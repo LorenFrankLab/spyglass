@@ -199,33 +199,55 @@ class Merge(ExportMixin, dj.Manual):
             return [recurse(item) for item in restriction]
         return restriction
 
-    def _raise_if_unknown_dict_fields(self, restriction) -> None:
-        """Recursively raise if a dict leaf references an unknown field.
+    def _drop_unknown_dict_fields(self, restriction):
+        """Drop dict keys unknown to every heading, as DataJoint does.
+
+        Spyglass code routinely restricts by a full upstream ``key`` carrying
+        fields no merge heading has, e.g. ``PoseGroup.fetch_pose_datasets``
+        passing ``{"pose_group_name": ..., "merge_id": ...}``. DataJoint
+        ignores such keys, so they are dropped here rather than rejected.
 
         Mirrors ``_restriction_has_part_field``'s traversal so composite
-        restrictions (list/AndList/Not) get the same unknown-field guard as
-        a bare dict restriction.
+        restrictions (list/AndList/Not) are rewritten the same way.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten.
+
+        Returns
+        -------
+        dict, str, list, AndList, Not, or QueryExpression
+            The restriction with unknown dict keys removed.
+
+        Raises
+        ------
+        DataJointError
+            If a non-empty dict leaf has no known key at all. That leaf would
+            otherwise match every row, silently returning the whole table.
         """
         if isinstance(restriction, dj.condition.Not):
-            self._raise_if_unknown_dict_fields(restriction.restriction)
-        elif isinstance(restriction, dict):
-            unknown = [
-                k
-                for k in restriction
-                if k not in self._get_all_heading_fields()
-            ]
-            if unknown:
+            return dj.Not(
+                self._drop_unknown_dict_fields(restriction.restriction)
+            )
+        if isinstance(restriction, dict):
+            known = self._get_all_heading_fields()
+            kept = {k: v for k, v in restriction.items() if k in known}
+            if restriction and not kept:
                 raise DataJointError(
-                    f"Unknown field(s) {unknown} in restriction "
-                    f"{restriction!r}: not attributes of the merge master "
-                    "or any part table."
+                    f"No field of {restriction!r} is an attribute of the "
+                    "merge master or any part table."
                 )
-        elif isinstance(
-            restriction,
-            (dj.condition.AndList, *self._COMPOSITE_RESTRICTION_TYPES),
-        ):
-            for item in restriction:
-                self._raise_if_unknown_dict_fields(item)
+            return kept
+        if isinstance(restriction, dj.condition.AndList):  # before list check
+            return dj.AndList(
+                self._drop_unknown_dict_fields(item) for item in restriction
+            )
+        if isinstance(restriction, self._COMPOSITE_RESTRICTION_TYPES):
+            return [
+                self._drop_unknown_dict_fields(item) for item in restriction
+            ]
+        return restriction
 
     def _resolve_restriction_to_merge_ids(self, restriction) -> list:
         """Return merge_ids matching a part-table-field restriction."""
@@ -365,13 +387,15 @@ class Merge(ExportMixin, dj.Manual):
         Raises
         ------
         DataJointError
-            If a dict or string restriction references a field unknown to both
-            the master and every part table. Without this, an unknown field
-            would resolve to no parts and silently return an empty table.
+            If a string restriction references a field unknown to both the
+            master and every part table, or if a dict restriction has no
+            known field at all. Either would otherwise return the whole
+            table.
         """
-        should_resolve = self._restriction_has_part_field(restriction)
-        if should_resolve:
-            self._raise_if_unknown_dict_fields(restriction)
+        # Drop unknown dict keys first, so a key no heading has cannot send
+        # an otherwise master-only restriction down the part-resolution path.
+        restriction = self._drop_unknown_dict_fields(restriction)
+        if self._restriction_has_part_field(restriction):
             merge_ids = self._resolve_restriction_to_merge_ids(restriction)
             restriction = (
                 [{RESERVED_PRIMARY_KEY: mid} for mid in merge_ids]

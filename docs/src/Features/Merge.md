@@ -209,12 +209,17 @@ downstream Computed table could do the following:
 
 ```python
 def make(self, key):
+    parent = (MergeTable & key).get_parent_table()
     try:
-        params = (MergeTable & key).get_parent_table().fetch("params")
+        params = parent.fetch("params")
     except DataJointError:
         params = default_params
     processed_data = self.processing_func(key, params)
 ```
+
+`key` may carry fields belonging to this table rather than the Merge Table;
+those are dropped from the restriction. Keep the restriction outside the `try`,
+so a restriction error surfaces instead of falling through to `default_params`.
 
 ## Deprecated API
 

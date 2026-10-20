@@ -465,9 +465,35 @@ def test_string_restrict_unknown_field_raises(pos_merge):
 
 
 def test_dict_restrict_unknown_field_raises(pos_merge):
-    """A dict field unknown to master and every part raises, not empty-table."""
-    with pytest.raises(dj.errors.DataJointError, match="Unknown field"):
+    """A dict with no known field raises, rather than matching every row."""
+    with pytest.raises(dj.errors.DataJointError, match="No field of"):
         pos_merge & {"definitely_not_a_field": 1}
+
+
+def test_dict_restrict_extra_field_ignored(pos_merge):
+    """An unknown key alongside a known one is dropped, as DataJoint does."""
+    mid = pos_merge.super_fetch("merge_id")[0]
+    expected = len(pos_merge & {"merge_id": mid})
+    result = len(pos_merge & {"merge_id": mid, "definitely_not_a_field": 1})
+    assert result == expected == 1, (
+        f"A dict carrying an unknown key returned {result} rows; the unknown "
+        f"key must be dropped, leaving the {expected} merge_id match."
+    )
+
+
+def test_dict_restrict_upstream_key_shape(pos_merge):
+    """The shape PoseGroup passes: a group field plus merge_id.
+
+    ``PoseGroup.fetch_pose_datasets`` restricts PositionOutput by
+    ``{"pose_group_name": ..., "merge_id": ...}``, where no merge heading has
+    ``pose_group_name``. That must restrict by merge_id, not raise.
+    """
+    mid = pos_merge.super_fetch("merge_id")[0]
+    restricted = pos_merge & {"pose_group_name": "g1", "merge_id": mid}
+    assert len(restricted) == 1, (
+        "A restriction carrying an upstream group field alongside merge_id "
+        "must resolve to the merge_id row, as it did before this branch."
+    )
 
 
 def test_string_restrict_quoted_literal_ignored(pos_merge):
