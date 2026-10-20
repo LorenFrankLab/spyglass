@@ -169,13 +169,16 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
         """Return all spike indicators as a list of dataframes."""
-        return pd.concat(
-            [
-                data["spike_indicator"].set_index("time")
-                for data in self.fetch_nwb()
-            ],
-            axis=1,
-        )
+        try:
+            return pd.concat(
+                [
+                    data["spike_indicator"].set_index("time")
+                    for data in self.fetch_nwb()
+                ],
+                axis=1,
+            )
+        finally:
+            self.close_nwb()
 
 
 @schema
