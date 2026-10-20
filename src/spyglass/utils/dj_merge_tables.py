@@ -1,4 +1,5 @@
 import re
+from functools import partial
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
@@ -142,6 +143,61 @@ class Merge(ExportMixin, dj.Manual):
                 self._restriction_has_part_field(item) for item in restriction
             )
         return False
+
+    @classmethod
+    def _restriction_for_part(cls, restriction, part, lenient=False):
+        """Rewrite a restriction so each leaf applies to one part table.
+
+        A dict naming a column the part lacks, or a ``source`` naming a
+        different part, becomes ``False``. DataJoint compiles a dict sharing
+        no column with the queried table to ``True``, so without this a leaf
+        inside a list or ``AndList`` matches every row of a part it cannot
+        describe, and a leaf inside ``Not`` excludes every row. A ``Not`` over
+        a part-only column therefore returns the set complement: parts lacking
+        the column contribute all of their rows.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten; others
+            pass through so DataJoint applies them unchanged.
+        part : dj.Table
+            Part table to rewrite the restriction for.
+        lenient : bool
+            Default False. When True, a dict naming a column the part lacks
+            keeps only the shared columns, as DataJoint does, instead of
+            resolving to ``False``. Set from ``add_invalid_restrict`` so
+            callers relying on that leniency keep it — ``fetch_nwb``
+            restricts parts by a fetched row carrying columns, such as
+            ``analysis_file_name``, that no part has.
+
+        Returns
+        -------
+        dict, bool, str, list, AndList, Not, or QueryExpression
+            The restriction as it applies to ``part``.
+        """
+        recurse = partial(cls._restriction_for_part, part=part, lenient=lenient)
+        if isinstance(restriction, dj.condition.Not):
+            return dj.Not(recurse(restriction.restriction))
+        if isinstance(restriction, dict):
+            restriction = dict(restriction)  # copy: don't mutate caller's dict
+            source = restriction.pop(RESERVED_SECONDARY_KEY, None)
+            if source is not None and source != cls._part_name(part):
+                return False
+            if not set(restriction) <= set(part.heading.names):
+                if not lenient:
+                    return False
+                restriction = {  # as DataJoint does: keep the shared columns
+                    k: v
+                    for k, v in restriction.items()
+                    if k in part.heading.names
+                }
+            return restriction or True
+        if isinstance(restriction, dj.condition.AndList):  # before list check
+            return dj.AndList(recurse(item) for item in restriction)
+        if isinstance(restriction, cls._COMPOSITE_RESTRICTION_TYPES):
+            return [recurse(item) for item in restriction]
+        return restriction
 
     def _raise_if_unknown_dict_fields(self, restriction) -> None:
         """Recursively raise if a dict leaf references an unknown field.
@@ -520,6 +576,40 @@ class Merge(ExportMixin, dj.Manual):
         return parts
 
     @classmethod
+    def _restrict_one_part(cls, part, restriction, add_invalid_restrict):
+        """Apply a restriction to one part table, rewritten for that part.
+
+        Dict leaves that cannot describe the part become False, so the part is
+        excluded by an empty result rather than by a type check on the
+        restriction's container.
+
+        Parameters
+        ----------
+        part : dj.Table
+            Part table to restrict.
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite for ``part`` and apply.
+        add_invalid_restrict : bool
+            When True, a restriction DataJoint rejects for this part yields
+            the part unrestricted, and ``_restriction_for_part`` keeps only
+            the columns the part shares.
+
+        Returns
+        -------
+        dj.Table or None
+            The restricted part, the unrestricted part when DataJoint rejects
+            the restriction and ``add_invalid_restrict``, else None.
+        """
+        try:
+            return part.restrict(
+                cls._restriction_for_part(
+                    restriction, part, lenient=add_invalid_restrict
+                )
+            )
+        except DataJointError:  # If restriction not valid on given part
+            return part if add_invalid_restrict else None
+
+    @classmethod
     def _merge_restrict_parts(
         cls,
         restriction: str = True,
@@ -539,6 +629,10 @@ class Merge(ExportMixin, dj.Manual):
             Default True. Return empty part tables
         add_invalid_restrict: bool, optional
             Default True. Include part for which the restriction is invalid.
+            Also passed to ``_restriction_for_part`` as ``lenient``, so a
+            dict naming a column the part lacks keeps DataJoint's
+            match-everything behavior here, and restricts the part to no rows
+            when False.
 
         Returns
         ------
@@ -568,24 +662,13 @@ class Merge(ExportMixin, dj.Manual):
                 )  # Only look at source part table
                 in part.full_table_name
             ]
-        if isinstance(restriction, dict):  # restr by source already done above
-            restriction = dict(restriction)  # copy: don't mutate caller's dict
-            _ = restriction.pop(cls()._reserved_sk, None)  # won't work for str
-            # If a dict restriction has all invalid keys, it is treated as True
-            if not add_invalid_restrict:
-                parts_all = [  # so exclude tables w/ nonmatching attrs
-                    p
-                    for p in parts_all
-                    if all([k in p.heading.names for k in restriction.keys()])
-                ]
-
         parts = []
         for part in parts_all:
-            try:
-                parts.append(part.restrict(restriction))
-            except DataJointError:  # If restriction not valid on given part
-                if add_invalid_restrict:
-                    parts.append(part)
+            restricted = cls._restrict_one_part(
+                part, restriction, add_invalid_restrict
+            )
+            if restricted is not None:
+                parts.append(restricted)
 
         if not return_empties:
             parts = [p for p in parts if len(p)]

@@ -117,6 +117,23 @@ result = MergeTable & {"merge_id": some_uuid}
     String restrictions on master-only fields (`merge_id`, `source`) are passed
     through to DataJoint directly without part-table resolution.
 
+!!! note "Composite and negated restrictions"
+
+    Lists, `dj.AndList` and `dj.Not` resolve through parts the same way a bare dict
+    does, and a dict is applied only to the parts that have its columns:
+
+    ```python
+    MergeTable & {"part_field": 1}  # equivalent
+    MergeTable & [{"part_field": 1}]  # equivalent
+    ```
+
+    `dj.Not` on a part-table field returns the set complement, so parts without that
+    field contribute all of their rows:
+
+    ```python
+    len(MergeTable & r) + len(MergeTable & dj.Not(r)) == len(MergeTable)
+    ```
+
 !!! note "Raw master-only restriction"
 
     If you intentionally want to restrict on `merge_id` or `source` without

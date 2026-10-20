@@ -899,3 +899,67 @@ def test_fetch1_key_plus_attr(merge_repro):
         "'KEY' element."
     )
     assert part_attr == 2
+
+
+# ----------- composite restrictions on heterogeneous parts (item 1) --------
+#
+# a_id exists only on SourceA, so a dict naming it shares no column with
+# SourceB. DataJoint compiles such a dict to True, which is what made the
+# container change a restriction's meaning. merge_repro is function-scoped
+# and reset to 2 SourceA rows + 1 SourceB row, so counts are exact here
+# rather than derived from current state.
+
+
+def test_composite_restrict_list_scoped_to_part(merge_repro):
+    """[{part-only field}] must not match rows of a part lacking it."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & {"a_id": 1}) == 1, "Test setup: a_id=1 matches 1 row."
+    assert len(M & [{"a_id": 1}]) == 1, (
+        "A list-wrapped restriction on a SourceA-only field matched rows of "
+        "SourceB, which has no a_id column."
+    )
+
+
+def test_composite_restrict_andlist_scoped_to_part(merge_repro):
+    """AndList([{part-only field}]) must not match a part lacking it."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & dj.AndList([{"a_id": 1}])) == 1, (
+        "An AndList-wrapped restriction on a SourceA-only field matched "
+        "rows of SourceB, which has no a_id column."
+    )
+
+
+def test_composite_restrict_not_is_set_complement(merge_repro):
+    """Not() on a part-only field returns the set complement."""
+    M = merge_repro["MergeRepro"]()
+    restriction = {"a_id": 1}
+    matching = len(M & restriction)
+    complement = len(M & dj.Not(restriction))
+    assert complement == len(M) - matching, (
+        f"Not({restriction}) returned {complement} rows; the complement "
+        f"must hold the other {len(M) - matching}, including the SourceB "
+        "row, which has no a_id column to exclude it."
+    )
+
+
+def test_composite_restrict_with_source_scoped_to_part(merge_repro):
+    """A source dict inside an OrList selects only that part's rows."""
+    M = merge_repro["MergeRepro"]()
+    result = len(M & [{"source": "SourceB"}, {"a_id": 1}])
+    assert result == len(M & {"source": "SourceB"}) + len(M & {"a_id": 1}), (
+        f"OR of a source dict and a part-only dict returned {result} rows; "
+        "each leaf must apply only to the part it can describe."
+    )
+
+
+def test_composite_restrict_delete_leaves_other_parts(merge_repro):
+    """Deleting via a list-wrapped restriction must not reach other parts."""
+    M = merge_repro["MergeRepro"]()
+    full, matching = len(M), len(M & {"a_id": 1})
+    (M & [{"a_id": 1}]).delete(safemode=False, force_permission=True)
+    remaining = len(merge_repro["MergeRepro"]())
+    assert remaining == full - matching, (
+        f"Deleting a list-wrapped SourceA-only restriction left "
+        f"{remaining} of {full} rows; it must remove only the {matching} "
+        "matching row(s) and leave SourceB untouched."
+    )
