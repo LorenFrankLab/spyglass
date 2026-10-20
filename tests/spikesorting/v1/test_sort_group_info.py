@@ -2,8 +2,8 @@
 
 Issue #1394: ``get_sort_group_info`` fetched a single electrode per sort
 group, so a sort group spanning many electrodes was silently described by one
-of them. It now returns every electrode of the group, with no opt-out -- see
-the PR #1678 review discussion. These tests pin that return shape and the
+of them. It now returns every electrode of the group: a sort group is
+described by all of its electrodes. These tests pin that return shape and the
 v0/v1 signature parity.
 """
 
