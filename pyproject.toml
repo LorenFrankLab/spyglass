@@ -45,6 +45,10 @@ dependencies = [
   # 2. spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
   # 3. spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but
   #    declares an unbounded numpy, we bound here.
+  # 4. ndx-ophys-devices 0.4.0 is a breaking spec change: ViralVectorInjection
+  #    coordinates moved into a StereotacticPosition child, FiberInsertion was
+  #    dropped, and OpticalLens* was renamed ObjectiveLens*. Our ingestion in
+  #    common_optogenetics reads the 0.3.x layout.
   "black[jupyter]>26",
   "bottleneck",
   "dask",
@@ -54,7 +58,7 @@ dependencies = [
   "jax<0.7.2",                    # TODO(#1609): remove with SpikeInterface bump
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
-  "ndx-ophys-devices",
+  "ndx-ophys-devices>=0.3.1,<0.4",  # see note 4 above
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
   "non-local-detector",
