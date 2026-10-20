@@ -2,8 +2,7 @@
 
 The broker is a small self-hosted service that decides who may read a file and
 hands back a short-lived signed URL for it. Spyglass never holds an
-object-store credential: everything here goes through the broker's versioned
-HTTP API, and the only secret this module keeps is a broker token.
+object-store credential; the only secret this module keeps is a broker token.
 
 Six endpoints make up the contract:
 
@@ -16,19 +15,16 @@ Six endpoints make up the contract:
 ``PATCH /file/{id}/visibility``  Change who may read a file. Owner only.
 ===============================  =============================================
 
-Login is GitHub's device flow, run by the broker on our behalf. There is no
-browser callback, so it works unchanged over SSH and inside a container: the
-user types a code at ``github.com/login/device`` and this module polls until
-the broker stops answering 428. What comes back is a *broker* token — it can
-read nothing on GitHub, and the GitHub token it was exchanged for never
-reaches this process.
+Login is GitHub's device flow, run by the broker. There is no browser
+callback, so it works over SSH and inside a container: the user types a code
+at ``github.com/login/device`` and this module polls until the broker stops
+answering 428. What comes back is a broker token; the GitHub token it was
+exchanged for never reaches this process.
 
 Notes
 -----
 The broker returns no expiry and offers no refresh endpoint, so a token is
-used until it is rejected. `StoreAuthError` on a call the token used to be
-allowed to make means "run `spyglass-store login` again", and is worded that
-way.
+used until it is rejected.
 """
 
 import json
@@ -705,17 +701,10 @@ class StoreClient:
     ) -> Optional[dict]:
         """Resolve a file, or return None if it is unavailable.
 
-        A refusal and a miss are deliberately collapsed here, because the
-        resolution chain does the same thing with both: move on to the next
-        backend. Note what that costs — a file the user could read after
-        linking their GitHub account is indistinguishable from one that does
-        not exist, so `resolve` remains available for callers that need to
-        tell the two apart.
-
-        Being throttled is **not** collapsed. A quota refusal means the file
-        exists and is readable, only not right now, and answering "not found"
-        would send the caller off to recompute something it could have waited
-        for. `StoreQuotaExceeded` propagates.
+        A refusal and a miss both return None, since the resolution chain
+        treats them alike; `resolve` tells them apart for callers that need
+        it. A quota refusal is not collapsed — `StoreQuotaExceeded`
+        propagates.
 
         Parameters
         ----------

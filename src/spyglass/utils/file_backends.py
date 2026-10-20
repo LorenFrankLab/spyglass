@@ -433,16 +433,10 @@ class DandiBackend(FileBackend):
 class StoreBackend(FileBackend):
     """Fetch files from a self-hosted shared-storage broker.
 
-    Sits directly after `LocalBackend`, so a copy already on disk still wins
-    and DANDI stays available as the fallback for published data.
-
-    Streams by default over HTTP range requests against the broker's *stable*
-    content URL. That URL is not itself signed: each request to it is answered
-    with a fresh redirect to a short-lived signed URL, which is what lets a
-    read of a multi-gigabyte file outlive any single signature.
-
-    Also implements `download`, so `prefer_download` behaves here as it does
-    for DANDI.
+    Sits directly after `LocalBackend`. Streams by default over HTTP range
+    requests against the broker's *stable* content URL, which answers each
+    request with a fresh redirect to a short-lived signed URL. Also
+    implements `download`.
     """
 
     name = "store"
@@ -494,13 +488,9 @@ class StoreBackend(FileBackend):
     def _known_hash(self, name: str) -> Optional[str]:
         """Return the digest this instance recorded for a file name, if any.
 
-        A name is not unique at the broker, so it can name a different
-        session held by another instance. A hash names the bytes.
-        `RawFileSelection` is keyed on the file name, so within one
-        instance a name maps to exactly one upload and one digest.
-
-        Absent for a file shared from a different Spyglass instance, which is
-        the case that falls back to the name.
+        A name is not unique at the broker; a hash names the bytes. Absent
+        for a file shared from a different Spyglass instance, which is the
+        case that falls back to the name.
 
         Parameters
         ----------
@@ -591,10 +581,8 @@ class StoreBackend(FileBackend):
     def _record_matches(self, nwb_file_path: str, record: dict) -> bool:
         """Return True if a record resolved by name is the expected file.
 
-        A name is not unique at the broker, so it can name a different
-        session registered by another instance. Compares what this instance
-        can claim about the file: the class its path implies, and the size the
-        external table recorded.
+        Compares what this instance can claim about the file: the class its
+        path implies, and the size the external table recorded.
 
         Parameters
         ----------
@@ -638,17 +626,12 @@ class StoreBackend(FileBackend):
         """Return the broker's record for this file, or None.
 
         The single lookup for this backend, so `has` and `open` cannot
-        disagree about what the broker holds.
+        disagree about what the broker holds. Resolves by content hash where
+        this instance recorded one, and by name otherwise; see `_known_hash`
+        and `_record_matches`.
 
-        Resolves by content hash where this instance recorded one, and by name
-        otherwise. See `_known_hash` for why that distinction matters, and
-        `_record_matches` for what a name-resolved record must agree with.
-
-        A refusal and a miss both return None. That is what the resolution
-        chain needs — try the next backend either way — but it does mean a
-        file the user could read after linking their GitHub account looks
-        exactly like one that does not exist. `StoreClient.resolve` raises the
-        distinction for callers that need it.
+        A refusal and a miss both return None. `StoreClient.resolve` raises
+        the distinction for callers that need it.
 
         Parameters
         ----------
@@ -707,10 +690,8 @@ class StoreBackend(FileBackend):
     def _resolved_with_client(self, nwb_file_path: str):
         """Return the file record and a live client, or (None, None).
 
-        The record is memoized but the client is not, so a user who logged out
-        mid-session would otherwise reach a transfer holding a cached record
-        and no way to authorize it. Asking for both together means a transfer
-        either has everything it needs or declines.
+        The record is memoized but the client is not, so asking for both
+        together means a transfer either has everything it needs or declines.
 
         Parameters
         ----------

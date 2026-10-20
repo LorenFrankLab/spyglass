@@ -1,16 +1,14 @@
 """Declare which files are shared through the shared-storage broker.
 
 A selection table names what should be shared, a computed table records what
-actually was. Raw and analysis are separate pairs, because `Nwbfile` and
-`AnalysisNwbfile` have separate primary keys.
+actually was. Raw and analysis are separate pairs.
 
-**Declaring a share is a database insert; `populate()` is the transfer** —
-unless `sg_config.store_auto_upload` is set. Either way a failed upload leaves
-the declaration to retry.
+Declaring a share is a database insert; `populate()` is the transfer, unless
+`sg_config.store_auto_upload` is set. A failed upload leaves the declaration
+to retry.
 
-**Nothing here decides who may read anything.** These tables record what the
-owner declared; the broker verifies ownership and enforces the result. Hence
-`update_visibility` relays to the broker rather than trusting the local row.
+Nothing here decides who may read anything. These tables record what the owner
+declared; the broker verifies ownership and enforces the result.
 """
 
 from typing import List, Optional
@@ -32,18 +30,14 @@ SCOPES = ("private", "group", "public")
 def most_restrictive(scopes) -> str:
     """Return the narrowest of several visibility scopes.
 
-    Used where a derived file has more than one parent. Taking the minimum
-    means a file assembled from a public and a private source is private:
-    combining data must never be a way to widen access to any part of it.
-
-    This governs the inherited *default* only. `share_file` consults no
-    parent, so a derivative may be declared more widely than its sources.
+    Governs the inherited default only. `share_file` consults no parent, so a
+    derivative may be declared more widely than its sources.
 
     Parameters
     ----------
     scopes : iterable of str
         Scope names. Unknown names are ignored rather than treated as a
-        widening, since an unrecognized scope is not evidence of permission.
+        widening.
 
     Returns
     -------
@@ -123,10 +117,8 @@ def _scope_row(selection, key: dict, scope: str, inherited: bool) -> dict:
 class _SharedFile:
     """Behavior common to the raw and analysis sharing tables.
 
-    A mixin rather than a DataJoint base class: the two tables differ in their
-    primary key and in the `file_class` the broker files them under, and
-    DataJoint does not inherit definitions. Everything that does not depend on
-    those two facts lives here.
+    A plain mixin, not a DataJoint base class: DataJoint does not inherit
+    definitions, and the two tables differ in primary key and `file_class`.
 
     Attributes
     ----------
@@ -307,10 +299,9 @@ class _UploadMixin(_SharedFile):
     def make_compute(self, key, scope, teams, path):
         """Hash the file and upload it. No database access.
 
-        The digest is taken over the file's raw bytes, because that is what
-        the object store verifies on arrival. A file whose bytes are already
-        stored — by this user or another — is deduplicated to the existing
-        object and only the registration is written.
+        The digest is over the file's raw bytes. A file whose bytes are
+        already stored is deduplicated to the existing object, and only the
+        registration is written.
 
         Parameters
         ----------
@@ -403,10 +394,8 @@ class _UploadMixin(_SharedFile):
     ):
         """Change who may read an already-uploaded file.
 
-        Relayed to the broker, which verifies ownership: a teammate who can
-        read a file cannot widen access to it. The local declaration is
-        updated only after the broker accepts the change, so the tables never
-        claim a visibility the broker did not apply.
+        Relayed to the broker, which verifies ownership. The local
+        declaration is updated only after the broker accepts the change.
 
         Re-scoping a raw follows into the derivatives that inherited from it;
         see `_resync_inherited`.
@@ -471,14 +460,11 @@ class _UploadMixin(_SharedFile):
     def _resync_inherited(self, key: dict) -> None:
         """Re-derive the derivatives that inherited from this file.
 
-        Inheritance copies a parent's scope at registration, so a parent
-        re-scoped afterward leaves them at the old audience. Narrows or
-        widens; skips rows the user scoped by hand, which `inherited` marks.
+        Narrows or widens; skips rows the user scoped by hand, which
+        `inherited` marks. Dependents come from the recorded `.Parent` rows,
+        so an analysis file named in `share_parents` cascades as a raw does.
 
-        Dependents come from the recorded `.Parent` rows, so an analysis file
-        named in `share_parents` cascades exactly as a raw does.
-
-        Never raises — the raw's own change is already applied.
+        Never raises: this file's own change is already applied.
 
         Parameters
         ----------
@@ -603,10 +589,9 @@ def declared_visibility(
 ) -> Optional[tuple]:
     """Return the visibility declared for one file, or None.
 
-    None means "never declared", which is different from "declared private".
-    Inheritance depends on the distinction: a derived file whose parents were
-    never shared should not be queued at all, whereas one whose parent is
-    explicitly private is queued as private.
+    None means "never declared", which inheritance treats differently from
+    "declared private": the first is not queued at all, the second is queued
+    as private.
 
     Parameters
     ----------
@@ -635,19 +620,11 @@ def declared_visibility(
 def inherited_visibility(raw_files=(), analysis_files=()) -> Optional[tuple]:
     """Return the narrowest visibility across a set of parent files.
 
-    The rule is intersection, in both dimensions. The scope is the narrowest
-    any parent declared, and the teams are the teams *every* group-scoped
-    parent named — because a reader who is on only one parent's team can
-    reconstruct nothing the derived file does not already expose to them.
-
-    A `public` parent contributes no team restriction, since it restricts
-    nobody. A group scope that intersects to no team at all collapses to
-    private rather than to a share that names nobody.
-
-    A parent that was *never declared* is narrower than any scope, so one
-    undeclared parent makes the answer None. Skipping it instead would let a
-    public raw file pull a derived result into the open alongside an analysis
-    file its owner never chose to share.
+    Intersection in both dimensions: the narrowest scope any parent
+    declared, and the teams every group-scoped parent named. A `public`
+    parent contributes no team restriction. A group scope that intersects to
+    no team collapses to private. One never-declared parent makes the answer
+    None.
 
     Parameters
     ----------
@@ -691,14 +668,9 @@ def queue_inherited_share(
 ) -> Optional[dict]:
     """Declare a derived file at its parents' visibility.
 
-    Queuing only. The row is a database insert; `SharedAnalysisFile.populate()`
-    is what transfers the bytes. Uploading as a side effect of creation is
-    `AnalysisNwbfileBuilder`'s business, under `sg_config.store_auto_upload`,
-    and it drives it from the return value below.
-
-    Does nothing when no parent was ever shared. That is the whole safety
-    property: a default that queued anything would be a default that widened
-    access to a file nobody asked to share.
+    Queuing only: the row is a database insert, and
+    `SharedAnalysisFile.populate()` transfers the bytes. Does nothing when no
+    parent was ever shared.
 
     Parameters
     ----------
@@ -766,6 +738,10 @@ def share_file(
     A convenience over the two-step insert, for the common case. The
     equivalent of `share_data_to_kachery`, minus the zone.
 
+    Calling this again for the same file replaces the declaration. Once the
+    file is in the store it routes through `update_visibility`, so the broker
+    applies the change before the local row records it.
+
     Parameters
     ----------
     file_name : str
@@ -784,10 +760,6 @@ def share_file(
     populate : bool, optional
         Transfer immediately. False declares the share and leaves the upload
         for a later `populate()` — useful when queueing many large files.
-
-    Calling this again for the same file replaces the declaration. Once the
-    file is in the store it routes through `update_visibility`, so the broker
-    applies the change before the local row records it.
 
     Returns
     -------

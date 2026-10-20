@@ -24,11 +24,7 @@ def forward_to_admin(command: str):
     """Turn a refused write into a `PermissionError` naming what to forward.
 
     On an instance attached to a shared-storage broker, `LabMember` and
-    `LabTeam` are admin-only: together they decide who the broker believes you
-    are and which teams you belong to.
-
-    A denial here is policy rather than a fault, so the error hands an admin
-    the exact command rather than a bare MySQL privilege error.
+    `LabTeam` are admin-only, so a denial here is policy rather than a fault.
 
     Parameters
     ----------
@@ -151,15 +147,12 @@ class LabMember(SpyglassIngestion, dj.Manual):
     def set_github_user_name(cls, lab_member_name: str, github_user_name: str):
         """Link a lab member to the GitHub identity the broker recognizes.
 
-        On an instance attached to a shared-storage broker, `LabMemberInfo` is
-        writable by admins only. It has to be: a user who could edit it could
-        point their own GitHub login at a lab member on better-connected teams
-        and be handed that member's files. So this call is *expected* to fail
-        for an ordinary user, and its job is to fail in a way that says what
-        to ask for rather than surfacing a bare MySQL denial.
+        `LabMemberInfo` is admin-only wherever a broker is attached, so this
+        call is expected to fail for an ordinary user and raises a
+        `PermissionError` naming the update to forward.
 
-        A member with no GitHub link is not broken. The broker reads them as
-        an unaffiliated reader, on no team, who can fetch public files only.
+        A member with no GitHub link is not broken: the broker reads them as
+        an unaffiliated reader who can fetch public files only.
 
         Parameters
         ----------

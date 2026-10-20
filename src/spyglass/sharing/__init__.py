@@ -5,11 +5,8 @@ Three modules live here: `sharing_kachery`, which is being retired;
 broker; and `store_client`, which talks to it.
 
 Every table name is resolved lazily. Declaring a schema opens a database
-connection at import time, and `spyglass-store login` has to work *before* a
-user has a working DataJoint config — that is the whole point of a one-command
-login. Importing `spyglass.sharing.store_client` runs this module first, so an
-eager table import would make the login command require the very setup it
-exists to precede.
+connection at import time, and `spyglass-store login` has to work before a
+user has a working DataJoint config.
 """
 
 _LAZY_NAMES = {

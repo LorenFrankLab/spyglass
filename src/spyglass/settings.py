@@ -16,10 +16,9 @@ _UNSET = object()  # distinguishes "not supplied" from an explicit False
 def _clean_store_url(value) -> str:
     """Normalize a broker base URL to a bare origin with no trailing slash.
 
-    Every broker route is built by appending a versioned path, so a value the
-    user wrote with a trailing slash would otherwise produce a double slash and
-    a 404 that names neither cause. `None` and `False` become "", which is how
-    "no broker configured" is spelled throughout.
+    Every broker route appends a versioned path, so a trailing slash would
+    produce a double slash. `None` and `False` become "", which is how "no
+    broker configured" is spelled throughout.
 
     Parameters
     ----------
@@ -890,12 +889,9 @@ class SpyglassConfig:
     def prefer_download(self) -> bool:
         """Returns True if whole-file download is preferred over streaming.
 
-        The instance-wide default. Streaming backends honor it by fetching the
-        file to local disk and reading the copy; backends that cannot download
-        ignore it. Useful on slow or metered connections.
-
-        A single backend can override it — see `backend_prefers_download`,
-        which is what `FileBackend.will_stream` asks.
+        The instance-wide default. Streaming backends honor it by fetching
+        the file to local disk; backends that cannot download ignore it. A
+        single backend can override it; see `backend_prefers_download`.
         """
         return self._prefer_download
 
@@ -959,12 +955,10 @@ class SpyglassConfig:
     def set_backend_option(self, backend: str, key: str, value) -> None:
         """Set one backend's setting for this session, and persist it.
 
-        The one path that writes `custom.backends`. Writing to `dj.config` is
-        what makes a reload or a `save_dj_config` keep the value.
-
-        `_config` is only touched once a load has succeeded: a non-empty
-        `_config` is the cache sentinel, so seeding it after a failed load
-        would make every later `load_config` return early.
+        The one path that writes `custom.backends`, which is what makes a
+        reload or a `save_dj_config` keep the value. `_config` is only touched
+        once a load has succeeded, since a non-empty `_config` is the cache
+        sentinel.
 
         Parameters
         ----------

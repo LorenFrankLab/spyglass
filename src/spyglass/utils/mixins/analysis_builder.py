@@ -76,11 +76,8 @@ class AnalysisFileBuilder:
             Parent NWB file name
         share_parents : list of str, optional
             Additional analysis files this one derives from. Used only to
-            inherit visibility, and only ever to narrow it: the registered
-            file is declared at the narrowest scope any parent declared. Pass
-            these when a result draws on analysis files beyond
-            `nwb_file_name`, so it cannot be shared more widely than they are.
-            See `_queue_inherited_share`.
+            inherit visibility, narrowing to the narrowest scope any parent
+            declared. See `_queue_inherited_share`.
         """
         self._table = analysis_table
         self.nwb_file_name = nwb_file_name
@@ -247,26 +244,19 @@ class AnalysisFileBuilder:
     def _queue_inherited_share(self):
         """Declare this file for sharing at its parents' visibility.
 
-        A derived file reaches the same people its sources reached, without
-        the user being asked again. Queuing is a database insert;
-        `SharedAnalysisFile.populate()` is what uploads — unless
-        `sg_config.store_auto_upload` is set, which transfers it here too.
-
-        Does nothing when no parent was declared shared, so nothing queued
-        means nothing uploaded.
+        Queuing is a database insert; `SharedAnalysisFile.populate()`
+        uploads, unless `sg_config.store_auto_upload` is set. Does nothing
+        when no parent was declared shared.
 
         Copies the file into the common `AnalysisNwbfile` first, which is what
-        the selection table's foreign key names.
+        the selection table's foreign key names. Returns before importing
+        anything when no broker is configured, since importing
+        `sharing_store` declares its schema.
 
-        Returns before importing anything when no broker is configured.
-        Importing `sharing_store` declares its schema, which an instance that
-        will never share a file should not grow.
-
-        Warns rather than raising, naming which step failed: destroying an
-        analysis file that is otherwise complete would be a worse outcome than
-        not sharing it. Inside a caller's transaction it re-raises instead,
-        because the failure may have rolled that transaction back and `make()`
-        would otherwise commit statement by statement against it.
+        Warns rather than raising, naming which step failed: an analysis file
+        that is otherwise complete outlives a sharing failure. Inside a
+        caller's transaction it re-raises instead, because the failure may
+        have rolled that transaction back.
         """
         from spyglass.settings import sg_config
 
