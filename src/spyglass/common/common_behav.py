@@ -866,12 +866,18 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         for row in existing_entries:
             if (cls & row).fetch1("camera_name"):
                 continue
-            video_nwb = (cls & row).fetch_nwb()[0]
-            if len(video_nwb) != 1:
-                raise ValueError(
-                    f"Expecting 1 video file per entry. {len(video_nwb)} found"
-                )
-            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            restricted = cls & row
+            try:
+                video_nwb = restricted.fetch_nwb()[0]
+                if len(video_nwb) != 1:
+                    raise ValueError(
+                        "Expecting 1 video file per entry."
+                        f" {len(video_nwb)} found"
+                    )
+                camera = video_nwb[0]["video_file"].device.camera_name
+            finally:
+                restricted.close_nwb()
+            row["camera_name"] = camera
             cls.update1(row=row)
 
     @classmethod
