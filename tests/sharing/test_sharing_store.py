@@ -1284,6 +1284,45 @@ def classic_make(store, common, mini_copy_name):
         path.unlink(missing_ok=True)
 
 
+def test_a_failed_queue_inside_a_make_fails_the_populate(
+    store, declared, broker_configured, classic_make, mini_copy_name
+):
+    """A deadlock here rolls the caller's transaction back, so it must raise.
+
+    Warning and continuing would let the rest of `make()` commit statement by
+    statement against a transaction that is no longer open.
+    """
+    import datajoint as dj
+
+    with patch.object(
+        store.AnalysisFileSelection,
+        "insert1",
+        side_effect=RuntimeError("deadlock found"),
+    ):
+        with pytest.raises((RuntimeError, dj.errors.DataJointError)):
+            classic_make.populate({"nwb_file_name": mini_copy_name})
+
+    assert not (classic_make & {"nwb_file_name": mini_copy_name})
+
+
+def test_a_failed_queue_outside_a_transaction_still_warns(
+    store, declared, broker_configured, build_analysis, caplog
+):
+    """Outside one, a complete analysis file outlives a sharing failure."""
+    with patch.object(
+        store.AnalysisFileSelection,
+        "insert1",
+        side_effect=RuntimeError("no grants"),
+    ):
+        analysis = build_analysis()
+
+    key = {"analysis_file_name": analysis}
+
+    assert not (store.AnalysisFileSelection & key), "Declared anyway"
+    assert "Could not queue" in caplog.text
+    assert "share_file" in caplog.text, "Lost the recovery advice"
+
+
 def test_auto_upload_defers_inside_a_classic_make(
     store,
     declared,

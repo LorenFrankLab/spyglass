@@ -262,9 +262,11 @@ class AnalysisFileBuilder:
         Importing `sharing_store` declares its schema, which an instance that
         will never share a file should not grow.
 
-        Never raises. Failing registration would destroy an analysis file that
-        is otherwise complete; the declaration survives for a later
-        `populate()`. Warns, naming which half failed.
+        Warns rather than raising, naming which step failed: destroying an
+        analysis file that is otherwise complete would be a worse outcome than
+        not sharing it. Inside a caller's transaction it re-raises instead,
+        because the failure may have rolled that transaction back and `make()`
+        would otherwise commit statement by statement against it.
         """
         from spyglass.settings import sg_config
 
@@ -309,6 +311,17 @@ class AnalysisFileBuilder:
                 reserve_jobs=True,
             )
         except Exception as err:  # noqa: BLE001 - see docstring
+            if self._table.connection.in_transaction:
+                # Swallowing this would leave the caller's `make()` running
+                # against a transaction the failure may already have rolled
+                # back. The recovery advice below does not apply either: it
+                # assumes the analysis file survives, and it will not.
+                logger.warning(
+                    f"Could not {action} {self.analysis_file_name} for the "
+                    + f"shared store: {err}"
+                )
+                raise
+
             messages = {
                 "upload": (
                     f"Could not upload {self.analysis_file_name} to the shared "
