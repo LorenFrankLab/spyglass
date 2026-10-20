@@ -1053,9 +1053,9 @@ class SpyglassConfig:
     def store_auto_upload(self) -> bool:
         """True if declaring a derived file for sharing should also upload it.
 
-        Off by default, and meant for a shared compute host, where a pipeline
-        writes analysis files and nobody runs `SharedAnalysisFile.populate()`.
-        Leave it off where declaring a share should stay instant.
+        Off by default. A file built inside a `make()` is declared but not
+        uploaded, because a populate cannot run in the caller's transaction;
+        those transfer on the next `SharedAnalysisFile.populate()`.
         """
         return self._store_auto_upload
 

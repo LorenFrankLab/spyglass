@@ -1284,6 +1284,35 @@ def classic_make(store, common, mini_copy_name):
         path.unlink(missing_ok=True)
 
 
+def test_auto_upload_defers_inside_a_classic_make(
+    store,
+    declared,
+    broker_configured,
+    auto_upload,
+    fake_client,
+    classic_make,
+    mini_copy_name,
+    caplog,
+):
+    """`populate` refuses an open transaction, so the upload has to wait.
+
+    The declaration stands, which is what a later
+    `SharedAnalysisFile.populate()` acts on.
+    """
+    key = {"nwb_file_name": mini_copy_name}
+
+    classic_make.populate(key)
+
+    analysis = (classic_make & key).fetch1("analysis_file_name")
+    akey = {"analysis_file_name": analysis}
+
+    assert len(store.AnalysisFileSelection & akey) == 1, "Not declared"
+    assert not (store.SharedAnalysisFile & akey), "Uploaded in a transaction"
+    assert [c[0] for c in fake_client.calls] == [], "Transferred anyway"
+    assert "did not upload" in caplog.text
+    assert "Could not upload" not in caplog.text, "Reported as a failure"
+
+
 def test_the_builder_queues_inside_a_classic_make(
     store, declared, broker_configured, classic_make, mini_copy_name, common
 ):

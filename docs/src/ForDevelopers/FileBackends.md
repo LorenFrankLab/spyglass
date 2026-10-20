@@ -260,6 +260,9 @@ Two more behaviors are worth knowing:
     as `False`. This keeps the chain simple but it does mean a file the user
     *could* read — after linking their GitHub account, say — looks exactly like
     one that does not exist, at the broker as well as here.
+- **`auto_upload` does not transfer a file built inside a `make()`.** A populate
+    cannot run in the caller's transaction, so such a file is declared and left
+    for the next `SharedAnalysisFile.populate()`.
 - **A custom analysis file is copied into the common table.**
     `AnalysisFileSelection` has a foreign key to the common `AnalysisNwbfile`,
     so declaring a file registered in a per-user `{prefix}_nwbfile` table copies

@@ -292,6 +292,16 @@ class AnalysisFileBuilder:
             if queued is None or not sg_config.store_auto_upload:
                 return
 
+            if self._table.connection.in_transaction:
+                # `populate` refuses an open transaction, and the caller's
+                # commit is not ours to wait for.
+                logger.info(
+                    f"Queued {self.analysis_file_name}, but did not upload "
+                    + "it: a populate cannot run inside the transaction this "
+                    + "was built in. Run `SharedAnalysisFile.populate()`."
+                )
+                return
+
             action = "upload"
 
             SharedAnalysisFile.populate(
