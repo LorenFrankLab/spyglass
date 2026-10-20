@@ -777,7 +777,10 @@ def share_file(
     teams : list of str, optional
         `LabTeam` names. Required when `scope` is "group".
     file_class : str, optional
-        "raw" or "analysis". Chooses which pair of tables to use.
+        "raw" or "analysis". Chooses which pair of tables to use. An analysis
+        file held only in a custom `{prefix}_nwbfile` table must be copied
+        into the common `AnalysisNwbfile` first; the builder does this when it
+        registers one.
     populate : bool, optional
         Transfer immediately. False declares the share and leaves the upload
         for a later `populate()` — useful when queueing many large files.

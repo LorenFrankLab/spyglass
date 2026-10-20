@@ -1144,6 +1144,93 @@ def test_a_hand_set_scope_survives_a_parent_rescope(
     ) == "public", "Re-derivation overrode a hand-set scope"
 
 
+# ------------------------- custom analysis tables -------------------------
+
+
+@pytest.fixture
+def custom_analysis(store, common):
+    """A custom `{prefix}_nwbfile` analysis table, and its registry unblocked.
+
+    `AnalysisFileSelection` has a foreign key to the *common* table, so a file
+    built here cannot be declared for sharing until it is copied across.
+    """
+    import datajoint as dj
+
+    from spyglass.common.common_nwbfile import AnalysisRegistry
+    from spyglass.utils.dj_mixin import SpyglassAnalysis
+
+    # `SpyglassAnalysis` requires `{prefix}_nwbfile` to match this setting.
+    prior = dj.config.get("custom", {}).get("database.prefix")
+    dj.config.setdefault("custom", {})["database.prefix"] = "sharestore"
+
+    _ = AnalysisRegistry().unblock_new_inserts()
+    schema = dj.schema(
+        "sharestore_nwbfile", context=dict(Nwbfile=common.Nwbfile)
+    )
+
+    @schema
+    class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
+        definition = """This definition is managed by SpyglassAnalysis"""
+
+    table = AnalysisNwbfile()
+
+    yield table
+
+    # Rows first: the cleanup below still needs the prefix set.
+    for name in table.fetch("analysis_file_name"):
+        key = {"analysis_file_name": name}
+        path = Path(table.get_abs_path(name))
+        (store.AnalysisFileSelection & key).delete(
+            safemode=False, force_permission=True
+        )
+        (common.AnalysisNwbfile & key).delete(
+            safemode=False, force_permission=True
+        )
+        (table & key).delete(safemode=False, force_permission=True)
+        path.unlink(missing_ok=True)
+
+    if prior is None:
+        dj.config["custom"].pop("database.prefix", None)
+    else:
+        dj.config["custom"]["database.prefix"] = prior
+
+
+def test_a_custom_table_file_is_copied_to_common_and_queued(
+    store, declared, broker_configured, custom_analysis, common, mini_copy_name
+):
+    """The selection FK names the common table, so the row has to be there.
+
+    Without the copy the declaration failed its foreign key and the file could
+    not be shared at all.
+    """
+    with custom_analysis.build(mini_copy_name) as builder:
+        analysis = builder.analysis_file_name
+
+    key = {"analysis_file_name": analysis}
+
+    assert len(common.AnalysisNwbfile & key) == 1, "Not copied to common"
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+
+
+def test_a_failed_copy_warns_and_keeps_the_analysis_file(
+    store, declared, broker_configured, custom_analysis, mini_copy_name, caplog
+):
+    """Sharing is a side concern; a complete analysis file outlives its failure."""
+    with patch.object(
+        type(custom_analysis),
+        "_copy_to_common",
+        side_effect=RuntimeError("no grants"),
+    ):
+        with custom_analysis.build(mini_copy_name) as builder:
+            analysis = builder.analysis_file_name
+
+    key = {"analysis_file_name": analysis}
+
+    assert len(custom_analysis & key) == 1, "Analysis file was destroyed"
+    assert not (store.AnalysisFileSelection & key), "Declared without a copy"
+    assert "common AnalysisNwbfile" in caplog.text
+
+
 # -------------------------- inside a transaction --------------------------
 
 

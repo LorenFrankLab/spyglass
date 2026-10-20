@@ -260,6 +260,12 @@ Two more behaviors are worth knowing:
     as `False`. This keeps the chain simple but it does mean a file the user
     *could* read — after linking their GitHub account, say — looks exactly like
     one that does not exist, at the broker as well as here.
+- **A custom analysis file is copied into the common table.**
+    `AnalysisFileSelection` has a foreign key to the common `AnalysisNwbfile`,
+    so declaring a file registered in a per-user `{prefix}_nwbfile` table copies
+    its row into the common table first. Declaring a share therefore adds a
+    common-table row for a file that previously had none. `Export` and
+    `sharing_kachery` copy for the same reason.
 
 Streaming holds the broker's **stable** content URL rather than the signed URL
 it redirects to. Each range request is re-authorized and re-signed, which is
