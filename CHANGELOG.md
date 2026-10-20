@@ -35,6 +35,10 @@
 - Active management of memory resources for open NWBs: open files are cached and
     closed under RAM or file-descriptor pressure. Adds `close_nwb()`, the
     `custom.nwb_cache` config, and a `psutil` dependency #1606
+- Release the NWB file hold in `fetch1_dataframe`, `fetch_dataframe` and the
+    other getters that materialize their data, so the cache may close those
+    files under memory pressure. A getter that returns a lazy NWB object keeps
+    its hold #1606
 
 ### Pipelines
 
