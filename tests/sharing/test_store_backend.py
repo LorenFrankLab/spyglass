@@ -347,6 +347,12 @@ def test_a_refused_name_match_is_not_cached(backend, tmp_path, monkeypatch):
     monkeypatch.setattr(
         StoreBackend, "_expected_file_class", staticmethod(lambda p: "analysis")
     )
+    # Stubbed so the assertions turn on the class check alone. Unstubbed, this
+    # queries the external table, where a real row for a name ending in
+    # `a.nwb` decides the result.
+    monkeypatch.setattr(
+        StoreBackend, "_recorded_size", staticmethod(lambda n, c: None)
+    )
 
     path = str(tmp_path / "a.nwb")
     mismatched = {**RECORD, "file_class": "raw"}

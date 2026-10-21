@@ -569,7 +569,14 @@ class StoreBackend(FileBackend):
             from spyglass.common.common_nwbfile import schema as common_schema
 
             external = common_schema.external[file_class]
-            sizes = (external & f"filepath LIKE '%{name}'").fetch("size")
+            # `_` and `%` are LIKE wildcards and NWB names carry `_`, so the
+            # pattern is escaped. Raw filepaths are a bare name, analysis
+            # filepaths a `{session}/{name}`, so both forms are matched.
+            pattern = name.replace("\\", "\\\\")
+            pattern = pattern.replace("%", "\\%").replace("_", "\\_")
+            sizes = (
+                external & f"filepath = '{name}' OR filepath LIKE '%/{pattern}'"
+            ).fetch("size")
 
             return int(sizes[0]) if len(sizes) == 1 else None
         except Exception as err:  # no schema, no grants, no connection
