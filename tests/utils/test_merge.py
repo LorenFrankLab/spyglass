@@ -1108,3 +1108,60 @@ def test_string_restrict_between_part_field(merge_repro):
         "BETWEEN on a part column should route through parts rather than "
         "reaching the master, which has no such column."
     )
+
+
+# ------------- delete_upstream atomicity (item 7) ---------------------------
+
+
+def test_delete_upstream_declined_leaves_all_rows(merge_repro, monkeypatch):
+    """Answering anything but yes deletes neither merge nor upstream rows."""
+    M = merge_repro["MergeRepro"]()
+    SourceA = merge_repro["SourceA"]()
+    before, source_before = len(M), len(SourceA)
+
+    monkeypatch.setattr(
+        "spyglass.utils.dj_merge_tables.user_choice", lambda *a, **k: "no"
+    )
+    (M & {"source": "SourceA"}).delete_upstream(dry_run=False)
+
+    assert len(merge_repro["MergeRepro"]()) == before, (
+        "A declined confirmation must leave the merge entries in place; "
+        "they were previously deleted before the upstream prompt."
+    )
+    assert (
+        len(merge_repro["SourceA"]()) == source_before
+    ), "A declined confirmation must leave the upstream rows in place."
+
+
+def test_delete_upstream_parent_failure_rolls_back(merge_repro, monkeypatch):
+    """A failed upstream delete leaves the merge entries in place."""
+    M = merge_repro["MergeRepro"]()
+    before = len(M)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated parent delete failure")
+
+    monkeypatch.setattr(dj.Table, "delete", boom)
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        (M & {"source": "SourceA"}).delete_upstream(
+            dry_run=False, safemode=False
+        )
+
+    monkeypatch.undo()
+    assert len(merge_repro["MergeRepro"]()) == before, (
+        f"{before - len(merge_repro['MergeRepro']())} merge entr(ies) were "
+        "deleted despite the upstream delete failing; the transaction must "
+        "roll back."
+    )
+
+
+def test_delete_upstream_no_matching_part(merge_repro):
+    """A restriction matching no part returns rather than raising."""
+    M = merge_repro["MergeRepro"]()
+    before = len(M)
+    (M & "FALSE").delete_upstream(dry_run=False, safemode=False)
+    assert len(merge_repro["MergeRepro"]()) == before, (
+        "A restriction matching no part should delete nothing, not raise "
+        "AttributeError on _merge_repr returning None."
+    )

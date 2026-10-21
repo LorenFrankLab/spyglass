@@ -11,7 +11,12 @@ import numpy as np
 from datajoint.condition import extract_column_names, make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, get_master, to_camel_case
+from datajoint.utils import (
+    from_camel_case,
+    get_master,
+    to_camel_case,
+    user_choice,
+)
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
@@ -728,7 +733,10 @@ class Merge(ExportMixin, dj.Manual):
                 add_invalid_restrict=add_invalid_restrict,
             )
             for parent in part.parents(as_objects=True)  # ID respective parents
-            if cls().table_name not in parent.full_table_name  # Not merge table
+            # Exclude the master, the part's other parent. Compared in full:
+            # a substring test on the table name also excludes a real parent
+            # whose schema happens to contain it.
+            if parent.full_table_name != cls().full_table_name
         ]
         if parent_name:
             part_parents = [
@@ -997,7 +1005,19 @@ class Merge(ExportMixin, dj.Manual):
         dry_run: bool = True,
         **kwargs,
     ):
-        """Core logic shared by merge_delete_parent and delete_upstream."""
+        """Core logic shared by merge_delete_parent and delete_upstream.
+
+        Deletes the upstream rows and lets DataJoint's cascade take the merge
+        entries with them, inside one transaction. The merge rows cannot
+        outlive their source, nor the reverse: a parent delete that fails, or
+        a declined confirmation, leaves everything in place.
+        """
+        # Normalize to merge_id keys against the master first, where master-
+        # only fields such as `source` are valid. Compiled straight through,
+        # a `source` restriction reaches parts that have no such column, so
+        # every part raises and is dropped and this would delete nothing.
+        restriction = (cls() & restriction)._resolve_top_restriction()
+
         part_parents = cls._merge_restrict_parents(
             restriction=restriction, as_objects=True, return_empties=False
         )
@@ -1005,33 +1025,39 @@ class Merge(ExportMixin, dj.Manual):
         if dry_run:
             return part_parents
 
-        merge_ids = cls._merge_repr(restriction=restriction).fetch(
-            RESERVED_PRIMARY_KEY, as_dict=True
-        )
+        merge_query = cls._merge_repr(restriction=restriction)
+        if merge_query is None:  # no part matched the restriction
+            logger.info("No merge entries match this restriction.")
+            return
+
+        merge_ids = merge_query.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
 
         logger.info(
-            f"Deleting {len(merge_ids)} merge_id(s) and "
-            + f"{len(part_parents)} upstream part-parent table(s)."
+            f"Deleting {len(merge_ids)} merge entr(ies) by cascade from "
+            + f"{len(part_parents)} upstream table(s): "
+            + ", ".join(p.full_table_name for p in part_parents)
         )
 
-        super().delete((cls & merge_ids), **kwargs)
-
-        if cls & merge_ids:
+        safemode = kwargs.get("safemode")
+        safemode = dj.config["safemode"] if safemode is None else safemode
+        if safemode and user_choice("Delete upstream rows?") != "yes":
+            logger.warning("Delete cancelled.")
             return
 
         # part_parent is a raw dj.FreeTable (from Table.parents()), not a
-        # SpyglassMixin instance — it has no cautious_delete, so the
-        # super()-unbound-dispatch trick used above (which relies on the
-        # MRO's CautiousDeleteMixin.delete) doesn't apply here. Use
-        # DataJoint's own Table.delete directly, forwarding only the kwargs
-        # it recognizes (e.g. dropping Spyglass-only ``force_permission``).
-        table_delete_kwargs = {
-            k: v
-            for k, v in kwargs.items()
-            if k in ("transaction", "safemode", "force_parts", "force_masters")
-        }
-        for part_parent in part_parents:
-            dj.Table.delete(part_parent, **table_delete_kwargs)
+        # SpyglassMixin instance, so it has no cautious_delete and must go
+        # through DataJoint's own Table.delete. force_masters pulls each
+        # merge part and its master into that parent's cascade;
+        # transaction=False puts every parent in the one transaction opened
+        # here, so no parent can be deleted while another fails.
+        with cls().connection.transaction:
+            for part_parent in part_parents:
+                dj.Table.delete(
+                    part_parent,
+                    transaction=False,
+                    safemode=False,
+                    force_masters=True,
+                )
 
     # -------------------- Deprecated merge_X classmethods -------------------
 
@@ -1114,9 +1140,10 @@ class Merge(ExportMixin, dj.Manual):
     def merge_delete_parent(
         cls, restriction: str = True, dry_run=True, **kwargs
     ) -> list:
-        """Delete entries from merge master, part, and respective part parents
+        """Delete the part parents and, by cascade, their merge entries.
 
-        Note: Clears merge entries from their respective parents.
+        .. deprecated:: 0.7.0
+            Use ``(T & restriction).delete_upstream(dry_run=...)`` instead.
 
         Parameters
         ----------
@@ -1128,6 +1155,11 @@ class Merge(ExportMixin, dj.Manual):
             be deleted. Otherwise, table entries.
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
+
+        Notes
+        -----
+        Runs in one transaction with a single confirmation, so the merge
+        entries cannot be deleted while an upstream row survives.
         """
         cls._deprecate(
             "merge_delete_parent",
@@ -1527,10 +1559,31 @@ class Merge(ExportMixin, dj.Manual):
         )
 
     def delete_upstream(self, dry_run: bool = True, **kwargs):
-        """Delete merge entry and its upstream part-parent rows.
+        """Delete the upstream part-parent rows and, by cascade, merge entries.
 
         Instance-method replacement for ``merge_delete_parent``. Use as
         ``(T & restriction).delete_upstream(dry_run=True)``.
+
+        Parameters
+        ----------
+        dry_run : bool
+            Default True. Return the part-parent tables that would be deleted
+            from, without deleting.
+        **kwargs
+            Passed to DataJoint's ``delete``. ``safemode`` governs the single
+            confirmation prompt.
+
+        Returns
+        -------
+        list or None
+            The part-parent tables when ``dry_run``, else None.
+
+        Notes
+        -----
+        The upstream rows are deleted first and the merge entries follow by
+        cascade, all in one transaction, so a failed or declined delete leaves
+        both in place. The prompt lists what will be deleted; answering
+        anything but "yes" cancels.
         """
         return self.__class__._merge_delete_parent_restricted(
             restriction=self.restriction or True,
