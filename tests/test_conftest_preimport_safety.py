@@ -46,9 +46,9 @@ def test_pytest_configure_refuses_preimport_before_side_effects(
     # pytest_configure assigns these globals before reaching the guard. Record
     # them with monkeypatch so this direct hook invocation cannot affect the
     # surrounding test session.
-    for name in ("TEST_FILE", "TEARDOWN", "VERBOSE", "NO_DLC"):
+    for name in ("TEST_FILE", "TEARDOWN", "VERBOSE", "NO_POSE"):
         monkeypatch.setattr(conftest, name, getattr(conftest, name))
-    monkeypatch.setattr(pytest, "NO_DLC", getattr(pytest, "NO_DLC", False))
+    monkeypatch.setattr(pytest, "NO_POSE", getattr(pytest, "NO_POSE", False))
 
     def _unexpected_side_effect(*args, **kwargs):
         raise AssertionError("destructive pytest setup ran before the guard")
@@ -61,7 +61,7 @@ def test_pytest_configure_refuses_preimport_before_side_effects(
             base_dir=str(requested),
             no_teardown=not conftest.TEARDOWN,
             quiet_spy=not conftest.VERBOSE,
-            no_dlc=conftest.NO_DLC,
+            no_pose=conftest.NO_POSE,
             container_name="must-not-start",
             container_port=None,
         )

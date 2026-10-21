@@ -281,9 +281,6 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management
 
---container-name NAME  # Docker container name (default: branch-derived)
---container-port PORT  # Host port mapped to MySQL's 3306
-
 --container-vol-dir PATH  # Host dir for per-container MySQL data volumes
 # Bind-mounts <PATH>/<container-name> -> /var/lib/mysql, keeping test-container
 # data off the root disk (e.g. --container-vol-dir /stelmo/cbroz/docker-vols/).
@@ -292,6 +289,9 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 
 --no-pose           # Skip DeepLabCut/SLEAP (pose) tests and downloads
 # Useful for: systems without DLC/SLEAP, faster test runs
+
+--container-name NAME  # Docker container name (default: branch-derived)
+--container-port PORT  # Host port mapped to MySQL's 3306
 ```
 
 #### Container Data Directory

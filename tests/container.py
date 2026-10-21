@@ -37,8 +37,9 @@ class DockerMySQLManager:
         If True, print container status on startup. Default False.
     vol_dir : str
         Parent directory for the container's MySQL data dir, bind-mounted as
-        `<vol_dir>/<container_name>` -> /var/lib/mysql. Default None, letting
-        Docker manage storage on its own root disk.
+        `<vol_dir>/<container_name>` -> /var/lib/mysql. Falls back to
+        $SPYGLASS_TEST_DOCKER_VOL_DIR. Default None, letting Docker manage
+        storage on its own root disk.
     """
 
     def __init__(
@@ -55,6 +56,7 @@ class DockerMySQLManager:
     ) -> None:
         self.image_name = image_name
         self.mysql_version = mysql_version
+        self.vol_dir = vol_dir
         self.client = None if null_server else docker.from_env()
         self.null_server = null_server
         self.password = "tutorial"
@@ -265,8 +267,8 @@ class DockerMySQLManager:
             # host directory to bind-mount per-container data there instead of
             # Docker's default storage; unset keeps the default anonymous
             # volume. Avoids filling the root disk with test-container data.
-            # self.vol_dir (resolved in __init__ via _resolve_vol_dir) already
-            # includes the per-container subdirectory.
+            # self.vol_dir is already resolved to <vol_dir>/<container_name>
+            # (or None) by _resolve_vol_dir in __init__.
             volumes = None
             if self.vol_dir:
                 self.vol_dir.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,12 @@
 import os
 import random
+import shutil
 import string
 import subprocess
+import sys
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -303,15 +305,80 @@ class AnalysisMixin(BaseMixin):
         with h5py.File(nwb_file_path, "a") as f:
             f["/general/source_script"][()] = self._logged_env_info()
 
+    def _conda_exe(self) -> Optional[str]:
+        """Find a conda-compatible executable for ``env export``.
+
+        Searches the running interpreter's own installation before
+        ``PATH``. A non-login shell -- cron, systemd, ``sudo``, a bare
+        ``<env>/bin/python`` invocation -- never sources the profile that
+        puts conda on ``PATH``, so ``PATH`` alone is not a dependable
+        way to find it.
+
+        ``mamba`` and ``micromamba`` accept the same ``env export -p``
+        call and emit the same conda YAML, so any of them will do.
+
+        Returns
+        -------
+        str or None
+            Path to the executable, or None if none was found.
+        """
+        prefix = Path(sys.prefix)
+        # sys.prefix is <root>/envs/<name> for a named env, <root> for base;
+        # parents[:2] covers the envs/ dir and the install root.
+        roots = [prefix, *list(prefix.parents)[:2]]
+        for root in roots:
+            for sub in ("condabin", "bin"):
+                for name in ("conda", "mamba", "micromamba"):
+                    candidate = root / sub / name
+                    if os.access(candidate, os.X_OK):
+                        return str(candidate)
+        for name in ("conda", "mamba", "micromamba"):
+            found = shutil.which(name)
+            if found:
+                return found
+        return None
+
     def _logged_env_info(self) -> str:
-        """Get the environment information for logging."""
+        """Get the environment information for logging.
+
+        Always conda YAML, or an explanatory marker -- never a different
+        format. Falling back to ``pip freeze`` would silently change the
+        shape of a permanent provenance record, and would drop the
+        non-Python packages (BLAS, ffmpeg, CUDA runtime) that this
+        pipeline's reproducibility actually turns on.
+
+        Notes
+        -----
+        Exported with an explicit ``-p sys.prefix`` rather than relying on
+        the activated environment: with no ``CONDA_PREFIX`` set, ``conda
+        env export`` reports ``name: base`` and exits 0, which would stamp
+        the file with an environment that did not produce the data.
+
+        Capture failures are recorded in the field instead of raised. This
+        runs from ``AnalysisNwbfile.create()``, at the end of a populate --
+        losing hours of computation because provenance metadata could not
+        be collected is the wrong trade.
+        """
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        python_env = subprocess.check_output(
-            ["conda", "env", "export"], text=True
-        )
-        env_info += python_env
+
+        conda_exe = self._conda_exe()
+        if conda_exe is None:
+            return env_info + (
+                "(conda environment export unavailable: no conda, mamba, or "
+                f"micromamba executable found for prefix {sys.prefix})\n"
+            )
+        try:
+            env_info += subprocess.check_output(
+                [conda_exe, "env", "export", "-p", sys.prefix],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            env_info += (
+                f"(conda environment export failed: {type(e).__name__}: {e})\n"
+            )
         return env_info
 
     @classmethod
