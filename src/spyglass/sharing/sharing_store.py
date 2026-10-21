@@ -83,6 +83,43 @@ def _require_known_teams(teams) -> None:
         )
 
 
+def _require_file_in(table, key: dict) -> None:
+    """Raise if `table` does not hold the file `key` names.
+
+    The selection tables' foreign keys point at `Nwbfile` and the *common*
+    `AnalysisNwbfile`, so declaring a file the table does not hold would fail
+    on a foreign key naming neither the table asked nor the way out.
+
+    Parameters
+    ----------
+    table : dj.Table
+        The table expected to hold the file.
+    key : dict
+        Key naming the file.
+
+    Raises
+    ------
+    ValueError
+        If the file is absent, or the table cannot be read.
+    """
+    name = next(iter(key.values()))
+
+    try:
+        present = bool(table & key)
+    except dj.errors.AccessError as err:
+        raise ValueError(
+            f"Cannot read {table.full_table_name} to share {name}. Share it "
+            + "from the table that holds it."
+        ) from err
+
+    if not present:
+        raise ValueError(
+            f"{table.full_table_name} does not hold {name}. Share it from the "
+            + "table that holds it, or copy it into the common "
+            + "`AnalysisNwbfile` first with `_copy_to_common`."
+        )
+
+
 def _scope_row(selection, key: dict, scope: str, inherited: bool) -> dict:
     """Return the selection row for a scope, marking how it was arrived at.
 
@@ -726,17 +763,19 @@ def queue_inherited_share(
     return {**key, "scope": scope, "teams": teams}
 
 
-def share_file(
+def _share(
+    table,
     file_name: str,
+    file_class: str,
     scope: str = "public",
     teams: Optional[List[str]] = None,
-    file_class: str = "analysis",
     populate: bool = True,
 ):
     """Declare one file for sharing, and upload it.
 
-    A convenience over the two-step insert, for the common case. The
-    equivalent of `share_data_to_kachery`, minus the zone.
+    The body of `Nwbfile.share_file` and `AnalysisMixin.share_file`. Not called
+    directly: `table` has to be the one holding the file, which only those
+    methods can guarantee.
 
     Calling this again for the same file replaces the declaration. Once the
     file is in the store it routes through `update_visibility`, so the broker
@@ -744,19 +783,19 @@ def share_file(
 
     Parameters
     ----------
+    table : dj.Table
+        The table holding the file, which decides which pair of sharing
+        tables to use.
     file_name : str
         Spyglass file name.
+    file_class : str
+        "raw" or "analysis".
     scope : str, optional
         "private", "group", or "public". Defaults to "public", matching the
         selection tables: declaring a share is an explicit act, and the point
         of it is to be read. Pass "private" or "group" to narrow.
     teams : list of str, optional
         `LabTeam` names. Required when `scope` is "group".
-    file_class : str, optional
-        "raw" or "analysis". Chooses which pair of tables to use. An analysis
-        file held only in a custom `{prefix}_nwbfile` table must be copied
-        into the common `AnalysisNwbfile` first; the builder does this when it
-        registers one.
     populate : bool, optional
         Transfer immediately. False declares the share and leaves the upload
         for a later `populate()` — useful when queueing many large files.
@@ -769,8 +808,8 @@ def share_file(
     Raises
     ------
     ValueError
-        If `scope` or `file_class` is unknown, a group scope names no team, or
-        a named team does not exist.
+        If `scope` or `file_class` is unknown, a group scope names no team, a
+        named team does not exist, or `table` does not hold `file_name`.
     """
     if scope not in SCOPES:
         raise ValueError(f"Unknown scope {scope!r}; pick one of {SCOPES}.")
@@ -790,6 +829,8 @@ def share_file(
     shared = SharedRawFile if is_raw else SharedAnalysisFile
 
     key = {selection._name_attr: file_name}
+
+    _require_file_in(table, key)
 
     # Already uploaded: the broker holds the authoritative visibility, and
     # `populate` below is a no-op, so writing the row here alone would leave

@@ -269,6 +269,12 @@ Two more behaviors are worth knowing:
     its row into the common table first. Declaring a share therefore adds a
     common-table row for a file that previously had none. `Export` and
     `sharing_kachery` copy for the same reason.
+- **Sharing is a method on the table holding the file**, so the table decides
+    which pair of sharing tables to use and whether a copy is needed:
+    `Nwbfile().share_file(name)` for a raw file,
+    `AnalysisNwbfile().share_file(name)` or `{prefix}_nwbfile.share_file(name)`
+    for an analysis file. Asking a table that does not hold the file raises and
+    names the way out.
 
 Streaming holds the broker's **stable** content URL rather than the signed URL
 it redirects to. Each range request is re-authorized and re-signed, which is

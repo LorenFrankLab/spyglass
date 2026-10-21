@@ -139,16 +139,16 @@ def test_group_with_no_team_is_refused(store, declared, fake_client):
         store.SharedRawFile()._declared_visibility(declared)
 
 
-def test_share_file_rejects_a_group_with_no_team(store):
+def test_share_file_rejects_a_group_with_no_team(store, common):
     """The convenience helper refuses before writing anything."""
     with pytest.raises(ValueError, match="grants access to nobody"):
-        store.share_file("x.nwb", scope="group")
+        common.Nwbfile().share_file("x.nwb", scope="group")
 
 
-def test_share_file_rejects_an_unknown_scope(store):
+def test_share_file_rejects_an_unknown_scope(store, common):
     """Scope names are closed; a typo must not become a permission."""
     with pytest.raises(ValueError, match="Unknown scope"):
-        store.share_file("x.nwb", scope="everyone")
+        common.Nwbfile().share_file("x.nwb", scope="everyone")
 
 
 # ------------------------------- upload ---------------------------------
@@ -417,15 +417,14 @@ def test_share_file_narrows_an_existing_declaration(
         common.LabTeam.insert1({"team_name": team}, skip_duplicates=True)
 
     try:
-        store.share_file(
+        common.Nwbfile().share_file(
             mini_copy_name,
             scope="group",
             teams=[team],
-            file_class="raw",
             populate=False,
         )
-        store.share_file(
-            mini_copy_name, scope="private", file_class="raw", populate=False
+        common.Nwbfile().share_file(
+            mini_copy_name, scope="private", populate=False
         )
 
         assert (store.RawFileSelection & key).fetch1("scope") == "private"
@@ -694,7 +693,7 @@ def test_narrowing_a_raw_narrows_its_derivatives(
 
 
 def test_share_file_rejects_an_unknown_team_before_writing(
-    store, declared, broker_configured, fake_client
+    store, declared, broker_configured, fake_client, common
 ):
     """A name the FK will reject must not change the scope on its way there.
 
@@ -702,11 +701,10 @@ def test_share_file_rejects_an_unknown_team_before_writing(
     deleted and none inserted — a declaration that names nobody.
     """
     with pytest.raises(ValueError, match="No such LabTeam"):
-        store.share_file(
+        common.Nwbfile().share_file(
             declared["nwb_file_name"],
             scope="group",
             teams=["No Such Team"],
-            file_class="raw",
             populate=False,
         )
 
@@ -715,24 +713,24 @@ def test_share_file_rejects_an_unknown_team_before_writing(
 
 
 def test_share_file_replaces_teams_across_a_round_trip(
-    store, declared, broker_configured, fake_client, team_names
+    store, declared, broker_configured, fake_client, team_names, common
 ):
     """Flipping away from group and back leaves only the teams last named."""
     alpha, beta = team_names
     name = declared["nwb_file_name"]
 
-    store.share_file(
-        name, scope="group", teams=[alpha], file_class="raw", populate=False
+    common.Nwbfile().share_file(
+        name, scope="group", teams=[alpha], populate=False
     )
     assert set((store.RawFileSelection.Team & declared).fetch("team_name")) == {
         alpha
     }
 
-    store.share_file(name, scope="public", file_class="raw", populate=False)
+    common.Nwbfile().share_file(name, scope="public", populate=False)
     assert not (store.RawFileSelection.Team & declared)
 
-    store.share_file(
-        name, scope="group", teams=[beta], file_class="raw", populate=False
+    common.Nwbfile().share_file(
+        name, scope="group", teams=[beta], populate=False
     )
 
     assert (store.RawFileSelection & declared).fetch1("scope") == "group"
@@ -742,7 +740,13 @@ def test_share_file_replaces_teams_across_a_round_trip(
 
 
 def test_narrowing_an_un_uploaded_raw_narrows_its_derivatives(
-    store, declared, build_analysis, broker_configured, fake_client, team_names
+    store,
+    declared,
+    build_analysis,
+    broker_configured,
+    fake_client,
+    team_names,
+    common,
 ):
     """Re-scoping a raw reaches its derivatives whether or not it has uploaded.
 
@@ -758,11 +762,10 @@ def test_narrowing_an_un_uploaded_raw_narrows_its_derivatives(
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
     assert not (store.SharedRawFile & declared), "Raw must not be uploaded"
 
-    store.share_file(
+    common.Nwbfile().share_file(
         declared["nwb_file_name"],
         scope="group",
         teams=[alpha],
-        file_class="raw",
         populate=False,
     )
 
@@ -1045,13 +1048,13 @@ def test_narrowing_an_analysis_parent_reaches_its_derivatives(
 
 
 def test_share_file_on_an_upload_goes_through_the_broker(
-    store, declared, fake_client, mini_copy_name
+    store, declared, fake_client, mini_copy_name, common
 ):
     """populate() is a no-op once uploaded, so a local write would diverge."""
     store.SharedRawFile.populate(declared)
     fake_client.calls.clear()
 
-    store.share_file(mini_copy_name, scope="private", file_class="raw")
+    common.Nwbfile().share_file(mini_copy_name, scope="private")
 
     kinds = [call[0] for call in fake_client.calls]
 
@@ -1104,7 +1107,7 @@ def test_a_one_shot_iterable_of_algorithms_still_digests(tmp_path):
 
 
 def test_a_derivative_can_be_public_while_its_raw_is_private(
-    store, declared, build_analysis, broker_configured, fake_client
+    store, declared, build_analysis, broker_configured, fake_client, common
 ):
     """Inheritance sets a default; it does not constrain what you may declare.
 
@@ -1116,7 +1119,7 @@ def test_a_derivative_can_be_public_while_its_raw_is_private(
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
 
-    store.share_file(analysis, scope="public")
+    common.AnalysisNwbfile().share_file(analysis, scope="public")
 
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
     assert (store.SharedAnalysisFile & key).fetch1("file_id") == "f1"
@@ -1124,7 +1127,7 @@ def test_a_derivative_can_be_public_while_its_raw_is_private(
 
 
 def test_a_hand_set_scope_survives_a_parent_rescope(
-    store, declared, build_analysis, broker_configured, fake_client
+    store, declared, build_analysis, broker_configured, fake_client, common
 ):
     """Declaring a derivative directly is a choice, not a default to re-derive.
 
@@ -1134,7 +1137,9 @@ def test_a_hand_set_scope_survives_a_parent_rescope(
     analysis = build_analysis()
     key = {"analysis_file_name": analysis}
 
-    store.share_file(analysis, scope="public", populate=False)
+    common.AnalysisNwbfile().share_file(
+        analysis, scope="public", populate=False
+    )
 
     store.SharedRawFile.populate(declared)
     store.SharedRawFile().update_visibility(declared, scope="private")
@@ -1210,6 +1215,72 @@ def test_a_custom_table_file_is_copied_to_common_and_queued(
 
     assert len(common.AnalysisNwbfile & key) == 1, "Not copied to common"
     assert (store.AnalysisFileSelection & key).fetch1("scope") == "private"
+
+
+def test_a_custom_table_shares_its_own_file(
+    store, custom_analysis, common, mini_copy_name
+):
+    """The table holding the file is the handle, so no lookup is needed.
+
+    Built with no broker configured, which is how a real instance accumulates
+    custom-table files with no common-table row: registration returns before
+    the copy when `store_url` is unset.
+    """
+    from spyglass.settings import sg_config
+
+    with custom_analysis.build(mini_copy_name) as builder:
+        analysis = builder.analysis_file_name
+
+    key = {"analysis_file_name": analysis}
+
+    assert not (common.AnalysisNwbfile & key), "Precondition: not in common"
+
+    prior = sg_config.store_url
+    sg_config.store_url = "https://store.example.org"
+    try:
+        custom_analysis.share_file(analysis, scope="public", populate=False)
+    finally:
+        sg_config.store_url = prior
+
+    assert len(common.AnalysisNwbfile & key) == 1, "Not copied to common"
+    assert (store.AnalysisFileSelection & key).fetch1("scope") == "public"
+
+
+def test_sharing_from_the_wrong_table_names_the_way_out(
+    store, custom_analysis, common, mini_copy_name
+):
+    """A file in a custom table cannot be shared from the common one.
+
+    The one case the method form cannot remove, so it explains itself rather
+    than failing on a foreign key.
+    """
+    with custom_analysis.build(mini_copy_name) as builder:
+        analysis = builder.analysis_file_name
+
+    assert not (
+        common.AnalysisNwbfile & {"analysis_file_name": analysis}
+    ), "Precondition: not in common"
+
+    with pytest.raises(ValueError, match="does not hold"):
+        common.AnalysisNwbfile().share_file(analysis, populate=False)
+
+
+def test_the_raw_table_shares_its_own_file(
+    store, mini_copy_name, broker_configured, fake_client, common
+):
+    """The raw half of the same shape."""
+    key = {"nwb_file_name": mini_copy_name}
+
+    try:
+        common.Nwbfile().share_file(
+            mini_copy_name, scope="private", populate=False
+        )
+
+        assert (store.RawFileSelection & key).fetch1("scope") == "private"
+    finally:
+        (store.RawFileSelection & key).delete(
+            safemode=False, force_permission=True
+        )
 
 
 def test_a_failed_copy_warns_and_keeps_the_analysis_file(

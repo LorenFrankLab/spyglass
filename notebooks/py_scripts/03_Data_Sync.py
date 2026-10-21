@@ -238,11 +238,8 @@ sgs.RawFileSelection.Team.insert1(
 # For the common case there is a one-line helper:
 #
 # ```python
-# sgs.share_file(
-#     nwb_copy_filename,
-#     scope="group",
-#     teams=["My Team"],
-#     file_class="raw",
+# sgc.Nwbfile().share_file(
+#     nwb_copy_filename, scope="group", teams=["My Team"]
 # )
 # ```
 #
@@ -377,7 +374,9 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 # intermediate shared:
 #
 # ```python
-# sgs.share_file(analysis_file_name, scope="group", teams=["My Team"])
+# sgc.AnalysisNwbfile().share_file(
+#     analysis_file_name, scope="group", teams=["My Team"]
+# )
 # ```
 #
 # Inheritance is a convenience on top of that. When `AnalysisFileBuilder`

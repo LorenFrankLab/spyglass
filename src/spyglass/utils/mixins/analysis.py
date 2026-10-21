@@ -4,7 +4,7 @@ import string
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Union, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -139,6 +139,51 @@ class AnalysisMixin(BaseMixin):
         from spyglass.common.common_nwbfile import AnalysisRegistry
 
         AnalysisRegistry().insert1(self.full_table_name)
+
+    def share_file(
+        self,
+        analysis_file_name: str,
+        scope: str = "public",
+        teams: Optional[List[str]] = None,
+        populate: bool = True,
+    ) -> dict:
+        """Declare this analysis file for sharing, and upload it.
+
+        Copies the row into the common `AnalysisNwbfile` first, which is what
+        the selection table's foreign key names. A no-op when this *is* the
+        common table.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            A file held in this table.
+        scope : str, optional
+            "private", "group", or "public". Defaults to "public".
+        teams : list of str, optional
+            `LabTeam` names. Required when `scope` is "group".
+        populate : bool, optional
+            Transfer immediately. False leaves the upload for a later
+            `SharedAnalysisFile.populate()`.
+
+        Returns
+        -------
+        dict
+            The selection key that was written.
+        """
+        from spyglass.sharing.sharing_store import _share
+
+        # No-op if this is the common table, or if the file is not here --
+        # `_share` raises on the latter with the way out.
+        self._copy_to_common([analysis_file_name])
+
+        return _share(
+            self,
+            analysis_file_name,
+            "analysis",
+            scope=scope,
+            teams=teams,
+            populate=populate,
+        )
 
     def _copy_to_common(self, file_names: list = None) -> None:
         """Copy entries from this custom table to the common AnalysisNwbfile."""

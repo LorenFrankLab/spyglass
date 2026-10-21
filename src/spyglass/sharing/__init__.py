@@ -19,7 +19,6 @@ _LAZY_NAMES = {
     "SharedAnalysisFile": "sharing_store",
     "SharedRawFile": "sharing_store",
     "most_restrictive": "sharing_store",
-    "share_file": "sharing_store",
 }
 
 from spyglass.sharing.store_client import (  # noqa: E402, F401
