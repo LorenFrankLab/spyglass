@@ -343,7 +343,7 @@ def test_fetch1_raises_empty(pos_merge):
 def test_fetch1_missing_attr_raises_datajoint_error(pos_merge, pos_merge_key):
     """fetch1 with a non-existent attr raises DataJointError, not IndexError."""
     mid = pos_merge_key["merge_id"]
-    with pytest.raises(dj.errors.DataJointError, match="attributes"):
+    with pytest.raises(dj.errors.DataJointError, match="not found"):
         (pos_merge & {"merge_id": mid}).fetch1("__nonexistent_attr__")
 
 
@@ -684,9 +684,11 @@ def test_fetch1_count_zero_message(pos_merge):
 
 
 def test_fetch1_missing_attr_message(pos_merge, pos_merge_key):
-    """fetch1 for an absent attr names retrieval failure, not the count."""
+    """fetch1 for an absent attr names the attribute, not the count."""
     mid = pos_merge_key["merge_id"]
-    with pytest.raises(dj.errors.DataJointError, match="could not retrieve"):
+    with pytest.raises(
+        dj.errors.DataJointError, match="__nonexistent_attr__.*not found"
+    ):
         (pos_merge & {"merge_id": mid}).fetch1("__nonexistent_attr__")
 
 
@@ -856,12 +858,40 @@ def test_fetch1_source_field_in_restriction(graph_tables):
 # with >1 populated part are exercisable without any environment gating.
 
 
-def test_fetch_no_attrs_heterogeneous_parts_raises_clear_error(merge_repro):
-    """fetch() with no attrs across heterogeneous parts must not crash with
-    an opaque numpy dtype error; it should explain the ambiguity clearly."""
+def test_fetch_no_attrs_heterogeneous_parts(merge_repro):
+    """fetch() with no attrs spans parts with differing columns.
+
+    The union gives every part the same columns, so this neither raises a
+    numpy dtype error nor needs as_dict=True to succeed.
+    """
     M = merge_repro["MergeRepro"]()
-    with pytest.raises(dj.errors.DataJointError, match="as_dict"):
-        M.fetch()
+    rows = M.fetch()
+    assert len(rows) == len(M), "fetch() should return every merged row."
+    for field in ("merge_id", "source", "a_id", "b_id"):
+        assert field in rows.dtype.names, (
+            f"{field!r} missing from the merged result; the union must carry "
+            "the master's columns and every part's."
+        )
+
+
+def test_fetch_no_attrs_includes_source(merge_repro):
+    """A no-attr fetch carries `source`, which lives only on the master."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True)
+    assert {r["source"] for r in rows} == {"SourceA", "SourceB"}, (
+        "Each merged row should report the part it came from; `source` was "
+        "lost when parts were fetched without joining the master."
+    )
+
+
+def test_fetch_master_and_part_attrs_together(merge_repro):
+    """A master attr and a part attr can be requested in one call."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch("source", "part_attr", as_dict=True)
+    assert len(rows) == len(M), (
+        f"Mixing a master-only attr with a part attr returned {len(rows)} "
+        "rows; it previously skipped every part and returned nothing."
+    )
 
 
 def test_fetch_no_attrs_as_dict_tolerates_heterogeneous_parts(merge_repro):
@@ -989,3 +1019,24 @@ def test_composite_restrict_delete_leaves_other_parts(merge_repro):
         f"{remaining} of {full} rows; it must remove only the {matching} "
         "matching row(s) and leave SourceB untouched."
     )
+
+
+def test_fetch_order_by_part_field_global(merge_repro):
+    """order_by may name a part column, and orders the merged whole."""
+    M = merge_repro["MergeRepro"]()
+    asc = M.fetch("part_attr", order_by="part_attr")
+    assert list(asc) == sorted(asc), (
+        f"order_by on a part column returned {list(asc)}; the union carries "
+        "part columns, so ordering must apply across all parts."
+    )
+
+
+def test_fetch_key_plus_attr_unpacks(merge_repro):
+    """fetch('KEY', attr) returns two sequences, not a flattened list."""
+    M = merge_repro["MergeRepro"]()
+    keys, attrs = M.fetch("KEY", "part_attr")
+    assert len(keys) == len(attrs) == len(M), (
+        "fetch('KEY', attr) must return one keys sequence and one value "
+        "sequence; per-part fetching flattened these into 2 pairs."
+    )
+    assert all("merge_id" in k for k in keys), "KEY entries are key dicts."

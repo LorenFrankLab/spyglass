@@ -326,8 +326,8 @@ class Merge(ExportMixin, dj.Manual):
                 has_part_field = True
         return has_part_field
 
-    def _resolve_top_restriction(self, limit=None, offset=0, order_by=None):
-        """Return a merge_id-only restriction for part-walking.
+    def _resolve_top_restriction(self):
+        """Return a merge_id-only restriction for part resolution.
 
         Always materializes ``self``'s current restriction (honoring any
         ``_top`` LIMIT/ORDER BY, applied at the SQL level by DataJoint) into
@@ -338,25 +338,18 @@ class Merge(ExportMixin, dj.Manual):
         ``super_fetch()`` returns): compiled directly, it would be replayed
         against every part's heading, which never includes ``source``, and
         every part would raise and be dropped. Resolving it against the
-        master first — where ``source`` is valid — then handing part-walking
-        nothing but merge_id keys sidesteps that entirely.
+        master first — where ``source`` is valid — then handing part
+        resolution nothing but merge_id keys sidesteps that entirely.
 
-        ``limit``/``offset``/``order_by`` (from a plain ``fetch(limit=...)``
-        call, as opposed to ``M & dj.Top(...)``) are applied here too, at the
-        master level, for the same reason: applied per-part instead, each
-        part would independently limit/offset/order its own rows rather
-        than the merged whole. Passed straight through to ``super().fetch()``
-        — DataJoint only applies a ``Top`` restriction when at least one is
-        truthy (see ``datajoint.fetch.Fetch.__call__``), so there's no need
-        to sparsify these into a conditionally-built kwargs dict first.
+        ``limit``/``offset``/``order_by`` are not applied here. They belong
+        to the merged union that ``_merge_fetch_impl`` builds, which carries
+        every part's columns and so can order by a part field; applied here
+        they would only ever see the master's two.
+
+        Reads through ``_master_only`` rather than ``super().fetch``, which
+        DataJoint would re-enter on a copy of this class (see ``fetch``).
         """
-        limited_ids = super().fetch(
-            RESERVED_PRIMARY_KEY,
-            log_export=False,
-            limit=limit,
-            offset=offset,
-            order_by=order_by,
-        )
+        limited_ids = self._master_only().fetch(RESERVED_PRIMARY_KEY)
         return (
             [{RESERVED_PRIMARY_KEY: mid} for mid in limited_ids]
             if len(limited_ids)
@@ -424,51 +417,53 @@ class Merge(ExportMixin, dj.Manual):
         return super().restrict(restriction)
 
     def fetch(self, *attrs, log_export=True, **kwargs):
-        """Walk parts unless request is master-only (merge_id, source, KEY).
+        """Fetch through the merged union unless the request is master-only.
 
         Overrides ExportMixin.fetch.  Use ``super_fetch()`` for a raw
-        master-only fetch when part-walking is unwanted.
+        master-only fetch when part resolution is unwanted.
 
-        When the table was restricted with ``dj.Top``, the LIMIT is
-        materialised into a merge_id set before part-walking so that the
-        row-count contract is preserved.
+        The union carries ``source`` from the master and every part's
+        columns, so master and part attributes can be requested together and
+        ``limit``/``offset``/``order_by`` apply to the merged whole. A
+        ``dj.Top`` restriction is materialised into a merge_id set first, so
+        its row-count contract is preserved.
 
         Parameters
         ----------
         *attrs : str
             Attributes to fetch. A request consisting only of master-only
-            attrs (``merge_id``, ``source``, ``KEY``) bypasses part-walking.
+            attrs (``merge_id``, ``source``, ``KEY``) is served from the
+            master directly.
         log_export : bool
             Default True. During export, log this fetch as an export event.
         **kwargs
             Forwarded to the underlying DataJoint ``fetch`` (e.g. ``as_dict``,
-            ``format``, ``limit``).
+            ``format``, ``limit``, ``order_by``).
 
         Returns
         -------
         np.ndarray, list, or pd.DataFrame
-            Part-table contents, with type determined by ``kwargs``. Results
-            from multiple parts are concatenated preserving that type.
+            Merged part-table contents, with type determined by ``kwargs``.
+            Columns a given part lacks are NULL, or 0 when numeric.
         """
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
         ):
             return super().fetch(*attrs, log_export=log_export, **kwargs)
+
+        # DataJoint re-enters fetch() here. Given attrs, its own
+        # Fetch.__call__ projects the receiver and fetches that with no attrs
+        # and format="array" (datajoint/fetch.py:206-217), and proj copies
+        # the receiver's class, so the inner call lands back in this method.
+        # It must read the master: resolving parts again would recurse
+        # through _resolve_top_restriction. A no-attr union fetch is
+        # available as fetch(as_dict=True) or by naming attributes.
         if not attrs and kwargs.get("format") == "array":
             return super().fetch(*attrs, log_export=log_export, **kwargs)
 
-        # limit/offset/order_by must apply once, globally, before part-
-        # walking — forwarding them to each part's own fetch() call (as
-        # **kwargs would) applies them independently per part instead.
-        limit = kwargs.pop("limit", None)
-        offset = kwargs.pop("offset", 0)
-        order_by = kwargs.pop("order_by", None)
-        restriction = self._resolve_top_restriction(
-            limit=limit, offset=offset, order_by=order_by
-        )
         return self._merge_fetch_impl(
             *attrs,
-            restriction=restriction,
+            restriction=self._resolve_top_restriction(),
             log_export=log_export,
             **kwargs,
         )
@@ -1442,91 +1437,45 @@ class Merge(ExportMixin, dj.Manual):
     def _merge_fetch_impl(
         self, *attrs, restriction: str = True, log_export=True, **kwargs
     ) -> list:
-        """Core part-walking fetch logic, shared by fetch() and merge_fetch()."""
-        if log_export and self.export_id:
-            self._log_fetch(  # Transforming restriction to merge_id
-                restriction=self._merge_repr(restriction=restriction).fetch(
-                    RESERVED_PRIMARY_KEY, as_dict=True
-                )
-            )
+        """Fetch from the merged union, shared by fetch() and merge_fetch().
 
-        results = []
-        parts = self._merge_restrict_parts(
-            restriction=restriction,
-            as_objects=True,
-            return_empties=False,
-            add_invalid_restrict=False,
-        )
+        One query answers the whole request. The union ``_merge_repr`` builds
+        joins each applicable part to the master, so ``source`` is available
+        alongside part attributes, and projects every part to the same
+        columns, filling the ones it lacks with NULL or 0. Consequences,
+        against fetching each part separately and concatenating: master and
+        part attributes can be requested together, ``limit``/``offset``/
+        ``order_by`` apply to the merged whole and may name a part column,
+        ``KEY`` keeps DataJoint's shape, and parts with differing headings
+        need no dtype reconciliation.
+        """
+        query = self._merge_repr(restriction=restriction)
 
-        for part in parts:
-            # A plain-name attr absent from this part's heading is the expected
-            # "wrong part" case — skip it.  Any other DataJointError (e.g. a
-            # dropped connection) is operational and must propagate.
-            missing = [
-                a
-                for a in attrs
-                if isinstance(a, str)
-                and re.fullmatch(r"\w+", a)
-                and a not in self._DJ_SPECIAL_ATTRS
-                and a not in part.heading.names
-            ]
-            if missing:
-                logger.warning(
-                    f"Attribute(s) {missing} not in "
-                    + to_camel_case(part.table_name.split("__")[-1])
-                    + ". Skipping."
-                )
-                continue
-            results.append(part.fetch(*attrs, **kwargs))
-
-        if not results:
+        if query is None:  # no part matched the restriction
             logger.info(
-                "No merge_fetch results.\n\t"
-                + "If not restricting, try: `M.fetch(True,'attr')\n\t"
-                + "If restricting by source, use dict: "
-                + "`M.fetch({'source':'X'}"
+                "No merge fetch results.\n\t"
+                + "If restricting by source, use a dict: "
+                + "`M.fetch({'source':'X'})`"
             )
             return []
 
-        if len(results) == 1:
-            return results[0]
+        if log_export and self.export_id:
+            self._log_fetch(  # Transforming restriction to merge_id
+                restriction=query.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
+            )
 
-        # Multiple parts — merge preserving the return type of each fetch
-        first = results[0]
-        if isinstance(first, np.ndarray):
-            # No-attrs fetch (no as_dict): each result is a structured array
-            # named after that part's own heading. Parts with heterogeneous
-            # headings (different field names) can't be concatenated into a
-            # single structured array — surface a clear, actionable error
-            # instead of numpy's opaque DTypePromotionError.
-            if first.dtype.names is not None and any(
-                r.dtype.names != first.dtype.names for r in results[1:]
-            ):
-                raise DataJointError(
-                    "Cannot fetch() all columns across parts with "
-                    "heterogeneous headings "
-                    f"({[r.dtype.names for r in results]}) as a single "
-                    "array. Use fetch(as_dict=True), or specify explicit "
-                    "attrs common to every part."
-                )
-            return np.concatenate(results)
-        if isinstance(first, list):
-            if first and isinstance(first[0], np.ndarray):
-                # Multi-attr fetch (no as_dict): each result is [arr_a, arr_b, ...]
-                return [
-                    np.concatenate([r[i] for r in results])
-                    for i in range(len(first))
-                ]
-            # as_dict=True: each result is a list of dicts — flatten
-            return [item for sub in results for item in sub]
-        try:  # format='frame' returns DataFrame
-            import pandas as pd
+        if isinstance(query, dj.expression.Union) and (
+            kwargs.get("limit") is not None
+            or kwargs.get("offset")
+            or kwargs.get("order_by")
+        ):
+            # DataJoint builds a Union's SQL with the ORDER BY and LIMIT
+            # inside the subquery alias, as `` as `_u0 ORDER BY ...` ``
+            # (datajoint/expression.py:806), which MySQL rejects. Wrapping
+            # the union in a plain subquery puts the clauses outside it.
+            query = query.make_subquery()
 
-            if isinstance(first, pd.DataFrame):
-                return pd.concat(results, ignore_index=True)
-        except ImportError:
-            pass
-        return results
+        return query.fetch(*attrs, **kwargs)
 
     def merge_populate(self, source: str, keys=None, **kwargs):
         """Populate source table and insert successes into merge.
@@ -1625,21 +1574,42 @@ class Merge(ExportMixin, dj.Manual):
         return query.preview()
 
     def __repr__(self):
-        """Show merged, part-walked preview by default."""
+        """Show the merged preview by default, else the master's."""
         out = self.view()
         if out is not None:
             return out
-        return super().__repr__()
+        return repr(self._master_only())
+
+    def _master_only(self) -> dj.Table:
+        """Return a plain DataJoint view of the master, bypassing this class.
+
+        DataJoint's ``preview`` fetches through the receiver's own ``fetch``
+        (``datajoint/preview.py`` projects, then fetches with
+        ``format="array"``), and ``proj`` copies the receiver's class, so
+        previewing ``self`` would resolve parts. A ``FreeTable`` on the same
+        table carries the master heading and none of this class's overrides.
+
+        Returns
+        -------
+        dj.FreeTable
+            The master table, carrying this instance's restriction and any
+            ``dj.Top``.
+        """
+        master = dj.FreeTable(self.connection, self.full_table_name)
+        master = master.restrict(self.restriction)
+        if self._top is not None:
+            master = master.restrict(self._top)
+        return master
 
     def super_view(self):
-        """Show master-only preview (no part-walking).
+        """Show master-only preview (no part resolution).
 
         Returns
         -------
         str
             The raw DataJoint master-table preview (``merge_id``, ``source``).
         """
-        return super().__repr__()
+        return repr(self._master_only())
 
     def _repr_html_(self):
         """HTML repr for notebooks, showing merged view as HTML string."""
