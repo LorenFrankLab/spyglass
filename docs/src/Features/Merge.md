@@ -117,6 +117,15 @@ result = MergeTable & {"merge_id": some_uuid}
     String restrictions on master-only fields (`merge_id`, `source`) are passed
     through to DataJoint directly without part-table resolution.
 
+    Column names are read with DataJoint's own SQL parser, so `NOT IN`, `BETWEEN`,
+    backtick-quoted names and function calls such as `lower(field) =` all resolve
+    through parts. A restriction naming no known column raises; an unknown name
+    alongside a known one is left to DataJoint, as with dict keys.
+
+    A string restriction applies to the parts that have the named column; parts
+    without it are dropped. This differs from `dj.Not` on a dict, which returns the
+    set complement.
+
 !!! note "Composite and negated restrictions"
 
     Lists, `dj.AndList` and `dj.Not` resolve through parts the same way a bare dict

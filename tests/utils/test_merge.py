@@ -460,7 +460,7 @@ def test_delete_forwards_force_permission(graph_tables, monkeypatch):
 
 def test_string_restrict_unknown_field_raises(pos_merge):
     """A string field unknown to master and every part raises, not full-table."""
-    with pytest.raises(dj.errors.DataJointError, match="Unknown field"):
+    with pytest.raises(dj.errors.DataJointError, match="No field of"):
         pos_merge & "definitely_not_a_field = 1"
 
 
@@ -1040,3 +1040,71 @@ def test_fetch_key_plus_attr_unpacks(merge_repro):
         "sequence; per-part fetching flattened these into 2 pairs."
     )
     assert all("merge_id" in k for k in keys), "KEY entries are key dicts."
+
+
+# ------------------- NOT IN / NOT LIKE string restrictions (item 5) ---------
+
+
+def test_string_restrict_not_in_master(pos_merge):
+    """`field NOT IN (...)` on a master column reads the field, not NOT."""
+    full = len(pos_merge)
+    result = len(pos_merge & "source NOT IN ('__nope__')")
+    assert result == full, (
+        f"NOT IN on a master column returned {result} of {full} rows; the "
+        "token before IN is NOT, which must not be read as a field name."
+    )
+
+
+def test_string_restrict_not_like_master(pos_merge):
+    """`field NOT LIKE ...` on a master column worked before this branch."""
+    full = len(pos_merge)
+    result = len(pos_merge & "source NOT LIKE '__nope__%'")
+    assert (
+        result == full
+    ), f"NOT LIKE on a master column returned {result} of {full} rows."
+
+
+def test_string_restrict_not_in_part_field(merge_repro):
+    """`field NOT IN (...)` resolves through parts that have the field."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id IN (1)") == 1, "Test setup: a_id=1 matches 1 row."
+    assert len(M & "a_id NOT IN (1)") == 1, (
+        "NOT IN on a part-only column should return SourceA's other row; "
+        "SourceB has no a_id column, so it is dropped."
+    )
+
+
+def test_string_restrict_not_like_part_field(merge_repro):
+    """`field NOT LIKE ...` resolves through parts that have the field."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id NOT LIKE '1'") == 1, (
+        "NOT LIKE on a part-only column should resolve through SourceA "
+        "rather than raising Unknown field 'NOT'."
+    )
+
+
+def test_string_restrict_backtick_part_field(merge_repro):
+    """A backtick-quoted part column resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "`a_id` = 1") == len(M & {"a_id": 1}) == 1, (
+        "A backtick-quoted part column should route like the bare name; "
+        "DataJoint's parser reads it."
+    )
+
+
+def test_string_restrict_function_call_part_field(merge_repro):
+    """A part column inside a function call resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "lower(a_id) = '1'") == 1, (
+        "A part column wrapped in a function should route through parts; "
+        "the parser strips the function name, not the column."
+    )
+
+
+def test_string_restrict_between_part_field(merge_repro):
+    """BETWEEN on a part column resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id BETWEEN 1 AND 1") == 1, (
+        "BETWEEN on a part column should route through parts rather than "
+        "reaching the master, which has no such column."
+    )

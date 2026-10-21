@@ -8,7 +8,7 @@ from typing import List, Union
 
 import datajoint as dj
 import numpy as np
-from datajoint.condition import make_condition
+from datajoint.condition import extract_column_names, make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, get_master, to_camel_case
@@ -285,46 +285,34 @@ class Merge(ExportMixin, dj.Manual):
             for name in part.heading.names
         )
 
-    @staticmethod
-    def _strip_quoted(restriction: str) -> str:
-        """Drop quoted literals so field-name scanning ignores string values.
-
-        Without this, a master-field restriction whose value happens to mention
-        a part-field name (e.g. ``description = "see nwb_file_name docs"``)
-        would be misrouted through part resolution.
-        """
-        return re.sub(r"'[^']*'|\"[^\"]*\"", "", restriction)
-
-    # Comparison operators whose left-hand side is a field reference.
-    _RESTRICT_OPERATORS = r"!=|<=|>=|<>|=|<|>|\bLIKE\b|\bIN\b|\bIS\b"
-
     def _string_has_part_field(self, restriction: str) -> bool:
         """True if a SQL string restriction references a part-table-only field.
 
-        Field-name tokens are read from the left-hand side of comparison
-        operators, ignoring quoted literals.  A token that belongs to no
-        heading (master or any part) raises ``DataJointError`` rather than
-        passing through to DataJoint, which would silently drop the unknown
-        attribute and return the entire table.
+        Column names come from DataJoint's ``extract_column_names``, the same
+        parser it uses to populate ``restriction_attributes``. It drops quoted
+        literals, reads backtick-quoted names, strips function names, and
+        excludes SQL keywords, so ``x NOT IN (...)``, ``x BETWEEN a AND b``
+        and ``lower(x) = 'y'`` all resolve to ``x``.
+
+        Raises
+        ------
+        DataJointError
+            If no extracted name belongs to the master or any part table.
+            That is the case DataJoint would answer with the whole table. A
+            name unknown alongside a known one is left to DataJoint, matching
+            how unknown dict keys are dropped.
         """
-        stripped = self._strip_quoted(restriction)
-        part_only = {f.lower() for f in self._get_part_only_fields()}
+        fields = {f.lower() for f in extract_column_names(restriction)}
+        if not fields:
+            return False
         known = {f.lower() for f in self._get_all_heading_fields()}
-        has_part_field = False
-        for token in re.findall(
-            r"\b([A-Za-z_]\w*)\s*(?:" + self._RESTRICT_OPERATORS + r")",
-            stripped,
-            re.IGNORECASE,
-        ):
-            field = token.lower()
-            if field not in known:
-                raise DataJointError(
-                    f"Unknown field {token!r} in restriction {restriction!r}: "
-                    "not an attribute of the merge master or any part table."
-                )
-            if field in part_only:
-                has_part_field = True
-        return has_part_field
+        if not fields & known:
+            raise DataJointError(
+                f"No field of restriction {restriction!r} is an attribute of "
+                "the merge master or any part table."
+            )
+        part_only = {f.lower() for f in self._get_part_only_fields()}
+        return bool(fields & part_only)
 
     def _resolve_top_restriction(self):
         """Return a merge_id-only restriction for part resolution.
