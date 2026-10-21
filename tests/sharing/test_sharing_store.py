@@ -336,9 +336,9 @@ def test_the_builder_queues_an_inherited_share(
 ):
     """Sharing a derived file takes no action beyond sharing its parent.
 
-    The parent is declared private by the `declared` fixture, so registering a
-    file built from it should queue that same scope with no user involvement —
-    and should queue only, leaving the upload to a later populate.
+    The parent is declared private by the `declared` fixture, so registering
+    a file built from it queues that same scope with no user involvement, and
+    queues only, leaving the upload to a later populate.
     """
     key = {"analysis_file_name": build_analysis()}
 
@@ -697,8 +697,8 @@ def test_share_file_rejects_an_unknown_team_before_writing(
 ):
     """A name the FK will reject must not change the scope on its way there.
 
-    The scope was written first, so the row was left `group` with its teams
-    deleted and none inserted — a declaration that names nobody.
+    Writing the scope first leaves the row `group` with its teams deleted
+    and none inserted, a declaration that names nobody.
     """
     with pytest.raises(ValueError, match="No such LabTeam"):
         common.Nwbfile().share_file(
@@ -802,8 +802,7 @@ def test_widening_stops_at_another_parents_restriction(
     """Re-derivation reads every recorded parent, not just the raw."""
     # A hand-declared private analysis file for the derivative to also
     # inherit from. `inherited = 0` is what makes it a choice rather than
-    # another row the cascade re-derives — were it inherited from this same
-    # raw, widening it along with everything else would be correct.
+    # another row the cascade re-derives.
     with common.AnalysisNwbfile().build(mini_copy_name) as builder:
         upstream = builder.analysis_file_name
 

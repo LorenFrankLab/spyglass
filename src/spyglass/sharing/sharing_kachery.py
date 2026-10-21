@@ -3,7 +3,7 @@
 .. deprecated:: 0.6.1
     Scheduled for removal in 0.7.0, one release cycle after this notice.
     Use `spyglass.sharing.share_file` and the shared-storage broker instead;
-    see the Data Sync notebook. Existing rows are left alone — retiring the
+    see the Data Sync notebook. Existing rows are left alone; retiring the
     schema is a database-admin task, not part of the removal.
 """
 

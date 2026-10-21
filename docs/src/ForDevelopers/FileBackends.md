@@ -179,7 +179,7 @@ path and rename on success. A partial file left at the expected path is worse
 than no file, because `LocalBackend` will hand it to the next caller as a valid
 local copy.
 
-Overriding `open` is reserved for backends where the split does not apply —
+Overriding `open` is reserved for backends where the split does not apply.
 `LocalBackend` does it, because reading a file already on disk is neither, and
 so declares both flags `False`.
 
@@ -206,9 +206,9 @@ correct. `LocalBackend` is the one shipped example, and it returns `False`.
 ### Reporting a miss
 
 Prefer a return value. `has` answers "is this worth attempting?" before any
-transfer, and `download` returns `False` for "I tried and got nothing" — `open`
-converts that into the exception the resolver expects. Between them these cover
-most cases.
+transfer, and `download` returns `False` for "I tried and got nothing", which
+`open` converts into the exception the resolver expects. Between them these
+cover most cases.
 
 `stream` is the exception, because it owes its caller an `(io, nwbfile)` pair
 and has no value with which to say no:
@@ -238,28 +238,28 @@ both capabilities. A single per-process memo means the `open` that follows a
 `has` does not pay a second round trip.
 
 It resolves by **content hash where it can, and by name only as a fallback**.
-Neither a name nor a hash is unique at the broker — registration is per owner —
-so `resolve` returns every matching registration and answers with the first this
-caller may read. That settles who gets what, but not *which file*: two instances
-can hold different sessions under the same `nwb_file_name`. A hash names the
-bytes, so where Spyglass recorded one it uses that. `RawFileSelection` is keyed
-on the file name, so within one instance a name maps to exactly one upload and
-one digest. The name is the fallback for a file shared from a *different*
-instance, where no local row exists.
+Neither a name nor a hash is unique at the broker, since registration is per
+owner, so `resolve` returns every matching registration and answers with the
+first this caller may read. That settles who gets what, but not *which file*:
+two instances can hold different sessions under the same `nwb_file_name`. A hash
+names the bytes, so where Spyglass recorded one it uses that. `RawFileSelection`
+is keyed on the file name, so within one instance a name maps to exactly one
+upload and one digest. The name is the fallback for a file shared from a
+*different* instance, where no local row exists.
 
 Two more behaviors are worth knowing:
 
 - **An unconfigured instance holds nothing.** With no `store_url` set, or with
     the user not logged in, `has` returns `False` and the chain moves on. Most
     instances are attached to no broker; that is not a misconfiguration. A
-    broker set but not logged in *is* half-finished, so that one warns — once
-    per session, since `has` runs per file.
+    broker set but not logged in is half-finished, so that one warns once per
+    session, since `has` runs per file.
 - **A refusal is indistinguishable from a miss.** The broker answers 404 both
-    for "no such file" and for "none you may read" — saying otherwise would
-    confirm a file exists to someone with no right to know — and `has` treats it
-    as `False`. This keeps the chain simple but it does mean a file the user
-    *could* read — after linking their GitHub account, say — looks exactly like
-    one that does not exist, at the broker as well as here.
+    for "no such file" and for "none you may read", so that answering separately
+    cannot confirm a file to someone with no right to know, and `has` treats
+    both as `False`. A file the user could read after linking their GitHub
+    account therefore looks like one that does not exist, at the broker as well
+    as here.
 - **`auto_upload` does not transfer a file built inside a `make()`.** A populate
     cannot run in the caller's transaction, so such a file is declared and left
     for the next `SharedAnalysisFile.populate()`.
@@ -280,9 +280,8 @@ Streaming holds the broker's **stable** content URL rather than the signed URL
 it redirects to. Each range request is re-authorized and re-signed, which is
 what lets a read of a multi-gigabyte file outlive any single signature. The
 bearer header rides every request and is dropped when the redirect crosses to
-the object store — required, because an S3 endpoint that receives an
-`Authorization` header alongside a presigned URL leaves presigned mode and
-rejects the request.
+the object store. An S3 endpoint that receives an `Authorization` header
+alongside a presigned URL leaves presigned mode and rejects the request.
 
 **`KacheryBackend`** is download-only; kachery-cloud has no streaming path. Its
 `has` is a restriction on `AnalysisNwbfileKachery`. Kachery is deprecated and
@@ -306,7 +305,7 @@ from spyglass.utils.nwb_helper_fn import file_is_remote
 
 The answer comes from the backend that opened the file: `open` reports it in
 `Opened.streamed` and the resolver caches that alongside the io handle, so any
-streaming backend is recognized — HTTP, S3, ROS3, or something not yet written.
+streaming backend is recognized: HTTP, S3, ROS3, or something not yet written.
 
 It reports what happened, not what the backend can do. A stream-capable backend
 that downloaded because the user set `prefer_download` produced a real local

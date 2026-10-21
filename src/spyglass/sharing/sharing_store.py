@@ -61,8 +61,8 @@ def most_restrictive(scopes) -> str:
 def _require_known_teams(teams) -> None:
     """Raise if any name is not a `LabTeam`.
 
-    Checked before any write, local or remote: the selection part table's FK
-    would otherwise reject the name only after the scope had been changed.
+    Checked before any write, local or remote, so the scope is not changed
+    ahead of a name the selection part table's FK rejects.
 
     Parameters
     ----------
@@ -86,9 +86,8 @@ def _require_known_teams(teams) -> None:
 def _require_file_in(table, key: dict) -> None:
     """Raise if `table` does not hold the file `key` names.
 
-    The selection tables' foreign keys point at `Nwbfile` and the *common*
-    `AnalysisNwbfile`, so declaring a file the table does not hold would fail
-    on a foreign key naming neither the table asked nor the way out.
+    The selection tables' foreign keys point at `Nwbfile` and the common
+    `AnalysisNwbfile`, so the file has to be in the table it is shared from.
 
     Parameters
     ----------
@@ -115,8 +114,7 @@ def _require_file_in(table, key: dict) -> None:
     if not present:
         raise ValueError(
             f"{table.full_table_name} does not hold {name}. Share it from the "
-            + "table that holds it, or copy it into the common "
-            + "`AnalysisNwbfile` first with `_copy_to_common`."
+            + "table that holds it."
         )
 
 
@@ -304,14 +302,10 @@ class _UploadMixin(_SharedFile):
 
         return scope, teams
 
-    # Tripartite `make`, not a monolithic one, because the work between the
-    # fetch and the insert is hashing and then uploading a file that is
-    # routinely tens of gigabytes. A single `make` runs entirely inside one
-    # database transaction, so the MySQL connection would sit idle for the
-    # whole transfer and hit `wait_timeout` — failing the populate *after* the
-    # object store had accepted the bytes, leaving a registration on the
-    # broker with no row here. Splitting it keeps the transaction to the
-    # insert alone.
+    # Tripartite `make`: the work between the fetch and the insert is hashing
+    # and uploading a file that is routinely tens of gigabytes, and a
+    # monolithic `make` holds one database transaction across all of it. The
+    # split keeps the transaction to the insert alone.
 
     def make_fetch(self, key):
         """Read the declared visibility and resolve the file's path.
@@ -470,8 +464,8 @@ class _UploadMixin(_SharedFile):
 
         teams = list(teams or []) if scope == "group" else []
 
-        # Before the broker call, which would otherwise have applied a change
-        # the local FK then rejects.
+        # Before the broker call, so the broker does not apply a change the
+        # local FK then rejects.
         _require_known_teams(teams)
 
         file_id = (self & key).fetch1("file_id")
@@ -735,9 +729,9 @@ def queue_inherited_share(
 
     scope, teams = inherited
 
-    # One transaction: a half-written declaration would pass the
-    # already-declared check above, so its missing parents could never be
-    # repaired and it could never be re-derived. Sometimes run in `make`
+    # One transaction: a half-written declaration passes the already-declared
+    # check above, leaving its missing parents unrepairable. Sometimes run in
+    # `make`
     with AnalysisFileSelection._safe_context():
         AnalysisFileSelection.insert1({**key, "scope": scope, "inherited": 1})
         AnalysisFileSelection.Team.insert(
@@ -798,7 +792,7 @@ def _share(
         `LabTeam` names. Required when `scope` is "group".
     populate : bool, optional
         Transfer immediately. False declares the share and leaves the upload
-        for a later `populate()` — useful when queueing many large files.
+        for a later `populate()`. Useful when queueing many large files.
 
     Returns
     -------
@@ -832,23 +826,20 @@ def _share(
 
     _require_file_in(table, key)
 
-    # Already uploaded: the broker holds the authoritative visibility, and
-    # `populate` below is a no-op, so writing the row here alone would leave
-    # DataJoint claiming a scope the broker never applied.
+    # Already uploaded: the broker holds the authoritative visibility, so the
+    # change goes through it rather than the local row alone.
     if shared & key:
         shared().update_visibility(key, scope=scope, teams=teams)
         return key
 
     # Not `insert1(..., skip_duplicates=True)`. A second call is how a user
-    # *narrows* a share they declared too widely, and skipping the duplicate
-    # would leave the old scope and the old teams in place while returning as
-    # though it had worked.
+    # narrows a share declared too widely, so the duplicate has to be written
+    # rather than skipped.
     row = _scope_row(selection, key, scope, inherited=False)
 
     # One transaction, so a failure cannot leave the scope changed with the
     # teams half-replaced. Teams are replaced rather than added to, and only a
-    # group scope keeps any: a row left behind from an earlier group
-    # declaration would take effect again the moment the scope flipped back.
+    # group scope keeps any, so a flip back to group starts from none.
     with selection._safe_context():
         if selection & key:
             selection.update1(row)

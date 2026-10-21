@@ -526,9 +526,8 @@ def test_auto_upload_reads_from_the_store_block(monkeypatch, tmp_path):
 def test_store_url_survives_a_reload(monkeypatch, tmp_path):
     """A reload re-reads the URL, because the setter wrote it to `dj.config`.
 
-    `load_config` resolves every custom key from `dj.config` alone, so a
-    setter that only touched the instance lost the value on the next
-    `force_reload` — and wrote "" to disk on the next `save_dj_config`.
+    `load_config` resolves every custom key from `dj.config` alone, so the
+    setter has to write there for a reload or a `save_dj_config` to keep it.
 
     The load must actually reach its commit phase for this to mean anything,
     hence the explicit sandbox base dir.
@@ -620,9 +619,9 @@ def test_find_lets_a_quota_refusal_through(client, transport):
 def loaded_config(monkeypatch, tmp_path):
     """Build a `SpyglassConfig` that has actually reached its commit phase.
 
-    `tests/sharing/` runs with no base dir, so a bare `SpyglassConfig()` fails
-    its load and reads none of `custom` — every setting would read as its
-    default and every assertion below would pass for the wrong reason.
+    `tests/sharing/` runs with no base dir, so a bare `SpyglassConfig()`
+    fails its load and reads none of `custom`, leaving every setting at its
+    default.
     """
     import datajoint as dj
 

@@ -190,9 +190,8 @@ class LabMember(SpyglassIngestion, dj.Manual):
 
         if not (cls.LabMemberInfo & key):
             # `google_user_name` has no default and is uniquely indexed, so
-            # this method cannot create the row: a placeholder would take the
-            # one empty-string slot and make the *next* member's link fail
-            # with a duplicate-key error naming a column they never set.
+            # only one row can hold a placeholder. The row is the caller's to
+            # create.
             raise ValueError(
                 f"{lab_member_name} has no `LabMemberInfo` row, and one "
                 + "cannot be created here: `google_user_name` is required and "

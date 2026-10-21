@@ -74,9 +74,8 @@ class BackendUnavailable(FileNotFoundError):
     its transfer did not produce one. `get_nwb_file` catches this and moves on
     to the next backend.
 
-    Genuine failures — a corrupt file, a network error, a DataJoint error — are
-    not this, and must propagate rather than be mistaken for a miss. Otherwise
-    the real error is swallowed and the file may be silently recomputed.
+    Genuine failures propagate instead: a corrupt file, a network error, a
+    DataJoint error.
 
     Subclasses `FileNotFoundError` so existing callers that catch that keep
     working; resolution catches only this narrower type.
@@ -473,8 +472,8 @@ class StoreBackend(FileBackend):
             return None
 
         if not client.logged_in:
-            # Once per broker: `has` runs per file, so a bare warning would
-            # bury a populate over hundreds of them.
+            # Once per broker: `has` runs per file, and a populate covers
+            # hundreds.
             if client.base_url not in self._warned_logged_out:
                 self._warned_logged_out.add(client.base_url)
                 logger.warning(
@@ -662,10 +661,8 @@ class StoreBackend(FileBackend):
         client = self._client()
 
         if client is None:
-            # Nothing is cached here. The chain instance is built once at
-            # import, and the notebook's own instructions have the user set
-            # `store_url` or log in *mid-session* — caching "no" would make
-            # every file probed before that permanently unavailable.
+            # Nothing is cached here. The chain instance lives for the
+            # process, and `store_url` or a login can arrive mid-session.
             return None
 
         digest = self._known_hash(name)
@@ -680,8 +677,7 @@ class StoreBackend(FileBackend):
                 return None
 
         # Only a hit is cached. `find` collapses a refusal, a miss and a
-        # broker outage into None, and this instance lives for the process —
-        # so caching one would strand a file that is shared moments later.
+        # broker outage into None, any of which can change mid-session.
         if record is not None:
             self._resolved[name] = record
 
@@ -765,9 +761,9 @@ class StoreBackend(FileBackend):
         Returns
         -------
         bool
-            True if the file is present locally after the call. False — not an
-            exception — when the broker holds nothing readable, since `open`
-            is what turns that into the one error the resolver looks for.
+            True if the file is present locally after the call. False, not
+            an exception, when the broker holds nothing readable: `open`
+            raises the error the resolver looks for.
 
         Raises
         ------

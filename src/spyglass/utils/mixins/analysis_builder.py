@@ -302,10 +302,9 @@ class AnalysisFileBuilder:
             )
         except Exception as err:  # noqa: BLE001 - see docstring
             if self._table.connection.in_transaction:
-                # Swallowing this would leave the caller's `make()` running
-                # against a transaction the failure may already have rolled
-                # back. The recovery advice below does not apply either: it
-                # assumes the analysis file survives, and it will not.
+                # The failure may already have rolled the caller's
+                # transaction back, and the recovery advice below assumes the
+                # analysis file survives.
                 logger.warning(
                     f"Could not {action} {self.analysis_file_name} for the "
                     + f"shared store: {err}"

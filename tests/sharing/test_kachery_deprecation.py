@@ -2,7 +2,7 @@
 
 The point of logging rather than only warning is that removal can be timed
 against real use, so what matters is that a call reaches `ActivityLog` under
-the name someone would search for — and that an instance without kachery
+the name someone would search for, and that an instance without kachery
 installed records nothing.
 """
 

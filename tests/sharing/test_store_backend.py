@@ -2,7 +2,7 @@
 
 The backend's contract with `get_nwb_file` is narrow: say whether it holds a
 readable file, and supply it. What these tests cover is the boundary where
-that contract is easy to get wrong — an unconfigured instance, a refusal that
+that contract is easy to get wrong: an unconfigured instance, a refusal that
 must not stop the chain, and a partial download that must not be mistaken for
 a local copy.
 """

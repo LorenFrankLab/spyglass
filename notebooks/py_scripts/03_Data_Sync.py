@@ -93,8 +93,8 @@ sg_config.store_url
 # The broker knows you by your GitHub login. It maps that login to a
 # `LabMember` through `LabMemberInfo.github_user_name`, and from there to your
 # `LabTeam` memberships. Until that column is set, the broker sees an
-# unaffiliated reader on no team, who can fetch **public files only** — a
-# perfectly valid account that quietly cannot see your lab's data.
+# unaffiliated reader on no team, who can fetch public files only. The
+# account is valid and cannot see your lab's data.
 #
 
 sgc.LabMember.LabMemberInfo & {"lab_member_name": "Firstname Lastname"}
@@ -109,7 +109,7 @@ sgc.LabMember.LabMemberInfo & {"lab_member_name": "Firstname Lastname"}
 # member who has none needs `google_user_name` supplied, and that column is
 # uniquely indexed, so there is no placeholder this call could invent without
 # taking the one blank slot and breaking the *next* member's link. If you see
-# "has no `LabMemberInfo` row", insert the row first — see
+# "has no `LabMemberInfo` row", insert the row first. See
 # [Insert Data](./02_Insert_Data.ipynb).
 #
 # On a database attached to a broker, `LabMemberInfo` is **writable by admins
@@ -138,8 +138,8 @@ sgc.LabMember.LabMemberInfo & {"lab_member_name": "Firstname Lastname"}
 #
 
 # Login uses GitHub's **device flow**. There is no browser callback, so it
-# works unchanged over SSH and inside a container — you are never waiting on a
-# `localhost` redirect that cannot reach you.
+# works unchanged over SSH and inside a container, with no `localhost`
+# redirect to wait on.
 #
 # From a terminal:
 #
@@ -187,7 +187,7 @@ sgs.get_client().logged_in
 #
 # **An unverified account cannot upload.** A first `populate()` will fail with
 # `StoreForbidden: This identity may not upload.` That is not a bug and not a
-# misconfiguration — ask your ServerHost admin to whitelist you.
+# misconfiguration. Ask your ServerHost admin to whitelist you.
 #
 
 client = sgs.get_client()
@@ -212,8 +212,8 @@ client.tier, client.github_login
 # **`public` is the default.** Declaring a share is an explicit act and the
 # point of it is to be read, so omitting `scope` publishes. Narrowing is what
 # you say out loud. Note this is the opposite of *inheritance*, which always
-# takes the narrowest scope a file's parents declared — a derivative of a
-# private raw is never published by a default nobody chose.
+# takes the narrowest scope a file's parents declared, so a derivative of a
+# private raw stays private by default.
 #
 # Declaring a share is a **database insert**. Raw and analysis files live in
 # separate tables, because `Nwbfile` and `AnalysisNwbfile` have separate
@@ -245,9 +245,9 @@ sgs.RawFileSelection.Team.insert1(
 #
 # Calling it again for the same file **replaces** the declaration, teams
 # included, which is how you narrow a share declared too widely before it is
-# uploaded. Once the file is in the store, use `update_visibility` instead —
-# only that relays the change to the broker, and only the broker's copy is
-# what a reader is actually checked against.
+# uploaded. Once the file is in the store, use `update_visibility` instead:
+# it relays the change to the broker, and the broker's copy is what a reader
+# is checked against.
 #
 
 sgs.RawFileSelection()
@@ -262,9 +262,9 @@ sgs.RawFileSelection()
 sgs.SharedRawFile.populate()
 
 # That hashes the file's bytes with SHA-256, registers the hash and size with
-# the broker, and uploads to a signed URL — unless someone already stored
-# identical bytes, in which case only the registration is written and the
-# transfer is skipped. Files are content-addressed, so the same bytes are
+# the broker, and uploads to a signed URL. If someone already stored
+# identical bytes, only the registration is written and the transfer is
+# skipped. Files are content-addressed, so the same bytes are
 # stored once no matter how many people share them.
 #
 
@@ -326,8 +326,8 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 
 # Streaming means only the chunks your analysis touches cross the network, and
 # reads are cached locally so the same chunk is not fetched twice. On a slow or
-# metered link the arithmetic inverts — many small range requests cost more
-# than one sequential transfer — so set `prefer_download` and get the whole
+# metered link the arithmetic inverts, because many small range requests cost
+# more than one sequential transfer. Set `prefer_download` to fetch the whole
 # file in one go:
 #
 # ```python
@@ -341,8 +341,8 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 # ```
 #
 # One caveat worth knowing: a file you are *refused* and a file that does not
-# exist look identical to the resolution chain — both simply fall through to
-# the next backend. If a file you expect to be able to read is not found,
+# exist look identical to the resolution chain: both fall through to the next
+# backend. If a file you expect to be able to read is not found,
 # check step 1 before assuming it was never shared.
 #
 
@@ -362,8 +362,8 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 # )
 # ```
 #
-# Note that visibility lives in DataJoint and is enforced by the broker; there
-# is no second place to configure it.
+# Visibility lives in DataJoint and is enforced by the broker. There is no
+# second place to configure it.
 #
 
 # ## 8. Sharing derived files
@@ -382,7 +382,7 @@ file_is_remote(sgc.Nwbfile.get_abs_path(nwb_copy_filename))
 # Inheritance is a convenience on top of that. When `AnalysisFileBuilder`
 # registers a file whose parents were already shared, it queues a row at the
 # **narrowest** scope any parent declared, and the teams *every* group-scoped
-# parent named — so a result built from a public source and a private one is
+# parent named, so a result built from a public source and a private one is
 # private. A file whose parents were never shared is not queued at all, and a
 # scope you set by hand is never overridden.
 #
@@ -422,8 +422,8 @@ sgs.AnalysisFileSelection()
 # a long streaming read that re-follows the redirect hundreds of times is
 # billed once.
 #
-# Note that being throttled is the one broker refusal that does *not* fall
-# through to the next backend. A missing or forbidden file quietly moves on to
+# Being throttled is the one broker refusal that does not fall through to the
+# next backend. A missing or forbidden file quietly moves on to
 # DANDI; a quota refusal raises, because the file is there and readable and
 # waiting is cheaper than recomputing it.
 #
@@ -486,8 +486,8 @@ sgs.AnalysisFileSelection()
 #
 # Access is managed outside Spyglass, at
 # `https://kachery-gateway.figurl.org/admin?zone=your_zone`, under
-# Admin/Authorization Settings. That split — permissions in a web console,
-# declarations in DataJoint — is one of the reasons Kachery is being replaced.
+# Admin/Authorization Settings. That split, permissions in a web console and
+# declarations in DataJoint, is one of the reasons Kachery is being replaced.
 #
 
 # # Up Next

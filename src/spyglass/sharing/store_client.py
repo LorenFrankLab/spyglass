@@ -37,9 +37,9 @@ from urllib.parse import urljoin
 
 from spyglass.utils.logging import logger
 
-#: Versioned API prefix. The path carries the version so that a broker upgrade
-#: cannot break a pinned client — which matters more than usual here, because
-#: we do not control when a user upgrades Spyglass.
+#: Versioned API prefix. The path carries the version so that a broker
+#: upgrade cannot break a pinned client, since Spyglass upgrades on the user's
+#: schedule.
 API_PREFIX = "/api/v1"
 
 #: Where the broker token is cached, unless `SPYGLASS_STORE_TOKEN` overrides
@@ -127,10 +127,9 @@ class StorePossessionRequired(StoreError):
 class StorePending(StoreError):
     """The user has not yet approved the login at GitHub.
 
-    The broker answers 428 for this, which is not a failure — it is the
-    expected state for as long as the user is still typing the code. Its own
-    type so that the polling loop can continue on this and only this, and let
-    every real refusal out immediately.
+    The broker answers 428 for this, the expected state for as long as the
+    user is still typing the code. Its own type, so the polling loop continues
+    on this and lets every real refusal out immediately.
 
     Attributes
     ----------
@@ -214,9 +213,8 @@ def _write_tokens(tokens: dict) -> None:
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Written to a fresh 0600 file and renamed over the cache. O_CREAT does
-    # not narrow an existing file, so writing in place would put the token in
-    # a world-readable file for as long as it took to chmod afterward.
+    # Written to a fresh 0600 file and renamed over the cache, since O_CREAT
+    # does not narrow an existing file.
     temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     fd = os.open(
         temp,
@@ -281,7 +279,7 @@ class StoreClient:
     """A connection to one shared-storage broker.
 
     Holds a base URL and a token; every method is one HTTP call against the
-    versioned API. Nothing here decides what a user may read — the broker does
+    versioned API. Nothing here decides what a user may read: the broker does
     that, and this class turns its answer into an exception or a value.
 
     Parameters
@@ -587,8 +585,7 @@ class StoreClient:
         ----------
         poll_interval : int, optional
             Seconds between polls. Defaults to the interval the broker asks
-            for, which is GitHub's — polling faster earns a slow-down, not a
-            faster answer.
+            for, which is GitHub's. Polling faster earns a slow-down.
 
         Returns
         -------
@@ -621,10 +618,10 @@ class StoreClient:
                     json={"device_code": start["device_code"]},
                 ).json()
             except StorePending as pending:
-                # The only outcome this loop continues on. Every other refusal
-                # — an expired code, a GitHub account below the minimum age —
-                # surfaces now rather than after another quarter hour of
-                # polling. The broker may also ask us to slow down.
+                # The only outcome this loop continues on. Every other
+                # refusal surfaces now: an expired code, a GitHub account
+                # below the minimum age. The broker may also ask us to slow
+                # down.
                 interval = max(interval, pending.interval)
                 continue
 
@@ -703,7 +700,7 @@ class StoreClient:
 
         A refusal and a miss both return None, since the resolution chain
         treats them alike; `resolve` tells them apart for callers that need
-        it. A quota refusal is not collapsed — `StoreQuotaExceeded`
+        it. A quota refusal is not collapsed; `StoreQuotaExceeded`
         propagates.
 
         Parameters
@@ -844,8 +841,8 @@ class StoreClient:
         Returns
         -------
         dict
-            Keys `file_id`, `deduplicated`, and — when the object is not
-            already stored — `upload_url` and `upload_headers`.
+            Keys `file_id` and `deduplicated`, plus `upload_url` and
+            `upload_headers` when the object is not already stored.
 
         Raises
         ------

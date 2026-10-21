@@ -34,9 +34,8 @@ def test_member_insert_names_the_command(common, denied):
 def test_team_creation_names_the_outer_call(common, denied):
     """The user forwards the call they made, not the row it reached first.
 
-    `create_new_team` inserts lab members before the team itself, so without
-    one wrapper around the whole body a denial would name `LabMember.insert1`
-    — a command the admin running it would not recreate the team.
+    `create_new_team` inserts lab members before the team itself, so one
+    wrapper around the whole body keeps the message on the call the user made.
     """
     with patch.object(common.LabMember, "insert1", side_effect=denied):
         with pytest.raises(PermissionError) as err:
