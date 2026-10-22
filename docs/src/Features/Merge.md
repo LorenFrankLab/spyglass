@@ -2,9 +2,9 @@
 
 ## Why
 
-A pipeline may diverge when we want to process the same data in different ways.
-Merge Tables allow us to join divergent pipelines together, and unify downstream
-processing steps. For a more in depth discussion, please refer to
+A pipeline may diverge to process the same data in different ways. A Merge Table
+joins the divergent pipelines, so downstream steps read from one table. For a
+longer discussion, see
 [this notebook](https://github.com/ttngu207/db-programming-with-datajoint/blob/master/notebooks/pipelines_merging_design_master_part.ipynb)
 and related discussions
 [here](https://github.com/datajoint/datajoint-python/issues/151) and
@@ -12,11 +12,11 @@ and related discussions
 
 ## Version Support Policy
 
-Pipelines are periodically rewritten as new major versions — for example,
+Pipelines are periodically rewritten as new major versions, such as
 `SpikeSortingV0` and `SpikeSortingV1` today, with `PositionV2` and
-`SpikeSortingV2` anticipated. Merge Tables (e.g., `PositionOutput`,
-`SpikeSortingOutput`) are what let the old and new versions coexist and be
-queried interchangeably while users migrate.
+`SpikeSortingV2` anticipated. Merge Tables such as `PositionOutput` and
+`SpikeSortingOutput` let old and new versions coexist and be queried
+interchangeably while users migrate.
 
 When a new version `VX` is released, the previous version `VX-1` is supported as
 follows:
@@ -34,16 +34,16 @@ follows:
 
 ## What
 
-A Merge Table is fundamentally a master table with one part for each divergent
-pipeline. By convention...
+A Merge Table is a master table with one part for each divergent pipeline. By
+convention:
 
 1. The master table has one primary key, `merge_id`, a
     [UUID](https://en.wikipedia.org/wiki/Universally_unique_identifier), and
     one secondary attribute, `source`, which gives the part table name. Both
-    are managed with the custom `insert` function of this class.
+    are managed by this class's `insert`.
 
-2. Each part table has inherits the final table in its respective pipeline, and
-    shares the same name as this table.
+2. Each part table inherits the final table of its pipeline, and takes that
+    table's name.
 
 ```python
 from spyglass.utils.dj_merge_tables import _Merge
@@ -74,20 +74,46 @@ class MergeOutput(_Merge):
 
 ![Merge diagram](../images/merge_diagram.png)
 
-By convention, Merge Tables have been named with the pipeline name plus `Output`
-(e.g., `LFPOutput`, `PositionOutput`). Using the underscore alias for this class
-allows us to circumvent a DataJoint protection that interprets the class as a
-table itself.
+Merge Tables are named for the pipeline plus `Output`, such as `LFPOutput` and
+`PositionOutput`. Import the class as `_Merge`, which keeps DataJoint from
+reading it as a table to declare.
 
 ## How
 
 ### Merging
 
-The Merge class in Spyglass's utils is a subclass of DataJoint's
+`Merge` subclasses DataJoint's
 [Manual Table](https://datajoint.com/docs/core/design/tables/tiers/#data-entry-lookup-and-manual)
-and adds functions to make the awkwardness of part tables more manageable. These
-functions are described in the [API section](../api/utils/dj_merge_tables.md),
-under `utils.dj_merge_tables`.
+and adds the methods below. The [API reference](../api/utils/dj_merge_tables.md)
+gives their full signatures, under `utils.dj_merge_tables`.
+
+Call these methods on an instance, `MergeTable()`. Restricting with `&` returns
+one, so `(MergeTable & restriction).fetch()` works as written.
+
+### Populating
+
+`populate()` takes a restriction, populates the source tables it applies to, and
+inserts the new keys into the matching parts:
+
+```python
+# Populate every source
+MergeTable().populate()
+
+# Populate the sources this restriction applies to
+MergeTable().populate({"nwb_file_name": "my_session.nwb"})
+
+# Populate one source
+MergeTable().populate({"source": "MyPart"})
+```
+
+It returns the rows inserted, keyed by source name. A source is skipped when the
+restriction names a column it does not have, and when it takes direct inserts
+rather than being populated.
+
+!!! note "Inserting directly"
+
+    Use `insert` for rows already present in a source table. `populate` is for rows
+    that do not exist yet.
 
 ### Restricting
 
@@ -95,13 +121,22 @@ Restrict a Merge Table with the standard `&` operator. Part-table fields are
 resolved automatically:
 
 ```python
-# Restrict by a field that lives in a part table — works correctly
+# Restrict by a part-table field
 result = MergeTable & {"nwb_file_name": "my_session.nwb"}
-len(result)  # only rows whose part has nwb_file_name == "my_session.nwb"
+len(result)  # rows whose part has nwb_file_name == "my_session.nwb"
 
-# Restrict by the master primary key — unchanged behavior
+# Restrict by the master primary key
 result = MergeTable & {"merge_id": some_uuid}
 ```
+
+A dict key that no table has is dropped, as DataJoint does, so a full upstream
+`key` restricts by the fields the Merge Table shares with it. A dict with no
+known key at all raises.
+
+!!! note "Stored restrictions"
+
+    `&` resolves part-table fields when it is evaluated, so a stored query is a
+    snapshot. Re-apply the restriction to pick up rows inserted since.
 
 !!! note "String restrictions"
 
@@ -145,68 +180,88 @@ result = MergeTable & {"merge_id": some_uuid}
 
 !!! note "Raw master-only restriction"
 
-    If you intentionally want to restrict on `merge_id` or `source` without
-    part-table resolution, use `super_restrict()`:
+    To restrict on `merge_id` or `source` without part-table resolution, use
+    `super_restrict()`:
 
     ```python
-    MergeTable.super_restrict({"source": "MyPart"})
+    MergeTable().super_restrict({"source": "MyPart"})
     ```
 
 ### Fetching
 
-`fetch()` and `fetch1()` on a (restricted) Merge Table walk the part tables
-automatically:
+`fetch()` and `fetch1()` read the master joined to its parts, so one call can
+name master and part fields together:
 
 ```python
-# Fetch a part-table attribute — walks parts
+# A part-table field
 (MergeTable & restriction).fetch("nwb_file_name")
 
-# fetch1() — exactly one row; returns dict / scalar / tuple per DJ convention
-(MergeTable & restriction).fetch1()  # dict of all columns
-(MergeTable & restriction).fetch1("nwb_file_name")  # scalar
-(MergeTable & restriction).fetch1("a", "b")  # tuple
+# Master and part fields in one call
+(MergeTable & restriction).fetch("source", "nwb_file_name")
 
-# Fetch master-only columns — served from master directly
-MergeTable.fetch("merge_id")
-MergeTable.fetch("source")
+# fetch1(): a dict for no fields, a scalar for one, a tuple for several
+(MergeTable & restriction).fetch1()
+(MergeTable & restriction).fetch1("nwb_file_name")
+(MergeTable & restriction).fetch1("a", "b")
 
-# Raw master-only fetch (bypasses part-walking)
-MergeTable.super_fetch()
+# limit, offset and order_by apply to the whole result
+MergeTable().fetch("nwb_file_name", order_by="nwb_file_name", limit=5)
+
+# Master columns only, without part resolution
+MergeTable().super_fetch()
 ```
+
+Naming no fields returns every column of every part, plus `source`. A column a
+part does not have reads as `NULL`, or `0` when numeric.
+
+For other output shapes, pass `as_dict` or `format` to `fetch()`. `fetch1()`
+rejects them.
 
 ### Viewing
 
 ```python
-# Print a merged union of all parts
+# Merged preview of all parts, as a string
 (MergeTable & restriction).view()
 
-# Return an HTML representation (notebooks)
+# The same as HTML, for notebooks
 (MergeTable & restriction).html()
+
+# Master columns only
+MergeTable().super_view()
 ```
+
+When the restriction matches no part, `view()` returns `None` and `html()`
+returns an empty marker.
 
 ### Selecting part and parent tables
 
 ```python
-# Get the part table matching the current restriction
+# The part table for the current restriction
 (MergeTable & restriction).get_part_table()
 
-# Get the part table joined with master (includes source column)
+# With the master's columns, including source
 (MergeTable & restriction).get_part_table(join_master=True)
 
-# Get the upstream parent table (the source of the data)
+# The upstream source table the data came from
 (MergeTable & restriction).get_parent_table()
 ```
+
+Both raise when the restriction matches no part, or more than one. Pass
+`multi_source=True` for a list instead.
 
 ### Deleting
 
 ```python
-# Delete merge entries (master + parts) matching the restriction
+# Merge entries, master and parts
 (MergeTable & restriction).delete()
 
-# Delete the upstream parent-table entries (destructive!)
-(MergeTable & restriction).delete_upstream(dry_run=True)  # preview
-(MergeTable & restriction).delete_upstream(dry_run=False)  # execute
+# Upstream source rows, and the merge entries that cascade with them
+(MergeTable & restriction).delete_upstream(dry_run=True)  # list the targets
+(MergeTable & restriction).delete_upstream(dry_run=False)  # delete
 ```
+
+`delete_upstream` deletes the source rows and lets DataJoint's cascade take the
+merge entries, in one transaction behind one confirmation.
 
 ### Building Downstream
 
@@ -233,7 +288,7 @@ so a restriction error surfaces instead of falling through to `default_params`.
 ## Deprecated API
 
 The following class methods are deprecated and will be removed in Spyglass
-0.7.0. They continue to work but emit a deprecation warning on first call.
+0.7.0. They continue to work but log a deprecation warning on first call.
 Migrate to the instance-method equivalents shown in the table below.
 
 | Deprecated call                                             | Replacement                                                |
@@ -250,4 +305,4 @@ Migrate to the instance-method equivalents shown in the table below.
 
 ## Example
 
-For example usage, see our Merge Table notebook.
+See the [Merge Tables notebook](../notebooks/04_Merge_Tables.ipynb).
