@@ -16,7 +16,7 @@ def analysis_store_spec():
     try:
         from spyglass.settings import sg_config
 
-        pass  # TEMP: fix disabled to prove the failure
+        sg_config._set_dj_config_stores()
     except Exception:  # no config loaded, nothing to repair
         pass
 
