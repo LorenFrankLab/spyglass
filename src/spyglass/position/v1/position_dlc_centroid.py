@@ -32,6 +32,10 @@ def validate_smoothing_params(params: dict) -> None:
     if params is None:
         return
 
+    from spyglass.position.v1.position_dlc_position import _check_v1_smoothing
+
+    _check_v1_smoothing(params)
+
     # Create a copy to avoid modifying original
     adapted_params = params.copy()
 
@@ -49,11 +53,21 @@ def validate_smoothing_params(params: dict) -> None:
             adapted_params["likelihood_thresh"] = sp["likelihood_thresh"]
         adapted_params["smoothing_params"] = sp
 
+    # V1 ran interpolation with params.get("interp_params", {}), so a set
+    # with interpolate=True and no interp_params is valid.
+    if adapted_params.get("interpolate") and "interp_params" not in (
+        adapted_params
+    ):
+        adapted_params["interp_params"] = {}
+
     _validate_smoothing_params(adapted_params, require_likelihood_thresh=False)
 
 
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
-from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
+from spyglass.position.v1.position_dlc_position import (
+    DLCSmoothInterpParams,
+    _v1_interp_kwargs,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_centroid")
@@ -302,7 +316,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                     centroid_df.copy(),
                     nan_spans,
                     legacy_v1=True,
-                    **params["interp_params"],
+                    **_v1_interp_kwargs(params.get("interp_params")),
                 )
             else:
                 interp_df = centroid_df.copy()

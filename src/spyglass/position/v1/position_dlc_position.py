@@ -18,14 +18,50 @@ from spyglass.position.utils.validation import (
 )
 from spyglass.position.v1.dlc_utils import check_bounds_all_bodyparts
 
+#: Keys ``interp_position`` accepts. V1's wrapper dropped anything else, so a
+#: stored set with an extra key still populates.
+_INTERP_KEYS = ("max_pts_to_interp", "max_cm_to_interp")
+
+
+def _v1_interp_kwargs(interp_params: dict) -> dict:
+    """Keep only the interpolation keys the shared function accepts."""
+    return {k: v for k, v in (interp_params or {}).items() if k in _INTERP_KEYS}
+
+
+def _check_v1_smoothing(params: dict) -> None:
+    """Reject smoothing V1 ``make`` cannot run, at insert rather than populate.
+
+    ``make`` looks the method up in ``_key_to_smooth_func_dict``, which holds
+    only ``moving_avg``, and needs ``smoothing_duration``. Accepting anything
+    else moves the failure to the end of a long job.
+    """
+    from spyglass.position.utils.interpolation import (
+        _key_to_smooth_func_dict,
+    )
+
+    if not params.get("smooth"):
+        return
+
+    sp = params.get("smoothing_params") or {}
+    method = sp.get("smooth_method", sp.get("method"))
+    if method is not None and method not in _key_to_smooth_func_dict:
+        raise ValueError(
+            f"smooth_method '{method}' is not available in Position V1. "
+            f"Options: {sorted(_key_to_smooth_func_dict)}"
+        )
+    if "smoothing_duration" not in sp:
+        raise ValueError(
+            "smoothing_params must include 'smoothing_duration' when "
+            "smooth is True"
+        )
+
 
 def validate_smoothing_params(params: dict) -> None:
-    """V1-compatible wrapper for shared validation function.
-
-    Converts V1 parameter format to standardized format before validation.
-    """
+    """Validate smoothing params, adapting names for the shared check."""
     if params is None:
         return
+
+    _check_v1_smoothing(params)
 
     # Create a copy to avoid modifying original
     adapted_params = params.copy()
@@ -47,7 +83,13 @@ def validate_smoothing_params(params: dict) -> None:
             sp["method"] = sp.pop("smooth_method")
             adapted_params["smoothing_params"] = sp
 
-    # Call shared validation with adapted parameters
+    # V1 ran interpolation with params.get("interp_params", {}), so a set
+    # with interpolate=True and no interp_params is valid.
+    if adapted_params.get("interpolate") and "interp_params" not in (
+        adapted_params
+    ):
+        adapted_params["interp_params"] = {}
+
     _validate_smoothing_params(adapted_params)
 
 
@@ -275,7 +317,10 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             interp_params = params.get("interp_params", dict())
             self._info_msg("interpolating across low likelihood times")
             interp_df = interp_pos(
-                df_w_nans.copy(), nan_spans, legacy_v1=True, **interp_params
+                df_w_nans.copy(),
+                nan_spans,
+                legacy_v1=True,
+                **_v1_interp_kwargs(interp_params),
             )
         else:
             interp_df = df_w_nans.copy()

@@ -208,3 +208,49 @@ def test_centoid_no_process(
     avg_interp_speed = df_interp["speed"].mean()
     avg_no_interp_speed = df_no_interp["speed"].mean()
     assert avg_interp_speed != avg_no_interp_speed, "Speed should be different"
+
+
+def test_insert_interpolate_without_interp_params(params_tbl):
+    """V1 accepted interpolate=True with no interp_params and ran with {}.
+
+    Rejecting it meant re-inserting a stored set with skip_duplicates failed.
+    """
+    params_tbl.insert1(
+        {
+            "dlc_centroid_params_name": "interp no params",
+            "params": {
+                "centroid_method": "two_pt_centroid",
+                "points": {"point1": "greenLED", "point2": "redLED_C"},
+                "interpolate": True,
+                "smooth": False,
+                "max_LED_separation": 12,
+                "speed_smoothing_std_dev": 0.100,
+            },
+        },
+        skip_duplicates=True,
+    )
+
+    assert "interp no params" in params_tbl.fetch("dlc_centroid_params_name")
+
+
+def test_insert_rejects_savgol(params_tbl):
+    """V1 `make` has only moving_avg, so savgol must fail at insert."""
+    with pytest.raises(ValueError, match="not available in Position V1"):
+        params_tbl.insert1(
+            {
+                "dlc_centroid_params_name": "savgol centroid",
+                "params": {
+                    "centroid_method": "two_pt_centroid",
+                    "points": {"point1": "greenLED", "point2": "redLED_C"},
+                    "interpolate": False,
+                    "smooth": True,
+                    "smoothing_params": {
+                        "smooth_method": "savgol",
+                        "smoothing_duration": 0.05,
+                    },
+                    "max_LED_separation": 12,
+                    "speed_smoothing_std_dev": 0.100,
+                },
+            },
+            skip_duplicates=True,
+        )

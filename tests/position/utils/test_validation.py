@@ -661,3 +661,86 @@ class TestParamDataclasses:
         )
         validate_centroid_params(dc)
         validate_centroid_params(dc.to_dict())
+
+
+class TestV1SmoothingGuards:
+    """V1 `make` can only run `moving_avg`, and needs a duration.
+
+    The shared validator accepts `savgol` and `gaussian`, so without these
+    checks the failure moved from insert to populate, after a long job.
+    """
+
+    def test_rejects_a_method_v1_cannot_run(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _check_v1_smoothing,
+        )
+
+        with pytest.raises(ValueError, match="not available in Position V1"):
+            _check_v1_smoothing(
+                {
+                    "smooth": True,
+                    "smoothing_params": {
+                        "smooth_method": "savgol",
+                        "smoothing_duration": 0.05,
+                    },
+                }
+            )
+
+    def test_requires_smoothing_duration(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _check_v1_smoothing,
+        )
+
+        with pytest.raises(ValueError, match="smoothing_duration"):
+            _check_v1_smoothing(
+                {
+                    "smooth": True,
+                    "smoothing_params": {"smooth_method": "moving_avg"},
+                }
+            )
+
+    def test_accepts_moving_avg_with_duration(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _check_v1_smoothing,
+        )
+
+        _check_v1_smoothing(
+            {
+                "smooth": True,
+                "smoothing_params": {
+                    "smooth_method": "moving_avg",
+                    "smoothing_duration": 0.05,
+                },
+            }
+        )
+
+    def test_ignores_sets_that_do_not_smooth(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _check_v1_smoothing,
+        )
+
+        _check_v1_smoothing({"smooth": False, "smoothing_params": {}})
+
+
+class TestV1InterpKwargs:
+    """V1's wrapper dropped keys `interp_position` does not accept.
+
+    A stored set with an extra or renamed key raised TypeError at populate.
+    """
+
+    def test_drops_unknown_keys(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _v1_interp_kwargs,
+        )
+
+        assert _v1_interp_kwargs(
+            {"max_cm_to_interp": 15, "foo": 1, "max_pts_to_interp": 10}
+        ) == {"max_cm_to_interp": 15, "max_pts_to_interp": 10}
+
+    def test_handles_none_and_empty(self):
+        from spyglass.position.v1.position_dlc_position import (
+            _v1_interp_kwargs,
+        )
+
+        assert _v1_interp_kwargs(None) == {}
+        assert _v1_interp_kwargs({}) == {}
