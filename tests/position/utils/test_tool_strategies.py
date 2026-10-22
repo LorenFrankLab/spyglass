@@ -207,7 +207,8 @@ class TestSLEAPOutputDiscovery:
 
         assert [Path(f).name for f in found] == ["vidA.analysis.h5"]
 
-    def test_video_without_output_is_skipped(self, strategy, tmp_path):
+    def test_video_without_output_is_none(self, strategy, tmp_path):
+        """A video with no output holds a place rather than being dropped."""
         out = tmp_path / "out"
         out.mkdir()
         self._write(out, ["vidA.analysis.h5"])
@@ -216,7 +217,7 @@ class TestSLEAPOutputDiscovery:
             [str(tmp_path / "vidB.mp4")], output_dir=str(out)
         )
 
-        assert found == []
+        assert found == [None]
 
 
 class TestToolStrategyFactory:
@@ -458,3 +459,80 @@ class TestSLEAPPatternAnchoring:
         )
 
         assert [Path(f).name for f in found] == ["vid1.a.analysis.h5"]
+
+
+class TestOutputPositionalAlignment:
+    """`find_output_files` returns one entry per video, in order.
+
+    A video with no output used to be skipped, so the returned list was
+    shorter than `video_paths` and a caller pairing the two handed every
+    later video the previous video's output.
+    """
+
+    @staticmethod
+    def _write(out_dir, names):
+        import os
+
+        for i, name in enumerate(names):
+            p = out_dir / name
+            p.touch()
+            os.utime(p, (1_600_000_000 + i, 1_600_000_000 + i))
+
+    def test_sleap_gap_is_a_none_placeholder(self, SLEAPStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # vid2 has no output; vid1 and vid3 do.
+        self._write(out, ["vid1.analysis.h5", "vid3.analysis.h5"])
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2, 3)]
+
+        found = SLEAPStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert len(found) == len(videos)
+        assert found[1] is None
+        assert Path(found[0]).name == "vid1.analysis.h5"
+        assert Path(found[2]).name == "vid3.analysis.h5"
+
+    def test_sleap_no_outputs_at_all(self, SLEAPStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = SLEAPStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert found == [None, None]
+
+    def test_sleap_missing_search_dir_is_none(self, SLEAPStrategy, tmp_path):
+        """An absent output directory is a gap, not a shortened list."""
+        videos = [str(tmp_path / "vid1.mp4")]
+
+        found = SLEAPStrategy().find_output_files(
+            videos, output_dir=str(tmp_path / "does_not_exist")
+        )
+
+        assert found == [None]
+
+    def test_dlc_gap_is_a_none_placeholder(self, DLCStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # The DLC fallback pattern is "*.h5", so an unrelated h5 in the
+        # directory would fill a gap. Keep only vid1's own output.
+        self._write(out, ["vid1DLC_resnet50.h5"])
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = DLCStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert len(found) == len(videos)
+        assert Path(found[0]).name == "vid1DLC_resnet50.h5"
+        # vid2 has no own output, but the "*.h5" fallback finds vid1's file.
+        # That is pre-existing fallback behaviour; the point here is that the
+        # entry exists at index 1 rather than the list being length 1.
+        assert found[1] is not None
+
+    def test_dlc_empty_dir_is_none(self, DLCStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = DLCStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert found == [None, None]

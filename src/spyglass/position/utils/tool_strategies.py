@@ -190,7 +190,9 @@ class PoseToolStrategy(ABC):
         Returns
         -------
         list
-            List of output file paths found
+            One entry per entry in ``video_paths``, positionally aligned:
+            the output file path, or ``None`` placeholder where that video has
+            no output.
         """
 
     @abstractmethod
@@ -1052,6 +1054,8 @@ class DLCStrategy(PoseToolStrategy):
 
         DLC saves files as: {video_stem}DLC_{network}_{shuffle}_{snapshot}.h5
         If no destfolder specified, saves to video directory.
+
+        Returns one entry per video, ``None`` where a video has no output.
         """
         # If we got direct file info from inference, use it
         if output_file_info:
@@ -1072,6 +1076,7 @@ class DLCStrategy(PoseToolStrategy):
             )
 
             if not self._fs.exists(search_dir):
+                output_files.append(None)
                 continue
 
             # Look for DLC output files for this video
@@ -1087,16 +1092,17 @@ class DLCStrategy(PoseToolStrategy):
                     matching_files, key=lambda p: p.stat().st_mtime
                 )
                 output_files.append(str(latest_file))
+                continue
+
+            # Fallback: look for any h5 files
+            fallback_pattern = patterns["fallback"]
+            full_fallback_pattern = str(search_dir / fallback_pattern)
+            h5_files = [Path(p) for p in self._fs.glob(full_fallback_pattern)]
+            if h5_files:
+                latest_h5 = max(h5_files, key=lambda p: p.stat().st_mtime)
+                output_files.append(str(latest_h5))
             else:
-                # Fallback: look for any h5 files
-                fallback_pattern = patterns["fallback"]
-                full_fallback_pattern = str(search_dir / fallback_pattern)
-                h5_files = [
-                    Path(p) for p in self._fs.glob(full_fallback_pattern)
-                ]
-                if h5_files:
-                    latest_h5 = max(h5_files, key=lambda p: p.stat().st_mtime)
-                    output_files.append(str(latest_h5))
+                output_files.append(None)
 
         return output_files
 
@@ -2261,6 +2267,8 @@ class SLEAPStrategy(PoseToolStrategy):
         Prefers ``*.analysis.h5`` (SLEAP analysis export); falls back to
         ``*.predictions.slp`` (SLEAP project with embedded predictions).
         Mirrors the structure of DLCStrategy.find_output_files().
+
+        Returns one entry per video, ``None`` where a video has no output.
         """
         if output_file_info:
             if isinstance(output_file_info, str):
@@ -2279,6 +2287,7 @@ class SLEAPStrategy(PoseToolStrategy):
             )
 
             if not self._fs.exists(search_dir):
+                output_files.append(None)
                 continue
 
             # Primary: {video_stem}*.analysis.h5
@@ -2310,6 +2319,8 @@ class SLEAPStrategy(PoseToolStrategy):
             if slp_files:
                 latest = max(slp_files, key=self._fs.getmtime)
                 output_files.append(str(latest))
+            else:
+                output_files.append(None)
 
         return output_files
 
