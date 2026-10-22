@@ -305,6 +305,39 @@ Migrate to the instance-method equivalents shown in the table below.
 | `MergeTable.merge_fetch(*attrs, restriction=...)`           | `(MergeTable & restriction).fetch(*attrs)`                 |
 | `MergeTable.merge_populate(source, keys)`                   | `MergeTable.populate({"source": source}, keys)`            |
 
+### Behavior Changes
+
+Restricting
+
+- A list, `dj.AndList` or `dj.Not` selects the same rows as the equivalent dict.
+    `dj.Not` on a part-table field returns the set complement, so parts without
+    that field contribute all of their rows.
+- A dict key that no table has is dropped, as DataJoint does. A dict with no
+    known key raises.
+- `NOT IN`, `BETWEEN`, backtick-quoted names and function calls in a string
+    restriction resolve through the parts.
+- `&` resolves part-table fields when it is evaluated, so a stored query is a
+    snapshot.
+
+Fetching:
+
+- `fetch()` and `fetch1()` read the master joined to its parts, so one call can
+    name master and part fields together.
+- Naming no fields returns every column of every part, plus `source`. A column a
+    part does not have reads as `NULL`, or `0` when numeric.
+- `limit`, `offset` and `order_by` apply to the whole result, and `order_by` may
+    name a part field.
+- `fetch(format="array")` returns the same columns as `fetch()`.
+
+Other:
+
+- `populate(*restrictions, **kwargs)` takes DataJoint's signature.
+- `get_part_table()` returns a list, as `parts()` does, and `[]` when no part
+    matches. `multi_source` is removed.
+- `delete_upstream()` deletes the upstream rows and lets the cascade take the
+    merge entries, in one transaction behind one confirmation.
+- `repr` shows the merged view. `super_view()` shows the master alone.
+
 ## Example
 
 See the [Merge Tables notebook](../notebooks/04_Merge_Tables.ipynb).
