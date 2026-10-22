@@ -112,12 +112,50 @@ def test_cohort_fetch1_dataframe(si_df):
 
 
 def test_all_nans(populate_pose_estimation, sgp):
+    """`nan_inds` raises when no point clears the likelihood threshold.
+
+    The threshold must exceed every likelihood for the guard to be reached,
+    and `get_subthresh_inds` compares with a strict `<`, so a threshold of
+    1.0 still leaves the points at exactly 1.0 above it. Hence 1.1 rather
+    than a value near the top of the range -- the premise is asserted below
+    so this cannot quietly stop testing the guard if the fixture changes.
+    """
     pose_est_tbl = populate_pose_estimation
     restr_tbl = pose_est_tbl.BodyPart & dj.Top()
     df = restr_tbl.fetch1_dataframe()
-    with pytest.raises(ValueError):
-        # Use likelihood threshold of 1.1 (impossible) to force all points below threshold
-        sgp.v1.position_dlc_position.nan_inds(df, 10, 1.1, 10)
+    thresh = 1.1
+
+    subthresh = sgp.v1.position_dlc_position.get_subthresh_inds(
+        df.copy(), likelihood_thresh=thresh
+    )
+    assert len(subthresh) == len(df), "Premise: every point is subthreshold"
+
+    with pytest.raises(ValueError, match="No good spans found"):
+        sgp.v1.position_dlc_position.nan_inds(df, 10, thresh, 10)
+
+
+def test_partial_nans_does_not_raise(populate_pose_estimation, sgp):
+    """A threshold that leaves good points returns rather than raising.
+
+    Pins the other side of the guard: `test_all_nans` passing says nothing
+    about whether the raise is reached only when it should be.
+    """
+    pose_est_tbl = populate_pose_estimation
+    restr_tbl = pose_est_tbl.BodyPart & dj.Top()
+    df = restr_tbl.fetch1_dataframe()
+    thresh = float(df["likelihood"].max())
+
+    subthresh = sgp.v1.position_dlc_position.get_subthresh_inds(
+        df.copy(), likelihood_thresh=thresh
+    )
+    assert 0 < len(subthresh) < len(df), "Premise: some points clear it"
+
+    out_df, bad_mask = sgp.v1.position_dlc_position.nan_inds(
+        df.copy(), 10, thresh, 10
+    )
+    assert len(out_df) == len(df), "Row count is preserved"
+    assert bad_mask.sum() == len(subthresh), "Subthreshold points are masked"
+    assert out_df.loc[bad_mask, "x"].isna().all(), "Masked x is NaN"
 
 
 # Parameterized test cases using pytest.mark.parametrize
