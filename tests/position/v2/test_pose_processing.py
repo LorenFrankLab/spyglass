@@ -362,7 +362,9 @@ _SMOOTH_INTERP = {
     "interpolate": True,
     "smooth": True,
     "interp_params": {"max_pts_to_interp": 10, "max_cm_to_interp": 50},
-    "smoothing_params": {"method": "moving_avg", "smoothing_duration": 0.05},
+    # 0.15 s is >= 2 samples at every sampling rate these fixtures use; a
+    # window that rounds below 2 is rejected, not silently clamped to 1.
+    "smoothing_params": {"method": "moving_avg", "smoothing_duration": 0.15},
 }
 
 
