@@ -915,54 +915,20 @@ def get_dlc_model_eval(
 ):
     project_path = Path(yml_path).parent
 
-    # Validate trainingsetindex against available training fractions
-    training_fractions = dlc_config.get("TrainingFraction", [])
+    # DLC 3's PyTorch evaluate_network rejects a numpy integer as "Invalid
+    # trainingsetindex", and fetch1 returns np.int64. Convert rather than
+    # retrying other indices: evaluating a different training fraction and
+    # storing it under the requested key is worse than failing.
+    trainingsetindex = int(trainingsetindex)
+    trainFraction = dlc_config["TrainingFraction"][trainingsetindex]
 
-    if not training_fractions:
-        # If no training fractions defined, assume a single default
-        training_fractions = [0.95]
-        trainingsetindex = 0
-
-    if trainingsetindex >= len(training_fractions) or trainingsetindex < 0:
-        # Use the first available training index instead of failing
-        trainingsetindex = 0
-        if len(training_fractions) == 0:
-            raise ValueError("No valid training fractions found in DLC config")
-
-    trainFraction = training_fractions[trainingsetindex]
-
-    try:
-        with suppress_print_from_package():
-            evaluate_network(
-                yml_path,
-                Shuffles=[shuffle],  # this needs to be a list
-                trainingsetindex=trainingsetindex,
-                comparisonbodyparts="all",
-            )
-    except ValueError as e:
-        if "Invalid trainingsetindex" in str(e):
-            # Try with different training indices if available
-            for i, frac in enumerate(training_fractions):
-                try:
-                    with suppress_print_from_package():
-                        evaluate_network(
-                            yml_path,
-                            Shuffles=[shuffle],
-                            trainingsetindex=i,
-                            comparisonbodyparts="all",
-                        )
-                    trainingsetindex = i
-                    trainFraction = frac
-                    break
-                except ValueError:
-                    continue
-            else:
-                raise RuntimeError(
-                    f"Could not evaluate model: no valid trainingsetindex found "
-                    f"in {training_fractions}"
-                )
-        else:
-            raise
+    with suppress_print_from_package():
+        evaluate_network(
+            yml_path,
+            Shuffles=[shuffle],  # this needs to be a list
+            trainingsetindex=trainingsetindex,
+            comparisonbodyparts="all",
+        )
 
     eval_folder = get_evaluation_folder(
         trainFraction=trainFraction,

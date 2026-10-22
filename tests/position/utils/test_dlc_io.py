@@ -808,3 +808,77 @@ class TestToLegacyEvalFields:
         assert result[" Train error(px)"] == "1.8"
         assert result["Training iterations:"] is None
         assert result["p-cutoff used"] is None
+
+
+class TestTrainingFractionNotSubstituted:
+    """The requested training fraction is evaluated, or nothing is.
+
+    DLC 3's PyTorch `evaluate_network` rejects a numpy integer as "Invalid
+    trainingsetindex", and `fetch1` returns np.int64. The old retry loop
+    caught that, evaluated a different fraction, and stored the result under
+    the requested key.
+    """
+
+    @staticmethod
+    def _fake_dlc(calls):
+        """An evaluate_network that only accepts a real Python int."""
+
+        def _evaluate_network(yml_path, Shuffles, trainingsetindex, **kw):
+            calls.append(trainingsetindex)
+            if not isinstance(trainingsetindex, int) or isinstance(
+                trainingsetindex, bool
+            ):
+                raise ValueError(f"Invalid trainingsetindex {trainingsetindex}")
+
+        return _evaluate_network
+
+    def test_numpy_index_is_converted_not_retried(self, tmp_path):
+        import numpy as np
+        from unittest.mock import patch
+
+        from spyglass.position.utils import dlc_io
+
+        calls = []
+        cfg = {"TrainingFraction": [0.8, 0.95]}
+        (tmp_path / "evaluation-results").mkdir()
+
+        with (
+            patch.object(dlc_io, "evaluate_network", self._fake_dlc(calls)),
+            patch.object(
+                dlc_io,
+                "get_evaluation_folder",
+                return_value="evaluation-results",
+            ),
+            patch.object(dlc_io, "get_most_recent_file") as most_recent,
+        ):
+            most_recent.side_effect = FileNotFoundError("no csv")
+            with pytest.raises(RuntimeError):
+                dlc_io.get_dlc_model_eval(
+                    yml_path=str(tmp_path / "config.yaml"),
+                    model_prefix="",
+                    shuffle=1,
+                    trainingsetindex=np.int64(1),
+                    dlc_config=cfg,
+                )
+
+        # The requested index, once, converted to int. No fallback sweep.
+        assert calls == [1]
+        assert all(type(c) is int for c in calls)
+
+    def test_out_of_range_index_raises(self, tmp_path):
+        from unittest.mock import patch
+
+        from spyglass.position.utils import dlc_io
+
+        calls = []
+        with patch.object(dlc_io, "evaluate_network", self._fake_dlc(calls)):
+            with pytest.raises(IndexError):
+                dlc_io.get_dlc_model_eval(
+                    yml_path=str(tmp_path / "config.yaml"),
+                    model_prefix="",
+                    shuffle=1,
+                    trainingsetindex=5,
+                    dlc_config={"TrainingFraction": [0.8, 0.95]},
+                )
+
+        assert calls == []  # fails before DLC is called
