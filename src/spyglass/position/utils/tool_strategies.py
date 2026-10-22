@@ -2285,7 +2285,7 @@ class SLEAPStrategy(PoseToolStrategy):
                 )
             ]
             if analysis_files:
-                latest = max(analysis_files, key=lambda p: p.stat().st_mtime)
+                latest = max(analysis_files, key=self._fs.getmtime)
                 output_files.append(str(latest))
                 continue
 
@@ -2301,16 +2301,22 @@ class SLEAPStrategy(PoseToolStrategy):
                 )
             ]
             if slp_files:
-                latest = max(slp_files, key=lambda p: p.stat().st_mtime)
+                latest = max(slp_files, key=self._fs.getmtime)
                 output_files.append(str(latest))
 
         return output_files
 
     def get_output_file_patterns(self) -> Dict[str, str]:
-        """Get SLEAP-specific output file patterns."""
+        """Get SLEAP-specific output file patterns.
+
+        Each pattern anchors on the video stem followed by a dot. Videos
+        usually share one output directory, and without the dot ``vid1`` also
+        matches ``vid10.analysis.h5``. SLEAP's own names
+        (``<video>.mp4.predictions.slp``) still match.
+        """
         return {
-            "primary": "{video_stem}*.analysis.h5",  # SLEAP analysis export
-            "fallback": "{video_stem}*.predictions.slp",  # embedded predictions
+            "primary": "{video_stem}.*analysis.h5",  # SLEAP analysis export
+            "fallback": "{video_stem}.*predictions.slp",  # embedded predictions
         }
 
 

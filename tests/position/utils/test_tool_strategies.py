@@ -1,5 +1,6 @@
 """Tests for pose estimation tool strategies."""
 
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
@@ -259,9 +260,10 @@ class TestToolStrategyFactory:
         assert strategy.tool_name == "SLEAP"
         assert strategy.source_software == "SLEAP"
         assert strategy.supports_training is True
+        # The dot after the stem distinguishes `vid1` from `vid10.analysis.h5`
         assert strategy.get_output_file_patterns() == {
-            "primary": "{video_stem}*.analysis.h5",
-            "fallback": "{video_stem}*.predictions.slp",
+            "primary": "{video_stem}.*analysis.h5",
+            "fallback": "{video_stem}.*predictions.slp",
         }
 
     def test_ndx_pose_is_not_a_strategy(self, factory):
@@ -388,3 +390,71 @@ class TestToolStrategyFactory:
         factory.register_strategy("idempotent", IdempotentStrategy)
         factory.register_strategy("idempotent", IdempotentStrategy)
         assert len(factory.get_available_tools()) == before + 1
+
+
+class TestSLEAPPatternAnchoring:
+    """`vid1` must not collect `vid10`'s output.
+
+    The stem patterns are globbed per video, so without a dot after the stem
+    `vid1*` also matches `vid10.analysis.h5`, and the newest-of-matches
+    tiebreak then hands `vid10`'s result to `vid1`.
+    """
+
+    @pytest.fixture
+    def strategy(self, SLEAPStrategy):
+        return SLEAPStrategy()
+
+    @staticmethod
+    def _write(out_dir, names):
+        """Create files oldest-first so mtime order is known."""
+        import os
+
+        for i, name in enumerate(names):
+            p = out_dir / name
+            p.touch()
+            os.utime(p, (1_600_000_000 + i, 1_600_000_000 + i))
+
+    def test_vid1_does_not_take_vid10_output(self, strategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # vid10's file is newest, so an unanchored glob returns it for vid1.
+        self._write(out, ["vid1.analysis.h5", "vid10.analysis.h5"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.analysis.h5"]
+
+    def test_sleap_native_double_suffix_still_matches(self, strategy, tmp_path):
+        """SLEAP writes <video>.mp4.predictions.slp; the dot must allow it."""
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vid1.mp4.predictions.slp"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.mp4.predictions.slp"]
+
+    def test_mtime_choice_uses_injected_filesystem(self, strategy, tmp_path):
+        """A stub filesystem must control which match wins."""
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vid1.a.analysis.h5", "vid1.b.analysis.h5"])
+
+        # Invert the real mtime order through the seam.
+        strategy._fs = SimpleNamespace(
+            exists=lambda p: Path(p).exists(),
+            glob=lambda pat: [
+                str(p) for p in Path(pat).parent.glob(Path(pat).name)
+            ],
+            getmtime=lambda p: 1.0 if "vid1.a." in str(p) else 0.0,
+        )
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.a.analysis.h5"]
