@@ -343,9 +343,14 @@ def smooth_moving_avg(
 
     idx = pd.IndexSlice
     x_col, y_col = coord_cols
-    moving_avg_window = max(
-        1, int(np.round(smoothing_duration * sampling_rate))
-    )
+    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
+    if moving_avg_window < 2:
+        raise ValueError(
+            f"smoothing_duration {smoothing_duration} s at "
+            f"{sampling_rate} Hz rounds to a {moving_avg_window}-sample "
+            "window, which does not smooth. Use at least "
+            f"{2 / sampling_rate:.4g} s."
+        )
 
     # Extract x, y arrays
     xy_arr = pos_df.loc[:, idx[[x_col, y_col]]].values

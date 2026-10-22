@@ -183,16 +183,14 @@ class TestSmoothMovingAvg:
         )
 
         result = smooth_moving_avg(
-            pos_df.copy(), smoothing_duration=0.1, sampling_rate=10.0
+            pos_df.copy(), smoothing_duration=0.2, sampling_rate=10.0
         )
 
-        # window = round(0.1 * 10) = 1 → moving average is the identity:
-        # isolated NaNs stay NaN, every other value is unchanged.
-        expected = np.array(
-            [0.0, 1.0, np.nan, 3.0, 4.0, 5.0, np.nan, 7.0, 8.0, 9.0]
-        )
-        assert np.array_equal(result["x"].values, expected, equal_nan=True)
-        assert np.array_equal(result["y"].values, expected, equal_nan=True)
+        # window = round(0.2 * 10) = 2; bottleneck move_mean(min_count=1):
+        # out[0] = x[0]; out[i] = mean of the non-NaN of (x[i-1], x[i]).
+        expected = np.array([0.0, 0.5, 1.0, 3.0, 3.5, 4.5, 5.0, 7.0, 7.5, 8.5])
+        assert np.allclose(result["x"].values, expected)
+        assert np.allclose(result["y"].values, expected)
 
     def test_smooth_moving_avg_custom_cols(self):
         """Test smoothing with custom column names."""
@@ -209,14 +207,64 @@ class TestSmoothMovingAvg:
 
         result = smooth_moving_avg(
             pos_df.copy(),
-            smoothing_duration=0.1,
+            smoothing_duration=0.2,
             sampling_rate=10.0,
             coord_cols=("pos_x", "pos_y"),
         )
 
-        # window = round(0.1 * 10) = 1 → identity on the custom columns
-        assert np.allclose(result["pos_x"].values, np.arange(10))
-        assert np.allclose(result["pos_y"].values, np.arange(10))
+        # window = round(0.2 * 10) = 2, applied to the custom columns
+        expected = np.arange(10, dtype=float) - 0.5
+        expected[0] = 0.0
+        assert np.allclose(result["pos_x"].values, expected)
+        assert np.allclose(result["pos_y"].values, expected)
+
+
+class TestMovingAvgWindowFloor:
+    """A window that rounds below 2 samples does not smooth, so it raises.
+
+    ``max(1, round(duration * rate))`` turned an unusable duration into a
+    1-sample window -- the identity -- and the row populated unsmoothed with
+    no warning. V1 raised on a 0 window.
+    """
+
+    def _df(self, n=5):
+        return pd.DataFrame(
+            {"x": np.arange(n, dtype=float), "y": np.arange(n, dtype=float)},
+            index=np.arange(n, dtype=float),
+        )
+
+    def test_rounds_to_zero(self):
+        from spyglass.position.utils.interpolation import smooth_moving_avg
+
+        with pytest.raises(ValueError, match="rounds to a 0-sample window"):
+            smooth_moving_avg(
+                self._df(), smoothing_duration=0.01, sampling_rate=30.0
+            )
+
+    def test_rounds_to_one(self):
+        from spyglass.position.utils.interpolation import smooth_moving_avg
+
+        with pytest.raises(ValueError, match="rounds to a 1-sample window"):
+            smooth_moving_avg(
+                self._df(), smoothing_duration=0.04, sampling_rate=30.0
+            )
+
+    def test_message_names_the_minimum_duration(self):
+        from spyglass.position.utils.interpolation import smooth_moving_avg
+
+        with pytest.raises(ValueError, match="Use at least 0.06667 s"):
+            smooth_moving_avg(
+                self._df(), smoothing_duration=0.01, sampling_rate=30.0
+            )
+
+    def test_two_samples_is_accepted(self):
+        from spyglass.position.utils.interpolation import smooth_moving_avg
+
+        result = smooth_moving_avg(
+            self._df(), smoothing_duration=0.0667, sampling_rate=30.0
+        )
+
+        assert np.allclose(result["x"].values, [0.0, 0.5, 1.5, 2.5, 3.5])
 
 
 class TestSmoothSavgol:
