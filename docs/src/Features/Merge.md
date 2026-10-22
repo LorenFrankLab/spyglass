@@ -236,7 +236,7 @@ returns an empty marker.
 ### Selecting part and parent tables
 
 ```python
-# The part table for the current restriction
+# The part tables for the current restriction, as a list
 (MergeTable & restriction).get_part_table()
 
 # With the master's columns, including source
@@ -246,8 +246,10 @@ returns an empty marker.
 (MergeTable & restriction).get_parent_table()
 ```
 
-Both raise when the restriction matches no part, or more than one. Pass
-`multi_source=True` for a list instead.
+`get_part_table()` returns a list, as DataJoint's `parts()` does, and `[]` when
+no part matches. `get_parent_table()` returns one table, and raises when the
+restriction matches no part or more than one; pass `multi_source=True` for a
+list.
 
 ### Deleting
 

@@ -249,7 +249,8 @@ LFPOutput().fetch_nwb(nwb_key)[0]
 #
 
 # %% [markdown]
-# - `get_part_table()` returns the Merge Part table for the current restriction.
+# - `get_part_table()` returns a list of the Merge Part tables for the current
+# restriction, as DataJoint's `parts()` does.
 # - `get_parent_table()` returns the upstream source table (where the actual data
 # lives).
 #

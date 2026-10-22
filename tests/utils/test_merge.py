@@ -184,33 +184,56 @@ def test_super_fetch_master_only(pos_merge):
     assert len(rows) > 0, "super_fetch should return rows."
 
 
-# ------------------- Phase 3: merge_get_part error messages -----------------
+# ------------------- merge_get_part return shape ---------------------------
 
 
-def test_merge_get_part_zero_msg(pos_merge):
-    """Zero-match restriction should say '0 matching', not '0 potential'."""
-    with pytest.raises(ValueError, match="0 matching"):
-        pos_merge.merge_get_part({"nwb_file_name": "__nonexistent__.nwb"})
+def test_merge_get_part_zero_returns_none(pos_merge):
+    """The deprecated merge_get_part returns None when no part matches."""
+    ret = pos_merge.merge_get_part({"nwb_file_name": "__nonexistent__.nwb"})
+    assert ret is None, f"Expected None for no match, got {ret!r}."
 
 
 def test_merge_get_part_multi_msg(pos_merge):
-    """Multi-source restriction should show the count, not say '0 matching'."""
+    """Multi-source restriction raises, naming the count."""
     # return_empties=True ensures all part tables are candidates, giving >1
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match="potential parts"):
         pos_merge.merge_get_part(True, return_empties=True)
-    assert "0 matching" not in str(exc_info.value)
-    assert "potential parts" in str(exc_info.value)
+
+
+def test_merge_get_part_multi_source_returns_list(pos_merge):
+    """multi_source=True returns the list rather than raising."""
+    parts = pos_merge.merge_get_part(
+        True, return_empties=True, multi_source=True
+    )
+    assert isinstance(parts, list) and len(parts) > 1
 
 
 # ------------------- Phase 4: instance-method replacements ------------------
 
 
-def test_get_part_table_instance(pos_merge, pos_merge_key):
-    """get_part_table() on restricted instance matches merge_get_part."""
+def test_get_part_table_returns_list(pos_merge, pos_merge_key):
+    """get_part_table() returns a list, as DataJoint's parts() does."""
     mid = pos_merge_key["merge_id"]
-    via_class = pos_merge.merge_get_part({"merge_id": mid})
-    via_inst = (pos_merge & {"merge_id": mid}).get_part_table()
-    assert len(via_inst) == len(via_class), "get_part_table count mismatch."
+    parts = (pos_merge & {"merge_id": mid}).get_part_table()
+    assert isinstance(parts, list), f"Expected a list, got {type(parts)}."
+    assert len(parts) == 1, "One source matches a single merge_id."
+    assert len(parts[0]) == len(pos_merge.merge_get_part({"merge_id": mid}))
+
+
+def test_get_part_table_empty_on_no_match(pos_merge):
+    """get_part_table() returns [] rather than raising."""
+    parts = (pos_merge & {"nwb_file_name": "__nope__.nwb"}).get_part_table()
+    assert parts == [], f"Expected [], got {parts!r}."
+
+
+def test_get_part_table_source_restriction(pos_merge):
+    """A `source` restriction reaches the parts."""
+    src = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    parts = (pos_merge & {"source": src}).get_part_table()
+    assert len(parts) == 1, (
+        f"A source restriction returned {len(parts)} parts; `source` lives "
+        "on the master and must be resolved there before the parts see it."
+    )
 
 
 def test_get_parent_table_instance(pos_merge, pos_merge_key):

@@ -978,10 +978,19 @@ class Merge(ExportMixin, dj.Manual):
         restriction: str = True,
         join_master: bool = False,
         restrict_part: bool = True,
-        multi_source: bool = False,
         return_empties: bool = False,
-    ):
-        """Core logic shared by merge_get_part and get_part_table."""
+    ) -> list:
+        """Core logic shared by merge_get_part and get_part_table.
+
+        Returns
+        -------
+        list
+            The matching part tables, empty when none match.
+        """
+        # Resolve master-only fields such as `source` against the master, so
+        # the parts receive merge_id alone (see _resolve_top_restriction).
+        restriction = (cls() & restriction)._resolve_top_restriction()
+
         sources = [
             cls._part_name(part)
             for part in cls._merge_restrict_parts(
@@ -991,24 +1000,6 @@ class Merge(ExportMixin, dj.Manual):
                 add_invalid_restrict=False,
             )
         ]
-
-        if not multi_source and len(sources) != 1:
-            if len(sources) == 0:
-                raise ValueError(
-                    "Found 0 matching parts. The upstream source may not have "
-                    "been inserted into this merge table yet.\n\t"
-                    + "Checked parts: "
-                    + str(
-                        [p.full_table_name for p in cls.parts(as_objects=True)]
-                    )
-                )
-            raise ValueError(
-                f"Found {len(sources)} potential parts: {sources}\n\t"
-                + "Try adding a restriction before invoking `get_part_table`.\n\t"
-                + "Or permitting multiple sources with `multi_source=True`."
-            )
-        if len(sources) == 0:
-            return None
 
         parts = [
             (
@@ -1021,7 +1012,7 @@ class Merge(ExportMixin, dj.Manual):
         if join_master:
             parts = [cls * part for part in parts]
 
-        return parts if multi_source else parts[0]
+        return parts
 
     @classmethod
     def _merge_restrict_parents_to_tables(
@@ -1327,30 +1318,34 @@ class Merge(ExportMixin, dj.Manual):
 
         Returns
         ------
-        Union[dj.Table, List[dj.Table]]
-            Native part table(s) of Merge. If `multi_source`, returns list.
-
-        Example
-        -------
-            >>> (MergeTable & restriction).get_part_table()
-            >>> (MergeTable & restriction).get_part_table(join_master=True)
+        Union[dj.Table, List[dj.Table], None]
+            Native part table of Merge, None when none match, or a list when
+            `multi_source`.
 
         Raises
         ------
         ValueError
-            If multiple sources are found, but not expected lists and suggests
-            restricting
+            If multiple sources are found and `multi_source` is False.
         """
         cls._deprecate(
             "merge_get_part", "(T & restriction).get_part_table(...)"
         )
-        return cls._merge_restrict_parts_to_tables(
+        parts = cls._merge_restrict_parts_to_tables(
             restriction=restriction,
             join_master=join_master,
             restrict_part=restrict_part,
-            multi_source=multi_source,
             return_empties=return_empties,
         )
+        if multi_source:
+            return parts
+        if len(parts) > 1:
+            raise ValueError(
+                f"Found {len(parts)} potential parts: "
+                + f"{[cls._part_name(p) for p in parts]}\n\t"
+                + "Try adding a restriction before invoking `get_part`.\n\t"
+                + "Or permitting multiple sources with `multi_source=True`."
+            )
+        return parts[0] if parts else None
 
     @classmethod
     def merge_get_parent(
@@ -1572,19 +1567,32 @@ class Merge(ExportMixin, dj.Manual):
         self,
         join_master: bool = False,
         restrict_part: bool = True,
-        multi_source: bool = False,
         return_empties: bool = False,
-    ):
-        """Return part table(s) for self.restriction.
+    ) -> list:
+        """Return the part tables matching self.restriction.
 
         Instance-method replacement for ``merge_get_part``. Use as
-        ``(T & restriction).get_part_table()``.
+        ``(T & restriction).get_part_table()``. Returns a list, as
+        DataJoint's ``parts`` does.
+
+        Parameters
+        ----------
+        join_master : bool
+            Default False. Join each part with the master, adding ``source``.
+        restrict_part : bool
+            Default True. Apply this instance's restriction to each part.
+        return_empties : bool
+            Default False. Include parts with no matching row.
+
+        Returns
+        -------
+        list
+            Native part tables of Merge, empty when none match.
         """
         return self.__class__._merge_restrict_parts_to_tables(
             restriction=self.restriction or True,
             join_master=join_master,
             restrict_part=restrict_part,
-            multi_source=multi_source,
             return_empties=return_empties,
         )
 
