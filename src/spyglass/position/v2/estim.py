@@ -1124,10 +1124,14 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 **inference_params,
             )
 
-        # Find output files using tool-specific logic
-        output_files = self._find_output_files(
-            tool, video_paths, output_dir, output_file_info
-        )
+        # Find output files using tool-specific logic, drop ``None``
+        output_files = [
+            f
+            for f in self._find_output_files(
+                tool, video_paths, output_dir, output_file_info
+            )
+            if f is not None
+        ]
 
         if not output_files:
             raise FileNotFoundError(
@@ -1242,7 +1246,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            List of output file paths
+            One entry per entry in ``video_paths``, with placeholder for video
+            without output.
         """
         # Import strategy factory
         from spyglass.position.utils.tool_strategies import ToolStrategyFactory
@@ -1745,12 +1750,16 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     **inference_params,
                 )
 
-            cam_outputs = self._find_output_files(
-                tool,
-                [cam_video_path] if cam_video_path else [],
-                output_dir,
-                cam_output_info,
-            )
+            cam_outputs = [
+                f
+                for f in self._find_output_files(
+                    tool,
+                    [cam_video_path] if cam_video_path else [],
+                    output_dir,
+                    cam_output_info,
+                )
+                if f is not None
+            ]
             if not cam_outputs:
                 raise FileNotFoundError(
                     f"No output found for camera_index={ci}, "
