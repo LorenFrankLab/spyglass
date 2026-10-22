@@ -111,6 +111,51 @@ class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
         super().insert1({**key, "training_id": training_id}, **kwargs)
 
 
+def latest_snapshot_index(train_dir: Path) -> int:
+    """Index of the most recently written TensorFlow snapshot.
+
+    Parameters
+    ----------
+    train_dir : Path
+        A DLC model's ``train`` directory.
+
+    Returns
+    -------
+    int
+        The snapshot index. Zero only under ``test_mode``, where training is
+        deliberately incomplete.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no snapshot is found outside ``test_mode``.
+
+    Notes
+    -----
+    DLC judges "latest" by snapshot magnitude; this means most recently
+    written. Only the TensorFlow engine writes the ``*index*`` files searched
+    here. The PyTorch engine, the DLC 3 default, writes ``snapshot-*.pt``,
+    so a PyTorch project finds nothing and raises rather than reporting 0,
+    which would be indistinguishable from a real snapshot index.
+    """
+    latest, max_modified_time = None, 0
+    for snapshot in train_dir.glob("*index*"):
+        modified_time = os.path.getmtime(snapshot)
+        if modified_time > max_modified_time:
+            latest = int(snapshot.stem[9:])
+            max_modified_time = modified_time
+
+    if latest is not None:
+        return latest
+
+    if not test_mode:
+        raise FileNotFoundError(
+            f"No training snapshot found under {train_dir}. The PyTorch "
+            "engine writes snapshot-*.pt, which this search does not match."
+        )
+    return 0
+
+
 @schema
 class DLCModelTraining(SpyglassMixin, dj.Computed):
     definition = """
@@ -257,7 +302,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             if not hit_end_of_train:
                 raise
 
-        snapshots = (
+        train_dir = (
             project_path
             / get_model_folder(
                 trainFraction=dlc_config["train_fraction"],
@@ -266,18 +311,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 modelprefix=dlc_config["modelprefix"],
             )
             / "train"
-        ).glob("*index*")
-
-        # DLC goes by snapshot magnitude when judging 'latest' for
-        # evaluation. Here, we mean most recently generated and
-        # fallback when no snapshots exist (e.g., test_mode)
-        latest_snapshot = 0
-        max_modified_time = 0
-        for snapshot in snapshots:
-            modified_time = os.path.getmtime(snapshot)
-            if modified_time > max_modified_time:
-                latest_snapshot = int(snapshot.stem[9:])
-                max_modified_time = modified_time
+        )
+        latest_snapshot = latest_snapshot_index(train_dir)
 
         self_insert = dict(
             key,
