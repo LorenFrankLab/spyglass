@@ -124,11 +124,14 @@ for label, interval_data in results.groupby("interval_labels"):
 Position V1 and V2 now share one implementation of each calculation, in
 `spyglass/position/utils/`. Position V1 supports DeepLabCut >= 2.3.
 
+- `spyglass.position.v1.dlc_reader` is removed. Its `PoseEstimation` is
+    `spyglass.position.utils.dlc_io.DLCProjectReader`; its `read_yaml` and
+    `save_yaml` are in `spyglass.position.utils`
 - These are no longer importable: `spyglass.position.utils_dlc`,
     `v1.dlc_utils_makevid`, `v1.do_pose_estimation`, `v1.read_yaml`,
-    `v1.save_yaml`, `dlc_reader.do_pose_estimation`,
-    `dlc_utils.validate_smooth_params`, `dlc_utils.two_pt_head_orientation`,
-    `dlc_utils.no_orientation` and `dlc_utils._key_to_func_dict`
+    `v1.save_yaml`, `dlc_utils.validate_smooth_params`,
+    `dlc_utils.two_pt_head_orientation`, `dlc_utils.no_orientation` and
+    `dlc_utils._key_to_func_dict`
 - `get_video_info` returns `(None,) * 4` where it raised `FileNotFoundError`;
     `_process_videos` raises `RuntimeError` where it raised `ValueError`
 - `find_mp4` verifies an existing converted mp4 against its source and raises on
