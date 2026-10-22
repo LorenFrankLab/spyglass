@@ -51,9 +51,7 @@ class PoseToolStrategy(ABC):
     def supports_training(self) -> bool:
         """Whether this tool supports model training.
 
-        Used to avoid Liskov substitution principle violations where
-        callers would need to check the specific strategy type to know
-        if training methods are available.
+        Lets a caller branch on the capability rather than the strategy type.
 
         Returns
         -------
@@ -699,9 +697,8 @@ class DLCStrategy(PoseToolStrategy):
         if shuffle is not None and info.get("shuffle") != shuffle:
             return None  # shuffle changed → weights can't be reused
         train_dir = Path(info["path"])
-        # PyTorch-only: TF-engine continuation is rejected in
-        # ``continue_training`` before this is ever reached, so a ``*.index``
-        # (TensorFlow) fallback here would be dead code.
+        # PyTorch-only: ``continue_training`` rejects TF-engine continuation
+        # before this is reached, so only ``snapshot-*.pt`` is searched
         snaps = sorted(train_dir.glob("snapshot-*.pt"))
         if not snaps:
             return None
@@ -947,11 +944,11 @@ class DLCStrategy(PoseToolStrategy):
             Filesystem-safety sanitizer applied to *experimenter* (matches
             the folder naming used at creation time).
         experimenter : str
-            Name recorded as the project's experimenter -- the middle
+            Name recorded as the project's experimenter, and the middle
             component of the ``{project_name}-{experimenter}-{date}`` folder
-            DLC creates. Must be a real identifier (e.g. the calling user),
-            not derived from *project_name* -- doing so used to duplicate
-            the project name into the folder (see issue #1676).
+            DLC creates. Must be a real identifier (e.g. the calling user).
+            Deriving it from *project_name* duplicates the name into the
+            folder (see issue #1676).
         create_kwargs : dict, optional
             Extra keyword args forwarded to ``create_new_project``.
         model_instance : optional
@@ -2029,13 +2026,9 @@ class SLEAPStrategy(PoseToolStrategy):
             )
             return None
 
-        # delete=False is deliberate, not a leak: this rewritten config is
-        # consumed by the out-of-process ``sleap-train`` subprocess launched in
-        # ``_run_training`` (via ``config_override``), so it must outlive this
-        # function's scope — a ``finally: unlink`` would pull it out from under
-        # the trainer. The subprocess reads it, and the file is a small config
-        # left in the system temp dir for post-mortem inspection of the exact
-        # length used; OS temp reaping cleans it up.
+        # delete=False: ``_run_training`` passes this config to the
+        # out-of-process ``sleap-train`` subprocess via ``config_override``,
+        # so it must outlive this function. OS temp reaping cleans it up.
         out = tempfile.NamedTemporaryFile(
             prefix="sleap_cont_", suffix=out_suffix, delete=False
         )

@@ -916,9 +916,9 @@ def get_dlc_model_eval(
     project_path = Path(yml_path).parent
 
     # DLC 3's PyTorch evaluate_network rejects a numpy integer as "Invalid
-    # trainingsetindex", and fetch1 returns np.int64. Convert rather than
-    # retrying other indices: evaluating a different training fraction and
-    # storing it under the requested key is worse than failing.
+    # trainingsetindex", and fetch1 returns np.int64. Convert the index; do
+    # not fall back to another one, which evaluates a different training
+    # fraction under the requested key.
     trainingsetindex = int(trainingsetindex)
     trainFraction = dlc_config["TrainingFraction"][trainingsetindex]
 
