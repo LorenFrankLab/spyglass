@@ -440,7 +440,7 @@ def _convert_mp4(
     # WRONG, pre-existing video with no error raised. The stem reduction is
     # also lossy — ``".1" in dest_filename`` is a substring test (not a suffix
     # match), collapsing e.g. ``clip.1.h264``, ``clip.15.h264`` and
-    # ``clip.h264`` all onto ``clip.mp4``. See issue #1651.
+    # ``clip.h264`` all onto ``clip.mp4``. See issue #1652.
     # V2 avoids this entirely via ``deterministic=True`` (unique per source).
     if deterministic:
         dest_filename = _deterministic_video_stem(filename, video_path)
@@ -538,7 +538,7 @@ def _assert_video_correspondence(source, dest, count_frames=True):
 
     The legacy converter names mp4s by a lossy stem in a flat directory and
     reuses any file of that name, so a *different* source can silently collide
-    onto an existing mp4 (see issue #1651). This
+    onto an existing mp4 (see issue #1652). This
     compares the source and existing-destination frame/packet counts and
     raises rather than returning the wrong video. It does not *fix* the naming
     — it unsilences the collision so the caller sees an error instead of
@@ -570,7 +570,7 @@ def _assert_video_correspondence(source, dest, count_frames=True):
         raise RuntimeError(
             f"Cannot verify that existing '{dest}' was produced from source "
             f"'{source}' ({unit} count failed: {e}). Refusing to reuse it "
-            "silently — see issue #1651."
+            "silently — see issue #1652."
         ) from e
     if src_n != dst_n:
         raise ValueError(
@@ -578,7 +578,7 @@ def _assert_video_correspondence(source, dest, count_frames=True):
             f"but source '{source}' has {src_n}. The legacy converter names "
             "mp4s by a lossy stem, so a different source reduced to the same "
             "name and would be silently reused. Rename/relocate one source, "
-            "or use the V2 deterministic converter. See issue #1651."
+            "or use the V2 deterministic converter. See issue #1652."
         )
 
 
@@ -639,7 +639,7 @@ def ensure_mp4(video_paths: "list", output_dir: Union[str, PosixPath]):
 
     Converted mp4s are named deterministically (``deterministic=True``): the
     name is a pure function of the source's absolute path, so it is unique
-    per source (no silent collisions — see issue #1651) and reproducible. V2
+    per source (no silent collisions — see issue #1652) and reproducible. V2
     working mp4s can therefore be deleted to reclaim disk and regenerated
     identically.
 
