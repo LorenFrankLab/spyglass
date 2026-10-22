@@ -234,8 +234,7 @@ def get_video_info(key):
     timestamps : np.array
         timestamps of the video
     """
-    # Imported here, not at module scope: importing it there gave every
-    # pure-math helper in this package a live DataJoint connection.
+    # Lazy import to avoid DB connection w/ helper methods
     from spyglass.common.common_behav import VideoFile
 
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}

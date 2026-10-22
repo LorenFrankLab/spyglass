@@ -106,6 +106,7 @@ def two_pt_orientation(
 def no_orientation(
     pos_df: pd.DataFrame,
     fill_with: float = np.nan,
+    dtype: type = np.float32,
     **kwargs,
 ) -> np.ndarray:
     """Return array of constant values (typically NaN) for orientation.
@@ -118,6 +119,8 @@ def no_orientation(
         Position data (only used for length)
     fill_with : float, optional
         Value to fill array with, by default np.nan
+    dtype : type, optional
+        Array dtype, by default np.float32. V1 tables pass np.float16.
     **kwargs
         Additional keyword arguments (ignored, for compatibility)
 
@@ -132,9 +135,7 @@ def no_orientation(
     >>> orientation = no_orientation(pos_df, fill_with=0.0)  # All zeros
     """
     n_frames = len(pos_df)
-    orientation = np.full(
-        shape=(n_frames,), fill_value=fill_with, dtype=np.float32
-    )
+    orientation = np.full(shape=(n_frames,), fill_value=fill_with, dtype=dtype)
     return orientation
 
 
@@ -143,6 +144,7 @@ def bisector_orientation(
     led1: str,
     led2: str,
     led3: str,
+    legacy_v1: bool = False,
     **kwargs,
 ) -> np.ndarray:
     """Calculate orientation from perpendicular bisector of two markers.
@@ -164,6 +166,10 @@ def bisector_orientation(
         Name of second perpendicular marker (opposite side)
     led3 : str
         Name of forward/backward marker (determines direction)
+    legacy_v1 : bool, optional
+        Use Position V1 semantics: consult led3 only when led1 and led2 are
+        level, and resolve coincident side markers from led3 instead of
+        returning NaN. Default False.
     **kwargs
         Additional keyword arguments (ignored, for compatibility)
 
@@ -190,7 +196,7 @@ def bisector_orientation(
     Algorithm:
     1. Compute vector from led2 to led1: (x_vec, y_vec)
     2. Perpendicular vector: (-y_vec, x_vec) / |vector|
-    3. Use led3 position to determine sign of orientation
+    3. Use led3 position to determine sign. Skipped w/ ``legacy_v1``
     4. Special handling when y_vec ≈ 0 (horizontal alignment)
     """
     orient = np.full(len(pos_df), np.nan)  # Initialize with NaNs
@@ -208,8 +214,10 @@ def bisector_orientation(
     fwd_x = pos_df[led3]["x"] - mid_x
     fwd_y = pos_df[led3]["y"] - mid_y
 
-    # Special case: led1 and led2 are horizontally aligned; perpendicular is vertical
-    horiz = y_eq0 & ~zero_length
+    # led1 and led2 level: the perpendicular is vertical, and led3 picks which
+    # way. legacy_v1 also routes coincident LEDs here; otherwise they are
+    # excluded and stay NaN.
+    horiz = y_eq0 if legacy_v1 else (y_eq0 & ~zero_length)
     orient[horiz & (fwd_y.values > 0)] = np.pi / 2
     orient[horiz & (fwd_y.values < 0)] = -np.pi / 2
 
@@ -224,10 +232,14 @@ def bisector_orientation(
 
     # Dot of candidate perpendicular (-y_vec, x_vec) with forward vector;
     # negative dot → flip sign so orientation points toward led3.
-    # NaN dot (led3 unknown) → keep default sign=1 (preserves pre-fix behavior).
+    # NaN dot (led3 unknown) → keep default sign=1
     gen_mask = ~y_eq0 & ~zero_length
-    dot = (-y_vec * fwd_x + x_vec * fwd_y).values[gen_mask]
-    sign = np.where(np.isnan(dot) | (dot >= 0), 1.0, -1.0)
+    if legacy_v1:  # perpendicular is taken as-is
+        sign = 1.0
+    else:  # Flip the perpendicular when it points away from led3.
+        dot = (-y_vec * fwd_x + x_vec * fwd_y).values[gen_mask]
+        sign = np.where(np.isnan(dot) | (dot >= 0), 1.0, -1.0)
+
     norm_x = sign * (-y_vec.values[gen_mask]) / length.values[gen_mask]
     norm_y = sign * x_vec.values[gen_mask] / length.values[gen_mask]
     orient[gen_mask] = np.arctan2(norm_y, norm_x)
@@ -238,6 +250,7 @@ def bisector_orientation(
 def interp_orientation(
     df: pd.DataFrame,
     spans_to_interp: List[Tuple[int, int]],
+    legacy_v1: bool = False,
     **kwargs,
 ) -> pd.DataFrame:
     """Linearly interpolate orientation over NaN spans.
@@ -248,6 +261,10 @@ def interp_orientation(
         DataFrame with 'orientation' column and time index
     spans_to_interp : List[Tuple[int, int]]
         List of (start_idx, stop_idx) tuples indicating NaN spans
+    legacy_v1 : bool, optional
+        Use Position V1 semantics: anchor the interpolation at the first and
+        last missing frames rather than their neighbours. Default False. V1
+        tables pass True; V2 does not.
     **kwargs
         Additional keyword arguments (ignored, for compatibility)
 
@@ -302,10 +319,15 @@ def interp_orientation(
         idx,
     ):
         """Apply interpolated orientation values to dataframe."""
+        if legacy_v1:
+            xp = [span_times[0], span_times[-1]]
+        else:
+            xp = [time_before, time_after]
+
         # Interpolate orientation
         orient_new = np.interp(
             x=span_times,
-            xp=[time_before, time_after],
+            xp=xp,
             fp=[
                 boundary_values["orientation"][0],
                 boundary_values["orientation"][1],

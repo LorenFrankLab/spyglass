@@ -299,7 +299,10 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 )
                 nan_spans = get_span_start_stop(nan_inds)
                 interp_df = interp_pos(
-                    centroid_df.copy(), nan_spans, **params["interp_params"]
+                    centroid_df.copy(),
+                    nan_spans,
+                    legacy_v1=True,
+                    **params["interp_params"],
                 )
             else:
                 interp_df = centroid_df.copy()

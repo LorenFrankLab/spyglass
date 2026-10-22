@@ -143,6 +143,7 @@ def interp_position(
     coord_cols: Tuple[str, str] = ("x", "y"),
     max_pts_to_interp: Optional[int] = None,
     max_cm_to_interp: Optional[float] = None,
+    legacy_v1: bool = False,
 ) -> pd.DataFrame:
     """Linearly interpolate position coordinates over NaN spans.
 
@@ -167,6 +168,10 @@ def interp_position(
         Maximum distance (in cm or pixels) between bounding points
         Spans with larger distances will remain NaN
         Default: None (no limit)
+    legacy_v1 : bool, optional
+        Use Position V1 semantics: anchor the interpolation at the first and
+        last missing frames rather than their neighbours, and ignore
+        ``max_pts_to_interp``. Default False. V1 tables pass True.
 
     Returns
     -------
@@ -217,7 +222,12 @@ def interp_position(
             - np.array([boundary_values["x"][1], boundary_values["y"][1]])
         )
 
-        if span_len > max_pts_to_interp or distance > max_cm_to_interp:
+        if distance > max_cm_to_interp:
+            return False, f"Index {span_start} to {span_stop} not interpolated"
+        if span_len > max_pts_to_interp:
+            # V1 compatibility: the limit does not apply
+            if legacy_v1:
+                return True, ""
             return False, f"Index {span_start} to {span_stop} not interpolated"
         return True, ""
 
@@ -232,15 +242,20 @@ def interp_position(
         idx,
     ):
         """Apply interpolated position values to dataframe."""
+        if legacy_v1:
+            xp = [span_times[0], span_times[-1]]
+        else:
+            xp = [time_before, time_after]
+
         # Interpolate x and y coordinates
         x_new = np.interp(
             x=span_times,
-            xp=[time_before, time_after],
+            xp=xp,
             fp=[boundary_values["x"][0], boundary_values["x"][1]],
         )
         y_new = np.interp(
             x=span_times,
-            xp=[time_before, time_after],
+            xp=xp,
             fp=[boundary_values["y"][0], boundary_values["y"][1]],
         )
 

@@ -337,6 +337,7 @@ def interp_pos(dlc_df: pd.DataFrame, spans_to_interp, **kwargs) -> pd.DataFrame:
         pos_df=dlc_df,
         spans_to_interp=spans_to_interp,
         coord_cols=("x", "y"),
+        legacy_v1=True,
         **{
             k: v
             for k, v in kwargs.items()
@@ -441,7 +442,9 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
         alt="spyglass.position.utils.orientation.bisector_orientation",
     )
     # Use the modern bisector function with proper parameter mapping
-    return bisector_orientation(pos_df, led1=LED1, led2=LED2, led3=LED3)
+    return bisector_orientation(
+        pos_df, led1=LED1, led2=LED2, led3=LED3, legacy_v1=True
+    )
 
 
 _key_to_smooth_func_dict = {

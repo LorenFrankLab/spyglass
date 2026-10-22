@@ -1,3 +1,5 @@
+from functools import partial
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -22,9 +24,9 @@ from .position_dlc_cohort import DLCSmoothInterpCohort
 schema = dj.schema("position_v1_dlc_orient")
 
 _key_to_func_dict = {
-    "none": no_orientation,
+    "none": partial(no_orientation, dtype=np.float16),  # V1 uses float16 fill
     "red_green_orientation": two_pt_orientation,
-    "red_led_bisector": red_led_bisector_orientation,
+    "red_led_bisector": partial(red_led_bisector_orientation, legacy_v1=True),
 }
 
 
@@ -168,6 +170,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             orient_df = interp_orientation(
                 unwrap_df,
                 nan_spans,
+                legacy_v1=True,
             )
             orientation = gaussian_smooth(
                 orient_df["orientation"].to_numpy(),

@@ -274,7 +274,9 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())
             self._info_msg("interpolating across low likelihood times")
-            interp_df = interp_pos(df_w_nans.copy(), nan_spans, **interp_params)
+            interp_df = interp_pos(
+                df_w_nans.copy(), nan_spans, legacy_v1=True, **interp_params
+            )
         else:
             interp_df = df_w_nans.copy()
             self._info_msg("skipping interpolation")
