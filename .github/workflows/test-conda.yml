@@ -34,6 +34,10 @@ jobs:
       github.event.action != 'closed' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    # Caps measured against four recent runs: conda ~4 min, apt ~0.5 min,
+    # pip ~0.5 min, tests 12-15 min. The job default is 6 h, long enough for a
+    # stalled step to hold a runner for an afternoon.
+    timeout-minutes: 90
     defaults:
      run:
        shell: bash -l {0}
@@ -56,12 +60,15 @@ jobs:
           --health-retries=3
     steps:
     - name: Checkout
+      timeout-minutes: 5
       uses: actions/checkout@v4
     - name: Set up Python
+      timeout-minutes: 5
       uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON }}
     - name: Set up conda
+      timeout-minutes: 20
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass
@@ -69,16 +76,30 @@ jobs:
         miniforge-version: latest
         use-mamba: true
     - name: Install apt dependencies
+      timeout-minutes: 10
+      env:
+        DEBIAN_FRONTEND: noninteractive  # no prompt to stall on
       run: |
-        sudo apt-get update # First mysql options
-        # non-dlc position deps
-        sudo apt-get install \
-          mysql-client libmysqlclient-dev libgirepository1.0-dev -y
-        sudo apt-get install ffmpeg libsm6 libxext6 -y
+        # The Azure-local mirror blackholes connections intermittently. On
+        # 2026-10-22 `apt-get update` was still emitting `Ign:` lines for it
+        # after two hours, against a usual 30 s. apt does fall back to
+        # archive.ubuntu.com through the runner's mirrorlist, so the fix is to
+        # bound how long each attempt may hang. Retries stay at 1: against a
+        # mirror that never answers, more attempts only multiply the wait.
+        APT_OPTS="-o Acquire::http::Timeout=10"
+        APT_OPTS="$APT_OPTS -o Acquire::https::Timeout=10"
+        APT_OPTS="$APT_OPTS -o Acquire::Retries=1"
+        sudo apt-get update $APT_OPTS
+        # mysql client/headers, plus libsm6/libxext6 for opencv-python
+        sudo apt-get install -y $APT_OPTS \
+          mysql-client libmysqlclient-dev libgirepository1.0-dev \
+          ffmpeg libsm6 libxext6
     - name: Run pip install for test deps
+      timeout-minutes: 15
       run: |
         pip install --quiet .[test]
     - name: Cache test data
+      timeout-minutes: 10
       id: cache-test-data
       uses: actions/cache@v4
       with:
@@ -90,6 +111,7 @@ jobs:
         restore-keys: |
           test-data-
     - name: Download data
+      timeout-minutes: 20
       if: steps.cache-test-data.outputs.cache-hit != 'true'
       env:
         BASEURL: https://ucsf.box.com/shared/static/
@@ -110,8 +132,10 @@ jobs:
         curl_opts $VID_DIR $VID_ONE $VID1URL
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Move actions coveragerc
+      timeout-minutes: 2
       run: mv tests/.coveragerc .coveragerc
     - name: Determine test mode
+      timeout-minutes: 2
       id: test_mode
       run: |
         # Determine which tests to run based on trigger
@@ -148,6 +172,7 @@ jobs:
           echo "description=Full test suite" >> $GITHUB_OUTPUT
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
+      timeout-minutes: 45
       run: |
         # --base-dir matches the conftest default (./tests/_data/) and the
         # path covered by the cache-test-data step above. Pinned explicitly
@@ -157,6 +182,7 @@ jobs:
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/
     - name: Upload coverage reports to Codecov
+      timeout-minutes: 10
       if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
       with:
