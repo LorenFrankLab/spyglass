@@ -168,6 +168,12 @@ def get_1pt_centroid(
     idx = pd.IndexSlice
     coords = pos_df.loc[:, idx[point_name, ["x", "y"]]].to_numpy()
 
+    # A position is one measurement, so half of one is not usable: NaN the
+    # whole row when either coordinate is missing. float64 because an integer
+    # input cannot hold NaN.
+    coords = coords.astype(float)
+    coords[np.isnan(coords).any(axis=1)] = np.nan
+
     return coords
 
 
@@ -508,9 +514,14 @@ class Centroid:
         self.centroid[mask] = np.nanmean(coords, axis=0)
 
     def get_1pt_centroid(self):
-        """Calculate centroid for a single point"""
+        """Calculate centroid for a single point.
+
+        A row with only one of x/y is unusable, so the whole row is NaN.
+        """
         point = self.point_names[0]
-        self.centroid = self.coords[point].copy()
+        coords = self.coords[point].astype(float)
+        coords[np.isnan(coords).any(axis=1)] = np.nan
+        self.centroid = coords
 
     def get_2pt_centroid(self):
         """Calculate centroid for two points"""

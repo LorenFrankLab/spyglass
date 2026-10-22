@@ -86,7 +86,11 @@ class TestGet1ptCentroid:
         np.testing.assert_array_equal(centroid[:, 1], [4.0, 5.0, 6.0])
 
     def test_1pt_centroid_with_nans(self):
-        """Test 1-point centroid preserves NaN."""
+        """A frame missing either coordinate is NaN in both.
+
+        Half a position is not a position, so the surviving coordinate is
+        dropped rather than reported.
+        """
         from spyglass.position.utils.centroid import get_1pt_centroid
 
         pos_df = pd.DataFrame(
@@ -99,11 +103,8 @@ class TestGet1ptCentroid:
 
         centroid = get_1pt_centroid(pos_df, points={"point1": "nose"})
 
-        # Passthrough: each frame equals the (x, y) of nose, NaN preserved.
-        # assert_array_equal treats NaN as equal, so the NaN-partner values
-        # (5.0 at frame 1, 3.0 at frame 2) are pinned too.
         assert centroid.shape == (3, 2)
-        expected = np.array([[1.0, 4.0], [np.nan, 5.0], [3.0, np.nan]])
+        expected = np.array([[1.0, 4.0], [np.nan, np.nan], [np.nan, np.nan]])
         np.testing.assert_array_equal(centroid, expected)
 
     def test_1pt_centroid_missing_key(self):
@@ -638,3 +639,51 @@ class TestGet4ptCentroid:
         v1_class = Centroid(pos_df, points, max_sep).centroid
 
         np.testing.assert_allclose(functional, v1_class, atol=1e-10)
+
+
+class TestOnePointCentroidPartialNaN:
+    """A row with only one of x/y is unusable, so the whole row is NaN.
+
+    V1 NaN'd the row and returned float64. Copying the coordinates through
+    left a half-position that reads as real, and an integer input could not
+    hold NaN at all.
+    """
+
+    @staticmethod
+    def _df():
+        df = pd.DataFrame(
+            {("nose", "x"): [1.0, np.nan], ("nose", "y"): [np.nan, 2.0]}
+        )
+        df.columns = pd.MultiIndex.from_tuples(df.columns)
+        return df
+
+    def test_functional_nans_the_whole_row(self):
+        from spyglass.position.utils.centroid import get_1pt_centroid
+
+        result = get_1pt_centroid(self._df(), points={"point1": "nose"})
+
+        assert np.isnan(result).all()
+
+    def test_compat_class_nans_the_whole_row(self):
+        from spyglass.position.utils.centroid import Centroid
+
+        result = Centroid(self._df(), points={"point1": "nose"}).centroid
+
+        assert np.isnan(result).all()
+
+    def test_integer_input_returns_float(self):
+        """int64 cannot hold NaN; V1 returned float64."""
+        from spyglass.position.utils.centroid import get_1pt_centroid
+
+        df = pd.DataFrame(
+            {
+                ("nose", "x"): np.array([1, 7], dtype=np.int64),
+                ("nose", "y"): np.array([4, 9], dtype=np.int64),
+            }
+        )
+        df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+        result = get_1pt_centroid(df, points={"point1": "nose"})
+
+        assert result.dtype == np.float64
+        np.testing.assert_array_equal(result, [[1.0, 4.0], [7.0, 9.0]])
