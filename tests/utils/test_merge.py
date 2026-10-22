@@ -1298,3 +1298,30 @@ def test_projection_fetch_does_not_recurse(merge_repro):
         "proj().fetch() keeps this class, so it re-enters fetch; it must "
         "resolve rather than recurse."
     )
+
+
+def test_populate_end_to_end(merge_repro):
+    """populate() runs the real source populate and inserts one part.
+
+    The mock-based populate tests stub `source_class_dict`; this one resolves
+    it for real, against the two Computed sources of `merge_repro`.
+    """
+    M = merge_repro["MergeRepro"]()
+    M.super_delete(warn=False, safemode=False)
+    assert len(M) == 0, "Test setup: merge table starts empty."
+
+    inserted = M.populate({"source": "SourceA"})
+
+    assert inserted == {
+        "SourceA": 2
+    }, f"Expected 2 SourceA rows inserted, got {inserted}."
+    assert {r["source"] for r in M.super_fetch(as_dict=True)} == {"SourceA"}, (
+        "populate({'source': ...}) must not insert a sibling part; "
+        "_merge_insert scans every part when part_name is not forwarded."
+    )
+
+
+def test_source_class_dict_resolves(merge_repro):
+    """source_class_dict finds both fixture sources."""
+    M = merge_repro["MergeRepro"]()
+    assert set(M.source_class_dict) == {"SourceA", "SourceB"}

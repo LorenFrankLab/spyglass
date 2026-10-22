@@ -1,3 +1,5 @@
+import sys
+
 import datajoint as dj
 import pytest
 
@@ -28,7 +30,9 @@ def merge_repro_schema(SpyglassMixin, _Merge):
     the merge Part table's own heading — a bare ``-> Source`` FK only pulls
     primary-key attributes. Sources are heterogeneous (``a_id`` vs ``b_id``)
     so multi-part fetch has to reconcile differing field names. ``SourceA``/
-    ``SourceB`` are ``Computed`` so ``populate()`` is exercisable.
+    ``SourceB`` are ``Computed`` so ``populate()`` is exercisable; they are
+    bound onto this module below, which is where ``source_class_dict`` looks
+    them up.
     """
 
     class SourceALookup(SpyglassMixin, dj.Lookup):
@@ -86,6 +90,12 @@ def merge_repro_schema(SpyglassMixin, _Merge):
             -> SourceB
             """
 
+    # source_class_dict resolves part names against getmodule(merge_table),
+    # which for a fixture-local class is this module.
+    module = sys.modules[MergeRepro.__module__]
+    for name, cls in (("SourceA", SourceA), ("SourceB", SourceB)):
+        setattr(module, name, cls)
+
     yield {
         "SourceALookup": SourceALookup,
         "SourceBLookup": SourceBLookup,
@@ -93,6 +103,9 @@ def merge_repro_schema(SpyglassMixin, _Merge):
         "SourceB": SourceB,
         "MergeRepro": MergeRepro,
     }
+
+    for name in ("SourceA", "SourceB"):
+        delattr(module, name)
 
 
 @pytest.fixture(scope="module")
