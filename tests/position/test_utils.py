@@ -104,7 +104,7 @@ def test_convert_mp4_error(sgp):
 def test_convert_mp4_collision_raises(monkeypatch, tmp_path):
     """Legacy skip-on-exists now raises when the mp4 is a different video.
 
-    Guards the silent video-filename collision (issue #1651): a
+    Guards the silent video-filename collision (issue #1652): a
     pre-existing mp4 whose frame count differs from the source it is asked to
     convert is a collision, not a cache hit.
     """
@@ -233,24 +233,28 @@ def test_interp_orientation(
 
 
 def test_vid_maker_processor_error(sgp):
+    from spyglass.position.utils.make_video import VideoMaker
+
     with pytest.raises(ValueError):
-        sgp.v1.dlc_utils_makevid.VideoMaker(
+        VideoMaker(
             video_filename="any",
             position_mean="any",
             orientation_mean="any",
-            centroids="any",
+            bodypart_centroids="any",
             position_time="any",
             processor="any",
         )
 
 
 def test_vid_maker_filenotfound(sgp):
+    from spyglass.position.utils.make_video import VideoMaker
+
     with pytest.raises(FileNotFoundError):
-        sgp.v1.dlc_utils_makevid.VideoMaker(
+        VideoMaker(
             video_filename="any",
             position_mean="any",
             orientation_mean="any",
-            centroids="any",
+            bodypart_centroids="any",
             position_time="any",
         )
 

@@ -1,6 +1,7 @@
 """Video generation utilities for pose estimation overlays.
 
-Centralized from v1 (dlc_utils_makevid) and extended for V2.
+Shared by Position V1 and V2. ``make_video`` accepts V1's ``centroids``
+keyword as a synonym for ``bodypart_centroids``.
 """
 
 import shutil
@@ -740,5 +741,11 @@ class VideoMaker:
 
 
 def make_video(**kwargs):
-    """Passthrough for VideoMaker class for backwards compatibility."""
+    """Passthrough for VideoMaker class for backwards compatibility.
+
+    Accepts ``centroids`` as a synonym for ``bodypart_centroids``, the name
+    Position V1 uses.
+    """
+    if "centroids" in kwargs:
+        kwargs.setdefault("bodypart_centroids", kwargs.pop("centroids"))
     return VideoMaker(**kwargs)

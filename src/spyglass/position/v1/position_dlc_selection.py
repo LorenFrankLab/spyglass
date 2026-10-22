@@ -8,7 +8,7 @@ import pynwb
 from datajoint.utils import to_camel_case
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils_makevid import make_video
+from spyglass.position.utils.make_video import make_video
 from spyglass.position.v1.position_dlc_centroid import DLCCentroid
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
 from spyglass.position.v1.position_dlc_orient import DLCOrientation

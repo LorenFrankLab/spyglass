@@ -276,12 +276,6 @@ def check_bounds_all_bodyparts(df, bounds):
 # Use compatibility wrapper below for V1 API
 from spyglass.position.utils.interpolation import smooth_moving_avg
 
-# Import function mapping for backward compatibility
-_key_to_smooth_func_dict = {
-    "moving_avg": smooth_moving_avg,
-}
-
-
 # Centroid class moved to utils.centroid module for reusability
 # Import for V1 backward compatibility
 from spyglass.position.utils.centroid import Centroid
@@ -388,25 +382,9 @@ def smooth_moving_avg_v1(
         "smooth_moving_avg_v1",
         alt="spyglass.position.utils.interpolation.smooth_moving_avg",
     )
-    try:
-        import bottleneck as bn
-    except ImportError:
-        raise ImportError(
-            "bottleneck is required for moving average smoothing. "
-            "Install with: pip install bottleneck"
-        )
-
-    idx = pd.IndexSlice
-    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
-
-    xy_arr = interp_df.loc[:, idx[("x", "y")]].values
-    smoothed_xy_arr = bn.move_mean(
-        xy_arr, window=moving_avg_window, axis=0, min_count=1
+    return smooth_moving_avg(
+        interp_df, smoothing_duration, sampling_rate, coord_cols=("x", "y")
     )
-    interp_df.loc[:, idx["x"]], interp_df.loc[:, idx["y"]] = [
-        *zip(*smoothed_xy_arr.tolist())
-    ]
-    return interp_df
 
 
 def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):

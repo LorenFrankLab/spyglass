@@ -65,3 +65,35 @@ def test_pose_video_path(sgp, dlc_pose_tables):
     estim_sel_tbl = sgp.v1.position_dlc_selection.DLCPoseEstimationSelection()
     path2 = (estim_sel_tbl & key).fetch1("video_path")
     assert path1 == path2, "Pose video paths do not match"
+
+
+class TestV1VideoKeyword:
+    """V1 calls `make_video(centroids=...)`; the shared class takes
+    `bodypart_centroids`.
+
+    `VideoMaker.__init__` collects unknown keywords in `**kwargs`, so
+    repointing V1 at the shared module without the synonym would drop
+    `centroids` silently and raise TypeError for a missing
+    `bodypart_centroids`.
+    """
+
+    KWARGS = dict(
+        video_filename="any",
+        position_mean="any",
+        orientation_mean="any",
+        position_time="any",
+    )
+
+    def test_centroids_reaches_bodypart_centroids(self):
+        from spyglass.position.utils.make_video import make_video
+
+        # processor="any" fails validation, which happens after binding -- so
+        # ValueError, not TypeError, proves the keyword was accepted.
+        with pytest.raises(ValueError, match="processor"):
+            make_video(**self.KWARGS, centroids="any", processor="any")
+
+    def test_missing_centroids_still_raises(self):
+        from spyglass.position.utils.make_video import make_video
+
+        with pytest.raises(TypeError, match="bodypart_centroids"):
+            make_video(**self.KWARGS, processor="any")
