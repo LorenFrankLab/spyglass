@@ -193,9 +193,9 @@ LFPOutput().super_view()
 # restrictions that reference part-table fields are **resolved automatically**:
 #
 # ```python
-# Merge & {"field": "value"}      # ✓ dict — resolves through parts
-# Merge & 'field LIKE "val%"'     # ✓ string — also resolves through parts
-# Merge & {"merge_id": some_uuid} # ✓ master field — unchanged
+# Merge & {"field": "value"}      # dict, resolves through parts
+# Merge & 'field LIKE "val%"'     # string, resolves through parts
+# Merge & {"merge_id": some_uuid} # master field, restricts directly
 # ```
 
 # %%
@@ -272,20 +272,19 @@ result5.full_table_name
 #
 
 # %% [markdown]
-# When deleting from Merge Tables, we have three options:
+# Three options for deleting from Merge Tables:
 #
-# 1. **`(T & restriction).delete()`** — removes the master and part entries from
-#    the Merge Table. The upstream source data (e.g., `LFPV1`) is *not* removed.
+# 1. **`(T & restriction).delete()`** removes the master and part entries. The
+#    upstream source data, such as `LFPV1`, stays.
 #
-# 2. **`(T & restriction).delete_upstream(dry_run=True)`** — removes entries from
-#    the upstream source tables. Use `dry_run=True` (default) to preview first.
+# 2. **`(T & restriction).delete_upstream(dry_run=True)`** removes the upstream
+#    source rows and, by cascade, their merge entries. `dry_run=True` is the
+#    default and lists the targets.
 #
-# 3. **`table.delete_downstream_parts(dry_run=True)`** — available on any
-#    upstream table; finds downstream Merge Table entries and removes them,
-#    preventing orphaned master rows.
+# 3. **`table.delete_downstream_parts(dry_run=True)`** runs on any upstream
+#    table, finding and removing the downstream Merge Table entries.
 #
-# The latter two are destructive. Call `delete_upstream` before `delete()` if
-# you want to also remove the upstream source data in the same session.
+# The latter two are destructive.
 
 # %%
 # Preview: what would delete_upstream remove from the source tables?

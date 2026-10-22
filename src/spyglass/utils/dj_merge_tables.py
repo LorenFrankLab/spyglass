@@ -29,9 +29,8 @@ RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
 
-# True while a master-only read is in progress. DataJoint re-enters fetch on
-# a projection of the receiver, which keeps this class (see Merge.fetch), and
-# that inner call must stay on the master.
+# True while a master-only read is in progress. Re-entrancy guard for
+# DataJoint's own refetch of a projection; see Merge.fetch
 MASTER_FETCH_FLAG = ContextVar("MASTER_FETCH_FLAG", default=False)
 
 
@@ -147,11 +146,8 @@ class Merge(ExportMixin, dj.Manual):
         """True if any leaf of a (possibly composite) restriction is part-only.
 
         Recurses through ``Not``, ``AndList``, and plain sequences (the
-        ``list``/``tuple``/``set`` OrList convention) so composite
-        restrictions get the same part-table resolution as a bare dict or
-        string — without this, e.g. ``M & [{"part_field": 1}]`` or
-        ``M & dj.Not({"part_field": 1})`` would fall straight through to a
-        master-only restrict and silently match every row.
+        ``list``/``tuple``/``set`` OrList convention), so a composite
+        restriction resolves through the parts like a bare dict or string.
         """
         if isinstance(restriction, dj.condition.Not):
             return self._restriction_has_part_field(restriction.restriction)
@@ -173,12 +169,9 @@ class Merge(ExportMixin, dj.Manual):
         """Rewrite a restriction so each leaf applies to one part table.
 
         A dict naming a column the part lacks, or a ``source`` naming a
-        different part, becomes ``False``. DataJoint compiles a dict sharing
-        no column with the queried table to ``True``, so without this a leaf
-        inside a list or ``AndList`` matches every row of a part it cannot
-        describe, and a leaf inside ``Not`` excludes every row. A ``Not`` over
-        a part-only column therefore returns the set complement: parts lacking
-        the column contribute all of their rows.
+        different part, becomes ``False``. A ``Not`` over a part-only column
+        therefore gives the set complement: parts lacking that column
+        contribute all of their rows.
 
         Parameters
         ----------
@@ -189,11 +182,9 @@ class Merge(ExportMixin, dj.Manual):
             Part table to rewrite the restriction for.
         lenient : bool
             Default False. When True, a dict naming a column the part lacks
-            keeps only the shared columns, as DataJoint does, instead of
-            resolving to ``False``. Set from ``add_invalid_restrict`` so
-            callers relying on that leniency keep it — ``fetch_nwb``
-            restricts parts by a fetched row carrying columns, such as
-            ``analysis_file_name``, that no part has.
+            keeps only the shared columns, as DataJoint does. Set from
+            ``add_invalid_restrict`` for callers that restrict parts by a
+            fetched row, such as ``fetch_nwb``.
 
         Returns
         -------
@@ -279,8 +270,8 @@ class Merge(ExportMixin, dj.Manual):
         Raises
         ------
         DataJointError
-            If a non-empty dict leaf has no known key at all. That leaf would
-            otherwise match every row, silently returning the whole table.
+            If a non-empty dict leaf has no known key at all, which DataJoint
+            answers with the whole table.
         """
         if isinstance(restriction, dj.condition.Not):
             return dj.Not(
@@ -358,9 +349,8 @@ class Merge(ExportMixin, dj.Manual):
         ------
         DataJointError
             If no extracted name belongs to the master or any part table.
-            That is the case DataJoint would answer with the whole table. A
-            name unknown alongside a known one is left to DataJoint, matching
-            how unknown dict keys are dropped.
+            A name unknown alongside a known one is left to DataJoint, as
+            unknown dict keys are.
         """
         fields = {f.lower() for f in extract_column_names(restriction)}
         if not fields:
@@ -527,7 +517,7 @@ class Merge(ExportMixin, dj.Manual):
             Default True. During export, log this fetch as an export event.
         **kwargs
             Forwarded to ``fetch``. Output-shaping kwargs (``as_dict``,
-            ``format``) are rejected — see Raises.
+            ``format``) are rejected; see Raises.
 
         Returns
         -------
@@ -538,9 +528,9 @@ class Merge(ExportMixin, dj.Manual):
         Raises
         ------
         DataJointError
-            If the restricted table contains ≠ 1 row; if an output-shaping
-            kwarg (``as_dict``, ``format``) is passed (use ``fetch()``
-            instead); or if the requested attributes cannot be retrieved from
+            If the restricted table contains other than 1 row; if an
+            output-shaping kwarg (``as_dict``, ``format``) is passed (use
+            ``fetch()``); or if the requested attributes are absent from
             any part table.
         """
         if attrs and all(
@@ -563,12 +553,8 @@ class Merge(ExportMixin, dj.Manual):
                 f"fetch1 expected exactly 1 entry, but found {n}."
             )
 
-        # 'KEY' mixed with a genuine part attr (e.g. fetch1("KEY", "attr"))
-        # can't be requested from the part table directly — DataJoint's own
-        # fetch(as_dict=True) absorbs 'KEY' into the primary-key attribute
-        # names instead of a literal "KEY" entry, and a plain-name attr not
-        # in this table's own primary key wouldn't survive that flattening.
-        # Fetch it separately from the master, where "KEY" is well-defined.
+        # DataJoint's as_dict absorbs 'KEY' into the primary-key names, so
+        # read it from the master, where it is well defined
         fetch_attrs = tuple(a for a in attrs if a not in self._DJ_SPECIAL_ATTRS)
         rows = self.fetch(
             *fetch_attrs,
@@ -714,7 +700,7 @@ class Merge(ExportMixin, dj.Manual):
         restr_str = make_condition(cls(), restriction, set())
 
         parts_all = cls.parts(as_objects=True)
-        # If the restriction assigns a source, we only want that part. Match
+        # A restriction that assigns a source selects that part alone. Match
         # the whole `source`="X" pattern, which a mere mention of `source`
         # does not satisfy
         source_pattern = f'`{RESERVED_SECONDARY_KEY}`="'
@@ -899,7 +885,7 @@ class Merge(ExportMixin, dj.Manual):
         for row in rows:
             keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
-                # Local name for *this* part — must not shadow the
+                # Local name for this part, not the part_name filter
                 # `part_name` filter parameter above, or a later row with no
                 # matching part would silently reuse the previous row's name.
                 this_part_name = cls._part_name(part)

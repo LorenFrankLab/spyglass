@@ -20,19 +20,17 @@ def Nwbfile(pos_merge_tables):
 
 @pytest.fixture(scope="module")
 def merge_repro_schema(SpyglassMixin, _Merge):
-    """Two-part merge table, isolated from graph_schema and every real
-    pipeline — no FK ties to ParentNode/IntermediateNode/etc. (which would
-    perturb TableChain graph traversal elsewhere, as reusing PkNode/SkNode
-    did) and no optional dependencies like deeplabcut (which pos_merge's
-    DLCPosV1 part needs, and isn't installed in every dev env).
+    """Two-part merge table, isolated from graph_schema and every real pipeline.
 
-    ``part_attr`` is part of each source's primary key so it propagates into
-    the merge Part table's own heading — a bare ``-> Source`` FK only pulls
-    primary-key attributes. Sources are heterogeneous (``a_id`` vs ``b_id``)
-    so multi-part fetch has to reconcile differing field names. ``SourceA``/
+    No FK ties to graph_schema, which keeps TableChain traversal elsewhere
+    unaffected, and no optional dependencies such as deeplabcut.
+
+    ``part_attr`` is in each source's primary key, so it propagates into the
+    merge Part table's heading: a bare ``-> Source`` FK pulls primary-key
+    attributes only. The sources are heterogeneous (``a_id`` vs ``b_id``), so
+    multi-part fetch has to reconcile differing field names. ``SourceA`` and
     ``SourceB`` are ``Computed`` so ``populate()`` is exercisable; they are
-    bound onto this module below, which is where ``source_class_dict`` looks
-    them up.
+    bound onto this module below, where ``source_class_dict`` looks them up.
     """
 
     class SourceALookup(SpyglassMixin, dj.Lookup):

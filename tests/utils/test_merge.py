@@ -123,7 +123,7 @@ def test_smart_restrict_empty(pos_merge):
 
 
 def test_super_restrict_silent_noop(pos_merge, pos_interval_key):
-    """super_restrict bypasses part resolution — part-field restriction is a noop."""
+    """super_restrict bypasses parts, so a part-field restriction is a noop."""
     nwb = pos_interval_key["nwb_file_name"]
     full = len(pos_merge)
     raw = len(pos_merge.super_restrict({"nwb_file_name": nwb}))
@@ -159,7 +159,7 @@ def test_fetch_multi_attr_returns_list_of_arrays(pos_merge, pos_merge_key):
 def test_fetch_key_direct(pos_merge, pos_merge_key):
     """fetch of master-only attr should bypass part-walking."""
     mid = pos_merge_key["merge_id"]
-    # "merge_id" is in _MASTER_ONLY_ATTRS — must NOT route to merge_fetch
+    # "merge_id" is in _MASTER_ONLY_ATTRS, so it stays on the master
     result = (pos_merge & {"merge_id": mid}).fetch("merge_id")
     # DataJoint may return a scalar UUID for single-row UUID-column fetches
     scalar = result if not hasattr(result, "__iter__") else result[0]
@@ -168,8 +168,8 @@ def test_fetch_key_direct(pos_merge, pos_merge_key):
 
 def test_fetch_merge_id_direct(pos_merge):
     """super_fetch() should bypass part-walking, returning only master cols."""
-    # DataJoint has a bug fetching named cols from UUID-PK tables (format=array)
-    # so we verify structural behaviour: returned dicts have only master keys.
+    # DataJoint has a bug fetching named cols from UUID-PK tables
+    # (format=array), so check the shape: dicts carry only master keys
     rows = pos_merge.super_fetch(as_dict=True)
     assert len(rows) > 0, "super_fetch should return rows."
     master_keys = {"merge_id", "source"}
@@ -540,10 +540,7 @@ def test_merge_fetch_positional_attrs(pos_merge):
 
 
 def test_merge_fetch_honors_instance_restriction(graph_tables):
-    """(M & restriction).merge_fetch(attr) must honor the instance's own
-    restriction (issue 5) — merge_fetch is a classmethod internally and
-    previously always fetched from an unrestricted cls(), discarding
-    whatever restriction the caller had already applied."""
+    """(M & restriction).merge_fetch(attr) honors the instance restriction."""
     MergeOutput = graph_tables["MergeOutput"]()
     value, matching, full = _partial_match_value(MergeOutput)
     restricted = MergeOutput & {"intermediate_id": value}
@@ -752,7 +749,7 @@ def test_fetch1_missing_attr_message(pos_merge, pos_merge_key):
 
 
 def test_mixed_master_part_dict_restriction(pos_merge, pos_merge_key):
-    """A dict mixing master + part fields ANDs both — master key not dropped."""
+    """A dict mixing master and part fields ANDs both, keeping the master key."""
     mid = pos_merge_key["merge_id"]
     row = (pos_merge & {"merge_id": mid}).fetch1()
     nwb = row["nwb_file_name"]
@@ -786,8 +783,8 @@ def test_string_restrict_and_two_part_fields(pos_merge, pos_merge_key):
 # instead of falling straight through to the raw master-only restrict.
 #
 # graph_tables is module-scoped and shared with delete tests elsewhere in
-# this file, so row counts shrink over the module's lifetime — the target
-# value is picked from the table's *current* state rather than hardcoded.
+# this file, so row counts shrink over the module's lifetime. The target value
+# is picked from the table's current state rather than hardcoded.
 
 
 def _partial_match_value(MergeOutput):
@@ -869,9 +866,8 @@ def test_delete_upstream_removes_source_row(graph_tables):
     MergeOutput = graph_tables["MergeOutput"]()
     PkNode = graph_tables["PkNode"]()
 
-    # Restrict by merge_id alone (not the full super_fetch dict, which also
-    # carries the master-only `source` field — see test_fetch1_source_field
-    # below for that separate, pre-existing bug).
+    # Restrict by merge_id alone. For the full super_fetch dict, which also
+    # carries the master-only `source` field, see test_fetch1_source_field
     mid = MergeOutput.super_fetch("merge_id")[0]
     row = (MergeOutput & {"merge_id": mid}).fetch1()
     source_key = {
@@ -911,10 +907,9 @@ def test_fetch1_source_field_in_restriction(graph_tables):
 
 # ------------------- multi-part fetch contract (issue 4) --------------------
 #
-# merge_repro is a dependency-free, isolated 2-part merge table (SourceA: 2
-# rows, SourceB: 1 row) — no optional packages (e.g. deeplabcut) and no FK
-# ties to graph_schema, so limit/offset/order_by bugs that only manifest
-# with >1 populated part are exercisable without any environment gating.
+# merge_repro is an isolated 2-part merge table (SourceA: 2 rows, SourceB: 1
+# row) with no optional packages and no FK ties to graph_schema, so bugs
+# needing >1 populated part are exercisable without environment gating.
 
 
 def test_fetch_no_attrs_heterogeneous_parts(merge_repro):
@@ -949,7 +944,7 @@ def test_fetch_master_and_part_attrs_together(merge_repro):
     rows = M.fetch("source", "part_attr", as_dict=True)
     assert len(rows) == len(M), (
         f"Mixing a master-only attr with a part attr returned {len(rows)} "
-        "rows; it previously skipped every part and returned nothing."
+        f"rows; every one of the {len(M)} merged rows should be present."
     )
 
 
@@ -984,8 +979,7 @@ def test_fetch_offset_applies_globally(merge_repro):
 
 
 def test_fetch_order_by_merge_id_applies_globally(merge_repro):
-    """fetch(order_by='merge_id') should pick a global first row, honored
-    across parts — not each part independently self-ordering."""
+    """fetch(order_by='merge_id') orders across parts, not within each."""
     M = merge_repro["MergeRepro"]()
     asc = M.fetch(as_dict=True, limit=1, order_by="merge_id")[0]
     desc = M.fetch(as_dict=True, limit=1, order_by="merge_id DESC")[0]
@@ -1183,10 +1177,9 @@ def test_delete_upstream_declined_leaves_all_rows(merge_repro, monkeypatch):
     )
     (M & {"source": "SourceA"}).delete_upstream(dry_run=False)
 
-    assert len(merge_repro["MergeRepro"]()) == before, (
-        "A declined confirmation must leave the merge entries in place; "
-        "they were previously deleted before the upstream prompt."
-    )
+    assert (
+        len(merge_repro["MergeRepro"]()) == before
+    ), "A declined confirmation must leave the merge entries in place."
     assert (
         len(merge_repro["SourceA"]()) == source_before
     ), "A declined confirmation must leave the upstream rows in place."
