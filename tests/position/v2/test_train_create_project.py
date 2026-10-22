@@ -100,7 +100,7 @@ class TestDeterministicVideoStem:
     """V2's collision-free, reproducible converted-mp4 naming.
 
     Guards against the legacy bare-stem naming where two distinct sources
-    sharing a stem silently collide (see issue #1651).
+    sharing a stem silently collide (see issue #1652).
     """
 
     def test_reproducible(self):
