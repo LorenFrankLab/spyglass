@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Union
 
 import datajoint as dj
 import h5py
@@ -94,6 +94,43 @@ class Nwbfile(SpyglassMixin, dj.Manual):
             get_nwb_file(self.get_abs_path(file))
             for file in self.fetch("nwb_file_name")
         ]
+
+    def share_file(
+        self,
+        nwb_file_name: str,
+        scope: str = "public",
+        teams: Optional[List[str]] = None,
+        populate: bool = True,
+    ) -> dict:
+        """Declare this raw file for sharing through the broker, and upload it.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            A file held in this table.
+        scope : str, optional
+            "private", "group", or "public". Defaults to "public".
+        teams : list of str, optional
+            `LabTeam` names. Required when `scope` is "group".
+        populate : bool, optional
+            Transfer immediately. False leaves the upload for a later
+            `SharedRawFile.populate()`.
+
+        Returns
+        -------
+        dict
+            The selection key that was written.
+        """
+        from spyglass.sharing.sharing_store import _share
+
+        return _share(
+            self,
+            nwb_file_name,
+            "raw",
+            scope=scope,
+            teams=teams,
+            populate=populate,
+        )
 
     @classmethod
     def get_abs_path(

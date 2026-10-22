@@ -2,18 +2,53 @@
 
 ## [0.6.1] (Unreleased)
 
+### Release Notes
+
 <!--
-### Release notes
-
-```python
-# Add alters here
-# from spyglass.location import Each Table Needed To Resolve FKRef
-
-# Table.alter()
-```
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 -->
 
+```python
+# Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
+# unique index, so run the DDL directly. `AFTER` keeps positional inserts in
+# the same order as a fresh instance. Restart Python afterward.
+from spyglass.common.common_lab import LabMember
+
+info = LabMember.LabMemberInfo
+info.connection.query(
+    f"ALTER TABLE {info.full_table_name} "
+    + "ADD COLUMN `github_user_name` varchar(200) DEFAULT NULL "
+    + 'COMMENT "For shared-store identity" AFTER `datajoint_user_name`, '
+    + "ADD UNIQUE INDEX (`github_user_name`)"
+)
+```
+
 ### Breaking Changes
+
+#### `LabMemberInfo` Takes Five Values (#1686)
+
+`LabMember.LabMemberInfo` gains `github_user_name`, between
+`datajoint_user_name` and `admin`, so a positional insert now needs five values.
+
+```python
+# OLD: four values
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", 0])
+
+# NEW: five, with the GitHub login (None if the member has not linked one)
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", None, 0])
+
+# ... or name the fields and stay insulated from column order
+LabMember.LabMemberInfo.insert1(
+    {
+        "lab_member_name": "Firstname Lastname",
+        "google_user_name": "fl@uni.edu",
+        "datajoint_user_name": "fl",
+        "github_user_name": "fl-gh",
+        "admin": 0,
+    }
+)
+```
 
 #### `get_sort_group_info` Returns Every Electrode (#1678)
 
@@ -47,6 +82,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Repair stale notebook cross-links and guard them with a test #1678
 - Move Export tutorial into its own `Data Export` docs category #1678
 - Document admin-only table declaration and MySQL role activation #1678
+- Rewrite the Data Sync notebook for the shared-store workflow, keeping kachery
+    in an appendix #1686
 
 ### Infrastructure
 
@@ -72,6 +109,21 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Stop calling `populate()` on deprecated `make`s in tests #1678
 - Repair a stale raw external checksum when a container is reused #1678
 - Force the v1 recompute selection attempt in its test fixture #1678
+- Add a shared-storage file backend: `sharing_store` declaration and upload
+    tables, `StoreBackend` in the `get_nwb_file` resolution chain after local
+    disk, and a `spyglass-store` console script for `login`/`logout`/`status`
+    #1686
+- Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
+    #1686
+- Inherit shared-store visibility for derived analysis files, taking the
+    narrowest scope across their parents #1686
+- Expand `custom` config to specify per-backend data store behavior #1686
+- Add `requests` and `fsspec` as dependencies, for broker calls and
+    range-request streaming #1686
+- Deprecate kachery sharing, removed in 0.7.0. `kachery-cloud` is now an alias
+    for a new `kachery-legacy` extra #1686
+- Add `digest_file` to return several digests of a file's raw bytes in one read
+    #1686
 
 ### Pipelines
 
