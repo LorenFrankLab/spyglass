@@ -548,13 +548,13 @@ def test_html_empty_restriction(pos_merge):
 
 
 def test_fetch_reraises_unexpected_dj_error(pos_merge, monkeypatch):
-    """An operational (non-missing-attr) DataJointError is not swallowed."""
+    """An operational DataJointError propagates instead of becoming []."""
 
-    def boom(self, *args, **kwargs):
+    def boom(*args, **kwargs):
         raise dj.errors.DataJointError("simulated connection failure")
 
-    for part in pos_merge.parts(as_objects=True):
-        monkeypatch.setattr(type(part), "fetch", boom)
+    # Patch the query, not a part's fetch: fetch() reads the union in one query
+    monkeypatch.setattr(pos_merge.connection, "query", boom)
 
     with pytest.raises(dj.errors.DataJointError, match="simulated"):
         pos_merge.fetch("nwb_file_name")
@@ -1164,4 +1164,25 @@ def test_delete_upstream_no_matching_part(merge_repro):
     assert len(merge_repro["MergeRepro"]()) == before, (
         "A restriction matching no part should delete nothing, not raise "
         "AttributeError on _merge_repr returning None."
+    )
+
+
+def test_repr_does_not_materialize_merge_ids(merge_repro, monkeypatch):
+    """An unrestricted table resolves parts by subquery, not by fetching ids."""
+    M = merge_repro["MergeRepro"]()
+    restriction = M._resolve_top_restriction()
+    assert isinstance(restriction, dj.expression.QueryExpression), (
+        f"Expected a subquery, got {type(restriction).__name__}; an "
+        "unrestricted table must not load its merge_ids."
+    )
+    assert "merge_id" in restriction.heading.names
+
+
+def test_resolve_top_restriction_materializes_for_top(merge_repro):
+    """dj.Top still materializes: MySQL rejects LIMIT in an IN subquery."""
+    M = merge_repro["MergeRepro"]()
+    restriction = (M & dj.Top(limit=1))._resolve_top_restriction()
+    assert isinstance(restriction, list) and len(restriction) == 1, (
+        f"Top(limit=1) should materialize one merge_id key, got "
+        f"{restriction!r}."
     )

@@ -255,7 +255,11 @@ class Merge(ExportMixin, dj.Manual):
         return restriction
 
     def _resolve_restriction_to_merge_ids(self, restriction) -> list:
-        """Return merge_ids matching a part-table-field restriction."""
+        """Return merge_ids matching a part-table-field restriction.
+
+        ``(M & r).delete()`` would fail bc MySQL refuses a DELETE whose WHERE
+        subquery names the table being deleted from (error 1093).
+        """
         parts = self._merge_restrict_parts(
             restriction=restriction,
             as_objects=True,
@@ -320,29 +324,24 @@ class Merge(ExportMixin, dj.Manual):
         return bool(fields & part_only)
 
     def _resolve_top_restriction(self):
-        """Return a merge_id-only restriction for part resolution.
+        """Express self's restriction on merge_id alone, for part resolution.
 
-        Always materializes ``self``'s current restriction (honoring any
-        ``_top`` LIMIT/ORDER BY, applied at the SQL level by DataJoint) into
-        a list of merge_id keys via a plain master-table fetch, rather than
-        reusing ``self.restriction`` directly. This matters whenever the
-        restriction references a master-only field such as ``source``
-        (e.g. ``M & {"merge_id": mid, "source": "X"}``, the exact shape
-        ``super_fetch()`` returns): compiled directly, it would be replayed
-        against every part's heading, which never includes ``source``, and
-        every part would raise and be dropped. Resolving it against the
-        master first — where ``source`` is valid — then handing part
-        resolution nothing but merge_id keys sidesteps that entirely.
+        Master-only fields such as ``source`` are resolved here, against the
+        master, so part resolution receives merge_id and nothing else.
+        ``limit``/``offset``/``order_by`` belong to the union
+        ``_merge_fetch_impl`` builds, not here.
 
-        ``limit``/``offset``/``order_by`` are not applied here. They belong
-        to the merged union that ``_merge_fetch_impl`` builds, which carries
-        every part's columns and so can order by a part field; applied here
-        they would only ever see the master's two.
-
-        Reads through ``_master_only`` rather than ``super().fetch``, which
-        DataJoint would re-enter on a copy of this class (see ``fetch``).
+        Returns
+        -------
+        dj.expression.QueryExpression, list, or str
+            A subquery on the master's primary key. Under ``dj.Top``, a list
+            of merge_id keys, or "FALSE" when none match: MySQL rejects LIMIT
+            inside an IN subquery.
         """
-        limited_ids = self._master_only().fetch(RESERVED_PRIMARY_KEY)
+        master = self._master_only()
+        if self._top is None:
+            return master.proj()
+        limited_ids = master.fetch(RESERVED_PRIMARY_KEY)
         return (
             [{RESERVED_PRIMARY_KEY: mid} for mid in limited_ids]
             if len(limited_ids)
@@ -375,11 +374,16 @@ class Merge(ExportMixin, dj.Manual):
         DataJointError
             If a string restriction references a field unknown to both the
             master and every part table, or if a dict restriction has no
-            known field at all. Either would otherwise return the whole
-            table.
+            known field at all.
+
+        Notes
+        -----
+        A part-field restriction resolves to merge_id values when ``&`` is
+        evaluated, so a stored query is a snapshot. Re-apply the restriction
+        to pick up rows inserted since.
         """
-        # Drop unknown dict keys first, so a key no heading has cannot send
-        # an otherwise master-only restriction down the part-resolution path.
+        # Drop unknown dict keys before the part-field check, so a master-only
+        # restriction carrying one still takes the master path
         restriction = self._drop_unknown_dict_fields(restriction)
         if self._restriction_has_part_field(restriction):
             merge_ids = self._resolve_restriction_to_merge_ids(restriction)
@@ -658,21 +662,20 @@ class Merge(ExportMixin, dj.Manual):
         restr_str = make_condition(cls(), restriction, set())
 
         parts_all = cls.parts(as_objects=True)
-        # If the restriction makes ref to a source, we only want that part
+        # If the restriction assigns a source, we only want that part. Match
+        # the whole `source`="X" pattern, which a mere mention of `source`
+        # does not satisfy
+        source_pattern = f'`{RESERVED_SECONDARY_KEY}`="'
         if (
             not return_empties
             and isinstance(restr_str, str)
-            and f"`{cls()._reserved_sk}`" in restr_str
+            and source_pattern in restr_str
         ):
-            parts_all = [
+            source_name = restr_str.split(source_pattern)[1].split('"')[0]
+            parts_all = [  # Only look at source part table
                 part
                 for part in parts_all
-                if from_camel_case(
-                    restr_str.split(f'`{cls()._reserved_sk}`="')[-1].split('"')[
-                        0
-                    ]
-                )  # Only look at source part table
-                in part.full_table_name
+                if from_camel_case(source_name) in part.full_table_name
             ]
         parts = []
         for part in parts_all:
@@ -1621,26 +1624,19 @@ class Merge(ExportMixin, dj.Manual):
             return out
         return repr(self._master_only())
 
-    def _master_only(self) -> dj.Table:
+    def _master_only(self) -> dj.expression.QueryExpression:
         """Return a plain DataJoint view of the master, bypassing this class.
 
-        DataJoint's ``preview`` fetches through the receiver's own ``fetch``
-        (``datajoint/preview.py`` projects, then fetches with
-        ``format="array"``), and ``proj`` copies the receiver's class, so
-        previewing ``self`` would resolve parts. A ``FreeTable`` on the same
-        table carries the master heading and none of this class's overrides.
+        Wraps self as a subquery so ``preview`` and ``proj``, which both keep
+        the receiver's class, operate on the master alone.
 
         Returns
         -------
-        dj.FreeTable
-            The master table, carrying this instance's restriction and any
+        dj.expression.QueryExpression
+            The master heading, carrying this instance's restriction and any
             ``dj.Top``.
         """
-        master = dj.FreeTable(self.connection, self.full_table_name)
-        master = master.restrict(self.restriction)
-        if self._top is not None:
-            master = master.restrict(self._top)
-        return master
+        return self.make_subquery()
 
     def super_view(self):
         """Show master-only preview (no part resolution).
