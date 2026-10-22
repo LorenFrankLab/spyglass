@@ -152,3 +152,57 @@ def test_label_frame_error(dlc_project_tbl, empty_dlc_project):
             new_proj_path="/fake_path",
             video_filenames=["any"],
         )
+
+
+class TestPatchCollectedDataPaths:
+    """Pre-2.2 label files must be left alone, not rewritten.
+
+    DLC < 2.2 writes a single index column. Read with index_col=[0, 1, 2],
+    the first two coordinate columns become index levels, so every row looks
+    mismatched and patching overwrites the labels in both the CSV and the
+    .h5 DLC trains from.
+    """
+
+    OLD_FORMAT = (
+        "scorer,,,alice,alice\n"
+        "bodyparts,,,nose,nose\n"
+        "coords,,,x,y\n"
+        "labeled-data/vidA/img010.png,1.5,2.25,7.0,8.0\n"
+    )
+
+    def test_old_single_index_file_is_untouched(self, sgp, tmp_path):
+        from spyglass.position.v1.position_dlc_project import DLCProject
+
+        label_dir = tmp_path / "vidA"
+        label_dir.mkdir()
+        csv_path = label_dir / "CollectedData_alice.csv"
+        csv_path.write_text(self.OLD_FORMAT)
+        before = csv_path.read_bytes()
+
+        DLCProject._patch_collected_data_paths(label_dir, "vidA")
+
+        assert csv_path.read_bytes() == before
+
+    def test_three_level_stale_video_name_is_still_patched(self, sgp, tmp_path):
+        """The guard must not become a no-op for the format it does handle."""
+        import pandas as pd
+
+        from spyglass.position.v1.position_dlc_project import DLCProject
+
+        label_dir = tmp_path / "vidA"
+        label_dir.mkdir()
+        csv_path = label_dir / "CollectedData_alice.csv"
+
+        cols = pd.MultiIndex.from_tuples(
+            [("alice", "nose", "x"), ("alice", "nose", "y")],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        idx = pd.MultiIndex.from_tuples(
+            [("labeled-data", "WRONGNAME", "img010.png")]
+        )
+        pd.DataFrame([[1.5, 2.25]], columns=cols, index=idx).to_csv(csv_path)
+
+        DLCProject._patch_collected_data_paths(label_dir, "vidA")
+
+        patched = pd.read_csv(csv_path, header=[0, 1, 2], index_col=[0, 1, 2])
+        assert list(patched.index.get_level_values(1).unique()) == ["vidA"]

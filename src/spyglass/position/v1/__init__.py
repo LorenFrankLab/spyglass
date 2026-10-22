@@ -1,3 +1,11 @@
+"""Position V1 pipeline.
+
+Supports DeepLabCut >= 2.3, the oldest release whose ``CollectedData`` files
+carry the ``(labeled-data, video, image)`` row index this pipeline reads.
+Spyglass installs Position V2, which targets DeepLabCut 3; a V1 user supplies
+their own DeepLabCut.
+"""
+
 # Import only remaining V1-specific utilities from dlc_utils
 # Import shared utilities from utils modules
 from spyglass.position.utils.centroid import Centroid

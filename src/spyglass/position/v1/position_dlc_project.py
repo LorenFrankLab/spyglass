@@ -401,6 +401,19 @@ class DLCProject(SpyglassMixin, dj.Manual):
             except Exception:
                 continue
 
+            # DLC >= 2.2 indexes rows as (labeled-data, video, image). An
+            # older single-column index parses the first two coordinate
+            # columns as index levels, so every row looks wrong and patching
+            # would overwrite the labels in both the CSV and the .h5 DLC
+            # trains from. DLC reads that layout with its own converters.
+            if set(df.index.get_level_values(0)) != {"labeled-data"}:
+                logger.warning(
+                    f"Skipping {csv_path.name}: its row index is not "
+                    "(labeled-data, video, image), so it predates DLC 2.2. "
+                    "Position V1 supports DeepLabCut >= 2.3."
+                )
+                continue
+
             stems = df.index.get_level_values(1).unique()
             wrong = [s for s in stems if s != video_name]
             if not wrong:
