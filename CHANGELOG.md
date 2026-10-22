@@ -58,6 +58,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Add `prefer_download` custom config for stream-capable backends #1662
 - Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
     targets #1679
+- Pin `ndx-ophys-devices>=0.3.1,<0.4` #1697
 - Fix handler loss in the DLC `file_log` decorator, which dropped the outer
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
