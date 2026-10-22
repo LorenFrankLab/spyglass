@@ -822,11 +822,18 @@ class DLCStrategy(PoseToolStrategy):
 
         # Import utility functions from Model class
         from spyglass.position.utils import suppress_print_from_package
-        from spyglass.position.v2.train import (
-            ModelMetadata,
-            _to_stored_path,
-            default_pk_name,
-        )
+
+        try:
+            from spyglass.position.v2.train import (
+                ModelMetadata,
+                _to_stored_path,
+                default_pk_name,
+            )
+        except ImportError as e:  # pragma: no cover
+            raise NotImplementedError(
+                "DLC model import needs spyglass.position.v2, which is "
+                "not available in this install."
+            ) from e
 
         # Validate project configuration
         if "project_path" not in params:

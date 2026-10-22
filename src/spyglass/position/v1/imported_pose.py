@@ -173,7 +173,13 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         """
         import warnings
 
-        from spyglass.position.v2.train import Skeleton
+        try:
+            from spyglass.position.v2.train import Skeleton
+        except ImportError as e:  # pragma: no cover
+            raise NotImplementedError(
+                "import_to_v2 needs spyglass.position.v2, which is not "
+                "available in this install."
+            ) from e
 
         bodyparts = [str(node) for node in skeleton_obj.nodes]
         try:

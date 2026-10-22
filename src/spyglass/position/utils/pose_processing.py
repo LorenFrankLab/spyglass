@@ -290,10 +290,17 @@ def compute_pose_outputs(
         smooth_orientation,
         two_pt_orientation,
     )
-    from spyglass.position.v2.utils.skeleton import (
-        build_canonical_map,
-        canonicalize,
-    )
+
+    try:
+        from spyglass.position.v2.utils.skeleton import (
+            build_canonical_map,
+            canonicalize,
+        )
+    except ImportError as e:  # pragma: no cover
+        raise NotImplementedError(
+            "compute_pose_outputs needs spyglass.position.v2, which is "
+            "not available in this install."
+        ) from e
 
     timestamps = pose_df.index.values
     sampling_rate = float(1 / np.median(np.diff(timestamps)))
