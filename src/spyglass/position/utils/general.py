@@ -19,7 +19,6 @@ from typing import Union
 import numpy as np
 import pandas as pd
 
-from spyglass.common.common_behav import VideoFile
 from spyglass.settings import pose_output_dir, pose_video_dir
 from spyglass.utils.logging import logger, stream_handler
 
@@ -235,6 +234,10 @@ def get_video_info(key):
     timestamps : np.array
         timestamps of the video
     """
+    # Imported here, not at module scope: importing it there gave every
+    # pure-math helper in this package a live DataJoint connection.
+    from spyglass.common.common_behav import VideoFile
+
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
