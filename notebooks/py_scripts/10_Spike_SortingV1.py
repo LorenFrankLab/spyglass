@@ -307,7 +307,7 @@ curation_key = sss_pk.fetch1("KEY")
 curation_key["curation_id"] = 1
 merge_insert_key = (sgs.CurationV1 & curation_key).fetch("KEY", as_dict=True)
 SpikeSortingOutput.insert(merge_insert_key, part_name="CurationV1")
-SpikeSortingOutput.merge_view()
+SpikeSortingOutput()  # the repr shows the merged view
 
 # Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's
 

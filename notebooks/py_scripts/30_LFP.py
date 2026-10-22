@@ -319,8 +319,8 @@ sgc.IntervalList & {
 #
 
 # +
-lfp_sampling_rate = lfp.LFPOutput.merge_get_parent(lfp_key).fetch1(
-    "lfp_sampling_rate"
+lfp_sampling_rate = (
+    (lfp.LFPOutput & lfp_key).get_parent_table().fetch1("lfp_sampling_rate")
 )
 
 filter_name = "Theta 5-11 Hz"

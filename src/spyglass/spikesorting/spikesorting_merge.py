@@ -169,18 +169,18 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_recording(cls, key):
         """get the recording associated with a spike sorting output"""
         source_table = source_class_dict[
-            to_camel_case(cls.merge_get_parent(key).table_name)
+            to_camel_case((cls & key).get_parent_table().table_name)
         ]
-        query = source_table & cls.merge_get_part(key)
+        query = source_table & (cls & key).get_part_table()[0]
         return query.get_recording(query.fetch("KEY"))
 
     @classmethod
     def get_sorting(cls, key):
         """get the sorting associated with a spike sorting output"""
         source_table = source_class_dict[
-            to_camel_case(cls.merge_get_parent(key).table_name)
+            to_camel_case((cls & key).get_parent_table().table_name)
         ]
-        query = source_table & cls.merge_get_part(key)
+        query = source_table & (cls & key).get_part_table()[0]
         return query.get_sorting(query.fetch("KEY"))
 
     @classmethod
@@ -202,9 +202,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             Table linking a merge id to information about the electrode group.
         """
         source_table = source_class_dict[
-            to_camel_case(cls.merge_get_parent(key).table_name)
+            to_camel_case((cls & key).get_parent_table().table_name)
         ]
-        part_table = cls.merge_get_part(key)
+        part_table = (cls & key).get_part_table()[0]
         query = source_table & part_table
         sort_group_info = source_table.get_sort_group_info(query.fetch("KEY"))
         return part_table * sort_group_info  # join the info with merge id's

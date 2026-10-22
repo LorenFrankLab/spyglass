@@ -238,7 +238,7 @@ PositionOutput.TrodesPosV1 & trodes_key
 #
 
 # get the merge id corresponding to our inserted trodes_key
-merge_key = (PositionOutput.merge_get_part(trodes_key)).fetch1("KEY")
+merge_key = (PositionOutput & trodes_key).fetch1("KEY")
 # use this to restrict PositionOutput and fetch the data
 position_info = (PositionOutput & merge_key).fetch1_dataframe()
 position_info
@@ -343,7 +343,7 @@ sgp.v1.TrodesPosSelection.insert1(
 )
 sgp.v1.TrodesPosV1.populate(trodes_s_up_key)
 
-merge_key = (PositionOutput.merge_get_part(trodes_s_up_key)).fetch1("KEY")
+merge_key = (PositionOutput & trodes_s_up_key).fetch1("KEY")
 upsampled_position_info = (PositionOutput & merge_key).fetch1_dataframe()
 upsampled_position_info
 

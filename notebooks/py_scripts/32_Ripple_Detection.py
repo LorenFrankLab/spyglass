@@ -357,7 +357,7 @@ sgp.TrodesPosV1 & pos_key
 # +
 from spyglass.position import PositionOutput  # noqa: F401, F403
 
-pos_key = PositionOutput.merge_get_part(pos_key).fetch1("KEY")
+pos_key = (PositionOutput & pos_key).fetch1("KEY")
 (PositionOutput & pos_key).fetch1_dataframe()
 # -
 

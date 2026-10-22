@@ -588,8 +588,10 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         results_df.index = bodyparts_df.index
 
         # save results into a nwbfile
-        nwb_file_name = PositionOutput.merge_get_parent(merge_key).fetch1(
-            "nwb_file_name"
+        nwb_file_name = (
+            (PositionOutput & merge_key)
+            .get_parent_table()
+            .fetch1("nwb_file_name")
         )
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         key["analysis_file_name"] = analysis_file_name
