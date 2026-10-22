@@ -143,7 +143,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             merge_key, params["waveform_extraction_params"]
         )
 
-        source_key = SpikeSortingOutput().merge_get_parent(merge_key).fetch1()
+        source_key = (
+            (SpikeSortingOutput & merge_key).get_parent_table().fetch1()
+        )
         # v0 pipeline
         if "sorter" in source_key and "nwb_file_name" in source_key:
             sorter = source_key["sorter"]

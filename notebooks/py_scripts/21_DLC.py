@@ -790,7 +790,7 @@ sgp.DLCPosVideo().populate(dlc_key)
 # populated when we populate `DLCPosV1`
 #
 
-sgp.PositionOutput.merge_get_part(dlc_key)
+(sgp.PositionOutput & dlc_key).get_part_table()[0]
 
 # `PositionOutput` also has a part table, similar to the `DLCModelSource` table above. Let's check that out as well.
 #

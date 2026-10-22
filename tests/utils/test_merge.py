@@ -1,4 +1,5 @@
 import datajoint as dj
+import numpy as np
 import pytest
 from datajoint.logging import logger as dj_logger
 
@@ -91,3 +92,1229 @@ def test_merge_get_class(merge_table):
 def test_merge_get_class_invalid(spike_merge, pop_spike_merge):
     ret = spike_merge.merge_get_parent_class("bad")
     assert ret is None, "Should return None for invalid part name."
+
+
+# ------------------- Smart restrict / fetch ---------------------------------
+
+
+def test_smart_restrict_by_part_field(
+    pos_merge, pos_merge_key, pos_interval_key
+):
+    """& with a part-table field should equal merge_restrict count."""
+    nwb = pos_interval_key["nwb_file_name"]
+    smart = len(pos_merge & {"nwb_file_name": nwb})
+    explicit = len(pos_merge.merge_restrict({"nwb_file_name": nwb}))
+    assert (
+        smart == explicit
+    ), f"Smart restrict ({smart}) != merge_restrict ({explicit})"
+
+
+def test_smart_restrict_master_field(pos_merge, pos_merge_key):
+    """Restricting by merge_id (master field) still works normally."""
+    mid = pos_merge_key["merge_id"]
+    result = pos_merge & {"merge_id": mid}
+    assert len(result) == 1, "Master-field restriction should return 1 row."
+
+
+def test_smart_restrict_empty(pos_merge):
+    """Restricting by a part field with no matches returns empty, not full."""
+    result = pos_merge & {"nwb_file_name": "__nonexistent__.nwb"}
+    assert len(result) == 0, "No-match restriction should return 0 rows."
+
+
+def test_super_restrict_silent_noop(pos_merge, pos_interval_key):
+    """super_restrict bypasses parts, so a part-field restriction is a noop."""
+    nwb = pos_interval_key["nwb_file_name"]
+    full = len(pos_merge)
+    raw = len(pos_merge.super_restrict({"nwb_file_name": nwb}))
+    assert raw == full, "super_restrict should ignore part-table fields."
+
+
+# ----------------------------- Smart fetch -----------------------------------
+
+
+def test_fetch_part_attr(pos_merge, pos_interval_key):
+    """fetch('part_attr') should walk parts and return data."""
+    nwb = pos_interval_key["nwb_file_name"]
+    results = (pos_merge & {"nwb_file_name": nwb}).fetch("nwb_file_name")
+    assert len(results) > 0, "fetch of part attr should return results."
+    assert all(r == nwb for r in results), "Unexpected nwb_file_name values."
+
+
+def test_fetch_multi_attr_returns_list_of_arrays(pos_merge, pos_merge_key):
+    """fetch('a', 'b') with no as_dict returns a list of arrays (DataJoint convention)."""
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).fetch(
+        "nwb_file_name", "interval_list_name"
+    )
+    assert isinstance(
+        result, list
+    ), "fetch with multiple attrs should return a list of arrays."
+    assert len(result) == 2, "List should have one element per attr."
+    assert isinstance(
+        result[0], np.ndarray
+    ), "Each element should be a numpy array."
+
+
+def test_fetch_key_direct(pos_merge, pos_merge_key):
+    """fetch of master-only attr should bypass part-walking."""
+    mid = pos_merge_key["merge_id"]
+    # "merge_id" is in _MASTER_ONLY_ATTRS, so it stays on the master
+    result = (pos_merge & {"merge_id": mid}).fetch("merge_id")
+    # DataJoint may return a scalar UUID for single-row UUID-column fetches
+    scalar = result if not hasattr(result, "__iter__") else result[0]
+    assert scalar == mid, "Fetched merge_id should match restriction."
+
+
+def test_fetch_merge_id_direct(pos_merge):
+    """super_fetch() should bypass part-walking, returning only master cols."""
+    # DataJoint has a bug fetching named cols from UUID-PK tables
+    # (format=array), so check the shape: dicts carry only master keys
+    rows = pos_merge.super_fetch(as_dict=True)
+    assert len(rows) > 0, "super_fetch should return rows."
+    master_keys = {"merge_id", "source"}
+    assert all(
+        set(r.keys()) <= master_keys for r in rows
+    ), "super_fetch should only return master-table columns."
+
+
+def test_super_fetch_master_only(pos_merge):
+    """super_fetch() returns only master columns."""
+    rows = pos_merge.super_fetch()
+    assert len(rows) > 0, "super_fetch should return rows."
+
+
+# ------------------- merge_get_part return shape ---------------------------
+
+
+def test_merge_get_part_zero_returns_none(pos_merge):
+    """The deprecated merge_get_part returns None when no part matches."""
+    ret = pos_merge.merge_get_part({"nwb_file_name": "__nonexistent__.nwb"})
+    assert ret is None, f"Expected None for no match, got {ret!r}."
+
+
+def test_merge_get_part_multi_msg(pos_merge):
+    """Multi-source restriction raises, naming the count."""
+    # return_empties=True ensures all part tables are candidates, giving >1
+    with pytest.raises(ValueError, match="potential parts"):
+        pos_merge.merge_get_part(True, return_empties=True)
+
+
+def test_merge_get_part_multi_source_returns_list(pos_merge):
+    """multi_source=True returns the list rather than raising."""
+    parts = pos_merge.merge_get_part(
+        True, return_empties=True, multi_source=True
+    )
+    assert isinstance(parts, list) and len(parts) > 1
+
+
+# ------------------- Phase 4: instance-method replacements ------------------
+
+
+def test_get_part_table_returns_list(pos_merge, pos_merge_key):
+    """get_part_table() returns a list, as DataJoint's parts() does."""
+    mid = pos_merge_key["merge_id"]
+    parts = (pos_merge & {"merge_id": mid}).get_part_table()
+    assert isinstance(parts, list), f"Expected a list, got {type(parts)}."
+    assert len(parts) == 1, "One source matches a single merge_id."
+    assert len(parts[0]) == len(pos_merge.merge_get_part({"merge_id": mid}))
+
+
+def test_get_part_table_empty_on_no_match(pos_merge):
+    """get_part_table() returns [] rather than raising."""
+    parts = (pos_merge & {"nwb_file_name": "__nope__.nwb"}).get_part_table()
+    assert parts == [], f"Expected [], got {parts!r}."
+
+
+def test_get_part_table_source_restriction(pos_merge):
+    """A `source` restriction reaches the parts."""
+    src = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    parts = (pos_merge & {"source": src}).get_part_table()
+    assert len(parts) == 1, (
+        f"A source restriction returned {len(parts)} parts; `source` lives "
+        "on the master and must be resolved there before the parts see it."
+    )
+
+
+def test_get_parent_table_instance(pos_merge, pos_merge_key):
+    """get_parent_table() on restricted instance matches merge_get_parent."""
+    mid = pos_merge_key["merge_id"]
+    via_class = pos_merge.merge_get_parent({"merge_id": mid})
+    via_inst = (pos_merge & {"merge_id": mid}).get_parent_table()
+    assert len(via_inst) == len(via_class), "get_parent_table count mismatch."
+
+
+def test_delete_upstream_dry_run(pos_merge, pos_merge_key):
+    """delete_upstream(dry_run=True) returns list of tables."""
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).delete_upstream(dry_run=True)
+    assert isinstance(
+        result, list
+    ), "delete_upstream dry_run should return a list."
+    assert len(result) > 0, "Should find at least one upstream table."
+
+
+def test_preview_instance(pos_merge, pos_merge_key):
+    """view() returns a string representation of the merged view."""
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).view()
+    assert isinstance(result, str), "view() should return a string."
+
+
+def test_html_instance(pos_merge, pos_merge_key):
+    """html() returns an HTML object."""
+    from IPython.core.display import HTML
+
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).html()
+    assert isinstance(result, HTML), "html() should return an HTML object."
+
+
+# ------------------- Phase 4 addendum: merge_delete fix --------------------
+
+
+def test_merge_delete_noop(pos_merge):
+    """merge_delete with a non-matching restriction is a no-op, not an error."""
+    before = len(pos_merge)
+    pos_merge.merge_delete(
+        {"nwb_file_name": "__nonexistent__.nwb"}, safemode=False
+    )
+    assert (
+        len(pos_merge) == before
+    ), "No-match merge_delete must not change count."
+
+
+def test_merge_delete_removes_entry(graph_tables):
+    """merge_delete removes the specified entry from master and part tables."""
+    MergeOutput = graph_tables["MergeOutput"]
+    before = len(MergeOutput())
+    assert before > 0, "Test setup: MergeOutput must have entries."
+    key = MergeOutput().super_fetch(as_dict=True)[0]
+
+    MergeOutput().merge_delete(key, safemode=False, force_permission=True)
+
+    assert (
+        len(MergeOutput()) == before - 1
+    ), "merge_delete should reduce count by 1."
+    assert len(MergeOutput() & key) == 0, "Deleted entry must be absent."
+
+
+def test_delete_instance_removes_entry(graph_tables):
+    """(T & restriction).delete() removes the matching entry."""
+    MergeOutput = graph_tables["MergeOutput"]
+    before = len(MergeOutput())
+    assert before > 0, "Test setup: MergeOutput must have entries."
+    key = MergeOutput().super_fetch(as_dict=True)[0]
+
+    (MergeOutput() & key).delete(force_permission=True, safemode=False)
+
+    assert (
+        len(MergeOutput()) == before - 1
+    ), "(T & key).delete() should reduce count by 1."
+    assert len(MergeOutput() & key) == 0, "Deleted entry must be absent."
+
+
+# ------------------- fetch1() -----------------------------------------------
+
+
+def test_fetch1_no_attrs_returns_dict(pos_merge, pos_merge_key):
+    """fetch1() with no attrs returns a dict containing part-table columns."""
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).fetch1()
+    assert isinstance(result, dict), "fetch1() should return a dict."
+    assert "nwb_file_name" in result, "Part-table columns should be present."
+
+
+def test_fetch1_one_attr_returns_scalar(
+    pos_merge, pos_merge_key, pos_interval_key
+):
+    """fetch1('attr') returns a scalar value."""
+    mid = pos_merge_key["merge_id"]
+    nwb = pos_interval_key["nwb_file_name"]
+    result = (pos_merge & {"merge_id": mid}).fetch1("nwb_file_name")
+    assert result == nwb, "fetch1 scalar should match expected nwb_file_name."
+
+
+def test_fetch1_multi_attr_returns_tuple(pos_merge, pos_merge_key):
+    """fetch1('a', 'b') returns a tuple of values."""
+    mid = pos_merge_key["merge_id"]
+    result = (pos_merge & {"merge_id": mid}).fetch1(
+        "nwb_file_name", "interval_list_name"
+    )
+    assert isinstance(
+        result, tuple
+    ), "fetch1 with multiple attrs should return a tuple."
+    assert (
+        len(result) == 2
+    ), "Tuple length should match number of requested attrs."
+
+
+def test_fetch1_raises_multiple(pos_merge):
+    """fetch1 raises DataJointError when multiple rows match."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test multiple-row error.")
+    with pytest.raises(dj.errors.DataJointError):
+        pos_merge.fetch1()
+
+
+def test_fetch1_raises_empty(pos_merge):
+    """fetch1 raises DataJointError when no rows match."""
+    with pytest.raises(dj.errors.DataJointError):
+        (pos_merge & {"nwb_file_name": "__nonexistent__.nwb"}).fetch1()
+
+
+def test_fetch1_missing_attr_raises_datajoint_error(pos_merge, pos_merge_key):
+    """fetch1 with a non-existent attr raises DataJointError, not IndexError."""
+    mid = pos_merge_key["merge_id"]
+    with pytest.raises(dj.errors.DataJointError, match="not found"):
+        (pos_merge & {"merge_id": mid}).fetch1("__nonexistent_attr__")
+
+
+# ------------------- String restrictions ------------------------------------
+
+
+def test_string_restrict_part_field(pos_merge, pos_interval_key):
+    """String restriction referencing a part-table field resolves through parts."""
+    nwb = pos_interval_key["nwb_file_name"]
+    result = pos_merge & f'nwb_file_name = "{nwb}"'
+    assert len(result) > 0, "String restrict on part field should find rows."
+
+
+def test_string_restrict_like(pos_merge, pos_interval_key):
+    """LIKE string restriction on a part field resolves correctly."""
+    nwb = pos_interval_key["nwb_file_name"]
+    prefix = nwb[:4]  # first few chars
+    result = pos_merge & f'nwb_file_name LIKE "{prefix}%"'
+    assert (
+        len(result) > 0
+    ), "LIKE string restrict on part field should find rows."
+
+
+def test_string_restrict_empty(pos_merge):
+    """String restriction on part field with no match returns empty table."""
+    result = pos_merge & 'nwb_file_name = "__nonexistent__.nwb"'
+    assert (
+        len(result) == 0
+    ), "Non-matching string restriction should return 0 rows."
+
+
+def test_string_restrict_master_field_unchanged(pos_merge):
+    """String restriction on a master varchar field is not routed through parts."""
+    source_val = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    result = pos_merge & f'source = "{source_val}"'
+    assert (
+        len(result) > 0
+    ), "String restrict on master source field should find rows."
+    assert not pos_merge._string_has_part_field(
+        f'source = "{source_val}"'
+    ), "'source' is a master field and must not trigger part-resolution."
+
+
+# ------------------- dj.Top restrictions ------------------------------------
+
+
+def test_top_limit_len(pos_merge):
+    """(T & dj.Top(limit=1)) should report exactly 1 row."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test Top limit.")
+    restricted = pos_merge & dj.Top(limit=1)
+    assert len(restricted) == 1, "dj.Top(limit=1) should yield exactly 1 row."
+
+
+def test_top_limit_fetch(pos_merge):
+    """(T & dj.Top(limit=1)).fetch() should return 1 row of part-table data."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test Top limit.")
+    rows = (pos_merge & dj.Top(limit=1)).fetch("nwb_file_name")
+    assert len(rows) == 1, "fetch() with dj.Top(limit=1) should return 1 row."
+
+
+def test_top_limit_returns_query(pos_merge):
+    """(T & dj.Top(limit=1)) returns a query expression, not a string."""
+    restricted = pos_merge & dj.Top(limit=1)
+    assert not isinstance(
+        restricted, str
+    ), "& dj.Top should return a query object, not a string."
+    assert isinstance(
+        restricted, type(pos_merge)
+    ), "& dj.Top should return the same table type."
+
+
+def test_top_repr_shows_limited_rows(pos_merge):
+    """repr(T & dj.Top(limit=1)) should show 1 data row, not the full table."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test Top repr.")
+    full_repr = repr(pos_merge)
+    top_repr = repr(pos_merge & dj.Top(limit=1))
+    assert isinstance(top_repr, str), "repr should be a string."
+    # The top repr must be shorter than the full repr (fewer rows)
+    assert len(top_repr) < len(
+        full_repr
+    ), "dj.Top repr should be shorter than full-table repr."
+
+
+# ------------------- delete force_permission forwarding ----------------------
+
+
+def test_delete_forwards_force_permission(graph_tables, monkeypatch):
+    """delete() forwards force_permission to the downstream delete."""
+    from spyglass.utils import _Merge
+
+    inst = graph_tables["MergeOutput"]()
+    key = inst.super_fetch(as_dict=True)[0]
+    restricted = inst & key
+
+    captured = {}
+    mro = type(inst).__mro__
+    super_cls = mro[mro.index(_Merge) + 1]
+
+    def fake_delete(self, *args, **kwargs):
+        captured["force_permission"] = kwargs.get("force_permission")
+
+    monkeypatch.setattr(super_cls, "delete", fake_delete, raising=False)
+    restricted.delete(force_permission=True, safemode=False)
+    assert (
+        captured.get("force_permission") is True
+    ), "force_permission must reach the downstream delete."
+
+
+# ------------------- string-restriction field validation --------------------
+
+
+def test_string_restrict_unknown_field_raises(pos_merge):
+    """A string field unknown to master and every part raises, not full-table."""
+    with pytest.raises(dj.errors.DataJointError, match="No field of"):
+        pos_merge & "definitely_not_a_field = 1"
+
+
+def test_dict_restrict_unknown_field_raises(pos_merge):
+    """A dict with no known field raises, rather than matching every row."""
+    with pytest.raises(dj.errors.DataJointError, match="No field of"):
+        pos_merge & {"definitely_not_a_field": 1}
+
+
+def test_dict_restrict_extra_field_ignored(pos_merge):
+    """An unknown key alongside a known one is dropped, as DataJoint does."""
+    mid = pos_merge.super_fetch("merge_id")[0]
+    expected = len(pos_merge & {"merge_id": mid})
+    result = len(pos_merge & {"merge_id": mid, "definitely_not_a_field": 1})
+    assert result == expected == 1, (
+        f"A dict carrying an unknown key returned {result} rows; the unknown "
+        f"key must be dropped, leaving the {expected} merge_id match."
+    )
+
+
+def test_dict_restrict_upstream_key_shape(pos_merge):
+    """The shape PoseGroup passes: a group field plus merge_id.
+
+    ``PoseGroup.fetch_pose_datasets`` restricts PositionOutput by
+    ``{"pose_group_name": ..., "merge_id": ...}``, where no merge heading has
+    ``pose_group_name``. That must restrict by merge_id, not raise.
+    """
+    mid = pos_merge.super_fetch("merge_id")[0]
+    restricted = pos_merge & {"pose_group_name": "g1", "merge_id": mid}
+    assert len(restricted) == 1, (
+        "A restriction carrying an upstream group field alongside merge_id "
+        "must resolve to the merge_id row, as it did before this branch."
+    )
+
+
+def test_string_restrict_quoted_literal_ignored(pos_merge):
+    """A part-field name inside a quoted literal does not trigger resolution."""
+    source_val = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    restr = f'source = "{source_val} nwb_file_name"'
+    assert not pos_merge._string_has_part_field(
+        restr
+    ), "Field names inside quoted literals must be ignored."
+
+
+# ------------------- merge_fetch positional-arg compatibility ---------------
+
+
+def test_merge_fetch_positional_attrs(pos_merge):
+    """merge_fetch treats positional args as attrs (restriction kw-only)."""
+    result = pos_merge.merge_fetch("merge_id")
+    assert len(result) == len(
+        pos_merge
+    ), "Positional arg should be an attr, not the restriction."
+
+
+def test_merge_fetch_honors_instance_restriction(graph_tables):
+    """(M & restriction).merge_fetch(attr) honors the instance restriction."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    restricted = MergeOutput & {"intermediate_id": value}
+
+    result = restricted.merge_fetch("intermediate_id")
+
+    assert len(result) == matching, (
+        f"(M & restriction).merge_fetch() returned {len(result)} rows; "
+        f"expected {matching} matching the instance's own restriction."
+    )
+
+
+# ------------------- html() empty-restriction guard -------------------------
+
+
+def test_html_empty_restriction(pos_merge):
+    """html() on an empty restriction returns HTML, not AttributeError."""
+    from IPython.core.display import HTML
+
+    result = (pos_merge & "FALSE").html()
+    assert isinstance(result, HTML), "html() on empty should return HTML."
+
+
+# ------------------- fetch error handling & dict safety ---------------------
+
+
+def test_fetch_reraises_unexpected_dj_error(pos_merge, monkeypatch):
+    """An operational DataJointError propagates instead of becoming []."""
+
+    def boom(*args, **kwargs):
+        raise dj.errors.DataJointError("simulated connection failure")
+
+    # Patch the query, not a part's fetch: fetch() reads the union in one query
+    monkeypatch.setattr(pos_merge.connection, "query", boom)
+
+    with pytest.raises(dj.errors.DataJointError, match="simulated"):
+        pos_merge.fetch("nwb_file_name")
+
+
+def test_restrict_does_not_mutate_caller_dict(pos_merge, pos_interval_key):
+    """Restricting must not pop the source key from the caller's dict."""
+    nwb = pos_interval_key["nwb_file_name"]
+    src = pos_merge.super_fetch(as_dict=True)[0]["source"]
+    snapshot = {"source": src, "nwb_file_name": nwb}
+    _ = pos_merge & snapshot
+    assert "source" in snapshot, "restrict must not mutate the caller's dict."
+
+
+def test_fetch1_incompatible_kwarg(pos_merge, pos_merge_key):
+    """fetch1 rejects output-shaping kwargs with a clear error."""
+    mid = pos_merge_key["merge_id"]
+    with pytest.raises(dj.errors.DataJointError, match="does not support"):
+        (pos_merge & {"merge_id": mid}).fetch1(format="frame")
+
+
+# ------------------- populate() replacement & deprecation -------------------
+
+
+def _patch_populate_sources(pos_merge, monkeypatch, calls, names=("a_id",)):
+    """Stub source_class_dict + insert to record a populate() call."""
+
+    class FakeQuery:
+        heading = type("FakeHeading", (), {"names": set(names)})()
+
+        def __and__(self, other):
+            calls.setdefault("restrictions", []).append(other)
+            return self
+
+        def fetch(self, *args, **kwargs):
+            return [{"a_id": 1}]
+
+    class FakeSource:
+        key_source = FakeQuery()
+
+        @staticmethod
+        def populate(*args, **kwargs):
+            calls["populate"] = (args, kwargs)
+
+        def __and__(self, other):
+            return FakeQuery()
+
+    monkeypatch.setattr(
+        type(pos_merge),
+        "source_class_dict",
+        property(lambda self: {"AnySource": FakeSource()}),
+    )
+
+    def fake_insert(self, rows, **kwargs):
+        calls["insert"] = (rows, kwargs)
+
+    monkeypatch.setattr(type(pos_merge), "insert", fake_insert)
+
+
+def test_populate_restriction_reaches_source(pos_merge, monkeypatch):
+    """populate() restricts key_source, then inserts w/ part_name."""
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+
+    inserted = pos_merge.populate({"a_id": 1})
+
+    assert calls["restrictions"], "restriction must reach the key_source."
+    assert calls["populate"][0][0] == [{"a_id": 1}], "keys forwarded."
+    assert calls["insert"][0] == [{"a_id": 1}], "successes inserted."
+    assert (
+        calls["insert"][1].get("skip_duplicates") is True
+    ), "insert must forward skip_duplicates=True."
+    assert calls["insert"][1].get("part_name") == "AnySource", (
+        "insert must forward part_name=source, else _merge_insert scans "
+        "every part and can insert successes into sibling parts too."
+    )
+    assert inserted == {"AnySource": 1}
+
+
+def test_populate_skips_source_lacking_column(pos_merge, monkeypatch):
+    """A restriction naming a column the source lacks populates nothing."""
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+
+    inserted = pos_merge.populate({"__not_a_column__": 1})
+
+    assert inserted == {}, f"Expected no source populated, got {inserted}."
+    assert "populate" not in calls, (
+        "A source whose key_source lacks the restricted column must be "
+        "skipped, not populated whole: DataJoint ignores unknown dict keys."
+    )
+
+
+def test_populate_source_value_selects_part(pos_merge, monkeypatch):
+    """A `source` value populates that part alone."""
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+    assert pos_merge.populate({"source": "AnySource"}) == {"AnySource": 1}
+
+    calls.clear()
+    assert pos_merge.populate({"source": "OtherSource"}) == {}
+    assert "populate" not in calls, "`source` must select one part."
+
+
+def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
+    """Deprecated merge_populate still works and logs a 0.7.0 deprecation."""
+    import logging
+
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        pos_merge.merge_populate("AnySource", keys=[{"a_id": 1}])
+
+    assert calls["insert"][0] == [{"a_id": 1}], "successes inserted."
+    assert "merge_populate" in caplog.text and "0.7.0" in caplog.text
+    assert calls["insert"][1].get("part_name") == "AnySource", (
+        "insert must forward part_name=source, else _merge_insert scans "
+        "every part and can insert successes into sibling parts too."
+    )
+
+
+def test_deprecated_methods_warn(pos_merge, caplog):
+    """Deprecated merge_X methods log a deprecation naming Spyglass 0.7.0."""
+    import logging
+
+    from spyglass.common import common_usage
+
+    # deprecate_log warns once per process; clear so this test sees the warning
+    common_usage._warned_functions.discard("merge_restrict")
+    common_usage._warned_functions.discard("merge_view")
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        pos_merge.merge_restrict(True)
+        pos_merge.merge_view(True)
+
+    assert "0.7.0" in caplog.text, "Deprecation must name the 0.7.0 target."
+    assert "merge_restrict" in caplog.text
+    assert "merge_view" in caplog.text
+
+
+# ------------------- dj.Top order_by + restriction mixing -------------------
+
+
+def test_top_order_by_preserved(pos_merge):
+    """dj.Top(order_by=...) selects different rows, honored by part-walking."""
+    if len(pos_merge) < 2:
+        pytest.skip("Need at least 2 entries to test Top order_by.")
+    asc = pos_merge & dj.Top(limit=1, order_by="merge_id")
+    desc = pos_merge & dj.Top(limit=1, order_by="merge_id DESC")
+    asc_ids = asc._resolve_top_restriction()
+    desc_ids = desc._resolve_top_restriction()
+    assert len(asc_ids) == 1 and len(desc_ids) == 1, "Top(limit=1) → one id."
+    assert (
+        asc_ids != desc_ids
+    ), "order_by direction should select different row."
+
+
+def test_fetch1_count_zero_message(pos_merge):
+    """fetch1 on an empty restriction names the count, not a missing attr."""
+    with pytest.raises(dj.errors.DataJointError, match="expected exactly 1"):
+        (pos_merge & "FALSE").fetch1()
+
+
+def test_fetch1_missing_attr_message(pos_merge, pos_merge_key):
+    """fetch1 for an absent attr names the attribute, not the count."""
+    mid = pos_merge_key["merge_id"]
+    with pytest.raises(
+        dj.errors.DataJointError, match="__nonexistent_attr__.*not found"
+    ):
+        (pos_merge & {"merge_id": mid}).fetch1("__nonexistent_attr__")
+
+
+def test_mixed_master_part_dict_restriction(pos_merge, pos_merge_key):
+    """A dict mixing master and part fields ANDs both, keeping the master key."""
+    mid = pos_merge_key["merge_id"]
+    row = (pos_merge & {"merge_id": mid}).fetch1()
+    nwb = row["nwb_file_name"]
+    match = pos_merge & {"merge_id": mid, "nwb_file_name": nwb}
+    assert len(match) == 1, "Matching master+part dict returns the row."
+    mismatch = pos_merge & {"merge_id": mid, "nwb_file_name": "__nope__.nwb"}
+    assert len(mismatch) == 0, "Master key must not be silently dropped."
+
+
+def test_string_restrict_and_two_part_fields(pos_merge, pos_merge_key):
+    """A string AND-ing two part fields resolves through parts correctly."""
+    mid = pos_merge_key["merge_id"]
+    row = (pos_merge & {"merge_id": mid}).fetch1()
+    master = set(pos_merge.heading.names)
+    part_fields = [
+        k for k in row if k not in master and isinstance(row[k], str)
+    ]
+    if len(part_fields) < 2:
+        pytest.skip("Need ≥2 string-valued part fields to test AND mixing.")
+    f1, f2 = part_fields[:2]
+    restr = f'{f1} = "{row[f1]}" AND {f2} = "{row[f2]}"'
+    assert len(pos_merge & restr) >= 1, "AND of two part fields should match."
+
+
+# ------------------- composite restrictions (issue 1) -----------------------
+#
+# `intermediate_id` is a part-only field on MergeOutput.PkNode (present via
+# `-> PkNode`'s primary-key FK, absent from the merge master). A plain dict
+# restriction on it correctly routes through part resolution; these tests
+# check that list (OrList), AndList, and Not wrappers get the same treatment
+# instead of falling straight through to the raw master-only restrict.
+#
+# graph_tables is module-scoped and shared with delete tests elsewhere in
+# this file, so row counts shrink over the module's lifetime. The target value
+# is picked from the table's current state rather than hardcoded.
+
+
+def _partial_match_value(MergeOutput):
+    """An intermediate_id value matching a proper subset of current rows."""
+    values = sorted(set(int(v) for v in MergeOutput.fetch("intermediate_id")))
+    full = len(MergeOutput)
+    for value in values:
+        matching = len(MergeOutput & {"intermediate_id": value})
+        if 0 < matching < full:
+            return value, matching, full
+    pytest.skip("No intermediate_id value gives a proper subset match.")
+
+
+def test_composite_restrict_list_matches_dict(graph_tables):
+    """[{part-field: val}] (OrList) should route like the bare dict form."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, _ = _partial_match_value(MergeOutput)
+    list_result = len(MergeOutput & [{"intermediate_id": value}])
+    assert list_result == matching, (
+        f"List-wrapped restriction ({list_result}) should match the "
+        f"equivalent dict restriction ({matching}), not bypass part "
+        "resolution."
+    )
+
+
+def test_composite_restrict_andlist_matches_dict(graph_tables):
+    """AndList([{part-field: val}]) should route like the bare dict form."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, _ = _partial_match_value(MergeOutput)
+    and_result = len(MergeOutput & dj.AndList([{"intermediate_id": value}]))
+    assert and_result == matching, (
+        f"AndList-wrapped restriction ({and_result}) should match the "
+        f"equivalent dict restriction ({matching}), not bypass part "
+        "resolution."
+    )
+
+
+def test_composite_restrict_not_dict_excludes_matches(graph_tables):
+    """Not({part-field: val}) should exclude exactly the matching rows."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    not_result = len(MergeOutput & dj.Not({"intermediate_id": value}))
+    assert not_result == full - matching, (
+        "Not(dict) on a part-only field should exclude exactly the "
+        "matching rows, not bypass part resolution."
+    )
+
+
+def test_composite_restrict_not_string_excludes_matches(graph_tables):
+    """Not('part-field = val') should exclude exactly the matching rows."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    not_result = len(MergeOutput & dj.Not(f"intermediate_id = {value}"))
+    assert not_result == full - matching, (
+        "Not(str) on a part-only field should exclude exactly the "
+        "matching rows, not bypass part resolution."
+    )
+
+
+def test_composite_restrict_delete_scoped_to_match(graph_tables):
+    """A list-wrapped part-field restriction must not delete the whole table."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    value, matching, full = _partial_match_value(MergeOutput)
+    (MergeOutput & [{"intermediate_id": value}]).delete(
+        safemode=False, force_permission=True
+    )
+    assert len(graph_tables["MergeOutput"]()) == full - matching, (
+        "Deleting via a list-wrapped restriction should remove only the "
+        "matching rows, not the whole table."
+    )
+
+
+# ------------------- delete_upstream(dry_run=False) (issue 2) ---------------
+
+
+def test_delete_upstream_removes_source_row(graph_tables):
+    """delete_upstream(dry_run=False) deletes the merge row and its upstream
+    source row, without crashing on FreeTable having no cautious_delete."""
+    MergeOutput = graph_tables["MergeOutput"]()
+    PkNode = graph_tables["PkNode"]()
+
+    # Restrict by merge_id alone. For the full super_fetch dict, which also
+    # carries the master-only `source` field, see test_fetch1_source_field
+    mid = MergeOutput.super_fetch("merge_id")[0]
+    row = (MergeOutput & {"merge_id": mid}).fetch1()
+    source_key = {
+        "pk_id": row["pk_id"],
+        "intermediate_id": row["intermediate_id"],
+    }
+    assert len(PkNode & source_key) == 1, "Test setup: source row must exist."
+
+    (MergeOutput & {"merge_id": mid}).delete_upstream(
+        dry_run=False, safemode=False, force_permission=True
+    )
+
+    assert (
+        len(MergeOutput & {"merge_id": mid}) == 0
+    ), "Merge row should be deleted."
+    assert (
+        len(PkNode & source_key) == 0
+    ), "Upstream source row should also be deleted, not left orphaned."
+
+
+def test_fetch1_source_field_in_restriction(graph_tables):
+    """Restricting by {merge_id, source} together (super_fetch()'s own
+    output shape) must not silently drop part-walked fetch results.
+
+    ``source`` is a master-only secondary field, absent from every part's
+    heading; compiling it into the restriction before part-resolution
+    causes every part to raise "Attribute not found" and be dropped.
+    """
+    MergeOutput = graph_tables["MergeOutput"]()
+    key = MergeOutput.super_fetch(as_dict=True)[0]
+    row = (MergeOutput & key).fetch1()
+    assert "pk_id" in row, (
+        "fetch1 should still walk parts when `source` is included "
+        "alongside `merge_id` in the restriction."
+    )
+
+
+# ------------------- multi-part fetch contract (issue 4) --------------------
+#
+# merge_repro is an isolated 2-part merge table (SourceA: 2 rows, SourceB: 1
+# row) with no optional packages and no FK ties to graph_schema, so bugs
+# needing >1 populated part are exercisable without environment gating.
+
+
+def test_fetch_no_attrs_heterogeneous_parts(merge_repro):
+    """fetch() with no attrs spans parts with differing columns.
+
+    The union gives every part the same columns, so this neither raises a
+    numpy dtype error nor needs as_dict=True to succeed.
+    """
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch()
+    assert len(rows) == len(M), "fetch() should return every merged row."
+    for field in ("merge_id", "source", "a_id", "b_id"):
+        assert field in rows.dtype.names, (
+            f"{field!r} missing from the merged result; the union must carry "
+            "the master's columns and every part's."
+        )
+
+
+def test_fetch_no_attrs_includes_source(merge_repro):
+    """A no-attr fetch carries `source`, which lives only on the master."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True)
+    assert {r["source"] for r in rows} == {"SourceA", "SourceB"}, (
+        "Each merged row should report the part it came from; `source` was "
+        "lost when parts were fetched without joining the master."
+    )
+
+
+def test_fetch_master_and_part_attrs_together(merge_repro):
+    """A master attr and a part attr can be requested in one call."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch("source", "part_attr", as_dict=True)
+    assert len(rows) == len(M), (
+        f"Mixing a master-only attr with a part attr returned {len(rows)} "
+        f"rows; every one of the {len(M)} merged rows should be present."
+    )
+
+
+def test_fetch_no_attrs_as_dict_tolerates_heterogeneous_parts(merge_repro):
+    """as_dict=True naturally tolerates differing per-part columns."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True)
+    assert len(rows) == len(
+        M
+    ), "as_dict=True fetch should return one dict per row across all parts."
+
+
+def test_fetch_limit_applies_globally(merge_repro):
+    """fetch(limit=1) should return 1 row total, not 1 per part."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.fetch(as_dict=True, limit=1)
+    assert len(rows) == 1, (
+        f"fetch(limit=1) returned {len(rows)} rows; limit must apply across "
+        "all parts combined, not once per part."
+    )
+
+
+def test_fetch_offset_applies_globally(merge_repro):
+    """fetch(offset=1) should skip 1 row total, not 1 per part."""
+    M = merge_repro["MergeRepro"]()
+    full = len(M)
+    rows = M.fetch(as_dict=True, offset=1)
+    assert len(rows) == full - 1, (
+        f"fetch(offset=1) returned {len(rows)} of {full} rows; offset must "
+        "apply across all parts combined, not once per part."
+    )
+
+
+def test_fetch_order_by_merge_id_applies_globally(merge_repro):
+    """fetch(order_by='merge_id') orders across parts, not within each."""
+    M = merge_repro["MergeRepro"]()
+    asc = M.fetch(as_dict=True, limit=1, order_by="merge_id")[0]
+    desc = M.fetch(as_dict=True, limit=1, order_by="merge_id DESC")[0]
+    assert asc["merge_id"] != desc["merge_id"], (
+        "Ascending vs descending order_by should select different rows "
+        "from the globally ordered set."
+    )
+    all_ids = sorted(r["merge_id"] for r in M.fetch(as_dict=True))
+    assert (
+        asc["merge_id"] == all_ids[0]
+    ), "order_by='merge_id' should select the global min."
+    assert (
+        desc["merge_id"] == all_ids[-1]
+    ), "order_by='merge_id DESC' should select the global max."
+
+
+def test_fetch1_key_plus_attr(merge_repro):
+    """fetch1('KEY', <part attr>) should build KEY into the returned tuple,
+    not raise KeyError from an unhandled 'KEY' entry."""
+    M = merge_repro["MergeRepro"]()
+    one = M & {"part_attr": 2}  # matches exactly 1 SourceA row
+    assert len(one) == 1, "Test setup: part_attr=2 must match exactly 1 row."
+    key, part_attr = one.fetch1("KEY", "part_attr")
+    assert isinstance(key, dict) and "merge_id" in key, (
+        "fetch1('KEY', ...) should return the primary key dict as the "
+        "'KEY' element."
+    )
+    assert part_attr == 2
+
+
+# ----------- composite restrictions on heterogeneous parts (item 1) --------
+#
+# a_id exists only on SourceA, so a dict naming it shares no column with
+# SourceB. DataJoint compiles such a dict to True, which is what made the
+# container change a restriction's meaning. merge_repro is function-scoped
+# and reset to 2 SourceA rows + 1 SourceB row, so counts are exact here
+# rather than derived from current state.
+
+
+def test_composite_restrict_list_scoped_to_part(merge_repro):
+    """[{part-only field}] must not match rows of a part lacking it."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & {"a_id": 1}) == 1, "Test setup: a_id=1 matches 1 row."
+    assert len(M & [{"a_id": 1}]) == 1, (
+        "A list-wrapped restriction on a SourceA-only field matched rows of "
+        "SourceB, which has no a_id column."
+    )
+
+
+def test_composite_restrict_andlist_scoped_to_part(merge_repro):
+    """AndList([{part-only field}]) must not match a part lacking it."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & dj.AndList([{"a_id": 1}])) == 1, (
+        "An AndList-wrapped restriction on a SourceA-only field matched "
+        "rows of SourceB, which has no a_id column."
+    )
+
+
+def test_composite_restrict_not_is_set_complement(merge_repro):
+    """Not() on a part-only field returns the set complement."""
+    M = merge_repro["MergeRepro"]()
+    restriction = {"a_id": 1}
+    matching = len(M & restriction)
+    complement = len(M & dj.Not(restriction))
+    assert complement == len(M) - matching, (
+        f"Not({restriction}) returned {complement} rows; the complement "
+        f"must hold the other {len(M) - matching}, including the SourceB "
+        "row, which has no a_id column to exclude it."
+    )
+
+
+def test_composite_restrict_with_source_scoped_to_part(merge_repro):
+    """A source dict inside an OrList selects only that part's rows."""
+    M = merge_repro["MergeRepro"]()
+    result = len(M & [{"source": "SourceB"}, {"a_id": 1}])
+    assert result == len(M & {"source": "SourceB"}) + len(M & {"a_id": 1}), (
+        f"OR of a source dict and a part-only dict returned {result} rows; "
+        "each leaf must apply only to the part it can describe."
+    )
+
+
+def test_composite_restrict_delete_leaves_other_parts(merge_repro):
+    """Deleting via a list-wrapped restriction must not reach other parts."""
+    M = merge_repro["MergeRepro"]()
+    full, matching = len(M), len(M & {"a_id": 1})
+    (M & [{"a_id": 1}]).delete(safemode=False, force_permission=True)
+    remaining = len(merge_repro["MergeRepro"]())
+    assert remaining == full - matching, (
+        f"Deleting a list-wrapped SourceA-only restriction left "
+        f"{remaining} of {full} rows; it must remove only the {matching} "
+        "matching row(s) and leave SourceB untouched."
+    )
+
+
+def test_fetch_order_by_part_field_global(merge_repro):
+    """order_by may name a part column, and orders the merged whole."""
+    M = merge_repro["MergeRepro"]()
+    asc = M.fetch("part_attr", order_by="part_attr")
+    assert list(asc) == sorted(asc), (
+        f"order_by on a part column returned {list(asc)}; the union carries "
+        "part columns, so ordering must apply across all parts."
+    )
+
+
+def test_fetch_key_plus_attr_unpacks(merge_repro):
+    """fetch('KEY', attr) returns two sequences, not a flattened list."""
+    M = merge_repro["MergeRepro"]()
+    keys, attrs = M.fetch("KEY", "part_attr")
+    assert len(keys) == len(attrs) == len(M), (
+        "fetch('KEY', attr) must return one keys sequence and one value "
+        "sequence; per-part fetching flattened these into 2 pairs."
+    )
+    assert all("merge_id" in k for k in keys), "KEY entries are key dicts."
+
+
+# ------------------- NOT IN / NOT LIKE string restrictions (item 5) ---------
+
+
+def test_string_restrict_not_in_master(pos_merge):
+    """`field NOT IN (...)` on a master column reads the field, not NOT."""
+    full = len(pos_merge)
+    result = len(pos_merge & "source NOT IN ('__nope__')")
+    assert result == full, (
+        f"NOT IN on a master column returned {result} of {full} rows; the "
+        "token before IN is NOT, which must not be read as a field name."
+    )
+
+
+def test_string_restrict_not_like_master(pos_merge):
+    """`field NOT LIKE ...` on a master column worked before this branch."""
+    full = len(pos_merge)
+    result = len(pos_merge & "source NOT LIKE '__nope__%'")
+    assert (
+        result == full
+    ), f"NOT LIKE on a master column returned {result} of {full} rows."
+
+
+def test_string_restrict_not_in_part_field(merge_repro):
+    """`field NOT IN (...)` resolves through parts that have the field."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id IN (1)") == 1, "Test setup: a_id=1 matches 1 row."
+    assert len(M & "a_id NOT IN (1)") == 1, (
+        "NOT IN on a part-only column should return SourceA's other row; "
+        "SourceB has no a_id column, so it is dropped."
+    )
+
+
+def test_string_restrict_not_like_part_field(merge_repro):
+    """`field NOT LIKE ...` resolves through parts that have the field."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id NOT LIKE '1'") == 1, (
+        "NOT LIKE on a part-only column should resolve through SourceA "
+        "rather than raising Unknown field 'NOT'."
+    )
+
+
+def test_string_restrict_backtick_part_field(merge_repro):
+    """A backtick-quoted part column resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "`a_id` = 1") == len(M & {"a_id": 1}) == 1, (
+        "A backtick-quoted part column should route like the bare name; "
+        "DataJoint's parser reads it."
+    )
+
+
+def test_string_restrict_function_call_part_field(merge_repro):
+    """A part column inside a function call resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "lower(a_id) = '1'") == 1, (
+        "A part column wrapped in a function should route through parts; "
+        "the parser strips the function name, not the column."
+    )
+
+
+def test_string_restrict_between_part_field(merge_repro):
+    """BETWEEN on a part column resolves through parts."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M & "a_id BETWEEN 1 AND 1") == 1, (
+        "BETWEEN on a part column should route through parts rather than "
+        "reaching the master, which has no such column."
+    )
+
+
+# ------------- delete_upstream atomicity (item 7) ---------------------------
+
+
+def test_delete_upstream_declined_leaves_all_rows(merge_repro, monkeypatch):
+    """Answering anything but yes deletes neither merge nor upstream rows."""
+    M = merge_repro["MergeRepro"]()
+    SourceA = merge_repro["SourceA"]()
+    before, source_before = len(M), len(SourceA)
+
+    monkeypatch.setattr(
+        "spyglass.utils.dj_merge_tables.user_choice", lambda *a, **k: "no"
+    )
+    (M & {"source": "SourceA"}).delete_upstream(dry_run=False)
+
+    assert (
+        len(merge_repro["MergeRepro"]()) == before
+    ), "A declined confirmation must leave the merge entries in place."
+    assert (
+        len(merge_repro["SourceA"]()) == source_before
+    ), "A declined confirmation must leave the upstream rows in place."
+
+
+def test_delete_upstream_parent_failure_rolls_back(merge_repro, monkeypatch):
+    """A failed upstream delete leaves the merge entries in place."""
+    M = merge_repro["MergeRepro"]()
+    before = len(M)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated parent delete failure")
+
+    monkeypatch.setattr(dj.Table, "delete", boom)
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        (M & {"source": "SourceA"}).delete_upstream(
+            dry_run=False, safemode=False
+        )
+
+    monkeypatch.undo()
+    assert len(merge_repro["MergeRepro"]()) == before, (
+        f"{before - len(merge_repro['MergeRepro']())} merge entr(ies) were "
+        "deleted despite the upstream delete failing; the transaction must "
+        "roll back."
+    )
+
+
+def test_delete_upstream_no_matching_part(merge_repro):
+    """A restriction matching no part returns rather than raising."""
+    M = merge_repro["MergeRepro"]()
+    before = len(M)
+    (M & "FALSE").delete_upstream(dry_run=False, safemode=False)
+    assert len(merge_repro["MergeRepro"]()) == before, (
+        "A restriction matching no part should delete nothing, not raise "
+        "AttributeError on _merge_repr returning None."
+    )
+
+
+def test_repr_does_not_materialize_merge_ids(merge_repro, monkeypatch):
+    """An unrestricted table resolves parts by subquery, not by fetching ids."""
+    M = merge_repro["MergeRepro"]()
+    restriction = M._resolve_top_restriction()
+    assert isinstance(restriction, dj.expression.QueryExpression), (
+        f"Expected a subquery, got {type(restriction).__name__}; an "
+        "unrestricted table must not load its merge_ids."
+    )
+    assert "merge_id" in restriction.heading.names
+
+
+def test_resolve_top_restriction_materializes_for_top(merge_repro):
+    """dj.Top still materializes: MySQL rejects LIMIT in an IN subquery."""
+    M = merge_repro["MergeRepro"]()
+    restriction = (M & dj.Top(limit=1))._resolve_top_restriction()
+    assert isinstance(restriction, list) and len(restriction) == 1, (
+        f"Top(limit=1) should materialize one merge_id key, got "
+        f"{restriction!r}."
+    )
+
+
+def test_populate_signature_matches_datajoint(pos_merge):
+    """`populate` takes restrictions, as DataJoint's does."""
+    import inspect
+
+    params = inspect.signature(type(pos_merge).populate).parameters
+    kinds = [p.kind for p in params.values()]
+    assert inspect.Parameter.VAR_POSITIONAL in kinds, (
+        f"Merge.populate takes {list(params)}; it should accept "
+        "*restrictions like DataJoint's populate."
+    )
+
+
+# ------------- fetch(format="array") parity (item 10) -----------------------
+
+
+def test_fetch_array_format_matches_fetch(merge_repro):
+    """fetch(format="array") returns the same columns as fetch()."""
+    M = merge_repro["MergeRepro"]()
+    assert M.fetch(format="array").dtype.names == M.fetch().dtype.names, (
+        "A no-field fetch and an explicit format='array' fetch must agree; "
+        "format='array' is DataJoint's own default."
+    )
+
+
+def test_fetch_array_format_includes_source(merge_repro):
+    """format="array" carries `source`, as the other output shapes do."""
+    M = merge_repro["MergeRepro"]()
+    names = M.fetch(format="array").dtype.names
+    assert "source" in names and "a_id" in names, (
+        f"format='array' returned {names}; it should read the merged union, "
+        "not the master alone."
+    )
+
+
+def test_master_only_fetch_still_master_only(merge_repro):
+    """Naming only master fields keeps the read on the master."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M.fetch("merge_id")) == len(M)
+    assert set(M.super_fetch(as_dict=True)[0]) == {"merge_id", "source"}
+    one = M & {"part_attr": 2}  # matches exactly 1 SourceA row
+    assert isinstance(one.fetch1("KEY", "part_attr")[0], dict)
+
+
+def test_projection_fetch_does_not_recurse(merge_repro):
+    """Fetching a projection of a Merge Table terminates."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.proj().fetch()
+    assert len(rows) == len(M), (
+        "proj().fetch() keeps this class, so it re-enters fetch; it must "
+        "resolve rather than recurse."
+    )
+
+
+def test_populate_end_to_end(merge_repro):
+    """populate() runs the real source populate and inserts one part.
+
+    The mock-based populate tests stub `source_class_dict`; this one resolves
+    it for real, against the two Computed sources of `merge_repro`.
+    """
+    M = merge_repro["MergeRepro"]()
+    M.super_delete(warn=False, safemode=False)
+    assert len(M) == 0, "Test setup: merge table starts empty."
+
+    inserted = M.populate({"source": "SourceA"})
+
+    assert inserted == {
+        "SourceA": 2
+    }, f"Expected 2 SourceA rows inserted, got {inserted}."
+    assert {r["source"] for r in M.super_fetch(as_dict=True)} == {"SourceA"}, (
+        "populate({'source': ...}) must not insert a sibling part; "
+        "_merge_insert scans every part when part_name is not forwarded."
+    )
+
+
+def test_source_class_dict_resolves(merge_repro):
+    """source_class_dict finds both fixture sources."""
+    M = merge_repro["MergeRepro"]()
+    assert set(M.source_class_dict) == {"SourceA", "SourceB"}

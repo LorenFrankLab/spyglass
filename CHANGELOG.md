@@ -40,6 +40,34 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
+#### Merge Table API Matches DataJoint (#1583)
+
+`&`, `fetch`, `fetch1`, `populate` and the part and parent getters now behave as
+they do on an ordinary DataJoint table. The `merge_*` class methods are
+deprecated and will be removed in Spyglass 0.7.0. The Merge Tables page lists
+[each replacement and every behaviour change](./Features/Merge.md#deprecated-api).
+
+**Impact**: `&` and `fetch` resolve part-table fields, so a restriction naming
+one selects the intended rows rather than the whole table. A no-field `fetch()`
+returned `merge_id` and `source`, and now returns every part column as well, so
+code that indexes columns by position sees more of them.
+
+**Migration guide**:
+
+```python
+# OLD
+part = MergeTable.merge_get_part(key)
+parent = MergeTable.merge_get_parent(key)
+MergeTable().merge_populate("MySource", keys)
+master_rows = MergeTable().fetch()
+
+# NEW
+part = (MergeTable & key).get_part_table()[0]
+parent = (MergeTable & key).get_parent_table()
+MergeTable().populate({"source": "MySource"}, keys)
+master_rows = MergeTable().super_fetch()
+```
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641

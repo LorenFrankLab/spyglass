@@ -16,8 +16,10 @@ def lfp_analysis_raw(common, lfp, populate_lfp, mini_dict):
 
 @pytest.fixture(scope="session")
 def lfp_band_sampling_rate(lfp, lfp_merge_key):
-    yield lfp.LFPOutput.merge_get_parent(lfp_merge_key).fetch1(
-        "lfp_sampling_rate"
+    yield (
+        (lfp.LFPOutput & lfp_merge_key)
+        .get_parent_table()
+        .fetch1("lfp_sampling_rate")
     )
 
 

@@ -408,3 +408,43 @@ def test_custom_analysis_in_export(gen_export_selection, populate_export):
     assert any(
         custom_abs_path in fp for fp in file_paths
     ), f"Custom file {custom_abs_path} not in export files"
+
+
+# ==================== deprecate_log positional-arg compatibility ============
+
+
+@pytest.fixture
+def activity_log(common):
+    yield common.common_usage.ActivityLog()
+
+
+def test_deprecate_log_positional_compat(activity_log, caplog):
+    """deprecate_log must accept the pre-existing (name, alt, warning, doc)
+    positional call convention.
+
+    ``version`` was inserted before ``doc`` in the current signature
+    (``name, alt=None, warning=True, version="0.7.0", doc=None``); a 4th
+    positional argument intended as ``doc`` would silently land in
+    ``version`` instead, corrupting the deprecation message for any
+    external caller still using the original positional order.
+    """
+    import logging
+
+    from spyglass.common.common_usage import _warned_functions
+
+    name = "positional_compat_test"
+    _warned_functions.discard(name)
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        activity_log.deprecate_log(
+            name, "use_this_instead", True, "http://doc.example"
+        )
+
+    assert "Migration guide: http://doc.example" in caplog.text, (
+        "4th positional arg (doc) must land in the doc slot, not be "
+        "swallowed by version."
+    )
+    assert "Spyglass 0.7.0" in caplog.text, (
+        "version must keep its documented default when passed positionally "
+        "up through doc, not get overwritten by the doc value."
+    )

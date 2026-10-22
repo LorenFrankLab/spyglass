@@ -1159,7 +1159,7 @@ def lin_merge(pos_merge_tables):
 
 @pytest.fixture(scope="session")
 def pos_merge_key(pos_merge, trodes_pos_v1, trodes_sel_keys):
-    yield pos_merge.merge_get_part(trodes_sel_keys[-1]).fetch1("KEY")
+    yield (pos_merge & trodes_sel_keys[-1]).fetch1("KEY")
 
 
 # ---------------------- FIXTURES, LINEARIZATION TABLES ----------------------
@@ -1283,7 +1283,7 @@ def lin_v1(teardown, sgpl, lin_sel):
 
 @pytest.fixture(scope="session")
 def lin_merge_key(lin_merge, lin_v1, lin_sel_key):
-    yield lin_merge.merge_get_part(lin_sel_key).fetch1("KEY")
+    yield (lin_merge & lin_sel_key).fetch1("KEY")
 
 
 # --------------------------- FIXTURES, LFP TABLES ---------------------------

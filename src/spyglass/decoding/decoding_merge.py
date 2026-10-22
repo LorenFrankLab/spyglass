@@ -60,7 +60,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
     def _fetch_registered_paths(self, attr):
         """Fetch a filepath attribute from all part parents, skipping missing."""
         paths = []
-        for tbl in self.merge_get_parent(multi_source=True):
+        for tbl in self.get_parent_table(multi_source=True):
             paths.extend(tbl.fetch(attr).tolist())
         return paths
 

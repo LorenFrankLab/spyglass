@@ -70,7 +70,9 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, alt=None, warning=True, doc=None) -> None:
+    def deprecate_log(
+        cls, name, alt=None, warning=True, doc=None, *, version="0.7.0"
+    ) -> None:
         """Log a deprecation warning for a feature.
 
         Parameters
@@ -83,10 +85,15 @@ class ActivityLog(dj.Manual):
             Whether to log a warning. Default is True.
         doc : str, optional
             URL of the migration guide. Default no such message.
+        version : str, optional
+            Keyword-only. Spyglass version when removal is scheduled, so a
+            positional call matching the pre-existing
+            ``(name, alt, warning, doc)`` signature can't silently shift its
+            ``doc`` argument into this slot. Default "0.7.0".
         """
         if warning and name not in _warned_functions:
             _warned_functions.add(name)
-            msg = f"DEPRECATION scheduled for Spyglass 0.7.0: {name}"
+            msg = f"DEPRECATION scheduled for Spyglass {version}: {name}"
             if alt:
                 msg += f"\n\tUse instead: {alt}"
             if doc:

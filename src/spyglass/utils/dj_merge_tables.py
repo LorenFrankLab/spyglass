@@ -1,4 +1,7 @@
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import partial
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
@@ -6,10 +9,16 @@ from time import time
 from typing import List, Union
 
 import datajoint as dj
-from datajoint.condition import make_condition
+import numpy as np
+from datajoint.condition import extract_column_names, make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, get_master, to_camel_case
+from datajoint.utils import (
+    from_camel_case,
+    get_master,
+    to_camel_case,
+    user_choice,
+)
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
@@ -19,6 +28,22 @@ from spyglass.utils.mixins.export import ExportMixin
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
+
+# True while a master-only read is in progress. Re-entrancy guard for
+# DataJoint's own refetch of a projection; see Merge.fetch
+MASTER_FETCH_FLAG = ContextVar("MASTER_FETCH_FLAG", default=False)
+
+
+@contextmanager
+def _master_fetch():
+    """Mark the enclosed read as master-only."""
+    token = MASTER_FETCH_FLAG.set(True)
+    try:
+        yield
+    finally:
+        MASTER_FETCH_FLAG.reset(token)
+
+
 MERGE_DEFINITION = (
     f"\n    {RESERVED_PRIMARY_KEY}: uuid\n    ---\n"
     + f"    {RESERVED_SECONDARY_KEY}: varchar({RESERVED_SK_LENGTH})\n    "
@@ -52,13 +77,30 @@ def is_merge_table(table):
 
 
 class Merge(ExportMixin, dj.Manual):
-    """Adds funcs to support standard Merge table operations.
+    """Mixin for Merge tables: master table with one part per upstream pipeline.
 
-    Many methods have the @classmethod decorator to permit MergeTable.method()
-    syntax. This makes access to instance attributes (e.g., (MergeTable &
-    "example='restriction'").restriction) harder, but these attributes have
-    limited utility when the user wants to, for example, restrict the merged
-    view rather than the master table itself.
+    Preferred usage (instance methods on a restricted table)::
+
+        result = MergeTable & {"nwb_file_name": "session.nwb"}
+        result.fetch("lfp_sampling_rate")   # walks parts automatically
+        result.get_part_table()             # Merge Part table for restriction
+        result.get_parent_table()           # upstream source table
+        result.view()                       # print merged union
+        result.delete()                     # delete master + part entries
+        result.delete_upstream(dry_run=True)# delete upstream source rows
+
+    The ``&`` operator resolves part-table fields automatically: both dict
+    restrictions (``{"nwb_file_name": "session.nwb"}``) and string
+    restrictions (``'nwb_file_name LIKE "mini%"'``) that reference part-table
+    field names are resolved to matching ``merge_id`` sets before the master
+    is restricted.
+
+    Use ``super_restrict()`` / ``super_fetch()`` to bypass part-resolution and
+    operate on the master table directly.
+
+    Deprecated class methods (``merge_X``) still work but emit a warning and
+    will be removed in Spyglass 0.7.0. See the migration table in the
+    Merge Tables documentation.
     """
 
     def __init__(self):
@@ -79,7 +121,481 @@ class Merge(ExportMixin, dj.Manual):
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
                     )
+
         self._source_class_dict = {}
+
+    # ----------------------- Part-field restriction helpers ------------------
+
+    _MASTER_ONLY_ATTRS = frozenset(
+        [RESERVED_PRIMARY_KEY, RESERVED_SECONDARY_KEY]
+    )
+    _DJ_SPECIAL_ATTRS = frozenset(["KEY"])
+
+    def _has_non_master_fields(self, restriction) -> bool:
+        """True if restriction dict contains keys absent from master heading."""
+        if not isinstance(restriction, dict):
+            return False
+        return any(k not in self.heading.names for k in restriction)
+
+    # Composite restriction wrappers whose elements should be checked
+    # recursively for part-only fields, mirroring how DataJoint's own
+    # ``make_condition`` recurses through them (see datajoint/condition.py).
+    _COMPOSITE_RESTRICTION_TYPES = (list, tuple, set)
+
+    def _restriction_has_part_field(self, restriction) -> bool:
+        """True if any leaf of a (possibly composite) restriction is part-only.
+
+        Recurses through ``Not``, ``AndList``, and plain sequences (the
+        ``list``/``tuple``/``set`` OrList convention), so a composite
+        restriction resolves through the parts like a bare dict or string.
+        """
+        if isinstance(restriction, dj.condition.Not):
+            return self._restriction_has_part_field(restriction.restriction)
+        if isinstance(restriction, dict):
+            return self._has_non_master_fields(restriction)
+        if isinstance(restriction, str):
+            return self._string_has_part_field(restriction)
+        if isinstance(
+            restriction,
+            (dj.condition.AndList, *self._COMPOSITE_RESTRICTION_TYPES),
+        ):
+            return any(
+                self._restriction_has_part_field(item) for item in restriction
+            )
+        return False
+
+    @classmethod
+    def _restriction_for_part(cls, restriction, part, lenient=False):
+        """Rewrite a restriction so each leaf applies to one part table.
+
+        A dict naming a column the part lacks, or a ``source`` naming a
+        different part, becomes ``False``. A ``Not`` over a part-only column
+        therefore gives the set complement: parts lacking that column
+        contribute all of their rows.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten; others
+            pass through so DataJoint applies them unchanged.
+        part : dj.Table
+            Part table to rewrite the restriction for.
+        lenient : bool
+            Default False. When True, a dict naming a column the part lacks
+            keeps only the shared columns, as DataJoint does. Set from
+            ``add_invalid_restrict`` for callers that restrict parts by a
+            fetched row, such as ``fetch_nwb``.
+
+        Returns
+        -------
+        dict, bool, str, list, AndList, Not, or QueryExpression
+            The restriction as it applies to ``part``.
+        """
+        return cls._restriction_for_names(
+            restriction,
+            names=set(part.heading.names),
+            source_name=cls._part_name(part),
+            lenient=lenient,
+        )
+
+    @classmethod
+    def _restriction_for_names(
+        cls, restriction, names, source_name, lenient=False
+    ):
+        """Rewrite a restriction for one heading, by column name.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten.
+        names : set of str
+            Column names the target has.
+        source_name : str
+            CamelCase part name a ``source`` value is matched against.
+        lenient : bool
+            Default False. See ``_restriction_for_part``.
+
+        Returns
+        -------
+        dict, bool, str, list, AndList, Not, or QueryExpression
+            The restriction as it applies to that heading.
+        """
+        recurse = partial(
+            cls._restriction_for_names,
+            names=names,
+            source_name=source_name,
+            lenient=lenient,
+        )
+        if isinstance(restriction, dj.condition.Not):
+            return dj.Not(recurse(restriction.restriction))
+        if isinstance(restriction, dict):
+            restriction = dict(restriction)  # copy: don't mutate caller's dict
+            source = restriction.pop(RESERVED_SECONDARY_KEY, None)
+            if source is not None and source != source_name:
+                return False
+            if not set(restriction) <= names:
+                if not lenient:
+                    return False
+                restriction = {  # as DataJoint does: keep the shared columns
+                    k: v for k, v in restriction.items() if k in names
+                }
+            return restriction or True
+        if isinstance(restriction, dj.condition.AndList):  # before list check
+            return dj.AndList(recurse(item) for item in restriction)
+        if isinstance(restriction, cls._COMPOSITE_RESTRICTION_TYPES):
+            return [recurse(item) for item in restriction]
+        return restriction
+
+    def _drop_unknown_dict_fields(self, restriction):
+        """Drop dict keys unknown to every heading, as DataJoint does.
+
+        Spyglass code routinely restricts by a full upstream ``key`` carrying
+        fields no merge heading has, e.g. ``PoseGroup.fetch_pose_datasets``
+        passing ``{"pose_group_name": ..., "merge_id": ...}``. DataJoint
+        ignores such keys, so they are dropped here rather than rejected.
+
+        Mirrors ``_restriction_has_part_field``'s traversal so composite
+        restrictions (list/AndList/Not) are rewritten the same way.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten.
+
+        Returns
+        -------
+        dict, str, list, AndList, Not, or QueryExpression
+            The restriction with unknown dict keys removed.
+
+        Raises
+        ------
+        DataJointError
+            If a non-empty dict leaf has no known key at all, which DataJoint
+            answers with the whole table.
+        """
+        if isinstance(restriction, dj.condition.Not):
+            return dj.Not(
+                self._drop_unknown_dict_fields(restriction.restriction)
+            )
+        if isinstance(restriction, dict):
+            known = self._get_all_heading_fields()
+            kept = {k: v for k, v in restriction.items() if k in known}
+            if restriction and not kept:
+                raise DataJointError(
+                    f"No field of {restriction!r} is an attribute of the "
+                    "merge master or any part table."
+                )
+            return kept
+        if isinstance(restriction, dj.condition.AndList):  # before list check
+            return dj.AndList(
+                self._drop_unknown_dict_fields(item) for item in restriction
+            )
+        if isinstance(restriction, self._COMPOSITE_RESTRICTION_TYPES):
+            return [
+                self._drop_unknown_dict_fields(item) for item in restriction
+            ]
+        return restriction
+
+    def _resolve_restriction_to_merge_ids(self, restriction) -> list:
+        """Return merge_ids matching a part-table-field restriction.
+
+        ``(M & r).delete()`` would fail bc MySQL refuses a DELETE whose WHERE
+        subquery names the table being deleted from (error 1093).
+        """
+        parts = self._merge_restrict_parts(
+            restriction=restriction,
+            as_objects=True,
+            return_empties=False,
+            add_invalid_restrict=False,
+        )
+        return [
+            mid
+            for part in parts
+            for mid in part.fetch(RESERVED_PRIMARY_KEY, as_dict=False).tolist()
+        ]
+
+    def _get_part_only_fields(self) -> frozenset:
+        """Field names that exist in parts but not in the master heading."""
+        self._ensure_dependencies_loaded()
+        master_names = frozenset(self.heading.names)
+        return (
+            frozenset(
+                name
+                for part in self.parts(as_objects=True)
+                for name in part.heading.names
+            )
+            - master_names
+        )
+
+    def _get_all_heading_fields(self) -> frozenset:
+        """Field names known to the master heading or any part heading."""
+        self._ensure_dependencies_loaded()
+        return frozenset(self.heading.names) | frozenset(
+            name
+            for part in self.parts(as_objects=True)
+            for name in part.heading.names
+        )
+
+    def _string_has_part_field(self, restriction: str) -> bool:
+        """True if a SQL string restriction references a part-table-only field.
+
+        Column names come from DataJoint's ``extract_column_names``, the same
+        parser it uses to populate ``restriction_attributes``. It drops quoted
+        literals, reads backtick-quoted names, strips function names, and
+        excludes SQL keywords, so ``x NOT IN (...)``, ``x BETWEEN a AND b``
+        and ``lower(x) = 'y'`` all resolve to ``x``.
+
+        Raises
+        ------
+        DataJointError
+            If no extracted name belongs to the master or any part table.
+            A name unknown alongside a known one is left to DataJoint, as
+            unknown dict keys are.
+        """
+        fields = {f.lower() for f in extract_column_names(restriction)}
+        if not fields:
+            return False
+        known = {f.lower() for f in self._get_all_heading_fields()}
+        if not fields & known:
+            raise DataJointError(
+                f"No field of restriction {restriction!r} is an attribute of "
+                "the merge master or any part table."
+            )
+        part_only = {f.lower() for f in self._get_part_only_fields()}
+        return bool(fields & part_only)
+
+    def _resolve_top_restriction(self):
+        """Express self's restriction on merge_id alone, for part resolution.
+
+        Master-only fields such as ``source`` are resolved here, against the
+        master, so part resolution receives merge_id and nothing else.
+        ``limit``/``offset``/``order_by`` belong to the union
+        ``_merge_fetch_impl`` builds, not here.
+
+        Returns
+        -------
+        dj.expression.QueryExpression, list, or str
+            A subquery on the master's primary key. Under ``dj.Top``, a list
+            of merge_id keys, or "FALSE" when none match: MySQL rejects LIMIT
+            inside an IN subquery.
+        """
+        master = self._master_only()
+        if self._top is None:
+            return master.proj()
+        limited_ids = master.fetch(RESERVED_PRIMARY_KEY)
+        return (
+            [{RESERVED_PRIMARY_KEY: mid} for mid in limited_ids]
+            if len(limited_ids)
+            else "FALSE"
+        )
+
+    def restrict(self, restriction, *args, **kwargs):
+        """Resolve part-table fields before restricting master.
+
+        Dict restrictions whose keys are absent from the master heading and
+        string restrictions referencing part-table field names are resolved to
+        matching ``merge_id`` sets before the master is restricted.
+        ``dj.Top`` restrictions are delegated to DataJoint core unchanged.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, or dj.condition
+            Restriction to apply. Part-table fields are resolved through parts;
+            master-only fields (``merge_id``, ``source``) restrict directly.
+        *args, **kwargs
+            Forwarded to ``ExportMixin.restrict``.
+
+        Returns
+        -------
+        Merge
+            The merge table restricted to matching ``merge_id`` rows.
+
+        Raises
+        ------
+        DataJointError
+            If a string restriction references a field unknown to both the
+            master and every part table, or if a dict restriction has no
+            known field at all.
+
+        Notes
+        -----
+        A part-field restriction resolves to merge_id values when ``&`` is
+        evaluated, so a stored query is a snapshot. Re-apply the restriction
+        to pick up rows inserted since.
+        """
+        # Drop unknown dict keys before the part-field check, so a master-only
+        # restriction carrying one still takes the master path
+        restriction = self._drop_unknown_dict_fields(restriction)
+        if self._restriction_has_part_field(restriction):
+            merge_ids = self._resolve_restriction_to_merge_ids(restriction)
+            restriction = (
+                [{RESERVED_PRIMARY_KEY: mid} for mid in merge_ids]
+                if merge_ids
+                else "FALSE"
+            )
+        return super().restrict(restriction, *args, **kwargs)
+
+    def super_restrict(self, restriction):
+        """Raw DataJoint restrict on master only, bypasses part resolution.
+
+        Use when you intentionally want to restrict on master-only fields
+        (``merge_id``, ``source``) without triggering part-table resolution.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, or dj.condition
+            Restriction applied directly to the master heading. Part-table
+            fields are silently ignored (raw DataJoint behavior).
+
+        Returns
+        -------
+        Merge
+            The merge master restricted without part resolution.
+        """
+        return super().restrict(restriction)
+
+    def fetch(self, *attrs, log_export=True, **kwargs):
+        """Fetch through the merged union unless the request is master-only.
+
+        Overrides ExportMixin.fetch.  Use ``super_fetch()`` for a raw
+        master-only fetch when part resolution is unwanted.
+
+        The union carries ``source`` from the master and every part's
+        columns, so master and part attributes can be requested together and
+        ``limit``/``offset``/``order_by`` apply to the merged whole. A
+        ``dj.Top`` restriction is materialised into a merge_id set first, so
+        its row-count contract is preserved.
+
+        Parameters
+        ----------
+        *attrs : str
+            Attributes to fetch. A request consisting only of master-only
+            attrs (``merge_id``, ``source``, ``KEY``) is served from the
+            master directly.
+        log_export : bool
+            Default True. During export, log this fetch as an export event.
+        **kwargs
+            Forwarded to the underlying DataJoint ``fetch`` (e.g. ``as_dict``,
+            ``format``, ``limit``, ``order_by``).
+
+        Returns
+        -------
+        np.ndarray, list, or pd.DataFrame
+            Merged part-table contents, with type determined by ``kwargs``.
+            Columns a given part lacks are NULL, or 0 when numeric.
+        """
+        # Inside a master-only read, DataJoint re-enters here: given attrs,
+        # its Fetch.__call__ projects the receiver and fetches that with no
+        # attrs and format="array" (datajoint/fetch.py:206-217), and proj
+        # keeps the receiver's class. Stay on the master for that inner call.
+        if MASTER_FETCH_FLAG.get() and not attrs:
+            return super().fetch(*attrs, log_export=log_export, **kwargs)
+
+        if attrs and all(
+            a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
+        ):
+            with _master_fetch():
+                return super().fetch(*attrs, log_export=log_export, **kwargs)
+
+        return self._merge_fetch_impl(
+            *attrs,
+            restriction=self._resolve_top_restriction(),
+            log_export=log_export,
+            **kwargs,
+        )
+
+    def fetch1(self, *attrs, log_export=True, **kwargs):
+        """Fetch exactly one entry, walking parts like fetch().
+
+        Follows DataJoint convention for the return shape.
+
+        Parameters
+        ----------
+        *attrs : str
+            Attributes to fetch. Master-only attrs bypass part-walking.
+        log_export : bool
+            Default True. During export, log this fetch as an export event.
+        **kwargs
+            Forwarded to ``fetch``. Output-shaping kwargs (``as_dict``,
+            ``format``) are rejected; see Raises.
+
+        Returns
+        -------
+        dict, scalar, or tuple
+            A dict (no attrs), a scalar (one attr), or a tuple (multiple
+            attrs).
+
+        Raises
+        ------
+        DataJointError
+            If the restricted table contains other than 1 row; if an
+            output-shaping kwarg (``as_dict``, ``format``) is passed (use
+            ``fetch()``); or if the requested attributes are absent from
+            any part table.
+        """
+        if attrs and all(
+            a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
+        ):
+            with _master_fetch():
+                return super().fetch1(*attrs, log_export=log_export, **kwargs)
+
+        incompatible = {"as_dict", "format"} & set(kwargs)
+        if incompatible:
+            raise DataJointError(
+                f"Merge.fetch1 does not support {sorted(incompatible)}; it "
+                "always returns a dict (no attrs), a scalar (one attr), or a "
+                "tuple (multiple attrs). Use fetch() for other output formats."
+            )
+
+        n = len(self)
+        if n != 1:
+            raise DataJointError(
+                f"fetch1 expected exactly 1 entry, but found {n}."
+            )
+
+        # DataJoint's as_dict absorbs 'KEY' into the primary-key names, so
+        # read it from the master, where it is well defined
+        fetch_attrs = tuple(a for a in attrs if a not in self._DJ_SPECIAL_ATTRS)
+        rows = self.fetch(
+            *fetch_attrs,
+            log_export=log_export,
+            as_dict=True,
+            **kwargs,
+        )
+        if not rows:
+            raise DataJointError(
+                f"fetch1 matched {n} row(s) by count but could not retrieve "
+                f"the requested attributes {list(attrs)} from any part table. "
+                "Verify that the attributes exist in the relevant part table."
+            )
+        row = rows[0]
+        if "KEY" in attrs:
+            with _master_fetch():
+                row = {**row, "KEY": super().fetch1("KEY")}
+        if not attrs:
+            return row
+        if len(attrs) == 1:
+            return row[attrs[0]]
+        return tuple(row[a] for a in attrs)
+
+    def super_fetch(self, *args, **kwargs):
+        """Raw fetch on master table only (merge_id, source columns).
+
+        Use when part-walking is unwanted, e.g. listing all merge_ids without
+        resolving part tables.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Forwarded to ``ExportMixin.fetch`` (DataJoint ``fetch``).
+
+        Returns
+        -------
+        np.ndarray or list
+            Master-table contents (``merge_id``, ``source`` only).
+        """
+        with _master_fetch():
+            return super().fetch(*args, **kwargs)
 
     @staticmethod
     def _part_name(part=None):
@@ -114,6 +630,40 @@ class Merge(ExportMixin, dj.Manual):
         return parts
 
     @classmethod
+    def _restrict_one_part(cls, part, restriction, add_invalid_restrict):
+        """Apply a restriction to one part table, rewritten for that part.
+
+        Dict leaves that cannot describe the part become False, so the part is
+        excluded by an empty result rather than by a type check on the
+        restriction's container.
+
+        Parameters
+        ----------
+        part : dj.Table
+            Part table to restrict.
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite for ``part`` and apply.
+        add_invalid_restrict : bool
+            When True, a restriction DataJoint rejects for this part yields
+            the part unrestricted, and ``_restriction_for_part`` keeps only
+            the columns the part shares.
+
+        Returns
+        -------
+        dj.Table or None
+            The restricted part, the unrestricted part when DataJoint rejects
+            the restriction and ``add_invalid_restrict``, else None.
+        """
+        try:
+            return part.restrict(
+                cls._restriction_for_part(
+                    restriction, part, lenient=add_invalid_restrict
+                )
+            )
+        except DataJointError:  # If restriction not valid on given part
+            return part if add_invalid_restrict else None
+
+    @classmethod
     def _merge_restrict_parts(
         cls,
         restriction: str = True,
@@ -133,6 +683,10 @@ class Merge(ExportMixin, dj.Manual):
             Default True. Return empty part tables
         add_invalid_restrict: bool, optional
             Default True. Include part for which the restriction is invalid.
+            Also passed to ``_restriction_for_part`` as ``lenient``, so a
+            dict naming a column the part lacks keeps DataJoint's
+            match-everything behavior here, and restricts the part to no rows
+            when False.
 
         Returns
         ------
@@ -146,39 +700,28 @@ class Merge(ExportMixin, dj.Manual):
         restr_str = make_condition(cls(), restriction, set())
 
         parts_all = cls.parts(as_objects=True)
-        # If the restriction makes ref to a source, we only want that part
+        # A restriction that assigns a source selects that part alone. Match
+        # the whole `source`="X" pattern, which a mere mention of `source`
+        # does not satisfy
+        source_pattern = f'`{RESERVED_SECONDARY_KEY}`="'
         if (
             not return_empties
             and isinstance(restr_str, str)
-            and f"`{cls()._reserved_sk}`" in restr_str
+            and source_pattern in restr_str
         ):
-            parts_all = [
+            source_name = restr_str.split(source_pattern)[1].split('"')[0]
+            parts_all = [  # Only look at source part table
                 part
                 for part in parts_all
-                if from_camel_case(
-                    restr_str.split(f'`{cls()._reserved_sk}`="')[-1].split('"')[
-                        0
-                    ]
-                )  # Only look at source part table
-                in part.full_table_name
+                if from_camel_case(source_name) in part.full_table_name
             ]
-        if isinstance(restriction, dict):  # restr by source already done above
-            _ = restriction.pop(cls()._reserved_sk, None)  # won't work for str
-            # If a dict restriction has all invalid keys, it is treated as True
-            if not add_invalid_restrict:
-                parts_all = [  # so exclude tables w/ nonmatching attrs
-                    p
-                    for p in parts_all
-                    if all([k in p.heading.names for k in restriction.keys()])
-                ]
-
         parts = []
         for part in parts_all:
-            try:
-                parts.append(part.restrict(restriction))
-            except DataJointError:  # If restriction not valid on given part
-                if add_invalid_restrict:
-                    parts.append(part)
+            restricted = cls._restrict_one_part(
+                part, restriction, add_invalid_restrict
+            )
+            if restricted is not None:
+                parts.append(restricted)
 
         if not return_empties:
             parts = [p for p in parts if len(p)]
@@ -231,7 +774,10 @@ class Merge(ExportMixin, dj.Manual):
                 add_invalid_restrict=add_invalid_restrict,
             )
             for parent in part.parents(as_objects=True)  # ID respective parents
-            if cls().table_name not in parent.full_table_name  # Not merge table
+            # Exclude the master, the part's other parent. Compared in full:
+            # a substring test on the table name also excludes a real parent
+            # whose schema happens to contain it.
+            if parent.full_table_name != cls().full_table_name
         ]
         if parent_name:
             part_parents = [
@@ -339,20 +885,25 @@ class Merge(ExportMixin, dj.Manual):
         for row in rows:
             keys = []  # empty to-be-inserted keys
             for part in parts:  # check each part
-                part_name = cls._part_name(part)
+                # Local name for this part, not the part_name filter
+                # `part_name` filter parameter above, or a later row with no
+                # matching part would silently reuse the previous row's name.
+                this_part_name = cls._part_name(part)
                 part_parent = part.parents(as_objects=True)[-1]
                 if part_parent & row:  # if row is in part parent
                     keys = (part_parent & row).fetch("KEY")  # get pk
                     if len(keys) > 1:
                         raise ValueError(
                             "Ambiguous entry. Data has mult rows in "
-                            + f"{part_name}:\n\tData:{row}\n\t{keys}"
+                            + f"{this_part_name}:\n\tData:{row}\n\t{keys}"
                         )
                     key = keys[0]
                     if part & key:
-                        logger.info(f"Key already in part {part_name}: {key}")
+                        logger.info(
+                            f"Key already in part {this_part_name}: {key}"
+                        )
                         continue
-                    master_sk = {cls()._reserved_sk: part_name}
+                    master_sk = {cls()._reserved_sk: this_part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
                     master_pk = {cls()._reserved_pk: uuid}
 
@@ -396,11 +947,158 @@ class Merge(ExportMixin, dj.Manual):
         """
         self._merge_insert(rows, **kwargs)
 
+    # -------------------- Deprecation helper --------------------------------
+
+    @staticmethod
+    def _deprecate(name: str, alt: str) -> None:
+        """Log deprecation warning for a merge method (v0.7.0 removal)."""
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(name=name, alt=alt)
+
+    # ------------- Private implementation methods (no deprecation) -----------
+
+    @classmethod
+    def _merge_restrict_parts_to_tables(
+        cls,
+        restriction: str = True,
+        join_master: bool = False,
+        restrict_part: bool = True,
+        return_empties: bool = False,
+    ) -> list:
+        """Core logic shared by merge_get_part and get_part_table.
+
+        Returns
+        -------
+        list
+            The matching part tables, empty when none match.
+        """
+        # Resolve master-only fields such as `source` against the master, so
+        # the parts receive merge_id alone (see _resolve_top_restriction).
+        restriction = (cls() & restriction)._resolve_top_restriction()
+
+        sources = [
+            cls._part_name(part)
+            for part in cls._merge_restrict_parts(
+                restriction=restriction,
+                as_objects=False,
+                return_empties=return_empties,
+                add_invalid_restrict=False,
+            )
+        ]
+
+        parts = [
+            (
+                getattr(cls, source)().restrict(restriction)
+                if restrict_part
+                else getattr(cls, source)()
+            )
+            for source in sources
+        ]
+        if join_master:
+            parts = [cls * part for part in parts]
+
+        return parts
+
+    @classmethod
+    def _merge_restrict_parents_to_tables(
+        cls,
+        restriction: str = True,
+        join_master: bool = False,
+        multi_source: bool = False,
+        return_empties: bool = False,
+        add_invalid_restrict: bool = True,
+    ):
+        """Core logic shared by merge_get_parent and get_parent_table."""
+        part_parents = cls._merge_restrict_parents(
+            restriction=restriction,
+            as_objects=True,
+            return_empties=return_empties,
+            add_invalid_restrict=add_invalid_restrict,
+        )
+
+        if not multi_source and len(part_parents) != 1:
+            raise ValueError(
+                f"Found {len(part_parents)} potential parents: {part_parents}"
+                + "\n\tTry adding a string restriction when invoking "
+                + "`get_parent_table()`. Or permitting multiple sources with "
+                + "`multi_source=True`."
+            )
+
+        if join_master:
+            part_parents = [cls * part for part in part_parents]
+
+        return part_parents if multi_source else part_parents[0]
+
+    @classmethod
+    def _merge_delete_parent_restricted(
+        cls,
+        restriction: str = True,
+        dry_run: bool = True,
+        **kwargs,
+    ):
+        """Core logic shared by merge_delete_parent and delete_upstream.
+
+        Deletes the upstream rows and lets DataJoint's cascade take the merge
+        entries with them, inside one transaction. The merge rows cannot
+        outlive their source, nor the reverse: a parent delete that fails, or
+        a declined confirmation, leaves everything in place.
+        """
+        # Normalize to merge_id keys against the master first, where master-
+        # only fields such as `source` are valid. Compiled straight through,
+        # a `source` restriction reaches parts that have no such column, so
+        # every part raises and is dropped and this would delete nothing.
+        restriction = (cls() & restriction)._resolve_top_restriction()
+
+        part_parents = cls._merge_restrict_parents(
+            restriction=restriction, as_objects=True, return_empties=False
+        )
+
+        if dry_run:
+            return part_parents
+
+        merge_query = cls._merge_repr(restriction=restriction)
+        if merge_query is None:  # no part matched the restriction
+            logger.info("No merge entries match this restriction.")
+            return
+
+        merge_ids = merge_query.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
+
+        logger.info(
+            f"Deleting {len(merge_ids)} merge entr(ies) by cascade from "
+            + f"{len(part_parents)} upstream table(s): "
+            + ", ".join(p.full_table_name for p in part_parents)
+        )
+
+        safemode = kwargs.get("safemode")
+        safemode = dj.config["safemode"] if safemode is None else safemode
+        if safemode and user_choice("Delete upstream rows?") != "yes":
+            logger.warning("Delete cancelled.")
+            return
+
+        # part_parent is a raw dj.FreeTable (from Table.parents()), not a
+        # SpyglassMixin instance, so it has no cautious_delete and must go
+        # through DataJoint's own Table.delete. force_masters pulls each
+        # merge part and its master into that parent's cascade;
+        # transaction=False puts every parent in the one transaction opened
+        # here, so no parent can be deleted while another fails.
+        with cls().connection.transaction:
+            for part_parent in part_parents:
+                dj.Table.delete(
+                    part_parent,
+                    transaction=False,
+                    safemode=False,
+                    force_masters=True,
+                )
+
+    # -------------------- Deprecated merge_X classmethods -------------------
+
     @classmethod
     def merge_view(cls, restriction: str = True):
-        """Prints merged view, including null entries for unique columns.
+        """Print merged view, including null entries for unique columns.
 
-        Note: To handle this Union as a table-like object, use `merge_resrict`
+        .. deprecated:: 0.7.0
+            Use ``(T & restriction).view()`` instead.
 
         Parameters
         ---------
@@ -408,69 +1106,76 @@ class Merge(ExportMixin, dj.Manual):
             Restriction to apply to the merged view
         """
 
-        # If we overwrite `preview`, we then encounter issues with operators
-        # getting passed a `Union`, which doesn't have a method we can
-        # intercept to manage master/parts
-
+        cls._deprecate("merge_view", "(T & restriction).view()")
         return pprint(cls._merge_repr(restriction=restriction))
 
     @classmethod
     def merge_html(cls, restriction: str = True):
         """Displays HTML in notebooks."""
-
+        cls._deprecate("merge_html", "(T & restriction).html()")
         return HTML(repr_html(cls._merge_repr(restriction=restriction)))
 
     @classmethod
     def merge_restrict(cls, restriction: str = True) -> dj.U:
-        """Given a restriction, return a merged view with restriction applied.
+        """Return a merged Union view with restriction applied.
 
-        Example
-        -------
-            >>> MergeTable.merge_restrict("field = 1")
+        .. deprecated:: 0.7.0
+            Use ``MergeTable & restriction`` instead. The ``&`` operator now
+            resolves part-table fields automatically.
 
         Parameters
         ----------
         restriction: str
-            Restriction one would apply if `merge_view` was a real table.
+            Restriction to apply to the merged view.
 
         Returns
         -------
         datajoint.Union
             Merged view with restriction applied.
         """
+        cls._deprecate("merge_restrict", "T & restriction")
         return cls._merge_repr(restriction=restriction)
 
     @classmethod
     def merge_delete(cls, restriction: str = True, **kwargs):
-        """Given a restriction string, delete corresponding entries.
+        """Delete entries matching restriction from master and part tables.
+
+        .. deprecated:: 0.7.0
+            Use ``(T & restriction).delete()`` instead.
 
         Parameters
         ----------
         restriction: str
-            Optional restriction to apply before deletion from master/part
-            tables. If not provided, delete all entries.
+            Optional restriction. If omitted, deletes all entries.
         kwargs: dict
-            Additional keyword arguments for DataJoint delete.
+            Additional keyword arguments forwarded to DataJoint ``delete``.
 
         Example
         -------
-            >>> MergeTable.merge_delete("field = 1")
+            >>> (MergeTable & "field = 1").delete()
         """
+        cls._deprecate("merge_delete", "(T & restriction).delete()")
+        query = cls._merge_repr(restriction=restriction)
+        if query is None:
+            return  # No parts, nothing to delete
         uuids = [
             {k: v}
-            for entry in cls.merge_restrict(restriction).fetch("KEY")
+            for entry in query.fetch("KEY")
             for k, v in entry.items()
-            if k == cls()._reserved_pk
+            if k == RESERVED_PRIMARY_KEY
         ]
+        if not uuids:
+            return  # Nothing to delete
         (cls() & uuids).delete(**kwargs)
 
     @classmethod
     def merge_delete_parent(
         cls, restriction: str = True, dry_run=True, **kwargs
     ) -> list:
-        """Delete entries from merge master, part, and respective part parents
+        """Delete the part parents and, by cascade, their merge entries.
 
-        Note: Clears merge entries from their respective parents.
+        .. deprecated:: 0.7.0
+            Use ``(T & restriction).delete_upstream(dry_run=...)`` instead.
 
         Parameters
         ----------
@@ -482,27 +1187,19 @@ class Merge(ExportMixin, dj.Manual):
             be deleted. Otherwise, table entries.
         kwargs: dict
             Additional keyword arguments for DataJoint delete.
+
+        Notes
+        -----
+        Runs in one transaction with a single confirmation, so the merge
+        entries cannot be deleted while an upstream row survives.
         """
-        part_parents = cls._merge_restrict_parents(
-            restriction=restriction, as_objects=True, return_empties=False
+        cls._deprecate(
+            "merge_delete_parent",
+            "(T & restriction).delete_upstream(dry_run=...)",
         )
-
-        if dry_run:
-            return part_parents
-
-        merge_ids = cls.merge_restrict(restriction).fetch(
-            RESERVED_PRIMARY_KEY, as_dict=True
+        return cls._merge_delete_parent_restricted(
+            restriction=restriction, dry_run=dry_run, **kwargs
         )
-
-        # CB: Removed transaction protection here bc 'no' confirmation resp
-        # still resulted in deletes. If re-add, consider transaction=False
-        super().delete((cls & merge_ids), **kwargs)
-
-        if cls & merge_ids:  # If 'no' on del prompt from above, skip below
-            return  # User can still abort del below, but yes/no is unlikly
-
-        for part_parent in part_parents:
-            super().delete(part_parent, **kwargs)
 
     def fetch_nwb(
         self,
@@ -607,51 +1304,34 @@ class Merge(ExportMixin, dj.Manual):
 
         Returns
         ------
-        Union[dj.Table, List[dj.Table]]
-            Native part table(s) of Merge. If `multi_source`, returns list.
-
-        Example
-        -------
-            >>> (MergeTable & restriction).get_part_table()
-            >>> MergeTable().merge_get_part(restriction, join_master=True)
+        Union[dj.Table, List[dj.Table], None]
+            Native part table of Merge, None when none match, or a list when
+            `multi_source`.
 
         Raises
         ------
         ValueError
-            If multiple sources are found, but not expected lists and suggests
-            restricting
+            If multiple sources are found and `multi_source` is False.
         """
-        sources = [
-            cls._part_name(part)  # friendly part name
-            for part in cls._merge_restrict_parts(
-                restriction=restriction,
-                as_objects=False,
-                return_empties=return_empties,
-                add_invalid_restrict=False,
-            )
-        ]
-
-        if not multi_source and len(sources) > 1:
+        cls._deprecate(
+            "merge_get_part", "(T & restriction).get_part_table(...)"
+        )
+        parts = cls._merge_restrict_parts_to_tables(
+            restriction=restriction,
+            join_master=join_master,
+            restrict_part=restrict_part,
+            return_empties=return_empties,
+        )
+        if multi_source:
+            return parts
+        if len(parts) > 1:
             raise ValueError(
-                f"Found {len(sources)} potential parts: {sources}\n\t"
+                f"Found {len(parts)} potential parts: "
+                + f"{[cls._part_name(p) for p in parts]}\n\t"
                 + "Try adding a restriction before invoking `get_part`.\n\t"
                 + "Or permitting multiple sources with `multi_source=True`."
             )
-        if len(sources) == 0:
-            return None
-
-        parts = [
-            (
-                getattr(cls, source)().restrict(restriction)
-                if restrict_part  # Re-apply restriction or don't
-                else getattr(cls, source)()
-            )
-            for source in sources
-        ]
-        if join_master:
-            parts = [cls * part for part in parts]
-
-        return parts if multi_source else parts[0]
+        return parts[0] if parts else None
 
     @classmethod
     def merge_get_parent(
@@ -687,26 +1367,16 @@ class Merge(ExportMixin, dj.Manual):
         dj.FreeTable
             Parent of parts of Merge Table as FreeTable.
         """
-
-        part_parents = cls._merge_restrict_parents(
+        cls._deprecate(
+            "merge_get_parent", "(T & restriction).get_parent_table(...)"
+        )
+        return cls._merge_restrict_parents_to_tables(
             restriction=restriction,
-            as_objects=True,
+            join_master=join_master,
+            multi_source=multi_source,
             return_empties=return_empties,
             add_invalid_restrict=add_invalid_restrict,
         )
-
-        if not multi_source and len(part_parents) != 1:
-            raise ValueError(
-                f"Found  {len(part_parents)} potential parents: {part_parents}"
-                + "\n\tTry adding a string restriction when invoking "
-                + "`get_parent`. Or permitting multiple sources with "
-                + "`multi_source=True`."
-            )
-
-        if join_master:
-            part_parents = [cls * part for part in part_parents]
-
-        return part_parents if multi_source else part_parents[0]
 
     @property
     def source_class_dict(self) -> dict:
@@ -740,7 +1410,9 @@ class Merge(ExportMixin, dj.Manual):
         if isinstance(source, dj.Table):
             source = self._part_name(source)
         if isinstance(source, dict):
-            source = self._part_name(self.merge_get_parent(source))
+            source = self._part_name(
+                self.__class__._merge_restrict_parents_to_tables(source)
+            )
 
         return source
 
@@ -774,7 +1446,7 @@ class Merge(ExportMixin, dj.Manual):
         add_invalid_restrict=True,
     ) -> dj.Table:
         """Returns native parent class, restricted with key."""
-        parent = self.merge_get_parent(
+        parent = self.__class__._merge_restrict_parents_to_tables(
             key, add_invalid_restrict=add_invalid_restrict
         )
         parent_key = parent.fetch("KEY", as_dict=True)
@@ -797,6 +1469,8 @@ class Merge(ExportMixin, dj.Manual):
         ----------
         restriction: str
             Optional restriction to apply before determining parent to return.
+            Combined (AND) with any restriction already applied to this
+            instance, e.g. via ``(T & restriction).merge_fetch(...)``.
             Default True.
         log_export: bool
             Default True. During export, log this fetch an export event.
@@ -808,81 +1482,323 @@ class Merge(ExportMixin, dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
-        restriction = self.restriction or restriction
+        self._deprecate("merge_fetch", "(T & restriction).fetch(*attrs)")
+        return self._merge_fetch_impl(
+            *attrs,
+            restriction=dj.AndList([self.restriction or True, restriction]),
+            log_export=log_export,
+            **kwargs,
+        )
+
+    def _merge_fetch_impl(
+        self, *attrs, restriction: str = True, log_export=True, **kwargs
+    ) -> list:
+        """Fetch from the merged union, shared by fetch() and merge_fetch().
+
+        One query answers the whole request. The union ``_merge_repr`` builds
+        joins each applicable part to the master, so ``source`` is available
+        alongside part attributes, and projects every part to the same
+        columns, filling the ones it lacks with NULL or 0. Consequences,
+        against fetching each part separately and concatenating: master and
+        part attributes can be requested together, ``limit``/``offset``/
+        ``order_by`` apply to the merged whole and may name a part column,
+        ``KEY`` keeps DataJoint's shape, and parts with differing headings
+        need no dtype reconciliation.
+        """
+        query = self._merge_repr(restriction=restriction)
+
+        if query is None:  # no part matched the restriction
+            logger.info(
+                "No merge fetch results.\n\t"
+                + "If restricting by source, use a dict: "
+                + "`M.fetch({'source':'X'})`"
+            )
+            return []
 
         if log_export and self.export_id:
             self._log_fetch(  # Transforming restriction to merge_id
-                restriction=self.merge_restrict(restriction).fetch(
-                    RESERVED_PRIMARY_KEY, as_dict=True
-                )
+                restriction=query.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
             )
 
-        results = []
-        parts = self._merge_restrict_parts(
-            restriction=restriction,
-            as_objects=True,
-            return_empties=False,
-            add_invalid_restrict=False,
+        if isinstance(query, dj.expression.Union) and (
+            kwargs.get("limit") is not None
+            or kwargs.get("offset")
+            or kwargs.get("order_by")
+        ):
+            # DataJoint builds a Union's SQL with the ORDER BY and LIMIT
+            # inside the subquery alias, as `` as `_u0 ORDER BY ...` ``
+            # (datajoint/expression.py:806), which MySQL rejects. Wrapping
+            # the union in a plain subquery puts the clauses outside it.
+            query = query.make_subquery()
+
+        return query.fetch(*attrs, **kwargs)
+
+    def merge_populate(self, source: str, keys=None, **kwargs):
+        """Populate source table and insert successes into merge.
+
+        .. deprecated:: 0.7.0
+            Use ``T.populate({"source": source}, keys)`` instead.
+        """
+        self._deprecate(
+            "merge_populate", 'T.populate({"source": source}, keys)'
+        )
+        source_restr = {RESERVED_SECONDARY_KEY: source}
+        if keys is None:
+            return self.populate(source_restr, **kwargs)
+        return self.populate(source_restr, keys, **kwargs)
+
+    # -------------------- Instance-method replacements ----------------------
+
+    def get_part_table(
+        self,
+        join_master: bool = False,
+        restrict_part: bool = True,
+        return_empties: bool = False,
+    ) -> list:
+        """Return the part tables matching self.restriction.
+
+        Instance-method replacement for ``merge_get_part``. Use as
+        ``(T & restriction).get_part_table()``. Returns a list, as
+        DataJoint's ``parts`` does.
+
+        Parameters
+        ----------
+        join_master : bool
+            Default False. Join each part with the master, adding ``source``.
+        restrict_part : bool
+            Default True. Apply this instance's restriction to each part.
+        return_empties : bool
+            Default False. Include parts with no matching row.
+
+        Returns
+        -------
+        list
+            Native part tables of Merge, empty when none match.
+        """
+        return self.__class__._merge_restrict_parts_to_tables(
+            restriction=self.restriction or True,
+            join_master=join_master,
+            restrict_part=restrict_part,
+            return_empties=return_empties,
         )
 
-        for part in parts:
-            try:
-                results.extend(part.fetch(*attrs, **kwargs))
-            except DataJointError as e:
-                logger.warning(
-                    f"{e.args[0]} Skipping "
-                    + to_camel_case(part.table_name.split("__")[-1])
+    def get_parent_table(
+        self,
+        join_master: bool = False,
+        multi_source: bool = False,
+        return_empties: bool = False,
+        add_invalid_restrict: bool = True,
+    ):
+        """Return parent table(s) for self.restriction.
+
+        Instance-method replacement for ``merge_get_parent``. Use as
+        ``(T & restriction).get_parent_table()``.
+        """
+        return self.__class__._merge_restrict_parents_to_tables(
+            restriction=self.restriction or True,
+            join_master=join_master,
+            multi_source=multi_source,
+            return_empties=return_empties,
+            add_invalid_restrict=add_invalid_restrict,
+        )
+
+    def delete_upstream(self, dry_run: bool = True, **kwargs):
+        """Delete the upstream part-parent rows and, by cascade, merge entries.
+
+        Instance-method replacement for ``merge_delete_parent``. Use as
+        ``(T & restriction).delete_upstream(dry_run=True)``.
+
+        Parameters
+        ----------
+        dry_run : bool
+            Default True. Return the part-parent tables that would be deleted
+            from, without deleting.
+        **kwargs
+            Passed to DataJoint's ``delete``. ``safemode`` governs the single
+            confirmation prompt.
+
+        Returns
+        -------
+        list or None
+            The part-parent tables when ``dry_run``, else None.
+
+        Notes
+        -----
+        The upstream rows are deleted first and the merge entries follow by
+        cascade, all in one transaction, so a failed or declined delete leaves
+        both in place. The prompt lists what will be deleted; answering
+        anything but "yes" cancels.
+        """
+        return self.__class__._merge_delete_parent_restricted(
+            restriction=self.restriction or True,
+            dry_run=dry_run,
+            **kwargs,
+        )
+
+    def view(self, include_empties: bool = False):
+        """Return merged preview string for self.restriction.
+
+        Respects ``dj.Top`` limits set via ``T & dj.Top(limit=n)``.
+
+        Parameters
+        ----------
+        include_empties : bool
+            Default False. Include part tables with no matching rows.
+
+        Returns
+        -------
+        str or None
+            The merged preview string, or None when the view is empty.
+        """
+        query = self._merge_repr(
+            restriction=self._resolve_top_restriction(),
+            include_empties=include_empties,
+        )
+        if query is None:
+            return None
+        return query.preview()
+
+    def __repr__(self):
+        """Show the merged preview by default, else the master's."""
+        out = self.view()
+        if out is not None:
+            return out
+        return repr(self._master_only())
+
+    def _master_only(self) -> dj.expression.QueryExpression:
+        """Return a plain DataJoint view of the master, bypassing this class.
+
+        Wraps self as a subquery so ``preview`` and ``proj``, which both keep
+        the receiver's class, operate on the master alone.
+
+        Returns
+        -------
+        dj.expression.QueryExpression
+            The master heading, carrying this instance's restriction and any
+            ``dj.Top``.
+        """
+        return self.make_subquery()
+
+    def super_view(self):
+        """Show master-only preview (no part resolution).
+
+        Returns
+        -------
+        str
+            The raw DataJoint master-table preview (``merge_id``, ``source``).
+        """
+        return repr(self._master_only())
+
+    def _repr_html_(self):
+        """HTML repr for notebooks, showing merged view as HTML string."""
+        query = self._merge_repr(
+            restriction=self._resolve_top_restriction(),
+            include_empties=False,
+        )
+        if query is None:
+            return "<i>&lt;empty&gt;</i>"
+        return repr_html(query)
+
+    def html(self, include_empties: bool = False):
+        """Return HTML merged view for self.restriction (notebooks).
+
+        Instance-method replacement for ``merge_html``. Use as
+        ``(T & restriction).html()``.
+        Respects ``dj.Top`` limits set via ``T & dj.Top(limit=n)``.
+
+        Parameters
+        ----------
+        include_empties : bool
+            Default False. Include part tables with no matching rows.
+
+        Returns
+        -------
+        IPython.core.display.HTML
+            The merged view as HTML; an empty-state placeholder when no rows
+            match.
+        """
+        query = self._merge_repr(
+            restriction=self._resolve_top_restriction(),
+            include_empties=include_empties,
+        )
+        if query is None:
+            return HTML("<i>&lt;empty&gt;</i>")
+        return HTML(repr_html(query))
+
+    def populate(self, *restrictions, **kwargs):
+        """Populate the source tables a restriction names, and insert them.
+
+        Follows DataJoint's ``populate`` signature. Each source's
+        ``key_source`` is restricted, populated, and its new keys inserted
+        into the matching part.
+
+        Parameters
+        ----------
+        *restrictions
+            DataJoint restrictions, applied as a conjunction. A ``source``
+            value selects one part. A source whose ``key_source`` lacks a
+            restricted column is skipped, as is one with no ``key_source``,
+            which DataJoint cannot populate.
+        **kwargs
+            Forwarded to each source's ``populate``.
+
+        Returns
+        -------
+        dict
+            Rows inserted, keyed by source name.
+        """
+        restrictions = restrictions or (True,)
+        inserted = {}
+
+        for source_name, source_class in self.source_class_dict.items():
+            key_source = getattr(source_class, "key_source", None)
+            if key_source is None:
+                logger.info(
+                    f"Skipping {source_name}: inserted directly, not populated."
                 )
+                continue
 
-        # Note: this could collapse results like merge_view, but user may call
-        # for recarray, pd.DataFrame, or dict, and fetched contents differ if
-        # attrs or "KEY" called. Intercept format, merge, and then transform?
+            # Rewrite each restriction for this source. One that cannot
+            # describe it resolves to False, which skips the source rather
+            # than populating it whole.
+            per_source = [
+                self._restriction_for_names(
+                    restr,
+                    names=set(key_source.heading.names),
+                    source_name=source_name,
+                )
+                for restr in restrictions
+            ]
+            if any(restr is False for restr in per_source):
+                continue
 
-        if not results:
-            logger.info(
-                "No merge_fetch results.\n\t"
-                + "If not restricting, try: `M.merge_fetch(True,'attr')\n\t"
-                + "If restricting by source, use dict: "
-                + "`M.merge_fetch({'source':'X'}"
+            keys = (key_source & dj.AndList(per_source)).fetch(
+                "KEY", as_dict=True
             )
-        return results[0] if len(results) == 1 else results
+            if not keys:
+                continue
 
-    def merge_populate(self, source: str, keys=None):
-        """Populate the merge table with entries from the source table."""
-        logger.warning("CBroz: Not fully tested. Use with caution.")
-        parent_class = self.merge_get_parent_class(source)
-        if not keys:
-            keys = parent_class.key_source
-        parent_class.populate(keys)
-        successes = (parent_class & keys).fetch("KEY", as_dict=True)
-        self.insert(successes)
+            source_class.populate(keys, **kwargs)
+            successes = (source_class & keys).fetch("KEY", as_dict=True)
+            if successes:
+                self.insert(
+                    successes, part_name=source_name, skip_duplicates=True
+                )
+            inserted[source_name] = len(successes)
+
+        return inserted
 
     def delete(self, force_permission=False, *args, **kwargs):
-        """Alias for cautious_delete, overwrites datajoint.table.Table.delete
+        """Delete master and all part entries for current restriction.
 
-        Delete all relevant part entries from self.restriction.
+        DataJoint cascades master→part deletions automatically when deleting
+        from the master table, so no need to delete Part rows separately.
+        `force_permission` is forwarded to ``CautiousDeleteMixin.delete``
+        (downstream in the MRO), where it bypasses the delete-permission check.
         """
-        if not (
-            parts := self.merge_get_part(
-                restriction=self.restriction,
-                multi_source=True,
-                return_empties=False,
-            )
-        ):
+        if not len(self):
             return
-
-        _ = kwargs.pop("force_masters", None)  # Part not accept this kwarg
-        for part in parts:
-            part.delete(
-                force_permission=force_permission,
-                force_parts=True,
-                *args,
-                **kwargs,
-            )
-
-        # Delete orphaned master entries, no prompt
-        kwargs["safemode"] = False
-        (self - self.parts(as_objects=True)).super_delete(*args, **kwargs)
+        super().delete(force_permission=force_permission, *args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.

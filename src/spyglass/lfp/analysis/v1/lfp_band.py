@@ -89,7 +89,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
 
         """
         lfp_key = {"merge_id": lfp_merge_id}
-        lfp_part_table = LFPOutput.merge_get_part(lfp_key)
+        lfp_part_table = (LFPOutput & lfp_key).get_part_table()[0]
 
         # Validate inputs
         lfp_electrode_group_name = lfp_part_table.fetch1(
@@ -113,8 +113,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 + f"{electrode_list} not in {available_electrodes}"
             )
         # sampling rate
-        lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
-            "lfp_sampling_rate"
+        lfp_sampling_rate = (
+            (LFPOutput & lfp_key).get_parent_table().fetch1("lfp_sampling_rate")
         )
         # filter
         filter_query = FirFilterParameters() & {
@@ -339,9 +339,11 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             (lfp_sampling_rate, lfp_band_valid_times, interval_list_name,
              lfp_band_sampling_rate, decimation)
         """
-        lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(
-            lfp_key
-        ).fetch1("lfp_sampling_rate", "interval_list_name")
+        lfp_sampling_rate, lfp_interval_list = (
+            (LFPOutput & lfp_key)
+            .get_parent_table()
+            .fetch1("lfp_sampling_rate", "interval_list_name")
+        )
 
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key

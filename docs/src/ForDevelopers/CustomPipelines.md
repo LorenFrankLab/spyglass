@@ -375,7 +375,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     """
 
     def make_assume_one(self, key):
-        parent = SomeMergeTable().merge_get_parent(key)
+        parent = (SomeMergeTable & key).get_parent_table()
         if parent.camel_name != "MyUpstreamTable":
             raise ValueError("This analysis only works with MyUpstreamTable")
         data = (MyUpstreamTable & parent).some_method()
