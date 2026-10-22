@@ -1234,3 +1234,44 @@ def test_populate_signature_matches_datajoint(pos_merge):
         f"Merge.populate takes {list(params)}; it should accept "
         "*restrictions like DataJoint's populate."
     )
+
+
+# ------------- fetch(format="array") parity (item 10) -----------------------
+
+
+def test_fetch_array_format_matches_fetch(merge_repro):
+    """fetch(format="array") returns the same columns as fetch()."""
+    M = merge_repro["MergeRepro"]()
+    assert M.fetch(format="array").dtype.names == M.fetch().dtype.names, (
+        "A no-field fetch and an explicit format='array' fetch must agree; "
+        "format='array' is DataJoint's own default."
+    )
+
+
+def test_fetch_array_format_includes_source(merge_repro):
+    """format="array" carries `source`, as the other output shapes do."""
+    M = merge_repro["MergeRepro"]()
+    names = M.fetch(format="array").dtype.names
+    assert "source" in names and "a_id" in names, (
+        f"format='array' returned {names}; it should read the merged union, "
+        "not the master alone."
+    )
+
+
+def test_master_only_fetch_still_master_only(merge_repro):
+    """Naming only master fields keeps the read on the master."""
+    M = merge_repro["MergeRepro"]()
+    assert len(M.fetch("merge_id")) == len(M)
+    assert set(M.super_fetch(as_dict=True)[0]) == {"merge_id", "source"}
+    one = M & {"part_attr": 2}  # matches exactly 1 SourceA row
+    assert isinstance(one.fetch1("KEY", "part_attr")[0], dict)
+
+
+def test_projection_fetch_does_not_recurse(merge_repro):
+    """Fetching a projection of a Merge Table terminates."""
+    M = merge_repro["MergeRepro"]()
+    rows = M.proj().fetch()
+    assert len(rows) == len(M), (
+        "proj().fetch() keeps this class, so it re-enters fetch; it must "
+        "resolve rather than recurse."
+    )

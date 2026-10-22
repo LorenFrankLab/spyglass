@@ -1,4 +1,6 @@
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import partial
 from inspect import getmodule
 from itertools import chain as iter_chain
@@ -26,6 +28,23 @@ from spyglass.utils.mixins.export import ExportMixin
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
 RESERVED_SK_LENGTH = 32
+
+# True while a master-only read is in progress. DataJoint re-enters fetch on
+# a projection of the receiver, which keeps this class (see Merge.fetch), and
+# that inner call must stay on the master.
+MASTER_FETCH_FLAG = ContextVar("MASTER_FETCH_FLAG", default=False)
+
+
+@contextmanager
+def _master_fetch():
+    """Mark the enclosed read as master-only."""
+    token = MASTER_FETCH_FLAG.set(True)
+    try:
+        yield
+    finally:
+        MASTER_FETCH_FLAG.reset(token)
+
+
 MERGE_DEFINITION = (
     f"\n    {RESERVED_PRIMARY_KEY}: uuid\n    ---\n"
     + f"    {RESERVED_SECONDARY_KEY}: varchar({RESERVED_SK_LENGTH})\n    "
@@ -475,20 +494,18 @@ class Merge(ExportMixin, dj.Manual):
             Merged part-table contents, with type determined by ``kwargs``.
             Columns a given part lacks are NULL, or 0 when numeric.
         """
+        # Inside a master-only read, DataJoint re-enters here: given attrs,
+        # its Fetch.__call__ projects the receiver and fetches that with no
+        # attrs and format="array" (datajoint/fetch.py:206-217), and proj
+        # keeps the receiver's class. Stay on the master for that inner call.
+        if MASTER_FETCH_FLAG.get() and not attrs:
+            return super().fetch(*attrs, log_export=log_export, **kwargs)
+
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
         ):
-            return super().fetch(*attrs, log_export=log_export, **kwargs)
-
-        # DataJoint re-enters fetch() here. Given attrs, its own
-        # Fetch.__call__ projects the receiver and fetches that with no attrs
-        # and format="array" (datajoint/fetch.py:206-217), and proj copies
-        # the receiver's class, so the inner call lands back in this method.
-        # It must read the master: resolving parts again would recurse
-        # through _resolve_top_restriction. A no-attr union fetch is
-        # available as fetch(as_dict=True) or by naming attributes.
-        if not attrs and kwargs.get("format") == "array":
-            return super().fetch(*attrs, log_export=log_export, **kwargs)
+            with _master_fetch():
+                return super().fetch(*attrs, log_export=log_export, **kwargs)
 
         return self._merge_fetch_impl(
             *attrs,
@@ -529,7 +546,8 @@ class Merge(ExportMixin, dj.Manual):
         if attrs and all(
             a in self._MASTER_ONLY_ATTRS | self._DJ_SPECIAL_ATTRS for a in attrs
         ):
-            return super().fetch1(*attrs, log_export=log_export, **kwargs)
+            with _master_fetch():
+                return super().fetch1(*attrs, log_export=log_export, **kwargs)
 
         incompatible = {"as_dict", "format"} & set(kwargs)
         if incompatible:
@@ -566,7 +584,8 @@ class Merge(ExportMixin, dj.Manual):
             )
         row = rows[0]
         if "KEY" in attrs:
-            row = {**row, "KEY": super().fetch1("KEY")}
+            with _master_fetch():
+                row = {**row, "KEY": super().fetch1("KEY")}
         if not attrs:
             return row
         if len(attrs) == 1:
@@ -589,7 +608,8 @@ class Merge(ExportMixin, dj.Manual):
         np.ndarray or list
             Master-table contents (``merge_id``, ``source`` only).
         """
-        return super().fetch(*args, **kwargs)
+        with _master_fetch():
+            return super().fetch(*args, **kwargs)
 
     @staticmethod
     def _part_name(part=None):
