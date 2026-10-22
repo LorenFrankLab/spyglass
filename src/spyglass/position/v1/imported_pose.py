@@ -17,9 +17,8 @@ schema = dj.schema("position_v1_imported_pose")
 def _named_edges(bodyparts, edges_arr):
     """Convert integer-index skeleton edges to name pairs.
 
-    TODO(PR8): ``fetch_skeleton`` repeats this inline. Consolidate both into
-    the skeleton utils once PR3 and PR4 are merged and the module layering
-    allows the import.
+    TODO: ``fetch_skeleton`` repeats this inline. Consolidate both into the
+    skeleton utils once that module is importable here.
 
     Parameters
     ----------
@@ -246,6 +245,6 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
-        # TODO(PR8): duplicates _named_edges; see its docstring.
+        # TODO: duplicates _named_edges; see its docstring.
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]
         return {"nodes": nodes, "edges": named_edges}

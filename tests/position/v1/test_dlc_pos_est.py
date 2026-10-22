@@ -108,7 +108,7 @@ def test_pose_estimation_imports_shared_convert_to_cm():
 
     The two implementations were hand-synced, which is how the integer
     truncation bug came to exist in both. Coverage for the conversion itself
-    lives with the function, in ``tests/position/v2/test_pose_processing.py``.
+    lives with the shared ``convert_to_cm`` rather than here.
     """
     from spyglass.position.utils.pose_processing import convert_to_cm
     from spyglass.position.v1 import position_dlc_pose_estimation
