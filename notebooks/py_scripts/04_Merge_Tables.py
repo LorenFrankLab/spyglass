@@ -85,6 +85,10 @@ sgc.Session & nwb_file_dict
 # _Note_: Some existing parents of Merge Tables perform the Merge Table insert as
 # part of the populate methods. This practice will be revised in the future.
 #
+# `T.populate(restriction)` populates the source tables the restriction applies
+# to and inserts the new keys, replacing a populate-then-insert pair. It
+# returns the rows inserted per source.
+#
 # <!-- TODO: Add entry to another parent to cover mutual exclusivity issues. -->
 #
 
@@ -104,8 +108,7 @@ lfp_key = {
     "filter_sampling_rate": 30_000,
 }
 lfp.v1.LFPSelection.insert1(lfp_key, skip_duplicates=True)
-lfp.v1.LFPV1().populate(lfp_key)
-LFPOutput.insert([lfp_key], skip_duplicates=True)
+LFPOutput().populate(lfp_key)  # populates LFPV1, inserts into the Merge Table
 
 # %% [markdown]
 # ## Helper functions
@@ -129,7 +132,7 @@ LFPOutput.insert([lfp_key], skip_duplicates=True)
 # | `T.merge_get_parent(r, ...)` | `(T & r).get_parent_table(...)` |
 # | `T.merge_delete(r)` | `(T & r).delete()` |
 # | `T.merge_delete_parent(r, dry_run=True)` | `(T & r).delete_upstream(dry_run=True)` |
-# | `T.merge_populate(source, keys)` | `T.populate(source, keys)` |
+# | `T.merge_populate(source, keys)` | `T.populate({"source": source}, keys)` |
 #
 # All `merge_*` methods still work but will be removed in Spyglass 0.7.0.
 #

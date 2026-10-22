@@ -579,24 +579,33 @@ def test_fetch1_incompatible_kwarg(pos_merge, pos_merge_key):
 # ------------------- populate() replacement & deprecation -------------------
 
 
-def _patch_populate_parent(pos_merge, monkeypatch, calls):
-    """Stub merge_get_parent_class + insert to record a populate() call."""
+def _patch_populate_sources(pos_merge, monkeypatch, calls, names=("a_id",)):
+    """Stub source_class_dict + insert to record a populate() call."""
 
-    class FakeParent:
+    class FakeQuery:
+        heading = type("FakeHeading", (), {"names": set(names)})()
+
+        def __and__(self, other):
+            calls.setdefault("restrictions", []).append(other)
+            return self
+
+        def fetch(self, *args, **kwargs):
+            return [{"a_id": 1}]
+
+    class FakeSource:
+        key_source = FakeQuery()
+
         @staticmethod
         def populate(*args, **kwargs):
             calls["populate"] = (args, kwargs)
 
         def __and__(self, other):
-            return self
-
-        def fetch(self, *args, **kwargs):
-            return [{"merge_id": "fake"}]
+            return FakeQuery()
 
     monkeypatch.setattr(
         type(pos_merge),
-        "merge_get_parent_class",
-        lambda self, src: FakeParent(),
+        "source_class_dict",
+        property(lambda self: {"AnySource": FakeSource()}),
     )
 
     def fake_insert(self, rows, **kwargs):
@@ -605,15 +614,16 @@ def _patch_populate_parent(pos_merge, monkeypatch, calls):
     monkeypatch.setattr(type(pos_merge), "insert", fake_insert)
 
 
-def test_populate_instance(pos_merge, monkeypatch):
-    """populate() forwards keys and inserts successes with skip_duplicates."""
+def test_populate_restriction_reaches_source(pos_merge, monkeypatch):
+    """populate() restricts key_source, then inserts w/ part_name."""
     calls = {}
-    _patch_populate_parent(pos_merge, monkeypatch, calls)
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
 
-    pos_merge.populate("AnySource", keys=[{"k": 1}])
+    inserted = pos_merge.populate({"a_id": 1})
 
-    assert calls["populate"][0][0] == [{"k": 1}], "keys forwarded to populate."
-    assert calls["insert"][0] == [{"merge_id": "fake"}], "successes inserted."
+    assert calls["restrictions"], "restriction must reach the key_source."
+    assert calls["populate"][0][0] == [{"a_id": 1}], "keys forwarded."
+    assert calls["insert"][0] == [{"a_id": 1}], "successes inserted."
     assert (
         calls["insert"][1].get("skip_duplicates") is True
     ), "insert must forward skip_duplicates=True."
@@ -621,6 +631,32 @@ def test_populate_instance(pos_merge, monkeypatch):
         "insert must forward part_name=source, else _merge_insert scans "
         "every part and can insert successes into sibling parts too."
     )
+    assert inserted == {"AnySource": 1}
+
+
+def test_populate_skips_source_lacking_column(pos_merge, monkeypatch):
+    """A restriction naming a column the source lacks populates nothing."""
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+
+    inserted = pos_merge.populate({"__not_a_column__": 1})
+
+    assert inserted == {}, f"Expected no source populated, got {inserted}."
+    assert "populate" not in calls, (
+        "A source whose key_source lacks the restricted column must be "
+        "skipped, not populated whole: DataJoint ignores unknown dict keys."
+    )
+
+
+def test_populate_source_value_selects_part(pos_merge, monkeypatch):
+    """A `source` value populates that part alone."""
+    calls = {}
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
+    assert pos_merge.populate({"source": "AnySource"}) == {"AnySource": 1}
+
+    calls.clear()
+    assert pos_merge.populate({"source": "OtherSource"}) == {}
+    assert "populate" not in calls, "`source` must select one part."
 
 
 def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
@@ -628,12 +664,12 @@ def test_merge_populate_deprecated(pos_merge, monkeypatch, caplog):
     import logging
 
     calls = {}
-    _patch_populate_parent(pos_merge, monkeypatch, calls)
+    _patch_populate_sources(pos_merge, monkeypatch, calls)
 
     with caplog.at_level(logging.WARNING, logger="spyglass"):
-        pos_merge.merge_populate("AnySource", keys=[{"k": 1}])
+        pos_merge.merge_populate("AnySource", keys=[{"a_id": 1}])
 
-    assert calls["insert"][0] == [{"merge_id": "fake"}], "successes inserted."
+    assert calls["insert"][0] == [{"a_id": 1}], "successes inserted."
     assert "merge_populate" in caplog.text and "0.7.0" in caplog.text
     assert calls["insert"][1].get("part_name") == "AnySource", (
         "insert must forward part_name=source, else _merge_insert scans "
@@ -1185,4 +1221,16 @@ def test_resolve_top_restriction_materializes_for_top(merge_repro):
     assert isinstance(restriction, list) and len(restriction) == 1, (
         f"Top(limit=1) should materialize one merge_id key, got "
         f"{restriction!r}."
+    )
+
+
+def test_populate_signature_matches_datajoint(pos_merge):
+    """`populate` takes restrictions, as DataJoint's does."""
+    import inspect
+
+    params = inspect.signature(type(pos_merge).populate).parameters
+    kinds = [p.kind for p in params.values()]
+    assert inspect.Parameter.VAR_POSITIONAL in kinds, (
+        f"Merge.populate takes {list(params)}; it should accept "
+        "*restrictions like DataJoint's populate."
     )

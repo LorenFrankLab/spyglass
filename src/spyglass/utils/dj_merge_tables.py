@@ -181,21 +181,53 @@ class Merge(ExportMixin, dj.Manual):
         dict, bool, str, list, AndList, Not, or QueryExpression
             The restriction as it applies to ``part``.
         """
-        recurse = partial(cls._restriction_for_part, part=part, lenient=lenient)
+        return cls._restriction_for_names(
+            restriction,
+            names=set(part.heading.names),
+            source_name=cls._part_name(part),
+            lenient=lenient,
+        )
+
+    @classmethod
+    def _restriction_for_names(
+        cls, restriction, names, source_name, lenient=False
+    ):
+        """Rewrite a restriction for one heading, by column name.
+
+        Parameters
+        ----------
+        restriction : dict, str, list, AndList, Not, or QueryExpression
+            Restriction to rewrite. Only dict leaves are rewritten.
+        names : set of str
+            Column names the target has.
+        source_name : str
+            CamelCase part name a ``source`` value is matched against.
+        lenient : bool
+            Default False. See ``_restriction_for_part``.
+
+        Returns
+        -------
+        dict, bool, str, list, AndList, Not, or QueryExpression
+            The restriction as it applies to that heading.
+        """
+        recurse = partial(
+            cls._restriction_for_names,
+            names=names,
+            source_name=source_name,
+            lenient=lenient,
+        )
         if isinstance(restriction, dj.condition.Not):
             return dj.Not(recurse(restriction.restriction))
         if isinstance(restriction, dict):
             restriction = dict(restriction)  # copy: don't mutate caller's dict
             source = restriction.pop(RESERVED_SECONDARY_KEY, None)
-            if source is not None and source != cls._part_name(part):
+            if source is not None and source != source_name:
                 return False
-            if not set(restriction) <= set(part.heading.names):
+            if not set(restriction) <= names:
                 if not lenient:
                     return False
                 restriction = {  # as DataJoint does: keep the shared columns
-                    k: v
-                    for k, v in restriction.items()
-                    if k in part.heading.names
+                    k: v for k, v in restriction.items() if k in names
                 }
             return restriction or True
         if isinstance(restriction, dj.condition.AndList):  # before list check
@@ -1503,21 +1535,16 @@ class Merge(ExportMixin, dj.Manual):
     def merge_populate(self, source: str, keys=None, **kwargs):
         """Populate source table and insert successes into merge.
 
-        Deprecated — use ``T.populate(source, keys)``.
+        .. deprecated:: 0.7.0
+            Use ``T.populate({"source": source}, keys)`` instead.
         """
-        self._deprecate("merge_populate", "T.populate(source, keys)")
-        parent_class = self.merge_get_parent_class(source)
-        if parent_class is None:
-            raise ValueError(f"No parent class found for source: {source}")
-        if keys is None and hasattr(parent_class, "key_source"):
-            keys = parent_class.key_source
-        if keys is not None:
-            parent_class.populate(keys, **kwargs)
-            successes = (parent_class & keys).fetch("KEY", as_dict=True)
-        else:
-            parent_class.populate(**kwargs)
-            successes = parent_class().fetch("KEY", as_dict=True)
-        self.insert(successes, part_name=source, skip_duplicates=True)
+        self._deprecate(
+            "merge_populate", 'T.populate({"source": source}, keys)'
+        )
+        source_restr = {RESERVED_SECONDARY_KEY: source}
+        if keys is None:
+            return self.populate(source_restr, **kwargs)
+        return self.populate(source_restr, keys, **kwargs)
 
     # -------------------- Instance-method replacements ----------------------
 
@@ -1684,34 +1711,68 @@ class Merge(ExportMixin, dj.Manual):
             return HTML("<i>&lt;empty&gt;</i>")
         return HTML(repr_html(query))
 
-    def populate(self, source: str, keys=None, **kwargs):
-        """Populate source table and insert successes into merge.
+    def populate(self, *restrictions, **kwargs):
+        """Populate the source tables a restriction names, and insert them.
 
-        Instance-method replacement for ``merge_populate``. Use as
-        ``T.populate(source, keys)``.
+        Follows DataJoint's ``populate`` signature. Each source's
+        ``key_source`` is restricted, populated, and its new keys inserted
+        into the matching part.
 
         Parameters
         ----------
-        source : str
-            CamelCase name of the source table.
-        keys : list or dj.expression, optional
-            Keys to populate. If None and source is a Computed table,
-            uses ``key_source``.
+        *restrictions
+            DataJoint restrictions, applied as a conjunction. A ``source``
+            value selects one part. A source whose ``key_source`` lacks a
+            restricted column is skipped, as is one with no ``key_source``,
+            which DataJoint cannot populate.
         **kwargs
-            Forwarded to ``parent_class.populate``.
+            Forwarded to each source's ``populate``.
+
+        Returns
+        -------
+        dict
+            Rows inserted, keyed by source name.
         """
-        parent_class = self.merge_get_parent_class(source)
-        if parent_class is None:
-            raise ValueError(f"No parent class found for source: {source}")
-        if keys is None and hasattr(parent_class, "key_source"):
-            keys = parent_class.key_source
-        if keys is not None:
-            parent_class.populate(keys, **kwargs)
-            successes = (parent_class & keys).fetch("KEY", as_dict=True)
-        else:
-            parent_class.populate(**kwargs)
-            successes = parent_class().fetch("KEY", as_dict=True)
-        self.insert(successes, part_name=source, skip_duplicates=True)
+        restrictions = restrictions or (True,)
+        inserted = {}
+
+        for source_name, source_class in self.source_class_dict.items():
+            key_source = getattr(source_class, "key_source", None)
+            if key_source is None:
+                logger.info(
+                    f"Skipping {source_name}: inserted directly, not populated."
+                )
+                continue
+
+            # Rewrite each restriction for this source. One that cannot
+            # describe it resolves to False, which skips the source rather
+            # than populating it whole.
+            per_source = [
+                self._restriction_for_names(
+                    restr,
+                    names=set(key_source.heading.names),
+                    source_name=source_name,
+                )
+                for restr in restrictions
+            ]
+            if any(restr is False for restr in per_source):
+                continue
+
+            keys = (key_source & dj.AndList(per_source)).fetch(
+                "KEY", as_dict=True
+            )
+            if not keys:
+                continue
+
+            source_class.populate(keys, **kwargs)
+            successes = (source_class & keys).fetch("KEY", as_dict=True)
+            if successes:
+                self.insert(
+                    successes, part_name=source_name, skip_duplicates=True
+                )
+            inserted[source_name] = len(successes)
+
+        return inserted
 
     def delete(self, force_permission=False, *args, **kwargs):
         """Delete master and all part entries for current restriction.
