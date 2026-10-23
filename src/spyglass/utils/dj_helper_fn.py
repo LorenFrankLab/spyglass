@@ -15,7 +15,7 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 from spyglass.utils.logging import logger
-from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.

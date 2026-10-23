@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
 from fractions import Fraction
+from math import ceil
 from pathlib import Path
 
 import matplotlib
@@ -237,6 +238,7 @@ class VideoMaker:
         self.start_time = pd.to_datetime(position_time[0] * 1e9, unit="ns")
 
         self.dropped_frames = set()
+        self.frame_errors = {}  # frame_ind -> reason it was not plotted
 
         self.batch_size = batch_size
         self.max_workers = max_workers
@@ -256,14 +258,27 @@ class VideoMaker:
             f"Making video: {self.output_video_filename} "
             + f"in batches of {self.batch_size}"
         )
-        self.process_frames()
-        plt.close(self.fig)
+        try:
+            self.process_frames()
 
-        if Path(self.output_video_filename).exists():
-            logger.info(f"Finished video: {self.output_video_filename}")
-        else:
-            logger.error(f"Failed to create: {self.output_video_filename}")
+            if not Path(self.output_video_filename).exists():
+                raise FileNotFoundError(  # pragma: no cover
+                    f"Failed to create: {self.output_video_filename}"
+                )
+        except Exception:
+            # Keep temp_dir. process_frames skips batches whose partial
+            # video already exists, so a rerun resumes from the failed batch
+            # instead of restarting at frame zero.
+            logger.error(
+                "Video render failed. Keeping partial frames to resume from:"
+                + f"\n\t{self.temp_dir}"
+            )
+            raise
+        finally:
+            plt.close(self.fig)
+            matplotlib.use(prev_backend)  # Reset to previous backend
 
+        logger.info(f"Finished video: {self.output_video_filename}")
         logger.debug(f"Dropped frames: {self.dropped_frames}")
 
         if not debug:
@@ -563,6 +578,11 @@ class VideoMaker:
 
             self.ffmpeg_extract(start_frame, end_frame)
             self.plot_frames(start_frame, end_frame, progress_bar)
+            self._check_plotted(
+                start_frame,
+                end_frame,
+                last_batch=start_frame + self.batch_size >= self.n_frames,
+            )
             self.ffmpeg_stitch_partial(start_frame, str(output_partial_video))
 
             # Clean up PNG files AFTER stitching
@@ -572,6 +592,80 @@ class VideoMaker:
         progress_bar.close()
         logger.info("Concatenating partial videos")
         self.concat_partial_videos()
+
+    def _check_plotted(self, start_frame, end_frame, last_batch=False):
+        """Check this batch's plots before stitching it into a partial video.
+
+        `plot_frames` swallows per-frame IndexError and TimeoutError, and
+        `_generate_single_frame` returns early when its extracted frame is
+        absent. Either leaves a gap in the `plot_*.png` sequence, and ffmpeg
+        reads that sequence contiguously -- so it stops at the gap and writes
+        a short partial without failing.
+
+        A gap before the end of a batch, or any gap in a batch that is not the
+        last, pulls every later frame earlier in time and desynchronizes the
+        overlay from the timestamps. That is unrecoverable, so it raises.
+
+        Frames lost only at the tail of the final batch merely shorten the
+        video -- every rendered frame keeps its own timestamp -- so those are
+        logged and tolerated rather than failing the populate.
+
+        Parameters
+        ----------
+        start_frame, end_frame : int
+            Batch bounds, end_frame inclusive, as in ffmpeg_extract.
+        last_batch : bool
+            Whether this is the final batch of the video.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the missing frames would shift later frames earlier.
+        """
+        # Each batch's plots are named by batch-relative index, and
+        # ffmpeg_stitch_partial reads them with ``-start_number 0``, so the
+        # gap check runs over that sequence rather than absolute frame
+        # numbers. Reported indices stay absolute, matching dropped_frames
+        # and _frame_error.
+        missing = [
+            start_frame + offset
+            for offset in range(end_frame - start_frame + 1)
+            if not (self.temp_dir / f"plot_{self._pad(offset)}.png").exists()
+        ]
+        if not missing:
+            return
+
+        self.dropped_frames.update(missing)  # pragma: no cover
+        reasons = ", ".join(  # pragma: no cover
+            f"{ind}: {self._frame_error(ind)}" for ind in missing[:10]
+        )
+
+        # Tail-only loss: the gap runs unbroken to the end of the batch
+        tail_only = set(missing) == set(  # pragma: no cover
+            range(min(missing), end_frame + 1)
+        )
+        if last_batch and tail_only:  # pragma: no cover
+            logger.warning(
+                f"Dropped {len(missing)} frame(s) from the end of the video "
+                + f"({reasons}). The video is short by that many frames; "
+                + "the frames it does contain stay aligned."
+            )
+            return
+
+        raise FileNotFoundError(  # pragma: no cover
+            f"Could not plot {len(missing)} frame(s) of batch "
+            + f"{start_frame}-{end_frame} ({reasons})"
+            + ("..." if len(missing) > 10 else "")
+            + "\n\tStitching would drop them and shift all later frames "
+            + "earlier."
+        )
+
+    def _frame_error(self, frame_ind):  # pragma: no cover
+        """Best-known reason a frame has no plot, for error messages."""
+        if reason := self.frame_errors.get(frame_ind):
+            return reason
+        orig = self.temp_dir / f"orig_{self._pad(frame_ind)}.png"
+        return "not extracted" if not orig.exists() else "no error reported"
 
     def _debug_print(self, msg="             ", end=""):
         """Print a self-overwriting message if debug is enabled."""
@@ -587,16 +681,19 @@ class VideoMaker:
     ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
 
+        frames = range(start_frame, end_frame + 1)  # end_frame is inclusive
+
+        # Single-threaded processing for debugging
         if not process_pool:  # pragma: no cover
-            for i, frame_ind in enumerate(range(start_frame, end_frame)):
+            for i, frame_ind in enumerate(frames):
                 self._generate_single_frame(frame_ind, batch_index=i)
                 progress_bar.update()
             return
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}
-            frames_left = end_frame - start_frame
-            frames_iter = enumerate(range(start_frame, end_frame))
+            frames_left = len(frames)
+            frames_iter = enumerate(frames)
 
             while frames_left:
                 while len(jobs) < self.max_jobs_in_queue:
@@ -616,6 +713,12 @@ class VideoMaker:
                         ret = job.result(timeout=self.timeout)
                     except (IndexError, TimeoutError) as e:  # pragma: no cover
                         ret = type(e).__name__
+                        self.frame_errors[jobs[job]] = ret
+                    else:
+                        if ret is None:  # pragma: no cover
+                            # Workers are separate processes, so their early
+                            # return is the only signal that reaches us.
+                            self.frame_errors[jobs[job]] = "no source frame"
                     self._debug_print(f"Finish: {self._pad(ret)}")
                     progress_bar.update()
                     del jobs[job]
@@ -670,7 +773,17 @@ class VideoMaker:
         return f"{frame_ind:0{self.pad_len}d}"
 
     def ffmpeg_stitch_partial(self, start_frame, output_partial_video):
-        """Stitch a partial movie from processed frames."""
+        """Stitch a partial movie from processed frames.
+
+        Raises
+        ------
+        subprocess.CalledProcessError, FileNotFoundError
+            If ffmpeg fails or writes no file. Must raise rather than log:
+            process_frames deletes this batch's frames immediately after, so
+            a skipped batch cannot be recovered, and concatenating without it
+            would shift every later frame earlier.
+        """
+        logger.debug(f"Stitch part vid  : {start_frame}")
         frame_pattern = str(self.temp_dir / f"plot_%0{self.pad_len}d.png")
 
         ffmpeg_cmd = [
@@ -697,16 +810,33 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:  # pragma: no cover
             logger.error(f"Err stitching video: {e.stderr}")
+            raise
 
         if not Path(output_partial_video).exists():  # pragma: no cover
-            logger.error(f"Partial video not created: {output_partial_video}")
+            raise FileNotFoundError(
+                f"Partial video not created: {output_partial_video}"
+            )
 
     def concat_partial_videos(self):
-        """Concatenate all the partial videos into one final video."""
+        """Concatenate all the partial videos into one final video.
+
+        Raises
+        ------
+        FileNotFoundError
+            If any batch is missing its partial video. Concatenating a subset
+            would silently drop those frames and shift every later frame
+            earlier, desynchronizing the overlay from the timestamps.
+        """
         partial_vids = sorted(self.temp_dir.glob("partial_*.mp4"))
 
-        if not partial_vids:  # pragma: no cover
-            raise FileNotFoundError("No partial videos to concatenate!")
+        expected = ceil(self.n_frames / self.batch_size)
+        if len(partial_vids) != expected:  # pragma: no cover
+            raise FileNotFoundError(
+                f"Expected {expected} partial videos, found "
+                + f"{len(partial_vids)}. Concatenating these would drop the "
+                + "missing frames and shift all later frames earlier.\n\t"
+                + f"Partials: {self.temp_dir}"
+            )
 
         logger.debug(f"Concat part vids: {len(partial_vids)}")
         concat_list_path = self.temp_dir / "concat_list.txt"

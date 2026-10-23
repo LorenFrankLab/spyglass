@@ -4,6 +4,7 @@ Covers VideoMaker construction validation and make_video passthrough.
 Heavy rendering operations (ffmpeg, matplotlib) are mocked.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,7 +20,7 @@ def dummy_video(tmp_path):
 
 
 @pytest.fixture
-def basic_args(dummy_video):
+def basic_args(dummy_video, tmp_path):
     """Minimal valid arguments for VideoMaker."""
     n = 10
     return dict(
@@ -28,7 +29,7 @@ def basic_args(dummy_video):
         orientation_mean=np.zeros(n),
         bodypart_centroids={"head": np.zeros((n, 2))},
         position_time=np.arange(n, dtype=float),
-        output_video_filename="out.mp4",
+        output_video_filename=str(tmp_path / "out.mp4"),
         key_hash="testhash",
     )
 
@@ -48,11 +49,16 @@ def _make_vm(args, ctor=None):
     def _set_plot_bases_stub(self):
         self.fig = MagicMock()
 
+    def _process_frames_stub(self):
+        # Rendering is mocked out, but __init__ raises when the output video
+        # is missing, so the stub leaves an empty one behind.
+        Path(self.output_video_filename).touch()
+
     with (
         patch("matplotlib.use"),
         patch.object(VideoMaker, "_set_frame_info", return_value=None),
         patch.object(VideoMaker, "_set_plot_bases", _set_plot_bases_stub),
-        patch.object(VideoMaker, "process_frames", return_value=None),
+        patch.object(VideoMaker, "process_frames", _process_frames_stub),
         patch("matplotlib.pyplot.close"),
         patch("shutil.rmtree"),
     ):

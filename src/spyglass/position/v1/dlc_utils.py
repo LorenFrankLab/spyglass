@@ -19,7 +19,7 @@ from position_tools import get_distance
 from spyglass.common.common_usage import ActivityLog
 from spyglass.position.utils.validation import validate_list, validate_option
 from spyglass.settings import pose_output_dir, test_mode
-from spyglass.utils.logging import logger, stream_handler
+from spyglass.utils.logging import logger
 
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
@@ -92,14 +92,29 @@ def file_log(this_log, console=False):
             )
             file_handler.setFormatter(file_fmt)
             this_log.addHandler(file_handler)
-            if not console:
-                this_log.removeHandler(logger.handlers[0])
+
+            # Suppress console output by removing whatever handlers are
+            # present, then restoring those same objects. The old code
+            # removed handlers[0] by position, which under nesting was the
+            # outer call's file handler -- so the outer call silently lost
+            # its log file and regained the console output it had
+            # suppressed. Restoring the module-level stream_handler rather
+            # than the removed object also resurrected a handler another
+            # caller had deliberately removed.
+            suppressed = (
+                []
+                if console
+                else [h for h in this_log.handlers if h is not file_handler]
+            )
+            for handler in suppressed:
+                this_log.removeHandler(handler)
+
             try:
                 return func(self, *args, **kwargs)
             finally:
-                if not console:
-                    this_log.addHandler(stream_handler)
                 this_log.removeHandler(file_handler)
+                for handler in suppressed:
+                    this_log.addHandler(handler)
                 file_handler.close()
 
         return wrapper

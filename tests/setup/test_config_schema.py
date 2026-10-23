@@ -445,6 +445,7 @@ class TestConfigCompatibility:
                 "custom": {
                     "debug_mode": False,
                     "test_mode": False,
+                    "prefer_download": False,
                     "kachery_zone": "franklab.default",
                     "spyglass_dirs": {
                         "base": str(base_dir),
@@ -579,6 +580,7 @@ class TestExampleConfigSync:
                 "custom": {
                     "debug_mode": "false",
                     "test_mode": "false",
+                    "prefer_download": "false",
                     "kachery_zone": "franklab.default",
                     "spyglass_dirs": {
                         "base": str(base_dir),

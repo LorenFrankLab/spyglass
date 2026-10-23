@@ -45,6 +45,10 @@ dependencies = [
   # 2. spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
   # 3. spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but
   #    declares an unbounded numpy, we bound here.
+  # 4. ndx-ophys-devices 0.4.0 is a breaking spec change: ViralVectorInjection
+  #    coordinates moved into a StereotacticPosition child, FiberInsertion was
+  #    dropped, and OpticalLens* was renamed ObjectiveLens*. Our ingestion in
+  #    common_optogenetics reads the 0.3.x layout.
   "black[jupyter]>26",
   "bottleneck",
   "dask",
@@ -54,7 +58,7 @@ dependencies = [
   "jax<0.7.2",                    # TODO(#1609): remove with SpikeInterface bump
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
-  "ndx-ophys-devices",
+  "ndx-ophys-devices>=0.3.1,<0.4",  # see note 4 above
   "ndx-optogenetics==0.3.0",
   "ndx-pose<0.4",                  # 0.4 needs pynwb>=4 / hdmf>=6
   "non-local-detector",
@@ -77,6 +81,7 @@ dependencies = [
 optional-dependencies.dlc = [
   "deeplabcut>=3", # 3.0+ drops TF and uses PyTorch backend
   "ndx-pose>=0.2,<0.4",
+  "ffmpeg",
 ]
 optional-dependencies.docs = [
   "hatch",                  # Get version from env
@@ -155,7 +160,7 @@ lint.ignore = [ "E402", "E501", "F401" ]
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude/*'
 ignore-words = './docs/spellcheck_words.txt'
-ignore-words-list = 'nevers,notin'
+ignore-words-list = 'nevers,notin,sortings'
 # Nevers - name in Citation
 # notin - UnitSelectionParams.unit_criteria operator, paired with isin
 

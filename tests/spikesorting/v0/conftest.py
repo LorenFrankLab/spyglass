@@ -1,5 +1,75 @@
+import shutil
+import warnings
+from pathlib import Path
+
 import datajoint as dj
 import pytest
+
+
+def _test_recording_path(spike_v0, key, base_dir):
+    """Resolve one key's recording directory, scoped to the pytest data dir.
+
+    Returns None, with a warning, for any path outside `base_dir`. Teardown
+    that swept `recording_dir` wholesale would delete real data if the suite
+    were ever run against a production config, so every deletion below is
+    limited to the single directory this fixture creates.
+
+    Parameters
+    ----------
+    spike_v0 : module
+        The `spyglass.spikesorting.v0` module.
+    key : dict
+        SpikeSortingRecordingSelection key.
+    base_dir : str or Path
+        The pytest data directory.
+
+    Returns
+    -------
+    pathlib.Path or None
+        The recording directory, or None if it falls outside `base_dir`.
+    """
+    rec_path = spike_v0.SpikeSortingRecording()._key_to_path(key)
+
+    if not Path(rec_path).is_relative_to(Path(base_dir)):
+        warnings.warn(
+            "Refusing to remove a recording directory outside the pytest "
+            + f"data directory: {rec_path}",
+            stacklevel=2,
+        )
+        return None
+
+    return Path(rec_path)
+
+
+def _drop_unusable_recording(spike_v0, key, base_dir):
+    """Delete this key's recording directory when it exists but holds no files.
+
+    `SpikeSortingRecording._fetch_recording_path` only recomputes when the
+    recording path is *missing*. A directory that exists but is empty never
+    self-heals: the existence check short circuits the recompute, and the
+    file-count check then raises "Files missing! Please delete folder and
+    rerun". An interrupted run, or one passing `--no-teardown`, can leave
+    exactly that state behind and break every later session.
+
+    A directory holding files is left alone, so the cached recording that
+    makes repeat runs fast is preserved.
+    """
+    rec_path = _test_recording_path(spike_v0, key, base_dir)
+
+    if rec_path is None or not rec_path.exists():
+        return
+    if any(f.is_file() for f in rec_path.rglob("*")):
+        return  # usable; keep the cached recording
+
+    shutil.rmtree(rec_path, ignore_errors=True)
+
+
+def _drop_recording(spike_v0, key, base_dir):
+    """Delete this key's recording directory outright, for session teardown."""
+    rec_path = _test_recording_path(spike_v0, key, base_dir)
+
+    if rec_path is not None:
+        shutil.rmtree(rec_path, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
@@ -58,6 +128,8 @@ def pop_rec_v0(
     mini_copy_name,
     add_interval,
     team_name,
+    teardown,
+    base_dir,
 ):
     _, params_name, _ = pop_rec_params
     ssr_key = dict(
@@ -68,6 +140,11 @@ def pop_rec_v0(
         interval_list_name="01_s1",
         team_name=team_name,
     )
+
+    # Clear an artifact an interrupted or --no-teardown run may have left in a
+    # state the loader cannot recover from. See _drop_unusable_recording.
+    _drop_unusable_recording(spike_v0, ssr_key, base_dir)
+
     _ = pop_sort_interval
     spike_v0.SpikeSortingRecordingSelection.insert1(
         ssr_key, skip_duplicates=True
@@ -77,6 +154,14 @@ def pop_rec_v0(
     spike_v0.SpikeSortingRecording.populate([ssr_pk])
 
     yield spike_v0.SpikeSortingRecording() & ssr_pk
+
+    if teardown:
+        _drop_recording(spike_v0, ssr_key, base_dir)
+    else:
+        # test_recompute deletes the recording directory to force a rebuild.
+        # If that rebuild fails, an empty directory is left behind that breaks
+        # every later run, so clear it even when keeping the cache.
+        _drop_unusable_recording(spike_v0, ssr_key, base_dir)
 
 
 @pytest.fixture(scope="session")

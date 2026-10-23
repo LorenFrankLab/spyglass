@@ -2,6 +2,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Optional, Union
+from uuid import uuid4
 
 import datajoint as dj
 import fsspec
@@ -26,6 +27,7 @@ try:
     from dandi.organize import CopyMode, FileOperationMode, OrganizeInvalid
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
+    from dandi.upload import UploadExisting, UploadValidation
 
     MIN_ERROR_SEVERITY = Severity["ERROR"].value
     MIN_WARNING_SEVERITY = Severity["WARNING"].value
@@ -43,7 +45,9 @@ except (ImportError, ModuleNotFoundError) as e:
         nwb_has_external_links,
         MIN_ERROR_SEVERITY,
         MIN_WARNING_SEVERITY,
-    ) = [None] * 11
+        UploadExisting,
+        UploadValidation,
+    ) = [None] * 13
     logger.warning(e)
 
 
@@ -134,14 +138,16 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 "table": self.Violations,
                 "min_severity": MIN_ERROR_SEVERITY,
                 "max_severity": None,
+                "prefix": "violation",
             },
             {
                 "table": self.Warnings,
                 "min_severity": MIN_WARNING_SEVERITY,
                 "max_severity": MIN_ERROR_SEVERITY,
+                "prefix": "warning",
             },
         ]
-        result_inserts = []
+        result_inserts = {}
         for result_map in results_maps:
             min_severity_value = result_map["min_severity"]
             max_severity_value = result_map["max_severity"]
@@ -159,8 +165,8 @@ class DandiValidation(SpyglassMixin, dj.Computed):
             part_keys = [
                 {
                     **key,
-                    "violation_id": i,
-                    "id": result.id,
+                    f"{result_map['prefix']}_id": i,
+                    "id": result.id[:128],
                     "message": result.message[:255]
                     .replace("'", "")
                     .encode("ascii", "ignore")
@@ -172,9 +178,9 @@ class DandiValidation(SpyglassMixin, dj.Computed):
                 }
                 for i, result in enumerate(filtered_results)
             ]
-            result_inserts.append({result_map["table"]: part_keys})
+            result_inserts[result_map["table"]] = part_keys
         self.insert1(key)
-        for part_table, part_keys in result_inserts:
+        for part_table, part_keys in result_inserts.items():
             part_table.insert(part_keys)
 
 
@@ -201,14 +207,45 @@ class DandiPath(SpyglassMixin, dj.Manual):
     def has_raw_path(self, file_path: Union[str, Path]) -> bool:
         return bool(self & self.raw_from_path(file_path))
 
-    def fetch_file_from_dandi(
+    def _resolve_key(
         self, key: Optional[dict] = None, nwb_file_path: Optional[str] = None
-    ):
-        """Fetch the file from Dandi and return the NWB file object."""
+    ) -> dict:
+        """Return a restriction key from either an explicit key or a path.
+
+        Parameters
+        ----------
+        key : dict, optional
+            Restriction on this table. Takes precedence over nwb_file_path.
+        nwb_file_path : str, optional
+            Path whose file name identifies the entry.
+
+        Returns
+        -------
+        dict
+            Key suitable for restricting this table.
+
+        Raises
+        ------
+        ValueError
+            If neither argument is given.
+        """
         if key is None and nwb_file_path is None:
             raise ValueError("Must provide either key or nwb_file_path")
-        key = key or self.key_from_path(nwb_file_path)
+        return key or self.key_from_path(nwb_file_path)
 
+    def _asset_url(self, key: dict) -> str:
+        """Resolve a key to a direct S3 content URL for the asset.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction identifying exactly one entry in this table.
+
+        Returns
+        -------
+        str
+            S3 URL of the asset, with redirects followed and query stripped.
+        """
         dandiset_id, dandi_path, dandi_instance = (self & key).fetch1(
             "dandiset_id", "dandi_path", "dandi_instance"
         )
@@ -220,7 +257,78 @@ class DandiPath(SpyglassMixin, dj.Manual):
             asset = client.get_dandiset(dandiset_id).get_asset_by_path(
                 dandi_path
             )
-            s3_url = asset.get_content_url(follow_redirects=1, strip_query=True)
+            return asset.get_content_url(follow_redirects=1, strip_query=True)
+
+    def download_file_from_dandi(
+        self,
+        key: Optional[dict] = None,
+        nwb_file_path: Optional[str] = None,
+        dest: Optional[str] = None,
+    ) -> bool:
+        """Download the file from Dandi to local disk.
+
+        Used when a user prefers a whole-file transfer over streaming. Writes
+        to a temporary sibling path and renames on success, so an interrupted
+        transfer never leaves a partial file that later looks local.
+
+        The staging path carries a random token, so two workers downloading
+        the same missing file cannot write, rename, or unlink each other's
+        partial copy. Each `replace` promotes a file that worker downloaded in
+        full. A hard kill can leave an orphan `.part` behind; a fixed name
+        would instead leave a half-written file two workers both believe is
+        theirs.
+
+        Parameters
+        ----------
+        key : dict, optional
+            Restriction on this table. Takes precedence over nwb_file_path.
+        nwb_file_path : str, optional
+            Path identifying the file, and the download destination unless
+            dest is given.
+        dest : str, optional
+            Destination path. Defaults to nwb_file_path.
+
+        Returns
+        -------
+        bool
+            True if the file is present locally after the call.
+
+        Raises
+        ------
+        ValueError
+            If neither dest nor nwb_file_path is given. A key alone names the
+            file on the archive, not where it should land locally.
+        """
+        key = self._resolve_key(key, nwb_file_path)
+
+        if dest is None and nwb_file_path is None:
+            raise ValueError(
+                "Must provide dest or nwb_file_path when downloading by key."
+            )
+
+        dest = Path(dest or nwb_file_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temp = dest.with_suffix(f"{dest.suffix}.{uuid4().hex[:8]}.part")
+
+        s3_url = self._asset_url(key)
+
+        logger.info(f"Downloading {dest.name} from Dandi")
+        fs = fsspec.filesystem("http")
+        try:
+            fs.get_file(s3_url, str(temp))
+            temp.replace(dest)
+        finally:
+            temp.unlink(missing_ok=True)
+
+        return dest.exists()
+
+    def fetch_file_from_dandi(
+        self, key: Optional[dict] = None, nwb_file_path: Optional[str] = None
+    ):
+        """Fetch the file from Dandi and return the NWB file object."""
+        key = self._resolve_key(key, nwb_file_path)
+
+        s3_url = self._asset_url(key)
 
         # stream the file from s3
         # first, create a virtual filesystem based on the http protocol
@@ -357,6 +465,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
             [dandiset_dir],
             dandi_instance=dandi_instance,
             jobs=n_upload_processes,
+            existing=UploadExisting.SKIP,
+            validation=UploadValidation.SKIP,
         )
         logger.info(f"Dandiset {dandiset_id} uploaded")
 
@@ -516,7 +626,12 @@ def validate_dandiset(
             f"Using multiprocessing to validate dandi export. {n_processes} processes"
         )
         with Pool(processes=n_processes) as pool:
-            per_file_results = pool.map(validate_1, files_to_validate)
+            per_file_results = list(
+                tqdm(
+                    pool.imap_unordered(validate_1, files_to_validate),
+                    total=len(files_to_validate),
+                )
+            )
         validator_result = [item for sub in per_file_results for item in sub]
     min_severity_value = Severity[min_severity].value
 

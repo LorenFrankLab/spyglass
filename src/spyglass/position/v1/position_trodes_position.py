@@ -302,17 +302,28 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     has_video : bool
     """
 
-    def make(self, key):
-        """Generate a video with overlaid position data.
+    _parallel_make = True  # make_compute spawns a process pool per video
+    _video_maker = None  # last VideoMaker; populate cannot return it
+
+    def make_fetch(self, key):
+        """Fetch the inputs needed to render the position video.
 
         Fetches...
             - Raw position data from the RawPosition table
             - Position data from the TrodesPosV1 table
             - Video data from the VideoFile table
-        Generates a video using VideoMaker class.
-        """
-        M_TO_CM = 100
 
+        Parameters
+        ----------
+        key : dict
+            primary key of TrodesPosV1
+
+        Returns
+        -------
+        list
+            raw_df, pos_df, epoch, video_path, video_filename,
+            meters_per_pixel, video_time, params
+        """
         self._info_msg("Loading position data...")
         raw_df = (
             RawPosition.PosObject
@@ -324,9 +335,21 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         self._info_msg("Loading video data...")
+        # populate_missing=False: make_fetch must not write. Both helpers
+        # default to repairing a missing mapping, which would commit outside
+        # the transaction and start a nested populate.
         epoch = get_position_interval_epoch(
-            key["nwb_file_name"], key["interval_list_name"]
+            key["nwb_file_name"],
+            key["interval_list_name"],
+            populate_missing=False,
         )
+        if epoch is None:
+            raise ValueError(
+                f"No epoch mapped for {key['nwb_file_name']} / "
+                f"{key['interval_list_name']}.\n\tRun "
+                "`populate_position_interval_map_session(nwb_file_name)` "
+                "first."
+            )
 
         (
             video_path,
@@ -334,13 +357,67 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             meters_per_pixel,
             video_time,
         ) = get_video_info(
-            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
+            {"nwb_file_name": key["nwb_file_name"], "epoch": epoch},
+            populate_missing=False,
         )
+
+        params_pk = "trodes_pos_params_name"
+        params = (TrodesPosParams() & {params_pk: key[params_pk]}).fetch1(
+            "params"
+        )
+
+        return [
+            raw_df,
+            pos_df,
+            epoch,
+            video_path,
+            video_filename,
+            meters_per_pixel,
+            video_time,
+            params,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        raw_df,
+        pos_df,
+        epoch,
+        video_path,
+        video_filename,
+        meters_per_pixel,
+        video_time,
+        params,
+    ):
+        """Generate a video with overlaid position data.
+
+        Generates a video using VideoMaker class. Returns has_video=False
+        without rendering when there is no video to overlay, or when the
+        position data was upsampled. Returns has_video=None after rendering
+        on the `limit` debug path, where the insert is intentionally skipped.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of TrodesPosV1
+        raw_df, pos_df, epoch, video_path, video_filename, meters_per_pixel,
+        video_time, params
+            output of make_fetch
+
+        Returns
+        -------
+        list
+            has_video, vid_maker. has_video is True when a video was rendered
+            and should be inserted, False when rendering was skipped, and None
+            on the `limit` debug path, where make_insert skips the insert.
+            vid_maker is None when no video was made.
+        """
+        M_TO_CM = 100
+        params_pk = "trodes_pos_params_name"
 
         # Check if video exists
         if not video_path:  # pragma: no cover
-            self.insert1(dict(**key, has_video=False))
-            return
+            return [False, None]
 
         # Check timepoints overlap
         if not set(video_time).intersection(set(pos_df.index)):
@@ -348,19 +425,13 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
                 "No overlapping time points between video and position data"
             )
 
-        params_pk = "trodes_pos_params_name"
-        params = (TrodesPosParams() & {params_pk: key[params_pk]}).fetch1(
-            "params"
-        )
-
         # Check if upsampled
         if params["is_upsampled"]:
             logger.error(
                 "Upsampled position data not supported for video creation\n"
                 + "Please submit a feature request via GitHub if needed."
             )
-            self.insert1(dict(**key, has_video=False))  # Null insert
-            return
+            return [False, None]  # Null insert
 
         video_path = find_mp4(
             video_path=os.path.dirname(video_path) + "/",
@@ -439,6 +510,26 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         )
 
         if limit and not test_mode:  # pragma: no cover
-            return vid_maker
+            return [None, vid_maker]  # debug run, skip the insert
 
-        self.insert1(dict(**key, has_video=True))
+        return [True, vid_maker]
+
+    def make_insert(self, key, has_video, vid_maker):
+        """Insert the key, recording whether a video was made.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of TrodesPosV1
+        has_video : bool or None
+            whether make_compute rendered a video. None for a `limit` debug
+            run, which is not recorded so the entry can be remade.
+        vid_maker : VideoMaker or None
+            the VideoMaker used, retained for debugging
+        """
+        self._video_maker = vid_maker  # retained for debugging
+
+        if has_video is None:  # pragma: no cover
+            return
+
+        self.insert1(dict(**key, has_video=has_video))

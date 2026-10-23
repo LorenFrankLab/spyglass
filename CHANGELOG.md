@@ -1,5 +1,118 @@
 # Change Log
 
+## [0.6.1] (Unreleased)
+
+<!--
+### Release notes
+
+```python
+# Add alters here
+# from spyglass.location import Each Table Needed To Resolve FKRef
+
+# Table.alter()
+```
+-->
+
+### Breaking Changes
+
+#### `get_sort_group_info` Returns Every Electrode (#1678)
+
+`get_sort_group_info` returned a single representative electrode per sort group,
+so a sort group spanning a whole tetrode was described by one of its four
+channels. It now returns one row per electrode, on `CurationV1`,
+`CuratedSpikeSorting` and `SpikeSortingOutput`.
+
+**Impact**: any caller that assumed a single row — `fetch1()`, or indexing the
+first row — will now see one row per electrode of the group.
+
+**Migration guide**:
+
+```python
+# OLD: one row per sort group
+info = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch1()
+
+# NEW: restrict to the electrode you want
+info = (
+    SpikeSortingOutput().get_sort_group_info(merge_keys) & {"electrode_id": 0}
+).fetch1()
+
+# ... or keep every electrode of the group
+rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+```
+
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Pin `ndx-ophys-devices>=0.3.1,<0.4` #1697
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
+- Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
+    the `None` return from `make_compute` #1679
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
+
+### Pipelines
+
+- Common
+
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
+
+- Decoding
+
+    - Pair waveform-feature units with spike times by label, not position #1678
+
+- Position
+
+    - Separate `DLCPosVideo`, `TrodesPosVideo`, and `PositionVideo` to tri-part
+        `make`; `PositionVideo` also closes the video NWB file handle it
+        previously left open #1679
+    - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
+        `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
+        under DataJoint's daemonic workers #1679
+    - `TrodesPosVideo` and `PositionVideo` raise on an unmapped epoch instead of
+        committing `has_video=False`, and no longer repair `PositionIntervalMap`
+        or `VideoFile` from `make_fetch` #1679
+    - `DLCPosVideo` raises when a render writes no file, instead of reporting
+        success and inserting no row #1679
+    - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
+        across databases #1679
+    - `VideoMaker` raises on a failed partial render #1679
+
+- Spike Sorting
+
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
+        #1678
+
 ## [0.6.0] (Sep 1st 2026)
 
 ### Breaking Changes
@@ -405,6 +518,8 @@ Position V1 and V2 now share one implementation of each calculation, in
         injects the `tempdir` scratch-dir param only for sorters that declare it
         (only `mountainsort4`), instead of injecting it into every sorter and
         maintaining hardcoded removal lists #1655
+    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
+    - Add `unit_criteria` to `UnitSelectionParams` #1670
 
 ## [0.5.5] (Aug 6, 2025)
 

@@ -212,7 +212,7 @@ def infer_output_dir(key, makedir=True):
     return output_dir
 
 
-def get_video_info(key):
+def get_video_info(key, populate_missing: bool = True):
     """Returns video path for a given key.
 
     Given nwb_file_name and interval_list_name returns specified
@@ -222,6 +222,10 @@ def get_video_info(key):
     ----------
     key : dict
         Dictionary containing nwb_file_name and interval_list_name as keys
+    populate_missing : bool
+        Whether to insert VideoFile entries from the NWB file when the session
+        has none. Must be False when called from another table's `make_fetch`,
+        which is not permitted to write. Defaults to True.
 
     Returns
     -------
@@ -240,12 +244,18 @@ def get_video_info(key):
     vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
     video_query = VideoFile & vf_key
 
-    if not video_query:
-        # Only ingest when the session has no videos at all, so a genuine
-        # epoch miss is reported below rather than rescanning the file.
-        if not (VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}):
-            VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
-            video_query = VideoFile & vf_key
+    # Only ingest when the session has no videos at all, so a genuine epoch
+    # miss is reported below rather than rescanning the file.
+    if not video_query and not (
+        VideoFile & {"nwb_file_name": vf_key["nwb_file_name"]}
+    ):
+        if not populate_missing:
+            raise ValueError(
+                f"No VideoFile entries for {vf_key['nwb_file_name']}.\n\tRun "
+                "`VideoFile().insert_from_nwbfile(nwb_file_name)` first."
+            )
+        VideoFile().insert_from_nwbfile(vf_key["nwb_file_name"])
+        video_query = VideoFile & vf_key
 
     if len(video_query) != 1:
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")
