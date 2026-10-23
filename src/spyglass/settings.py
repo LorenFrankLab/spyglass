@@ -840,6 +840,7 @@ class SpyglassConfig:
         if self._config:
             self._config["prefer_download"] = self._prefer_download
 
+    @property
     def pose_project_dir(self) -> str:
         """Pose project directory as a string."""
         return self.config.get(self.dir_to_var("project", "pose"))
