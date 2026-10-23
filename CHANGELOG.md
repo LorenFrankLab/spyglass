@@ -232,6 +232,32 @@ for label, interval_data in results.groupby("interval_labels"):
 - `-1` - Time points outside any decoding interval (only when
     `estimate_decoding_params=True`)
 
+#### Shared Position Utilities (#1646)
+
+Position V1 and V2 now share one implementation of each calculation, in
+`spyglass/position/utils/`. Position V1 supports DeepLabCut >= 2.3.
+
+- `spyglass.position.v1.dlc_reader` is removed. Its `PoseEstimation` is
+    `spyglass.position.utils.dlc_io.DLCProjectReader`; its `read_yaml` and
+    `save_yaml` are in `spyglass.position.utils`
+- These are no longer importable: `spyglass.position.utils_dlc`,
+    `v1.dlc_utils_makevid`, `v1.do_pose_estimation`, `v1.read_yaml`,
+    `v1.save_yaml`, `dlc_utils.validate_smooth_params`,
+    `dlc_utils.two_pt_head_orientation`, `dlc_utils.no_orientation` and
+    `dlc_utils._key_to_func_dict`
+- `get_video_info` returns `(None,) * 4` where it raised `FileNotFoundError`;
+    `_process_videos` raises `RuntimeError` where it raised `ValueError`
+- `find_mp4` verifies an existing converted mp4 against its source and raises on
+    a mismatch, at the cost of one `ffprobe -count_frames` per video #1652
+- `speed_smoothing_std_dev` of `0` or `None` skips smoothing, not raises
+- `one_pt_centroid` and `null` sets insert without `max_LED_separation`
+- A smoothing duration rounding below two samples is rejected, not clamped to a
+    one-sample window
+- `validate_list` checks that required items are present, not the reverse
+- Position V2 drops three V1 behaviours: interpolating spans longer than
+    `max_pts_to_interp`, a bisector orientation that can point away from the
+    third LED, and a horizontal orientation for collinear LEDs
+
 ### Documentation
 
 - Delete extra pyscripts that were renamed #1363

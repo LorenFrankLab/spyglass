@@ -1088,7 +1088,9 @@ class VideoFile(SpyglassIngestion, dj.Imported):
             raise ValueError(f"No VideoFile rows found for key: {key}")
         return [cls.get_abs_path(k) for k in row_keys]
 
-    def _narrow_key_lookup(self, video_path: str, restriction=None) -> tuple:
+    def _get_key_for_video_path(
+        self, video_path: str, restriction=None
+    ) -> tuple:
         """Select a single VideoFile PK for *video_path* under *restriction*.
 
         *restriction* scopes VideoFile to a session (the sole caller passes

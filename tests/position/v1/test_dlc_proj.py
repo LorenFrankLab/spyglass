@@ -111,7 +111,7 @@ def test_process_video_error(dlc_project_tbl, teardown):
         dlc_project_tbl._process_videos(video_list=["fake_video.mp4"], **kwarg)
     with open("temp_file.txt", "w") as f:
         f.write("This is a temporary file.")
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError):
         dlc_project_tbl._process_videos(video_list=["temp_file.txt"], **kwarg)
 
     os.remove("temp_file.txt")
@@ -152,3 +152,89 @@ def test_label_frame_error(dlc_project_tbl, empty_dlc_project):
             new_proj_path="/fake_path",
             video_filenames=["any"],
         )
+
+
+class TestPatchCollectedDataPaths:
+    """Pre-2.2 label files must be left alone, not rewritten.
+
+    DLC < 2.2 writes a single index column. Read with index_col=[0, 1, 2],
+    the first two coordinate columns become index levels, so every row looks
+    mismatched and patching overwrites the labels in both the CSV and the
+    .h5 DLC trains from.
+    """
+
+    OLD_FORMAT = (
+        "scorer,,,alice,alice\n"
+        "bodyparts,,,nose,nose\n"
+        "coords,,,x,y\n"
+        "labeled-data/vidA/img010.png,1.5,2.25,7.0,8.0\n"
+    )
+
+    def test_old_single_index_file_is_untouched(self, sgp, tmp_path):
+        from spyglass.position.v1.position_dlc_project import DLCProject
+
+        label_dir = tmp_path / "vidA"
+        label_dir.mkdir()
+        csv_path = label_dir / "CollectedData_alice.csv"
+        csv_path.write_text(self.OLD_FORMAT)
+        before = csv_path.read_bytes()
+
+        DLCProject._patch_collected_data_paths(label_dir, "vidA")
+
+        assert csv_path.read_bytes() == before
+
+    def test_three_level_stale_video_name_is_still_patched(self, sgp, tmp_path):
+        """The guard must not become a no-op for the format it does handle."""
+        import pandas as pd
+
+        from spyglass.position.v1.position_dlc_project import DLCProject
+
+        label_dir = tmp_path / "vidA"
+        label_dir.mkdir()
+        csv_path = label_dir / "CollectedData_alice.csv"
+
+        cols = pd.MultiIndex.from_tuples(
+            [("alice", "nose", "x"), ("alice", "nose", "y")],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        idx = pd.MultiIndex.from_tuples(
+            [("labeled-data", "WRONGNAME", "img010.png")]
+        )
+        pd.DataFrame([[1.5, 2.25]], columns=cols, index=idx).to_csv(csv_path)
+
+        DLCProject._patch_collected_data_paths(label_dir, "vidA")
+
+        patched = pd.read_csv(csv_path, header=[0, 1, 2], index_col=[0, 1, 2])
+        assert list(patched.index.get_level_values(1).unique()) == ["vidA"]
+
+
+def test_extract_frames_preserves_labeled_images(
+    sgp, dlc_project_tbl, project_key, dlc_config, project_dir, monkeypatch
+):
+    """Labeled images and their annotations must survive extraction.
+
+    `run_extract_frames` used to delete every PNG under labeled-data before
+    extracting, which discarded already-labeled frames while their
+    CollectedData annotations still referenced them.
+    """
+    import deeplabcut
+
+    vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
+    label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
+    label_dir.mkdir(parents=True, exist_ok=True)
+
+    labeled_png = label_dir / "img_labeled_keepme.png"
+    labeled_png.write_bytes(b"not-a-real-png")
+    collected = label_dir / "CollectedData_keepme.csv"
+    collected.write_text("scorer,,\n")
+
+    monkeypatch.setattr(
+        deeplabcut, "extract_frames", lambda *a, **k: None, raising=False
+    )
+
+    dlc_project_tbl.run_extract_frames(
+        project_key, userfeedback=False, mode="automatic", algo="uniform"
+    )
+
+    assert labeled_png.exists(), "labeled frame was deleted"
+    assert collected.exists(), "CollectedData annotation was deleted"

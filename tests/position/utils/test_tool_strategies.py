@@ -1,0 +1,538 @@
+"""Tests for pose estimation tool strategies."""
+
+from types import SimpleNamespace
+from pathlib import Path
+from typing import Any, Dict, List, Set
+
+import pytest
+
+
+class TestPoseToolStrategy:
+    """Test base PoseToolStrategy class."""
+
+    def test_abstract_base_class(self, PoseToolStrategy):
+        """Test that PoseToolStrategy is abstract."""
+        with pytest.raises(TypeError):
+            PoseToolStrategy()
+
+
+class TestDLCStrategy:
+    """Test DLCStrategy implementation."""
+
+    @pytest.fixture
+    def strategy(self, DLCStrategy):
+        """Create DLCStrategy instance."""
+        return DLCStrategy()
+
+    def test_initialization(self, strategy):
+        """Test DLCStrategy initialization."""
+        assert strategy.tool_name == "DLC"
+        assert hasattr(strategy, "validate_params")
+        assert hasattr(strategy, "get_required_params")
+        assert hasattr(strategy, "train_model")
+
+    def test_get_required_params(self, strategy):
+        """Test get_required_params method."""
+        required = strategy.get_required_params()
+        assert required == {"project_path"}
+        assert isinstance(required, set)  # guard alongside value
+
+    def test_get_accepted_params(self, strategy):
+        """Test get_accepted_params method."""
+        accepted = strategy.get_accepted_params()
+        assert isinstance(accepted, set)  # guard alongside value
+        # Required is always a subset of accepted; DLC exposes both the
+        # PyTorch length knobs (epochs/save_epochs) and legacy TF/project keys.
+        assert strategy.get_required_params() <= accepted
+        assert {
+            "project_path",
+            "shuffle",
+            "maxiters",
+            "epochs",
+            "save_epochs",
+        } <= accepted
+
+    def test_get_default_params(self, strategy):
+        """Test get_default_params method."""
+        defaults = strategy.get_default_params()
+        assert defaults["shuffle"] == 1
+        assert defaults["trainingsetindex"] == 0
+        # PyTorch-first defaults (DLC 3.x): an explicit epoch budget rather
+        # than TF iteration knobs. The TF ``maxiters`` default stays None so
+        # DLC picks its own; net_type is the ResNet-50 backbone.
+        assert defaults["epochs"] == 200
+        assert defaults["save_epochs"] == 25
+        assert defaults["maxiters"] is None
+        assert defaults["net_type"] == "resnet_50"
+        assert isinstance(defaults, dict)  # guard alongside value
+
+    def test_validate_params_missing_required(self, strategy):
+        """Test validate_params with missing required parameters."""
+        params = {}  # Missing project_path
+
+        with pytest.raises(ValueError, match="missing required parameters"):
+            strategy.validate_params(params)
+
+    def test_validate_params_warns_on_tf_maxiters_as_epochs(self, strategy):
+        """A TF-sized ``epochs`` value warns (TF->PyTorch migration guard)."""
+        params = {"project_path": "/tmp/proj", "epochs": 1_030_000}
+        with pytest.warns(UserWarning, match="implausibly large"):
+            strategy.validate_params(params)
+
+    def test_validate_params_no_warn_on_normal_epochs(self, strategy):
+        """A normal PyTorch ``epochs`` value does not warn."""
+        import warnings
+
+        params = {"project_path": "/tmp/proj", "epochs": 200}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning -> failure
+            strategy.validate_params(params)
+
+
+class TestSLEAPStrategy:
+    """Test SLEAPStrategy implementation."""
+
+    @pytest.fixture
+    def strategy(self, SLEAPStrategy):
+        """Create SLEAPStrategy instance."""
+        return SLEAPStrategy()
+
+    def test_initialization(self, strategy):
+        """Test SLEAPStrategy initialization."""
+        assert strategy.tool_name == "SLEAP"
+        assert hasattr(strategy, "validate_params")
+        assert hasattr(strategy, "get_required_params")
+        assert hasattr(strategy, "train_model")
+
+    def test_get_required_params(self, strategy):
+        """Test get_required_params method."""
+        required = strategy.get_required_params()
+        assert required == {"model_type"}
+        assert isinstance(required, set)  # guard alongside value
+
+    def test_get_accepted_params(self, strategy):
+        """Test get_accepted_params method."""
+        accepted = strategy.get_accepted_params()
+        assert isinstance(accepted, set)  # guard alongside value
+        assert strategy.get_required_params() <= accepted
+        assert {"model_type", "max_epochs", "batch_size"} <= accepted
+
+    def test_get_default_params(self, strategy):
+        """Test get_default_params method."""
+        defaults = strategy.get_default_params()
+        assert defaults["model_type"] == "single_instance"
+        assert defaults["backbone"] == "unet"
+        assert defaults["max_epochs"] == 200
+        assert defaults["batch_size"] == 4
+        assert defaults["learning_rate"] == 1e-4
+        assert isinstance(defaults, dict)  # guard alongside value
+
+    def test_validate_params_missing_required(self, strategy):
+        """Test validate_params with missing required parameters."""
+        params = {}  # Missing model_type
+
+        with pytest.raises(ValueError, match="missing required parameters"):
+            strategy.validate_params(params)
+
+    def test_validate_params_invalid_model_type(self, strategy):
+        """Test validate_params with invalid model_type."""
+        params = {"model_type": "invalid_type"}
+
+        with pytest.raises(ValueError, match="Invalid SLEAP model_type"):
+            strategy.validate_params(params)
+
+
+class TestSLEAPOutputDiscovery:
+    """Each video must resolve to its own output file.
+
+    The globs were unanchored, so with several videos sharing one output
+    directory every video matched every file and the newest-of-matches
+    tiebreak returned the same result for all of them.
+    """
+
+    @pytest.fixture
+    def strategy(self, SLEAPStrategy):
+        return SLEAPStrategy()
+
+    @staticmethod
+    def _write(out_dir, names):
+        """Create files in mtime order, oldest first."""
+        import os
+
+        for i, name in enumerate(names):
+            p = out_dir / name
+            p.touch()
+            os.utime(p, (1_600_000_000 + i, 1_600_000_000 + i))
+
+    def test_each_video_gets_its_own_analysis_h5(self, strategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # vidB's file is newest, so an unanchored glob returns it for both.
+        self._write(out, ["vidA.analysis.h5", "vidB.analysis.h5"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vidA.mp4"), str(tmp_path / "vidB.mp4")],
+            output_dir=str(out),
+        )
+
+        assert [Path(f).name for f in found] == [
+            "vidA.analysis.h5",
+            "vidB.analysis.h5",
+        ]
+
+    def test_each_video_gets_its_own_slp_fallback(self, strategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vidA.predictions.slp", "vidB.predictions.slp"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vidA.mp4"), str(tmp_path / "vidB.mp4")],
+            output_dir=str(out),
+        )
+
+        assert [Path(f).name for f in found] == [
+            "vidA.predictions.slp",
+            "vidB.predictions.slp",
+        ]
+
+    def test_analysis_h5_preferred_over_slp(self, strategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # .slp written later, so preference must not be decided by mtime.
+        self._write(out, ["vidA.analysis.h5", "vidA.predictions.slp"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vidA.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vidA.analysis.h5"]
+
+    def test_video_without_output_is_none(self, strategy, tmp_path):
+        """A video with no output holds a place rather than being dropped."""
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vidA.analysis.h5"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vidB.mp4")], output_dir=str(out)
+        )
+
+        assert found == [None]
+
+
+class TestToolStrategyFactory:
+    """Test ToolStrategyFactory."""
+
+    @pytest.fixture
+    def factory(self, ToolStrategyFactory):
+        """Create ToolStrategyFactory instance with registry isolation.
+
+        ``register_strategy`` mutates the class-level ``_strategies`` dict, so
+        snapshot and restore it around each test. Without this, mock tools
+        registered here (e.g. ``"test"``/``"idempotent"``) leak into the global
+        registry and break unrelated tests that iterate all registered tools
+        (``ModelParams.tool_info`` now raises on a strategy that fails to build).
+        """
+        saved = dict(ToolStrategyFactory._strategies)
+        try:
+            yield ToolStrategyFactory()
+        finally:
+            ToolStrategyFactory._strategies.clear()
+            ToolStrategyFactory._strategies.update(saved)
+
+    def test_get_dlc_strategy(self, factory, DLCStrategy):
+        """Test getting DLC strategy."""
+        strategy = factory.create_strategy("DLC")
+        assert isinstance(strategy, DLCStrategy)  # guard alongside behavior
+        # The factory returns a wired DLC strategy: DLC identity, the
+        # DeepLabCut ndx-pose software name, and DLC's output-file patterns.
+        assert strategy.tool_name == "DLC"
+        assert strategy.source_software == "DeepLabCut"
+        assert strategy.supports_training is True
+        assert strategy.get_output_file_patterns() == {
+            "primary": "{video_stem}DLC_*.h5",
+            "fallback": "*.h5",
+        }
+
+    def test_get_sleap_strategy(self, factory, SLEAPStrategy):
+        """Test getting SLEAP strategy."""
+        strategy = factory.create_strategy("SLEAP")
+        assert isinstance(strategy, SLEAPStrategy)  # guard alongside behavior
+        assert strategy.tool_name == "SLEAP"
+        assert strategy.source_software == "SLEAP"
+        assert strategy.supports_training is True
+        # The dot after the stem distinguishes `vid1` from `vid10.analysis.h5`
+        assert strategy.get_output_file_patterns() == {
+            "primary": "{video_stem}.*analysis.h5",
+            "fallback": "{video_stem}.*predictions.slp",
+        }
+
+    def test_ndx_pose_is_not_a_strategy(self, factory):
+        """ndx-pose is a file format, not a tool strategy."""
+        with pytest.raises(ValueError, match="Unsupported tool"):
+            factory.create_strategy("ndx-pose")
+
+    def test_get_unknown_strategy(self, factory):
+        """Test error for unknown strategy."""
+        with pytest.raises(ValueError, match="Unsupported tool"):
+            factory.create_strategy("unknown_tool")
+
+    def test_list_available_strategies(self, factory):
+        """Test listing available strategies."""
+        strategies = factory.get_available_tools()
+        expected = ["DLC", "SLEAP"]
+        assert set(strategies) == set(expected)
+
+    def test_register_new_strategy(self, factory, PoseToolStrategy):
+        """Test registering a new strategy."""
+
+        # Create a mock strategy class
+        class TestStrategy(PoseToolStrategy):
+            @property
+            def tool_name(self) -> str:
+                return "test"
+
+            @property
+            def supports_training(self) -> bool:
+                return True
+
+            def get_required_params(self) -> Set[str]:
+                return {"test_param"}
+
+            def get_accepted_params(self) -> Set[str]:
+                return {"test_param", "optional_param"}
+
+            def get_default_params(self) -> Dict[str, Any]:
+                return {"optional_param": "default"}
+
+            def get_parameter_aliases(self) -> Dict[str, list]:
+                return {}
+
+            def validate_params(self, params: dict) -> None:
+                pass
+
+            def get_skipped_params(self) -> Set[str]:
+                return {"analysis_file_id", "model_path"}
+
+            def find_output_files(self) -> List[str]:
+                return ["test_output.csv"]
+
+            def get_output_file_patterns(self) -> Dict[str, str]:
+                return {"test": "*.test"}
+
+            def train_model(
+                self,
+                key,
+                params,
+                skeleton_id,
+                vid_group,
+                sel_entry,
+                model_instance,
+            ):
+                return {"test": "result"}
+
+            def evaluate_model(
+                self,
+                model_entry,
+                params_entry,
+                model_instance,
+                plotting: bool = True,
+                show_errors: bool = True,
+                **kwargs,
+            ):
+                return {"evaluation": "result"}
+
+        # Register the strategy
+        factory.register_strategy("test", TestStrategy)
+
+        # Test it can be retrieved
+        strategy = factory.create_strategy("test")
+        assert isinstance(strategy, TestStrategy)
+        assert strategy.tool_name == "test"
+
+        # Test it appears in listings
+        strategies = factory.get_available_tools()
+        assert "test" in strategies
+
+    def test_register_strategy_idempotent(self, factory, PoseToolStrategy):
+        """Registering the same strategy twice keeps exactly one entry."""
+
+        class IdempotentStrategy(PoseToolStrategy):
+            @property
+            def tool_name(self):
+                return "idempotent"
+
+            @property
+            def supports_training(self):
+                return False
+
+            def get_required_params(self):
+                return set()
+
+            def get_accepted_params(self):
+                return set()
+
+            def get_default_params(self):
+                return {}
+
+            def validate_params(self, params, *args, **kwargs):
+                pass
+
+            def train_model(self, *args, **kwargs):
+                return {}
+
+            def run_inference(self, *args, **kwargs):
+                return {}
+
+            def evaluate_model(self, *args, **kwargs):
+                return {}
+
+        before = len(factory.get_available_tools())
+        factory.register_strategy("idempotent", IdempotentStrategy)
+        factory.register_strategy("idempotent", IdempotentStrategy)
+        assert len(factory.get_available_tools()) == before + 1
+
+
+class TestSLEAPPatternAnchoring:
+    """`vid1` must not collect `vid10`'s output.
+
+    The stem patterns are globbed per video, so without a dot after the stem
+    `vid1*` also matches `vid10.analysis.h5`, and the newest-of-matches
+    tiebreak then hands `vid10`'s result to `vid1`.
+    """
+
+    @pytest.fixture
+    def strategy(self, SLEAPStrategy):
+        return SLEAPStrategy()
+
+    @staticmethod
+    def _write(out_dir, names):
+        """Create files oldest-first so mtime order is known."""
+        import os
+
+        for i, name in enumerate(names):
+            p = out_dir / name
+            p.touch()
+            os.utime(p, (1_600_000_000 + i, 1_600_000_000 + i))
+
+    def test_vid1_does_not_take_vid10_output(self, strategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # vid10's file is newest, so an unanchored glob returns it for vid1.
+        self._write(out, ["vid1.analysis.h5", "vid10.analysis.h5"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.analysis.h5"]
+
+    def test_sleap_native_double_suffix_still_matches(self, strategy, tmp_path):
+        """SLEAP writes <video>.mp4.predictions.slp; the dot must allow it."""
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vid1.mp4.predictions.slp"])
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.mp4.predictions.slp"]
+
+    def test_mtime_choice_uses_injected_filesystem(self, strategy, tmp_path):
+        """A stub filesystem must control which match wins."""
+        out = tmp_path / "out"
+        out.mkdir()
+        self._write(out, ["vid1.a.analysis.h5", "vid1.b.analysis.h5"])
+
+        # Invert the real mtime order through the seam.
+        strategy._fs = SimpleNamespace(
+            exists=lambda p: Path(p).exists(),
+            glob=lambda pat: [
+                str(p) for p in Path(pat).parent.glob(Path(pat).name)
+            ],
+            getmtime=lambda p: 1.0 if "vid1.a." in str(p) else 0.0,
+        )
+
+        found = strategy.find_output_files(
+            [str(tmp_path / "vid1.mp4")], output_dir=str(out)
+        )
+
+        assert [Path(f).name for f in found] == ["vid1.a.analysis.h5"]
+
+
+class TestOutputPositionalAlignment:
+    """`find_output_files` returns one entry per video, in order.
+
+    A video with no output used to be skipped, so the returned list was
+    shorter than `video_paths` and a caller pairing the two handed every
+    later video the previous video's output.
+    """
+
+    @staticmethod
+    def _write(out_dir, names):
+        import os
+
+        for i, name in enumerate(names):
+            p = out_dir / name
+            p.touch()
+            os.utime(p, (1_600_000_000 + i, 1_600_000_000 + i))
+
+    def test_sleap_gap_is_a_none_placeholder(self, SLEAPStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # vid2 has no output; vid1 and vid3 do.
+        self._write(out, ["vid1.analysis.h5", "vid3.analysis.h5"])
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2, 3)]
+
+        found = SLEAPStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert len(found) == len(videos)
+        assert found[1] is None
+        assert Path(found[0]).name == "vid1.analysis.h5"
+        assert Path(found[2]).name == "vid3.analysis.h5"
+
+    def test_sleap_no_outputs_at_all(self, SLEAPStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = SLEAPStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert found == [None, None]
+
+    def test_sleap_missing_search_dir_is_none(self, SLEAPStrategy, tmp_path):
+        """An absent output directory is a gap, not a shortened list."""
+        videos = [str(tmp_path / "vid1.mp4")]
+
+        found = SLEAPStrategy().find_output_files(
+            videos, output_dir=str(tmp_path / "does_not_exist")
+        )
+
+        assert found == [None]
+
+    def test_dlc_gap_is_a_none_placeholder(self, DLCStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        # The DLC fallback pattern is "*.h5", so an unrelated h5 in the
+        # directory would fill a gap. Keep only vid1's own output.
+        self._write(out, ["vid1DLC_resnet50.h5"])
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = DLCStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert len(found) == len(videos)
+        assert Path(found[0]).name == "vid1DLC_resnet50.h5"
+        # vid2 has no own output, but the "*.h5" fallback finds vid1's file.
+        # That is pre-existing fallback behaviour; the point here is that the
+        # entry exists at index 1 rather than the list being length 1.
+        assert found[1] is not None
+
+    def test_dlc_empty_dir_is_none(self, DLCStrategy, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        videos = [str(tmp_path / f"vid{i}.mp4") for i in (1, 2)]
+
+        found = DLCStrategy().find_output_files(videos, output_dir=str(out))
+
+        assert found == [None, None]

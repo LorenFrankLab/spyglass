@@ -3,12 +3,12 @@ from pathlib import Path
 
 import datajoint as dj
 
-from spyglass.position.utils import get_param_names
-from spyglass.position.utils_dlc import (
+from spyglass.position.utils import (
+    get_param_names,
     suppress_print_from_package,
     test_mode_suppress,
 )
-from spyglass.position.v1.dlc_utils import file_log
+from spyglass.position.utils.general import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
@@ -71,7 +71,7 @@ class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
         param_query = cls & param_pk
 
         if param_query:
-            logger.info(
+            cls()._info_msg(
                 f"New param set not added\n"
                 f"A param set with name: {paramset_name} already exists"
             )
@@ -109,6 +109,51 @@ class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
                 dj.U().aggr(self & key, n="max(training_id)").fetch1("n") or 0
             ) + 1
         super().insert1({**key, "training_id": training_id}, **kwargs)
+
+
+def latest_snapshot_index(train_dir: Path) -> int:
+    """Index of the most recently written TensorFlow snapshot.
+
+    Parameters
+    ----------
+    train_dir : Path
+        A DLC model's ``train`` directory.
+
+    Returns
+    -------
+    int
+        The snapshot index. Zero only under ``test_mode``, where training is
+        deliberately incomplete.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no snapshot is found outside ``test_mode``.
+
+    Notes
+    -----
+    DLC judges "latest" by snapshot magnitude; this means most recently
+    written. Only the TensorFlow engine writes the ``*index*`` files searched
+    here. The PyTorch engine, the DLC 3 default, writes ``snapshot-*.pt``,
+    so a PyTorch project finds nothing and raises rather than reporting 0,
+    which would be indistinguishable from a real snapshot index.
+    """
+    latest, max_modified_time = None, 0
+    for snapshot in train_dir.glob("*index*"):
+        modified_time = os.path.getmtime(snapshot)
+        if modified_time > max_modified_time:
+            latest = int(snapshot.stem[9:])
+            max_modified_time = modified_time
+
+    if latest is not None:
+        return latest
+
+    if not test_mode:
+        raise FileNotFoundError(
+            f"No training snapshot found under {train_dir}. The PyTorch "
+            "engine writes snapshot-*.pt, which this search does not match."
+        )
+    return 0
 
 
 @schema
@@ -167,7 +212,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        from . import dlc_reader
+        from spyglass.position.utils import read_yaml, save_yaml
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
@@ -180,9 +225,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         project_path = dlc_config["project_path"]
 
         # ---- Build and save DLC configuration (yaml) file ----
-        dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(
-            config_path
-        )
+        dlc_config = read_yaml(project_path)[1] or read_config(config_path)
         dlc_config.update(
             {
                 **params,
@@ -196,16 +239,34 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         )
 
         # Write dlc config file to base project folder
-        dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
+        dlc_cfg_filepath = save_yaml(project_path, dlc_config)
+
+        # DLC 3.x requires Engine enum, not a raw string. Convert if needed.
+        try:
+            from deeplabcut.core.engine import Engine as _Engine
+
+            _dlc3 = True
+        except ImportError:
+            _dlc3 = False
+
+        def _to_engine(val):
+            """Convert a string engine name to Engine enum for DLC 3.x."""
+            if _dlc3 and isinstance(val, str):
+                return _Engine(val)
+            return val
+
         # ---- create training dataset ----
         training_dataset_kwargs = {
             k: v
             for k, v in dlc_config.items()
             if k in get_param_names(create_training_dataset)
         }
+        if "engine" in training_dataset_kwargs:
+            training_dataset_kwargs["engine"] = _to_engine(
+                training_dataset_kwargs["engine"]
+            )
         self._info_msg("creating training dataset")
 
-        # NOTE: if DLC > 3, this will raise engine error
         with test_mode_suppress():
             create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
 
@@ -215,11 +276,18 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             for k, v in dlc_config.items()
             if k in get_param_names(train_network)
         }
+        if "engine" in train_network_kwargs:
+            train_network_kwargs["engine"] = _to_engine(
+                train_network_kwargs["engine"]
+            )
         for k in ["shuffle", "trainingsetindex", "maxiters"]:
             if value := train_network_kwargs.get(k):
                 train_network_kwargs[k] = int(value)
         if test_mode:
             train_network_kwargs["maxiters"] = 2
+            if _dlc3:  # DLC 3.x PyTorch uses epochs instead of maxiters
+                train_network_kwargs.setdefault("epochs", 1)
+                train_network_kwargs.setdefault("save_epochs", 1)
 
         try:
             with suppress_print_from_package():
@@ -234,7 +302,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             if not hit_end_of_train:
                 raise
 
-        snapshots = (
+        train_dir = (
             project_path
             / get_model_folder(
                 trainFraction=dlc_config["train_fraction"],
@@ -243,16 +311,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 modelprefix=dlc_config["modelprefix"],
             )
             / "train"
-        ).glob("*index*")
-
-        # DLC goes by snapshot magnitude when judging 'latest' for
-        # evaluation. Here, we mean most recently generated
-        max_modified_time = 0
-        for snapshot in snapshots:
-            modified_time = os.path.getmtime(snapshot)
-            if modified_time > max_modified_time:
-                latest_snapshot = int(snapshot.stem[9:])
-                max_modified_time = modified_time
+        )
+        latest_snapshot = latest_snapshot_index(train_dir)
 
         self_insert = dict(
             key,

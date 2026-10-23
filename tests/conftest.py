@@ -1566,23 +1566,47 @@ def project_dir(config_path):
     yield Path(config_path).parent
 
 
-@pytest.fixture(scope="session")
-def extract_frames(
-    verbose_context, dlc_project_tbl, project_key, dlc_config, project_dir
-):
-    with verbose_context:
-        dlc_project_tbl.run_extract_frames(
-            project_key, userfeedback=False, mode="automatic"
-        )
-    vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
-    label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
+def _clear_extracted_frames(label_dir):
+    """Delete extracted frames, keeping img000/img001 base test data.
 
-    yield label_dir
-
+    Parameters
+    ----------
+    label_dir : pathlib.Path
+        A project's ``labeled-data/<video_stem>`` directory.
+    """
+    if not label_dir.exists():
+        return
     for file in label_dir.glob("*png"):
         if file.stem in ["img000", "img001"]:
             continue
         file.unlink()
+
+
+@pytest.fixture(scope="session")
+def extract_frames(
+    verbose_context, dlc_project_tbl, project_key, dlc_config, project_dir
+):
+    vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
+    label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
+
+    # DLC skips frames already on disk, so a --no-teardown re-run against a
+    # persisted project dir would extract nothing. Clear here rather than in
+    # run_extract_frames, which must not touch a user's labeled images.
+    _clear_extracted_frames(label_dir)
+
+    with verbose_context:
+        dlc_project_tbl.run_extract_frames(
+            project_key,
+            userfeedback=False,
+            mode="automatic",
+            # Uniform sampling keeps frame indices predictable and off
+            # img000/img001, which hold the base test data.
+            algo="uniform",
+        )
+
+    yield label_dir
+
+    _clear_extracted_frames(label_dir)
 
 
 @pytest.fixture(scope="session")
