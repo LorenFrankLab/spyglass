@@ -734,8 +734,12 @@ class StagedAnalyzer:
         except OSError as exc:
             from spyglass.utils import logger
 
+            # Log the text, not the exception: a kept log record would hold
+            # its traceback and the caller frames (and analyzers) it reaches.
             logger.warning(
-                "Analyzer staging cleanup failed for %s: %s", self.folder, exc
+                "Analyzer staging cleanup failed for %s: %s",
+                self.folder,
+                str(exc),
             )
 
     def __enter__(self):

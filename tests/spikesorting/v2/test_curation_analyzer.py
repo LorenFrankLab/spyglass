@@ -539,6 +539,72 @@ def test_temporary_evaluation_unmaps_analyzers_before_cleanup(
     assert all(not paths for paths in still_mapped), still_mapped
 
 
+def test_failed_validation_does_not_keep_the_analyzer_alive(
+    tmp_path, monkeypatch
+):
+    """A logged validation failure does not hold the rejected analyzer.
+
+    A log handler can keep its records (pytest's capture does, for a whole
+    test). A record that holds the exception also holds its traceback, whose
+    frames hold the loaded analyzer, so the analyzer's memory-mapped files
+    stay mapped. On NFS that blocks removing the stale cache folder.
+    """
+    import logging
+    import weakref
+
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.utils import logger
+
+    class Loaded:
+        pass
+
+    loaded = []
+
+    def load(folder):
+        analyzer = Loaded()
+        loaded.append(weakref.ref(analyzer))
+        return analyzer
+
+    def reject(analyzer):
+        raise RuntimeError("corrupt cache")
+
+    prefix = {"curated_unit_ids": [1]}
+    monkeypatch.setattr(
+        resolver,
+        "_read_manifest",
+        lambda folder: {
+            **prefix,
+            "extension_inventory": {},
+            "storage_fingerprint": "same",
+        },
+    )
+    monkeypatch.setattr(
+        resolver, "_folder_storage_fingerprint", lambda folder: "same"
+    )
+    monkeypatch.setattr(resolver, "load_analyzer_folder", load)
+
+    class KeepRecords(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+
+        def emit(self, record):
+            self.records.append(record)
+
+    keep = KeepRecords()
+    logger.addHandler(keep)
+    try:
+        result = resolver._load_valid_cached_analyzer(
+            tmp_path, prefix, "display", validate_analyzer=reject
+        )
+        assert result is None
+        assert any("corrupt cache" in r.getMessage() for r in keep.records)
+        gc.collect()
+        assert loaded and loaded[0]() is None, "a log record keeps it alive"
+    finally:
+        logger.removeHandler(keep)
+
+
 def test_working_copy_is_unmapped_and_removed_at_exit(tmp_path, monkeypatch):
     """The working copy's files are unmapped and its folder removed at exit.
 

@@ -478,8 +478,10 @@ def _load_valid_cached_analyzer(
     except _AnalyzerSparsityInputsError:
         raise
     except Exception as exc:  # noqa: BLE001 - cache is regeneratable
+        # Log the text, not the exception: a kept log record would hold its
+        # traceback, whose frames hold the rejected (memory-mapped) analyzer.
         logger.warning(
-            "Curation analyzer validation failed at %s: %r.", folder, exc
+            "Curation analyzer validation failed at %s: %s.", folder, repr(exc)
         )
         return None
 
