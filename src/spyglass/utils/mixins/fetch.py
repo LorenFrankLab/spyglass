@@ -252,13 +252,11 @@ class FetchMixin(BaseMixin):
             "analysis_file_name" if "analysis" in attr_name else "nwb_file_name"
         )
 
-        # Get file names and path function
-        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+        # Get path function. The file names it resolves ignore limit/offset,
+        # so the access log reads them off rec_dicts below instead.
+        _, file_path_fn = self._get_nwb_files_and_path_fn(
             tbl, attr_name, *attrs, **kwargs
         )
-
-        if file_name_attr == "nwb_file_name":
-            self._log_nwb_access(nwb_files)
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)
@@ -275,6 +273,9 @@ class FetchMixin(BaseMixin):
         kwargs["as_dict"] = True  # force return as dictionary
         attrs = attrs or self.heading.names  # if not specified, fetch all
         rec_dicts = query_table.fetch(*attrs, **kwargs)
+
+        if file_name_attr == "nwb_file_name":
+            self._log_nwb_access([r[file_name_attr] for r in rec_dicts])
 
         # get filepath for each. Use datajoint for checksum if local
         for rec_dict in rec_dicts:

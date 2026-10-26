@@ -442,6 +442,31 @@ def spare_nwb_file(common, mini_path, raw_dir, teardown):
         path.unlink(missing_ok=True)
 
 
+@pytest.fixture(scope="function")
+def two_file_tbl(common, dj_conn, mini_copy_name, spare_nwb_file):
+    """A raw-file table with one row for each of two NWB files."""
+    from spyglass.utils import SpyglassMixin
+
+    schema = dj.Schema(
+        "test_access_log", {"Nwbfile": common.Nwbfile}, connection=dj_conn
+    )
+
+    @schema
+    class TwoFile(SpyglassMixin, dj.Manual):
+        definition = """
+        -> Nwbfile
+        """
+
+    tbl = TwoFile()
+    tbl.insert(
+        [{"nwb_file_name": mini_copy_name}, {"nwb_file_name": spare_nwb_file}]
+    )
+
+    yield tbl
+
+    tbl.delete_quick()
+
+
 def test_access_count_per_file(access_tbl, mini_copy_name, spare_nwb_file):
     """access_count aggregates rows per file, not over the whole log."""
     access_tbl.insert(
@@ -516,6 +541,23 @@ def test_access_log_not_on_close_nwb(access_tbl, common, mini_dict):
     restricted.close_nwb()
 
     assert len(access_tbl & mini_dict) == 1
+
+
+def test_access_log_follows_pagination(two_file_tbl, access_tbl):
+    """A limited fetch logs the page it returns, not the whole restriction."""
+    recs = two_file_tbl.fetch_nwb(limit=1)
+
+    assert len(recs) == 1, f"fetch_nwb returned {len(recs)} records, want 1"
+    logged = access_tbl.fetch("nwb_file_name").tolist()
+    assert logged == [recs[0]["nwb_file_name"]]
+
+
+def test_access_log_empty_page(two_file_tbl, access_tbl):
+    """A page past the end returns nothing and logs nothing."""
+    recs = two_file_tbl.fetch_nwb(limit=1, offset=2)
+
+    assert len(recs) == 0, f"fetch_nwb returned {len(recs)} records, want 0"
+    assert len(access_tbl) == 0, f"logged {len(access_tbl)} rows for no page"
 
 
 def test_access_log_survives_no_insert_grant(access_tbl, common, mini_dict):
