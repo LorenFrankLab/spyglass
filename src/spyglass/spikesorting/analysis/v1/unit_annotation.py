@@ -66,11 +66,13 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             if k in ["spikesorting_merge_id", "unit_id"]
         }
         if not self & unit_key:
-            nwb_file = (
-                SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
-            ).fetch_nwb()[0]
+            _ss_query = SpikeSortingOutput & {
+                "merge_id": key["spikesorting_merge_id"]
+            }
+            nwb_file = _ss_query.fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
             spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
+            _ss_query.close_nwb()
             if key["unit_id"] > len(spikes) and not self._test_mode:
                 raise ValueError(
                     f"unit_id {key['unit_id']} is greater than ",

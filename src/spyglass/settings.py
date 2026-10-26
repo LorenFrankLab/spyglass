@@ -12,6 +12,20 @@ from spyglass.utils.logging import logger
 
 _UNSET = object()  # distinguishes "not supplied" from an explicit False
 
+# Thresholds for the open-NWB-file cache, set under custom.nwb_cache
+NWB_CACHE_DEFAULTS = {
+    "min_free_gb": 2.0,
+    "min_free_pct": 0.1,
+    "max_file_fraction": 0.8,
+}
+
+# Permitted range per threshold: a test, and the text shown when it fails
+NWB_CACHE_RANGES = {
+    "min_free_gb": (lambda v: v >= 0, ">= 0"),
+    "min_free_pct": (lambda v: 0 <= v <= 1, "between 0 and 1"),
+    "max_file_fraction": (lambda v: 0 < v <= 1, "in (0, 1]"),
+}
+
 
 def _clean_store_url(value) -> str:
     """Normalize a broker base URL to a bare origin with no trailing slash.
@@ -112,6 +126,43 @@ class SpyglassConfig:
         # Note: _schema_version field is informational only, not enforced
         return schema["directory_schema"]
 
+    @staticmethod
+    def _validated_nwb_cache(supplied: dict) -> dict:
+        """Merge supplied NWB cache thresholds over defaults, checking ranges.
+
+        A value that is non-numeric or outside its range is replaced by its own
+        default and logged; the other thresholds are unaffected. Nothing is
+        raised, so one mistyped threshold cannot stop ``import spyglass``.
+
+        Parameters
+        ----------
+        supplied : dict
+            Contents of ``custom.nwb_cache``. Unrecognized keys are ignored.
+
+        Returns
+        -------
+        dict
+            One float per key of ``NWB_CACHE_DEFAULTS``.
+        """
+        merged = {**NWB_CACHE_DEFAULTS, **supplied}
+        ret = dict()
+
+        for key, default in NWB_CACHE_DEFAULTS.items():
+            in_range, range_text = NWB_CACHE_RANGES[key]
+            try:
+                value = float(merged[key])
+            except (TypeError, ValueError):
+                value = None  # same treatment as out of range, below
+            if value is None or not in_range(value):
+                logger.warning(
+                    f"Ignoring nwb_cache {key}={merged[key]!r}: must be"
+                    f" {range_text}. Using the default of {default}."
+                )
+                value = float(default)
+            ret[key] = value
+
+        return ret
+
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
         Initializes a new instance of the class.
@@ -188,6 +239,7 @@ class SpyglassConfig:
         # only the message (not an exception/traceback); recovery uses a new
         # SpyglassConfig object with an unambiguous lifecycle.
         self._mode_error: str | None = None
+        self._nwb_cache = dict(NWB_CACHE_DEFAULTS)
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -349,6 +401,12 @@ class SpyglassConfig:
         # of an existing valid test config remain transactional.
         if test_mode and test_mode_is_bound and not self._config:
             self.load_failed = True
+
+        # `or {}` so an explicit "nwb_cache": null reaches the validator as an
+        # empty mapping rather than failing the merge inside it.
+        self._nwb_cache = self._validated_nwb_cache(
+            dj_custom.get("nwb_cache") or {}
+        )
 
         resolved_base = (
             base_dir
@@ -1094,6 +1152,21 @@ class SpyglassConfig:
     def moseq_video_dir(self) -> str:
         """Moseq video directory as a string."""
         return self.config.get(self.dir_to_var("video", "moseq"))
+
+    @property
+    def nwb_min_free_gb(self) -> float:
+        """Minimum free system RAM in GB before NWB files are closed."""
+        return self._nwb_cache["min_free_gb"]
+
+    @property
+    def nwb_min_free_pct(self) -> float:
+        """Minimum free RAM as a fraction of total before files are closed."""
+        return self._nwb_cache["min_free_pct"]
+
+    @property
+    def nwb_max_file_fraction(self) -> float:
+        """Max fraction of the OS open-descriptor limit this process may use."""
+        return self._nwb_cache["max_file_fraction"]
 
 
 sg_config = SpyglassConfig()

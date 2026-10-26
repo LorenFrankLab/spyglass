@@ -244,15 +244,15 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             List of features for each unit
 
         """
-        return tuple(
-            zip(
-                *list(
-                    chain(
-                        *[self._convert_data(data) for data in self.fetch_nwb()]
-                    )
-                )
-            )
-        )
+
+        def converted_units():
+            """Materialize every unit's data, then release the files."""
+            try:
+                return [self._convert_data(d) for d in self.fetch_nwb()]
+            finally:
+                self.close_nwb()
+
+        return tuple(zip(*list(chain(*converted_units()))))
 
     @staticmethod
     def _convert_data(nwb_data) -> list[tuple[np.ndarray, np.ndarray]]:

@@ -22,7 +22,11 @@ from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
-from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    _acquire_nwb_file,
+    get_electrode_indices,
+    get_nwb_file,
+)
 
 # A trigger is a DB object that is automatically executed when INSERT occurs
 SQL_TRIGGER_QUERY = """
@@ -89,11 +93,27 @@ class Nwbfile(SpyglassMixin, dj.Manual):
             skip_duplicates=True,
         )
 
-    def fetch_nwb(self):
-        return [
-            get_nwb_file(self.get_abs_path(file))
-            for file in self.fetch("nwb_file_name")
-        ]
+    @property
+    def _nwb_table(self):
+        """This table is itself the NWB file list, so it resolves to itself.
+
+        Without this, path resolution raises: there is no NWB foreign key to
+        follow. With it, the inherited ``close_nwb`` resolves the same paths
+        ``fetch_nwb`` holds.
+        """
+        return Nwbfile
+
+    def fetch_nwb(self) -> list:
+        """Return an NWBFile per row, held until ``close_nwb()``.
+
+        The returned objects read lazily from disk, so each file is held to
+        keep the cache from closing it mid-read.
+        """
+        nwbfiles = []
+        for path in self._nwb_paths():
+            nwbfiles.append(get_nwb_file(path))
+            _acquire_nwb_file(path)  # after the open; a miss would no-op
+        return nwbfiles
 
     def share_file(
         self,
