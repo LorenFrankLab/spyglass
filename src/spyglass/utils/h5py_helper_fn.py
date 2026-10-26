@@ -9,31 +9,54 @@ from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 from spyglass.utils.logging import logger
 
+# The gzip level every compressed write uses, inline here and retroactively
+# through h5repack in common_file_compression. Change it in this one place
+# once the filter sweep names a level; see .claude/TASKS_SIMPLIFY.md Task 15.
+# The filter itself is fixed: gzip is the only one h5repack applies and every
+# HDF5 reader understands.
+GZIP_LEVEL = 6
 
-def compressed_data(data, compression="gzip", compression_opts=6):
-    """Wrap data in H5DataIO for compressed NWB dataset writes.
+
+def compression_settings(compression_opts=None) -> dict:
+    """H5DataIO keyword arguments for a compressed write.
+
+    For callers that hand the settings to hdmf themselves, such as
+    ``Data.set_data_io``, rather than wrapping data directly.
+
+    Parameters
+    ----------
+    compression_opts : int, optional
+        Gzip level, 1-9. Defaults to GZIP_LEVEL.
+
+    Returns
+    -------
+    dict
+        Suitable as ``**kwargs`` to H5DataIO, or as its settings dict.
+    """
+    return {
+        "compression": "gzip",
+        "compression_opts": (
+            GZIP_LEVEL if compression_opts is None else compression_opts
+        ),
+    }
+
+
+def compressed_data(data, compression_opts=None):
+    """Wrap data in H5DataIO for a compressed NWB dataset write.
 
     Parameters
     ----------
     data : array-like
         Data to wrap (numpy array, DataChunkIterator, etc.)
-    compression : str
-        HDF5 filter name. 'gzip' (default) or 'lzf'.
-    compression_opts : int or None
-        Level for gzip (1-9); ignored for lzf.
+    compression_opts : int, optional
+        Gzip level, 1-9. Defaults to GZIP_LEVEL.
 
     Returns
     -------
     H5DataIO
-        Wrapped object that pynwb will write with the requested filter.
+        Wrapped object that pynwb will write with the gzip filter.
     """
-    if compression == "lzf":
-        compression_opts = None
-    return H5DataIO(
-        data=data,
-        compression=compression,
-        compression_opts=compression_opts,
-    )
+    return H5DataIO(data=data, **compression_settings(compression_opts))
 
 
 def is_float16_dtype(

@@ -2,7 +2,10 @@
 
 Tracks NWB files repacked in-place via:
 
-    h5repack -f GZIP=6 -m 1  src.nwb  tmp.nwb
+    h5repack -f GZIP=<level> -m 1  src.nwb  tmp.nwb
+
+The level comes from `h5py_helper_fn.GZIP_LEVEL`, shared with the inline
+compressed writes so both paths move together.
 
 The -m 1 flag is required — without it, zero-shape datasets (video
 placeholders) are silently dropped. A repack is accepted only when the
@@ -25,12 +28,11 @@ import h5py
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+from spyglass.utils.h5py_helper_fn import GZIP_LEVEL
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
 
 schema = dj.schema("common_file_compression")
-
-_DEFAULT_GZIP_LEVEL = 6  # benchmarked default
 
 
 @schema
@@ -135,7 +137,7 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         staged = {}
         try:
             for role, path in paths.items():
-                staged[role] = _stage_repack(Path(path), _DEFAULT_GZIP_LEVEL)
+                staged[role] = _stage_repack(Path(path), GZIP_LEVEL)
         except Exception:
             for tmp, _, _ in staged.values():
                 if tmp is not None:

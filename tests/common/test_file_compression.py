@@ -379,3 +379,47 @@ def test_space_check_refuses(monkeypatch, uncompressed_h5):
 
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
     assert not leftovers, f"Temp files left behind: {leftovers}"
+
+
+# ------------------------------- gzip level ---------------------------------
+
+
+def test_compressed_data_uses_shared_level():
+    """Inline writes take the level from the one shared constant."""
+    from spyglass.utils.h5py_helper_fn import GZIP_LEVEL, compressed_data
+
+    wrapped = compressed_data(np.arange(128))
+
+    assert wrapped.io_settings["compression"] == "gzip"
+    assert wrapped.io_settings["compression_opts"] == GZIP_LEVEL
+
+
+def test_compressed_data_level_override():
+    """An explicit level wins over the shared constant."""
+    from spyglass.utils.h5py_helper_fn import compressed_data
+
+    wrapped = compressed_data(np.arange(128), compression_opts=1)
+
+    assert wrapped.io_settings["compression_opts"] == 1
+
+
+def test_repack_uses_shared_level(monkeypatch, uncompressed_h5):
+    """The retroactive repack passes the same constant to h5repack."""
+    from spyglass.common import common_file_compression as cfc
+    from spyglass.utils.h5py_helper_fn import GZIP_LEVEL
+
+    seen = {}
+
+    def fake_repack(src, dst, level):
+        seen["level"] = level
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(cfc, "_h5repack", fake_repack)
+    monkeypatch.setattr(
+        cfc.Nwbfile, "get_abs_path", staticmethod(lambda name, **kw: name)
+    )
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        cfc._stage_repack(uncompressed_h5, gzip_level=GZIP_LEVEL)
+
+    assert seen["level"] == GZIP_LEVEL
