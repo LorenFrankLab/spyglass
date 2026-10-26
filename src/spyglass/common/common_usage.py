@@ -104,7 +104,7 @@ class NwbfileAccess(dj.Manual):
     definition = """
     id: int auto_increment
     ---
-    -> Nwbfile          # secondary: one file has many access rows
+    -> Nwbfile          # one file has many access rows
     dj_user: varchar(64)
     caller_table: varchar(255)
     access_time=CURRENT_TIMESTAMP: timestamp

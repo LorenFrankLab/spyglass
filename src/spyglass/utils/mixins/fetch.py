@@ -172,8 +172,7 @@ class FetchMixin(BaseMixin):
         Parameters
         ----------
         log_access : bool, optional
-            Log a raw NWB access for the resolved files. Default False, so
-            that ``close_nwb`` does not record a release as a read.
+            Log a raw NWB access for the resolved files. Default False.
         """
         table, tbl_attr = self._nwb_table_tuple
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
@@ -206,8 +205,7 @@ class FetchMixin(BaseMixin):
         ----------
         nwb_files : list
             Raw NWB file names resolved for the current restriction. One row
-            is logged per distinct name, so a multi-row fetch of one session
-            counts as a single access of that file.
+            is logged per distinct name.
         """
         if not len(nwb_files):
             return
@@ -226,8 +224,7 @@ class FetchMixin(BaseMixin):
         try:
             NwbfileAccess().insert(rows)
         except AccessError:
-            # Read-only roles have no INSERT on common_usage. Instrumentation
-            # must never break a read, so drop the log and carry on.
+            # Read-only roles have no INSERT on common_usage
             pass
 
     def _execute_nwb_query(self, tbl, attr_name, *attrs, **kwargs):

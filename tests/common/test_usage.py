@@ -494,8 +494,7 @@ def test_access_log_on_fetch_nwb(access_tbl, common, mini_dict):
 def test_access_log_skips_analysis_files(lfp, populate_lfp, access_tbl):
     """Only raw files are logged; analysis file reads are not.
 
-    ``populate_lfp`` is requested before ``access_tbl`` so that the rows its
-    own raw reads log are cleared, not counted.
+    ``populate_lfp`` precedes ``access_tbl``: its own raw reads are cleared.
     """
     lfp.v1.LFPV1().fetch_nwb()
 
@@ -528,5 +527,7 @@ def test_access_log_survives_no_insert_grant(access_tbl, common, mini_dict):
     ):
         recs = (common.Raw & mini_dict).fetch_nwb()
 
-    assert len(recs) == 1, "fetch_nwb broken by the access log"
-    assert len(access_tbl) == 0, "log row written without an INSERT grant"
+    assert len(recs) == 1, f"fetch_nwb returned {len(recs)} records, want 1"
+    assert (
+        len(access_tbl) == 0
+    ), f"logged {len(access_tbl)} rows without an INSERT grant"
