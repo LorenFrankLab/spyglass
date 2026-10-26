@@ -988,7 +988,7 @@ def build_filtered_electrical_series(data, timestamps, electrodes):
     """
     from spyglass.utils.h5py_helper_fn import compressed_data
 
-    # TODO: use datatype of data
+    # TODO (from 2022): use datatype of data
     return pynwb.ecephys.ElectricalSeries(
         name="filtered data",
         data=compressed_data(data),
