@@ -241,7 +241,7 @@ def test_stage_skips_compressed(compressed_h5):
     from spyglass.common.common_file_compression import _stage_repack
 
     before = compressed_h5.read_bytes()
-    tmp, stats = _stage_repack(compressed_h5, gzip_level=6)
+    tmp, _, stats = _stage_repack(compressed_h5, gzip_level=6)
 
     assert tmp is None, "Staged a repack for an already-compressed file"
     assert stats["gzip_level"] is None, "Recorded as repacked"
@@ -270,7 +270,7 @@ def test_stage_leaves_source_untouched(monkeypatch, uncompressed_h5, gzip_copy):
         ),
     )
 
-    tmp, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    tmp, _, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
 
     assert tmp is not None and tmp.exists(), "Nothing staged"
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
@@ -323,3 +323,29 @@ def test_populate_needs_restriction():
 
     with pytest.raises(ValueError, match="requires a restriction"):
         CompressedNwbfile().populate()
+
+
+# --------------------------------- preflight --------------------------------
+
+
+def test_space_check_passes(uncompressed_h5):
+    """A directory with room for a second copy passes."""
+    from spyglass.common.common_file_compression import _assert_space_to_stage
+
+    _assert_space_to_stage(uncompressed_h5)
+
+
+def test_space_check_refuses(monkeypatch, uncompressed_h5):
+    """Too little free space refuses before any temp file is made."""
+    from collections import namedtuple
+
+    from spyglass.common import common_file_compression as cfc
+
+    usage = namedtuple("usage", ["total", "used", "free"])
+    monkeypatch.setattr(cfc, "disk_usage", lambda _: usage(1, 1, 0))
+
+    with pytest.raises(RuntimeError, match="Not enough space"):
+        cfc._stage_repack(uncompressed_h5, gzip_level=6)
+
+    leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
+    assert not leftovers, f"Temp files left behind: {leftovers}"

@@ -17,13 +17,14 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from shutil import which
+from shutil import disk_usage, which
 
 import datajoint as dj
 import h5py
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
 
@@ -129,14 +130,14 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            Single-item list holding {file_role: (tmp or None, stats)}.
+            Single-item list holding {file_role: (tmp or None, src, stats)}.
         """
         staged = {}
         try:
             for role, path in paths.items():
                 staged[role] = _stage_repack(Path(path), _DEFAULT_GZIP_LEVEL)
         except Exception:
-            for tmp, _ in staged.values():
+            for tmp, _, _ in staged.values():
                 if tmp is not None:
                     tmp.unlink(missing_ok=True)
             raise
@@ -151,14 +152,12 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         key : dict
             Primary key of Nwbfile.
         staged : dict
-            {file_role: (tmp or None, stats)}, from make_compute.
+            {file_role: (tmp or None, src, stats)}, from make_compute.
         """
         rows = []
-        for role, (tmp, stats) in staged.items():
+        for role, (tmp, src, stats) in staged.items():
             if tmp is not None:
-                _commit_repack(tmp=tmp, src=Path(stats.pop("_path")))
-            else:
-                stats.pop("_path")
+                _commit_repack(tmp=tmp, src=src)
             rows.append({**key, "file_role": role, **stats})
 
         self.insert(rows)
@@ -167,13 +166,41 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
             r["original_size_bytes"] - r["repacked_size_bytes"] for r in rows
         )
         logger.info(
-            f"Repacked {key['nwb_file_name']}: {saved / 1e9:.2f} GB saved"
+            f"Repacked {key['nwb_file_name']}: "
+            + f"{bytes_to_human_readable(saved)} saved"
         )
 
 
 # ---------------------------------------------------------------------------
 # h5repack helpers
 # ---------------------------------------------------------------------------
+
+
+def _assert_space_to_stage(src: Path) -> None:
+    """Raise if the source's directory cannot hold a second copy of it.
+
+    A repack writes its output beside the source before replacing it, so the
+    worst case — a file that does not compress — needs the file's size again.
+
+    Parameters
+    ----------
+    src : Path
+        File about to be repacked.
+
+    Raises
+    ------
+    RuntimeError
+        If free space is below the source's size.
+    """
+    needed = src.stat().st_size
+    free = disk_usage(src.parent).free
+
+    if free < needed:
+        raise RuntimeError(
+            f"Not enough space to repack {src.name}: needs "
+            + f"{bytes_to_human_readable(needed)}, "
+            + f"{bytes_to_human_readable(free)} free in {src.parent}"
+        )
 
 
 def _stage_repack(src: Path, gzip_level: int) -> tuple:
@@ -191,9 +218,9 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
     Returns
     -------
     tuple
-        (tmp, stats). ``tmp`` is None when the file is already compressed
-        and nothing was repacked. ``stats`` carries the row's size columns
-        plus ``_path``, the source to move onto.
+        (tmp, src, stats). ``tmp`` is None when the file is already
+        compressed and nothing was repacked; ``stats`` holds the row's
+        size columns.
     """
     if not src.exists():
         raise FileNotFoundError(src)
@@ -205,12 +232,17 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
         logger.info(
             f"{src.name} already fully compressed, recording without repacking"
         )
-        return None, {
-            "_path": str(src),
-            "gzip_level": None,
-            "original_size_bytes": original_size,
-            "repacked_size_bytes": original_size,
-        }
+        return (
+            None,
+            src,
+            {
+                "gzip_level": None,
+                "original_size_bytes": original_size,
+                "repacked_size_bytes": original_size,
+            },
+        )
+
+    _assert_space_to_stage(src)
 
     tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
     os.close(tmp_fd)
@@ -223,12 +255,15 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
         tmp.unlink(missing_ok=True)
         raise
 
-    return tmp, {
-        "_path": str(src),
-        "gzip_level": gzip_level,
-        "original_size_bytes": original_size,
-        "repacked_size_bytes": tmp.stat().st_size,
-    }
+    return (
+        tmp,
+        src,
+        {
+            "gzip_level": gzip_level,
+            "original_size_bytes": original_size,
+            "repacked_size_bytes": tmp.stat().st_size,
+        },
+    )
 
 
 def _commit_repack(tmp: Path, src: Path) -> None:
