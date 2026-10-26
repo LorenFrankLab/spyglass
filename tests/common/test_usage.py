@@ -1,5 +1,7 @@
 from pathlib import Path
+from unittest.mock import patch
 
+import datajoint as dj
 import pytest
 
 
@@ -408,3 +410,106 @@ def test_custom_analysis_in_export(gen_export_selection, populate_export):
     assert any(
         custom_abs_path in fp for fp in file_paths
     ), f"Custom file {custom_abs_path} not in export files"
+
+
+# ======================= RAW NWB FILE ACCESS LOGGING ========================
+
+
+@pytest.fixture(scope="function")
+def access_tbl(common):
+    from spyglass.common.common_usage import NwbfileAccess
+
+    tbl = NwbfileAccess()
+    tbl.delete_quick()
+    yield tbl
+    tbl.delete_quick()
+
+
+@pytest.fixture(scope="function")
+def spare_nwb_file(common, mini_path, raw_dir, teardown):
+    """A second raw Nwbfile entry, safe to delete without losing a session."""
+    import shutil
+
+    name = "access_log_spare_.nwb"
+    path = Path(raw_dir) / name
+    shutil.copy(mini_path, path)
+    common.Nwbfile.insert_from_relative_file_name(name)
+
+    yield name
+
+    if teardown:
+        (common.Nwbfile & {"nwb_file_name": name}).delete(safemode=False)
+        path.unlink(missing_ok=True)
+
+
+def test_access_count_per_file(access_tbl, mini_copy_name, spare_nwb_file):
+    """access_count aggregates rows per file, not over the whole log."""
+    access_tbl.insert(
+        [
+            dict(nwb_file_name=f, dj_user="tester", caller_table="`a`.`b`")
+            for f in [mini_copy_name] * 3 + [spare_nwb_file]
+        ]
+    )
+
+    counts = {
+        r["nwb_file_name"]: r["access_count"]
+        for r in access_tbl.access_count.fetch(as_dict=True)
+    }
+    assert counts == {mini_copy_name: 3, spare_nwb_file: 1}
+
+
+def test_access_log_cascades_on_nwbfile_delete(
+    access_tbl, common, spare_nwb_file, mini_copy_name
+):
+    """Deleting an Nwbfile entry takes its log rows with it."""
+    access_tbl.insert(
+        [
+            dict(nwb_file_name=f, dj_user="tester", caller_table="`a`.`b`")
+            for f in [mini_copy_name, spare_nwb_file]
+        ]
+    )
+
+    (common.Nwbfile & {"nwb_file_name": spare_nwb_file}).delete(safemode=False)
+
+    assert len(access_tbl & {"nwb_file_name": spare_nwb_file}) == 0
+    assert len(access_tbl & {"nwb_file_name": mini_copy_name}) == 1
+
+
+def test_access_log_dedupes_per_call(access_tbl, common, mini_copy_name):
+    """One call logs one row per file, however many rows name that file."""
+    common.Raw()._log_nwb_access([mini_copy_name] * 5)
+
+    assert len(access_tbl & {"nwb_file_name": mini_copy_name}) == 1
+
+
+def test_access_log_on_fetch_nwb(access_tbl, common, mini_dict):
+    """A raw fetch_nwb logs the file, the user, and the calling table."""
+    (common.Raw & mini_dict).fetch_nwb()
+
+    row = (access_tbl & mini_dict).fetch1()
+    assert row["dj_user"] == dj.config["database.user"]
+    assert row["caller_table"] == common.Raw.full_table_name
+
+
+def test_access_log_skips_analysis_files(lfp, populate_lfp, access_tbl):
+    """Only raw files are logged; analysis file reads are not.
+
+    ``populate_lfp`` is requested before ``access_tbl`` so that the rows its
+    own raw reads log are cleared, not counted.
+    """
+    lfp.v1.LFPV1().fetch_nwb()
+
+    assert len(access_tbl) == 0
+
+
+def test_access_log_survives_no_insert_grant(access_tbl, common, mini_dict):
+    """A read-only role still fetches; it just logs nothing."""
+    from spyglass.common.common_usage import NwbfileAccess
+
+    with patch.object(
+        NwbfileAccess, "insert", side_effect=dj.errors.AccessError("denied")
+    ):
+        recs = (common.Raw & mini_dict).fetch_nwb()
+
+    assert len(recs) == 1, "fetch_nwb broken by the access log"
+    assert len(access_tbl) == 0, "log row written without an INSERT grant"
