@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import warnings
 from pathlib import Path
+from shutil import which
 
 import datajoint as dj
 import h5py
@@ -209,6 +210,12 @@ def _h5repack(src: Path, dst: Path, level: int) -> None:
     -m 1 preserves zero-shape datasets that would otherwise be
     silently dropped.
     """
+    if which("h5repack") is None:
+        raise RuntimeError(
+            "h5repack not found on PATH. It ships with the HDF5 tools: "
+            "`conda install -c conda-forge hdf5` or `apt install hdf5-tools`."
+        )
+
     result = subprocess.run(
         ["h5repack", "-f", f"GZIP={level}", "-m", "1", str(src), str(dst)],
         capture_output=True,

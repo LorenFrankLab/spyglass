@@ -20,6 +20,7 @@ dependencies:
   - matplotlib
   - bottleneck
   - seaborn
+  - hdf5  # provides h5repack, used to compress existing NWB files
 
   # Core Jupyter environment for notebooks
   - jupyterlab>=3.*
