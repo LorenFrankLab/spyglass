@@ -34,10 +34,7 @@ jobs:
       github.event.action != 'closed' ||
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    # Caps measured against four recent runs: conda ~4 min, apt ~0.5 min,
-    # pip ~0.5 min, tests 12-15 min. The job default is 6 h, long enough for a
-    # stalled step to hold a runner for an afternoon.
-    timeout-minutes: 90
+    timeout-minutes: 90  # backstop; the step caps below are the real limits
     defaults:
      run:
        shell: bash -l {0}
@@ -76,21 +73,17 @@ jobs:
         miniforge-version: latest
         use-mamba: true
     - name: Install apt dependencies
-      timeout-minutes: 10
+      timeout-minutes: 40
       env:
-        DEBIAN_FRONTEND: noninteractive  # no prompt to stall on
+        DEBIAN_FRONTEND: noninteractive
       run: |
-        # The Azure-local mirror blackholes connections intermittently. On
-        # 2026-10-22 `apt-get update` was still emitting `Ign:` lines for it
-        # after two hours, against a usual 30 s. apt does fall back to
-        # archive.ubuntu.com through the runner's mirrorlist, so the fix is to
-        # bound how long each attempt may hang. Retries stay at 1: against a
-        # mirror that never answers, more attempts only multiply the wait.
-        APT_OPTS="-o Acquire::http::Timeout=10"
-        APT_OPTS="$APT_OPTS -o Acquire::https::Timeout=10"
+        # Bound each attempt: the Azure mirror can accept a connection and
+        # never answer, and more retries multiply that wait
+        APT_OPTS="-o Acquire::http::Timeout=30"
+        APT_OPTS="$APT_OPTS -o Acquire::https::Timeout=30"
         APT_OPTS="$APT_OPTS -o Acquire::Retries=1"
         sudo apt-get update $APT_OPTS
-        # mysql client/headers, plus libsm6/libxext6 for opencv-python
+        # libsm6/libxext6 are opencv-python's
         sudo apt-get install -y $APT_OPTS \
           mysql-client libmysqlclient-dev libgirepository1.0-dev \
           ffmpeg libsm6 libxext6
