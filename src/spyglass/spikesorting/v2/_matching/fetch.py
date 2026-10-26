@@ -83,6 +83,13 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             f"InputRecording parts ({'; '.join(structure_errors)}). A "
             "direct insert bypassed UnitMatchSelection.insert_inputs()."
         )
+    # Check each pinned curation before its population snapshot: no valid
+    # snapshot can exist for a missing or uncommitted (preview) curation, so
+    # the snapshot check would otherwise hide the real cause.
+    for row in input_rows:
+        _check_input_curation(
+            row["sorting_id"], int(row["curation_id"]), exc_class
+        )
     _validate_frozen_unit_selections(input_rows, exc_class)
     _validate_frozen_source_coverage(recording_rows, exc_class)
     recordings_by_input: dict[int, list[dict]] = {}
@@ -133,7 +140,6 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
     )
     for row in input_rows:
         sorting_id, curation_id = row["sorting_id"], int(row["curation_id"])
-        _check_input_curation(sorting_id, curation_id, exc_class)
         live = _resolve_match_input(
             sorting_id,
             curation_id,

@@ -995,15 +995,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Re-runs the selection checks on the RAW ``Input`` / ``InputRecording``
         rows before any matcher input is extracted, since a direct insert can
-        bypass ``insert_inputs``: the parts are well formed, there is at
-        least one input, no sorting is pinned twice, no concatenation input
+        bypass ``insert_inputs``: the parts are well formed, each pinned
+        curation exists and carries no unapplied proposed merges (checked
+        before the population snapshots, which cannot be valid for such a
+        curation), there is at least one input, no sorting is pinned twice,
+        no concatenation input
         spans two days and no inputs reuse original raw samples (on the frozen
         source coverage), each ``input_start_time`` is its earliest frozen
         session start and ``input_index`` follows their chronological order,
         and the stored ``input_set_hash`` is the hash of the parts. Then, per
         input, the pinned curation must still exist with the pinned
         ``curation_uuid`` (a recreated curation raises rather than silently
-        re-pointing), carry no unapplied proposed merges, and its live source
+        re-pointing), and its live source
         must still match the frozen recordings (source, ``recording_id``,
         content hash, concatenation membership, frames and kept intervals; a
         concatenation member's ``Recording`` must still carry the content
