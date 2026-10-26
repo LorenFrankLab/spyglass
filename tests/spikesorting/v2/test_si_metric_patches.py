@@ -274,6 +274,149 @@ def test_noise_cluster_spans_reset_on_exit_and_on_error():
     assert _NOISE_CLUSTER_SPANS.get() is None
 
 
+def _count_get_traces(recording):
+    """Wrap ``recording.get_traces`` so each call is counted in ``calls``."""
+    calls = []
+    original = recording.get_traces
+
+    def counting(*args, **kwargs):
+        calls.append(kwargs.get("start_frame"))
+        return original(*args, **kwargs)
+
+    recording.get_traces = counting
+    return calls
+
+
+def test_span_noise_cluster_reads_nearby_snippets_together():
+    """The span draw reads grouped snippets, with the per-snippet values.
+
+    Per-snippet ``get_traces`` calls dominate the metric's run time on a
+    chunked NWB recording, so snippets close together are read in one call
+    and sliced. The values must equal reading each snippet on its own.
+    """
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        sample_span_snippet_starts,
+    )
+
+    recording, spans, _, _ = _masked_frame_indexed_recording()
+    starts = sample_span_snippet_starts(
+        list(spans), nsamples=_NSAMPLES, n_snippets=_N_SNIPPETS, seed=0
+    )
+    expected = np.stack(
+        [
+            recording.get_traces(
+                start_frame=int(s), end_frame=int(s) + _NSAMPLES
+            )
+            for s in starts
+        ]
+    )
+    calls = _count_get_traces(recording)
+    with noise_cluster_spans(spans):
+        noise = _draw_noise_cluster(
+            recording,
+            n_snippets=_N_SNIPPETS,
+            nsamples=_NSAMPLES,
+            seed=0,
+            return_in_uV=False,
+        )
+    assert np.array_equal(noise, expected)
+    assert len(calls) < _N_SNIPPETS / 10
+
+
+def test_noise_cluster_is_drawn_once_per_block_for_a_seeded_draw():
+    """A seeded draw repeats exactly, so a block reads it once and reuses it.
+
+    SpikeInterface passes the same seed for every unit, so every unit's
+    ``nn_noise_overlap`` draws the same snippets. The reused array is
+    read-only, so a caller cannot alter the next unit's noise cluster.
+    """
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+
+    recording, spans, _, _ = _masked_frame_indexed_recording()
+    kwargs = dict(
+        n_snippets=_N_SNIPPETS, nsamples=_NSAMPLES, return_in_uV=False
+    )
+    calls = _count_get_traces(recording)
+    with noise_cluster_spans(spans):
+        first = _draw_noise_cluster(recording, seed=0, **kwargs)
+        n_reads = len(calls)
+        second = _draw_noise_cluster(recording, seed=0, **kwargs)
+        assert len(calls) == n_reads
+        assert np.array_equal(first, second)
+        assert not second.flags.writeable
+
+        _draw_noise_cluster(recording, seed=1, **kwargs)
+        assert len(calls) > n_reads
+
+
+def test_unseeded_noise_cluster_is_not_reused():
+    """``seed=None`` draws new snippets for each call, as SI does."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+
+    recording, spans, _, _ = _masked_frame_indexed_recording()
+    kwargs = dict(
+        n_snippets=_N_SNIPPETS, nsamples=_NSAMPLES, return_in_uV=False
+    )
+    with noise_cluster_spans(spans):
+        first = _draw_noise_cluster(recording, seed=None, **kwargs)
+        second = _draw_noise_cluster(recording, seed=None, **kwargs)
+    assert not np.array_equal(first, second)
+
+
+def test_noise_cluster_reuse_ends_with_the_block():
+    """A new block draws again, so no array outlives the compute."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _draw_noise_cluster,
+        noise_cluster_spans,
+    )
+
+    recording, spans, _, _ = _masked_frame_indexed_recording()
+    kwargs = dict(
+        n_snippets=_N_SNIPPETS, nsamples=_NSAMPLES, seed=0, return_in_uV=False
+    )
+    calls = _count_get_traces(recording)
+    with noise_cluster_spans(spans):
+        _draw_noise_cluster(recording, **kwargs)
+    n_reads = len(calls)
+    with noise_cluster_spans(spans):
+        _draw_noise_cluster(recording, **kwargs)
+    assert len(calls) == 2 * n_reads
+
+
+def test_nn_noise_overlap_unchanged_by_noise_cluster_reuse():
+    """Every unit's ``nn_noise_overlap`` is the same with the reused draw."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _nn_noise_overlap_sparse_fixed,
+        noise_cluster_spans,
+    )
+
+    analyzer = _sparse_whitened_analyzer(num_channels=32, num_units=6)
+    kwargs = dict(max_spikes=200, n_components=5, seed=0)
+    separate = []
+    for unit_id in analyzer.unit_ids:
+        with noise_cluster_spans(None):
+            separate.append(
+                _nn_noise_overlap_sparse_fixed(analyzer, unit_id, **kwargs)
+            )
+    with noise_cluster_spans(None):
+        reused = [
+            _nn_noise_overlap_sparse_fixed(analyzer, unit_id, **kwargs)
+            for unit_id in analyzer.unit_ids
+        ]
+    assert np.all(np.isfinite(separate))
+    assert reused == separate
+
+
 @pytest.fixture(scope="module")
 def small_ground_truth():
     """(traces, probe, sorting) of a 20 s, 8-channel, 4-unit recording."""

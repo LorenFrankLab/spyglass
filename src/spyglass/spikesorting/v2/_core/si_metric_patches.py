@@ -83,13 +83,34 @@ _NOISE_CLUSTER_SPANS: contextvars.ContextVar[
     tuple[tuple[int, int], ...] | None
 ] = contextvars.ContextVar("nn_noise_cluster_spans", default=None)
 
+#: Seeded noise-cluster draws made inside the current ``noise_cluster_spans``
+#: block, keyed by recording identity and draw parameters. SI passes one seed
+#: to every unit's ``nn_noise_overlap``, so every unit draws the same
+#: snippets; without this, a 37-unit sort re-reads the same 20,000 snippets
+#: 37 times. ``None`` outside a block: nothing is reused.
+_NOISE_CLUSTER_DRAWS: contextvars.ContextVar[dict | None] = (
+    contextvars.ContextVar("nn_noise_cluster_draws", default=None)
+)
+
+#: Snippets whose start lies within this many frames of the previous
+#: snippet's end are read in one ``get_traces`` call. On the v2 Recording
+#: NWB (time-tall, few-channel HDF5 chunks) one call costs about as much as
+#: reading a second of 30 kHz data, so reading a gap this long is cheaper
+#: than a second call.
+_SNIPPET_READ_MAX_GAP_FRAMES = 30_000
+
+#: Upper bound on one grouped read, in bytes of float64 traces.
+_SNIPPET_READ_MAX_BYTES = 64 * 2**20
+
 
 @contextlib.contextmanager
 def noise_cluster_spans(spans):
     """Restrict the span-aware metrics to ``spans`` inside this block.
 
     The nn noise cluster is drawn only from ``spans``, and ``sd_ratio``'s
-    template correction counts spikes and samples only inside them.
+    template correction counts spikes and samples only inside them. A seeded
+    noise-cluster draw is read once per block and reused (read-only) by
+    every unit that requests the same draw.
 
     Parameters
     ----------
@@ -107,9 +128,11 @@ def noise_cluster_spans(spans):
     """
     value = None if spans is None else tuple((int(a), int(b)) for a, b in spans)
     token = _NOISE_CLUSTER_SPANS.set(value)
+    draws_token = _NOISE_CLUSTER_DRAWS.set({})
     try:
         yield
     finally:
+        _NOISE_CLUSTER_DRAWS.reset(draws_token)
         _NOISE_CLUSTER_SPANS.reset(token)
 
 
@@ -176,6 +199,86 @@ def _si_metric_param_copies():
 
 
 def _draw_noise_cluster(recording, *, n_snippets, nsamples, seed, return_in_uV):
+    """Random noise snippets for ``nn_noise_overlap``, reused within a block.
+
+    Inside a :func:`noise_cluster_spans` block, a draw with a non-``None``
+    ``seed`` is made once and the same read-only array is returned for every
+    later request with the same recording and parameters. ``seed=None``
+    draws new snippets on every call, as SI does. See
+    :func:`_draw_noise_cluster_uncached` for the draw itself.
+    """
+    draws = _NOISE_CLUSTER_DRAWS.get()
+    if draws is None or seed is None:
+        return _draw_noise_cluster_uncached(
+            recording,
+            n_snippets=n_snippets,
+            nsamples=nsamples,
+            seed=seed,
+            return_in_uV=return_in_uV,
+        )
+    key = (id(recording), int(n_snippets), int(nsamples), seed, return_in_uV)
+    cached = draws.get(key)
+    # The recording is kept with its draw so its id cannot be reused by
+    # another recording while the block holds the entry.
+    if cached is None or cached[0] is not recording:
+        noise = _draw_noise_cluster_uncached(
+            recording,
+            n_snippets=n_snippets,
+            nsamples=nsamples,
+            seed=seed,
+            return_in_uV=return_in_uV,
+        )
+        noise.setflags(write=False)
+        cached = draws[key] = (recording, noise)
+    return cached[1]
+
+
+def _read_snippets(recording, starts, *, nsamples, return_in_uV):
+    """Read ``nsamples``-frame snippets at sorted ``starts``.
+
+    Snippets within ``_SNIPPET_READ_MAX_GAP_FRAMES`` of each other are read
+    in one ``get_traces`` call (up to ``_SNIPPET_READ_MAX_BYTES``) and
+    sliced, which returns the same frames as one call per snippet.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(len(starts), nsamples, n_channels)`` snippets in start order.
+    """
+    np = _pm.np
+    starts = np.asarray(starts, dtype=np.int64)
+    max_frames = max(
+        nsamples,
+        _SNIPPET_READ_MAX_BYTES // (8 * recording.get_num_channels()),
+    )
+    snippets = []
+    first = 0
+    while first < len(starts):
+        last = first
+        block_start = int(starts[first])
+        while (
+            last + 1 < len(starts)
+            and starts[last + 1] - (starts[last] + nsamples)
+            <= _SNIPPET_READ_MAX_GAP_FRAMES
+            and starts[last + 1] + nsamples - block_start <= max_frames
+        ):
+            last += 1
+        block = recording.get_traces(
+            start_frame=block_start,
+            end_frame=int(starts[last]) + nsamples,
+            return_in_uV=return_in_uV,
+        )
+        offsets = starts[first : last + 1] - block_start
+        snippets.append(
+            block[offsets[:, None] + np.arange(nsamples)[None, :], :]
+        )
+        first = last + 1
+    return np.concatenate(snippets, axis=0)
+
+
+def _draw_noise_cluster_uncached(
+    recording, *, n_snippets, nsamples, seed, return_in_uV
+):
     """Random fixed-length noise snippets for ``nn_noise_overlap``.
 
     Without statistics spans set (or with one span covering the recording)
@@ -236,15 +339,8 @@ def _draw_noise_cluster(recording, *, n_snippets, nsamples, seed, return_in_uV):
             "this unit's nn_noise_overlap as NaN."
         )
         raise
-    return np.stack(
-        [
-            recording.get_traces(
-                start_frame=int(start),
-                end_frame=int(start) + nsamples,
-                return_in_uV=return_in_uV,
-            )
-            for start in starts
-        ]
+    return _read_snippets(
+        recording, starts, nsamples=nsamples, return_in_uV=return_in_uV
     )
 
 
