@@ -11,7 +11,6 @@ import scipy.signal as signal
 
 from spyglass.common import _fir_filter as fir
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.h5py_helper_fn import compressed_data
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
@@ -387,15 +386,15 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_ind, "filtered electrode table"
             )
+            # Written as a placeholder and filled in slices below, so these
+            # two datasets stay uncompressed: a compressed dataset is chunked,
+            # and every slice write would decompress and recompress each
+            # chunk it overlaps.
             es = pynwb.ecephys.ElectricalSeries(
                 name="filtered data",
-                data=compressed_data(
-                    np.empty(tuple(output_shape_list), dtype=data_dtype)
-                ),
+                data=np.empty(tuple(output_shape_list), dtype=data_dtype),
                 electrodes=electrode_table_region,
-                timestamps=compressed_data(
-                    np.empty(output_shape_list[time_axis])
-                ),
+                timestamps=np.empty(output_shape_list[time_axis]),
                 description=description,
             )
             if data_type == "LFP":
