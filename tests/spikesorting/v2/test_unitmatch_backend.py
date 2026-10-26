@@ -611,6 +611,35 @@ def test_bundle_waveforms_use_mmap_and_scratch_is_reclaimed(
     assert not list(scratch_root.iterdir())
 
 
+def test_bundle_unmaps_waveforms_before_scratch_cleanup(
+    tmp_path, monkeypatch, saved_bundles
+):
+    """No scratch file is still mapped when the scratch directory is removed.
+
+    On NFS (the lab's ``temp_dir``) a still-mapped ``waveforms.npy`` makes
+    the scratch cleanup raise ``Directory not empty``, which fails the
+    whole UnitMatch populate.
+    """
+    from spyglass import settings
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+    from tests.spikesorting.v2._mapped_files import (
+        record_mapped_files_at_cleanup,
+    )
+
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setattr(settings, "temp_dir", str(scratch_root))
+    recording, sorting = _planted_session(
+        2.0,
+        {7: (_train(0.1, 2.0), _planted_template(0), None)},
+        noise_std=0,
+    )
+    still_mapped = record_mapped_files_at_cleanup(monkeypatch)
+    backend.extract_unitmatch_bundle(tmp_path / "bundle", recording, sorting)
+    assert still_mapped, "the bundle made no scratch directory"
+    assert all(not paths for paths in still_mapped), still_mapped
+
+
 #: Unit 12 fires only in the first 30 s of a 60 s session; its amplitude ramps
 #: from 0.8x to 1.2x across its spikes so a temporal split is distinguishable
 #: from a random one. Units 7 and 3 fire throughout. Ids are sparse and not

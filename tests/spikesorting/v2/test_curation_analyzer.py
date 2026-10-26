@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import multiprocessing
 import time
@@ -292,6 +293,8 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
     seen: dict = {}
 
     class _Working:
+        extensions: dict = {}
+
         def get_saved_extension_names(self):
             return []
 
@@ -460,6 +463,119 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
     ]
     assert interactive_folder.exists()
     assert all(not folder.exists() for folder in builds[1:])
+
+
+def test_temporary_evaluation_unmaps_analyzers_before_cleanup(
+    tmp_path, monkeypatch
+):
+    """No analyzer file is still mapped when the temporary folder is removed.
+
+    The temporary display and metric analyzers are memory-mapped binary
+    folders, and each holds a reference cycle with its extensions, as
+    SpikeInterface analyzers do. On NFS (the lab's ``temp_dir``) a file
+    still mapped at cleanup makes the removal raise ``Directory not
+    empty``.
+    """
+    from types import SimpleNamespace
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import (
+        evaluation_analyzers as _evaluation_analyzers,
+    )
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from tests.spikesorting.v2._mapped_files import (
+        record_mapped_files_at_cleanup,
+    )
+
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+
+    def build(sorting, source, compute_key, **kwargs):
+        folder = Path(kwargs["analyzer_folder"])
+        folder.mkdir()
+        np.save(folder / "waveforms.npy", np.zeros((64, 32)))
+
+    def load(folder):
+        analyzer = SimpleNamespace()
+        analyzer.waveforms = np.load(
+            Path(folder) / "waveforms.npy", mmap_mode="r"
+        )
+        analyzer.extension = SimpleNamespace(sorting_analyzer=analyzer)
+        return analyzer
+
+    monkeypatch.setattr(_sorting_analyzer, "build_analyzer", build)
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", load)
+    monkeypatch.setattr(
+        _evaluation_analyzers, "read_stored_units", lambda units: object()
+    )
+    monkeypatch.setattr(
+        _metric_curation,
+        "evaluate_analyzers",
+        lambda display, metric, **kwargs: (object(), {}, []),
+    )
+    still_mapped = record_mapped_files_at_cleanup(monkeypatch)
+    _evaluation_analyzers.evaluate_temporary_analyzers(
+        object(),
+        sorting_inputs=SimpleNamespace(
+            sorting_id=uuid.uuid4(),
+            curated_units=object(),
+            expected_unit_ids=[],
+        ),
+        analyzer_inputs=SimpleNamespace(
+            sorter_row={},
+            analyzer_job_kwargs={"n_jobs": 1},
+            display_waveform_params={},
+            metric_waveform_params={},
+        ),
+        metric_inputs=object(),
+        wants_pc=True,
+        observation_metrics=object(),
+        statistics_spans=None,
+    )
+    assert still_mapped, "the evaluation made no temporary folder"
+    assert all(not paths for paths in still_mapped), still_mapped
+
+
+def test_working_copy_is_unmapped_and_removed_at_exit(tmp_path, monkeypatch):
+    """The working copy's files are unmapped and its folder removed at exit.
+
+    The caller's ``as`` name still holds the analyzer after the block, so on
+    NFS (the lab's ``temp_dir``) its still-mapped files left the folder in
+    place: the removal ignores errors, so the copy leaked silently.
+    """
+    import spikeinterface.full as si
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from tests.spikesorting.v2._mapped_files import mapped_paths_under
+
+    if not Path("/proc/self/maps").exists():
+        pytest.skip("needs /proc/self/maps (Linux)")
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[2.0], num_channels=4, num_units=2, seed=0
+    )
+    published = si.create_sorting_analyzer(
+        sorting,
+        recording,
+        format="binary_folder",
+        folder=tmp_path / "published.analyzer",
+        sparse=False,
+    )
+    published.compute(["random_spikes", "waveforms", "templates"])
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(settings, "temp_dir", str(scratch))
+    monkeypatch.setattr(
+        resolver, "_resolve_curation_analyzer", lambda *a, **k: published
+    )
+    with resolver.open_curation_analyzer(object(), "recipe") as working:
+        assert mapped_paths_under(scratch), "the working copy maps no file"
+    assert not mapped_paths_under(scratch)
+    assert not list(scratch.iterdir())
+    del working
 
 
 @pytest.mark.slow
@@ -807,6 +923,12 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         assert curation_analyzer_cache_path(recreated, recipe) != folder
         orphan_report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         assert str(folder) in orphan_report["disk_side"]
+        # The analyzers above map files in ``folder``. Unmap them before the
+        # cleanup removes it: on NFS a mapped file blocks the removal.
+        raw_analyzer = raw_with_locations = analyzer = reused = None
+        working = derivative = reused_derivative = fine = None
+        shared = raw_fine = repaired = None
+        gc.collect()
         import datajoint as dj
 
         monkeypatch.setattr(dj.utils, "user_choice", lambda message: "yes")

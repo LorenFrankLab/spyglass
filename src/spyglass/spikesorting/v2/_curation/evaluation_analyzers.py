@@ -17,6 +17,7 @@ inside the functions so that patches applied to those modules take effect.
 
 from __future__ import annotations
 
+import gc
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2._curation import metrics as _metric_curation
@@ -237,4 +238,10 @@ def evaluate_temporary_analyzers(
                 continuity_spans=continuity_spans,
             )
         )
+        # Unmap both analyzers before the folder is removed. On NFS a
+        # still-mapped file leaves a .nfs placeholder and the removal fails
+        # with "Directory not empty". An analyzer and its extensions refer to
+        # each other, so only the cycle collector frees them.
+        del display_analyzer, metric_analyzer
+        gc.collect()
     return metrics_df, labels_by_unit, merge_groups, None

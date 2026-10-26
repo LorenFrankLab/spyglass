@@ -23,6 +23,7 @@ Every folder is a ``binary_folder`` analyzer loaded through
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 from collections.abc import Mapping
@@ -907,12 +908,23 @@ def open_curation_analyzer(
     tmp = tempfile.mkdtemp(
         prefix="v2_curation_analyzer_", dir=spyglass_temp_dir
     )
+    working = None
     try:
         working = copy_analyzer_folder(
             published, Path(tmp) / f"working{ANALYZER_FOLDER_SUFFIX}"
         )
         yield load_analyzer_extensions(working)
     finally:
+        # The caller's ``as`` name still holds the analyzer, so drop the
+        # extension data that maps the copy's files before removing them. On
+        # NFS a still-mapped file leaves a .nfs placeholder and the folder
+        # stays behind.
+        if working is not None:
+            for extension in working.extensions.values():
+                extension.data.clear()
+            working.extensions.clear()
+        working = None
+        gc.collect()
         shutil.rmtree(tmp, ignore_errors=True)
 
 

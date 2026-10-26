@@ -6,6 +6,7 @@ imported by their matcher backends, independently of preparing these files.
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 
 import numpy as np
@@ -351,6 +352,12 @@ def extract_waveform_bundle(
                 )
             )
             keep.append(unit_index)
+        # Unmap the scratch analyzer before its folder is removed. On NFS a
+        # still-mapped file leaves a .nfs placeholder and the removal fails
+        # with "Directory not empty". The analyzer and its extensions refer
+        # to each other, so only the cycle collector frees them.
+        del analyzer, waveforms_ext, sampled
+        gc.collect()
     keep = np.asarray(keep, dtype=np.intp)
     all_unit_ids = np.asarray(unit_ids, dtype=int)
     excluded = [int(u) for u in np.delete(all_unit_ids, keep)]

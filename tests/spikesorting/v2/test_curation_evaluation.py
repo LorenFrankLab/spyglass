@@ -16,6 +16,8 @@ Tiers:
 
 from __future__ import annotations
 
+import gc
+
 import pandas as pd
 import pytest
 
@@ -2994,6 +2996,11 @@ def test_evaluation_populate_repairs_partially_built_canonical_analyzer(
         cache_modified = False
         with analyzer_cache_lock(root["sorting_id"]):
             copy_analyzer_folder(original, backup.folder)
+        # ``original`` maps files in ``folder``. Unmap them before the
+        # extension folders are removed below: on NFS a still-mapped file
+        # leaves a .nfs placeholder and the removal fails.
+        del original
+        gc.collect()
         try:
             (CurationEvaluation & selection).delete(safemode=False)
             assert not (CurationEvaluation & selection)
