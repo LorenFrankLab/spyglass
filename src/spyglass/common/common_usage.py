@@ -98,6 +98,31 @@ class ActivityLog(dj.Manual):
 
 
 @schema
+class NwbfileAccess(dj.Manual):
+    """A log of raw NWB file reads, to inform compression scheduling."""
+
+    definition = """
+    id: int auto_increment
+    ---
+    -> Nwbfile          # secondary: one file has many access rows
+    dj_user: varchar(64)
+    caller_table: varchar(255)
+    access_time=CURRENT_TIMESTAMP: timestamp
+    """
+
+    @property
+    def access_count(self):
+        """Access counts per file.
+
+        Returns
+        -------
+        datajoint.expression.QueryExpression
+            One row per file, with an ``access_count`` attribute.
+        """
+        return dj.U("nwb_file_name").aggr(self, access_count="count(*)")
+
+
+@schema
 class ExportSelection(SpyglassMixin, dj.Manual):
     definition = """
     export_id: int auto_increment
