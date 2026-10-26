@@ -915,7 +915,7 @@ def _remove_unless_in_use(folder: Path) -> bool:
         if exc.errno not in (errno.EBUSY, errno.ENOTEMPTY):
             raise
         logger.warning(
-            "Analyzer staging folder %s is still in use (%s); left for a "
+            "Analyzer folder %s is still in use (%s); left for a "
             "later cleanup.",
             folder,
             str(exc),
@@ -1312,8 +1312,9 @@ def find_orphaned_analyzer_folders(
                 )["referenced_paths"]
                 if folder in live or derivative_base_path(folder) in live:
                     continue
-                if Path(folder).exists():
-                    shutil.rmtree(folder, ignore_errors=False)
+                if Path(folder).exists() and _remove_unless_in_use(
+                    Path(folder)
+                ):
                     deleted_folders.append(folder)
         logger.info(
             "Sorting.find_orphaned_analyzer_folders: deleted "

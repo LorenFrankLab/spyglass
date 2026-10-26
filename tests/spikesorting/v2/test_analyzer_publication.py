@@ -196,6 +196,42 @@ def test_cleanup_skips_staging_still_in_use(
     assert busy.exists() and not free.exists()
 
 
+def test_orphan_audit_skips_orphan_folder_still_in_use(
+    dj_conn, tmp_path, restore_custom_config, monkeypatch
+):
+    """A disk-side orphan whose files are still open is left for later.
+
+    On NFS a folder that a process still maps cannot be removed (``EBUSY`` /
+    ``ENOTEMPTY`` from its ``.nfs`` placeholder). The confirmed audit leaves
+    it, removes the other orphans, and does not raise.
+    """
+    import errno
+
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    sorting_id = uuid.uuid4()
+    busy = cache.analyzer_path(sorting_id, "busy")
+    free = cache.analyzer_path(sorting_id, "free")
+    for folder in (busy, free):
+        (folder / "extensions" / "waveforms").mkdir(parents=True)
+        (folder / "extensions" / "waveforms" / "waveforms.npy").write_text("x")
+    report = Sorting.find_orphaned_analyzer_folders(sorting_id=sorting_id)
+    assert sorted(report["disk_side"]) == sorted([str(busy), str(free)])
+    real_rmtree = shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        if Path(path) == busy:
+            raise OSError(errno.ENOTEMPTY, "Directory not empty", "waveforms")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(cache.shutil, "rmtree", rmtree)
+    monkeypatch.setattr(dj.utils, "user_choice", lambda *a, **k: "yes")
+    Sorting.find_orphaned_analyzer_folders(sorting_id=sorting_id, dry_run=False)
+    assert busy.exists() and not free.exists()
+
+
 def test_orphan_audit_reclaims_only_abandoned_staging(
     dj_conn, tmp_path, restore_custom_config, monkeypatch
 ):

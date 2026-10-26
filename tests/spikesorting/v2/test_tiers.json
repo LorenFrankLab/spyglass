@@ -157,7 +157,8 @@
       "tier": "unit",
       "overrides": {
         "test_duplicate_compute_keeps_winners_analyzer": "stage",
-        "test_orphan_audit_reclaims_only_abandoned_staging": "db_unit"
+        "test_orphan_audit_reclaims_only_abandoned_staging": "db_unit",
+        "test_orphan_audit_skips_orphan_folder_still_in_use": "db_unit"
       }
     },
     "test_analyzer_waveform_params.py": {
