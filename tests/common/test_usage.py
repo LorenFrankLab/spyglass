@@ -502,6 +502,23 @@ def test_access_log_skips_analysis_files(lfp, populate_lfp, access_tbl):
     assert len(access_tbl) == 0
 
 
+def test_access_log_on_nwbfile_fetch_nwb(access_tbl, common, mini_dict):
+    """Reading a raw file through Nwbfile itself is logged."""
+    (common.Nwbfile & mini_dict).fetch_nwb()
+
+    row = (access_tbl & mini_dict).fetch1()
+    assert row["caller_table"] == common.Nwbfile.full_table_name
+
+
+def test_access_log_not_on_close_nwb(access_tbl, common, mini_dict):
+    """Releasing a file is not a read; close_nwb logs nothing."""
+    restricted = common.Nwbfile & mini_dict
+    restricted.fetch_nwb()
+    restricted.close_nwb()
+
+    assert len(access_tbl & mini_dict) == 1
+
+
 def test_access_log_survives_no_insert_grant(access_tbl, common, mini_dict):
     """A read-only role still fetches; it just logs nothing."""
     from spyglass.common.common_usage import NwbfileAccess

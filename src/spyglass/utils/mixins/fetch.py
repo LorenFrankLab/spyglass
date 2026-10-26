@@ -161,18 +161,26 @@ class FetchMixin(BaseMixin):
 
         return nwb_files, file_path_fn
 
-    def _nwb_paths(self) -> list:
+    def _nwb_paths(self, log_access: bool = False) -> list:
         """Return resolved absolute NWB file paths for the current restriction.
 
         Shared infrastructure used by both ``fetch_nwb`` and ``close_nwb``.
         Uses ``file_path_fn`` (``SpyglassAnalysis.get_abs_path``) with
         ``from_schema=True`` so that ``filepath@store`` columns are resolved
         correctly regardless of table type.
+
+        Parameters
+        ----------
+        log_access : bool, optional
+            Log a raw NWB access for the resolved files. Default False, so
+            that ``close_nwb`` does not record a release as a read.
         """
         table, tbl_attr = self._nwb_table_tuple
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             table, tbl_attr
         )
+        if log_access and tbl_attr == "nwb_file_abs_path":
+            self._log_nwb_access(nwb_files)
         return [file_path_fn(f, from_schema=True) for f in nwb_files]
 
     def _download_missing_files(self, nwb_files, file_path_fn):
