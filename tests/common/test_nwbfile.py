@@ -85,6 +85,32 @@ def _destructive_plan(common_nwbfile, analysis_dir, tracked=()):
     )
 
 
+def test_nwbfile_fetch_nwb_holds(common_nwbfile, mini_copy_name):
+    """Nwbfile.fetch_nwb holds each file it opens, and close_nwb releases.
+
+    It returns whole NWBFile objects that read lazily, so without a hold the
+    cache would treat them as its first candidates to close mid-read.
+    """
+    import spyglass.utils.nwb_helper_fn as helper
+
+    cache = helper.__dict__["__open_nwb_files"]
+
+    def held_paths():
+        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
+
+    restricted = common_nwbfile.Nwbfile & {"nwb_file_name": mini_copy_name}
+
+    restricted.close_nwb()  # must not raise
+    before = held_paths()  # the cache is process-wide
+
+    restricted.fetch_nwb()
+    taken = held_paths() - before
+    assert taken, "Nwbfile.fetch_nwb took no hold"
+
+    restricted.close_nwb()
+    assert not (taken & held_paths()), "close_nwb left holds"
+
+
 def test_add_to_lock(common_nwbfile, lockfile, mini_copy_name):
     common_nwbfile.Nwbfile.add_to_lock(mini_copy_name)
     assert mini_copy_name in lockfile.read_text()

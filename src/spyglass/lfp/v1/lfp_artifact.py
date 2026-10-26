@@ -163,27 +163,27 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
         # name of the array of no-artifact valid time intervals
     """
 
-    def make(self, key):
-        """Populate the LFPArtifactDetection table with artifact times.
+    @staticmethod
+    def _detect_artifacts(lfp_query, artifact_params):
+        """Run the configured detection algorithm on one LFP entry.
 
-        1. Fetch parameters and LFP data from LFPArtifactDetectionParameters
-            and LFPV1, respectively.
-        2. Optionally reference the LFP data.
-        3. Pass data to chosen artifact detection algorithm.
-        3. Insert into LFPArtifactRemovedIntervalList, IntervalList, and
-            LFPArtifactDetection.
+        Parameters
+        ----------
+        lfp_query : dj.QueryExpression
+            ``LFPV1`` restricted to the entry being examined.
+        artifact_params : dict
+            An ``LFPArtifactDetectionParameters.artifact_params`` value.
+
+        Returns
+        -------
+        tuple
+            Artifact-removed valid times, and the artifact times.
         """
-        artifact_params = (
-            LFPArtifactDetectionParameters
-            & {"artifact_params_name": key["artifact_params_name"]}
-        ).fetch1("artifact_params")
-
         algorithm = artifact_params["artifact_detection_algorithm"]
         params = artifact_params["artifact_detection_algorithm_params"]
 
-        # get LFP data
-        lfp_eseries = (LFPV1 & key).fetch_nwb()[0]["lfp"]
-        sampling_frequency = (LFPV1 & key).fetch("lfp_sampling_rate")[0]
+        lfp_eseries = lfp_query.fetch_nwb()[0]["lfp"]
+        sampling_frequency = lfp_query.fetch("lfp_sampling_rate")[0]
         lfp_data = np.asarray(
             lfp_eseries.data[:, :],
             dtype=type(lfp_eseries.data[0][0]),
@@ -216,16 +216,39 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
 
         data = lfp_data if is_diff else lfp_eseries
 
-        (
-            artifact_removed_valid_times,
-            artifact_times,
-        ) = ARTIFACT_DETECTION_ALGORITHMS[algorithm](
+        return ARTIFACT_DETECTION_ALGORITHMS[algorithm](
             data,
             **params,
             sampling_frequency=sampling_frequency,
             timestamps=lfp_eseries.timestamps if is_diff else None,
             referencing=ref,
         )
+
+    def make(self, key):
+        """Populate the LFPArtifactDetection table with artifact times.
+
+        1. Fetch parameters and LFP data from LFPArtifactDetectionParameters
+            and LFPV1, respectively.
+        2. Optionally reference the LFP data.
+        3. Pass data to chosen artifact detection algorithm.
+        3. Insert into LFPArtifactRemovedIntervalList, IntervalList, and
+            LFPArtifactDetection.
+        """
+        artifact_params = (
+            LFPArtifactDetectionParameters
+            & {"artifact_params_name": key["artifact_params_name"]}
+        ).fetch1("artifact_params")
+
+        # get LFP data, held until detection finishes
+        lfp_query = LFPV1 & key
+        try:
+            artifact_removed_valid_times, artifact_times = (
+                self._detect_artifacts(lfp_query, artifact_params)
+            )
+        finally:
+            # Release even if detection raises, or the hold outlives the
+            # failure and keeps the file open.
+            lfp_query.close_nwb()
 
         key.update(
             dict(
