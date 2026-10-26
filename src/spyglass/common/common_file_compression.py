@@ -25,6 +25,7 @@ import h5py
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
+from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
 
 schema = dj.schema("common_file_compression")
 
@@ -104,12 +105,11 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         )
 
         copy_name = key["nwb_file_name"]
-        raw_name = copy_name[:-5] + ".nwb"  # strip trailing _ before .nwb
 
         return [
             {
                 "copy": Nwbfile.get_abs_path(copy_name),
-                "raw": Nwbfile.get_abs_path(raw_name),
+                "raw": Nwbfile.get_abs_path(get_nwb_raw_filename(copy_name)),
             }
         ]
 

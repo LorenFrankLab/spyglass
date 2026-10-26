@@ -145,3 +145,29 @@ def test_get_pos_dict_with_timestamps():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_raw_filename_round_trip():
+    """get_nwb_raw_filename inverts get_nwb_copy_filename."""
+    from spyglass.utils.nwb_helper_fn import (
+        get_nwb_copy_filename,
+        get_nwb_raw_filename,
+    )
+
+    raw = "minirec20230622.nwb"
+    assert get_nwb_raw_filename(get_nwb_copy_filename(raw)) == raw
+
+
+def test_raw_filename_strips_only_trailing_marker():
+    """Only the trailing underscore goes, not every '_.nwb' in the name."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
+
+    assert get_nwb_raw_filename("a_.nwb_b_.nwb") == "a_.nwb_b.nwb"
+
+
+def test_raw_filename_idempotent(caplog):
+    """A raw name comes back unchanged, with a warning."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
+
+    assert get_nwb_raw_filename("session.nwb") == "session.nwb"
+    assert "may not be a copy" in caplog.text

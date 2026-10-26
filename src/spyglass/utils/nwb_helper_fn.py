@@ -953,6 +953,22 @@ def get_nwb_copy_filename(nwb_file_name):
     return f"{filename}_{file_extension}"
 
 
+def get_nwb_raw_filename(nwb_file_name):
+    """Get file name of the raw nwb file a copy was made from.
+
+    Inverse of get_nwb_copy_filename. Returns the name unchanged when it is
+    already a raw name, so repeated calls are safe.
+    """
+
+    filename, file_extension = os.path.splitext(nwb_file_name)
+
+    if not filename.endswith("_"):
+        logger.warning(f"File may not be a copy: {nwb_file_name}")
+        return nwb_file_name
+
+    return f"{filename[:-1]}{file_extension}"
+
+
 def is_nwb_obj_type(
     nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
 ) -> bool:
