@@ -19,12 +19,7 @@ from spyglass.common._nwbfile_cleanup import (
     CleanupPolicy,
 )
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils import (
-    SpyglassAnalysis,
-    SpyglassMixin,
-    logger,
-    SpyglassMixinPart,
-)
+from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
@@ -76,23 +71,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     # explicit so that alter() can work
 
     # NOTE: See #630, #664. Excessive key length.
-
-    class AccessLog(SpyglassMixinPart):
-        """Log file access events for empirical access-pattern analysis.
-
-        Collected prior to compression implementation to inform scheduling
-        decisions. access_count is managed via HelperMixin._auto_increment
-        and counts accesses per file.
-        """
-
-        definition = """
-        -> master
-        access_count: int unsigned        # per-file access sequence number
-        ---
-        dj_user: varchar(64)              # DataJoint user
-        access_time=CURRENT_TIMESTAMP: timestamp
-        caller_table: varchar(255)        # full_table_name of calling table
-        """
 
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name: str) -> None:
