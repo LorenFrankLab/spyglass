@@ -186,3 +186,39 @@ def test_session_name_prefixes_analysis_files():
 
     session = get_nwb_session_name("minirec20230622_.nwb")
     assert "minirec20230622_ABCDEFGHIJ.nwb".startswith(session)
+
+
+def test_filtered_electrical_series_compresses():
+    """Both datasets of the filtered series are wrapped for compression."""
+    from datetime import datetime
+
+    from hdmf.backends.hdf5.h5_utils import H5DataIO
+    from pynwb import NWBFile
+
+    from spyglass.utils.nwb_helper_fn import (
+        build_filtered_electrical_series,
+    )
+
+    nwbf = NWBFile(
+        session_description="s",
+        identifier="i",
+        session_start_time=datetime.now().astimezone(),
+    )
+    device = nwbf.create_device(name="probe")
+    group = nwbf.create_electrode_group(
+        name="shank", description="d", location="l", device=device
+    )
+    for _ in range(2):
+        nwbf.add_electrode(group=group, location="l")
+    region = nwbf.create_electrode_table_region([0, 1], "filtered electrodes")
+
+    es = build_filtered_electrical_series(
+        data=np.zeros((10, 2)),
+        timestamps=np.arange(10.0),
+        electrodes=region,
+    )
+
+    assert es.name == "filtered data"
+    assert isinstance(es.data, H5DataIO)
+    assert isinstance(es.timestamps, H5DataIO)
+    assert es.data.io_settings["compression"] == "gzip"

@@ -13,8 +13,10 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.h5py_helper_fn import compressed_data
-from spyglass.utils.nwb_helper_fn import get_electrode_indices
+from spyglass.utils.nwb_helper_fn import (
+    build_filtered_electrical_series,
+    get_electrode_indices,
+)
 
 schema = dj.schema("lfp_band_v1")
 
@@ -566,12 +568,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            # TODO: use datatype of data
-            es = pynwb.ecephys.ElectricalSeries(
-                name="filtered data",
-                data=compressed_data(filtered_data),
+            es = build_filtered_electrical_series(
+                data=filtered_data,
+                timestamps=new_timestamps,
                 electrodes=electrode_table_region,
-                timestamps=compressed_data(new_timestamps),
             )
             lfp = pynwb.ecephys.LFP(electrical_series=es)
             ecephys_module = nwbf.create_processing_module(

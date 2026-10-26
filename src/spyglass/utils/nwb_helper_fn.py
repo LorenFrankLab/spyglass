@@ -969,6 +969,34 @@ def get_nwb_raw_filename(nwb_file_name):
     return f"{filename[:-1]}{file_extension}"
 
 
+def build_filtered_electrical_series(data, timestamps, electrodes):
+    """Build the compressed 'filtered data' ElectricalSeries.
+
+    Parameters
+    ----------
+    data : array-like
+        Filtered data.
+    timestamps : array-like
+        Timestamps of the filtered data.
+    electrodes : hdmf.common.DynamicTableRegion
+        Electrode table region the data was filtered from.
+
+    Returns
+    -------
+    pynwb.ecephys.ElectricalSeries
+        Series with both datasets wrapped for compressed writes.
+    """
+    from spyglass.utils.h5py_helper_fn import compressed_data
+
+    # TODO: use datatype of data
+    return pynwb.ecephys.ElectricalSeries(
+        name="filtered data",
+        data=compressed_data(data),
+        electrodes=electrodes,
+        timestamps=compressed_data(timestamps),
+    )
+
+
 def get_nwb_session_name(nwb_file_name):
     """Get the session name: no copy marker, no extension.
 

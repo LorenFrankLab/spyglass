@@ -13,9 +13,9 @@ from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
-from spyglass.utils.h5py_helper_fn import compressed_data
 from spyglass.utils.mixins.ingestion import IngestionEntries
 from spyglass.utils.nwb_helper_fn import (
+    build_filtered_electrical_series,
     estimate_sampling_rate,
     get_config,
     get_electrode_indices,
@@ -905,12 +905,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            # TODO: use datatype of data
-            es = pynwb.ecephys.ElectricalSeries(
-                name="filtered data",
-                data=compressed_data(filtered_data),
+            es = build_filtered_electrical_series(
+                data=filtered_data,
+                timestamps=new_timestamps,
                 electrodes=electrode_table_region,
-                timestamps=compressed_data(new_timestamps),
             )
             # Add the electrical series to the scratch area
             nwbf.add_scratch(es)
