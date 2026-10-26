@@ -171,3 +171,18 @@ def test_raw_filename_idempotent(caplog):
 
     assert get_nwb_raw_filename("session.nwb") == "session.nwb"
     assert "may not be a copy" in caplog.text
+
+
+def test_session_name_from_copy():
+    """A copy name reduces to the session it belongs to."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_session_name
+
+    assert get_nwb_session_name("minirec20230622_.nwb") == "minirec20230622"
+
+
+def test_session_name_prefixes_analysis_files():
+    """Analysis file names begin with the session name."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_session_name
+
+    session = get_nwb_session_name("minirec20230622_.nwb")
+    assert "minirec20230622_ABCDEFGHIJ.nwb".startswith(session)

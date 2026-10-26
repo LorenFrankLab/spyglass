@@ -21,7 +21,10 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dandi_file_updates import update_analysis_for_dandi_standard
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import make_file_obj_id_unique
-from spyglass.utils.nwb_helper_fn import get_linked_nwbs
+from spyglass.utils.nwb_helper_fn import (
+    get_linked_nwbs,
+    get_nwb_session_name,
+)
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 schema = dj.schema("common_usage")
@@ -227,7 +230,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             for x in files
             if any(
                 [
-                    nwb_file_name.split("_.nwb")[0] in x
+                    get_nwb_session_name(nwb_file_name) in x
                     for nwb_file_name in included_nwb_files
                 ]
             )
@@ -567,7 +570,7 @@ class Export(SpyglassMixin, dj.Computed):
                 for f in file_paths
                 if any(
                     [
-                        nwb_file_name.split("_.nwb")[0] in f
+                        get_nwb_session_name(nwb_file_name) in f
                         for nwb_file_name in included_nwb_files
                     ]
                 )

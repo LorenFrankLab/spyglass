@@ -969,6 +969,16 @@ def get_nwb_raw_filename(nwb_file_name):
     return f"{filename[:-1]}{file_extension}"
 
 
+def get_nwb_session_name(nwb_file_name):
+    """Get the session name: no copy marker, no extension.
+
+    Analysis file names begin with this, so it identifies the session a file
+    belongs to.
+    """
+
+    return os.path.splitext(get_nwb_raw_filename(nwb_file_name))[0]
+
+
 def is_nwb_obj_type(
     nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
 ) -> bool:
