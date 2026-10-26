@@ -226,9 +226,8 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
         raise FileNotFoundError(src)
 
     original_size = src.stat().st_size
-    n_datasets, n_compressed = _dataset_counts(src)
 
-    if n_compressed == n_datasets:
+    if not _has_uncompressed_dataset(src):
         logger.info(
             f"{src.name} already fully compressed, recording without repacking"
         )
@@ -354,8 +353,8 @@ def _verify(src: Path, dst: Path) -> None:
         )
 
 
-def _dataset_counts(path: Path) -> tuple[int, int]:
-    """Count a file's datasets, and how many carry a compression filter.
+def _has_uncompressed_dataset(path: Path) -> bool:
+    """Whether any dataset in a file lacks a compression filter.
 
     Parameters
     ----------
@@ -364,18 +363,14 @@ def _dataset_counts(path: Path) -> tuple[int, int]:
 
     Returns
     -------
-    tuple[int, int]
-        Total dataset count, and the count with a compression filter.
+    bool
+        True if at least one dataset is uncompressed. False for a file with
+        no datasets at all.
     """
-    total = compressed = 0
 
     def visit(_, obj):
-        nonlocal total, compressed
-        if isinstance(obj, h5py.Dataset):
-            total += 1
-            compressed += bool(obj.compression)
+        if isinstance(obj, h5py.Dataset) and not obj.compression:
+            return True  # a non-None return stops the walk
 
     with h5py.File(str(path), "r") as f:
-        f.visititems(visit)
-
-    return total, compressed
+        return bool(f.visititems(visit))

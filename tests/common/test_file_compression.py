@@ -157,34 +157,64 @@ def test_h5repack_missing(monkeypatch, tmp_path):
 def test_h5repack_compresses(uncompressed_h5, tmp_path):
     """h5repack compresses every dataset without changing the contents."""
     from spyglass.common.common_file_compression import (
-        _dataset_counts,
         _h5repack,
+        _has_uncompressed_dataset,
         _verify,
     )
 
     dst = tmp_path / "out.nwb"
     _h5repack(src=uncompressed_h5, dst=dst, level=6)
 
-    total, compressed = _dataset_counts(dst)
-    assert (total, compressed) == (_dataset_counts(uncompressed_h5)[0], total)
+    assert not _has_uncompressed_dataset(dst)
     _verify(src=uncompressed_h5, dst=dst)  # contents survived the repack
 
 
 # -------------------------------- counting ---------------------------------
 
 
-def test_counts_uncompressed(uncompressed_h5):
-    """Datasets are counted; none register as compressed."""
-    from spyglass.common.common_file_compression import _dataset_counts
+def test_detects_uncompressed(uncompressed_h5):
+    """A file with uncompressed datasets is flagged."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
 
-    assert _dataset_counts(uncompressed_h5) == (2, 0)
+    assert _has_uncompressed_dataset(uncompressed_h5)
 
 
-def test_counts_compressed(compressed_h5):
-    """A fully compressed file reports every dataset as compressed."""
-    from spyglass.common.common_file_compression import _dataset_counts
+def test_detects_fully_compressed(compressed_h5):
+    """A file whose every dataset is compressed is not flagged."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
 
-    assert _dataset_counts(compressed_h5) == (2, 2)
+    assert not _has_uncompressed_dataset(compressed_h5)
+
+
+def test_detects_partially_compressed(tmp_path):
+    """One uncompressed dataset among compressed ones is enough."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
+
+    path = tmp_path / "mixed_.nwb"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("a", data=np.arange(2048), compression="gzip")
+        f.create_dataset("b", data=np.arange(2048))
+
+    assert _has_uncompressed_dataset(path)
+
+
+def test_no_datasets_is_not_uncompressed(tmp_path):
+    """A file with no datasets is left alone, as before."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
+
+    path = tmp_path / "empty_.nwb"
+    with h5py.File(path, "w") as f:
+        f.create_group("grp")
+
+    assert not _has_uncompressed_dataset(path)
 
 
 # ------------------------------- verification -------------------------------
