@@ -37,8 +37,33 @@ def uncompressed_h5(tmp_path):
     path = tmp_path / "uncompressed_.nwb"
     with h5py.File(path, "w") as f:
         f.create_dataset("a", data=np.arange(2048, dtype="int16"))
+        f["a"].attrs["unit"] = "mV"
         f.create_group("grp").create_dataset("b", data=np.zeros(2048))
     return path
+
+
+@pytest.fixture
+def gzip_copy(tmp_path):
+    """Build a gzip-compressed copy of a file, as h5repack would."""
+
+    def _copy(src):
+        dst = tmp_path / f"repacked_{src.name}"
+
+        def visit(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                out = dst_f.create_dataset(
+                    name, data=obj[()], compression="gzip", compression_opts=6
+                )
+            else:
+                out = dst_f.require_group(name)
+            out.attrs.update(obj.attrs)
+
+        with h5py.File(src, "r") as src_f, h5py.File(dst, "w") as dst_f:
+            dst_f.attrs.update(src_f.attrs)
+            src_f.visititems(visit)
+        return dst
+
+    return _copy
 
 
 @pytest.fixture
@@ -129,18 +154,19 @@ def test_h5repack_missing(monkeypatch, tmp_path):
 
 @no_h5repack
 def test_h5repack_compresses(uncompressed_h5, tmp_path):
-    """h5repack writes every dataset with a compression filter."""
+    """h5repack compresses every dataset without changing the contents."""
     from spyglass.common.common_file_compression import (
-        _count_compressed_datasets,
-        _count_datasets,
+        _dataset_counts,
         _h5repack,
+        _verify,
     )
 
     dst = tmp_path / "out.nwb"
     _h5repack(src=uncompressed_h5, dst=dst, level=6)
 
-    assert _count_datasets(dst) == _count_datasets(uncompressed_h5)
-    assert _count_compressed_datasets(dst) == _count_datasets(dst)
+    total, compressed = _dataset_counts(dst)
+    assert (total, compressed) == (_dataset_counts(uncompressed_h5)[0], total)
+    _verify(src=uncompressed_h5, dst=dst)  # contents survived the repack
 
 
 # -------------------------------- counting ---------------------------------
@@ -148,24 +174,62 @@ def test_h5repack_compresses(uncompressed_h5, tmp_path):
 
 def test_counts_uncompressed(uncompressed_h5):
     """Datasets are counted; none register as compressed."""
-    from spyglass.common.common_file_compression import (
-        _count_compressed_datasets,
-        _count_datasets,
-    )
+    from spyglass.common.common_file_compression import _dataset_counts
 
-    assert _count_datasets(uncompressed_h5) == 2
-    assert _count_compressed_datasets(uncompressed_h5) == 0
+    assert _dataset_counts(uncompressed_h5) == (2, 0)
 
 
 def test_counts_compressed(compressed_h5):
     """A fully compressed file reports every dataset as compressed."""
-    from spyglass.common.common_file_compression import (
-        _count_compressed_datasets,
-        _count_datasets,
-    )
+    from spyglass.common.common_file_compression import _dataset_counts
 
-    assert _count_datasets(compressed_h5) == 2
-    assert _count_compressed_datasets(compressed_h5) == 2
+    assert _dataset_counts(compressed_h5) == (2, 2)
+
+
+# ------------------------------- verification -------------------------------
+
+
+def test_verify_accepts_compressed_copy(uncompressed_h5, gzip_copy):
+    """A lossless repack hashes the same as its source."""
+    from spyglass.common.common_file_compression import _verify
+
+    _verify(src=uncompressed_h5, dst=gzip_copy(uncompressed_h5))
+
+
+def test_verify_rejects_changed_value(uncompressed_h5, gzip_copy):
+    """A single altered value fails verification."""
+    from spyglass.common.common_file_compression import _verify
+
+    dst = gzip_copy(uncompressed_h5)
+    with h5py.File(dst, "r+") as f:
+        f["a"][0] += 1
+
+    with pytest.raises(ValueError, match="does not match its source"):
+        _verify(src=uncompressed_h5, dst=dst)
+
+
+def test_verify_rejects_dropped_dataset(uncompressed_h5, gzip_copy):
+    """A dropped dataset fails verification."""
+    from spyglass.common.common_file_compression import _verify
+
+    dst = gzip_copy(uncompressed_h5)
+    with h5py.File(dst, "r+") as f:
+        del f["grp/b"]
+
+    with pytest.raises(ValueError, match="does not match its source"):
+        _verify(src=uncompressed_h5, dst=dst)
+
+
+def test_verify_rejects_dropped_attr(uncompressed_h5, gzip_copy):
+    """A dropped attribute fails verification."""
+    from spyglass.common.common_file_compression import _verify
+
+    dst = gzip_copy(uncompressed_h5)
+    with h5py.File(dst, "r+") as f:
+        del f["a"].attrs["unit"]
+
+    with pytest.raises(ValueError, match="does not match its source"):
+        _verify(src=uncompressed_h5, dst=dst)
 
 
 # ------------------------------- repack file --------------------------------
@@ -203,7 +267,7 @@ def test_repack_verify_failure_leaves_source(monkeypatch, uncompressed_h5):
 
     monkeypatch.setattr(cfc, "_h5repack", fake_repack)
 
-    with pytest.raises(ValueError, match="Dataset count mismatch"):
+    with pytest.raises(ValueError, match="does not match its source"):
         cfc._repack_file(str(uncompressed_h5), gzip_level=6)
 
     assert uncompressed_h5.read_bytes() == before, "Source was modified"

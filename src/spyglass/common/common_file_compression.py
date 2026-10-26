@@ -5,9 +5,8 @@ Tracks NWB files repacked in-place via:
     h5repack -f GZIP=6 -m 1  src.nwb  tmp.nwb
 
 The -m 1 flag is required — without it, zero-shape datasets (video
-placeholders) are silently dropped. h5repack -f NONE returns rc=1
-even on success; verification gates on pynwb readability and dataset
-count, not on rc.
+placeholders) are silently dropped. A repack is accepted only when the
+source and the repacked file hash identically.
 
 Nwbfile always stores the copy ({session}_.nwb). CompressedNwbfile is
 keyed by Nwbfile and has a File part table with one row per physical
@@ -17,7 +16,6 @@ file — 'copy' ({session}_.nwb) and 'raw' ({session}.nwb).
 import os
 import subprocess
 import tempfile
-import warnings
 from pathlib import Path
 from shutil import which
 
@@ -26,6 +24,7 @@ import h5py
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils import logger
+from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("common_file_compression")
 
@@ -135,8 +134,7 @@ def _repack_file(path: str, gzip_level: int) -> dict:
         raise FileNotFoundError(src)
 
     original_size = src.stat().st_size
-    n_datasets = _count_datasets(path=src)
-    n_already_compressed = _count_compressed_datasets(path=src)
+    n_datasets, n_already_compressed = _dataset_counts(src)
 
     shared = {
         "original_size_bytes": original_size,
@@ -161,8 +159,8 @@ def _repack_file(path: str, gzip_level: int) -> dict:
 
     try:
         _h5repack(src=src, dst=tmp, level=gzip_level)
-        _verify(src=src, dst=tmp, expected_count=n_datasets)
-        n_compressed = _count_compressed_datasets(path=tmp)
+        _verify(src=src, dst=tmp)
+        _, n_compressed = _dataset_counts(tmp)
         repacked_size = tmp.stat().st_size
         _replace_preserving_mode(tmp=tmp, src=src)
     except Exception:
@@ -230,55 +228,55 @@ def _h5repack(src: Path, dst: Path, level: int) -> None:
         )
 
 
-def _verify(src: Path, dst: Path, expected_count: int) -> None:
-    """Verify dst is a valid repacked copy of src.
+def _verify(src: Path, dst: Path) -> None:
+    """Raise if a repacked file does not match its source.
 
-    Checks:
-    1. Dataset count matches (detects silent drops).
-    2. pynwb can open and read the file (warnings tolerated, errors fail).
+    Parameters
+    ----------
+    src : Path
+        Source file, before repacking.
+    dst : Path
+        Repacked file.
 
-    Raises ValueError if either check fails.
+    Raises
+    ------
+    ValueError
+        If the two files do not hash identically.
     """
-    n_dst = _count_datasets(dst)
-    if n_dst != expected_count:
+    # Default precision, so a repack is held to the same standard as recompute.
+    src_hash = NwbfileHasher(src).hash
+    dst_hash = NwbfileHasher(dst).hash
+
+    if src_hash != dst_hash:
         raise ValueError(
-            f"Dataset count mismatch: src={expected_count} dst={n_dst}"
+            f"Repacked file does not match its source: {src.name}\n"
+            + f"\tsrc: {src_hash}\n"
+            + f"\tdst: {dst_hash}"
         )
 
-    from pynwb import NWBHDF5IO
 
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with NWBHDF5IO(str(dst), "r", load_namespaces=True) as io:
-                io.read()
-    except Exception as exc:
-        raise ValueError(f"Repacked file not readable by pynwb: {exc}") from exc
+def _dataset_counts(path: Path) -> tuple[int, int]:
+    """Count a file's datasets, and how many carry a compression filter.
 
+    Parameters
+    ----------
+    path : Path
+        HDF5 file to walk.
 
-def _count_datasets(path: Path) -> int:
-    """Count all HDF5 datasets in a file."""
-    n = [0]
+    Returns
+    -------
+    tuple[int, int]
+        Total dataset count, and the count with a compression filter.
+    """
+    total = compressed = 0
+
+    def visit(_, obj):
+        nonlocal total, compressed
+        if isinstance(obj, h5py.Dataset):
+            total += 1
+            compressed += bool(obj.compression)
+
     with h5py.File(str(path), "r") as f:
-        f.visititems(
-            lambda _, obj: (
-                n.__setitem__(0, n[0] + 1)
-                if isinstance(obj, h5py.Dataset)
-                else None
-            )
-        )
-    return n[0]
+        f.visititems(visit)
 
-
-def _count_compressed_datasets(path: Path) -> int:
-    """Count datasets that have a compression filter applied."""
-    n = [0]
-    with h5py.File(str(path), "r") as f:
-        f.visititems(
-            lambda _, obj: (
-                n.__setitem__(0, n[0] + 1)
-                if isinstance(obj, h5py.Dataset) and obj.compression
-                else None
-            )
-        )
-    return n[0]
+    return total, compressed
