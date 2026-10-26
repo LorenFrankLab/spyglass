@@ -110,7 +110,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         keep the cache from closing it mid-read.
         """
         nwbfiles = []
-        for path in self._nwb_paths():
+        for path in self._nwb_paths(log_access=True):
             nwbfiles.append(get_nwb_file(path))
             _acquire_nwb_file(path)  # after the open; a miss would no-op
         return nwbfiles

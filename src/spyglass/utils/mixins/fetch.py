@@ -4,8 +4,10 @@ import os
 from functools import cached_property
 from typing import Tuple
 
+import datajoint as dj
 import numpy as np
 from datajoint import Table
+from datajoint.errors import AccessError
 
 from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
@@ -159,18 +161,25 @@ class FetchMixin(BaseMixin):
 
         return nwb_files, file_path_fn
 
-    def _nwb_paths(self) -> list:
+    def _nwb_paths(self, log_access: bool = False) -> list:
         """Return resolved absolute NWB file paths for the current restriction.
 
         Shared infrastructure used by both ``fetch_nwb`` and ``close_nwb``.
         Uses ``file_path_fn`` (``SpyglassAnalysis.get_abs_path``) with
         ``from_schema=True`` so that ``filepath@store`` columns are resolved
         correctly regardless of table type.
+
+        Parameters
+        ----------
+        log_access : bool, optional
+            Log a raw NWB access for the resolved files. Default False.
         """
         table, tbl_attr = self._nwb_table_tuple
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             table, tbl_attr
         )
+        if log_access and tbl_attr == "nwb_file_abs_path":
+            self._log_nwb_access(nwb_files)
         return [file_path_fn(f, from_schema=True) for f in nwb_files]
 
     def _download_missing_files(self, nwb_files, file_path_fn):
@@ -188,6 +197,37 @@ class FetchMixin(BaseMixin):
             if not os.path.exists(file_path):
                 # get from kachery/dandi or recompute, store in cache
                 get_nwb_file(file_path, self)
+
+    def _log_nwb_access(self, nwb_files: list) -> None:
+        """Log a read of each distinct raw NWB file named.
+
+        Parameters
+        ----------
+        nwb_files : list
+            Raw NWB file names resolved for the current restriction. One row
+            is logged per distinct name.
+        """
+        if not len(nwb_files):
+            return
+
+        from spyglass.common.common_usage import NwbfileAccess
+
+        rows = [
+            dict(
+                nwb_file_name=str(file_name),
+                dj_user=dj.config.get("database.user", "unknown"),
+                caller_table=getattr(self, "full_table_name", "unknown")[:255],
+            )
+            for file_name in set(nwb_files)
+        ]
+
+        try:
+            NwbfileAccess().insert(rows)
+        except AccessError:
+            # Read-only roles have no INSERT on common_usage
+            pass
+        except Exception as exc:
+            self._warn_msg(f"Failed to log raw NWB access: {exc}")
 
     def _execute_nwb_query(self, tbl, attr_name, *attrs, **kwargs):
         """Execute join query and fetch records with NWB filepaths.
@@ -214,8 +254,9 @@ class FetchMixin(BaseMixin):
             "analysis_file_name" if "analysis" in attr_name else "nwb_file_name"
         )
 
-        # Get file names and path function
-        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+        # Get path function. The file names it resolves ignore limit/offset,
+        # so the access log reads them off rec_dicts below instead.
+        _, file_path_fn = self._get_nwb_files_and_path_fn(
             tbl, attr_name, *attrs, **kwargs
         )
 
@@ -234,6 +275,9 @@ class FetchMixin(BaseMixin):
         kwargs["as_dict"] = True  # force return as dictionary
         attrs = attrs or self.heading.names  # if not specified, fetch all
         rec_dicts = query_table.fetch(*attrs, **kwargs)
+
+        if file_name_attr == "nwb_file_name":
+            self._log_nwb_access([r[file_name_attr] for r in rec_dicts])
 
         # get filepath for each. Use datajoint for checksum if local
         for rec_dict in rec_dicts:
