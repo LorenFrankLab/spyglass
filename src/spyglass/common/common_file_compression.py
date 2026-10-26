@@ -8,9 +8,9 @@ The -m 1 flag is required — without it, zero-shape datasets (video
 placeholders) are silently dropped. A repack is accepted only when the
 source and the repacked file hash identically.
 
-Nwbfile always stores the copy ({session}_.nwb). CompressedNwbfile is
-keyed by Nwbfile and has a File part table with one row per physical
-file — 'copy' ({session}_.nwb) and 'raw' ({session}.nwb).
+Nwbfile always stores the copy ({session}_.nwb). CompressedNwbfile
+holds one row per physical file — 'copy' ({session}_.nwb) and 'raw'
+({session}.nwb).
 """
 
 import os
@@ -23,7 +23,7 @@ import datajoint as dj
 import h5py
 
 from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("common_file_compression")
@@ -32,45 +32,70 @@ _DEFAULT_GZIP_LEVEL = 6  # benchmarked default
 
 
 @schema
-class CompressedNwbfile(dj.Manual):
-    """Session-level record that both NWB files in a pair have been repacked.
+class CompressedNwbfile(SpyglassMixin, dj.Computed):
+    """Per-file record of an in-place repack.
 
-    Keyed by Nwbfile (always the copy, {session}_.nwb). The File part
-    table holds per-file stats for both 'copy' and 'raw'.
+    One row per physical file: the 'copy' ({session}_.nwb) that Nwbfile
+    keys on, and the 'raw' ({session}.nwb) beside it.
     """
 
     definition = """
     -> Nwbfile
+    file_role: enum('copy', 'raw')
     ---
     repacked_at=CURRENT_TIMESTAMP: timestamp
+    gzip_level=null: tinyint unsigned # null if already compressed, not repacked
+    original_size_bytes: bigint unsigned
+    repacked_size_bytes: bigint unsigned
     """
 
-    class File(dj.Part):
-        """Per-file compression stats for one file in the session pair."""
+    @property
+    def compression_ratio(self):
+        """Per-file ratio of original to repacked size."""
+        return self.proj(
+            compression_ratio="original_size_bytes / repacked_size_bytes"
+        )
 
-        definition = """
-        -> master
-        file_role: enum('copy', 'raw')
-        ---
-        gzip_level: tinyint unsigned # level passed to h5repack; 0=pre-existing
-        original_size_bytes: bigint unsigned
-        repacked_size_bytes: bigint unsigned
-        compression_ratio: float
-        datasets_total: int unsigned
-        datasets_compressed: int unsigned
+    @property
+    def space_saved(self):
+        """Bytes before and after, summed over the restricted files."""
+        return dj.U().aggr(
+            self,
+            original_bytes="SUM(original_size_bytes)",
+            repacked_bytes="SUM(repacked_size_bytes)",
+        )
+
+    def populate(self, *restrictions, **kwargs):
+        """Repack the files of each restricted session.
+
+        Parameters
+        ----------
+        *restrictions : Any
+            At least one restriction is required. Repacking rewrites files
+            in place, so an unrestricted call would sweep the whole corpus.
+        **kwargs : Any
+            Passed to ``dj.Computed.populate``.
         """
+        if not restrictions:
+            raise ValueError(
+                "CompressedNwbfile.populate requires a restriction. Repacking "
+                + "rewrites files in place; an unrestricted call would sweep "
+                + "every session."
+            )
+        return super().populate(*restrictions, **kwargs)
 
-    def make(self, key, gzip_level=_DEFAULT_GZIP_LEVEL):
-        """Repack both files in a session pair and record results.
-
-        Requires admin privileges — modifies source files in place.
+    def make_fetch(self, key) -> list:
+        """Resolve the paths of the session's two NWB files.
 
         Parameters
         ----------
         key : dict
-            Must contain 'nwb_file_name' for the copy ({session}_.nwb).
-        gzip_level : int, optional
-            GZIP compression level (1-9). Default: 6 (benchmarked).
+            Primary key of Nwbfile, naming the copy ({session}_.nwb).
+
+        Returns
+        -------
+        list
+            Single-item list holding {file_role: absolute path}.
         """
         from spyglass.common import LabMember
 
@@ -78,30 +103,71 @@ class CompressedNwbfile(dj.Manual):
             "Admin privileges required to repack NWB files"
         )
 
-        if self & key:
-            logger.warning(
-                f"{key['nwb_file_name']} already in CompressedNwbfile"
-            )
-            return
-
         copy_name = key["nwb_file_name"]
         raw_name = copy_name[:-5] + ".nwb"  # strip trailing _ before .nwb
 
-        copy_stats = _repack_file(Nwbfile.get_abs_path(copy_name), gzip_level)
-        raw_stats = _repack_file(Nwbfile.get_abs_path(raw_name), gzip_level)
+        return [
+            {
+                "copy": Nwbfile.get_abs_path(copy_name),
+                "raw": Nwbfile.get_abs_path(raw_name),
+            }
+        ]
 
-        self.insert1(key)
-        self.File.insert(
-            [
-                {**key, "file_role": "copy", **copy_stats},
-                {**key, "file_role": "raw", **raw_stats},
-            ]
+    def make_compute(self, key, paths: dict) -> list:
+        """Repack each file to a temporary sibling and verify it.
+
+        Runs outside the insert transaction: a repack takes hours on a large
+        file, and nothing is moved into place until every file has passed.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key of Nwbfile.
+        paths : dict
+            {file_role: absolute path}, from make_fetch.
+
+        Returns
+        -------
+        list
+            Single-item list holding {file_role: (tmp or None, stats)}.
+        """
+        staged = {}
+        try:
+            for role, path in paths.items():
+                staged[role] = _stage_repack(Path(path), _DEFAULT_GZIP_LEVEL)
+        except Exception:
+            for tmp, _ in staged.values():
+                if tmp is not None:
+                    tmp.unlink(missing_ok=True)
+            raise
+
+        return [staged]
+
+    def make_insert(self, key, staged: dict) -> None:
+        """Move each repacked file into place and record what it saved.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key of Nwbfile.
+        staged : dict
+            {file_role: (tmp or None, stats)}, from make_compute.
+        """
+        rows = []
+        for role, (tmp, stats) in staged.items():
+            if tmp is not None:
+                _commit_repack(tmp=tmp, src=Path(stats.pop("_path")))
+            else:
+                stats.pop("_path")
+            rows.append({**key, "file_role": role, **stats})
+
+        self.insert(rows)
+
+        saved = sum(
+            r["original_size_bytes"] - r["repacked_size_bytes"] for r in rows
         )
-
         logger.info(
-            f"Repacked {copy_name}: "
-            f"copy {copy_stats['compression_ratio']:.2f}x, "
-            f"raw {raw_stats['compression_ratio']:.2f}x"
+            f"Repacked {key['nwb_file_name']}: {saved / 1e9:.2f} GB saved"
         )
 
 
@@ -110,47 +176,40 @@ class CompressedNwbfile(dj.Manual):
 # ---------------------------------------------------------------------------
 
 
-def _repack_file(path: str, gzip_level: int) -> dict:
-    """Repack a single file and return per-file stats for File part table.
+def _stage_repack(src: Path, gzip_level: int) -> tuple:
+    """Repack a file to a verified temporary sibling, leaving it in place.
 
-    If the file is already fully compressed, records it without repacking
-    (gzip_level=0 in the returned stats).
+    Nothing is moved over the source; see ``_commit_repack``.
 
     Parameters
     ----------
-    path : str
-        Absolute path to the NWB file.
+    src : Path
+        NWB file to repack.
     gzip_level : int
         GZIP level to pass to h5repack.
 
     Returns
     -------
-    dict
-        Keys: gzip_level, original_size_bytes, repacked_size_bytes,
-        compression_ratio, datasets_total, datasets_compressed.
+    tuple
+        (tmp, stats). ``tmp`` is None when the file is already compressed
+        and nothing was repacked. ``stats`` carries the row's size columns
+        plus ``_path``, the source to move onto.
     """
-    src = Path(path)
     if not src.exists():
         raise FileNotFoundError(src)
 
     original_size = src.stat().st_size
-    n_datasets, n_already_compressed = _dataset_counts(src)
+    n_datasets, n_compressed = _dataset_counts(src)
 
-    shared = {
-        "original_size_bytes": original_size,
-        "datasets_total": n_datasets,
-    }
-
-    if n_already_compressed == n_datasets:
+    if n_compressed == n_datasets:
         logger.info(
             f"{src.name} already fully compressed, recording without repacking"
         )
-        return {
-            "gzip_level": 0,
+        return None, {
+            "_path": str(src),
+            "gzip_level": None,
+            "original_size_bytes": original_size,
             "repacked_size_bytes": original_size,
-            "compression_ratio": 1.0,
-            "datasets_compressed": n_already_compressed,
-            **shared,
         }
 
     tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
@@ -160,29 +219,34 @@ def _repack_file(path: str, gzip_level: int) -> dict:
     try:
         _h5repack(src=src, dst=tmp, level=gzip_level)
         _verify(src=src, dst=tmp)
-        _, n_compressed = _dataset_counts(tmp)
-        repacked_size = tmp.stat().st_size
-        _replace_preserving_mode(tmp=tmp, src=src)
     except Exception:
-        if tmp.exists():
-            tmp.unlink()
+        tmp.unlink(missing_ok=True)
         raise
 
+    return tmp, {
+        "_path": str(src),
+        "gzip_level": gzip_level,
+        "original_size_bytes": original_size,
+        "repacked_size_bytes": tmp.stat().st_size,
+    }
+
+
+def _commit_repack(tmp: Path, src: Path) -> None:
+    """Move a staged repack over its source and refresh the stored checksum.
+
+    Parameters
+    ----------
+    tmp : Path
+        Verified repack output, from ``_stage_repack``.
+    src : Path
+        File to replace.
+    """
     from spyglass.utils.dj_helper_fn import _resolve_external_table
 
+    _replace_preserving_mode(tmp=tmp, src=src)
     _resolve_external_table(
         filepath=str(src), file_name=src.name, location="raw"
     )
-
-    ratio = original_size / repacked_size if repacked_size else 0.0
-
-    return {
-        "gzip_level": gzip_level,
-        "repacked_size_bytes": repacked_size,
-        "compression_ratio": round(ratio, 4),
-        "datasets_compressed": n_compressed,
-        **shared,
-    }
 
 
 def _replace_preserving_mode(tmp: Path, src: Path) -> None:

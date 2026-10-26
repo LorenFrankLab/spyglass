@@ -1,6 +1,7 @@
 """Tests for retroactive NWB file compression."""
 
 import os
+import pathlib
 import stat
 from shutil import which
 
@@ -232,30 +233,52 @@ def test_verify_rejects_dropped_attr(uncompressed_h5, gzip_copy):
         _verify(src=uncompressed_h5, dst=dst)
 
 
-# ------------------------------- repack file --------------------------------
+# ------------------------------ stage / commit ------------------------------
 
 
-def test_repack_skips_compressed(compressed_h5):
-    """An already-compressed file is recorded without being repacked."""
-    from spyglass.common.common_file_compression import _repack_file
+def test_stage_skips_compressed(compressed_h5):
+    """An already-compressed file stages nothing and records no level."""
+    from spyglass.common.common_file_compression import _stage_repack
 
     before = compressed_h5.read_bytes()
-    stats = _repack_file(str(compressed_h5), gzip_level=6)
+    tmp, stats = _stage_repack(compressed_h5, gzip_level=6)
 
-    assert stats["gzip_level"] == 0, "Recorded as repacked"
-    assert stats["datasets_compressed"] == stats["datasets_total"]
+    assert tmp is None, "Staged a repack for an already-compressed file"
+    assert stats["gzip_level"] is None, "Recorded as repacked"
+    assert stats["original_size_bytes"] == stats["repacked_size_bytes"]
     assert compressed_h5.read_bytes() == before, "File was rewritten"
 
 
-def test_repack_missing_file(tmp_path):
-    """Repacking a file that does not exist raises before any work."""
-    from spyglass.common.common_file_compression import _repack_file
+def test_stage_missing_file(tmp_path):
+    """Staging a file that does not exist raises before any work."""
+    from spyglass.common.common_file_compression import _stage_repack
 
     with pytest.raises(FileNotFoundError):
-        _repack_file(str(tmp_path / "absent_.nwb"), gzip_level=6)
+        _stage_repack(tmp_path / "absent_.nwb", gzip_level=6)
 
 
-def test_repack_verify_failure_leaves_source(monkeypatch, uncompressed_h5):
+def test_stage_leaves_source_untouched(monkeypatch, uncompressed_h5, gzip_copy):
+    """A successful stage writes a sibling and does not touch the source."""
+    from spyglass.common import common_file_compression as cfc
+
+    before = uncompressed_h5.read_bytes()
+    monkeypatch.setattr(
+        cfc,
+        "_h5repack",
+        lambda src, dst, level: pathlib.Path(dst).write_bytes(
+            gzip_copy(src).read_bytes()
+        ),
+    )
+
+    tmp, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+
+    assert tmp is not None and tmp.exists(), "Nothing staged"
+    assert uncompressed_h5.read_bytes() == before, "Source was modified"
+    assert stats["gzip_level"] == 6
+    assert stats["repacked_size_bytes"] == tmp.stat().st_size
+
+
+def test_stage_verify_failure_cleans_up(monkeypatch, uncompressed_h5):
     """A failed verification leaves the source and removes the temp file."""
     from spyglass.common import common_file_compression as cfc
 
@@ -268,14 +291,14 @@ def test_repack_verify_failure_leaves_source(monkeypatch, uncompressed_h5):
     monkeypatch.setattr(cfc, "_h5repack", fake_repack)
 
     with pytest.raises(ValueError, match="does not match its source"):
-        cfc._repack_file(str(uncompressed_h5), gzip_level=6)
+        cfc._stage_repack(uncompressed_h5, gzip_level=6)
 
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
     assert not leftovers, f"Temp files left behind: {leftovers}"
 
 
-def test_repack_h5repack_failure_leaves_source(monkeypatch, uncompressed_h5):
+def test_stage_h5repack_failure_cleans_up(monkeypatch, uncompressed_h5):
     """An h5repack failure leaves the source and removes the temp file."""
     from spyglass.common import common_file_compression as cfc
 
@@ -287,8 +310,16 @@ def test_repack_h5repack_failure_leaves_source(monkeypatch, uncompressed_h5):
     monkeypatch.setattr(cfc, "_h5repack", boom)
 
     with pytest.raises(RuntimeError, match="exploded"):
-        cfc._repack_file(str(uncompressed_h5), gzip_level=6)
+        cfc._stage_repack(uncompressed_h5, gzip_level=6)
 
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
     assert not leftovers, f"Temp files left behind: {leftovers}"
+
+
+def test_populate_needs_restriction():
+    """An unrestricted populate is refused: repacking is in place."""
+    from spyglass.common.common_file_compression import CompressedNwbfile
+
+    with pytest.raises(ValueError, match="requires a restriction"):
+        CompressedNwbfile().populate()
