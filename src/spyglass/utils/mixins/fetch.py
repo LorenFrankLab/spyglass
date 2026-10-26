@@ -4,8 +4,10 @@ import os
 from functools import cached_property
 from typing import Tuple
 
+import datajoint as dj
 import numpy as np
 from datajoint import Table
+from datajoint.errors import AccessError
 
 from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
@@ -189,6 +191,37 @@ class FetchMixin(BaseMixin):
                 # get from kachery/dandi or recompute, store in cache
                 get_nwb_file(file_path, self)
 
+    def _log_nwb_access(self, nwb_files: list) -> None:
+        """Log a read of each distinct raw NWB file named.
+
+        Parameters
+        ----------
+        nwb_files : list
+            Raw NWB file names resolved for the current restriction. One row
+            is logged per distinct name, so a multi-row fetch of one session
+            counts as a single access of that file.
+        """
+        if not len(nwb_files):
+            return
+
+        from spyglass.common.common_usage import NwbfileAccess
+
+        rows = [
+            dict(
+                nwb_file_name=str(file_name),
+                dj_user=dj.config.get("database.user", "unknown"),
+                caller_table=getattr(self, "full_table_name", "unknown")[:255],
+            )
+            for file_name in set(nwb_files)
+        ]
+
+        try:
+            NwbfileAccess().insert(rows)
+        except AccessError:
+            # Read-only roles have no INSERT on common_usage. Instrumentation
+            # must never break a read, so drop the log and carry on.
+            pass
+
     def _execute_nwb_query(self, tbl, attr_name, *attrs, **kwargs):
         """Execute join query and fetch records with NWB filepaths.
 
@@ -218,6 +251,9 @@ class FetchMixin(BaseMixin):
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             tbl, attr_name, *attrs, **kwargs
         )
+
+        if file_name_attr == "nwb_file_name":
+            self._log_nwb_access(nwb_files)
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)
