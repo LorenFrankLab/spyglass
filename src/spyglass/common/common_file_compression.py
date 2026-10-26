@@ -163,7 +163,7 @@ def _repack_file(path: str, gzip_level: int) -> dict:
         _verify(src=src, dst=tmp, expected_count=n_datasets)
         n_compressed = _count_compressed_datasets(path=tmp)
         repacked_size = tmp.stat().st_size
-        tmp.rename(src)
+        _replace_preserving_mode(tmp=tmp, src=src)
     except Exception:
         if tmp.exists():
             tmp.unlink()
@@ -184,6 +184,22 @@ def _repack_file(path: str, gzip_level: int) -> dict:
         "datasets_compressed": n_compressed,
         **shared,
     }
+
+
+def _replace_preserving_mode(tmp: Path, src: Path) -> None:
+    """Move a repacked file over its source, keeping the source's mode.
+
+    Parameters
+    ----------
+    tmp : Path
+        Repacked file to move into place.
+    src : Path
+        File to replace. Must exist.
+    """
+    # mkstemp creates the repack output 0600, so a plain rename would leave a
+    # raw file on shared storage readable only by whoever ran the repack.
+    os.chmod(tmp, src.stat().st_mode)
+    tmp.rename(src)
 
 
 def _h5repack(src: Path, dst: Path, level: int) -> None:
