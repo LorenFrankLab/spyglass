@@ -176,6 +176,12 @@ auto_labeled = (
 )  # a CurationRef pinned to this exact generation
 ```
 
+When you run this from a `.py` script instead of a notebook, put the call under
+`if __name__ == "__main__":`. MountainSort4 starts worker processes with
+`spawn`, which re-imports the script; without the guard each worker starts its
+own `run_v2_pipeline`, which waits on the parent's populate lock, and the run
+hangs with no error.
+
 After a failure, correct the reported cause and rerun with the same inputs.
 Completed stages are reused; a failed sorter restarts its stage, without
 resuming internal checkpoints.
