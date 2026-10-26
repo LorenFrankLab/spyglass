@@ -1,19 +1,14 @@
 """Dataset-level compression tracking for Spyglass NWB files.
 
-Tracks NWB files repacked in-place via:
+Repacks files in place via `h5repack -f GZIP=<level> -m 1`, at the level in
+`h5py_helper_fn.GZIP_LEVEL`. A repack is accepted only when the source and
+the repacked file hash identically.
 
-    h5repack -f GZIP=<level> -m 1  src.nwb  tmp.nwb
+The -m 1 flag is required: without it, zero-shape datasets (video
+placeholders) are silently dropped.
 
-The level comes from `h5py_helper_fn.GZIP_LEVEL`, shared with the inline
-compressed writes so both paths move together.
-
-The -m 1 flag is required — without it, zero-shape datasets (video
-placeholders) are silently dropped. A repack is accepted only when the
-source and the repacked file hash identically.
-
-Nwbfile always stores the copy ({session}_.nwb). CompressedNwbfile
-holds one row per physical file — 'copy' ({session}_.nwb) and 'raw'
-({session}.nwb).
+Nwbfile keys on the copy ({session}_.nwb); CompressedNwbfile holds a row for
+it and one for the raw file ({session}.nwb) beside it.
 """
 
 import os

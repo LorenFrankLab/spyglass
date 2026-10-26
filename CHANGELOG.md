@@ -75,7 +75,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Monitor open NWBs, and close under RAM or file-descriptior pressure. Adds
     `close_nwb()` (and implements for `fetch_dataframe` and similar),
     `custom.nwb_cache` config, and a `psutil` dependency #1606
-- Retroactively compress files #1478
+- Compress NWB datasets. Repacks existing files in place via
+    `CompressedNwbfile`, compresses new analysis writes, and adds an `hdf5`
+    dependency for `h5repack` #1478
 
 ### Pipelines
 

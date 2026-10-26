@@ -286,9 +286,7 @@ def add_id_column_to_table(file: h5py.File, dataset_path: str):
     n_rows = sample_column.shape[0]
     # Create the 'id' dataset
     data = np.arange(n_rows, dtype=np.int64)
-    id_ds = obj.create_dataset(
-        "id", data=data, compression="gzip", compression_opts=4
-    )
+    id_ds = obj.create_dataset("id", data=data, **compression_settings())
     id_ds.attrs["neurodata_type"] = "ElementIdentifiers"
     id_ds.attrs["namespace"] = "core"
 
