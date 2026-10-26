@@ -1,6 +1,7 @@
 """A duplicate or interrupted compute cannot change the scientific winner."""
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -154,6 +155,45 @@ def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
         assert not remove_analyzer_cache(sorting_id)
         assert (staged.folder / "marker").read_text() == "active"
     assert not staged.folder.exists()
+
+
+def test_cleanup_skips_staging_still_in_use(
+    tmp_path, restore_custom_config, monkeypatch
+):
+    """A staging folder whose files are still open is left for later.
+
+    On NFS, removing a file another handle still maps leaves a ``.nfs``
+    placeholder that cannot be removed (``EBUSY``), so the folder cannot be
+    removed either. Such a folder is in use, not abandoned: the cleanup
+    leaves it, reports only what it removed, and does not raise.
+    """
+    import errno
+
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    sorting_id = str(uuid.uuid4())
+    canonical = cache.analyzer_path(sorting_id, "test")
+    busy = cache._publish_sibling(canonical, "trash")
+    free = cache._publish_sibling(canonical, "trash")
+    for folder in (busy, free):
+        folder.mkdir(parents=True)
+        (folder / "marker").write_text("old copy")
+    real_rmtree = shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        if Path(path) == busy:
+            raise OSError(errno.EBUSY, "Device or resource busy", ".nfs0001")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(cache.shutil, "rmtree", rmtree)
+    assert sorted(cache.cleanup_analyzer_staging(sorting_id)) == sorted(
+        [str(busy), str(free)]
+    )
+    assert cache.cleanup_analyzer_staging(sorting_id, dry_run=False) == [
+        str(free)
+    ]
+    assert busy.exists() and not free.exists()
 
 
 def test_orphan_audit_reclaims_only_abandoned_staging(

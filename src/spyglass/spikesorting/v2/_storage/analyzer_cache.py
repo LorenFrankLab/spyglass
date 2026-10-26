@@ -887,14 +887,41 @@ def cleanup_analyzer_staging(
         try:
             with analyzer_cache_lock(identity.sorting_id).acquire(timeout=0):
                 with owner.acquire(timeout=0):
-                    if folder.exists():
+                    if folder.exists() and (
+                        dry_run or _remove_unless_in_use(folder)
+                    ):
                         abandoned.append(str(folder))
-                        if not dry_run:
-                            shutil.rmtree(folder)
                 Path(owner.lock_file).unlink(missing_ok=True)
         except Timeout:
             continue
     return abandoned
+
+
+def _remove_unless_in_use(folder: Path) -> bool:
+    """Remove ``folder``; return False if a still-open file blocks it.
+
+    On NFS, a removed file that a process still maps becomes a ``.nfs``
+    placeholder that cannot be removed (``EBUSY``), and its directory then
+    cannot be removed (``ENOTEMPTY``). Such a folder is still in use, so it is
+    left for a later cleanup. Any other error is raised.
+    """
+    import errno
+
+    from spyglass.utils import logger
+
+    try:
+        shutil.rmtree(folder)
+    except OSError as exc:
+        if exc.errno not in (errno.EBUSY, errno.ENOTEMPTY):
+            raise
+        logger.warning(
+            "Analyzer staging folder %s is still in use (%s); left for a "
+            "later cleanup.",
+            folder,
+            str(exc),
+        )
+        return False
+    return True
 
 
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
