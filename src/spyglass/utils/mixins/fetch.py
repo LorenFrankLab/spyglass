@@ -226,6 +226,8 @@ class FetchMixin(BaseMixin):
         except AccessError:
             # Read-only roles have no INSERT on common_usage
             pass
+        except Exception as exc:
+            self._warn_msg(f"Failed to log raw NWB access: {exc}")
 
     def _execute_nwb_query(self, tbl, attr_name, *attrs, **kwargs):
         """Execute join query and fetch records with NWB filepaths.
