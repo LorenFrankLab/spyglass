@@ -1,8 +1,15 @@
 import os
 
 import datajoint as dj
-import kachery_cloud as kcl
 from datajoint.errors import DataJointError
+
+try:
+    import kachery_cloud as kcl
+
+    _kachery_available = True
+except ImportError:
+    kcl = None
+    _kachery_available = False
 
 from spyglass.common.common_lab import Lab  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -28,8 +35,19 @@ except KeyError:
 schema = dj.schema("sharing_kachery")
 
 
+def _require_kachery():
+    if not _kachery_available:
+        raise ImportError(
+            "kachery_cloud is not installed. Install it with:\n"
+            "  pip install spyglass-neuro[kachery-cloud]\n"
+            "or remove kachery from your workflow and use the DANDI fallback "
+            "in spyglass.utils.nwb_helper_fn.get_nwb_file instead."
+        )
+
+
 def kachery_download_file(uri: str, dest: str, kachery_zone_name: str) -> str:
     """Set the kachery resource url and attempt to download."""
+    _require_kachery()
     KacheryZone.set_resource_url({"kachery_zone_name": kachery_zone_name})
     return kcl.load_file(uri, dest=dest)
 
@@ -136,6 +154,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate with the uri of the analysis file"""
+        _require_kachery()
         analysis_file = key["analysis_file_name"]
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file)
 
@@ -172,6 +191,10 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
         is_success : bool
             True if the file was successfully downloaded, False otherwise
         """
+        if not _kachery_available:
+            if permit_fail:
+                return False
+            _require_kachery()
         fetched_list = (
             AnalysisNwbfileKachery & {"analysis_file_name": analysis_file_name}
         ).fetch("analysis_file_uri", "kachery_zone_name")
@@ -235,6 +258,7 @@ def share_data_to_kachery(
     ValueError
         Does not allow sharing of all data in table
     """
+    _require_kachery()
     if not zone_name:
         zone_name = config["KACHERY_ZONE"]
     kachery_selection_key = {"kachery_zone_name": zone_name}

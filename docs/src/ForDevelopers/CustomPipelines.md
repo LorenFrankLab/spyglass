@@ -182,7 +182,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         interval = (IntervalList & key).fetch_interval()
         interval = interval.intersect(params["valid_times"])
         interval.name = my_new_name
-        test_data = [[1,2,3],[4,5,6]]
+        test_data = [[1, 2, 3], [4, 5, 6]]
         with self.analysis_table.build(nwb_file_name) as builder:
             # store results in file
             data_id = builder.add_nwb_object(test_data, "test")
@@ -194,7 +194,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
                 **key,
                 **interval.primary_key,
                 "analysis_file_name": builder.analysis_file_name,
-                "data_object_id": data_id
+                "data_object_id": data_id,
             }
         )
         self.MyAnalysisPart.insert1({**key, "result": 1})
@@ -202,46 +202,13 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
 
 ### Make Method
 
-In general, `make` methods have three steps:
-
-1. Collect inputs: fetch the relevant parameters and data.
-2. Run analysis: run the analysis on the inputs.
-3. Insert results: insert the results into the relevant tables.
-
-DataJoint has protections in place to ensure that `populate` calls are treated
-as a single transaction, but transaction times can slow down table interactions
-for collaborators. Instead, consider an explicit separation with a
-[generator approach](https://github.com/datajoint/datajoint-python/blob/63ebc380ecdd1ba1b0cff02f9927fe2666a59e24/datajoint/autopopulate.py#L108-L112).
-
-```python
-@schema
-class MyAnalysis(SpyglassMixin, dj.Computed):
-    ...
-
-    def make_fetch(self, key):
-        one = SomeUpstreamTable.fetch1(...)  # (1)
-        two = AnotherUpstreamTable.fetch1(...)  # (2)
-
-        return [one, two]
-
-    def make_compute(self, key, one, two):
-        result = some_analysis_function(one, two)  # (3)
-        self_insert = {"result_field": result}  # (4)
-
-        return self_insert
-
-    def make_insert(self, key, self_insert):
-        self.insert1(dict(key, **self_insert))  # (5)
-```
-
-1. `make_fetch` may not modify the key or the database, and only fetches data.
-2. `make_fetch` must be deterministic and idempotent.
-    - Deterministic: given the same key, it always returns the same data.
-    - Idempotent: calling it multiple times has the same effect as calling it
-        once.
-3. `make_compute` runs time-consuming computations.
-4. `make_compute` should not modify the key or the database.
-5. `make_insert` modifies the database.
+In general, `make` methods have three steps: collect inputs, run analysis, and
+insert results. For long-running computations, holding a DataJoint transaction
+open for the full duration can block collaborators. Spyglass supports an
+explicit three-method split (`make_fetch`, `make_compute`, `make_insert`) that
+keeps only the database write inside a transaction. See
+[Populate and Long-Running Computations](../Features/Populate.md) for the full
+pattern, rules, and a migration guide.
 
 ### Time Intervals
 
@@ -426,15 +393,15 @@ unsure about relevant methods, please open a GitHub discussion.
 
 [^1]: For example, `externalpackage.analysis_func` renames `param_name` to
     `param_rename` in version 2.0, and adjusts the functionality to handle new
-    cases. You can either (a) run an `if/then` against the package version, and
-    rename the parameters in the relevant case(s), or (b) alter the table
+    cases. You can either (a) run an `if/then` against the package version,
+    and rename the parameters in the relevant case(s), or (b) alter the table
     definition to add a new nullable secondary field `param_rename=NULL` and
     declare new paramsets for new versions of the package.
 
 [^2]: `blob`s are MySQL-native data types, and come in
-    [various sizes](https://dev.mysql.com/doc/refman/8.0/en/blob.html). For best
-    results, select the smallest size that will fit your data. `tinyblob` is 255
-    bytes, `blob` is 64KB, `mediumblob` is 16MB, and `longblob` is 4GB.
+    [various sizes](https://dev.mysql.com/doc/refman/8.0/en/blob.html). For
+    best results, select the smallest size that will fit your data. `tinyblob`
+    is 255 bytes, `blob` is 64KB, `mediumblob` is 16MB, and `longblob` is 4GB.
 
 [^3]: See `spyglass.lfp.lfp_electrode.LFPElectrodeGroup` for an example of
     grouping electrodes into a collection.

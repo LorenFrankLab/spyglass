@@ -270,6 +270,8 @@ class CurationV1(SpyglassMixin, dj.Manual):
         """Returns the sort group information for the curation
         (e.g. brain region, electrode placement, etc.)
 
+        One row per electrode of each sort group.
+
         Parameters
         ----------
         key : dict
@@ -285,19 +287,9 @@ class CurationV1(SpyglassMixin, dj.Manual):
         ) * SpikeSortingRecordingSelection().proj(
             "recording_id", "sort_group_id"
         )
-        electrode_restrict_list = []
-        for entry in table:
-            # pull just one electrode from each sort group for info
-            electrode_restrict_list.extend(
-                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
-                    limit=1
-                )
-            )
 
         sort_group_info = (
-            (Electrode & electrode_restrict_list)
-            * table
-            * SortGroup.SortGroupElectrode()
+            Electrode() * table * SortGroup.SortGroupElectrode()
         ) * BrainRegion()
         return (cls & key).proj() * sort_group_info
 
@@ -389,18 +381,17 @@ def _write_sorting_to_nwb_with_curation(
                 )
         # add labels, merge groups, metrics
         if labels is not None:
-            label_values = []
-            for unit_id in unit_ids:
-                if unit_id not in labels:
-                    label_values.append([])
-                else:
-                    label_values.append(labels[unit_id])
-            nwbf.add_unit_column(
-                name="curation_label",
-                description="curation label",
-                data=label_values,
-                index=True,
-            )
+            label_values = [labels.get(unit_id, []) for unit_id in unit_ids]
+            # Skip the column when no unit is labeled: an all-empty ragged
+            # column has no data for hdmf to infer a dtype from, which would
+            # crash the write.
+            if any(len(value) > 0 for value in label_values):
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description="curation label",
+                    data=label_values,
+                    index=True,
+                )
         if merge_groups is not None:
             merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
             merge_groups_list = [

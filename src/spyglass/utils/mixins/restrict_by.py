@@ -145,6 +145,7 @@ class RestrictByMixin(BaseMixin):
         restriction: str = True,
         direction: str = "down",
         return_graph: bool = False,
+        skip_external: bool = True,
         verbose: bool = False,
     ) -> List:
         RestrGraph = self._graph_deps[1]
@@ -157,6 +158,7 @@ class RestrictByMixin(BaseMixin):
             direction=direction,
             banned_tables=list(self._banned_search_tables),
             cascade=True,
+            skip_external=skip_external,
             verbose=verbose,
         )
         if return_graph:

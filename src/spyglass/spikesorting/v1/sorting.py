@@ -415,13 +415,16 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:
-            # Specify tempdir (expected by some sorters like mountainsort4)
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
-            sorter_params["tempdir"] = sorter_temp_dir.name
-            os.chmod(sorter_params["tempdir"], 0o777)
+            os.chmod(sorter_temp_dir.name, 0o777)
 
-            if sorter == "mountainsort5":
-                _ = sorter_params.pop("tempdir", None)
+            # Only mountainsort4 declares a `tempdir` scratch-dir param. Passing
+            # `tempdir` to any other sorter makes its parameter validation raise
+            # `AttributeError: Bad parameters: ['tempdir']`, so inject it solely
+            # for sorters that actually declare it. The temp dir is still handed
+            # to every sorter below as `output_folder`.
+            if "tempdir" in sis.get_default_sorter_params(sorter):
+                sorter_params["tempdir"] = sorter_temp_dir.name
 
             # if whitening is specified in sorter params, apply whitening separately
             # prior to sorting and turn off "sorter whitening"
@@ -440,8 +443,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 sorter_params = {
                     k: v
                     for k, v in sorter_params.items()
-                    if k
-                    not in ["tempdir", "mp_context", "max_threads_per_process"]
+                    if k not in ["mp_context", "max_threads_per_process"]
                 }
                 sorting = sis.run_sorter(
                     **common_sorter_items,
@@ -507,6 +509,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         Returns
         -------
         sorting : si.BaseSorting
+            Sorting read from the analysis NWB file. A sorting with no spikes
+            yields a valid zero-unit sorting rather than raising, matching
+            ``CurationV1.get_sorting``.
 
         """
 
@@ -529,11 +534,16 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
         recording_times = recording.get_times()
         n_samples = recording.get_num_samples()
+        # Iterate rows rather than indexing the "spike_times" column: an empty
+        # units table (a sorting with no spikes, see #1154) carries no columns
+        # at all, so the column lookup would raise a bare KeyError. Iterating
+        # yields an empty dict instead, and so an empty NumpySorting -- the
+        # same construction CurationV1.get_sorting uses.
         units_dict = {
-            unit_id: spike_times_to_valid_samples(
-                recording_times, spike_times, n_samples, unit_id
+            unit.Index: spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
             )
-            for unit_id, spike_times in zip(units.index, units["spike_times"])
+            for unit in units.itertuples()
         }
 
         sorting = si.NumpySorting.from_unit_dict(

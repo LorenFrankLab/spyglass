@@ -1,15 +1,16 @@
 """Converts decoder classes into dictionaries and dictionaries into classes
 so that datajoint can store them in tables."""
 
+from __future__ import annotations
+
 import copy
+from typing import TYPE_CHECKING
 
 import datajoint as dj
-from non_local_detector import continuous_state_transitions as cst
-from non_local_detector import discrete_state_transitions as dst
-from non_local_detector import initial_conditions as ic
-from non_local_detector.environment import Environment
-from non_local_detector.observation_models import ObservationModel
 from track_linearization import make_track_graph
+
+if TYPE_CHECKING:  # annotations only: never import non_local_detector eagerly
+    from non_local_detector.environment import Environment
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -44,6 +45,8 @@ def _convert_env_dict(env_params: dict) -> Environment:
     -------
     environment : Environment
     """
+    from non_local_detector.environment import Environment
+
     if env_params["track_graph"] is not None:
         env_params["track_graph"] = make_track_graph(
             **env_params["track_graph"]
@@ -107,6 +110,10 @@ def restore_classes(params: dict) -> dict:
     converted_params : dict
         The converted parameters
     """
+    from non_local_detector import continuous_state_transitions as cst
+    from non_local_detector import discrete_state_transitions as dst
+    from non_local_detector import initial_conditions as ic
+    from non_local_detector.observation_models import ObservationModel
 
     params = copy.deepcopy(params)
 
@@ -179,7 +186,11 @@ def _convert_environment_to_dict(env: Environment) -> dict:
 
 
 def convert_classes_to_dict(params: dict) -> dict:
-    """Converts the classifier parameters into a dictionary so that datajoint can store it."""
+    """Converts the classifier parameters into a dictionary so that datajoint can store it.
+
+    Operates on already-constructed classifier instances, so it needs no
+    ``non_local_detector`` import of its own.
+    """
     params = copy.deepcopy(params)
     try:
         params["environments"] = [

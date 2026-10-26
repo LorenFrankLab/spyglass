@@ -10,6 +10,28 @@ and related discussions
 [here](https://github.com/datajoint/datajoint-python/issues/151) and
 [here](https://github.com/LorenFrankLab/spyglass/issues/469).
 
+## Version Support Policy
+
+Pipelines are periodically rewritten as new major versions — for example,
+`SpikeSortingV0` and `SpikeSortingV1` today, with `PositionV2` and
+`SpikeSortingV2` anticipated. Merge Tables (e.g., `PositionOutput`,
+`SpikeSortingOutput`) are what let the old and new versions coexist and be
+queried interchangeably while users migrate.
+
+When a new version `VX` is released, the previous version `VX-1` is supported as
+follows:
+
+- **Installation**: `VX-1` is no longer supported for installation once `VX` is
+    released.
+- **Data access**: Data generated with `VX-1` will always remain accessible. Use
+    it with caution after 12 months, as it will no longer reflect ongoing
+    improvements to the pipeline.
+- **Bug fixes**: After 12 months, the Spyglass team no longer issues bug fixes
+    for `VX-1`. Affected users are welcome to submit a pull request.
+- **Insert tools**: After 12 months, the tools used to insert new `VX-1` entries
+    are removed. Fetch methods are retained so that existing data remains
+    accessible.
+
 ## What
 
 A Merge Table is fundamentally a master table with one part for each divergent

@@ -21,7 +21,7 @@ from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 
 @pytest.fixture(scope="module")
-def singlefile_multiepoch_video_nwb(raw_dir, common, data_import, teardown):
+def singlefile_multiepoch_video_nwb(raw_dir, common, data_import):
     """Create an NWB file with a single session-spanning ImageSeries.
 
     This fixture creates a mock NWB file that simulates the scenario described
@@ -126,10 +126,10 @@ def singlefile_multiepoch_video_nwb(raw_dir, common, data_import, teardown):
 
     yield video_files
 
-    if teardown:
-        (common.Nwbfile & nwb_dict).delete(safemode=False)
-        if nwb_path.exists():
-            nwb_path.unlink()
+    # Always clean up, even under --no-teardown, avoid phantom work next run
+    (common.Nwbfile & nwb_dict).delete(safemode=False)
+    if nwb_path.exists():
+        nwb_path.unlink()
 
 
 def test_singlefile_multiepoch_import(common, singlefile_multiepoch_video_nwb):

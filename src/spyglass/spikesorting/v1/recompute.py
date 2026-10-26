@@ -16,6 +16,7 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 """
 
 import atexit
+import os
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
@@ -607,7 +608,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
     def _hash_one(self, path, precision) -> NwbfileHasher:
         """Return the hasher for a given path. Store in cache."""
-        cache_val = f"{path}_{precision}"
+        legacy_mode = (
+            os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true"
+        )
+        cache_val = f"{path}_{precision}_{legacy_mode}"
         if cache_val in self._hasher_cache:
             return self._hasher_cache[cache_val]
         hasher = NwbfileHasher(
@@ -616,6 +620,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             keep_obj_hash=True,
             keep_file_open=True,
             precision_lookup=precision,
+            legacy_mode=legacy_mode,
         )
         self._hasher_cache[cache_val] = hasher
         return hasher
@@ -843,6 +848,17 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             self.insert1(dict(key, matched=True, **created_key))
             return
 
+        if not os.environ.get("SPYGLASS_LEGACY_HASHES", "").lower() == "true":
+            logger.warning(
+                "Hash mismatch for %s. "
+                "If this recording was hashed before the NwbfileHasher "
+                "Dataset-content fix, the stored hash excludes Dataset "
+                "values and will never match a correctly recomputed file. "
+                "To restore legacy (metadata-only) hashing for comparison, "
+                "rerun with:\n\tSPYGLASS_LEGACY_HASHES=true",
+                key.get("recording_id", key),
+            )
+
         names, hashes = [], []
         for obj in set({**old_hasher.objs, **new_hasher.objs}):
             old_obj, old_hash = old_hasher.objs.get(obj, (None, None))
@@ -936,21 +952,36 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
 
-    def delete(self, *args, **kwargs) -> None:
-        """Delete recompute attempts when deleting rows."""
+    def delete(self, *args, safemode=None, **kwargs) -> None:
+        """Delete recompute attempts when deleting rows.
+
+        Parameters
+        ----------
+        safemode : bool, optional
+            Whether to prompt before deleting, per the datajoint API. When
+            None, defaults to dj.config["safemode"]. Passing False deletes
+            the attempt files and rows without prompting, so non-interactive
+            callers (tests, scripts, cron) are not left with an EOFError or
+            a silent no-op.
+        """
         attempt_paths = []
         for key in self:
             _, new = self._get_paths(key)
             attempt_paths.append(new)
 
+        if safemode is None:
+            safemode = dj.config.get("safemode", True)
+
         msg = "Delete attempt files?\n\t" + "\n\t".join(
             str(p) for p in attempt_paths
         )
-        if dj.utils.user_choice(msg).lower() == "yes":
-            for path in attempt_paths:
-                path.unlink(missing_ok=True)
-            kwargs["safemode"] = False  # pragma: no cover
-            super().delete(*args, **kwargs)
+        if safemode and dj.utils.user_choice(msg).lower() != "yes":
+            logger.info("Delete cancelled: no attempt files or rows removed.")
+            return
+
+        for path in attempt_paths:
+            path.unlink(missing_ok=True)
+        super().delete(*args, safemode=False, **kwargs)
 
     def update_secondary(self, restriction=True) -> None:
         """Update secondary attrs for existing entries.

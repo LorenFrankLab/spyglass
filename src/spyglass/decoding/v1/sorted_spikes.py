@@ -8,21 +8,22 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+from __future__ import annotations
+
 import copy
 import uuid
 from pathlib import Path
-from typing import Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import datajoint as dj
-import non_local_detector.analysis as analysis
 import numpy as np
 import pandas as pd
 import xarray as xr
-from non_local_detector.models.base import SortedSpikesDetector
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.core import (
     DecodingParameters,  # noqa: F401
     PositionGroup,
@@ -40,6 +41,9 @@ from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,  # noqa: F401
 )
 from spyglass.utils import SpyglassMixin, logger
+
+if TYPE_CHECKING:  # annotations only: never import non_local_detector eagerly
+    from non_local_detector.models.base import SortedSpikesDetector
 
 schema = dj.schema("decoding_sorted_spikes_v1")
 
@@ -231,6 +235,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         ValueError
             If all decoding intervals are empty (no valid time points)
         """
+        from non_local_detector.models.base import SortedSpikesDetector
+
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
@@ -408,10 +414,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         coordinate instead of separate ``intervals`` dimension. See CHANGELOG.md
         for migration guide.
         """
+        from non_local_detector.models.base import SortedSpikesDetector
+
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
         """Retrieve the decoding model"""
+        from non_local_detector.models.base import SortedSpikesDetector
+
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
     @classmethod
@@ -428,6 +438,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         List[TrackGraph]
             list of track graphs in the trained model
         """
+        from non_local_detector.models.base import SortedSpikesDetector
+
         key = cls.get_fully_defined_key(
             key, required_fields=["decoding_param_name"]
         )
@@ -638,8 +650,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     def get_orientation_col(self, df):
         """Examine columns of a input df and return orientation col name"""
-        cols = df.columns
-        return "orientation" if "orientation" in cols else "head_orientation"
+        return resolve_orientation_col(df) or "head_orientation"
 
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
         """Get relative decoded position from the animal's actual position
@@ -657,6 +668,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             Information about the distance of the animal to the mental position.
         """
         # TODO: store in table
+
+        import non_local_detector.analysis as analysis
 
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)
