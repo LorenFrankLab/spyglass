@@ -81,6 +81,73 @@ def test_patch_is_idempotent_and_installs_the_fix():
     assert pm.nearest_neighbors_noise_overlap is _nn_noise_overlap_sparse_fixed
 
 
+@pytest.mark.parametrize("n_workers", [1, 4])
+@pytest.mark.parametrize("n_neighbors", [5, 50_000])
+def test_isolation_patch_matches_spikeinterface(n_neighbors, n_workers):
+    """The installed isolation score is SI's, on any number of threads.
+
+    SI's single-threaded scikit-learn k-d tree took ~20 of a 28 min
+    auto-curation on a real 20 min epoch. ``n_neighbors`` beyond the two
+    clusters' size exercises SI's adjustment to ``n_spikes - 1``.
+    """
+    import spikeinterface.metrics.quality.pca_metrics as pm
+
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _SI_COMPUTE_ISOLATION,
+        isolation_workers,
+        patch_isolation_kdtree,
+    )
+
+    rng = np.random.default_rng(0)
+    target = rng.normal(size=(3000, 7))
+    other = rng.normal(loc=0.8, size=(2500, 7))
+
+    patch_isolation_kdtree()
+    patch_isolation_kdtree()  # idempotent
+    with isolation_workers(n_workers):
+        result = pm._compute_isolation(target, other, n_neighbors)
+    assert result == _SI_COMPUTE_ISOLATION(target, other, n_neighbors)
+
+
+def test_isolation_patch_excludes_each_spike_among_duplicates():
+    """A spike with more duplicates than ``n_neighbors`` drops one neighbor
+    instead of itself, as scikit-learn's ``kneighbors()`` does, so every
+    spike keeps exactly ``n_neighbors`` neighbors."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _SI_COMPUTE_ISOLATION,
+        _compute_isolation_kdtree,
+    )
+
+    rng = np.random.default_rng(1)
+    target = np.repeat(rng.normal(size=(4, 7)), 12, axis=0)
+    other = rng.normal(loc=50.0, size=(40, 7))
+
+    result = _compute_isolation_kdtree(target, other, 5)
+    assert result == _SI_COMPUTE_ISOLATION(target, other, 5) == 1.0
+
+
+def test_isolation_workers_reach_the_search_and_reset(monkeypatch):
+    """``isolation_workers`` sets the search's thread count for its block."""
+    import scipy.spatial
+
+    from spyglass.spikesorting.v2._core import si_metric_patches as smp
+
+    seen = []
+    real_tree = scipy.spatial.cKDTree
+
+    class _Tree(real_tree):
+        def query(self, *args, **kwargs):
+            seen.append(kwargs["workers"])
+            return super().query(*args, **kwargs)
+
+    monkeypatch.setattr(scipy.spatial, "cKDTree", _Tree)
+    points = np.random.default_rng(2).normal(size=(50, 7))
+    with smp.isolation_workers(6):
+        smp._compute_isolation_kdtree(points[:25], points[25:], 5)
+    smp._compute_isolation_kdtree(points[:25], points[25:], 5)
+    assert seen == [6, 1]
+
+
 # ---------- nn noise cluster drawn from the statistics spans -----------------
 
 _FS = 30_000.0

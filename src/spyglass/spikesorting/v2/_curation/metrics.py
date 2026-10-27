@@ -1332,9 +1332,15 @@ def compute_metrics(
         # is broken for sparse analyzers (it derives the peak channel from a
         # dense median but indexes the sparse noise cluster -> IndexError,
         # swallowed as NaN). Ensure the median operator, then install the
-        # sparse fix. The PC compute below runs n_jobs=1 so the fix (a
-        # main-process monkeypatch) is the code that actually runs.
+        # sparse fix and the threaded k-d tree isolation search both NN
+        # metrics use. The PC compute below runs n_jobs=1 so the fixes
+        # (main-process monkeypatches) are the code that actually runs; the
+        # row's n_jobs instead sets the neighbor-search threads.
+        from spikeinterface.core.job_tools import fix_job_kwargs
+
         from spyglass.spikesorting.v2._core.si_metric_patches import (
+            isolation_workers,
+            patch_isolation_kdtree,
             patch_nn_noise_overlap_sparsity,
         )
 
@@ -1348,6 +1354,7 @@ def compute_metrics(
                 "templates", operators=[*templates_operators, "median"]
             )
         patch_nn_noise_overlap_sparsity()
+        patch_isolation_kdtree()
         # Enforce the pinned PCA params even if a stale/manual analyzer
         # already carries principal_components computed with different ones
         # (ensure_extensions skips a present extension without checking its
@@ -1372,6 +1379,11 @@ def compute_metrics(
         )
         with (
             noise_cluster_spans(statistics_spans),
+            isolation_workers(
+                fix_job_kwargs({"n_jobs": (job_kwargs or {}).get("n_jobs", 1)})[
+                    "n_jobs"
+                ]
+            ),
             isolated_si_metric_defaults(),
             escalate_si_metric_errors(rule_columns),
         ):

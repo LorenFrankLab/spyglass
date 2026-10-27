@@ -62,6 +62,11 @@ from spyglass.utils import logger
 _VALIDATED_SI_PREFIXES = ("0.104",)
 
 _PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
+_ISOLATION_PATCH_FLAG = "_spyglass_v2_isolation_kdtree_patched"
+
+#: SI's own ``_compute_isolation``, kept as the reference the k-d tree copy
+#: must reproduce.
+_SI_COMPUTE_ISOLATION = _pm._compute_isolation
 _SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
 
 #: Reentrant lock guarding SpikeInterface's class-level metric params (the
@@ -92,11 +97,19 @@ _NOISE_CLUSTER_DRAWS: contextvars.ContextVar[dict | None] = (
     contextvars.ContextVar("nn_noise_cluster_draws", default=None)
 )
 
+#: Threads each nn_isolation / nn_noise_overlap neighbor search uses. Set
+#: only through ``isolation_workers``; the metric compute sets it from the
+#: evaluation's ``n_jobs``.
+_ISOLATION_WORKERS: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "nn_isolation_workers", default=1
+)
+
 #: Snippets whose start lies within this many frames of the previous
-#: snippet's end are read in one ``get_traces`` call. On the v2 Recording
-#: NWB (time-tall, few-channel HDF5 chunks) one call costs about as much as
+#: snippet's end are read in one ``get_traces`` call. On a recording stored
+#: in time-tall, few-channel HDF5 chunks one call costs about as much as
 #: reading a second of 30 kHz data, so reading a gap this long is cheaper
-#: than a second call.
+#: than a second call. v2 now writes all-channel chunks, where a call is
+#: cheap; the draw runs once per block, so the grouping costs seconds at most.
 _SNIPPET_READ_MAX_GAP_FRAMES = 30_000
 
 #: Upper bound on one grouped read, in bytes of float64 traces.
@@ -510,6 +523,107 @@ def patch_nn_noise_overlap_sparsity() -> None:
         )
     _pm.nearest_neighbors_noise_overlap = _nn_noise_overlap_sparse_fixed
     setattr(_pm, _PATCH_FLAG, True)
+
+
+@contextlib.contextmanager
+def isolation_workers(n_workers: int):
+    """Run :func:`_compute_isolation_kdtree` searches on ``n_workers`` threads.
+
+    The previous value is restored on exit, including on error.
+    """
+    token = _ISOLATION_WORKERS.set(int(n_workers))
+    try:
+        yield
+    finally:
+        _ISOLATION_WORKERS.reset(token)
+
+
+def _compute_isolation_kdtree(
+    pcs_target_unit, pcs_other_unit, n_neighbors: int
+):
+    """SI 0.104.3's ``_compute_isolation`` on a threaded scipy k-d tree.
+
+    SI fits ``NearestNeighbors(algorithm="auto")``, a single-threaded
+    scikit-learn k-d tree for these low-dimensional PC features. Both
+    nn_isolation and nn_noise_overlap score every unit against up to
+    ``2 * max_spikes`` spikes this way, and on a 20 min epoch nn_isolation
+    took ~20 of a 28 min auto-curation. ``scipy.spatial.cKDTree`` runs the
+    same exact search about 2x faster on one thread and scales with
+    :func:`isolation_workers`. Both compute distances directly, so the
+    neighbors are SI's; only exactly tied neighbors (duplicate PC features)
+    can be ordered differently.
+
+    Each spike's own row is excluded as scikit-learn's ``kneighbors()``
+    does: query one extra neighbor and drop the spike itself, or the first
+    neighbor when duplicates crowd the spike out of its own list.
+
+    Parameters
+    ----------
+    pcs_target_unit : numpy.ndarray
+        ``(n_spikes_target, n_features)`` PC features of the target unit.
+    pcs_other_unit : numpy.ndarray
+        ``(n_spikes_other, n_features)`` PC features of the other cluster.
+    n_neighbors : int
+        Neighbors per spike; reduced to ``n_spikes - 1`` when larger.
+
+    Returns
+    -------
+    float
+        Fraction of neighbors that share each spike's cluster, in ``[0, 1]``.
+    """
+    import numpy as np
+    from scipy.spatial import cKDTree
+
+    n_spikes_target = pcs_target_unit.shape[0]
+    n_spikes_other = pcs_other_unit.shape[0]
+    pcs_concat = np.concatenate((pcs_target_unit, pcs_other_unit), axis=0)
+    label_concat = np.concatenate(
+        (np.zeros(n_spikes_target), np.ones(n_spikes_other))
+    )
+    n_spikes = len(label_concat)
+    n_neighbors_adjusted = min(n_neighbors, n_spikes - 1)
+    _, neighbors = cKDTree(pcs_concat).query(
+        pcs_concat,
+        k=n_neighbors_adjusted + 1,
+        workers=_ISOLATION_WORKERS.get(),
+    )
+    neighbors = np.asarray(neighbors).reshape(n_spikes, -1)
+    keep = neighbors != np.arange(n_spikes)[:, None]
+    keep[np.all(keep, axis=1), 0] = False
+    membership_ind = neighbors[keep].reshape(n_spikes, n_neighbors_adjusted)
+    target_nn_in_target = np.sum(
+        label_concat[membership_ind[:n_spikes_target]] == 0
+    )
+    other_nn_in_other = np.sum(
+        label_concat[membership_ind[n_spikes_target:]] == 1
+    )
+    return (
+        (target_nn_in_target + other_nn_in_other)
+        / (n_spikes_target + n_spikes_other)
+        / n_neighbors_adjusted
+    )
+
+
+def patch_isolation_kdtree() -> None:
+    """Idempotently install :func:`_compute_isolation_kdtree` over SI's.
+
+    SI's ``nearest_neighbors_isolation`` and the patched
+    ``nearest_neighbors_noise_overlap`` both look ``_compute_isolation`` up on
+    the module at call time. Logs a warning (and still applies) outside the
+    validated SI family.
+    """
+    if getattr(_pm, _ISOLATION_PATCH_FLAG, False):
+        return
+    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
+        logger.warning(
+            "spikesorting v2: SpikeInterface %s is outside the validated set "
+            "%s for the k-d tree isolation patch; applying anyway -- "
+            "re-verify or remove this shim.",
+            si.__version__,
+            _VALIDATED_SI_PREFIXES,
+        )
+    _pm._compute_isolation = _compute_isolation_kdtree
+    setattr(_pm, _ISOLATION_PATCH_FLAG, True)
 
 
 def _template_corrected_sd_ratio(
