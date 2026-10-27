@@ -1072,6 +1072,12 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ):
             built.delete(safemode=False)
             reused = False
+        if not reused:
+            from spyglass.spikesorting.v2._core.progress import (
+                report_progress,
+            )
+
+            report_progress("Building the review page…")
         cls.populate(selection)
         return FigPackBuildResult(
             uri=(cls & selection).fetch1("figpack_uri"),

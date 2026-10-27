@@ -514,6 +514,9 @@ def _resolve_published_analyzer(
                 folder,
             )
 
+        from spyglass.spikesorting.v2._core.progress import report_progress
+
+        report_progress(f"Building this curation's {role} analyzer…")
         publish_analyzer_atomically(folder, build_into)
         analyzer = _load_valid_cached_analyzer(
             folder, expected_prefix, role, validate_analyzer=validate_analyzer

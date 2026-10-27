@@ -1010,6 +1010,9 @@ def evaluate_analyzers(
     # evaluation on another thread changes them in between. The merge
     # suggestions stay inside too: SI's auto-merge can compute
     # quality_metrics itself (spikeinterface/curation/auto_merge.py:256).
+    from spyglass.spikesorting.v2._core.progress import report_progress
+
+    report_progress("Computing quality metrics and proposed labels…")
     metric_kwargs = metric_inputs.metric_kwargs
     metric_job_kwargs = metric_inputs.metric_job_kwargs
     rule_rows = metric_inputs.rule_rows

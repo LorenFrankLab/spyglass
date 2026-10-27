@@ -423,6 +423,10 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
             "Use these final labels (empty is allowed)", exact=True
         )
         expect(confirmation).to_be_visible(timeout=120000)
+        # Before a merge commit the page says what it costs and how to batch.
+        expect(page.locator('[data-review-guidance="merge"]')).to_contain_text(
+            "one commit re-evaluates once"
+        )
         page.get_by_text("accept", exact=True).last.locator("..").get_by_role(
             "checkbox"
         ).check()
@@ -431,6 +435,10 @@ def test_connected_browser_commits_conflict_and_verifies_without_notebook(
         page.get_by_role(
             "button", name="Commit and inspect merged units", exact=True
         ).click()
+        # While it runs, the status line names the step and the time so far.
+        expect(
+            page.locator('[data-review-status="operation"]')
+        ).to_contain_text("elapsed", timeout=60000)
         page.wait_for_url(lambda url: str(url) != initial_url, timeout=180000)
         assert urlsplit(page.url).netloc == forwarded_origin
         expect(browser.unit_row(page, second + 1)).to_be_visible(timeout=60000)

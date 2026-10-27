@@ -184,6 +184,7 @@ def evaluate_temporary_analyzers(
     import tempfile
     from pathlib import Path
 
+    from spyglass.spikesorting.v2._core.progress import report_progress
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     # Applied-merge: build curation-scoped TEMP analyzers over the
@@ -202,6 +203,9 @@ def evaluate_temporary_analyzers(
         # Same binary_folder convention (and memmap loader) as the
         # canonical cache, in a private temp folder.
         display_folder = Path(tmp) / (f"display{ANALYZER_FOLDER_SUFFIX}")
+        report_progress(
+            "Re-evaluating the merged curation: building its display analyzer…"
+        )
         build_analyzer(
             curated_sorting,
             recording,
@@ -216,6 +220,10 @@ def evaluate_temporary_analyzers(
         metric_analyzer = None
         if wants_pc:
             metric_folder = Path(tmp) / (f"metric{ANALYZER_FOLDER_SUFFIX}")
+            report_progress(
+                "Re-evaluating the merged curation: building its whitened "
+                "metric analyzer…"
+            )
             build_analyzer(
                 curated_sorting,
                 recording,

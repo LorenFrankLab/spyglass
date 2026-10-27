@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -170,6 +171,8 @@ class ReviewOperationService:
                 state.update(
                     status="running", message="Finishing review operation…"
                 )
+            if "started_at" in state:
+                state["elapsed_s"] = round(time.time() - state["started_at"])
         else:
             with operation_lock:
                 state = read_json(self.bundle / OPERATION_FILE)
@@ -238,12 +241,14 @@ def run_operation(*, review_id, bundle, request, operation_id, lock_fd=None):
         else os.fdopen(lock_fd, "a+")
     )
     with lock:
+        started_at = time.time()
         write_json(
             Path(bundle) / OPERATION_FILE,
             {
                 "status": "running",
                 "operation_id": operation_id,
                 "action": request["action"],
+                "started_at": started_at,
             },
         )
         _run_operation(
@@ -251,22 +256,42 @@ def run_operation(*, review_id, bundle, request, operation_id, lock_fd=None):
             bundle=bundle,
             request=request,
             operation_id=operation_id,
+            started_at=started_at,
         )
 
 
-def _run_operation(*, review_id, bundle, request, operation_id):
+def _run_operation(
+    *, review_id, bundle, request, operation_id, started_at=None
+):
     """Worker entry point: all schema imports and DB work stay in this process."""
+    from spyglass.spikesorting.v2._core.progress import progress_reporter
+
     root = Path(bundle)
     state = {
         "status": "running",
         "action": request["action"],
         "operation_id": operation_id,
+        "started_at": time.time() if started_at is None else started_at,
     }
 
     def report(message, **values):
-        state.update(message=message, **values)
+        state.update(message=message, step_started_at=time.time(), **values)
         write_json(root / OPERATION_FILE, state)
 
+    # Steps reported by the scientific code (analyzer builds, metrics, the
+    # review page) replace the coarse message while they run.
+    with progress_reporter(report):
+        _run_action(
+            review_id=review_id,
+            root=root,
+            request=request,
+            state=state,
+            report=report,
+        )
+
+
+def _run_action(*, review_id, root, request, state, report):
+    """Run one review action, journaling its progress and result."""
     try:
         from spyglass.spikesorting.v2.review_api import FigPackReview
 
@@ -333,6 +358,7 @@ def _run_operation(*, review_id, bundle, request, operation_id):
                         committed_curation=identity,
                     )
 
+                report("Saving the curation…")
                 receipt = changes.commit(
                     conflict_resolutions={
                         int(unit): tuple(labels)
@@ -406,7 +432,7 @@ def _run_operation(*, review_id, bundle, request, operation_id):
                     time_range and time_range[1] - time_range[0] <= 10
                 ),
             )
-            destination = root / "inspection" / operation_id
+            destination = root / "inspection" / state["operation_id"]
             view.save(str(destination), title="Selected-unit inspection")
             state["destination"] = {"bundle": str(destination)}
             report(

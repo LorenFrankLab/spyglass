@@ -99,6 +99,16 @@ window.figpack_p1.registerFPViewComponent({
       session.error = error.message;
       session.render();
     };
+    // A running operation's status line: the current step and, from the
+    // server's own clock, how long the operation has been running.
+    const statusText = operation => {
+      const elapsed = operation.status === "running" && Number.isFinite(operation.elapsed_s) ?
+        ` (${Math.floor(operation.elapsed_s / 60)} min ${operation.elapsed_s % 60} s elapsed)` : "";
+      return `${operation.message || ""}${elapsed}`;
+    };
+    // Elapsed time alone changes on every poll; refresh only the status line
+    // so a long operation does not redraw (and refocus) the whole panel.
+    const withoutElapsed = ({elapsed_s, ...rest}) => JSON.stringify(rest);
     const pollOperation = async () => {
       if (session.polling) {
         session.pollAgain = true;
@@ -118,7 +128,7 @@ window.figpack_p1.registerFPViewComponent({
           await pollOperation();
           return;
         }
-        const operationChanged = JSON.stringify(operation) !== JSON.stringify(session.operation);
+        const operationChanged = withoutElapsed(operation) !== withoutElapsed(session.operation);
         const needsRender = session.pollError !== "" || operationChanged;
         session.pollFailures = 0;
         session.pollError = "";
@@ -128,6 +138,10 @@ window.figpack_p1.registerFPViewComponent({
           session.resolutions = {};
         }
         if (needsRender) session.render();
+        else {
+          const line = container.querySelector('[data-review-status="operation"]');
+          if (line) line.textContent = statusText(operation);
+        }
         if (operation.status === "running") {
           setTimeout(pollOperation, 600);
         } else if (operation.status === "complete" && operation.url &&
@@ -263,6 +277,13 @@ window.figpack_p1.registerFPViewComponent({
             confirmation.onchange = () => { resolution.confirmed = confirmation.checked; session.render(); };
             element("span", "Use these final labels (empty is allowed)", wrapper);
           }
+          if (preview.has_merges) {
+            element("div", "Committing merges re-evaluates every unit of this sort and builds a new review " +
+              "for the merged units, which can take several minutes on a long recording. Make all your " +
+              "merges before committing: one commit re-evaluates once, however many merges it holds. " +
+              "You can close this tab while it runs; reopen the review with review.open() or " +
+              "FigPackReview.resume(review_id) to continue.").dataset.reviewGuidance = "merge";
+          }
           button(preview.has_merges ? "Commit and inspect merged units" : preview.has_changes ? "Commit curation" : "Record reviewed — no changes",
             () => operate({action: "commit", annotations_hash: preview.annotations_hash,
               confirm_no_changes: !preview.has_changes,
@@ -277,7 +298,11 @@ window.figpack_p1.registerFPViewComponent({
             pollOperation();
           }, session.polling);
         }
-        if (session.operation.message) element("div", session.operation.message).setAttribute("role", "status");
+        if (session.operation.message) {
+          const line = element("div", statusText(session.operation));
+          line.setAttribute("role", "status");
+          line.dataset.reviewStatus = "operation";
+        }
         if (session.operation.status === "complete" && session.operation.url) {
           const link = element("a", session.operation.action === "inspect" ? "Open selected-unit inspection" : "Continue review");
           link.dataset.reviewControl = "operation-destination";

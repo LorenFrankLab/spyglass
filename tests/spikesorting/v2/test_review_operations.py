@@ -309,3 +309,59 @@ os._exit(0)
         except BlockingIOError:
             assert time.monotonic() < deadline
             time.sleep(0.02)
+
+
+def test_operation_steps_reach_the_journal_with_timing(tmp_path, monkeypatch):
+    """A long commit reports each step from deep inside the scientific code,
+    and a running operation's status carries its elapsed time, so the page
+    can show what is happening instead of one message for several minutes."""
+    import time
+
+    from spyglass.spikesorting.v2 import review_api
+    from spyglass.spikesorting.v2._core.progress import report_progress
+    from spyglass.spikesorting.v2._review.operations import (
+        OPERATION_FILE,
+        ReviewOperationService,
+        _acquire_operation_lock,
+        run_operation,
+    )
+
+    child = SimpleNamespace(
+        sorting_id="sort", curation_id=2, curation_uuid="generation"
+    )
+    seen = []
+
+    def commit(**kwargs):
+        kwargs["on_commit"](child)
+        report_progress("Building the display analyzer…")
+        seen.append(json.loads((tmp_path / OPERATION_FILE).read_text()))
+        return SimpleNamespace(curation=child, needs_merge_verification=False)
+
+    changes = SimpleNamespace(
+        annotations_hash="saved", merge_groups=(), commit=commit
+    )
+    review = SimpleNamespace(uri=str(tmp_path), preview_import=lambda: changes)
+    monkeypatch.setattr(
+        review_api.FigPackReview, "resume", lambda review_id: review
+    )
+    before = time.time()
+    run_operation(
+        review_id="review",
+        bundle=str(tmp_path),
+        request={"action": "commit", "annotations_hash": "saved"},
+        operation_id="op",
+    )
+    step = seen[0]
+    assert step["message"] == "Building the display analyzer…"
+    assert before <= step["started_at"] <= step["step_started_at"]
+
+    # Outside an operation a report goes nowhere.
+    report_progress("not part of any operation")
+    final = json.loads((tmp_path / OPERATION_FILE).read_text())
+    assert final["message"] != "not part of any operation"
+
+    final.update(status="running", started_at=time.time() - 75)
+    (tmp_path / OPERATION_FILE).write_text(json.dumps(final))
+    with _acquire_operation_lock(tmp_path):  # the worker still owns it
+        state = ReviewOperationService("review", tmp_path, {}).status()
+    assert 74 <= state["elapsed_s"] <= 80
