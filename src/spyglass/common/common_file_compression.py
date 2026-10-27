@@ -103,10 +103,14 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
 
         copy_name = key["nwb_file_name"]
 
+        # Only the copy is registered in Nwbfile, so the raw name resolves
+        # with new_file=True. _stage_repack raises if it is not on disk.
         return [
             {
                 "copy": Nwbfile.get_abs_path(copy_name),
-                "raw": Nwbfile.get_abs_path(get_nwb_raw_filename(copy_name)),
+                "raw": Nwbfile.get_abs_path(
+                    get_nwb_raw_filename(copy_name), new_file=True
+                ),
             }
         ]
 
@@ -354,6 +358,9 @@ def _verify(src: Path, dst: Path) -> None:
 def _has_uncompressed_dataset(path: Path) -> bool:
     """Whether any dataset in a file lacks a compression filter.
 
+    Scalars and zero-length datasets are ignored: a filter needs a chunked
+    layout, so they cannot carry one and h5repack -m 1 leaves them alone.
+
     Parameters
     ----------
     path : Path
@@ -362,12 +369,17 @@ def _has_uncompressed_dataset(path: Path) -> bool:
     Returns
     -------
     bool
-        True if at least one dataset is uncompressed. False for a file with
-        no datasets at all.
+        True if at least one eligible dataset is uncompressed. False for a
+        file with no eligible datasets.
     """
 
     def visit(_, obj):
-        if isinstance(obj, h5py.Dataset) and not obj.compression:
+        if (
+            isinstance(obj, h5py.Dataset)
+            and obj.shape
+            and all(d > 0 for d in obj.shape)
+            and not obj.compression
+        ):
             return True  # a non-None return stops the walk
 
     with h5py.File(str(path), "r") as f:

@@ -481,3 +481,56 @@ def test_repack_uses_shared_level(monkeypatch, uncompressed_h5):
         cfc._stage_repack(uncompressed_h5, gzip_level=GZIP_LEVEL)
 
     assert seen["level"] == GZIP_LEVEL
+
+
+# ----------------------------- eligible datasets ----------------------------
+
+
+def test_scalar_only_uncompressed_needs_no_repack(tmp_path):
+    """A scalar cannot carry a filter, so it does not force a repack."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
+
+    path = tmp_path / "scalars_.nwb"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("a", data=np.arange(4096), compression="gzip")
+        f.create_dataset("identifier", data="abc")  # scalar, no filter
+        f.create_dataset("empty", shape=(0,), dtype="f8")  # zero-length
+
+    assert not _has_uncompressed_dataset(path)
+
+
+def test_eligible_uncompressed_still_detected(tmp_path):
+    """An uncompressed chunkable dataset is still reported."""
+    from spyglass.common.common_file_compression import (
+        _has_uncompressed_dataset,
+    )
+
+    path = tmp_path / "mixed_.nwb"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("a", data=np.arange(4096), compression="gzip")
+        f.create_dataset("identifier", data="abc")
+        f.create_dataset("b", data=np.arange(4096))  # eligible, uncompressed
+
+    assert _has_uncompressed_dataset(path)
+
+
+# -------------------------------- make_fetch --------------------------------
+
+
+def test_make_fetch_resolves_unregistered_raw(monkeypatch, mini_copy_name):
+    """The raw file is not in Nwbfile, so its path must not be looked up."""
+    from spyglass.common import LabMember
+    from spyglass.common.common_file_compression import CompressedNwbfile
+
+    # make_fetch imports LabMember lazily, so patch the class itself
+    monkeypatch.setattr(
+        LabMember, "check_admin_privilege", lambda self, *a, **k: None
+    )
+
+    (paths,) = CompressedNwbfile().make_fetch({"nwb_file_name": mini_copy_name})
+
+    assert paths["copy"].endswith(mini_copy_name)
+    assert paths["raw"].endswith(mini_copy_name.replace("_.nwb", ".nwb"))
+    assert not paths["raw"].endswith("_.nwb")
