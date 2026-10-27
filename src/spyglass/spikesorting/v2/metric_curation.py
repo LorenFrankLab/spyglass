@@ -162,6 +162,10 @@ class EvaluationAnalyzerInputs(NamedTuple):
     metric_analyzer_folder: str
     sorter_row: dict
     analyzer_job_kwargs: dict
+    # A merged curation's display analyzer cache slot (folder + manifest
+    # identity), published by the evaluation and read by its review page;
+    # ``None`` when the curation uses the sort's cached analyzers.
+    merged_display_cache: dict | None = None
 
 
 class EvaluationMetricInputs(NamedTuple):

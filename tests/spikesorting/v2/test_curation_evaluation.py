@@ -296,6 +296,183 @@ def _ensure_counts_metric_params():
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch, tmp_path
+):
+    """Evaluating a merged curation publishes its display analyzer once.
+
+    The merged review page reads the same per-generation display analyzer.
+    Building a temporary one for the evaluation and then the published one
+    for the page doubled the slowest part of committing a merge. The
+    published analyzer must be exactly what the page's own builder makes.
+    """
+    import numpy as np
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    import spyglass.spikesorting.v2._curation.analyzer as curation_analyzer
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            parent_curation_id=root["curation_id"],
+            apply_merge=True,
+        )
+        selection = CurationEvaluationSelection.insert_selection(
+            {
+                **merged,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        CurationEvaluation.populate(selection, reserve_jobs=False)
+        recipe = (
+            CurationEvaluation()
+            .make_fetch(selection)
+            .analyzer_inputs.display_waveform_params_name
+        )
+
+        reference_folder = tmp_path / "reference.analyzer"
+        reference = curation_analyzer.build_merged_analyzer(
+            merged, recipe, "display", analyzer_folder=reference_folder
+        )
+
+        def no_rebuild(*args, **kwargs):
+            raise AssertionError("the review rebuilt the merged analyzer")
+
+        monkeypatch.setattr(
+            curation_analyzer, "build_merged_analyzer", no_rebuild
+        )
+        published = curation_analyzer._resolve_curation_analyzer(
+            merged, recipe, "display"
+        )
+        merged_units = sorted(
+            int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
+        )
+        assert sorted(map(int, published.unit_ids)) == merged_units
+        # The review page's waveform view shades templates with SI's default
+        # percentiles; reading them must not change the published cache, or
+        # the next open (or "Inspect selected units") rebuilds it.
+        import inspect
+
+        import spikeinterface.widgets as sw
+
+        shading = (
+            inspect.signature(sw.UnitWaveformsWidget.__init__)
+            .parameters["templates_percentile_shading"]
+            .default
+        )
+        templates = published.get_extension("templates")
+        for percentile in shading:
+            templates.get_templates(
+                operator="percentile", percentile=percentile
+            )
+        curation_analyzer._resolve_curation_analyzer(merged, recipe, "display")
+        for name, key in (("waveforms", "waveforms"), ("templates", "average")):
+            np.testing.assert_array_equal(
+                published.get_extension(name).get_data(),
+                reference.get_extension(name).get_data(),
+                err_msg=f"{name}/{key} differs from the page's own build",
+            )
+        del published, reference
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merged_evaluation_metrics_do_not_depend_on_the_published_analyzer(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The shipped metric set is identical whether a merged curation's display
+    analyzer is built privately (the old path) or comes from the published
+    cache, which already carries the review page's display extensions."""
+    import pynwb
+
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    def metrics_of(computed):
+        path = AnalysisNwbfile.get_abs_path(computed.analysis_file_name)
+        try:
+            with pynwb.NWBHDF5IO(path, "r", load_namespaces=True) as io:
+                return (
+                    io.read().objects[computed.metrics_object_id].to_dataframe()
+                )
+        finally:
+            unlink_staged_analysis_file(
+                computed.analysis_file_name, context="metric comparison"
+            )
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(planted_two_unit_sort)
+    try:
+        root = CurationV2.insert_curation(sorting_key=sorting_key)
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[[unit_ids[0], unit_ids[1]]],
+            parent_curation_id=root["curation_id"],
+            apply_merge=True,
+        )
+        selection = CurationEvaluationSelection.insert_selection(
+            {
+                **merged,
+                "metric_params_name": "franklab_default",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        fetched = CurationEvaluation().make_fetch(selection)
+        assert fetched.analyzer_inputs.merged_display_cache is not None
+        private = fetched._replace(
+            analyzer_inputs=fetched.analyzer_inputs._replace(
+                merged_display_cache=None
+            )
+        )
+        published = metrics_of(
+            CurationEvaluation().make_compute(selection, *fetched)
+        )
+        built = metrics_of(
+            CurationEvaluation().make_compute(selection, *private)
+        )
+        assert list(published.columns) == list(built.columns)
+        differing = {
+            column: (published[column].tolist(), built[column].tolist())
+            for column in published.columns
+            if not published[column].equals(built[column])
+        }
+        assert not differing, differing
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_final_metrics_recomputed_for_merged_unit(
     planted_two_unit_sort, curation_evaluation_defaults
 ):

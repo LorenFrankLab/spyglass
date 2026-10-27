@@ -270,7 +270,8 @@ def hash_sorting_spike_content(sorting) -> str:
     return digest.hexdigest()
 
 
-def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
+def _manifest_identity(row, recipe_row, role: str) -> dict:
+    """The manifest fields resolved from the database (no spike trains)."""
     key = {
         "sorting_id": row["sorting_id"],
         "curation_id": int(row["curation_id"]),
@@ -280,11 +281,7 @@ def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
         "curation_uuid": str(row["curation_uuid"]),
         "curation_id": int(row["curation_id"]),
         "role": role,
-        "curated_unit_ids": tuple(
-            sorted(int(unit_id) for unit_id in sorting.get_unit_ids())
-        ),
         "contributor_map": _raw_contributor_map(key),
-        "merged_spike_content_hash": hash_sorting_spike_content(sorting),
         "merge_policy_version": MERGE_POLICY_VERSION,
         "source_artifact_hashes": _source_artifact_hashes(row["sorting_id"]),
         "waveform_recipe_hash": waveform_recipe_hash(recipe_row),
@@ -292,6 +289,47 @@ def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
         # The base cache carries no extra extensions; a derivative records the
         # exact request (names + normalized params) it was built for.
         "extension_request": {},
+    }
+
+
+def _manifest_with_sorting(identity: Mapping, sorting) -> dict:
+    """Complete a :func:`_manifest_identity` with the curated sorting's part."""
+    return {
+        **identity,
+        "curated_unit_ids": tuple(
+            sorted(int(unit_id) for unit_id in sorting.get_unit_ids())
+        ),
+        "merged_spike_content_hash": hash_sorting_spike_content(sorting),
+    }
+
+
+def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
+    return _manifest_with_sorting(
+        _manifest_identity(row, recipe_row, role), sorting
+    )
+
+
+def merged_analyzer_cache_inputs(curation_key, waveform_recipe, role):
+    """Database inputs to publish or reuse a merged curation's analyzer.
+
+    Returned by ``CurationEvaluation.make_fetch`` so the DB-free compute can
+    publish the per-generation analyzer the merged review page reads (see
+    :func:`publish_resolved_merged_analyzer`). JSON-native.
+    """
+    row = _resolve_curation_row(curation_key)
+    recipe_row = _resolve_recipe(waveform_recipe, role)
+    identity = _manifest_identity(row, recipe_row, role)
+    return {
+        "folder": str(
+            curation_analyzer_path(
+                row["sorting_id"],
+                row["curation_uuid"],
+                role,
+                identity["waveform_recipe_hash"],
+                identity["spikeinterface_version"],
+            )
+        ),
+        "identity": identity,
     }
 
 
@@ -538,8 +576,6 @@ def build_merged_analyzer(
 ):
     """Build one merged-curation analyzer through the shared low-level builder."""
     from spyglass.spikesorting.v2._sorting.analyzer import (
-        build_analyzer,
-        ensure_extensions,
         reconstruct_recording_and_sorting,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -586,18 +622,49 @@ def build_merged_analyzer(
             )
         )
     ).fetch1()
-    job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
-    build_analyzer(
+    return _build_resolved_merged_analyzer(
         curated_sorting,
         recording,
-        {"sorting_id": row["sorting_id"]},
+        sorting_id=row["sorting_id"],
         sorter_row=sorter_row,
-        job_kwargs=job_kwargs,
-        analyzer_folder=Path(analyzer_folder),
+        job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
         waveform_params=dict(recipe_row["params"]),
         statistics_spans=Sorting().get_statistics_spans(
             {"sorting_id": row["sorting_id"]}
         ),
+        role=role,
+        analyzer_folder=analyzer_folder,
+    )
+
+
+def _build_resolved_merged_analyzer(
+    curated_sorting,
+    recording,
+    *,
+    sorting_id,
+    sorter_row,
+    job_kwargs,
+    waveform_params,
+    statistics_spans,
+    role,
+    analyzer_folder,
+):
+    """Build a merged-curation analyzer from resolved inputs; no DB access."""
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        build_analyzer,
+        ensure_extensions,
+        ensure_review_template_percentiles,
+    )
+
+    build_analyzer(
+        curated_sorting,
+        recording,
+        {"sorting_id": sorting_id},
+        sorter_row=sorter_row,
+        job_kwargs=job_kwargs,
+        analyzer_folder=Path(analyzer_folder),
+        waveform_params=dict(waveform_params),
+        statistics_spans=statistics_spans,
     )
     analyzer = load_analyzer_folder(analyzer_folder)
     if not analyzer.has_recording():
@@ -608,7 +675,63 @@ def build_merged_analyzer(
             STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
             job_kwargs=job_kwargs,
         )
+        ensure_review_template_percentiles(analyzer)
     return analyzer
+
+
+def publish_resolved_merged_analyzer(
+    cache_inputs: Mapping,
+    curated_sorting,
+    recording,
+    *,
+    sorter_row,
+    job_kwargs,
+    waveform_params,
+    statistics_spans,
+):
+    """Publish (or reuse) a merged curation's analyzer without the database.
+
+    ``cache_inputs`` comes from :func:`merged_analyzer_cache_inputs`. The
+    published analyzer is the same per-generation cache slot, validated by the
+    same manifest, that :func:`_resolve_curation_analyzer` serves to the
+    review page, so a merge is built once for its evaluation and its page.
+    Returns the PUBLISHED (read-only) analyzer.
+    """
+    identity = dict(cache_inputs["identity"])
+    role = identity["role"]
+    expected_prefix = _manifest_with_sorting(identity, curated_sorting)
+
+    def _build_base(staging_folder):
+        analyzer = _build_resolved_merged_analyzer(
+            curated_sorting,
+            recording,
+            sorting_id=identity["sorting_id"],
+            sorter_row=sorter_row,
+            job_kwargs=job_kwargs,
+            waveform_params=waveform_params,
+            statistics_spans=statistics_spans,
+            role=role,
+            analyzer_folder=staging_folder,
+        )
+        manifest = CurationAnalyzerManifest(
+            **expected_prefix,
+            extension_inventory=_extension_inventory(analyzer, role),
+            storage_fingerprint=_folder_storage_fingerprint(
+                Path(staging_folder)
+            ),
+        )
+        _write_manifest(Path(staging_folder), manifest)
+
+    return _resolve_published_analyzer(
+        Path(cache_inputs["folder"]),
+        identity["sorting_id"],
+        expected_prefix,
+        role,
+        _build_base,
+        validate_analyzer=analyzer_sparsity_validator(
+            waveform_params, lambda: sorter_row.get("params")
+        ),
+    )
 
 
 def _resolve_curation_analyzer(

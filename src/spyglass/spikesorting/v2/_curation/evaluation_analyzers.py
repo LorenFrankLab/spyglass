@@ -185,17 +185,23 @@ def evaluate_temporary_analyzers(
     from pathlib import Path
 
     from spyglass.spikesorting.v2._core.progress import report_progress
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        publish_resolved_merged_analyzer,
+    )
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
-    # Applied-merge: build curation-scoped TEMP analyzers over the
-    # merged curated sorting. Never published to the canonical
-    # analyzer cache (identity is curation-scoped, not sorting-
-    # scoped); cleaned on success and failure by TemporaryDirectory.
+    # Applied-merge: evaluate curation-scoped analyzers over the merged
+    # curated sorting, never the sort's canonical cache (identity is
+    # curation-scoped). The display analyzer comes from the curation's
+    # published per-generation cache when make_fetch resolved one; the
+    # working copies are cleaned on success and failure by
+    # TemporaryDirectory.
     curated_sorting = read_stored_units(sorting_inputs.curated_units)
     compute_key = {"sorting_id": sorting_inputs.sorting_id}
     from spyglass.settings import temp_dir as spyglass_temp_dir
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         ANALYZER_FOLDER_SUFFIX,
+        copy_analyzer_folder,
         load_analyzer_folder,
     )
 
@@ -206,16 +212,33 @@ def evaluate_temporary_analyzers(
         report_progress(
             "Re-evaluating the merged curation: building its display analyzer…"
         )
-        build_analyzer(
-            curated_sorting,
-            recording,
-            compute_key,
-            sorter_row=analyzer_inputs.sorter_row,
-            job_kwargs=analyzer_inputs.analyzer_job_kwargs,
-            analyzer_folder=display_folder,
-            waveform_params=analyzer_inputs.display_waveform_params,
-            statistics_spans=statistics_spans,
-        )
+        if analyzer_inputs.merged_display_cache is not None:
+            # Publish (or reuse) the merged curation's display analyzer: the
+            # same cache slot its review page reads, so a merge is built once.
+            # The metrics run on a private working copy, which leaves the
+            # published folder exactly as the page validates it.
+            published = publish_resolved_merged_analyzer(
+                analyzer_inputs.merged_display_cache,
+                curated_sorting,
+                recording,
+                sorter_row=analyzer_inputs.sorter_row,
+                job_kwargs=analyzer_inputs.analyzer_job_kwargs,
+                waveform_params=analyzer_inputs.display_waveform_params,
+                statistics_spans=statistics_spans,
+            )
+            copy_analyzer_folder(published, display_folder)
+            del published
+        else:
+            build_analyzer(
+                curated_sorting,
+                recording,
+                compute_key,
+                sorter_row=analyzer_inputs.sorter_row,
+                job_kwargs=analyzer_inputs.analyzer_job_kwargs,
+                analyzer_folder=display_folder,
+                waveform_params=analyzer_inputs.display_waveform_params,
+                statistics_spans=statistics_spans,
+            )
         display_analyzer = load_analyzer_folder(display_folder)
         metric_analyzer = None
         if wants_pc:

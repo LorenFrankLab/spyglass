@@ -43,6 +43,34 @@ STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
 )
 
 
+def ensure_review_template_percentiles(analyzer) -> None:
+    """Store the template percentiles the review's waveform view shades with.
+
+    SI's waveform widgets (``plot_unit_templates`` on the review page) shade
+    templates with their default percentiles and, when absent, compute and
+    SAVE them into the analyzer. Inside a published, manifest-validated
+    curation cache that write changes the folder, so the next open of a
+    merged review (or "Inspect selected units") rebuilt the whole analyzer.
+    Computing them when the cache is built makes the page read-only.
+    """
+    import inspect
+
+    import spikeinterface.widgets as sw
+
+    shading = (
+        inspect.signature(sw.UnitWaveformsWidget.__init__)
+        .parameters["templates_percentile_shading"]
+        .default
+    )
+    if shading is None or not analyzer.has_extension("waveforms"):
+        return
+    if isinstance(shading, (int, float)):
+        shading = (shading, 100 - shading)
+    templates = analyzer.get_extension("templates")
+    for percentile in shading:
+        templates.get_templates(operator="percentile", percentile=percentile)
+
+
 class _AnalyzerSparsityInputsError(RuntimeError):
     """Unavailable sorter parameters do not establish that a cache is invalid."""
 

@@ -177,6 +177,15 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             )
         )
     ).fetch1()
+    merged_display_cache = None
+    if not use_fast_path and expected_unit_ids:
+        from spyglass.spikesorting.v2._curation.analyzer import (
+            merged_analyzer_cache_inputs,
+        )
+
+        merged_display_cache = merged_analyzer_cache_inputs(
+            curation_key, display_waveform_params_name, "display"
+        )
 
     return CurationEvaluationFetched(
         recording_inputs=EvaluationRecordingInputs(
@@ -216,6 +225,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             ),
             sorter_row=sorter_row,
             analyzer_job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
+            merged_display_cache=merged_display_cache,
         ),
         metric_inputs=EvaluationMetricInputs(
             metric_params_name=sel["metric_params_name"],
