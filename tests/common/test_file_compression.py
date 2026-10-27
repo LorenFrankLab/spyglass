@@ -271,7 +271,7 @@ def test_stage_skips_compressed(compressed_h5):
     from spyglass.common.common_file_compression import _stage_repack
 
     before = compressed_h5.read_bytes()
-    tmp, _, stats = _stage_repack(compressed_h5, gzip_level=6)
+    tmp, _, _, stats = _stage_repack(compressed_h5, gzip_level=6)
 
     assert tmp is None, "Staged a repack for an already-compressed file"
     assert stats["gzip_level"] is None, "Recorded as repacked"
@@ -300,7 +300,7 @@ def test_stage_leaves_source_untouched(monkeypatch, uncompressed_h5, gzip_copy):
         ),
     )
 
-    tmp, _, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    tmp, _, _, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
 
     assert tmp is not None and tmp.exists(), "Nothing staged"
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
@@ -599,7 +599,58 @@ def test_stage_overwrites_leftover_tmp(monkeypatch, uncompressed_h5):
     )
     monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
 
-    tmp, _, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    tmp, _, _, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
 
     assert tmp == stale, "Staging path is not deterministic"
     assert tmp.read_bytes() == b"fresh", "Leftover was not overwritten"
+
+
+# ------------------------------- staleness ---------------------------------
+
+
+def test_commit_rejects_changed_source(monkeypatch, uncompressed_h5):
+    """A source written to during the repack is not overwritten."""
+    from spyglass.common import common_file_compression as cfc
+
+    monkeypatch.setattr(
+        cfc,
+        "_h5repack",
+        lambda src, dst, level: pathlib.Path(dst).write_bytes(b"packed"),
+    )
+    monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
+
+    tmp, src, staged_at, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+
+    # a metadata writer touches the source while the repack ran
+    with h5py.File(src, "a") as f:
+        f.attrs["object_id"] = "rewritten"
+    after = src.read_bytes()
+
+    with pytest.raises(RuntimeError, match="changed while it was being"):
+        cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
+
+    assert src.read_bytes() == after, "The newer write was discarded"
+    assert tmp.exists(), "Stale staging removed instead of left for reuse"
+
+
+def test_commit_proceeds_on_unchanged_source(monkeypatch, uncompressed_h5):
+    """An untouched source is replaced as normal."""
+    from spyglass.common import common_file_compression as cfc
+    from spyglass.utils import dj_helper_fn
+
+    monkeypatch.setattr(
+        cfc,
+        "_h5repack",
+        lambda src, dst, level: pathlib.Path(dst).write_bytes(b"packed"),
+    )
+    monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
+    # _commit_repack imports it lazily, so patch it where it lives
+    monkeypatch.setattr(
+        dj_helper_fn, "_resolve_external_table", lambda **kw: None
+    )
+
+    tmp, src, staged_at, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
+
+    assert src.read_bytes() == b"packed"
+    assert not tmp.exists()

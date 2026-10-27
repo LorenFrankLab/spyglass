@@ -129,14 +129,15 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            Single-item list holding {file_role: (tmp or None, src, stats)}.
+            Single-item list holding
+            {file_role: (tmp or None, src, fingerprint, stats)}.
         """
         staged = {}
         try:
             for role, path in paths.items():
                 staged[role] = _stage_repack(Path(path), GZIP_LEVEL)
         except Exception:
-            for tmp, _, _ in staged.values():
+            for tmp, _, _, _ in staged.values():
                 if tmp is not None:
                     tmp.unlink(missing_ok=True)
             raise
@@ -151,12 +152,13 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         key : dict
             Primary key of Nwbfile.
         staged : dict
-            {file_role: (tmp or None, src, stats)}, from make_compute.
+            {file_role: (tmp or None, src, fingerprint, stats)}, from
+            make_compute.
         """
         rows = []
-        for role, (tmp, src, stats) in staged.items():
+        for role, (tmp, src, staged_at, stats) in staged.items():
             if tmp is not None:
-                _commit_repack(tmp=tmp, src=src)
+                _commit_repack(tmp=tmp, src=src, staged_at=staged_at)
             rows.append({**key, "file_role": role, **stats})
 
         self.insert(rows)
@@ -202,6 +204,23 @@ def _assert_space_to_stage(src: Path) -> None:
         )
 
 
+def _fingerprint(src: Path) -> tuple:
+    """Identify a file's current contents cheaply.
+
+    Parameters
+    ----------
+    src : Path
+        File to describe.
+
+    Returns
+    -------
+    tuple
+        (inode, size, mtime_ns). Any ordinary write changes at least one.
+    """
+    st = src.stat()
+    return (st.st_ino, st.st_size, st.st_mtime_ns)
+
+
 def _stage_repack(src: Path, gzip_level: int) -> tuple:
     """Repack a file to a verified temporary sibling, leaving it in place.
 
@@ -233,6 +252,7 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
         return (
             None,
             src,
+            _fingerprint(src),
             {
                 "gzip_level": None,
                 "original_size_bytes": original_size,
@@ -256,6 +276,7 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
     return (
         tmp,
         src,
+        _fingerprint(src),
         {
             "gzip_level": gzip_level,
             "original_size_bytes": original_size,
@@ -264,7 +285,7 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
     )
 
 
-def _commit_repack(tmp: Path, src: Path) -> None:
+def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> None:
     """Move a staged repack over its source and refresh the stored checksum.
 
     Parameters
@@ -273,8 +294,27 @@ def _commit_repack(tmp: Path, src: Path) -> None:
         Verified repack output, from ``_stage_repack``.
     src : Path
         File to replace.
+    staged_at : tuple
+        The source's fingerprint when it was staged.
+
+    Raises
+    ------
+    RuntimeError
+        If the source changed since staging. The staged file describes the
+        older contents, so replacing would discard the newer write.
     """
     from spyglass.utils.dj_helper_fn import _resolve_external_table
+
+    # A repack runs for hours, long enough for a metadata writer such as
+    # make_file_obj_id_unique to touch the source.
+    if _fingerprint(src) != staged_at:
+        raise RuntimeError(
+            f"{src.name} changed while it was being repacked, so the staged "
+            f"copy is stale and was not used. Left unchanged.\n"
+            f"\tat staging: {staged_at}\n"
+            f"\tnow:        {_fingerprint(src)}\n"
+            "The next repack rebuilds it from the current contents."
+        )
 
     _replace_preserving_mode(tmp=tmp, src=src)
     _resolve_external_table(
