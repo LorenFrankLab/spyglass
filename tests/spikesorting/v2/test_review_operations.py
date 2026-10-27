@@ -282,10 +282,13 @@ lock = _acquire_operation_lock(sys.argv[1])
 subprocess.Popen([sys.executable, "-c", sys.argv[2], sys.argv[1], str(lock.fileno())], pass_fds=(lock.fileno(),), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 os._exit(0)
 """
+    # The launcher imports spyglass before it spawns and exits, which takes
+    # ~3 s idle and longer under a loaded test session on NFS; the timeout
+    # only has to catch a launcher that hangs.
     subprocess.run(
         [sys.executable, "-c", launcher, str(tmp_path), worker],
         check=True,
-        timeout=5,
+        timeout=60,
     )
     try:
         deadline = time.monotonic() + 5
