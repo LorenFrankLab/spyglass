@@ -18,7 +18,7 @@ dependencies:
   - bottleneck
   - cudatoolkit=11.3   # dlc-only
   - ffmpeg   # dlc-only
-  - hdf5  # provides h5repack, used to compress existing NWB files
+  - hdf5  # provides h5repack
   - ipympl
   - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
   - jupyterlab>=3.*

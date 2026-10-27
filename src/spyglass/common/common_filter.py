@@ -386,10 +386,8 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_ind, "filtered electrode table"
             )
-            # Written as a placeholder and filled in slices below, so these
-            # two datasets stay uncompressed: a compressed dataset is chunked,
-            # and every slice write would decompress and recompress each
-            # chunk it overlaps.
+            # Uncompressed: a placeholder, filled in slices below, and a
+            # slice write recompresses every chunk it overlaps.
             es = pynwb.ecephys.ElectricalSeries(
                 name="filtered data",
                 data=np.empty(tuple(output_shape_list), dtype=data_dtype),

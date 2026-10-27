@@ -744,9 +744,8 @@ class AnalysisMixin(BaseMixin):
             )
             self._compress_table_columns(nwb_object)
         elif isinstance(nwb_object, np.ndarray):
-            # Wrapped at construction, not with set_data_io: that method is a
-            # silent no-op on ScratchData, which overrides the `data` property
-            # the hdmf implementation assigns through.
+            # Wrapped at construction: set_data_io is a silent no-op on
+            # ScratchData, which overrides the `data` property it assigns to.
             nwb_object = ScratchData(
                 name=table_name or "numpy_array",
                 data=compressed_data(nwb_object),

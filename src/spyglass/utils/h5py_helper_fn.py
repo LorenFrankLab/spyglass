@@ -9,12 +9,11 @@ from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 from spyglass.utils.logging import logger
 
-# The gzip level every compressed write uses, inline here and retroactively
-# through h5repack in common_file_compression. Change it in this one place
-# once the filter sweep names a level; see .claude/TASKS_SIMPLIFY.md Task 15.
-# The filter itself is fixed: gzip is the only one h5repack applies and every
-# HDF5 reader understands.
+# The gzip level every compressed write uses.
 GZIP_LEVEL = 6
+
+# Byte shuffle, applied before deflate. Full tests pending.
+SHUFFLE = True
 
 
 def compression_settings(compression_opts=None) -> dict:
@@ -38,6 +37,7 @@ def compression_settings(compression_opts=None) -> dict:
         "compression_opts": (
             GZIP_LEVEL if compression_opts is None else compression_opts
         ),
+        "shuffle": SHUFFLE,
     }
 
 

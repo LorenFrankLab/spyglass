@@ -394,6 +394,64 @@ def test_compressed_data_uses_shared_level():
     assert wrapped.io_settings["compression_opts"] == GZIP_LEVEL
 
 
+def test_compressed_data_uses_shared_shuffle():
+    """Inline writes take the shuffle setting from the same place."""
+    from spyglass.utils.h5py_helper_fn import SHUFFLE, compressed_data
+
+    assert compressed_data(np.arange(128)).io_settings["shuffle"] is SHUFFLE
+
+
+def test_repack_orders_shuf_before_gzip(monkeypatch, tmp_path):
+    """h5repack applies filters in order, so SHUF must come first."""
+    from spyglass.common import common_file_compression as cfc
+
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = stderr = ""
+        args = []
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        return Result()
+
+    monkeypatch.setattr(cfc.subprocess, "run", fake_run)
+    monkeypatch.setattr(cfc, "SHUFFLE", True)
+    monkeypatch.setattr(cfc, "which", lambda _: "/usr/bin/h5repack")
+
+    cfc._h5repack(src=tmp_path / "a.nwb", dst=tmp_path / "b.nwb", level=6)
+
+    cmd = seen["cmd"]
+    assert cmd[:5] == ["h5repack", "-f", "SHUF", "-f", "GZIP=6"]
+    assert "-m" in cmd and cmd[cmd.index("-m") + 1] == "1"
+
+
+def test_repack_omits_shuf_when_off(monkeypatch, tmp_path):
+    """With shuffle off, only the gzip filter is passed."""
+    from spyglass.common import common_file_compression as cfc
+
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = stderr = ""
+        args = []
+
+    monkeypatch.setattr(
+        cfc.subprocess,
+        "run",
+        lambda cmd, **kw: (seen.update(cmd=cmd), Result())[1],
+    )
+    monkeypatch.setattr(cfc, "SHUFFLE", False)
+    monkeypatch.setattr(cfc, "which", lambda _: "/usr/bin/h5repack")
+
+    cfc._h5repack(src=tmp_path / "a.nwb", dst=tmp_path / "b.nwb", level=6)
+
+    assert "SHUF" not in seen["cmd"]
+    assert seen["cmd"][:3] == ["h5repack", "-f", "GZIP=6"]
+
+
 def test_compressed_data_level_override():
     """An explicit level wins over the shared constant."""
     from spyglass.utils.h5py_helper_fn import compressed_data

@@ -1,11 +1,10 @@
 """Dataset-level compression tracking for Spyglass NWB files.
 
-Repacks files in place via `h5repack -f GZIP=<level> -m 1`, at the level in
-`h5py_helper_fn.GZIP_LEVEL`. A repack is accepted only when the source and
-the repacked file hash identically.
+Repacks files in place via `h5repack`, with the filters named by
+`h5py_helper_fn.GZIP_LEVEL` and `SHUFFLE`. A repack is accepted only when
+the source and the repacked file hash identically.
 
-The -m 1 flag is required: without it, zero-shape datasets (video
-placeholders) are silently dropped.
+-m 1 preserves zero-shape datasets, such as video placeholders.
 
 Nwbfile keys on the copy ({session}_.nwb); CompressedNwbfile holds a row for
 it and one for the raw file ({session}.nwb) beside it.
@@ -23,7 +22,7 @@ import h5py
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
-from spyglass.utils.h5py_helper_fn import GZIP_LEVEL
+from spyglass.utils.h5py_helper_fn import GZIP_LEVEL, SHUFFLE
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
 
@@ -114,8 +113,8 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
     def make_compute(self, key, paths: dict) -> list:
         """Repack each file to a temporary sibling and verify it.
 
-        Runs outside the insert transaction: a repack takes hours on a large
-        file, and nothing is moved into place until every file has passed.
+        Runs outside the insert transaction. Nothing is moved into place
+        until every file of the session has passed.
 
         Parameters
         ----------
@@ -176,8 +175,8 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
 def _assert_space_to_stage(src: Path) -> None:
     """Raise if the source's directory cannot hold a second copy of it.
 
-    A repack writes its output beside the source before replacing it, so the
-    worst case — a file that does not compress — needs the file's size again.
+    A repack writes its output beside the source before replacing it. The
+    worst case, a file that does not compress, needs the source's size again.
 
     Parameters
     ----------
@@ -290,18 +289,16 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
     src : Path
         File to replace. Must exist.
     """
-    # mkstemp creates the repack output 0600, so a plain rename would leave a
-    # raw file on shared storage readable only by whoever ran the repack.
+    # mkstemp creates the output 0600, not the source's mode.
     os.chmod(tmp, src.stat().st_mode)
     tmp.rename(src)
 
 
 def _h5repack(src: Path, dst: Path, level: int) -> None:
-    """Run h5repack -f GZIP={level} -m 1 src dst.
+    """Run h5repack over src into dst, with the configured filters.
 
     Raises subprocess.CalledProcessError if rc != 0.
-    -m 1 preserves zero-shape datasets that would otherwise be
-    silently dropped.
+    -m 1 preserves zero-shape datasets.
     """
     if which("h5repack") is None:
         raise RuntimeError(
@@ -309,8 +306,12 @@ def _h5repack(src: Path, dst: Path, level: int) -> None:
             "`conda install -c conda-forge hdf5` or `apt install hdf5-tools`."
         )
 
+    # SHUF must precede GZIP: h5repack applies filters in the order given.
+    filters = ["-f", "SHUF"] if SHUFFLE else []
+    filters += ["-f", f"GZIP={level}"]
+
     result = subprocess.run(
-        ["h5repack", "-f", f"GZIP={level}", "-m", "1", str(src), str(dst)],
+        ["h5repack", *filters, "-m", "1", str(src), str(dst)],
         capture_output=True,
         text=True,
     )
