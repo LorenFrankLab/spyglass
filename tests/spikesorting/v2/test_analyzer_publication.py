@@ -258,3 +258,41 @@ def test_orphan_audit_reclaims_only_abandoned_staging(
         )
         assert not abandoned.exists()
         assert active.folder.exists()
+
+
+def test_copy_keeps_the_analyzers_sampling_frequency(tmp_path):
+    """A copied analyzer reports exactly its source's sampling frequency.
+
+    v2 reads traces at a rate estimated from the timestamps (e.g.
+    30000.000000000182 Hz) while the stored units say 30000.0; the analyzer
+    keeps the recording's rate. A copy rebuilt from the units' provenance
+    reverted to 30000.0, so durations and firing rates on the copy differed
+    from the source in the last bits.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        copy_analyzer_folder,
+        load_analyzer_folder,
+    )
+
+    rate = 30000.000000000182
+    recording = si.generate_recording(
+        num_channels=2, sampling_frequency=rate, durations=[2.0], seed=0
+    )
+    sorting = si.NumpySorting.from_unit_dict(
+        {1: np.array([100, 5000, 40000])}, sampling_frequency=30000.0
+    )
+    source = si.create_sorting_analyzer(
+        sorting,
+        recording,
+        format="binary_folder",
+        folder=tmp_path / "source.analyzer",
+        sparse=False,
+    )
+    source.compute("random_spikes", seed=0)
+    source = load_analyzer_folder(tmp_path / "source.analyzer")
+    copy = copy_analyzer_folder(source, tmp_path / "copy.analyzer")
+    assert copy.sampling_frequency == source.sampling_frequency
+    assert copy.get_total_duration() == source.get_total_duration()

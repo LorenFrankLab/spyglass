@@ -348,6 +348,10 @@ def copy_analyzer_folder(analyzer, folder):
     SI's save_as copies only loaded extensions. Let SI recreate the small
     metadata files (rebasing relative extractor paths), then copy extension
     files directly so waveform/amplitude buffers never need to enter RAM.
+    The copy keeps the analyzer's own sorting, not its provenance: the
+    analyzer holds the recording's sampling rate (estimated from timestamps,
+    e.g. 30000.000000000182 Hz), and the provenance units' 30000.0 would
+    shift every duration and firing rate on the copy in the last bits.
     """
     import spikeinterface as si
 
@@ -358,7 +362,7 @@ def copy_analyzer_folder(analyzer, folder):
     )
     si.SortingAnalyzer.create_binary_folder(
         folder=folder,
-        sorting=analyzer.get_sorting_provenance() or analyzer.sorting,
+        sorting=analyzer.sorting,
         recording=recording,
         sparsity=analyzer.sparsity,
         return_in_uV=analyzer.return_in_uV,
