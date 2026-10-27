@@ -650,7 +650,97 @@ def test_commit_proceeds_on_unchanged_source(monkeypatch, uncompressed_h5):
     )
 
     tmp, src, staged_at, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
-    cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
+    kept = cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
 
     assert src.read_bytes() == b"packed"
     assert not tmp.exists()
+    assert kept.exists(), "Original not set aside for the caller to release"
+
+
+# -------------------------------- rollback ----------------------------------
+
+
+def _staged_pair(cfc, monkeypatch, a, b):
+    """Stage two files with h5repack and verification stubbed out."""
+    monkeypatch.setattr(
+        cfc,
+        "_h5repack",
+        lambda src, dst, level: pathlib.Path(dst).write_bytes(b"packed"),
+    )
+    monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
+    return {
+        "copy": cfc._stage_repack(a, gzip_level=6),
+        "raw": cfc._stage_repack(b, gzip_level=6),
+    }
+
+
+@pytest.fixture
+def two_sources(tmp_path):
+    """Two uncompressed files standing in for a session's pair."""
+    made = []
+    for name in ("sess_.nwb", "sess.nwb"):
+        path = tmp_path / name
+        with h5py.File(path, "w") as f:
+            f.create_dataset("a", data=np.arange(2048))
+        made.append(path)
+    return made
+
+
+def test_insert_failure_restores_every_original(
+    monkeypatch, two_sources, mini_dict
+):
+    """A failing insert puts both sources back as they were."""
+    from spyglass.common import common_file_compression as cfc
+    from spyglass.utils import dj_helper_fn
+
+    a, b = two_sources
+    before = (a.read_bytes(), b.read_bytes())
+    monkeypatch.setattr(
+        dj_helper_fn, "_resolve_external_table", lambda **kw: None
+    )
+    staged = _staged_pair(cfc, monkeypatch, a, b)
+
+    tbl = cfc.CompressedNwbfile()
+    monkeypatch.setattr(
+        type(tbl),
+        "insert",
+        lambda *ar, **kw: (_ for _ in ()).throw(RuntimeError("insert failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="insert failed"):
+        tbl.make_insert(mini_dict, staged)
+
+    assert (a.read_bytes(), b.read_bytes()) == before, "Sources not restored"
+    assert not list(a.parent.glob("*.orig")), "Set-aside originals left"
+
+
+def test_second_commit_failure_restores_the_first(
+    monkeypatch, two_sources, mini_dict
+):
+    """A failure on the second file undoes the first file's replace."""
+    from spyglass.common import common_file_compression as cfc
+    from spyglass.utils import dj_helper_fn
+
+    a, b = two_sources
+    before = (a.read_bytes(), b.read_bytes())
+    monkeypatch.setattr(
+        dj_helper_fn, "_resolve_external_table", lambda **kw: None
+    )
+    staged = _staged_pair(cfc, monkeypatch, a, b)
+
+    calls = {"n": 0}
+    real_replace = cfc._replace_preserving_mode
+
+    def fail_on_second(tmp, src, stat_src=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise PermissionError("second file refused")
+        real_replace(tmp=tmp, src=src, stat_src=stat_src)
+
+    monkeypatch.setattr(cfc, "_replace_preserving_mode", fail_on_second)
+
+    with pytest.raises(PermissionError, match="second file refused"):
+        cfc.CompressedNwbfile().make_insert(mini_dict, staged)
+
+    assert (a.read_bytes(), b.read_bytes()) == before, "First not rolled back"
+    assert not list(a.parent.glob("*.orig")), "Set-aside originals left"

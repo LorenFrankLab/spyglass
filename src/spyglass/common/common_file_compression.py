@@ -154,14 +154,38 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         staged : dict
             {file_role: (tmp or None, src, fingerprint, stats)}, from
             make_compute.
-        """
-        rows = []
-        for role, (tmp, src, staged_at, stats) in staged.items():
-            if tmp is not None:
-                _commit_repack(tmp=tmp, src=src, staged_at=staged_at)
-            rows.append({**key, "file_role": role, **stats})
 
-        self.insert(rows)
+        Notes
+        -----
+        Each original is set aside until every file is in place and the rows
+        are inserted, then deleted. A failure anywhere in between puts them
+        all back. The deletion still runs inside the transaction, so a
+        commit failing after this returns leaves a compressed file whose row
+        rolled back; a later repack finds it already compressed and records
+        it, with only that file's saving figure lost.
+        """
+        rows, kept = [], []
+        try:
+            for role, (tmp, src, staged_at, stats) in staged.items():
+                if tmp is not None:
+                    kept.append(
+                        (
+                            _commit_repack(
+                                tmp=tmp, src=src, staged_at=staged_at
+                            ),
+                            src,
+                        )
+                    )
+                rows.append({**key, "file_role": role, **stats})
+
+            self.insert(rows)
+        except Exception:
+            for orig, src in reversed(kept):
+                _restore_original(kept=orig, src=src)
+            raise
+
+        for orig, _ in kept:
+            orig.unlink(missing_ok=True)
 
         saved = sum(
             r["original_size_bytes"] - r["repacked_size_bytes"] for r in rows
@@ -285,7 +309,7 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
     )
 
 
-def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> None:
+def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> Path:
     """Move a staged repack over its source and refresh the stored checksum.
 
     Parameters
@@ -296,6 +320,12 @@ def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> None:
         File to replace.
     staged_at : tuple
         The source's fingerprint when it was staged.
+
+    Returns
+    -------
+    Path
+        The original, set aside as ``{source}.orig``. The caller deletes it
+        once its row is inserted, or restores it on failure.
 
     Raises
     ------
@@ -316,13 +346,47 @@ def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> None:
             "The next repack rebuilds it from the current contents."
         )
 
-    _replace_preserving_mode(tmp=tmp, src=src)
-    _resolve_external_table(
-        filepath=str(src), file_name=src.name, location="raw"
-    )
+    # Set the original aside rather than letting the rename destroy it, so
+    # a later failure in this transaction can put it back. Costs no disk:
+    # the staged file and the source already coexist, and a rename within a
+    # directory moves no bytes.
+    stat_src = src.stat()  # read before the move; src will not be there
+
+    kept = src.with_name(src.name + ".orig")
+    kept.unlink(missing_ok=True)
+    src.rename(kept)
+
+    try:
+        _replace_preserving_mode(tmp=tmp, src=src, stat_src=stat_src)
+        _resolve_external_table(
+            filepath=str(src), file_name=src.name, location="raw"
+        )
+    except Exception:
+        _restore_original(kept=kept, src=src)
+        raise
+
+    return kept
 
 
-def _replace_preserving_mode(tmp: Path, src: Path) -> None:
+def _restore_original(kept: Path, src: Path) -> None:
+    """Put a set-aside original back, replacing anything at its path.
+
+    Parameters
+    ----------
+    kept : Path
+        The ``{source}.orig`` written by ``_commit_repack``.
+    src : Path
+        Path the original came from.
+    """
+    if not kept.exists():
+        return
+    src.unlink(missing_ok=True)
+    kept.rename(src)
+
+
+def _replace_preserving_mode(
+    tmp: Path, src: Path, stat_src: os.stat_result = None
+) -> None:
     """Move a repacked file over its source, keeping mode and ownership.
 
     Parameters
@@ -330,7 +394,10 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
     tmp : Path
         Repacked file to move into place.
     src : Path
-        File to replace. Must exist.
+        Path to replace.
+    stat_src : os.stat_result, optional
+        The source's attributes, for a caller that has already moved it
+        aside. Read from ``src`` when omitted.
 
     Raises
     ------
@@ -339,7 +406,7 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
         cannot reassign the replacement to match. The source is left in
         place and the repacked file kept for the operator to finish.
     """
-    stat_src = src.stat()
+    stat_src = stat_src or src.stat()
 
     # The temp belongs to whoever ran the repack, so mode alone would hand a
     # shared file to the wrong owner. Only root may give a file away.
