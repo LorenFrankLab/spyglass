@@ -11,6 +11,27 @@ import functools
 import numbers
 from collections.abc import Mapping
 
+#: Most workers v2 uses when no layer sets ``n_jobs`` (see ``_default_n_jobs``).
+_DEFAULT_N_JOBS_CAP = 4
+
+
+def _default_n_jobs() -> int:
+    """Workers for v2's parallel stages when no layer sets ``n_jobs``.
+
+    A quarter of the cores this process may use, at most
+    ``_DEFAULT_N_JOBS_CAP`` and at least 1: on a 20 min, 32-channel epoch the
+    curation evaluation took 208 / 114 / 100 / 90 s at 1 / 4 / 8 / 16 workers,
+    each worker adds ~1 GB, and the results were identical for every count.
+    The quarter leaves room for other users of a shared server.
+    """
+    import os
+
+    try:
+        n_cpus = len(os.sched_getaffinity(0))
+    except AttributeError:  # not available on macOS / Windows
+        n_cpus = os.cpu_count() or 1
+    return max(1, min(_DEFAULT_N_JOBS_CAP, n_cpus // 4))
+
 
 def _ambient_job_kwargs() -> dict:
     """Return the ambient job-kwargs layer: SI globals then dj.config custom.
@@ -20,13 +41,18 @@ def _ambient_job_kwargs() -> dict:
     ``dj.config['custom']['spikesorting_v2_job_kwargs']``. Single source of this
     merge so :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`
     (which needs the ambient layer in isolation to attribute a seed) cannot
-    drift.
+    drift. SpikeInterface's own default ``n_jobs=1`` is replaced by
+    :func:`_default_n_jobs`; a global ``n_jobs`` changed with
+    ``si.set_global_job_kwargs`` is kept. To force one worker, set
+    ``n_jobs=1`` in ``spikesorting_v2_job_kwargs`` or the row's blob.
     """
     import datajoint as dj
 
     from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
 
     merged = get_global_job_kwargs()
+    if merged.get("n_jobs", 1) == 1:
+        merged["n_jobs"] = _default_n_jobs()
     custom = dj.config.get("custom", {}) or {}
     merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
     return merged

@@ -605,6 +605,9 @@
         "test_targeted_inspection_and_metric_filter_use_final_units": "stage"
       }
     },
+    "test_job_config.py": {
+      "tier": "unit"
+    },
     "test_nwb_iterators.py": {
       "tier": "unit"
     },

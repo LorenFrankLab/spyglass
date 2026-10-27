@@ -2073,9 +2073,14 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
     [Release workload measurement](./SpikeSortingV2StorageManagement.md#release-workload-measurement).
 - **Parallel populate.** `Recording`, the artifact-detection result tables, and
     `Sorting` compute outside DataJoint's framework transaction, so a long sort
-    does not hold row locks that block other users. Set
+    does not hold row locks that block other users. By default the parallel
+    stages use a quarter of the cores the process may use, at most 4 (each
+    worker adds about 1 GB; results do not depend on the worker count). Set
     `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}` to use N
-    workers in every compute stage.
+    workers in every compute stage, or `{"n_jobs": 1}` for none. On macOS and
+    Windows the workers start by re-importing the calling script, so scripts
+    need an `if __name__ == "__main__":` guard there (MountainSort4's workers
+    already require it on every platform).
 
 ### Environment
 
