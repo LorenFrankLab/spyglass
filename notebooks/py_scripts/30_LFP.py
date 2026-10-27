@@ -119,7 +119,7 @@ lfp.lfp_electrode.LFPElectrodeGroup.LFPElectrode() & {
 # ## `IntervalList`
 #
 
-# Recall from the [Spike Sorting V0 notebook](./10_Spike_SortingV1.ipynb) that
+# Recall from the [Spike Sorting V1 notebook](./10_Spike_SortingV1.ipynb) that
 # `IntervalList` selects time frames from the experiment. We can select the
 # interval and subset to the first `n` seconds...
 #

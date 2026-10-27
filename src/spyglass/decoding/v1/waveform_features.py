@@ -322,7 +322,7 @@ WAVEFORM_FEATURE_FUNCTIONS = {
 def _write_waveform_features_to_nwb(
     nwb_file_name: str,
     waveforms: si.WaveformExtractor,
-    spike_times: pd.DataFrame,
+    spike_times: pd.Series,
     waveform_features: dict,
 ) -> tuple[str, str]:
     """Save waveforms, metrics, labels, and merge groups to NWB units table.
@@ -333,7 +333,7 @@ def _write_waveform_features_to_nwb(
         name of the NWB file containing the spike sorting information
     waveforms : si.WaveformExtractor
         waveform extractor object containing the waveforms
-    spike_times : pd.DataFrame
+    spike_times : pd.Series
         spike times indexed by unit id, as returned by ``fetch_nwb`` on the
         upstream sorting. Curated sortings drop rejected units and give
         merged units new ids, so this index is neither contiguous nor

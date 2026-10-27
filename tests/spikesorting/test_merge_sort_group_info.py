@@ -2,8 +2,8 @@
 
 Issue #1394: ``get_sort_group_info`` reported a single electrode per sort
 group, which is not what the method name promises. It now returns every
-electrode of each sort group, with no opt-out -- see the PR #1678 review
-discussion. These tests pin that return shape, the merge-id join that is the
+electrode of each sort group: a sort group is described by all of its
+electrodes. These tests pin that return shape, the merge-id join that is the
 whole point of the method, and the signature parity the dispatch relies on.
 """
 

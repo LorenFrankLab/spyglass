@@ -330,15 +330,20 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         if limit:
             source &= dj.condition.Top(limit=limit, order_by="RAND()")
 
-        inserts = [
-            {
+        inserts = []
+        for key in source.fetch("KEY", as_dict=True):
+            # Restrict on the full row: RecordingRecompute's primary key is
+            # recording_id + env_id + rounding, so restricting on `key` alone
+            # would treat any prior attempt as covering every env/rounding.
+            row = {
                 **key,
                 **self.env_dict,
                 "rounding": rounding or self.default_rounding,
             }
-            for key in source.fetch("KEY", as_dict=True)
-            if not bool(RecordingRecompute & key)
-        ]
+            if bool(RecordingRecompute & row):
+                continue
+            inserts.append(row)
+
         if not inserts:
             self._info_msg(f"No rows to insert from:\n\t{source}")
             return
@@ -347,7 +352,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             f"Inserting recompute attempts for {len(inserts)} files."
         )
 
-        self.insert(inserts, at_creation=False, **kwargs)
+        self.insert(
+            inserts,
+            at_creation=False,
+            force_attempt=force_attempt,
+            **kwargs,
+        )
 
     # --- Xfail detection ---
 

@@ -24,21 +24,16 @@ SHARED_MODULES = [
     "spikesorting",
     # EDIT: waveform not used as a spyglass schema prefix
 ]
-# Privileges granted to `dj_user` on shared schema prefixes: everything
-# except CREATE, so only an admin can declare new shared tables. See issue
-# #1065. Order matches MySQL's own ordering in `SHOW GRANTS` output.
-# TRIGGER is load-bearing: AnalysisNwbfile.cleanup() blocks inserts by
-# creating triggers on every registered analysis table, `common_nwbfile`
-# among them, so dropping it makes cleanup fail for a regular user.
+# Privileges granted to `dj_user` on shared schema prefixes: an explicit
+# privilege list without CREATE or DROP (limited to admin).
+# TRIGGER is required for AnalysisNwbfile.cleanup()
 SHARED_PRIVILEGES = (
-    "SELECT, INSERT, UPDATE, DELETE, DROP, REFERENCES, INDEX, ALTER, "
+    "SELECT, INSERT, UPDATE, DELETE, REFERENCES, INDEX, ALTER, "
     "LOCK TABLES, TRIGGER"
 )
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SHARED = f"GRANT {SHARED_PRIVILEGES} ON "
-# Read access pairs SELECT with REFERENCES: a foreign key is checked against
-# the *parent* table, so a role that can only SELECT a schema cannot declare a
-# table pointing into it. Order matches MySQL's `SHOW GRANTS` output.
+# Read access pairs SELECT with REFERENCES for fk-resolution on deletes.
 GRANT_SEL = "GRANT SELECT, REFERENCES ON "
 GRANT_SHOW = "GRANT SHOW DATABASES ON "
 CREATE_USR = "CREATE USER IF NOT EXISTS "
@@ -64,11 +59,11 @@ class DatabaseSettings:
         - dj_guest:  select/references for all prefix
         - dj_collab: select/references for all prefix, all for user prefix
         - dj_user:   select/references for all prefix, all for user prefix,
-          all but create for shared prefix
+          all but create/drop for shared prefix
         - dj_admin:     all for all prefix
 
-        Note: dj_user cannot create tables in shared prefixes. An admin must
-        declare new shared tables. See issue #1065.
+        Note: dj_user can neither declare nor drop tables in shared prefixes.
+        An admin must do both. See issue #1065.
 
         Note: read access grants REFERENCES alongside SELECT. A foreign key is
         validated against the parent table, so SELECT alone would leave a role

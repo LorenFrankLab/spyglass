@@ -79,10 +79,9 @@ def get_spiking_sorting_v1_merge_ids(
     A recording may have any number of ``ArtifactDetectionSelection`` entries -
     the schema does not enforce a 1:1 mapping. Every matching artifact is
     followed, and all resulting merge ids are returned. Pass ``artifact_restr``
-    (e.g. ``{"artifact_param_name": "default"}``) to narrow the set. Recordings
-    with no artifact entry at all are followed through sortings that were run
-    without artifact detection, unless the lookup names an artifact id or
-    parameter.
+    (e.g. ``{"artifact_param_name": "default"}``) to narrow the set. Every
+    recording is also followed through sortings that were run without artifact
+    detection, unless the lookup names an artifact id or parameter.
 
     Parameters
     ----------
@@ -92,13 +91,14 @@ def get_spiking_sorting_v1_merge_ids(
             name of the nwb file
         interval_list_name : str
             name of the interval list
-        sort_group_name : str
-            name of the sort group
+        sort_group_id : int
+            id of the sort group
         artifact_param_name : str
             name of the artifact parameter
         curation_id : int, optional
             id of the curation (if not specified, uses the latest curation)
-        Keys are applied only to the tables whose heading declares them.
+        Keys are applied only to the tables whose heading declares them. A
+        key no table declares is ignored, with a warning.
     recording_restr : dict, optional
         Extra restriction applied to SpikeSortingRecordingSelection only.
         Overrides matching keys in ``restriction``.
@@ -113,11 +113,22 @@ def get_spiking_sorting_v1_merge_ids(
     Returns
     -------
     merge_id_list : list
-        list of merge ids for the given restriction
+        list of merge ids for the given restriction. Sortings whose selected
+        curation has no merge entry are omitted and logged as a warning.
     """
     restriction = dict(restriction or {})
     recording_restr = {**restriction, **(recording_restr or {})}
     artifact_restr = {**restriction, **(artifact_restr or {})}
+
+    known = (
+        set(SpikeSortingRecordingSelection().heading.names)
+        | set(ArtifactDetectionSelection().heading.names)
+        | set(SpikeSortingSelection().heading.names)
+        | {"curation_id"}
+    )
+    all_keys = set(restriction) | set(recording_restr) | set(artifact_restr)
+    if unknown := all_keys - known:
+        logger.warning(f"Ignoring unknown restriction keys: {sorted(unknown)}")
 
     if curation_id is None:
         curation_id = restriction.get("curation_id", None)
@@ -150,16 +161,14 @@ def get_spiking_sorting_v1_merge_ids(
         for r_id, a_id in zip(art_recording_ids, artifact_ids)
     ]
     # sortings run without artifact detection keep the original interval. Skip
-    # them when an artifact was named: unconditionally, a recording with no
-    # artifact entries bypasses the caller's filter.
+    # the whole loop when an artifact was named, or those sortings would bypass
+    # the caller's filter.
     artifact_only = set(ArtifactDetectionSelection().heading.names) - set(
         SpikeSortingRecordingSelection().heading.names
     )
     if not artifact_only & set(artifact_restr):
         raw_interval = restriction.get("interval_list_name", None)
         for r_id in recording_ids:
-            if r_id in has_artifact:
-                continue
             key = {"recording_id": str(r_id)}
             if raw_interval is not None:
                 key["interval_list_name"] = raw_interval
@@ -198,6 +207,14 @@ def get_spiking_sorting_v1_merge_ids(
         return []
 
     # list of merge ids for the desired curation(s)
-    return list(
-        (SpikeSortingOutput.CurationV1() & curation_keys).fetch("merge_id")
-    )
+    merged_ids, merged_sortings = (
+        SpikeSortingOutput.CurationV1() & curation_keys
+    ).fetch("merge_id", "sorting_id")
+    unmerged = {k["sorting_id"] for k in curation_keys} - set(merged_sortings)
+    if unmerged:
+        logger.warning(
+            f"Omitting {len(unmerged)} sorting(s) with no merge entry for "
+            + f"the selected curation: {sorted(map(str, unmerged))}"
+        )
+
+    return list(merged_ids)
