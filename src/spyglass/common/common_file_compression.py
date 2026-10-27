@@ -12,7 +12,6 @@ it and one for the raw file ({session}.nwb) beside it.
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from shutil import disk_usage, which
 
@@ -243,9 +242,9 @@ def _stage_repack(src: Path, gzip_level: int) -> tuple:
 
     _assert_space_to_stage(src)
 
-    tmp_fd, tmp_str = tempfile.mkstemp(suffix=".nwb.tmp", dir=src.parent)
-    os.close(tmp_fd)
-    tmp = Path(tmp_str)
+    # Remove if exists
+    tmp = src.with_name(src.name + ".repack.tmp")
+    tmp.unlink(missing_ok=True)
 
     try:
         _h5repack(src=src, dst=tmp, level=gzip_level)
@@ -298,7 +297,7 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
     PermissionError
         If the source belongs to another user or group and this process
         cannot reassign the replacement to match. The source is left in
-        place and the repacked file discarded.
+        place and the repacked file kept for the operator to finish.
     """
     stat_src = src.stat()
 
@@ -308,14 +307,18 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
         try:
             os.chown(tmp, stat_src.st_uid, stat_src.st_gid)
         except PermissionError as err:
-            tmp.unlink(missing_ok=True)
             raise PermissionError(
                 f"Cannot preserve ownership of {src.name}: owned by "
                 f"uid={stat_src.st_uid} gid={stat_src.st_gid}, running as "
-                f"uid={os.geteuid()} gid={os.getegid()}. Left unchanged."
+                f"uid={os.geteuid()} gid={os.getegid()}.\n"
+                f"The verified repack is kept at {tmp}. Finish it with:\n"
+                f"    sudo chown {stat_src.st_uid}:{stat_src.st_gid} {tmp}\n"
+                f"    sudo chmod {stat_src.st_mode & 0o7777:o} {tmp}\n"
+                f"    sudo mv {tmp} {src}\n"
+                "Re-running the repack discards it and starts over."
             ) from err
 
-    # mkstemp creates the output 0600, not the source's mode.
+    # The staged file is created 0600, not the source's mode.
     os.chmod(tmp, stat_src.st_mode)
     tmp.rename(src)
 

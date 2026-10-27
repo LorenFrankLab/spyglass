@@ -574,8 +574,32 @@ def test_replace_refuses_foreign_owner(monkeypatch, repack_src, repack_tmp):
 
     monkeypatch.setattr(cfc.os, "chown", refuse)
 
-    with pytest.raises(PermissionError, match="Cannot preserve ownership"):
+    with pytest.raises(PermissionError, match="Cannot preserve ownership") as e:
         cfc._replace_preserving_mode(tmp=repack_tmp, src=repack_src)
 
+    msg = str(e.value)
+    assert "sudo chown" in msg and "sudo mv" in msg, "No recovery command"
+    assert str(repack_tmp) in msg, "Message does not name the staged file"
+
     assert repack_src.read_bytes() == before, "Source was replaced"
-    assert not repack_tmp.exists(), "Repacked temp left behind"
+    assert repack_tmp.exists(), "Verified repack discarded on a fixable error"
+
+
+def test_stage_overwrites_leftover_tmp(monkeypatch, uncompressed_h5):
+    """A staged file from a previous attempt is replaced, not appended to."""
+    from spyglass.common import common_file_compression as cfc
+
+    stale = uncompressed_h5.with_name(uncompressed_h5.name + ".repack.tmp")
+    stale.write_bytes(b"stale from an earlier run")
+
+    monkeypatch.setattr(
+        cfc,
+        "_h5repack",
+        lambda src, dst, level: pathlib.Path(dst).write_bytes(b"fresh"),
+    )
+    monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
+
+    tmp, _, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+
+    assert tmp == stale, "Staging path is not deterministic"
+    assert tmp.read_bytes() == b"fresh", "Leftover was not overwritten"
