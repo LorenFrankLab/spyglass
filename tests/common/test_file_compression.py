@@ -534,3 +534,48 @@ def test_make_fetch_resolves_unregistered_raw(monkeypatch, mini_copy_name):
     assert paths["copy"].endswith(mini_copy_name)
     assert paths["raw"].endswith(mini_copy_name.replace("_.nwb", ".nwb"))
     assert not paths["raw"].endswith("_.nwb")
+
+
+# -------------------------------- ownership ---------------------------------
+
+
+def test_replace_preserves_ownership(repack_src, repack_tmp):
+    """An owned file keeps its uid and gid across the replace."""
+    import os
+
+    from spyglass.common.common_file_compression import (
+        _replace_preserving_mode,
+    )
+
+    before = repack_src.stat()
+    _replace_preserving_mode(tmp=repack_tmp, src=repack_src)
+    after = repack_src.stat()
+
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+    assert os.stat(repack_src).st_uid == os.geteuid()
+
+
+def test_replace_refuses_foreign_owner(monkeypatch, repack_src, repack_tmp):
+    """A file owned by another user is left alone, not reassigned."""
+    import os
+
+    from spyglass.common import common_file_compression as cfc
+
+    before = repack_src.read_bytes()
+
+    # Look like a different user, so the chown branch is taken, and refuse
+    # it the way the kernel refuses giving a file away. Read the real uid
+    # first: cfc.os is the os module the lambda would otherwise re-enter.
+    foreign = os.geteuid() + 1
+    monkeypatch.setattr(cfc.os, "geteuid", lambda: foreign)
+
+    def refuse(*a, **k):
+        raise PermissionError("not permitted")
+
+    monkeypatch.setattr(cfc.os, "chown", refuse)
+
+    with pytest.raises(PermissionError, match="Cannot preserve ownership"):
+        cfc._replace_preserving_mode(tmp=repack_tmp, src=repack_src)
+
+    assert repack_src.read_bytes() == before, "Source was replaced"
+    assert not repack_tmp.exists(), "Repacked temp left behind"

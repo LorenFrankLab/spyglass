@@ -284,7 +284,7 @@ def _commit_repack(tmp: Path, src: Path) -> None:
 
 
 def _replace_preserving_mode(tmp: Path, src: Path) -> None:
-    """Move a repacked file over its source, keeping the source's mode.
+    """Move a repacked file over its source, keeping mode and ownership.
 
     Parameters
     ----------
@@ -292,9 +292,31 @@ def _replace_preserving_mode(tmp: Path, src: Path) -> None:
         Repacked file to move into place.
     src : Path
         File to replace. Must exist.
+
+    Raises
+    ------
+    PermissionError
+        If the source belongs to another user or group and this process
+        cannot reassign the replacement to match. The source is left in
+        place and the repacked file discarded.
     """
+    stat_src = src.stat()
+
+    # The temp belongs to whoever ran the repack, so mode alone would hand a
+    # shared file to the wrong owner. Only root may give a file away.
+    if (os.geteuid(), os.getegid()) != (stat_src.st_uid, stat_src.st_gid):
+        try:
+            os.chown(tmp, stat_src.st_uid, stat_src.st_gid)
+        except PermissionError as err:
+            tmp.unlink(missing_ok=True)
+            raise PermissionError(
+                f"Cannot preserve ownership of {src.name}: owned by "
+                f"uid={stat_src.st_uid} gid={stat_src.st_gid}, running as "
+                f"uid={os.geteuid()} gid={os.getegid()}. Left unchanged."
+            ) from err
+
     # mkstemp creates the output 0600, not the source's mode.
-    os.chmod(tmp, src.stat().st_mode)
+    os.chmod(tmp, stat_src.st_mode)
     tmp.rename(src)
 
 
