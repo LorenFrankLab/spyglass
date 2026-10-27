@@ -336,9 +336,9 @@ adds two opt-in artifact families -- nothing is written unless a run passes
     `"apply"` mode therefore keeps both the original `Recording` artifact (other
     consumers still read it) and the corrected one on disk.
 - **Write-buffer memory (transient, not disk).** Applying motion is lazy but
-    still holds about two float64 copies of each write buffer (the parent read
-    plus the interpolation output) while writing: roughly 2 x n_channels x 8
-    bytes/frame for a ~30 s buffer, i.e. **~1.9 GB at 128 channels and ~5.5 GB
+    still holds about two float32 copies of each write buffer (the parent read
+    plus the interpolation output) while writing: roughly 2 x n_channels x 4
+    bytes/frame for a ~30 s buffer, i.e. **~0.9 GB at 128 channels and ~2.8 GB
     at 384 channels** (plus a smaller per-frame cost for chunk times/bin
     indices). Size `write_buffer_gb` accordingly on a high-channel-count probe.
 - **Rebuild reapplies the saved motion, never re-estimates.** A missing

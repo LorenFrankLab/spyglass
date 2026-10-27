@@ -467,6 +467,61 @@ def test_persist_geometry_writes_series_rows_only(xz_probe_session):
         _drop_analysis_file(first_name)
 
 
+@pytest.mark.slow
+@pytest.mark.database
+def test_float64_traces_are_stored_as_float32(xz_probe_session):
+    """Preprocessing runs in float64, but the artifact stores float32 traces
+    (half the bytes on disk and per read); integer traces keep their dtype.
+
+    float32's rounding is far below the raw int16 step: on a real 32-channel
+    epoch it was ~3e-7 uV rms against a 1 uV/count raw step and ~10 uV noise.
+    """
+    import h5py
+    import spikeinterface.core as si_core
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    nwb_file_name = xz_probe_session["nwb_file_name"]
+    channel_ids = list(_SMALL_GROUP_IDS)
+    locations = np.array(
+        [[0.0, 0.0], [0.0, -30.0], [0.0, -60.0], [30.0, -60.0]], dtype=float
+    )
+    rng = np.random.default_rng(0)
+    cases = {
+        np.float64: rng.normal(scale=20.0, size=(500, len(channel_ids))),
+        np.int16: rng.integers(
+            -500, 500, size=(500, len(channel_ids)), dtype=np.int16
+        ),
+    }
+    stored = {np.float64: np.float32, np.int16: np.int16}
+    for source_dtype, traces in cases.items():
+        recording = si_core.NumpyRecording(
+            [traces],
+            sampling_frequency=_SAMPLING_FREQUENCY,
+            channel_ids=channel_ids,
+        )
+        recording.set_channel_gains(1.0)
+        recording.set_channel_offsets(0.0)
+        recording.set_channel_locations(locations)
+        name, _, _ = Recording._write_nwb_artifact(
+            recording,
+            nwb_file_name,
+            filtering_description="stored-dtype probe",
+        )
+        try:
+            path = AnalysisNwbfile.get_abs_path(name)
+            with h5py.File(path, "r") as handle:
+                data = handle["acquisition/ProcessedElectricalSeries/data"]
+                assert data.dtype == stored[source_dtype]
+                assert data.chunks[1] == len(channel_ids)
+                np.testing.assert_array_equal(
+                    data[:], traces.astype(stored[source_dtype])
+                )
+        finally:
+            _drop_analysis_file(name)
+
+
 # ---------------------------------------------------------------------------
 # 2. Semantic round trip: populate -> read -> rebuild -> read
 # ---------------------------------------------------------------------------

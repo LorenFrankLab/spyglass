@@ -2064,8 +2064,11 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
 
 - **Streaming `Recording` writes.** `Recording.make` streams the preprocessed
     `ElectricalSeries` to NWB in chunks (a channel-count-scaled buffer of ≈30 s,
-    capped at 5 GB), never holding the full trace array in RAM. This bounds the
-    write, not the whole workflow: sorting, analyzers and browser payloads have
+    capped at 5 GB), never holding the full trace array in RAM. Preprocessing
+    runs in float64, but the file stores float32 traces (half the disk and read
+    cost; the rounding is far below the raw int16 step), chunked so each chunk
+    holds every channel and a short full-channel read is one contiguous read.
+    This bounds the write, not the whole workflow: sorting, analyzers and browser payloads have
     their own costs, and hour-long lab recordings have not been measured. See
     [Release workload measurement](./SpikeSortingV2StorageManagement.md#release-workload-measurement).
 - **Parallel populate.** `Recording`, the artifact-detection result tables, and

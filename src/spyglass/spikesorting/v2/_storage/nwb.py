@@ -36,6 +36,20 @@ _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
 _ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
 
 
+def _stored_trace_dtype(dtype):
+    """dtype a recording artifact stores ``dtype`` traces as.
+
+    Preprocessing runs in float64; the artifact stores float32, which halves
+    the file and every read of it. float32's rounding is far below the raw
+    int16 step: on a real 32-channel epoch it was ~3e-7 uV rms against a
+    1 uV/count raw step and ~10 uV noise. Integer traces keep their dtype.
+    """
+    import numpy as np
+
+    dtype = np.dtype(dtype)
+    return np.dtype(np.float32) if dtype == np.float64 else dtype
+
+
 class StoredTraces(NamedTuple):
     """A cached trace artifact resolved for a read that needs no DB.
 
@@ -501,12 +515,16 @@ def write_nwb_artifact(
         # Bound the buffers to ~a fixed duration of data so a narrow sort
         # group (e.g. a 4-ch tetrode) does not buffer the whole recording
         # in one 5 GB chunk; wide groups stay capped at 5 GB.
+        stored_dtype = _stored_trace_dtype(recording.get_dtype())
         data_iterator = SpikeInterfaceRecordingDataChunkIterator(
             recording=recording,
             return_in_uV=False,
             buffer_gb=write_buffer_gb(
-                recording.get_num_channels(), sampling_frequency
+                recording.get_num_channels(),
+                sampling_frequency,
+                itemsize=stored_dtype.itemsize,
             ),
+            dtype=stored_dtype,
         )
         timestamps_iterator = TimestampsDataChunkIterator(
             timestamps=timestamps,
