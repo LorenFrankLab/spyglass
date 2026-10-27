@@ -23,6 +23,25 @@ import numpy as np
 import spikeinterface as si
 from hdmf.data_utils import GenericDataChunkIterator
 
+# HDMF's default chunk size (``chunk_mb=10``).
+_DEFAULT_CHUNK_BYTES = 10e6
+
+
+def _all_channel_chunk_shape(
+    n_samples: int, n_channels: int, itemsize: int
+) -> tuple[int, int]:
+    """Chunk shape ``(n_frames, n_channels)`` of ~``_DEFAULT_CHUNK_BYTES``.
+
+    SpikeInterface reads short full-channel windows (~1 s per chunk of a
+    job). HDMF's default chunk keeps the array's aspect ratio -- for a long
+    32-channel recording ~37 s of ONE channel -- so each such read touches
+    every channel's chunk, and through h5py's default 8 MiB chunk cache a
+    20 min pass took ~8 min. Holding every channel in each chunk makes a
+    window one contiguous read.
+    """
+    frames = int(_DEFAULT_CHUNK_BYTES // (n_channels * itemsize))
+    return (max(1, min(frames, n_samples)), n_channels)
+
 
 class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
     """HDMF chunked iterator over a SpikeInterface ``BaseRecording``.
@@ -45,6 +64,7 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
         chunk_shape: Optional[tuple] = None,
         display_progress: bool = False,
         progress_bar_options: Optional[dict] = None,
+        dtype: Optional[np.dtype] = None,
     ):
         """Build the iterator over a SpikeInterface recording.
 
@@ -62,18 +82,32 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
         buffer_shape : tuple, optional
             Explicit buffer shape, overriding ``buffer_gb``.
         chunk_mb : float, optional
-            Target chunk size in MB. ``None`` uses HDMF's default.
+            Target chunk size in MB, in HDMF's aspect-ratio-preserving shape.
         chunk_shape : tuple, optional
-            Explicit chunk shape, overriding ``chunk_mb``.
+            Explicit chunk shape, overriding ``chunk_mb``. When neither is
+            given (and ``buffer_shape`` is not set), each chunk holds every
+            channel; see :func:`_all_channel_chunk_shape`.
         display_progress : bool, optional
             Show a progress bar during iteration. Default ``False``.
         progress_bar_options : dict, optional
             Keyword options forwarded to the progress bar.
+        dtype : numpy.dtype, optional
+            dtype the traces are cast to as they stream. ``None`` (default)
+            keeps the recording's dtype.
         """
         self.recording = recording
+        self.dtype_out = np.dtype(
+            recording.get_dtype() if dtype is None else dtype
+        )
         self.segment_index = segment_index
         self.return_in_uV = return_in_uV
         self.channel_ids = recording.get_channel_ids()
+        if chunk_shape is None and chunk_mb is None and buffer_shape is None:
+            chunk_shape = _all_channel_chunk_shape(
+                recording.get_num_samples(segment_index=segment_index),
+                recording.get_num_channels(),
+                self.dtype_out.itemsize,
+            )
         super().__init__(
             buffer_gb=buffer_gb,
             buffer_shape=buffer_shape,
@@ -90,10 +124,10 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
             start_frame=selection[0].start,
             end_frame=selection[0].stop,
             return_in_uV=self.return_in_uV,
-        )
+        ).astype(self.dtype_out, copy=False)
 
     def _get_dtype(self):
-        return self.recording.get_dtype()
+        return self.dtype_out
 
     def _get_maxshape(self):
         return (
