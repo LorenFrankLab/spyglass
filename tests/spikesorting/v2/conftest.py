@@ -157,10 +157,14 @@ def _guard_unit_tier_database_access(request, monkeypatch):
             "Move this test to a database tier or isolate its DB boundary."
         )
 
-    with monkeypatch.context() as patch:
-        patch.setattr(dj.Connection, "connect", refuse)
-        patch.setattr(dj.Connection, "query", refuse)
-        yield
+    # Patch on the test's own ``monkeypatch``, not a separate context: a test
+    # that also patches ``dj.Connection.query`` saves ``refuse`` as the value
+    # to restore, and only one shared undo stack restores the real method
+    # after it. Undone separately, the guard restored first and the test's
+    # undo then left ``refuse`` installed for every later test.
+    monkeypatch.setattr(dj.Connection, "connect", refuse)
+    monkeypatch.setattr(dj.Connection, "query", refuse)
+    yield
 
 
 @pytest.fixture(autouse=True)
