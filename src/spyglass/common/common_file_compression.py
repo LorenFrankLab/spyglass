@@ -12,6 +12,7 @@ it and one for the raw file ({session}.nwb) beside it.
 
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from shutil import disk_usage, which
 
@@ -102,8 +103,8 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
 
         copy_name = key["nwb_file_name"]
 
-        # Only the copy is registered in Nwbfile, so the raw name resolves
-        # with new_file=True. _stage_repack raises if it is not on disk.
+        # Only the copy is registered in Nwbfile. stage() raises if the
+        # raw file is not on disk.
         return [
             {
                 "copy": Nwbfile.get_abs_path(copy_name),
@@ -129,17 +130,15 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            Single-item list holding
-            {file_role: (tmp or None, src, fingerprint, stats)}.
+            Single-item list holding {file_role: _StagedRepack}.
         """
         staged = {}
         try:
             for role, path in paths.items():
-                staged[role] = _stage_repack(Path(path), GZIP_LEVEL)
+                staged[role] = _StagedRepack.stage(Path(path), GZIP_LEVEL)
         except Exception:
-            for tmp, _, _, _ in staged.values():
-                if tmp is not None:
-                    tmp.unlink(missing_ok=True)
+            for item in staged.values():
+                item.discard()
             raise
 
         return [staged]
@@ -152,40 +151,27 @@ class CompressedNwbfile(SpyglassMixin, dj.Computed):
         key : dict
             Primary key of Nwbfile.
         staged : dict
-            {file_role: (tmp or None, src, fingerprint, stats)}, from
-            make_compute.
+            {file_role: _StagedRepack}, from make_compute.
 
         Notes
         -----
         Each original is set aside until every file is in place and the rows
-        are inserted, then deleted. A failure anywhere in between puts them
-        all back. The deletion still runs inside the transaction, so a
-        commit failing after this returns leaves a compressed file whose row
-        rolled back; a later repack finds it already compressed and records
-        it, with only that file's saving figure lost.
+        are inserted. A failure in between puts them all back.
         """
-        rows, kept = [], []
+        rows = []
         try:
-            for role, (tmp, src, staged_at, stats) in staged.items():
-                if tmp is not None:
-                    kept.append(
-                        (
-                            _commit_repack(
-                                tmp=tmp, src=src, staged_at=staged_at
-                            ),
-                            src,
-                        )
-                    )
-                rows.append({**key, "file_role": role, **stats})
+            for role, item in staged.items():
+                item.commit()
+                rows.append({**key, "file_role": role, **item.stats})
 
             self.insert(rows)
         except Exception:
-            for orig, src in reversed(kept):
-                _restore_original(kept=orig, src=src)
+            for item in reversed(list(staged.values())):
+                item.restore()
             raise
 
-        for orig, _ in kept:
-            orig.unlink(missing_ok=True)
+        for item in staged.values():
+            item.release()
 
         saved = sum(
             r["original_size_bytes"] - r["repacked_size_bytes"] for r in rows
@@ -245,127 +231,144 @@ def _fingerprint(src: Path) -> tuple:
     return (st.st_ino, st.st_size, st.st_mtime_ns)
 
 
-def _stage_repack(src: Path, gzip_level: int) -> tuple:
-    """Repack a file to a verified temporary sibling, leaving it in place.
+@dataclass
+class _StagedRepack:
+    """One file repacked beside itself, waiting to be moved into place.
 
-    Nothing is moved over the source; see ``_commit_repack``.
-
-    Parameters
-    ----------
-    src : Path
-        NWB file to repack.
-    gzip_level : int
-        GZIP level to pass to h5repack.
-
-    Returns
-    -------
-    tuple
-        (tmp, src, stats). ``tmp`` is None when the file is already
-        compressed and nothing was repacked; ``stats`` holds the row's
-        size columns.
+    Every method is a no-op for a file that needed no repacking.
     """
-    if not src.exists():
-        raise FileNotFoundError(src)
 
-    original_size = src.stat().st_size
+    src: Path
+    stats: dict
+    tmp: Path = None  # None when every eligible dataset was compressed
+    staged_at: tuple = None
+    kept: Path = None  # the original, once commit has set it aside
 
-    if not _has_uncompressed_dataset(src):
-        logger.info(
-            f"{src.name} already fully compressed, recording without repacking"
-        )
-        return (
-            None,
-            src,
-            _fingerprint(src),
-            {
-                "gzip_level": None,
+    @classmethod
+    def stage(cls, src: Path, gzip_level: int) -> "_StagedRepack":
+        """Repack a file to a verified sibling, leaving the source in place.
+
+        Parameters
+        ----------
+        src : Path
+            NWB file to repack.
+        gzip_level : int
+            GZIP level to pass to h5repack.
+
+        Returns
+        -------
+        _StagedRepack
+            With ``tmp`` None when the file needed no repacking.
+        """
+        if not src.exists():
+            raise FileNotFoundError(src)
+
+        original_size = src.stat().st_size
+
+        if not _has_uncompressed_dataset(src):
+            logger.info(
+                f"{src.name} already fully compressed, "
+                "recording without repacking"
+            )
+            return cls(
+                src=src,
+                staged_at=_fingerprint(src),
+                stats={
+                    "gzip_level": None,
+                    "original_size_bytes": original_size,
+                    "repacked_size_bytes": original_size,
+                },
+            )
+
+        _assert_space_to_stage(src)
+
+        # One staging path per source, so a repack refused for a fixable
+        # reason survives here for the operator to finish by hand.
+        tmp = src.with_name(src.name + ".repack.tmp")
+        tmp.unlink(missing_ok=True)
+
+        try:
+            _h5repack(src=src, dst=tmp, level=gzip_level)
+            _verify(src=src, dst=tmp)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+
+        return cls(
+            src=src,
+            tmp=tmp,
+            staged_at=_fingerprint(src),
+            stats={
+                "gzip_level": gzip_level,
                 "original_size_bytes": original_size,
-                "repacked_size_bytes": original_size,
+                "repacked_size_bytes": tmp.stat().st_size,
             },
         )
 
-    _assert_space_to_stage(src)
+    def discard(self) -> None:
+        """Remove the staged file, before anything has been moved."""
+        if self.tmp is not None:
+            self.tmp.unlink(missing_ok=True)
 
-    # Remove if exists
-    tmp = src.with_name(src.name + ".repack.tmp")
-    tmp.unlink(missing_ok=True)
+    def commit(self) -> None:
+        """Set the original aside and put the repack in its place.
 
-    try:
-        _h5repack(src=src, dst=tmp, level=gzip_level)
-        _verify(src=src, dst=tmp)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
+        Raises
+        ------
+        RuntimeError
+            If the source changed since staging. The staged file describes
+            the older contents, so replacing would discard the newer write.
+        """
+        from spyglass.utils.dj_helper_fn import _resolve_external_table
 
-    return (
-        tmp,
-        src,
-        _fingerprint(src),
-        {
-            "gzip_level": gzip_level,
-            "original_size_bytes": original_size,
-            "repacked_size_bytes": tmp.stat().st_size,
-        },
-    )
+        if self.tmp is None:
+            return
 
+        # Hours pass between staging and here, and writers such as
+        # make_file_obj_id_unique touch the source.
+        if _fingerprint(self.src) != self.staged_at:
+            raise RuntimeError(
+                f"{self.src.name} changed while it was being repacked, so "
+                "the staged copy is stale and was not used. Left "
+                f"unchanged.\n"
+                f"\tat staging: {self.staged_at}\n"
+                f"\tnow:        {_fingerprint(self.src)}\n"
+                "The next repack rebuilds it from the current contents."
+            )
 
-def _commit_repack(tmp: Path, src: Path, staged_at: tuple) -> Path:
-    """Move a staged repack over its source and refresh the stored checksum.
+        stat_src = self.src.stat()  # read before the move; src will not be
 
-    Parameters
-    ----------
-    tmp : Path
-        Verified repack output, from ``_stage_repack``.
-    src : Path
-        File to replace.
-    staged_at : tuple
-        The source's fingerprint when it was staged.
+        kept = self.src.with_name(self.src.name + ".orig")
+        kept.unlink(missing_ok=True)
+        self.src.rename(kept)
+        self.kept = kept
 
-    Returns
-    -------
-    Path
-        The original, set aside as ``{source}.orig``. The caller deletes it
-        once its row is inserted, or restores it on failure.
+        try:
+            _replace_preserving_mode(
+                tmp=self.tmp, src=self.src, stat_src=stat_src
+            )
+            _resolve_external_table(
+                filepath=str(self.src),
+                file_name=self.src.name,
+                location="raw",
+            )
+        except Exception:
+            self.restore()
+            raise
 
-    Raises
-    ------
-    RuntimeError
-        If the source changed since staging. The staged file describes the
-        older contents, so replacing would discard the newer write.
-    """
-    from spyglass.utils.dj_helper_fn import _resolve_external_table
+    def restore(self) -> None:
+        """Put the set-aside original back, undoing ``commit``."""
+        if self.kept is None:
+            return
+        _restore_original(kept=self.kept, src=self.src)
+        self.kept = None
 
-    # A repack runs for hours, long enough for a metadata writer such as
-    # make_file_obj_id_unique to touch the source.
-    if _fingerprint(src) != staged_at:
-        raise RuntimeError(
-            f"{src.name} changed while it was being repacked, so the staged "
-            f"copy is stale and was not used. Left unchanged.\n"
-            f"\tat staging: {staged_at}\n"
-            f"\tnow:        {_fingerprint(src)}\n"
-            "The next repack rebuilds it from the current contents."
-        )
-
-    # Set the original aside rather than letting the rename destroy it, so
-    # a later failure in this transaction can put it back. Costs no disk:
-    # the staged file and the source already coexist, and a rename within a
-    # directory moves no bytes.
-    stat_src = src.stat()  # read before the move; src will not be there
-
-    kept = src.with_name(src.name + ".orig")
-    kept.unlink(missing_ok=True)
-    src.rename(kept)
-
-    try:
-        _replace_preserving_mode(tmp=tmp, src=src, stat_src=stat_src)
-        _resolve_external_table(
-            filepath=str(src), file_name=src.name, location="raw"
-        )
-    except Exception:
-        _restore_original(kept=kept, src=src)
-        raise
-
-    return kept
+    def release(self) -> None:
+        """Drop the set-aside original, once its row is inserted."""
+        if self.kept is None:
+            return
+        self.kept.unlink(missing_ok=True)
+        self.kept = None
 
 
 def _restore_original(kept: Path, src: Path) -> None:
@@ -374,7 +377,7 @@ def _restore_original(kept: Path, src: Path) -> None:
     Parameters
     ----------
     kept : Path
-        The ``{source}.orig`` written by ``_commit_repack``.
+        The ``{source}.orig`` written by ``commit``.
     src : Path
         Path the original came from.
     """
@@ -408,8 +411,8 @@ def _replace_preserving_mode(
     """
     stat_src = stat_src or src.stat()
 
-    # The temp belongs to whoever ran the repack, so mode alone would hand a
-    # shared file to the wrong owner. Only root may give a file away.
+    # The staged file belongs to whoever ran the repack, and only root may
+    # give a file away.
     if (os.geteuid(), os.getegid()) != (stat_src.st_uid, stat_src.st_gid):
         try:
             os.chown(tmp, stat_src.st_uid, stat_src.st_gid)

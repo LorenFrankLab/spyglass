@@ -268,10 +268,11 @@ def test_verify_rejects_dropped_attr(uncompressed_h5, gzip_copy):
 
 def test_stage_skips_compressed(compressed_h5):
     """An already-compressed file stages nothing and records no level."""
-    from spyglass.common.common_file_compression import _stage_repack
+    from spyglass.common.common_file_compression import _StagedRepack
 
     before = compressed_h5.read_bytes()
-    tmp, _, _, stats = _stage_repack(compressed_h5, gzip_level=6)
+    item = _StagedRepack.stage(compressed_h5, gzip_level=6)
+    tmp, stats = item.tmp, item.stats
 
     assert tmp is None, "Staged a repack for an already-compressed file"
     assert stats["gzip_level"] is None, "Recorded as repacked"
@@ -281,10 +282,10 @@ def test_stage_skips_compressed(compressed_h5):
 
 def test_stage_missing_file(tmp_path):
     """Staging a file that does not exist raises before any work."""
-    from spyglass.common.common_file_compression import _stage_repack
+    from spyglass.common.common_file_compression import _StagedRepack
 
     with pytest.raises(FileNotFoundError):
-        _stage_repack(tmp_path / "absent_.nwb", gzip_level=6)
+        _StagedRepack.stage(tmp_path / "absent_.nwb", gzip_level=6)
 
 
 def test_stage_leaves_source_untouched(monkeypatch, uncompressed_h5, gzip_copy):
@@ -300,7 +301,8 @@ def test_stage_leaves_source_untouched(monkeypatch, uncompressed_h5, gzip_copy):
         ),
     )
 
-    tmp, _, _, stats = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    item = cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
+    tmp, stats = item.tmp, item.stats
 
     assert tmp is not None and tmp.exists(), "Nothing staged"
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
@@ -321,7 +323,7 @@ def test_stage_verify_failure_cleans_up(monkeypatch, uncompressed_h5):
     monkeypatch.setattr(cfc, "_h5repack", fake_repack)
 
     with pytest.raises(ValueError, match="does not match its source"):
-        cfc._stage_repack(uncompressed_h5, gzip_level=6)
+        cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
 
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
@@ -340,7 +342,7 @@ def test_stage_h5repack_failure_cleans_up(monkeypatch, uncompressed_h5):
     monkeypatch.setattr(cfc, "_h5repack", boom)
 
     with pytest.raises(RuntimeError, match="exploded"):
-        cfc._stage_repack(uncompressed_h5, gzip_level=6)
+        cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
 
     assert uncompressed_h5.read_bytes() == before, "Source was modified"
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
@@ -375,7 +377,7 @@ def test_space_check_refuses(monkeypatch, uncompressed_h5):
     monkeypatch.setattr(cfc, "disk_usage", lambda _: usage(1, 1, 0))
 
     with pytest.raises(RuntimeError, match="Not enough space"):
-        cfc._stage_repack(uncompressed_h5, gzip_level=6)
+        cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
 
     leftovers = list(uncompressed_h5.parent.glob("*.nwb.tmp"))
     assert not leftovers, f"Temp files left behind: {leftovers}"
@@ -478,7 +480,7 @@ def test_repack_uses_shared_level(monkeypatch, uncompressed_h5):
     )
 
     with pytest.raises(RuntimeError, match="stop here"):
-        cfc._stage_repack(uncompressed_h5, gzip_level=GZIP_LEVEL)
+        cfc._StagedRepack.stage(uncompressed_h5, gzip_level=GZIP_LEVEL)
 
     assert seen["level"] == GZIP_LEVEL
 
@@ -599,7 +601,7 @@ def test_stage_overwrites_leftover_tmp(monkeypatch, uncompressed_h5):
     )
     monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
 
-    tmp, _, _, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    tmp = cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6).tmp
 
     assert tmp == stale, "Staging path is not deterministic"
     assert tmp.read_bytes() == b"fresh", "Leftover was not overwritten"
@@ -619,18 +621,18 @@ def test_commit_rejects_changed_source(monkeypatch, uncompressed_h5):
     )
     monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
 
-    tmp, src, staged_at, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
+    item = cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
 
     # a metadata writer touches the source while the repack ran
-    with h5py.File(src, "a") as f:
+    with h5py.File(item.src, "a") as f:
         f.attrs["object_id"] = "rewritten"
-    after = src.read_bytes()
+    after = item.src.read_bytes()
 
     with pytest.raises(RuntimeError, match="changed while it was being"):
-        cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
+        item.commit()
 
-    assert src.read_bytes() == after, "The newer write was discarded"
-    assert tmp.exists(), "Stale staging removed instead of left for reuse"
+    assert item.src.read_bytes() == after, "The newer write was discarded"
+    assert item.tmp.exists(), "Stale staging removed instead of left"
 
 
 def test_commit_proceeds_on_unchanged_source(monkeypatch, uncompressed_h5):
@@ -644,17 +646,17 @@ def test_commit_proceeds_on_unchanged_source(monkeypatch, uncompressed_h5):
         lambda src, dst, level: pathlib.Path(dst).write_bytes(b"packed"),
     )
     monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
-    # _commit_repack imports it lazily, so patch it where it lives
+    # commit() imports it lazily, so patch it where it lives
     monkeypatch.setattr(
         dj_helper_fn, "_resolve_external_table", lambda **kw: None
     )
 
-    tmp, src, staged_at, _ = cfc._stage_repack(uncompressed_h5, gzip_level=6)
-    kept = cfc._commit_repack(tmp=tmp, src=src, staged_at=staged_at)
+    item = cfc._StagedRepack.stage(uncompressed_h5, gzip_level=6)
+    item.commit()
 
-    assert src.read_bytes() == b"packed"
-    assert not tmp.exists()
-    assert kept.exists(), "Original not set aside for the caller to release"
+    assert item.src.read_bytes() == b"packed"
+    assert not item.tmp.exists()
+    assert item.kept.exists(), "Original not set aside for release"
 
 
 # -------------------------------- rollback ----------------------------------
@@ -669,8 +671,8 @@ def _staged_pair(cfc, monkeypatch, a, b):
     )
     monkeypatch.setattr(cfc, "_verify", lambda src, dst: None)
     return {
-        "copy": cfc._stage_repack(a, gzip_level=6),
-        "raw": cfc._stage_repack(b, gzip_level=6),
+        "copy": cfc._StagedRepack.stage(a, gzip_level=6),
+        "raw": cfc._StagedRepack.stage(b, gzip_level=6),
     }
 
 
