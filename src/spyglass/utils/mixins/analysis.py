@@ -4,7 +4,7 @@ import string
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -145,6 +145,51 @@ class AnalysisMixin(BaseMixin):
         from spyglass.common.common_nwbfile import AnalysisRegistry
 
         AnalysisRegistry().insert1(self.full_table_name)
+
+    def share_file(
+        self,
+        analysis_file_name: str,
+        scope: str = "public",
+        teams: Optional[List[str]] = None,
+        populate: bool = True,
+    ) -> dict:
+        """Declare this analysis file for sharing, and upload it.
+
+        Copies the row into the common `AnalysisNwbfile` first, which is what
+        the selection table's foreign key names. A no-op when this *is* the
+        common table.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            A file held in this table.
+        scope : str, optional
+            "private", "group", or "public". Defaults to "public".
+        teams : list of str, optional
+            `LabTeam` names. Required when `scope` is "group".
+        populate : bool, optional
+            Transfer immediately. False leaves the upload for a later
+            `SharedAnalysisFile.populate()`.
+
+        Returns
+        -------
+        dict
+            The selection key that was written.
+        """
+        from spyglass.sharing.sharing_store import _share
+
+        # No-op if this is the common table, or if the file is not here --
+        # `_share` raises on the latter with the way out.
+        self._copy_to_common([analysis_file_name])
+
+        return _share(
+            self,
+            analysis_file_name,
+            "analysis",
+            scope=scope,
+            teams=teams,
+            populate=populate,
+        )
 
     def _copy_to_common(self, file_names: list = None) -> None:
         """Copy entries from this custom table to the common AnalysisNwbfile."""
@@ -478,7 +523,7 @@ class AnalysisMixin(BaseMixin):
         }
         self.insert1(key)
 
-    def build(self, nwb_file_name: str):
+    def build(self, nwb_file_name: str, share_parents=None):
         """Create a builder for safe analysis file creation.
 
         Returns context manager that handles CREATE → POPULATE → REGISTER
@@ -489,11 +534,16 @@ class AnalysisMixin(BaseMixin):
         - Prevents modification of registered files (state checks)
         - Logs failed files for cleanup on exceptions
         - Provides clear error messages for invalid operations
+        - Inherits shared-store visibility from the parent file, narrowing
+          rather than widening where there is more than one parent
 
         Parameters
         ----------
         nwb_file_name : str
             Parent NWB file name
+        share_parents : list of str, optional
+            Additional analysis files this result derives from. Used only to
+            inherit shared-store visibility, and only ever to narrow it.
 
         Returns
         -------
@@ -527,7 +577,9 @@ class AnalysisMixin(BaseMixin):
         """
         from spyglass.utils.mixins.analysis_builder import AnalysisFileBuilder
 
-        return AnalysisFileBuilder(self, nwb_file_name)
+        return AnalysisFileBuilder(
+            self, nwb_file_name, share_parents=share_parents
+        )
 
     @classmethod
     def get_abs_path(

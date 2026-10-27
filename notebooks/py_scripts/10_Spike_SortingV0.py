@@ -96,6 +96,7 @@ sgc.LabMember.LabMemberInfo.insert1(
         name,
         email,
         dj_user,
+        None,  # github_user_name, unused here
         admin,
     ],
     skip_duplicates=True,
