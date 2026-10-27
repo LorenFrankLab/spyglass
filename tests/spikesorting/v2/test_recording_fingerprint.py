@@ -117,6 +117,37 @@ def test_timestamp_hash_is_bounded_and_matches_whole_vector(
     assert components["timestamps"] == combined_hash({"segment_0": expected})
 
 
+def test_timestamp_hash_reads_contiguous_slices(tmp_path, monkeypatch):
+    """Each timestamp chunk is read as one slice, not as a list of points.
+
+    h5py reads a fancy index point by point; on a 20 min, 30 kHz recording
+    that made hashing the timestamps take ~47 s of a ~3 min fingerprint.
+    """
+    import h5py
+
+    n_frames = 600_017
+    path, es_path = _baseline(
+        tmp_path / "sliced.nwb",
+        traces=np.zeros((n_frames, 4), dtype=np.float32),
+        timestamps=np.arange(n_frames, dtype=float) / 30_000.0 + 1234.0,
+    )
+    getitem = h5py.Dataset.__getitem__
+    indices = []
+
+    def recording_getitem(dataset, index):
+        if dataset.name.endswith("/timestamps"):
+            indices.append(index)
+        return getitem(dataset, index)
+
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", recording_getitem)
+    _aggregate(path, es_path)
+    chunk_reads = [index for index in indices if not np.isscalar(index)]
+    assert chunk_reads
+    assert all(isinstance(index, slice) for index in chunk_reads), [
+        type(index).__name__ for index in chunk_reads
+    ]
+
+
 def test_recording_content_fingerprint_discriminates(tmp_path):
     """Every scientifically-meaningful perturbation changes the aggregate;
     sub-``TRACE_ROUNDING`` float noise does not."""

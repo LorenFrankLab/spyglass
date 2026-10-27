@@ -139,7 +139,9 @@ def recording_content_fingerprint(
         hash_recording_traces,
     )
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _segment_times_range,
+    )
 
     analysis_abs_path = str(analysis_abs_path)
     series_name = electrical_series_path.rsplit("/", 1)[-1]
@@ -175,9 +177,13 @@ def recording_content_fingerprint(
         # Feed the same rounded, little-endian bytes as the former whole-vector
         # hash, in bounded chunks so existing content fingerprints stay valid.
         for start in range(0, n_frames, 300_000):
-            frames = np.arange(start, min(start + 300_000, n_frames))
             times = np.round(
-                _segment_times_at(recording, frames, segment_index=segment),
+                _segment_times_range(
+                    recording,
+                    start,
+                    min(start + 300_000, n_frames),
+                    segment_index=segment,
+                ),
                 timestamp_rounding,
             )
             digest.update(np.ascontiguousarray(times, dtype="<f8").tobytes())
