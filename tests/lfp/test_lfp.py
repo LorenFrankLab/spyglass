@@ -113,8 +113,8 @@ def test_artifact_detection_releases_hold_on_error(
 ):
     """A failed detection must not leave the LFP file held.
 
-    make() takes the hold when it fetches and releases it ~40 lines later;
-    an exception in between used to skip the release entirely.
+    make() takes the hold when it fetches and releases it ~40 lines later,
+    so the release must survive an exception in between.
     """
     from unittest.mock import patch
 
@@ -122,10 +122,6 @@ def test_artifact_detection_releases_hold_on_error(
     from spyglass.lfp.v1 import lfp_artifact
 
     cache = helper.__dict__["__open_nwb_files"]
-
-    def held_paths():
-        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
-
     params_name = art_param_defaults[0]
     key = dict(**lfp_v1_key, artifact_params_name=params_name)
     algorithm = (
@@ -136,14 +132,14 @@ def test_artifact_detection_releases_hold_on_error(
     def boom(*args, **kwargs):
         raise RuntimeError("detection failed")
 
-    before = held_paths()  # the cache is process-wide
+    before = cache.held_paths()  # the cache is process-wide
     with patch.dict(
         lfp_artifact.ARTIFACT_DETECTION_ALGORITHMS, {algorithm: boom}
     ):
         with pytest.raises(RuntimeError, match="detection failed"):
             lfp.v1.LFPArtifactDetection().make(key)
 
-    leaked = held_paths() - before
+    leaked = cache.held_paths() - before
     assert not leaked, f"hold survived the failure: {leaked}"
 
 

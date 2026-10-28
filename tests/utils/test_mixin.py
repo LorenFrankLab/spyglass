@@ -60,10 +60,10 @@ def test_fetch_nwb_holds_on_first_open(mini_insert, common):
 
     restricted.fetch_nwb()
     assert all(p in cache for p in paths), "fetch did not cache the path"
-    assert all(cache._cache[p][2] for p in paths), "first fetch took no hold"
+    assert cache.held_paths() >= set(paths), "first fetch took no hold"
 
     restricted.close_nwb()
-    assert not any(cache._cache[p][2] for p in paths), "hold not released"
+    assert not (cache.held_paths() & set(paths)), "hold not released"
 
 
 def test_auto_increment(schema_test, Mixin):

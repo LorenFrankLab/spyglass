@@ -105,17 +105,14 @@ def test_merge_close_nwb(spike_merge, pop_spike_merge):
     cache = helper.__dict__["__open_nwb_files"]
     restricted = spike_merge & pop_spike_merge
 
-    def held_paths():
-        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
-
     # The cache is process-wide, so ignore whatever other tests are holding.
-    # This call must also not raise -- that was the reported failure.
+    # This call must also not raise.
     restricted.close_nwb()
-    before = held_paths()
+    before = cache.held_paths()
 
     restricted.fetch_nwb()
-    taken = held_paths() - before
+    taken = cache.held_paths() - before
     assert taken, "fetch_nwb through the merge took no hold"
 
     restricted.close_nwb()
-    assert not (taken & held_paths()), "merge close_nwb left holds"
+    assert not (taken & cache.held_paths()), "merge close_nwb left holds"
