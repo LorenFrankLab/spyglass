@@ -18,12 +18,8 @@ def test_concurrent_sorters_and_ambient_reader_restore_their_own_state(
     from spyglass import settings
     from spyglass.spikesorting.v2._core import si_compat as _si_compat
     from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
-    from spyglass.spikesorting.v2._core import job_config
     from spyglass.spikesorting.v2._core.job_config import _ambient_job_kwargs
 
-    # Pin the core-count default to SI's own so the restored ambient n_jobs
-    # is distinguishable from the sorters' temporary 2 and 3 on any machine.
-    monkeypatch.setattr(job_config, "_default_n_jobs", lambda: 1)
     monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
     monkeypatch.delattr(np, "Inf", raising=False)
     original = dict(si.get_global_job_kwargs())

@@ -2068,22 +2068,28 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
     runs in float64, but the file stores float32 traces (half the disk and read
     cost; the rounding is far below the raw int16 step), chunked so each chunk
     holds every channel and a short full-channel read is one contiguous read.
-    This bounds the write, not the whole workflow: sorting, analyzers and browser payloads have
-    their own costs, and hour-long lab recordings have not been measured. See
+    This bounds the write, not the whole workflow: sorting, analyzers and
+    browser payloads have their own costs, and hour-long lab recordings have not
+    been measured. See
     [Release workload measurement](./SpikeSortingV2StorageManagement.md#release-workload-measurement).
 - **Parallel populate.** `Recording`, the artifact-detection result tables, and
     `Sorting` compute outside DataJoint's framework transaction, so a long sort
-    does not hold row locks that block other users. By default the parallel
-    stages use a quarter of the cores the process may use, at most 4 (each
-    worker adds about 1 GB; results do not depend on the worker count). Set
+    does not hold row locks that block other users. The exact neighbor searches
+    of the `nn_isolation` / `nn_noise_overlap` metrics, most of the
+    curation-evaluation time, run on threads by default (a quarter of the cores,
+    at most 16; they add no memory). The other parallel stages keep
+    SpikeInterface's single worker process by default: on a 20 min, 32-channel
+    epoch four workers saved only ~6 s per sort. Set
     `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}` to use N
-    workers in every compute stage, or `{"n_jobs": 1}` for none. The exact
-    neighbor searches of the `nn_isolation` / `nn_noise_overlap` metrics run
-    on threads, which add no memory, so by default they use a quarter of the
-    cores, at most 16; an explicit `n_jobs` sets them too. On macOS and
-    Windows the workers start by re-importing the calling script, so scripts
-    need an `if __name__ == "__main__":` guard there (MountainSort4's workers
-    already require it on every platform).
+    workers in every compute stage (an explicit `n_jobs` also sets the search
+    threads). Each worker adds about 1 GB, and results do not depend on the
+    count. On Linux the workers are forked, and a fork while OpenBLAS's thread
+    pool is running can deadlock the next linear-algebra call in the main
+    process -- seen as a MountainSort5 sort that hangs in its PCA; add
+    `"mp_context": "spawn"` to avoid it, at a few seconds of start-up per stage.
+    Spawned workers (and macOS / Windows, and MountainSort4's workers on every
+    platform) re-import the calling script, so scripts need an
+    `if __name__ == "__main__":` guard.
 
 ### Environment
 

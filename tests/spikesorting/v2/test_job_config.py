@@ -1,9 +1,12 @@
 """Default worker count for v2's parallel stages.
 
-Measured on a 20 min, 32-channel epoch, results are identical for any n_jobs,
-and 4 workers capture most of the speedup (curation evaluation 208 / 114 / 100
-/ 90 s at 1 / 4 / 8 / 16 workers), so v2 uses a quarter of the usable cores,
-at most 4, unless a layer sets ``n_jobs``. Hermetic -- no DB.
+v2 keeps SpikeInterface's default of one worker process unless a layer sets
+``n_jobs``. Forked workers followed by an in-process sorter deadlocked
+MountainSort5's PCA in OpenBLAS, and on a real 20 min, 32-channel epoch four
+forked workers saved only ~6 s (artifact detection and the display analyzer)
+while sorting and curation evaluation did not get faster; the evaluation's
+speedup comes from the neighbor-search threads, which have their own default.
+Hermetic -- no DB.
 """
 
 from __future__ import annotations
@@ -27,14 +30,14 @@ def _usable_cpus(monkeypatch, n):
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(n)))
 
 
-@pytest.mark.parametrize("cpus, expected", [(96, 4), (16, 4), (8, 2), (2, 1)])
-def test_default_n_jobs_is_a_quarter_of_usable_cores_at_most_four(
-    monkeypatch, no_v2_job_config, cpus, expected
+@pytest.mark.parametrize("cpus", [96, 16, 2])
+def test_default_n_jobs_is_one_worker_on_any_machine(
+    monkeypatch, no_v2_job_config, cpus
 ):
     from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
 
     _usable_cpus(monkeypatch, cpus)
-    assert _resolved_job_kwargs()["n_jobs"] == expected
+    assert _resolved_job_kwargs()["n_jobs"] == 1
 
 
 def test_configured_and_row_n_jobs_override_the_default(
@@ -75,7 +78,7 @@ def test_default_search_threads_are_a_quarter_of_usable_cores_at_most_16(
 ):
     """The exact nn-metric neighbor search runs on threads, which add no
     memory: on 11 real searches, 4 / 16 threads took 2.7 / 0.74 s. Its
-    default is therefore wider than the worker-process default."""
+    default therefore does not follow the one-worker n_jobs default."""
     from spyglass.spikesorting.v2._core.job_config import (
         resolve_search_threads,
     )
