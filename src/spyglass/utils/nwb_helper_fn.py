@@ -33,6 +33,20 @@ except ImportError:  # pragma: no cover
 # Below it the next open still succeeds.
 HELD_CLOSE_FRACTION = 0.95
 
+_HELD_EVICTION_WARNING = (
+    "NWB cache must close a file that is still held to stay"
+    " within the open file limit. Pending lazy h5py reads from"
+    " it may fail. Call close_nwb() when finished with"
+    " fetch_nwb(), or close_nwb_files() between populate()"
+    " calls. Where the holds are not yours to release, raise"
+    " the limit with `ulimit -n`."
+)
+
+_FD_PRESSURE_WARNING = (
+    "Open file descriptors exceed the NWB cache budget with no NWB"
+    " files left to close. Raise the limit with `ulimit -n`."
+)
+
 
 @dataclass
 class CacheEntry:
@@ -61,9 +75,7 @@ class CacheEntry:
 class NWBFileCache(BaseMixin):
     """LRU cache of open NWB files, closing them under resource pressure.
 
-    Maps file path to a :class:`CacheEntry`: the ``Opened`` record returned by
-    the backend that read it, the time it was last used, and whether a caller
-    holds it.
+    Maps file path to a :class:`CacheEntry`.
 
     Holds are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
@@ -88,7 +100,7 @@ class NWBFileCache(BaseMixin):
     """
 
     def __init__(self):
-        self._cache: dict = {}  # path → CacheEntry
+        self._cache: dict[str, CacheEntry] = {}
         self._warned: set = set()  # one-shot warning keys, see _warn_once
         self._held_evictions = 0
 
@@ -98,11 +110,10 @@ class NWBFileCache(BaseMixin):
 
     def get(self, path, default=None):
         """Return the ``Opened`` record and update last-used, or *default*."""
-        entry = self._cache.get(path)
-        if entry is None:
-            return default
-        entry.touch()
-        return entry.opened
+        if entry := self._cache.get(path):
+            entry.touch()
+            return entry.opened
+        return default
 
     def __getitem__(self, path):
         entry = self._cache[path]
@@ -240,22 +251,10 @@ class NWBFileCache(BaseMixin):
                     break  # headroom left; keep held files readable
                 candidates = set(self._cache)
                 self._held_evictions += 1
-                self._warn_once(
-                    "held_eviction",
-                    "NWB cache must close a file that is still held to stay"
-                    " within the open file limit. Pending lazy h5py reads from"
-                    " it may fail. Call close_nwb() when finished with"
-                    " fetch_nwb(), or close_nwb_files() between populate()"
-                    " calls. Where the holds are not yours to release, raise"
-                    " the limit with `ulimit -n`.",
-                )
+                self._warn_once("held_eviction", _HELD_EVICTION_WARNING)
             self._close_lru(candidates)
         if not self._cache and not self._num_open_ok():
-            self._warn_once(
-                "fd_pressure",
-                "Open file descriptors exceed the NWB cache budget with no NWB"
-                " files left to close. Raise the limit with `ulimit -n`.",
-            )
+            self._warn_once("fd_pressure", _FD_PRESSURE_WARNING)
 
     def _make_ram_room(self) -> None:
         """Close one unheld file if free RAM is low.
