@@ -995,7 +995,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # cleanup removes it: on NFS a mapped file blocks the removal.
         raw_analyzer = raw_with_locations = analyzer = reused = None
         working = derivative = reused_derivative = fine = None
-        shared = raw_fine = repaired = None
+        shared = raw_fine = raw_both = repaired = None
         waveforms = figure = qc_axes = widget = None
         gc.collect()
         import datajoint as dj
