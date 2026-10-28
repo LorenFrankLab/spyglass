@@ -281,8 +281,8 @@ class FetchMixin(BaseMixin):
             path = rec_dict.pop("nwb2load_filepath")
             nwbf = get_nwb_file(path)
             # Hold the file now, keyed on the path that cached it, so it is
-            # protected before the next iteration opens another. Acquiring
-            # ahead of the open would be a no-op on a cache miss.
+            # protected before the next iteration opens another. The hold
+            # follows the open: on a cache miss there is nothing to acquire.
             _acquire_nwb_file(path)
             # for each attr that contains substring 'object_id', store key-value:
             # attr name to NWB object
@@ -376,7 +376,7 @@ class FetchMixin(BaseMixin):
             restricted = SomeTable & {"nwb_file_name": "sub-xyz.nwb"}
             nwb_objects = restricted.fetch_nwb()
             arr = nwb_objects[0]["lfp"].data[:]   # read lazy handle into RAM
-            restricted.close_nwb()                # release — same restriction
+            restricted.close_nwb()                # release, same restriction
         """
         for path in self._nwb_paths():
             _release_nwb_file(path)

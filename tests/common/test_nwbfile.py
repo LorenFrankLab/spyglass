@@ -94,21 +94,87 @@ def test_nwbfile_fetch_nwb_holds(common_nwbfile, mini_copy_name):
     import spyglass.utils.nwb_helper_fn as helper
 
     cache = helper.__dict__["__open_nwb_files"]
-
-    def held_paths():
-        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
-
     restricted = common_nwbfile.Nwbfile & {"nwb_file_name": mini_copy_name}
 
     restricted.close_nwb()  # must not raise
-    before = held_paths()  # the cache is process-wide
+    before = cache.held_paths()  # the cache is process-wide
 
     restricted.fetch_nwb()
-    taken = held_paths() - before
+    taken = cache.held_paths() - before
     assert taken, "Nwbfile.fetch_nwb took no hold"
 
     restricted.close_nwb()
-    assert not (taken & held_paths()), "close_nwb left holds"
+    assert not (taken & cache.held_paths()), "close_nwb left holds"
+
+
+def test_cache_readers_ignore_entry_arity():
+    """Every cache reader works on an entry carrying an extra field."""
+    from dataclasses import dataclass
+    from unittest.mock import MagicMock
+
+    from spyglass.utils.nwb_helper_fn import CacheEntry, NWBFileCache
+
+    @dataclass
+    class WiderEntry(CacheEntry):
+        added_later: str = "a field no reader knows about"
+
+    cache = NWBFileCache()
+    held, unheld = MagicMock(), MagicMock()
+    cache._cache["/held.nwb"] = WiderEntry(held, 2.0, held=True)
+    cache._cache["/unheld.nwb"] = WiderEntry(unheld, 1.0)
+
+    assert cache.held_paths() == {"/held.nwb"}
+    assert cache._unheld() == {"/unheld.nwb"}
+    assert cache.get("/held.nwb") is held
+    assert cache["/unheld.nwb"] is unheld
+    assert set(cache.values()) == {held, unheld}
+
+    cache.release("/held.nwb")
+    assert not cache.held_paths()
+    cache.acquire("/held.nwb")
+    assert cache.held_paths() == {"/held.nwb"}
+
+    cache._close_lru({"/unheld.nwb"})
+    unheld.io.close.assert_called_once()
+
+    cache.close_all()
+    held.io.close.assert_called_once()
+    assert len(cache) == 0
+
+
+def test_interpreter_shutdown_with_a_populated_cache():
+    """A process exits cleanly with entries left in the module-level cache.
+
+    Runs in a subprocess because atexit handlers run only at interpreter exit.
+    """
+    import subprocess
+    import sys
+    from textwrap import dedent
+
+    script = dedent("""
+        import atexit, time
+        from dataclasses import dataclass
+        from unittest.mock import MagicMock
+
+        import spyglass.utils.nwb_helper_fn as helper
+
+        @dataclass
+        class WiderEntry(helper.CacheEntry):
+            added_later: str = "a field no reader knows about"
+
+        cache = helper.__dict__["__open_nwb_files"]
+        cache._cache["/held.nwb"] = WiderEntry(
+            MagicMock(), time.monotonic(), held=True
+        )
+        cache._held_evictions = 1
+        atexit.register(helper.close_nwb_files)
+        """)
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr, result.stderr
 
 
 def test_add_to_lock(common_nwbfile, lockfile, mini_copy_name):

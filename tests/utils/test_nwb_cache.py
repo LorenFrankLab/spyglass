@@ -83,7 +83,7 @@ def _add(cache, path, opened=None):
     """Insert in the order ``_open_nwb_file`` uses: make room, then add.
 
     ``__setitem__`` makes no room of its own, so a test that exercises either
-    limit -- to show a file closes or to show none does -- has to call
+    limit, to show a file closes or to show none does, has to call
     ``make_room()`` where the opener does. Plain setup inserts need not.
     """
     opened = opened if opened is not None else _opened()
@@ -182,10 +182,10 @@ def test_get_updates_last_used(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = _opened()
-    t_before = cache._cache["/a.nwb"][1]
+    t_before = cache._cache["/a.nwb"].last_used
     time.sleep(0.01)
     cache.get("/a.nwb")
-    t_after = cache._cache["/a.nwb"][1]
+    t_after = cache._cache["/a.nwb"].last_used
     assert t_after > t_before
 
 
@@ -193,10 +193,10 @@ def test_getitem_updates_last_used(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = _opened()
-    t_before = cache._cache["/a.nwb"][1]
+    t_before = cache._cache["/a.nwb"].last_used
     time.sleep(0.01)
     _ = cache["/a.nwb"]
-    t_after = cache._cache["/a.nwb"][1]
+    t_after = cache._cache["/a.nwb"].last_used
     assert t_after > t_before
 
 
@@ -500,8 +500,8 @@ def test_room_made_before_open(NWBFileCache, nwb_mod):
 def test_one_open_closes_one_unheld_file(NWBFileCache, nwb_mod):
     """Sustained low RAM closes one unheld file per open, not two.
 
-    The limits used to be checked both before the open and again on insert, so
-    a single open closed two files where the policy allows one.
+    The limits are checked before the open only, so one open closes at most
+    one file.
     """
     cache = NWBFileCache()
     io_a, io_b = _make_io(), _make_io()
@@ -631,11 +631,11 @@ def test_acquire_and_release_set_held(NWBFileCache):
     cache = NWBFileCache()
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = _opened()
-    assert cache._cache["/a.nwb"][2] is False
+    assert cache._cache["/a.nwb"].held is False
     cache.acquire("/a.nwb")
-    assert cache._cache["/a.nwb"][2] is True
+    assert cache._cache["/a.nwb"].held is True
     cache.release("/a.nwb")
-    assert cache._cache["/a.nwb"][2] is False
+    assert cache._cache["/a.nwb"].held is False
 
 
 def test_release_without_acquire(NWBFileCache):
@@ -643,7 +643,7 @@ def test_release_without_acquire(NWBFileCache):
     with patch("psutil.virtual_memory", return_value=_fake_vm(16)):
         cache["/a.nwb"] = _opened()
     cache.release("/a.nwb")  # release without prior acquire
-    assert cache._cache["/a.nwb"][2] is False
+    assert cache._cache["/a.nwb"].held is False
 
 
 def test_release_clears_repeated_holds(NWBFileCache):
@@ -656,7 +656,7 @@ def test_release_clears_repeated_holds(NWBFileCache):
     cache.acquire("/a.nwb")
 
     cache.release("/a.nwb")  # one close_nwb() is enough
-    assert cache._cache["/a.nwb"][2] is False
+    assert cache._cache["/a.nwb"].held is False
 
 
 def test_unheld_closed_before_held(NWBFileCache):
@@ -810,9 +810,7 @@ def test_low_ram_never_closes_held_file(NWBFileCache):
 def test_close_all_does_not_warn_on_held(NWBFileCache):
     """close_all closes held files silently.
 
-    Reaching it means the caller said they were finished, so warning that
-    their reads will fail is wrong -- and a per-session loop would warn on
-    every pass.
+    Reaching it means the caller said they were finished.
     """
     cache = NWBFileCache()
     io_a = _make_io()

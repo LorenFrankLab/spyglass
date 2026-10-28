@@ -97,8 +97,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     def _nwb_table(self):
         """This table is itself the NWB file list, so it resolves to itself.
 
-        Without this, path resolution raises: there is no NWB foreign key to
-        follow. With it, the inherited ``close_nwb`` resolves the same paths
+        The inherited ``close_nwb`` then resolves the same paths that
         ``fetch_nwb`` holds.
         """
         return Nwbfile

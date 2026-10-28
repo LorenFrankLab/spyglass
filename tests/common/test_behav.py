@@ -52,21 +52,17 @@ def test_raw_position_close_nwb(common, mini_pos_interval_dict):
     import spyglass.utils.nwb_helper_fn as helper
 
     cache = helper.__dict__["__open_nwb_files"]
-
-    def held_paths():
-        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
-
     restricted = common.RawPosition & mini_pos_interval_dict
 
     restricted.close_nwb()  # must not raise
-    before = held_paths()  # the cache is process-wide
+    before = cache.held_paths()  # the cache is process-wide
 
     restricted.fetch_nwb()
-    taken = held_paths() - before
+    taken = cache.held_paths() - before
     assert taken, "fetch_nwb through RawPosition took no hold"
 
     restricted.close_nwb()
-    assert not (taken & held_paths()), "close_nwb left holds"
+    assert not (taken & cache.held_paths()), "close_nwb left holds"
 
 
 def test_raw_position_fetch_nwb(common, mini_pos, mini_pos_interval_dict):

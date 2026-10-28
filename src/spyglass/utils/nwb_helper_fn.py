@@ -5,6 +5,7 @@ import errno
 import os
 import os.path
 import time
+from dataclasses import dataclass
 from itertools import groupby
 from pathlib import Path
 from typing import List, Union
@@ -17,6 +18,7 @@ import yaml
 from spyglass.utils.file_backends import (
     BackendUnavailable,
     LocalBackend,
+    Opened,
     get_backends,
 )
 from spyglass.utils.logging import logger
@@ -28,17 +30,52 @@ except ImportError:  # pragma: no cover
     resource = None
 
 # Close a file a caller still holds only this close to the descriptor limit.
-# Below it the next open still succeeds, so closing a held file breaks that
-# caller's pending reads and buys nothing.
+# Below it the next open still succeeds.
 HELD_CLOSE_FRACTION = 0.95
+
+_HELD_EVICTION_WARNING = (
+    "NWB cache must close a file that is still held to stay"
+    " within the open file limit. Pending lazy h5py reads from"
+    " it may fail. Call close_nwb() when finished with"
+    " fetch_nwb(), or close_nwb_files() between populate()"
+    " calls. Where the holds are not yours to release, raise"
+    " the limit with `ulimit -n`."
+)
+
+_FD_PRESSURE_WARNING = (
+    "Open file descriptors exceed the NWB cache budget with no NWB"
+    " files left to close. Raise the limit with `ulimit -n`."
+)
+
+
+@dataclass
+class CacheEntry:
+    """One open NWB file as :class:`NWBFileCache` tracks it.
+
+    Attributes
+    ----------
+    opened : Opened
+        Record returned by the backend that read the file, carrying the IO
+        handle (see :mod:`spyglass.utils.file_backends`).
+    last_used : float
+        ``time.monotonic()`` at the most recent read, ordering LRU eviction.
+    held : bool
+        True while a caller holds the file against closure.
+    """
+
+    opened: Opened
+    last_used: float
+    held: bool = False
+
+    def touch(self) -> None:
+        """Record the entry as used now."""
+        self.last_used = time.monotonic()
 
 
 class NWBFileCache(BaseMixin):
     """LRU cache of open NWB files, closing them under resource pressure.
 
-    Maps file path to the ``Opened`` record returned by the backend that read
-    it (see :mod:`spyglass.utils.file_backends`), alongside the time it was
-    last used and whether a caller holds it.
+    Maps file path to a :class:`CacheEntry`.
 
     Holds are managed by :class:`~spyglass.utils.mixins.fetch.FetchMixin`:
     calling ``fetch_nwb()`` acquires each opened file; calling ``close_nwb()``
@@ -52,7 +89,7 @@ class NWBFileCache(BaseMixin):
       cache, so sockets and device handles consume the same budget. Unheld
       files are closed, least recently used first, until the process is back
       inside the budget. A held file is closed only above the higher
-      :data:`HELD_CLOSE_FRACTION`, where the next open would raise ``EMFILE``
+      :data:`HELD_CLOSE_FRACTION`, where the next open raises ``EMFILE``
       anyway; between the two, descriptor pressure leaves held files alone.
     - **Free RAM** below ``min_free_gb`` GB *or* ``min_free_pct`` × total RAM,
       whichever is larger. At most one unheld file is closed per check, and
@@ -63,8 +100,7 @@ class NWBFileCache(BaseMixin):
     """
 
     def __init__(self):
-        # path → (opened, last_used_monotonic, held)
-        self._cache: dict = {}
+        self._cache: dict[str, CacheEntry] = {}
         self._warned: set = set()  # one-shot warning keys, see _warn_once
         self._held_evictions = 0
 
@@ -74,18 +110,15 @@ class NWBFileCache(BaseMixin):
 
     def get(self, path, default=None):
         """Return the ``Opened`` record and update last-used, or *default*."""
-        if path in self._cache:
-            opened, _, held = self._cache[path]
-            self._cache[path] = (opened, time.monotonic(), held)
-            return opened
+        if entry := self._cache.get(path):
+            entry.touch()
+            return entry.opened
         return default
 
     def __getitem__(self, path):
-        if path not in self._cache:
-            raise KeyError(path)
-        opened, _, held = self._cache[path]
-        self._cache[path] = (opened, time.monotonic(), held)
-        return opened
+        entry = self._cache[path]
+        entry.touch()
+        return entry.opened
 
     def __setitem__(self, path, opened):
         """Add an ``Opened`` record, closing any handle it replaces.
@@ -94,9 +127,9 @@ class NWBFileCache(BaseMixin):
         before the open, and a second check here would close a second file for
         the same open.
         """
-        if path in self._cache:
-            self._cache[path][0].io.close()
-        self._cache[path] = (opened, time.monotonic(), False)
+        if replaced := self._cache.get(path):
+            replaced.opened.io.close()
+        self._cache[path] = CacheEntry(opened, time.monotonic())
 
     def __contains__(self, path):
         return path in self._cache
@@ -113,7 +146,7 @@ class NWBFileCache(BaseMixin):
 
     def values(self):
         """Yield ``Opened`` records without updating last-used times."""
-        return (opened for opened, _, _ in self._cache.values())
+        return (entry.opened for entry in self._cache.values())
 
     def close_all(self):
         """Close every open IO handle and clear the cache.
@@ -121,22 +154,24 @@ class NWBFileCache(BaseMixin):
         Held files are closed without warning: the only way here is an
         explicit ``close_nwb_files()``, which states the caller is finished.
         """
-        for opened, _, _ in self._cache.values():
-            opened.io.close()
+        for entry in self._cache.values():
+            entry.opened.io.close()
         self._cache.clear()
         self._report_held_evictions()
 
+    def held_paths(self) -> set:
+        """Return the paths a caller is currently holding."""
+        return {p for p, entry in self._cache.items() if entry.held}
+
     def acquire(self, path):
         """Hold a file, protecting it from being closed."""
-        if path in self._cache:
-            opened, last_used, _ = self._cache[path]
-            self._cache[path] = (opened, last_used, True)
+        if entry := self._cache.get(path):
+            entry.held = True
 
     def release(self, path):
         """Clear the hold on a file, allowing it to be closed again."""
-        if path in self._cache:
-            opened, last_used, _ = self._cache[path]
-            self._cache[path] = (opened, last_used, False)
+        if entry := self._cache.get(path):
+            entry.held = False
 
     # ------------------------------------------------------------------
     # Memory helpers
@@ -174,8 +209,8 @@ class NWBFileCache(BaseMixin):
 
         soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
         try:
-            # Counts descriptors held outside the cache -- sockets, pipes, GPU
-            # handles -- and files opened more than once via external links.
+            # Counts descriptors held outside the cache (sockets, pipes, GPU
+            # handles) and files opened more than once via external links.
             # A fresh Process() so forked workers count their own, not the
             # parent's.
             num_open = psutil.Process().num_fds()
@@ -191,24 +226,23 @@ class NWBFileCache(BaseMixin):
 
     def _unheld(self) -> set:
         """Return the paths no caller is holding."""
-        return {p for p, (_, _, held) in self._cache.items() if not held}
+        return self._cache.keys() - self.held_paths()
 
     def _close_lru(self, candidates: set) -> None:
         """Close the least recently used of *candidates*."""
         if not candidates:
             return
-        lru_path = min(candidates, key=lambda p: self._cache[p][1])
-        opened, _, _ = self._cache.pop(lru_path)
-        opened.io.close()
+        lru_path = min(candidates, key=lambda p: self._cache[p].last_used)
+        self._cache.pop(lru_path).opened.io.close()
         logger.debug(f"Closed LRU NWB file: {lru_path}")
 
     def _make_fd_room(self) -> None:
         """Close files until this process is inside the descriptor budget.
 
         Loops, and closes a held file only once within
-        ``HELD_CLOSE_FRACTION`` of the limit: there, the next open would fail
-        outright, which is worse than a failed lazy read. Between the two
-        fractions the open still succeeds, so a held file stays open.
+        ``HELD_CLOSE_FRACTION`` of the limit, where the next open fails
+        anyway. Between the two fractions the open still succeeds, so a held
+        file stays open.
         """
         while self._cache and not self._num_open_ok():
             candidates = self._unheld()
@@ -217,22 +251,10 @@ class NWBFileCache(BaseMixin):
                     break  # headroom left; keep held files readable
                 candidates = set(self._cache)
                 self._held_evictions += 1
-                self._warn_once(
-                    "held_eviction",
-                    "NWB cache must close a file that is still held to stay"
-                    " within the open file limit. Pending lazy h5py reads from"
-                    " it may fail. Call close_nwb() when finished with"
-                    " fetch_nwb(), or close_nwb_files() between populate()"
-                    " calls. Where the holds are not yours to release, raise"
-                    " the limit with `ulimit -n`.",
-                )
+                self._warn_once("held_eviction", _HELD_EVICTION_WARNING)
             self._close_lru(candidates)
         if not self._cache and not self._num_open_ok():
-            self._warn_once(
-                "fd_pressure",
-                "Open file descriptors exceed the NWB cache budget with no NWB"
-                " files left to close. Raise the limit with `ulimit -n`.",
-            )
+            self._warn_once("fd_pressure", _FD_PRESSURE_WARNING)
 
     def _make_ram_room(self) -> None:
         """Close one unheld file if free RAM is low.
@@ -303,8 +325,8 @@ def _open_nwb_file(nwb_file_path, source=None):
     """
     backend = source or LocalBackend()
 
-    # Close what we can before opening: once the descriptor limit is reached
-    # the open itself raises, and the cache never gets the chance to free one.
+    # Close what we can before opening: at the descriptor limit the open
+    # itself raises.
     __open_nwb_files.make_room()
 
     opened = backend.open(nwb_file_path)

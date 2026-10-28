@@ -127,6 +127,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Replace the open-NWB-file cache's tuple entries with a named `CacheEntry`
+    record, so readers do not depend on field order or arity #1701
+- Add `NWBFileCache.held_paths()` #1701
 
 ### Pipelines
 
