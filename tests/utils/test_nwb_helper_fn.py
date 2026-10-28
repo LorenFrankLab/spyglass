@@ -145,3 +145,80 @@ def test_get_pos_dict_with_timestamps():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_raw_filename_round_trip():
+    """get_nwb_raw_filename inverts get_nwb_copy_filename."""
+    from spyglass.utils.nwb_helper_fn import (
+        get_nwb_copy_filename,
+        get_nwb_raw_filename,
+    )
+
+    raw = "minirec20230622.nwb"
+    assert get_nwb_raw_filename(get_nwb_copy_filename(raw)) == raw
+
+
+def test_raw_filename_strips_only_trailing_marker():
+    """Only the trailing underscore goes, not every '_.nwb' in the name."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
+
+    assert get_nwb_raw_filename("a_.nwb_b_.nwb") == "a_.nwb_b.nwb"
+
+
+def test_raw_filename_idempotent(caplog):
+    """A raw name comes back unchanged, with a warning."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_raw_filename
+
+    assert get_nwb_raw_filename("session.nwb") == "session.nwb"
+    assert "may not be a copy" in caplog.text
+
+
+def test_session_name_from_copy():
+    """A copy name reduces to the session it belongs to."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_session_name
+
+    assert get_nwb_session_name("minirec20230622_.nwb") == "minirec20230622"
+
+
+def test_session_name_prefixes_analysis_files():
+    """Analysis file names begin with the session name."""
+    from spyglass.utils.nwb_helper_fn import get_nwb_session_name
+
+    session = get_nwb_session_name("minirec20230622_.nwb")
+    assert "minirec20230622_ABCDEFGHIJ.nwb".startswith(session)
+
+
+def test_filtered_electrical_series_compresses():
+    """Both datasets of the filtered series are wrapped for compression."""
+    from datetime import datetime
+
+    from hdmf.backends.hdf5.h5_utils import H5DataIO
+    from pynwb import NWBFile
+
+    from spyglass.utils.nwb_helper_fn import (
+        build_filtered_electrical_series,
+    )
+
+    nwbf = NWBFile(
+        session_description="s",
+        identifier="i",
+        session_start_time=datetime.now().astimezone(),
+    )
+    device = nwbf.create_device(name="probe")
+    group = nwbf.create_electrode_group(
+        name="shank", description="d", location="l", device=device
+    )
+    for _ in range(2):
+        nwbf.add_electrode(group=group, location="l")
+    region = nwbf.create_electrode_table_region([0, 1], "filtered electrodes")
+
+    es = build_filtered_electrical_series(
+        data=np.zeros((10, 2)),
+        timestamps=np.arange(10.0),
+        electrodes=region,
+    )
+
+    assert es.name == "filtered data"
+    assert isinstance(es.data, H5DataIO)
+    assert isinstance(es.timestamps, H5DataIO)
+    assert es.data.io_settings["compression"] == "gzip"

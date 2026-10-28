@@ -5,8 +5,55 @@ from typing import List, Optional
 
 import h5py
 import numpy as np
+from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 from spyglass.utils.logging import logger
+
+GZIP_LEVEL = 6  # The gzip level every compressed write uses.
+SHUFFLE = True  # Byte shuffle, applied before deflate, lossless.
+
+
+def compression_settings(compression_opts=None) -> dict:
+    """H5DataIO keyword arguments for a compressed write.
+
+    For callers that hand the settings to hdmf themselves, such as
+    ``Data.set_data_io``, rather than wrapping data directly.
+
+    Parameters
+    ----------
+    compression_opts : int, optional
+        Gzip level, 1-9. Defaults to GZIP_LEVEL.
+
+    Returns
+    -------
+    dict
+        Suitable as ``**kwargs`` to H5DataIO, or as its settings dict.
+    """
+    return {
+        "compression": "gzip",
+        "compression_opts": (
+            GZIP_LEVEL if compression_opts is None else compression_opts
+        ),
+        "shuffle": SHUFFLE,
+    }
+
+
+def compressed_data(data, compression_opts=None):
+    """Wrap data in H5DataIO for a compressed NWB dataset write.
+
+    Parameters
+    ----------
+    data : array-like
+        Data to wrap (numpy array, DataChunkIterator, etc.)
+    compression_opts : int, optional
+        Gzip level, 1-9. Defaults to GZIP_LEVEL.
+
+    Returns
+    -------
+    H5DataIO
+        Wrapped object that pynwb will write with the gzip filter.
+    """
+    return H5DataIO(data=data, **compression_settings(compression_opts))
 
 
 def is_float16_dtype(
@@ -236,9 +283,7 @@ def add_id_column_to_table(file: h5py.File, dataset_path: str):
     n_rows = sample_column.shape[0]
     # Create the 'id' dataset
     data = np.arange(n_rows, dtype=np.int64)
-    id_ds = obj.create_dataset(
-        "id", data=data, compression="gzip", compression_opts=4
-    )
+    id_ds = obj.create_dataset("id", data=data, **compression_settings())
     id_ds.attrs["neurodata_type"] = "ElementIdentifiers"
     id_ds.attrs["namespace"] = "core"
 

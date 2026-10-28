@@ -14,10 +14,16 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from datajoint.table import Table
+from hdmf.backends.hdf5.h5_utils import H5DataIO
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.h5py_helper_fn import (
+    compressed_data,
+    compression_settings,
+)
+from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -739,6 +745,24 @@ class AnalysisMixin(BaseMixin):
             io.write(nwbf)
             return object_id
 
+    @staticmethod
+    def _compress_table_columns(table: DynamicTable) -> None:
+        """Write a DynamicTable's columns compressed.
+
+        Parameters
+        ----------
+        table : DynamicTable
+            Table to adjust in place, before it is written.
+        """
+        settings = compression_settings()
+        for column in (*table.columns, table.id):
+            try:
+                column.set_data_io(H5DataIO, settings)
+            except (AttributeError, TypeError, ValueError):
+                # A column whose data the filter cannot take, e.g. a ragged
+                # index of object dtype. Written uncompressed.
+                logger.debug(f"Not compressing column: {column.name}")
+
     def _add_nwb_object_to_open_nwb(
         self,
         nwbf: pynwb.NWBFile,
@@ -770,10 +794,13 @@ class AnalysisMixin(BaseMixin):
             nwb_object = DynamicTable.from_dataframe(
                 name=table_name or "pandas_table", df=nwb_object
             )
+            self._compress_table_columns(nwb_object)
         elif isinstance(nwb_object, np.ndarray):
+            # Wrapped at construction: set_data_io is a silent no-op on
+            # ScratchData, which overrides the `data` property it assigns to.
             nwb_object = ScratchData(
                 name=table_name or "numpy_array",
-                data=nwb_object,
+                data=compressed_data(nwb_object),
                 description="Numpy array stored in scratch space",
             )
         if nwb_object.name in nwbf.scratch:

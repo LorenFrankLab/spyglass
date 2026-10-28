@@ -953,6 +953,60 @@ def get_nwb_copy_filename(nwb_file_name):
     return f"{filename}_{file_extension}"
 
 
+def get_nwb_raw_filename(nwb_file_name):
+    """Get file name of the raw nwb file a copy was made from.
+
+    Inverse of get_nwb_copy_filename. Returns the name unchanged when it is
+    already a raw name, so repeated calls are safe.
+    """
+
+    filename, file_extension = os.path.splitext(nwb_file_name)
+
+    if not filename.endswith("_"):
+        logger.warning(f"File may not be a copy: {nwb_file_name}")
+        return nwb_file_name
+
+    return f"{filename[:-1]}{file_extension}"
+
+
+def build_filtered_electrical_series(data, timestamps, electrodes):
+    """Build the compressed 'filtered data' ElectricalSeries.
+
+    Parameters
+    ----------
+    data : array-like
+        Filtered data.
+    timestamps : array-like
+        Timestamps of the filtered data.
+    electrodes : hdmf.common.DynamicTableRegion
+        Electrode table region the data was filtered from.
+
+    Returns
+    -------
+    pynwb.ecephys.ElectricalSeries
+        Series with both datasets wrapped for compressed writes.
+    """
+    from spyglass.utils.h5py_helper_fn import compressed_data
+
+    # TODO (from 2022): use datatype of data
+    return pynwb.ecephys.ElectricalSeries(
+        name="filtered data",
+        data=compressed_data(data),
+        electrodes=electrodes,
+        timestamps=compressed_data(timestamps),
+    )
+
+
+def get_nwb_session_name(nwb_file_name):
+    """Get the session name: no copy marker, no extension.
+
+    Analysis file names begin with this, so it identifies the session a file
+    belongs to.
+    """
+
+    return os.path.splitext(get_nwb_raw_filename(nwb_file_name))[0]
+
+
 def is_nwb_obj_type(
     nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
 ) -> bool:
