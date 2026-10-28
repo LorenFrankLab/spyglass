@@ -552,7 +552,11 @@ def _compute_isolation_kdtree(
     same exact search about 2x faster on one thread and scales with
     :func:`isolation_workers`. Both compute distances directly, so the
     neighbors are SI's; only exactly tied neighbors (duplicate PC features)
-    can be ordered differently.
+    can be ordered differently. Two units' spikes at the same frame project
+    to identical features, so the score can differ from SI's in proportion
+    to such shared spikes: <= 3e-5 on a real 56-unit sort, but 0.18 on a
+    synthetic pair sharing ~20% of its spikes. SI's choice among the ties
+    is arbitrary too; neither score is the correct one.
 
     Each spike's own row is excluded as scikit-learn's ``kneighbors()``
     does: query one extra neighbor and drop the spike itself, or the first
