@@ -104,6 +104,61 @@ def test_convert_mp4_error(sgp):
         )
 
 
+def test_convert_mp4_collision_raises(monkeypatch, tmp_path):
+    """Legacy skip-on-exists now raises when the mp4 is a different video.
+
+    Guards the silent video-filename collision (issue #1652): a
+    pre-existing mp4 whose frame count differs from the source it is asked to
+    convert is a collision, not a cache hit.
+    """
+    from spyglass.position.utils import general
+
+    (tmp_path / "clip.mp4").write_text("stub")  # dest pre-exists -> skip branch
+
+    # source has a different frame count than the existing dest -> collision
+    counts = {"clip.h264": 500, "clip.mp4": 270}
+    monkeypatch.setattr(
+        general,
+        "_check_packets",
+        lambda f, count_frames=False: counts[Path(f).name],
+    )
+
+    with pytest.raises(ValueError, match="collision"):
+        general._convert_mp4("clip.h264", str(tmp_path), str(tmp_path))
+
+
+def test_convert_mp4_correspondence_ok(monkeypatch, tmp_path):
+    """Matching frame counts on an existing mp4 are a legitimate cache hit."""
+    from spyglass.position.utils import general
+
+    (tmp_path / "clip.mp4").write_text("stub")
+    monkeypatch.setattr(
+        general, "_check_packets", lambda f, count_frames=False: 270
+    )
+
+    out = general._convert_mp4("clip.h264", str(tmp_path), str(tmp_path))
+    assert Path(out).name == "clip.mp4"
+
+
+def test_convert_mp4_deterministic_skips_correspondence(monkeypatch, tmp_path):
+    """The V2 deterministic path trusts its name and never probes counts."""
+    from spyglass.position.utils import general
+
+    stem = general._deterministic_video_stem(
+        "clip.h264", str(tmp_path / "clip.h264")
+    )
+    (tmp_path / f"{stem}.mp4").write_text("stub")
+
+    def _boom(*a, **k):
+        raise AssertionError("_check_packets must not run when deterministic")
+
+    monkeypatch.setattr(general, "_check_packets", _boom)
+    out = general._convert_mp4(
+        "clip.h264", str(tmp_path), str(tmp_path), deterministic=True
+    )
+    assert Path(out).name == f"{stem}.mp4"
+
+
 def test_videofile_frames(common, sgp, video_keys):
     key = video_keys[0]
     path = common.VideoFile().get_abs_path(key)
@@ -181,24 +236,28 @@ def test_interp_orientation(
 
 
 def test_vid_maker_processor_error(sgp):
+    from spyglass.position.utils.make_video import VideoMaker
+
     with pytest.raises(ValueError):
-        sgp.v1.dlc_utils_makevid.VideoMaker(
+        VideoMaker(
             video_filename="any",
             position_mean="any",
             orientation_mean="any",
-            centroids="any",
+            bodypart_centroids="any",
             position_time="any",
             processor="any",
         )
 
 
 def test_vid_maker_filenotfound(sgp):
+    from spyglass.position.utils.make_video import VideoMaker
+
     with pytest.raises(FileNotFoundError):
-        sgp.v1.dlc_utils_makevid.VideoMaker(
+        VideoMaker(
             video_filename="any",
             position_mean="any",
             orientation_mean="any",
-            centroids="any",
+            bodypart_centroids="any",
             position_time="any",
         )
 
@@ -223,21 +282,24 @@ def _fail_if_slower_than(seconds, msg):
         signal.signal(signal.SIGALRM, prev)
 
 
-def _record_plotted_frame(frame_ind):
+def _record_plotted_frame(frame_ind, batch_index=None):
     """Stand in for _generate_single_frame, inside a pool worker.
 
     Writes the plot _check_plotted looks for, plus a marker that survives the
-    per-batch `*.png` cleanup so the test can count frames after the run.
+    per-batch `*.png` cleanup so the test can count frames after the run. The
+    plot is named by batch-relative index, as _generate_single_frame does;
+    the marker keeps the absolute frame so gaps across batches are visible.
     """
     out = Path(os.environ["SG_TEST_FRAME_DIR"])
-    (out / f"plot_{frame_ind:02d}.png").touch()
+    padded = frame_ind if batch_index is None else batch_index
+    (out / f"plot_{padded:02d}.png").touch()
     (out / f"seen_{frame_ind:02d}.log").touch()
     return frame_ind
 
 
 def _bare_vid_maker(sgp, tmp_path, n_frames, batch_size):
     """A VideoMaker with only the attrs the frame loop reads."""
-    maker = object.__new__(sgp.v1.dlc_utils_makevid.VideoMaker)
+    maker = object.__new__(sgp.utils.VideoMaker)
     maker.n_frames, maker.batch_size = n_frames, batch_size
     maker.pad_len = len(str(n_frames))
     maker.temp_dir = tmp_path
@@ -280,7 +342,9 @@ def test_vid_maker_plots_full_batch(sgp, tmp_path):
     maker = _bare_vid_maker(sgp, tmp_path, n_frames=25, batch_size=10)
 
     attempted = []
-    maker._generate_single_frame = attempted.append
+    maker._generate_single_frame = (
+        lambda frame_ind, batch_index=None: attempted.append(frame_ind)
+    )
 
     class Bar:
         def update(self, n=1):
@@ -293,7 +357,7 @@ def test_vid_maker_plots_full_batch(sgp, tmp_path):
 
 def test_vid_maker_check_plotted(sgp, tmp_path):
     """Gaps that shift later frames raise; a lost video tail warns."""
-    maker = object.__new__(sgp.v1.dlc_utils_makevid.VideoMaker)
+    maker = object.__new__(sgp.utils.VideoMaker)
     maker.temp_dir = tmp_path
     maker.pad_len = 2
     maker.dropped_frames = set()
@@ -332,7 +396,7 @@ def test_recent_files(sgp):
 def test_suppress_print(sgp, monkeypatch, capsys):
     import inspect
 
-    suppress_print_from_package = sgp.utils_dlc.suppress_print_from_package
+    suppress_print_from_package = sgp.utils.dlc_io.suppress_print_from_package
 
     def fake_deeplabcut_function():
         print("This should be suppressed")
@@ -353,7 +417,7 @@ def test_suppress_print(sgp, monkeypatch, capsys):
 
 @pytest.fixture(scope="module")
 def estim_class(sgp, centroid_key):
-    estim_class = sgp.v1.dlc_reader.PoseEstimation
+    estim_class = sgp.utils.dlc_io.DLCProjectReader
     infer_dir = sgp.v1.dlc_utils.infer_output_dir
 
     yield estim_class(infer_dir(centroid_key))
@@ -364,7 +428,7 @@ def test_estim_class(estim_class):
 
     data = estim_class.data
     data_keys = list(data.keys())
-    bp = estim_class.body_parts.tolist()
+    bp = estim_class.body_parts
     expect = ["tailBase", "tailMid", "tailTip", "whiteLED"]
 
     assert isinstance(data, dict), "Data should be a dictionary"

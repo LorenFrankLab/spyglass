@@ -1,9 +1,13 @@
-# Convenience functions
+"""Video generation utilities for pose estimation overlays.
 
-# some DLC-utils copied from datajoint element-interface utils.py
+Shared by Position V1 and V2. ``make_video`` accepts V1's ``centroids``
+keyword as a synonym for ``bodypart_centroids``.
+"""
+
 import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
+from fractions import Fraction
 from math import ceil
 from pathlib import Path
 
@@ -13,6 +17,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from spyglass.position.utils.general import ffmpeg_fps_mode_flag
 from spyglass.settings import temp_dir, test_mode
 from spyglass.utils import logger
 from spyglass.utils.position import convert_to_pixels as _to_px
@@ -31,6 +36,95 @@ COLOR_SWATCH = [
     "#ffe91a",
 ]
 
+# Quiet ffmpeg logging (shared by ``ffmpeg_clip`` and ``VideoMaker``).
+FFMPEG_LOG_ARGS = ["-hide_banner", "-loglevel", "error"]
+
+
+def ffmpeg_clip(
+    src,
+    dest_folder,
+    *,
+    start="00:00:00",
+    end="00:00:01",
+    suffix="short",
+    overwrite=False,
+):
+    """Write a short, time-bounded clip of a video with ffmpeg.
+
+    A dependency-light helper (raw ``ffmpeg`` on PATH, the same assumption
+    the rest of this module already makes) for the common "grab a few
+    seconds of a video" operation. Selection is by *time*, matching
+    DeepLabCut's ``VideoWriter.shorten`` command
+    (``ffmpeg -i src -ss start -to end -c:a copy out``) so its output is a
+    drop-in replacement, without importing DeepLabCut.
+
+    Note this is distinct from :class:`VideoMaker`'s ffmpeg usage, which
+    selects individual *frames* by index and re-encodes them for annotated
+    overlay videos.
+
+    Parameters
+    ----------
+    src : str or pathlib.Path
+        Path to the source video.
+    dest_folder : str or pathlib.Path
+        Directory the clip is written into. Created if it does not exist.
+        The output file is named ``<src_stem><suffix><src_suffix>`` so the
+        source's identifying tokens are preserved in the clip name.
+    start : str, optional
+        Clip start as ``HH:MM:SS``. Defaults to ``"00:00:00"``.
+    end : str, optional
+        Clip end as ``HH:MM:SS``. Defaults to ``"00:00:01"`` (a one-second
+        clip).
+    suffix : str, optional
+        String inserted before the extension of the output name. Defaults
+        to ``"short"``.
+    overwrite : bool, optional
+        If True, overwrite an existing clip (``ffmpeg -y``). If False
+        (default), ffmpeg refuses to overwrite (``-n``) and the existing
+        file's path is returned.
+
+    Returns
+    -------
+    pathlib.Path
+        Full path to the written (or pre-existing) clip.
+
+    Raises
+    ------
+    RuntimeError
+        If ffmpeg exits non-zero or the expected output file is missing.
+    """
+    src = Path(src)
+    dest_folder = Path(dest_folder)
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    out = dest_folder / f"{src.stem}{suffix}{src.suffix}"
+
+    if out.exists() and not overwrite:
+        logger.debug(f"Clip already exists, skipping: {out}")
+        return out
+
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-y" if overwrite else "-n",
+        "-i",
+        str(src),
+        "-ss",
+        start,
+        "-to",
+        end,
+        "-c:a",
+        "copy",
+        str(out),
+        *FFMPEG_LOG_ARGS,
+    ]
+    ret = subprocess.run(
+        ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if ret.returncode != 0 or not out.exists():
+        raise RuntimeError(
+            f"ffmpeg failed to clip {src} -> {out}: {ret.stderr}"
+        )
+    return out
+
 
 class VideoMaker:
     def __init__(
@@ -38,7 +132,7 @@ class VideoMaker:
         video_filename,
         position_mean,
         orientation_mean,
-        centroids,
+        bodypart_centroids,
         position_time,
         video_frame_inds=None,
         likelihoods=None,
@@ -65,6 +159,46 @@ class VideoMaker:
             3. Stitch frames into partial video 'partial_XXXX.mp4'
             4. Concatenate partial videos into final video output
 
+        Parameters
+        ----------
+        video_filename : str
+            Path to the source video file.
+        position_mean : np.ndarray
+            (N, 2) array of centroid x/y positions.
+        orientation_mean : np.ndarray
+            (N,) array of head orientations in radians.
+        bodypart_centroids : dict
+            Dict mapping bodypart name to (N, 2) position array.
+        position_time : np.ndarray
+            (N,) array of timestamps.
+        video_frame_inds : np.ndarray, optional
+            (N,) int array mapping each position sample to a video frame index.
+        likelihoods : dict, optional
+            Dict mapping bodypart name to (N,) likelihood array.
+        processor : str
+            Rendering backend. Only 'matplotlib' is supported.
+        frames : np.ndarray, optional
+            Explicit frame indices to process.
+        percent_frames : float
+            Fraction of frames to process, by default 1.0 (all frames).
+        output_video_filename : str
+            Output video path.
+        cm_to_pixels : float
+            Conversion factor from cm to pixels.
+        disable_progressbar : bool
+            Suppress tqdm progress bar.
+        crop : tuple, optional
+            (x0, x1, y0, y1) crop bounds in pixels.
+        batch_size : int
+            Frames per processing batch.
+        max_workers : int
+            Max parallel workers for frame rendering.
+        max_jobs_in_queue : int
+            Max jobs queued at once.
+        debug : bool
+            Keep temp directory and limit frames.
+        key_hash : str, optional
+            Hash for temp directory naming (enables resume).
         """
         if processor != "matplotlib":
             raise ValueError(
@@ -72,7 +206,6 @@ class VideoMaker:
                 + "Use matplotlib or submit a feature request via GitHub."
             )
 
-        # key_hash supports resume from previous run
         self.temp_dir = Path(temp_dir) / f"dlc_vid_{key_hash}"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         if not self.temp_dir.exists():  # pragma: no cover
@@ -82,17 +215,17 @@ class VideoMaker:
         if not Path(video_filename).exists():
             raise FileNotFoundError(f"Video not found: {video_filename}")
 
-        try:
-            position_mean = position_mean["DLC"]
-            orientation_mean = orientation_mean["DLC"]
-        except IndexError:
-            pass  # trodes data provides bare arrays
+        # Support legacy dict-keyed inputs (e.g. {"DLC": array})
+        if isinstance(position_mean, dict):
+            position_mean = next(iter(position_mean.values()))
+        if isinstance(orientation_mean, dict):
+            orientation_mean = next(iter(orientation_mean.values()))
 
         self.video_filename = video_filename
         self.video_frame_inds = video_frame_inds
         self.position_mean = position_mean
         self.orientation_mean = orientation_mean
-        self.centroids = centroids
+        self.bodypart_centroids = bodypart_centroids
         self.likelihoods = likelihoods
         self.position_time = position_time
         self.percent_frames = percent_frames
@@ -112,13 +245,11 @@ class VideoMaker:
         self.max_jobs_in_queue = max_jobs_in_queue
         self.timeout = 30 if test_mode else 300
 
-        self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
-
+        self.ffmpeg_log_args = FFMPEG_LOG_ARGS
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         prev_backend = matplotlib.get_backend()
-        plt.close("all")  # Required before backend switch (matplotlib >= 3.8)
-        matplotlib.use("Agg")  # Use non-interactive backend
+        matplotlib.use("Agg")
 
         _ = self._set_frame_info()
         _ = self._set_plot_bases()
@@ -151,7 +282,9 @@ class VideoMaker:
         logger.debug(f"Dropped frames: {self.dropped_frames}")
 
         if not debug:
-            shutil.rmtree(self.temp_dir)  # Clean up temp directory
+            shutil.rmtree(self.temp_dir)
+
+        matplotlib.use(prev_backend)
 
     def _set_frame_info(self):
         """Set the frame information for the video."""
@@ -179,7 +312,7 @@ class VideoMaker:
 
         stats = ret.stdout.strip().split("x")
         self.width, self.height = tuple(map(int, stats[:2]))
-        self.frame_rate = eval(stats[2])
+        self.frame_rate = float(Fraction(stats[2]))
 
         self.frame_size = (
             (self.width, self.height)
@@ -202,15 +335,15 @@ class VideoMaker:
             )
             self.frames = np.arange(0, self.n_frames)
         elif self.frames is not None:  # pragma: no cover
-            self.n_frames = len(self.frames)  # pragma: no cover
+            self.n_frames = len(self.frames)
         else:  # pragma: no cover
-            self.n_frames = int(stats[3])  # pragma: no cover
+            self.n_frames = int(stats[3])
 
-        if self.debug:  # If debugging, limit frames to available data
+        if self.debug:
             self.n_frames = min(len(self.position_mean), self.n_frames)
 
         if self.n_frames == 0:  # pragma: no cover
-            raise ValueError("No frames to process!")  # pragma: no cover
+            raise ValueError("No frames to process!")
 
         self.pad_len = len(str(self.n_frames))
 
@@ -240,7 +373,9 @@ class VideoMaker:
                 label=f"{bodypart} position",
                 alpha=0.6,
             )
-            for color, bodypart in zip(COLOR_SWATCH, self.centroids.keys())
+            for color, bodypart in zip(
+                COLOR_SWATCH, self.bodypart_centroids.keys()
+            )
         }
         self.centroid_position_dot = axes[0].scatter(
             [],
@@ -275,7 +410,6 @@ class VideoMaker:
             self.position_time[0] - self.position_time[-1]
         ).total_seconds()
 
-        # TODO: Update legend location based on centroid position
         axes[0].legend(loc="lower right", fontsize=4)
         self.title = axes[0].set_title(
             f"time = {time_delta:3.4f}s\n frame = {0}",
@@ -332,7 +466,7 @@ class VideoMaker:
     def _get_orient_line(self, pos_ind):  # pragma: no cover
         orient = self.orientation_mean[pos_ind]
         if isinstance(orient, np.ndarray):
-            orient = orient[0]  # Trodes passes orientation as a 1D array
+            orient = orient[0]
 
         def orient_list(c, axis="x"):
             func = np.cos if axis == "x" else np.sin
@@ -344,16 +478,24 @@ class VideoMaker:
             x, y = self._get_centroid_data(pos_ind)
             return (orient_list(x), orient_list(y, axis="y"))
 
-    def _generate_single_frame(self, frame_ind):  # pragma: no cover
+    def _generate_single_frame(
+        self, frame_ind, batch_index=None
+    ):  # pragma: no cover
         """Generate a single frame and save it as an image."""
-        # Zero-padded filename based on the dynamic padding length
-        padded = self._pad(frame_ind)
+        if batch_index is not None:
+            # Use batch-relative index for ffmpeg
+            padded = self._pad(batch_index)
+        else:
+            # Fallback to original behavior
+            padded = self._pad(frame_ind)
+
         frame_out_path = self.temp_dir / f"plot_{padded}.png"
         if frame_out_path.exists() and not self.debug:
-            return frame_ind  # Skip if frame already exists
+            return frame_ind
 
-        frame_file = self.temp_dir / f"orig_{padded}.png"
-        if not frame_file.exists():  # Skip if input frame not found
+        orig_padded = self._pad(frame_ind)
+        frame_file = self.temp_dir / f"orig_{orig_padded}.png"
+        if not frame_file.exists():
             self.dropped_frames.add(frame_ind)
             self._debug_print(f"Frame not found: {frame_file}", end="")
             return
@@ -370,22 +512,28 @@ class VideoMaker:
             empty_array = np.array([], dtype=float)
             self.orientation_line.set_data(empty_array, empty_array)
             self.title.set_text(f"time = {0:3.4f}s\n frame = {frame_ind}")
-
             self.fig.savefig(frame_out_path, dpi=400)
-            plt.cla()  # clear the current axes
+            plt.cla()
             return frame_ind
 
         pos_ind = pos_ind[0]
-        likelihood_inds = pos_ind + self.window_ind
-        neg_inds = np.where(likelihood_inds < 0)[0]
-        likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
+
+        if self.likelihoods:  # Only needed for the likelihood subplot
+            likelihood_inds = pos_ind + self.window_ind
+            neg_inds = np.where(likelihood_inds < 0)[0]
+            likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
+
+            # Handle indices that are too large
+            max_likelihood_ind = len(list(self.likelihoods.values())[0]) - 1
+            large_inds = np.where(likelihood_inds > max_likelihood_ind)[0]
+            likelihood_inds[large_inds] = max_likelihood_ind
 
         dlc_centroid_data = self._get_centroid_data(pos_ind)
 
         for bodypart in self.centroid_plot_objs:
             self.centroid_plot_objs[bodypart].set_offsets(
                 _to_px(
-                    data=self.centroids[bodypart][pos_ind],
+                    data=self.bodypart_centroids[bodypart][pos_ind],
                     cm_to_pixels=self.cm_to_pixels,
                 )
             )
@@ -406,20 +554,16 @@ class VideoMaker:
                 )
 
         self.fig.savefig(frame_out_path, dpi=400)
-        plt.cla()  # clear the current axes
-
+        plt.cla()
         return frame_ind
 
     def process_frames(self):
         """Process video frames in batches and generate matplotlib frames."""
-
-        disable = True if test_mode else self.debug
-
-        progress_bar = tqdm(leave=True, position=0, disable=disable)
+        progress_bar = tqdm(leave=True, position=0, disable=self.debug)
         progress_bar.reset(total=self.n_frames)
 
         for start_frame in range(0, self.n_frames, self.batch_size):
-            if start_frame >= self.n_frames:  # Skip if no frames left
+            if start_frame >= self.n_frames:
                 break  # pragma: no cover
             end_frame = min(start_frame + self.batch_size, self.n_frames) - 1
             logger.debug(f"Processing frames: {start_frame} - {end_frame}")
@@ -441,11 +585,11 @@ class VideoMaker:
             )
             self.ffmpeg_stitch_partial(start_frame, str(output_partial_video))
 
+            # Clean up PNG files AFTER stitching
             for frame_file in self.temp_dir.glob("*.png"):
-                frame_file.unlink()  # Delete orig and plot frames
+                frame_file.unlink()
 
         progress_bar.close()
-
         logger.info("Concatenating partial videos")
         self.concat_partial_videos()
 
@@ -478,10 +622,15 @@ class VideoMaker:
         FileNotFoundError
             If the missing frames would shift later frames earlier.
         """
+        # Each batch's plots are named by batch-relative index, and
+        # ffmpeg_stitch_partial reads them with ``-start_number 0``, so the
+        # gap check runs over that sequence rather than absolute frame
+        # numbers. Reported indices stay absolute, matching dropped_frames
+        # and _frame_error.
         missing = [
-            ind
-            for ind in range(start_frame, end_frame + 1)
-            if not (self.temp_dir / f"plot_{self._pad(ind)}.png").exists()
+            start_frame + offset
+            for offset in range(end_frame - start_frame + 1)
+            if not (self.temp_dir / f"plot_{self._pad(offset)}.png").exists()
         ]
         if not missing:
             return
@@ -519,12 +668,16 @@ class VideoMaker:
         return "not extracted" if not orig.exists() else "no error reported"
 
     def _debug_print(self, msg="             ", end=""):
-        """Print a self-overwiting message if debug is enabled."""
+        """Print a self-overwriting message if debug is enabled."""
         if self.debug:
             print(f"\r{msg}", end=end)  # pragma: no cover
 
     def plot_frames(
-        self, start_frame, end_frame, progress_bar=None, process_pool=True
+        self,
+        start_frame,
+        end_frame,
+        progress_bar=None,
+        process_pool=True,  # Re-enable pool
     ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
 
@@ -532,28 +685,27 @@ class VideoMaker:
 
         # Single-threaded processing for debugging
         if not process_pool:  # pragma: no cover
-            for frame_ind in frames:  # pragma: no cover
-                self._generate_single_frame(frame_ind)  # pragma: no cover
-                progress_bar.update()  # pragma: no cover
+            for i, frame_ind in enumerate(frames):
+                self._generate_single_frame(frame_ind, batch_index=i)
+                progress_bar.update()
             return
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-            jobs = {}  # dict of jobs
-
+            jobs = {}
             frames_left = len(frames)
-            frames_iter = iter(frames)
+            frames_iter = enumerate(frames)
 
             while frames_left:
                 while len(jobs) < self.max_jobs_in_queue:
                     try:
-                        this_frame = next(frames_iter)
+                        batch_index, this_frame = next(frames_iter)
                         self._debug_print(f"Submit: {self._pad(this_frame)}")
                         job = executor.submit(
-                            self._generate_single_frame, this_frame
+                            self._generate_single_frame, this_frame, batch_index
                         )
                         jobs[job] = this_frame
                     except StopIteration:
-                        break  # No more frames to submit
+                        break
 
                 for job in as_completed(jobs):
                     frames_left -= 1
@@ -576,21 +728,20 @@ class VideoMaker:
         """Use ffmpeg to extract a batch of frames."""
         logger.debug(f"Extracting frames: {start_frame} - {end_frame}")
         last_frame = self.temp_dir / f"orig_{self._pad(end_frame)}.png"
-        if last_frame.exists():  # assumes all frames previously extracted
-            logger.debug(f"Skipping existing: {last_frame}")  # pragma: no cover
+        if last_frame.exists():
+            logger.debug(f"Skipping existing: {last_frame}")
             return  # pragma: no cover
 
         output_pattern = str(self.temp_dir / f"orig_%0{self.pad_len}d.png")
 
-        # Use ffmpeg to extract frames
         ffmpeg_cmd = [
             "ffmpeg",
-            "-n",  # no overwrite
+            "-n",
             "-i",
             self.video_filename,
             "-vf",
             f"select=between(n\\,{start_frame}\\,{end_frame})",
-            "-vsync",
+            ffmpeg_fps_mode_flag(),
             "vfr",
             "-start_number",
             str(start_frame),
@@ -607,13 +758,11 @@ class VideoMaker:
         extracted = len(list(self.temp_dir.glob("orig_*.png")))
         logger.debug(f"Extracted  frames: {start_frame}, len: {extracted}")
 
-        frame_diff = end_frame - start_frame + 1  # may be less than batch size
+        frame_diff = end_frame - start_frame + 1
         if extracted < frame_diff:
             logger.warning(
                 f"Could not extract frames: {extracted} / {frame_diff}"
             )
-            one_err = "\n".join(str(ret.stderr).split("\\")[-3:-1])
-            logger.debug(f"\nExtract Error: {one_err}")
 
     def _pad(self, frame_ind=None):
         """Pad a frame index with leading zeros."""
@@ -639,19 +788,20 @@ class VideoMaker:
 
         ffmpeg_cmd = [
             "ffmpeg",
-            "-y",  # overwrite
+            "-y",
             "-r",
             str(self.fps),
             "-start_number",
-            str(start_frame),
+            "0",  # Start from frame 0 since we use batch indexing
             "-i",
             frame_pattern,
             *self.ffmpeg_fmt_args,
             output_partial_video,
             *self.ffmpeg_log_args,
         ]
+
         try:
-            _ = subprocess.run(
+            subprocess.run(
                 ffmpeg_cmd,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -696,7 +846,7 @@ class VideoMaker:
 
         ffmpeg_cmd = [
             "ffmpeg",
-            "-y",  # overwrite
+            "-y",
             "-f",
             "concat",
             "-safe",
@@ -708,7 +858,7 @@ class VideoMaker:
             *self.ffmpeg_log_args,
         ]
         try:
-            _ = subprocess.run(
+            subprocess.run(
                 ffmpeg_cmd,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -721,5 +871,11 @@ class VideoMaker:
 
 
 def make_video(**kwargs):
-    """Passthrough for VideoMaker class for backwards compatibility."""
+    """Passthrough for VideoMaker class for backwards compatibility.
+
+    Accepts ``centroids`` as a synonym for ``bodypart_centroids``, the name
+    Position V1 uses.
+    """
+    if "centroids" in kwargs:
+        kwargs.setdefault("bodypart_centroids", kwargs.pop("centroids"))
     return VideoMaker(**kwargs)

@@ -1,3 +1,5 @@
+from functools import partial
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -6,12 +8,14 @@ from position_tools.core import gaussian_smooth
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import (
+from spyglass.position.utils.orientation import (
+    bisector_orientation as red_led_bisector_orientation,
+)
+from spyglass.position.utils.orientation import (
     get_span_start_stop,
     interp_orientation,
     no_orientation,
-    red_led_bisector_orientation,
-    two_pt_head_orientation,
+    two_pt_orientation,
 )
 from spyglass.utils import SpyglassMixin
 
@@ -19,11 +23,10 @@ from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
 
-# Add new functions for orientation calculation here
 _key_to_func_dict = {
-    "none": no_orientation,
-    "red_green_orientation": two_pt_head_orientation,
-    "red_led_bisector": red_led_bisector_orientation,
+    "none": partial(no_orientation, dtype=np.float16),  # V1 uses float16 fill
+    "red_green_orientation": two_pt_orientation,
+    "red_led_bisector": partial(red_led_bisector_orientation, legacy_v1=True),
 }
 
 
@@ -167,6 +170,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             orient_df = interp_orientation(
                 unwrap_df,
                 nan_spans,
+                legacy_v1=True,
             )
             orientation = gaussian_smooth(
                 orient_df["orientation"].to_numpy(),

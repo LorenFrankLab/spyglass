@@ -1,5 +1,18 @@
-from .dlc_reader import do_pose_estimation, read_yaml, save_yaml
-from .dlc_utils import (
+"""Position V1 pipeline.
+
+Supports DeepLabCut >= 2.3, the oldest release whose ``CollectedData`` files
+carry the ``(labeled-data, video, image)`` row index this pipeline reads.
+Spyglass installs Position V2, which targets DeepLabCut 3; a V1 user supplies
+their own DeepLabCut.
+"""
+
+# Import only remaining V1-specific utilities from dlc_utils
+# Import shared utilities from utils modules
+from spyglass.position.utils.centroid import Centroid
+from spyglass.position.utils.interpolation import _key_to_smooth_func_dict
+from spyglass.position.utils.validation import validate_list, validate_option
+
+from spyglass.position.utils.general import (
     _convert_mp4,
     find_mp4,
     get_video_info,

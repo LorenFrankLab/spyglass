@@ -233,9 +233,9 @@ def close_nwb_files():
     Per-handle failures are suppressed so one bad handle cannot leave the
     rest of the cache open.
     """
-    for io, _ in __open_nwb_files.values():
+    for opened in __open_nwb_files.values():
         with suppress(Exception):
-            io.close()
+            opened.io.close()
     __open_nwb_files.clear()
 
 
