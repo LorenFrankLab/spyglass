@@ -405,12 +405,6 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
     monkeypatch.setattr(
         _sorting_analyzer, "ensure_extensions", lambda *a, **k: None
     )
-    percentile_targets = []
-    monkeypatch.setattr(
-        _sorting_analyzer,
-        "ensure_review_template_percentiles",
-        percentile_targets.append,
-    )
     monkeypatch.setattr(
         resolver, "load_analyzer_folder", lambda folder: saved[Path(folder)]
     )
@@ -421,8 +415,6 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
         )
         is saved[interactive_folder]
     )
-    # The interactive display build stores the review's template percentiles.
-    assert percentile_targets == [saved[interactive_folder]]
 
     from spyglass.spikesorting.v2._storage import (
         analyzer_cache as _analyzer_cache,

@@ -653,7 +653,6 @@ def _build_resolved_merged_analyzer(
     from spyglass.spikesorting.v2._sorting.analyzer import (
         build_analyzer,
         ensure_extensions,
-        ensure_review_template_percentiles,
     )
 
     build_analyzer(
@@ -675,7 +674,6 @@ def _build_resolved_merged_analyzer(
             STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
             job_kwargs=job_kwargs,
         )
-        ensure_review_template_percentiles(analyzer)
     return analyzer
 
 

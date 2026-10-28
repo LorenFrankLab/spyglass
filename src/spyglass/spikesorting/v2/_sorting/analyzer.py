@@ -48,10 +48,13 @@ def ensure_review_template_percentiles(analyzer) -> None:
 
     SI's waveform widgets (``plot_unit_templates`` on the review page) shade
     templates with their default percentiles and, when absent, compute and
-    SAVE them into the analyzer. Inside a published, manifest-validated
-    curation cache that write changes the folder, so the next open of a
-    merged review (or "Inspect selected units") rebuilt the whole analyzer.
-    Computing them when the cache is built makes the page read-only.
+    SAVE them into the analyzer -- the published cache the page reads. In a
+    sort's shared analyzer that rewrites ``templates`` in place under any
+    other reader; in a manifest-validated merged-curation cache the changed
+    folder fails validation, so the next open rebuilt the whole analyzer.
+    :func:`build_analyzer` computes them for every display build, so the page
+    only reads. The recompute content hash covers only the average
+    templates, so they do not change it.
     """
     import inspect
 
@@ -62,7 +65,11 @@ def ensure_review_template_percentiles(analyzer) -> None:
         .parameters["templates_percentile_shading"]
         .default
     )
-    if shading is None or not analyzer.has_extension("waveforms"):
+    if (
+        shading is None
+        or not analyzer.has_extension("waveforms")
+        or not analyzer.has_extension("templates")
+    ):
         return
     if isinstance(shading, (int, float)):
         shading = (shading, 100 - shading)
@@ -1114,6 +1121,9 @@ def build_analyzer(
             },
             **analyzer_job_kwargs,
         )
+        if not whiten:
+            # Display analyzers back the review page; see the helper.
+            ensure_review_template_percentiles(analyzer)
         if sparsity_kwargs["sparse"]:
             from spyglass.spikesorting.v2._storage.analyzer_cache import (
                 write_analyzer_sparsity_receipt,

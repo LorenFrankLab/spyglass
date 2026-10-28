@@ -328,3 +328,26 @@ def test_low_level_loader_accepts_intentional_extension_subset(
     analyzer = cache.load_analyzer_folder(folder)
     assert analyzer.get_saved_extension_names() == ["noise_levels"]
     assert analyzer.get_extension("noise_levels") is not None
+
+
+def test_display_build_stores_review_template_percentiles(complete_analyzer):
+    """The review's waveform view only reads a freshly built display cache.
+
+    SI's ``plot_unit_templates`` computes its percentile shading when absent
+    and saves it into the analyzer; on a shared sort cache that rewrites
+    ``templates`` under every other reader.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import spikeinterface.widgets as sw
+
+    original, _recording, _sorting, params = complete_analyzer
+    if params["purpose"] != "display":
+        pytest.skip("only display analyzers back the review page")
+    digest = _folder_digest(original.folder)
+    analyzer = cache.load_analyzer_folder(original.folder)
+    sw.plot_unit_templates(analyzer, backend="matplotlib")
+    plt.close("all")
+    assert _folder_digest(original.folder) == digest
