@@ -497,40 +497,6 @@ _MERGE_DEDUP_DELTA_MS = 0.4
 # timestamps while avoiding get_times() and HDF5 point-indexing overhead.
 
 
-def _segment_times_range(recording, start, stop, *, segment_index=0):
-    """Absolute times (s) of frames ``start:stop``, read as one slice.
-
-    Equals ``_segment_times_at(recording, np.arange(start, stop))``. An
-    explicit ``time_vector`` (an h5py dataset for an NWB extractor) is
-    sliced: h5py reads a fancy index point by point, which made hashing a
-    20 min, 30 kHz recording's timestamps take ~47 s. A rate-based segment
-    uses SpikeInterface's ``sample_index_to_time``.
-
-    Parameters
-    ----------
-    recording : si.BaseRecording
-    start, stop : int
-        Half-open frame range in ``[0, n_samples]``.
-    segment_index : int, optional
-
-    Returns
-    -------
-    numpy.ndarray of float64
-        ``(stop - start,)`` wall-clock seconds.
-    """
-    import numpy as np
-
-    time_vector = recording._recording_segments[segment_index].time_vector
-    if time_vector is not None:
-        return np.asarray(time_vector[start:stop], dtype=np.float64)
-    return np.asarray(
-        recording.sample_index_to_time(
-            np.arange(start, stop), segment_index=segment_index
-        ),
-        dtype=np.float64,
-    )
-
-
 def _segment_times_at(recording, frames, *, segment_index=0):
     """Absolute times (s) for arbitrary ``frames`` without materializing.
 

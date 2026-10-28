@@ -140,7 +140,7 @@ def recording_content_fingerprint(
     )
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_range,
+        _segment_times_slice,
     )
 
     analysis_abs_path = str(analysis_abs_path)
@@ -178,7 +178,7 @@ def recording_content_fingerprint(
         # hash, in bounded chunks so existing content fingerprints stay valid.
         for start in range(0, n_frames, 300_000):
             times = np.round(
-                _segment_times_range(
+                _segment_times_slice(
                     recording,
                     start,
                     min(start + 300_000, n_frames),

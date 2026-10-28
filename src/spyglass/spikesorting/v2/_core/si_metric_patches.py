@@ -98,8 +98,8 @@ _NOISE_CLUSTER_DRAWS: contextvars.ContextVar[dict | None] = (
 )
 
 #: Threads each nn_isolation / nn_noise_overlap neighbor search uses. Set
-#: only through ``isolation_workers``; the metric compute sets it from the
-#: evaluation's ``n_jobs``.
+#: only through ``isolation_workers``; the metric compute sets it from
+#: ``search_threads`` (see ``_core.job_config.resolve_search_threads``).
 _ISOLATION_WORKERS: contextvars.ContextVar[int] = contextvars.ContextVar(
     "nn_isolation_workers", default=1
 )
@@ -112,7 +112,7 @@ _ISOLATION_WORKERS: contextvars.ContextVar[int] = contextvars.ContextVar(
 #: cheap; the draw runs once per block, so the grouping costs seconds at most.
 _SNIPPET_READ_MAX_GAP_FRAMES = 30_000
 
-#: Upper bound on one grouped read, in bytes of float64 traces.
+#: Upper bound on one grouped read, in bytes of the recording's traces.
 _SNIPPET_READ_MAX_BYTES = 64 * 2**20
 
 
@@ -262,7 +262,8 @@ def _read_snippets(recording, starts, *, nsamples, return_in_uV):
     starts = np.asarray(starts, dtype=np.int64)
     max_frames = max(
         nsamples,
-        _SNIPPET_READ_MAX_BYTES // (8 * recording.get_num_channels()),
+        _SNIPPET_READ_MAX_BYTES
+        // (recording.get_dtype().itemsize * recording.get_num_channels()),
     )
     snippets = []
     first = 0
