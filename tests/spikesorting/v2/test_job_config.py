@@ -67,3 +67,36 @@ def test_a_changed_spikeinterface_global_n_jobs_is_honored(
         assert _resolved_job_kwargs()["n_jobs"] == 6
     finally:
         si.set_global_job_kwargs(**original)
+
+
+@pytest.mark.parametrize("cpus, expected", [(96, 16), (16, 4), (8, 2), (2, 1)])
+def test_default_search_threads_are_a_quarter_of_usable_cores_at_most_16(
+    monkeypatch, no_v2_job_config, cpus, expected
+):
+    """The exact nn-metric neighbor search runs on threads, which add no
+    memory: on 11 real searches, 4 / 16 threads took 2.7 / 0.74 s. Its
+    default is therefore wider than the worker-process default."""
+    from spyglass.spikesorting.v2._core.job_config import (
+        resolve_search_threads,
+    )
+
+    _usable_cpus(monkeypatch, cpus)
+    assert resolve_search_threads() == expected
+
+
+def test_an_explicit_n_jobs_sets_the_search_threads(
+    monkeypatch, no_v2_job_config
+):
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._core.job_config import (
+        resolve_search_threads,
+    )
+
+    _usable_cpus(monkeypatch, 96)
+    assert resolve_search_threads({"n_jobs": 3}) == 3
+    monkeypatch.setitem(
+        dj.config, "custom", {"spikesorting_v2_job_kwargs": {"n_jobs": 1}}
+    )
+    assert resolve_search_threads() == 1
+    assert resolve_search_threads(None, {"n_jobs": 2}) == 2

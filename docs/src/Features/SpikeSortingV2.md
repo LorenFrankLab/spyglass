@@ -2077,7 +2077,10 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
     stages use a quarter of the cores the process may use, at most 4 (each
     worker adds about 1 GB; results do not depend on the worker count). Set
     `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}` to use N
-    workers in every compute stage, or `{"n_jobs": 1}` for none. On macOS and
+    workers in every compute stage, or `{"n_jobs": 1}` for none. The exact
+    neighbor searches of the `nn_isolation` / `nn_noise_overlap` metrics run
+    on threads, which add no memory, so by default they use a quarter of the
+    cores, at most 16; an explicit `n_jobs` sets them too. On macOS and
     Windows the workers start by re-importing the calling script, so scripts
     need an `if __name__ == "__main__":` guard there (MountainSort4's workers
     already require it on every platform).

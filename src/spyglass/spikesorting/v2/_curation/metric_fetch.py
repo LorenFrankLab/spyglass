@@ -17,7 +17,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2._curation.metrics import apply_snr_peak_sign
-from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._core.job_config import (
+    _resolved_job_kwargs,
+    resolve_search_threads,
+)
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.metric_curation import (
@@ -243,6 +246,9 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             observed_presence_bin_duration_s=qm[
                 "observed_presence_bin_duration_s"
             ],
+            search_threads=resolve_search_threads(
+                qm["job_kwargs"], acr["job_kwargs"]
+            ),
         ),
     )
 

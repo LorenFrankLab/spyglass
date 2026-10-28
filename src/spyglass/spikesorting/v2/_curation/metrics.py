@@ -1029,6 +1029,7 @@ def evaluate_analyzers(
             statistics_spans=statistics_spans,
             rule_columns=rule_columns,
             continuity_spans=continuity_spans,
+            search_threads=metric_inputs.search_threads,
         )
         assert_unit_namespace(metrics_df, expected_unit_ids)
         if observation_metrics is not None:
@@ -1169,6 +1170,7 @@ def compute_metrics(
     statistics_spans=None,
     rule_columns=frozenset(),
     continuity_spans=None,
+    search_threads=None,
 ):
     """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -1183,7 +1185,9 @@ def compute_metrics(
     original spike timestamps. For concat-backed sources, ``continuity_spans``
     excludes pairs across acquisition/member joins on the synthetic clock.
     SI's count and contamination ratio keep their sample-clock definitions.
-    ``job_kwargs`` drive the heavy extension computation.
+    ``job_kwargs`` drive the heavy extension computation; ``search_threads``
+    (``None``: ``resolve_search_threads()``) sets the threads of the nn
+    metrics' exact neighbor searches.
 
     ``template_metric_columns`` (SI output COLUMN names) are surfaced from
     the DISPLAY analyzer's ``template_metrics`` extension -- waveform SHAPE
@@ -1337,10 +1341,11 @@ def compute_metrics(
         # swallowed as NaN). Ensure the median operator, then install the
         # sparse fix and the threaded k-d tree isolation search both NN
         # metrics use. The PC compute below runs n_jobs=1 so the fixes
-        # (main-process monkeypatches) are the code that actually runs; the
-        # row's n_jobs instead sets the neighbor-search threads.
-        from spikeinterface.core.job_tools import fix_job_kwargs
-
+        # (main-process monkeypatches) are the code that actually runs;
+        # ``search_threads`` sets the neighbor-search threads instead.
+        from spyglass.spikesorting.v2._core.job_config import (
+            resolve_search_threads,
+        )
         from spyglass.spikesorting.v2._core.si_metric_patches import (
             isolation_workers,
             patch_isolation_kdtree,
@@ -1383,9 +1388,9 @@ def compute_metrics(
         with (
             noise_cluster_spans(statistics_spans),
             isolation_workers(
-                fix_job_kwargs({"n_jobs": (job_kwargs or {}).get("n_jobs", 1)})[
-                    "n_jobs"
-                ]
+                resolve_search_threads()
+                if search_threads is None
+                else search_threads
             ),
             isolated_si_metric_defaults(),
             escalate_si_metric_errors(rule_columns),

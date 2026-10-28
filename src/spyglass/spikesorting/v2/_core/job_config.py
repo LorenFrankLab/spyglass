@@ -14,6 +14,20 @@ from collections.abc import Mapping
 #: Most workers v2 uses when no layer sets ``n_jobs`` (see ``_default_n_jobs``).
 _DEFAULT_N_JOBS_CAP = 4
 
+#: Most threads an exact nn-metric neighbor search uses by default (see
+#: ``resolve_search_threads``).
+_DEFAULT_SEARCH_THREADS_CAP = 16
+
+
+def _usable_cpus() -> int:
+    """Cores this process may run on (its affinity mask where available)."""
+    import os
+
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:  # not available on macOS / Windows
+        return os.cpu_count() or 1
+
 
 def _default_n_jobs() -> int:
     """Workers for v2's parallel stages when no layer sets ``n_jobs``.
@@ -24,13 +38,53 @@ def _default_n_jobs() -> int:
     each worker adds ~1 GB, and the results were identical for every count.
     The quarter leaves room for other users of a shared server.
     """
-    import os
+    return max(1, min(_DEFAULT_N_JOBS_CAP, _usable_cpus() // 4))
 
-    try:
-        n_cpus = len(os.sched_getaffinity(0))
-    except AttributeError:  # not available on macOS / Windows
-        n_cpus = os.cpu_count() or 1
-    return max(1, min(_DEFAULT_N_JOBS_CAP, n_cpus // 4))
+
+def _explicit_n_jobs(*row_job_kwargs: dict | None):
+    """The ``n_jobs`` a layer set (a later row blob first), or ``None``."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
+
+    for blob in reversed(row_job_kwargs):
+        if blob and "n_jobs" in blob:
+            return blob["n_jobs"]
+    custom = (dj.config.get("custom", {}) or {}).get(
+        "spikesorting_v2_job_kwargs", {}
+    ) or {}
+    if "n_jobs" in custom:
+        return custom["n_jobs"]
+    si_global = get_global_job_kwargs().get("n_jobs", 1)
+    return None if si_global == 1 else si_global
+
+
+def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
+    """Threads for the exact neighbor searches of the nn_advanced metrics.
+
+    An ``n_jobs`` set by a layer (per-row blobs, then
+    ``dj.config['custom']['spikesorting_v2_job_kwargs']``, then a changed SI
+    global) sets it. Otherwise a quarter of the usable cores, at most
+    ``_DEFAULT_SEARCH_THREADS_CAP``: the search is ~75% of curation-evaluation
+    metrics and its threads add no memory (on 11 real searches 1 / 4 / 16
+    threads took 8.9 / 2.7 / 0.74 s), unlike ``n_jobs`` worker processes.
+
+    Parameters
+    ----------
+    *row_job_kwargs : dict or None
+        The stage's per-row ``job_kwargs`` blobs, in increasing precedence.
+
+    Returns
+    -------
+    int
+        At least 1.
+    """
+    explicit = _explicit_n_jobs(*row_job_kwargs)
+    if explicit is None:
+        return max(1, min(_DEFAULT_SEARCH_THREADS_CAP, _usable_cpus() // 4))
+    from spikeinterface.core.job_tools import fix_job_kwargs
+
+    return fix_job_kwargs({"n_jobs": explicit})["n_jobs"]
 
 
 def _ambient_job_kwargs() -> dict:

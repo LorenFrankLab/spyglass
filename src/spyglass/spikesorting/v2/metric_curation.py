@@ -182,6 +182,9 @@ class EvaluationMetricInputs(NamedTuple):
     rule_rows: list[dict]
     metric_job_kwargs: dict
     observed_presence_bin_duration_s: float = 60.0
+    # Threads for the nn metrics' exact neighbor searches; ``None`` uses
+    # ``resolve_search_threads()`` (see ``_core.job_config``).
+    search_threads: int | None = None
 
 
 class CurationEvaluationFetched(NamedTuple):
