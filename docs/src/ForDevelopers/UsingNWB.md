@@ -177,6 +177,31 @@ Recordings start out as an NWB file, which is opened as a
 for visualizing the results of spike sorting, this recording is saved again in
 HDF5 format. This duplication should be resolved in the future.
 
+## Compression
+
+Datasets are written with the HDF5 gzip filter, preceded by the byte-shuffle
+filter. Both are standard HDF5, so a compressed file stays readable by pynwb,
+h5py, `h5dump` and MATLAB with no decompression step and no plugin.
+
+Two constants in `spyglass/utils/h5py_helper_fn.py` set the filters for new
+writes and for repacking alike:
+
+| constant     | effect                                |
+| :----------- | :------------------------------------ |
+| `GZIP_LEVEL` | deflate level, 1 to 9                 |
+| `SHUFFLE`    | whether byte shuffle precedes deflate |
+
+Shuffle groups the first byte of every value together, then the second, and so
+on. Neighbouring samples in an `int16` recording, or in a monotonic `float64`
+timestamp series, differ only in their low bytes, so the high bytes become long
+runs that deflate replaces with back-references. The filter reorders bytes and
+is reversed on read, so it changes no values.
+
+`CompressedNwbfile` repacks existing files in place through
+`h5repack -f SHUF -f GZIP=<level> -m 1`, one row per file. It requires admin
+privileges, accepts a repack only when the source and the output hash
+identically, and refuses an unrestricted `populate()`.
+
 ## Naming convention
 
 The following objects should be uniquely named.

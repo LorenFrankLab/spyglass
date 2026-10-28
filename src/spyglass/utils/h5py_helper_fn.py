@@ -9,11 +9,8 @@ from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 from spyglass.utils.logging import logger
 
-# The gzip level every compressed write uses.
-GZIP_LEVEL = 6
-
-# Byte shuffle, applied before deflate. Full tests pending.
-SHUFFLE = True
+GZIP_LEVEL = 6  # The gzip level every compressed write uses.
+SHUFFLE = True  # Byte shuffle, applied before deflate, lossless.
 
 
 def compression_settings(compression_opts=None) -> dict:
