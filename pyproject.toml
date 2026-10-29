@@ -41,28 +41,40 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  # 1. jax 0.7.2 req numpy>=2/scipy>=1.13, which spikeinterface 0.99 can't use.
+  # 2. spikeinterface 0.99.x uses scipy.linalg.tril, removed in scipy 1.13.
+  # 3. spikeinterface 0.99.1 calls np.issctype (removed in numpy 2.0) but
+  #    declares an unbounded numpy, we bound here.
+  # 4. ndx-ophys-devices 0.4.0 is a breaking spec change: ViralVectorInjection
+  #    coordinates moved into a StereotacticPosition child, FiberInsertion was
+  #    dropped, and OpticalLens* was renamed ObjectiveLens*. Our ingestion in
+  #    common_optogenetics reads the 0.3.x layout.
   "black[jupyter]>26",
   "bottleneck",
   "dask",
   "datajoint>=0.14.5,<2.0",
-  # "ghostipy", # removed from list bc M1 users need to install pyfftw first
+  "fsspec",                       # Streaming reads; was an undeclared transitive
   "hdmf>=3.4.6",
   "ipympl",
+  "jax<0.7.2",                    # TODO(#1609): remove with SpikeInterface bump
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
+  "ndx-ophys-devices>=0.3.1,<0.4",  # see note 4 above
   "ndx-optogenetics==0.3.0",
-  "ndx-ophys-devices",
   "ndx-pose",
   "non-local-detector",
-  "numpy",
+  "numpy<2",                      # TODO(#1609): remove with SpikeInterface bump
   "opencv-python",
   "panel>=1.4",
   "position-tools>=0.1",
-  "probeinterface<0.3",            # Bc some probes fail space checks
-  "pubnub<6.4",                    # TODO: remove this when sortingview is updated
+  "probeinterface<0.3",           # Bc some probes fail space checks
+  "psutil",                       # Detects available RAM for the NWB cache
+  "pubnub<6.4",                   # TODO: remove this when sortingview is updated
   "pydotplus",
   "pynwb>=3.1.3",
+  "requests",                     # Shared-storage broker API
   "ripple-detection",
+  "scipy<1.13",                   # TODO(#1609): remove with SpikeInterface bump
   "seaborn",
   "sortingview>=0.11",
   "spikeinterface>=0.99.1,<0.100",
@@ -70,7 +82,7 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut[tf]<3", # Pending position V2
   "ffmpeg",
 ]
 optional-dependencies.docs = [
@@ -87,7 +99,14 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
+# Deprecated alias for kachery-legacy, kept so an existing install command
+# does not break during the deprecation cycle. Removed with the extra itself.
 optional-dependencies.kachery-cloud = [
+  "spyglass-neuro[kachery-legacy]",
+]
+# Deprecated in 0.6.1, removed in 0.7.0. Superseded by the shared-storage
+# broker; nothing in the default install depends on these.
+optional-dependencies.kachery-legacy = [
   "kachery",
   "kachery-client",
   "kachery-cloud>=0.4",
@@ -105,7 +124,6 @@ optional-dependencies.moseq-gpu = [
 optional-dependencies.test = [
   "codecov",                # for code coverage badge
   "docker",                 # for tests in a container
-  "ghostipy",
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
@@ -118,6 +136,9 @@ optional-dependencies.test = [
 ]
 urls."Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 urls."Homepage" = "https://github.com/LorenFrankLab/spyglass"
+# Login has to work before a DataJoint session does: a new user may have no
+# working config yet, and should not need to open Python to get a token.
+scripts.spyglass-store = "spyglass.sharing.store_client:login_cli"
 
 [tool.hatch.version]
 source = "vcs"
@@ -144,8 +165,9 @@ lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
-ignore-words-list = 'nevers'
+ignore-words-list = 'nevers,notin,sortings'
 # Nevers - name in Citation
+# notin - UnitSelectionParams.unit_criteria operator, paired with isin
 
 [tool.pytest.ini_options]
 minversion = "7.0"

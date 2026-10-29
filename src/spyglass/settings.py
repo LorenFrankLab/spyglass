@@ -10,6 +10,69 @@ from pymysql.err import OperationalError
 from spyglass.utils.dj_helper_fn import str_to_bool
 from spyglass.utils.logging import logger
 
+_UNSET = object()  # distinguishes "not supplied" from an explicit False
+
+# Thresholds for the open-NWB-file cache, set under custom.nwb_cache
+NWB_CACHE_DEFAULTS = {
+    "min_free_gb": 2.0,
+    "min_free_pct": 0.1,
+    "max_file_fraction": 0.8,
+}
+
+# Permitted range per threshold: a test, and the text shown when it fails
+NWB_CACHE_RANGES = {
+    "min_free_gb": (lambda v: v >= 0, ">= 0"),
+    "min_free_pct": (lambda v: 0 <= v <= 1, "between 0 and 1"),
+    "max_file_fraction": (lambda v: 0 < v <= 1, "in (0, 1]"),
+}
+
+
+def _clean_store_url(value) -> str:
+    """Normalize a broker base URL to a bare origin with no trailing slash.
+
+    Every broker route appends a versioned path, so a trailing slash would
+    produce a double slash. `None` and `False` become "", which is how "no
+    broker configured" is spelled throughout.
+
+    Parameters
+    ----------
+    value : str or None
+        Configured value, in whatever form the config file supplied it.
+
+    Returns
+    -------
+    str
+        The URL without a trailing slash, or "" if none was configured.
+    """
+    return str(value).strip().rstrip("/") if value else ""
+
+
+def _normalize_backends(value) -> dict:
+    """Lower-case the backend names in a `custom.backends` block.
+
+    `FileBackend.name` is not consistently cased (`DandiBackend` is "Dandi"),
+    and this block is written by hand, so lookups match lower-cased.
+
+    Parameters
+    ----------
+    value : dict or None
+        The `backends` block, as the config file supplied it.
+
+    Returns
+    -------
+    dict
+        Backend name (lower-cased) to its settings dict. Malformed entries
+        are dropped rather than raising.
+    """
+    if not isinstance(value, dict):
+        return {}
+
+    return {
+        str(name).lower(): dict(settings)
+        for name, settings in value.items()
+        if isinstance(settings, dict)
+    }
+
 
 class SpyglassConfig:
     """Gets Spyglass dirs from dj.config or environment variables.
@@ -63,6 +126,43 @@ class SpyglassConfig:
         # Note: _schema_version field is informational only, not enforced
         return schema["directory_schema"]
 
+    @staticmethod
+    def _validated_nwb_cache(supplied: dict) -> dict:
+        """Merge supplied NWB cache thresholds over defaults, checking ranges.
+
+        A value that is non-numeric or outside its range is replaced by its own
+        default and logged; the other thresholds are unaffected. Nothing is
+        raised, so one mistyped threshold cannot stop ``import spyglass``.
+
+        Parameters
+        ----------
+        supplied : dict
+            Contents of ``custom.nwb_cache``. Unrecognized keys are ignored.
+
+        Returns
+        -------
+        dict
+            One float per key of ``NWB_CACHE_DEFAULTS``.
+        """
+        merged = {**NWB_CACHE_DEFAULTS, **supplied}
+        ret = dict()
+
+        for key, default in NWB_CACHE_DEFAULTS.items():
+            in_range, range_text = NWB_CACHE_RANGES[key]
+            try:
+                value = float(merged[key])
+            except (TypeError, ValueError):
+                value = None  # same treatment as out of range, below
+            if value is None or not in_range(value):
+                logger.warning(
+                    f"Ignoring nwb_cache {key}={merged[key]!r}: must be"
+                    f" {range_text}. Using the default of {default}."
+                )
+                value = float(default)
+            ret[key] = value
+
+        return ret
+
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
         Initializes a new instance of the class.
@@ -89,17 +189,57 @@ class SpyglassConfig:
             Cached config settings.
         _debug_mode (bool)
             True if debug_mode is set. Supports skipping known bugs in test env.
-        _test_mode (bool)
-            True if test_mode is set. Required for pytests to run without
-            prompts.
+        _test_mode (bool or object)
+            The bound test mode, or ``_UNSET`` before the first deliberate or
+            successful load. The public ``test_mode`` property always returns
+            a bool.
+        _prefer_download (bool)
+            True if streaming backends should download whole files instead.
+        _store_url (str)
+            Base URL of the shared-storage broker, or "" when this instance is
+            not attached to one.
+        _store_auto_upload (bool)
+            True if declaring a derived file for sharing should also upload it.
+        _backends (dict)
+            Per-backend settings from `custom.backends`, keyed by lower-cased
+            backend name.
         """
         self.supplied_base_dir = base_dir
         self._config = dict()
         self.config_defaults = dict(prepopulate=True)
-        self._debug_mode = kwargs.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode", False)
+        # Constructor values participate in first-load precedence. test_mode
+        # becomes instance identity once an explicit load starts or an ambient
+        # load succeeds; debug_mode remains an ordinary reloadable setting.
+        self._debug_mode_arg = kwargs.get("debug_mode", _UNSET)
+        self._initial_test_mode = kwargs.get("test_mode", _UNSET)
+        self._debug_mode = (
+            False
+            if self._debug_mode_arg is _UNSET
+            else str_to_bool(self._debug_mode_arg)
+        )
+        self._test_mode = _UNSET
+        # Readable before any load. Each load reads it from dj.config.
+        self._prefer_download = False
+        # Readable before any load. Each load reads it from dj.config. "" is
+        # the meaningful default: an instance with no broker is the common
+        # case, and the shared-store backend reads it as "I hold nothing"
+        # rather than as an error.
+        self._store_url = ""
+        self._store_auto_upload = False
+        # Per-backend overrides; a backend with no block takes the default.
+        self._backends = {}
         self._dlc_base = None
+        # Initialized here, not only in load_config's COMMIT phase: a load
+        # that fails or returns early (e.g. no base under an ambient test
+        # mode) still leaves `_dj_custom`/`_generate_dj_config` able to read
+        # it, matching `_dlc_base`.
+        self._moseq_base = None
         self.load_failed = False
+        # A mode-change request invalidates a loaded instance permanently. Keep
+        # only the message (not an exception/traceback); recovery uses a new
+        # SpyglassConfig object with an unambiguous lifecycle.
+        self._mode_error: str | None = None
+        self._nwb_cache = dict(NWB_CACHE_DEFAULTS)
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
@@ -120,13 +260,59 @@ class SpyglassConfig:
             "HDF5_USE_FILE_LOCKING": "FALSE",
         }
 
+    def _resolve_test_mode(self, call_value, dj_custom) -> tuple[bool, bool]:
+        """Return this instance's test mode and whether it is bound.
+
+        First-load precedence is call argument, constructor argument,
+        ``dj.config['custom']``, then ``False``. A call or constructor value
+        binds before path validation, so a failed explicit test-mode load
+        cannot later retry implicitly in production mode. A successful ambient
+        load is bound during commit. Once bound, the mode is immutable.
+        """
+        if self._mode_error is not None:
+            raise ValueError(self._mode_error)
+
+        if self._test_mode is not _UNSET:
+            bound_mode = self._test_mode
+            if call_value is not _UNSET:
+                requested_mode = str_to_bool(call_value)
+                if requested_mode != bound_mode:
+                    message = (
+                        "SpyglassConfig test_mode is already bound to "
+                        f"{bound_mode} and cannot change to {requested_mode}; "
+                        "create a new SpyglassConfig instance."
+                    )
+                    # Do not leave the old paths usable after a caller has
+                    # explicitly requested a different safety mode and caught
+                    # the rejection.
+                    self._config = {}
+                    self.load_failed = True
+                    self._mode_error = message
+                    raise ValueError(message)
+            return bound_mode, True
+
+        if call_value is not _UNSET:
+            test_mode = str_to_bool(call_value)
+        elif self._initial_test_mode is not _UNSET:
+            test_mode = str_to_bool(self._initial_test_mode)
+        else:
+            # Ambient state stays unbound until a configuration commits. This
+            # lets import-time startup remain graceful when no base exists.
+            return str_to_bool(dj_custom.get("test_mode", False)), False
+
+        # Bind deliberate mode before validation. In particular, a failed
+        # explicit test load must not let a later property access consult a
+        # production SPYGLASS_BASE_DIR.
+        self._test_mode = test_mode
+        return test_mode, True
+
     def load_config(
         self,
         base_dir=None,
         force_reload=False,
         on_startup: bool = False,
         **kwargs,
-    ) -> None:
+    ) -> dict | None:
         """
         Loads the configuration settings for the object.
 
@@ -136,6 +322,16 @@ class SpyglassConfig:
         3. dj.config['custom']['kachery_dirs']['X']
         4. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
         5. resolved_base_dir/X for non-base dirs
+
+        When test_mode=True, environment variables are not consulted for any
+        directory path, and the resolved base_dir must contain a 'tests' path
+        component.
+
+        ``test_mode`` binds to the instance on the first deliberate or
+        successful load and is then immutable. Passing a ``test_mode`` that
+        differs from the bound value (even without ``force_reload``) does not
+        transition the instance -- it invalidates it and raises. To switch
+        modes, construct a new ``SpyglassConfig``.
 
         Parameters
         ----------
@@ -148,14 +344,28 @@ class SpyglassConfig:
         Raises
         ------
         ValueError
-            If base_dir is not set in either dj.config or os.environ.
+            When a caller attempts to change the mode of a bound instance; or,
+            under test_mode, when a deliberate load cannot resolve a base_dir,
+            the resolved base_dir does not contain a 'tests' path component, or
+            any resolved directory -- including one reached through a symlink
+            -- falls outside that base_dir. A fresh ambient (dj.config-only)
+            test-mode load with no base returns gracefully instead.
 
         Returns
         -------
         dict
             list of relative_dirs and other settings (e.g., prepopulate).
         """
-        if not force_reload and self._config:
+        # Fast path for the common cached read (every directory property
+        # routes here with no kwargs). A mode-change request (explicit
+        # test_mode=) still falls through to _resolve_test_mode's binding /
+        # rejection, and a mode-wedged instance has _config == {} (falsy) so it
+        # also falls through and re-raises.
+        if (
+            not force_reload
+            and self._config
+            and kwargs.get("test_mode", _UNSET) is _UNSET
+        ):
             return self._config
 
         dj_custom = dj.config.get("custom", {})
@@ -163,19 +373,50 @@ class SpyglassConfig:
         dj_kachery = dj_custom.get("kachery_dirs", {})
         dj_dlc = dj_custom.get("dlc_dirs", {})
         dj_moseq = dj_custom.get("moseq_dirs", {})
+        dj_backends = _normalize_backends(dj_custom.get("backends", {}))
 
-        self._debug_mode = dj_custom.get("debug_mode", False)
-        self._test_mode = kwargs.get("test_mode") or dj_custom.get(
-            "test_mode", False
+        test_mode, test_mode_is_bound = self._resolve_test_mode(
+            kwargs.get("test_mode", _UNSET), dj_custom
         )
-        self._test_mode = str_to_bool(self._test_mode)
-        self._debug_mode = str_to_bool(self._debug_mode)
+        if not force_reload and self._config:
+            return self._config
+
+        def _resolve_debug_mode() -> bool:
+            """Resolve call > constructor > DataJoint > default precedence."""
+            call_value = kwargs.get("debug_mode", _UNSET)
+            if call_value is not _UNSET:
+                return str_to_bool(call_value)
+            if self._debug_mode_arg is not _UNSET:
+                return str_to_bool(self._debug_mode_arg)
+            return str_to_bool(dj_custom.get("debug_mode", False))
+
+        debug_mode = _resolve_debug_mode()
+        prefer_download = str_to_bool(dj_custom.get("prefer_download", False))
+        dj_store = dj_backends.get("store", {})
+        store_url = _clean_store_url(dj_store.get("url", ""))
+        store_auto_upload = str_to_bool(dj_store.get("auto_upload", False))
+
+        # Until a deliberate test-mode load commits, keep the object visibly
+        # failed. A successful commit below resets this flag. Same-mode reloads
+        # of an existing valid test config remain transactional.
+        if test_mode and test_mode_is_bound and not self._config:
+            self.load_failed = True
+
+        # `or {}` so an explicit "nwb_cache": null reaches the validator as an
+        # empty mapping rather than failing the merge inside it.
+        self._nwb_cache = self._validated_nwb_cache(
+            dj_custom.get("nwb_cache") or {}
+        )
 
         resolved_base = (
             base_dir
             or self.supplied_base_dir
             or dj_spyglass.get("base")
-            or os.environ.get("SPYGLASS_BASE_DIR")
+            # Gated by test_mode like every other directory env var below:
+            # SPYGLASS_BASE_DIR is the exact production path this sandbox
+            # exists to keep destructive tests off, so test_mode must not
+            # inherit it. Explicit base_dir/config still resolve.
+            or (None if test_mode else os.environ.get("SPYGLASS_BASE_DIR"))
         )
 
         # Log when supplied base_dir causes environment variable overrides to be ignored
@@ -184,37 +425,45 @@ class SpyglassConfig:
                 "Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides"
             )
 
-        if resolved_base:
-            base_path = Path(resolved_base).expanduser().resolve()
-            if not self._debug_mode:
-                # Create base directory if it doesn't exist
-                base_path.mkdir(parents=True, exist_ok=True)
-            resolved_base = str(base_path)
-
+        # ---------------------------- RESOLVE ----------------------------
+        # Compute every path as a plain value. Nothing is created and no
+        # external/global state is mutated until validation passes.
         if not resolved_base:
+            self.load_failed = True
+            if test_mode and test_mode_is_bound:
+                raise ValueError(
+                    "Refusing to load Spyglass in test_mode without an "
+                    "explicit base_dir or "
+                    "dj.config['custom']['spyglass_dirs']['base']; "
+                    "SPYGLASS_BASE_DIR is ignored in test_mode."
+                )
             if not on_startup:  # Only warn if not on startup
                 logger.error(
                     "Could not find SPYGLASS_BASE_DIR"
                     + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
                     + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
                 )
-            self.load_failed = True
             return
 
-        self._dlc_base = (
+        base_path = Path(resolved_base).expanduser().resolve()
+        resolved_base = str(base_path)
+
+        def env_or_none(var: str) -> str | None:
+            """Read an env var, ignored in test_mode to keep the sandbox."""
+            return None if test_mode else os.environ.get(var)
+
+        dlc_project = env_or_none("DLC_PROJECT_PATH")
+        dlc_base = (
             dj_dlc.get("base")
-            or os.environ.get("DLC_BASE_DIR")
-            or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
+            or env_or_none("DLC_BASE_DIR")
+            or (dlc_project.split("projects")[0] if dlc_project else None)
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
-
-        self._moseq_base = (
+        moseq_base = (
             dj_moseq.get("base")
-            or os.environ.get("MOSEQ_BASE_DIR")
+            or env_or_none("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
-        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
@@ -222,15 +471,15 @@ class SpyglassConfig:
             "moseq": dj_moseq,
             "kachery": dj_kachery,
         }
-        base_lookup = {"dlc": self._dlc_base, "moseq": self._moseq_base}
+        base_lookup = {"dlc": dlc_base, "moseq": moseq_base}
         for prefix, dirs in self.relative_dirs.items():
             this_base = base_lookup.get(prefix, resolved_base)
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
-                env_loc = (  # Ignore env vars if base was passed to func
+                env_loc = (  # Ignore env vars if base was passed or test_mode
                     os.environ.get(dir_env_fmt)
-                    if not self.supplied_base_dir
+                    if not self.supplied_base_dir and not test_mode
                     else None
                 )
                 source_config = source_config_lookup.get(prefix, dj_spyglass)
@@ -244,11 +493,75 @@ class SpyglassConfig:
 
         kachery_zone_dict = {
             "KACHERY_ZONE": (
-                os.environ.get("KACHERY_ZONE")
+                env_or_none("KACHERY_ZONE")
                 or dj.config.get("custom", {}).get("kachery_zone")
                 or "franklab.default"
             )
         }
+
+        # ---------------------------- VALIDATE ---------------------------
+        # Both checks apply ONLY under test_mode. Production configuration
+        # is unchanged: an analysis dir anywhere, including behind a
+        # symlink, stays legal.
+        if test_mode:
+            validation_error = None
+            if "tests" not in base_path.parts:
+                validation_error = (
+                    f"Refusing to load Spyglass in test_mode with base_dir "
+                    f"{resolved_base!r}: path does not contain a 'tests' "
+                    "component. Run pytest with --base-dir pointing inside a "
+                    "tests/ directory (default: ./tests/_data/) to keep "
+                    "destructive operations off shared/production storage."
+                )
+            else:
+                # Path.resolve() is non-strict: a dir that does not exist yet
+                # resolves to its would-be path, while an EXISTING symlink
+                # resolves through to its target. That is what catches an
+                # analysis dir symlinked at production storage.
+                checked = dict(config_dirs)
+                checked["DLC_BASE_DIR"] = dlc_base
+                checked["MOSEQ_BASE_DIR"] = moseq_base
+                for var, loc in checked.items():
+                    loc_path = Path(loc).expanduser().resolve()
+                    if not loc_path.is_relative_to(base_path):
+                        validation_error = (
+                            f"Refusing to load Spyglass in test_mode: {var} "
+                            f"resolves to {str(loc_path)!r}, outside the test "
+                            f"base {resolved_base!r}. Destructive tests must "
+                            "stay within the test base directory; check "
+                            "dj.config['custom'] and any directory symlinks."
+                        )
+                        break
+
+            if validation_error is not None:
+                # A deliberate (bound) test-mode load fails loud. An ambient /
+                # implicit load must not crash unrelated code -- matching the
+                # no-base handling above -- but must also NOT commit a
+                # test-mode config whose paths escape the sandbox. So mark the
+                # load failed and return without committing, leaving the mode
+                # unbound.
+                self.load_failed = True
+                if test_mode_is_bound:
+                    raise ValueError(validation_error)
+                if not on_startup:  # Only warn if not on startup
+                    logger.error(validation_error)
+                return
+
+        # ----------------------------- COMMIT ----------------------------
+        if self._test_mode is _UNSET:
+            self._test_mode = test_mode
+        self._debug_mode = debug_mode
+        self._prefer_download = prefer_download
+        self._store_url = store_url
+        self._store_auto_upload = store_auto_upload
+        self._backends = dj_backends
+        self._dlc_base = dlc_base
+        self._moseq_base = moseq_base
+
+        if not debug_mode:
+            base_path.mkdir(parents=True, exist_ok=True)
+        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
+        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         loaded_env = self._load_env_vars()
         self._set_env_with_dict(
@@ -258,7 +571,11 @@ class SpyglassConfig:
 
         self._config = dict(
             debug_mode=self._debug_mode,
-            test_mode=self._test_mode,
+            test_mode=self.test_mode,
+            prefer_download=self._prefer_download,
+            store_url=self._store_url,
+            store_auto_upload=self._store_auto_upload,
+            backends=self._backends,
             **self.config_defaults,
             **config_dirs,
             **kachery_zone_dict,
@@ -266,6 +583,8 @@ class SpyglassConfig:
         )
 
         self._set_dj_config_stores()
+
+        self.load_failed = False
 
         return self._config
 
@@ -505,7 +824,18 @@ class SpyglassConfig:
         return {
             "custom": {
                 "debug_mode": str(self.debug_mode).lower(),
-                "test_mode": str(self._test_mode).lower(),
+                "test_mode": str(self.test_mode).lower(),
+                # The instance-wide default, which any backend may override in
+                # its own block below.
+                "prefer_download": str(self._prefer_download).lower(),
+                "backends": {
+                    **self._backends,
+                    "store": {
+                        **self._backends.get("store", {}),
+                        "url": self._store_url,
+                        "auto_upload": str(self._store_auto_upload).lower(),
+                    },
+                },
                 "spyglass_dirs": {
                     "base": self.base_dir,
                     "raw": self.raw_dir,
@@ -607,7 +937,196 @@ class SpyglassConfig:
         """Returns True if test_mode is set.
 
         Required for pytests to run without prompts."""
-        return self._test_mode
+        if self._test_mode is not _UNSET:
+            return self._test_mode
+        if self._initial_test_mode is not _UNSET:
+            return str_to_bool(self._initial_test_mode)
+        return False
+
+    @property
+    def prefer_download(self) -> bool:
+        """Returns True if whole-file download is preferred over streaming.
+
+        The instance-wide default. Streaming backends honor it by fetching
+        the file to local disk; backends that cannot download ignore it. A
+        single backend can override it; see `backend_prefers_download`.
+        """
+        return self._prefer_download
+
+    @property
+    def backends(self) -> dict:
+        """Per-backend settings, keyed by lower-cased backend name.
+
+        A copy, so a caller cannot edit the loaded config in place. Backends
+        absent from `custom.backends` are absent here too; every reader is
+        expected to supply its own default.
+        """
+        return {name: dict(opts) for name, opts in self._backends.items()}
+
+    def backend_option(self, backend: str, key: str, default=None):
+        """Return one setting for one backend, or `default`.
+
+        Lookup is case-insensitive, because backend `name` attributes are not
+        consistently cased and the config is written by hand.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name, as `FileBackend.name` spells it.
+        key : str
+            Setting within that backend's block.
+        default : Any, optional
+            Returned when the backend has no block, or no such key in it.
+
+        Returns
+        -------
+        Any
+            The configured value, or `default`.
+        """
+        self.load_config()
+
+        return self._backends.get(str(backend).lower(), {}).get(key, default)
+
+    def backend_prefers_download(self, backend: str) -> bool:
+        """Return True if this backend should download rather than stream.
+
+        The backend's own `prefer_download`, falling back to the instance-wide
+        setting. The tradeoff is per-link: a lab fast to its own broker may be
+        slow to DANDI.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name, as `FileBackend.name` spells it.
+
+        Returns
+        -------
+        bool
+            Whether a whole-file transfer is preferred for this backend.
+        """
+        return str_to_bool(
+            self.backend_option(
+                backend, "prefer_download", self._prefer_download
+            )
+        )
+
+    def set_backend_option(self, backend: str, key: str, value) -> None:
+        """Set one backend's setting for this session, and persist it.
+
+        The one path that writes `custom.backends`, which is what makes a
+        reload or a `save_dj_config` keep the value. `_config` is only touched
+        once a load has succeeded, since a non-empty `_config` is the cache
+        sentinel.
+
+        Parameters
+        ----------
+        backend : str
+            Backend name. Stored lower-cased.
+        key : str
+            Setting within that backend's block.
+        value : Any
+            The already-normalized value to store.
+        """
+        name = str(backend).lower()
+
+        # `load_config` tolerates a malformed block by ignoring it, so this
+        # has to be able to repair one rather than raise on it.
+        custom = dj.config.setdefault("custom", {})
+        if not isinstance(custom.get("backends"), dict):
+            custom["backends"] = {}
+        if not isinstance(custom["backends"].get(name), dict):
+            custom["backends"][name] = {}
+
+        custom["backends"][name][key] = value
+
+        self._backends.setdefault(name, {})[key] = value
+
+        if self._config:
+            self._config["backends"] = self.backends
+
+    def _write_custom_key(self, key: str, value) -> None:
+        """Write one top-level `custom` setting through to `dj.config`.
+
+        See `set_backend_option` for why `_config` waits on a successful load.
+
+        Parameters
+        ----------
+        key : str
+            Key under `custom` in `dj.config`.
+        value : bool or str
+            The already-normalized value to store.
+        """
+        dj.config.setdefault("custom", {})[key] = value
+
+        if self._config:
+            self._config[key] = value
+
+    @prefer_download.setter
+    def prefer_download(self, value) -> None:
+        """Set the download preference for the current session.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings.
+        """
+        self.load_config()
+        self._prefer_download = str_to_bool(value)
+        self._write_custom_key("prefer_download", self._prefer_download)
+
+    @property
+    def store_url(self) -> str:
+        """Base URL of the shared-storage broker, or "" if none is configured.
+
+        An instance attached to no broker is the ordinary case, not a
+        misconfiguration: the shared-store backend reads "" as holding no
+        files and the resolution chain moves on to the next backend.
+        """
+        return self._store_url
+
+    @store_url.setter
+    def store_url(self, value) -> None:
+        """Point this session at a broker.
+
+        Parameters
+        ----------
+        value : str or None
+            Base URL, e.g. ``https://store.example.org``. A trailing slash is
+            dropped. None or "" detaches from the broker.
+        """
+        self.load_config()
+        self._store_url = _clean_store_url(value)
+        self.set_backend_option("store", "url", self._store_url)
+
+        if self._config:
+            self._config["store_url"] = self._store_url
+
+    @property
+    def store_auto_upload(self) -> bool:
+        """True if declaring a derived file for sharing should also upload it.
+
+        Off by default. A file built inside a `make()` is declared but not
+        uploaded, because a populate cannot run in the caller's transaction;
+        those transfer on the next `SharedAnalysisFile.populate()`.
+        """
+        return self._store_auto_upload
+
+    @store_auto_upload.setter
+    def store_auto_upload(self, value) -> None:
+        """Set whether declaring a derived share also transfers it.
+
+        Parameters
+        ----------
+        value : bool or str
+            Accepts the same string forms as other boolean settings, because
+            this is typed into `dj_local_conf.json` by hand.
+        """
+        self.load_config()
+        self._store_auto_upload = str_to_bool(value)
+        self.set_backend_option("store", "auto_upload", self._store_auto_upload)
+
+        if self._config:
+            self._config["store_auto_upload"] = self._store_auto_upload
 
     @property
     def dlc_project_dir(self) -> str:
@@ -633,6 +1152,21 @@ class SpyglassConfig:
     def moseq_video_dir(self) -> str:
         """Moseq video directory as a string."""
         return self.config.get(self.dir_to_var("video", "moseq"))
+
+    @property
+    def nwb_min_free_gb(self) -> float:
+        """Minimum free system RAM in GB before NWB files are closed."""
+        return self._nwb_cache["min_free_gb"]
+
+    @property
+    def nwb_min_free_pct(self) -> float:
+        """Minimum free RAM as a fraction of total before files are closed."""
+        return self._nwb_cache["min_free_pct"]
+
+    @property
+    def nwb_max_file_fraction(self) -> float:
+        """Max fraction of the OS open-descriptor limit this process may use."""
+        return self._nwb_cache["max_file_fraction"]
 
 
 sg_config = SpyglassConfig()

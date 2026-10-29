@@ -1,26 +1,26 @@
 # Change Log
 
-## [0.5.6] (Unreleased)
+## [0.6.1] (Unreleased)
 
 ### Release Notes
 
+<!--
 Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
+-->
 
 ```python
-# Alter Decoding v1 table
-from spyglass.common.common_filter import FirFilterParameters
-from spyglass.decoding.v1.core import DecodingParameters
+# Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
+# unique index, so run the DDL directly. `AFTER` keeps positional inserts in
+# the same order as a fresh instance. Restart Python afterward.
+from spyglass.common.common_lab import LabMember
 
-FirFilterParameters().alter()
-DecodingParameters().alter()
-
-# Alter v0 recompute table
-from spyglass.spikesorting.v0.spikesorting_recompute import (
-    RecordingRecompute,
-    RecordingRecomputeSelection,
-    RecordingRecomputeVersions,  # noqa F401
-    UserEnvironment,  # noqa F401
+info = LabMember.LabMemberInfo
+info.connection.query(
+    f"ALTER TABLE {info.full_table_name} "
+    + "ADD COLUMN `github_user_name` varchar(200) DEFAULT NULL "
+    + 'COMMENT "For shared-store identity" AFTER `datajoint_user_name`, '
+    + "ADD UNIQUE INDEX (`github_user_name`)"
 )
 
 RecordingRecomputeSelection().alter()
@@ -55,6 +55,176 @@ UserEnvironment().alter()
 ```
 
 ### Breaking Changes
+
+#### `LabMemberInfo` Takes Five Values (#1686)
+
+`LabMember.LabMemberInfo` gains `github_user_name`, between
+`datajoint_user_name` and `admin`, so a positional insert now needs five values.
+
+```python
+# OLD: four values
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", 0])
+
+# NEW: five, with the GitHub login (None if the member has not linked one)
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", None, 0])
+
+# ... or name the fields and stay insulated from column order
+LabMember.LabMemberInfo.insert1(
+    {
+        "lab_member_name": "Firstname Lastname",
+        "google_user_name": "fl@uni.edu",
+        "datajoint_user_name": "fl",
+        "github_user_name": "fl-gh",
+        "admin": 0,
+    }
+)
+```
+
+#### `get_sort_group_info` Returns Every Electrode (#1678)
+
+`get_sort_group_info` returned a single representative electrode per sort group,
+so a sort group spanning a whole tetrode was described by one of its four
+channels. It now returns one row per electrode, on `CurationV1`,
+`CuratedSpikeSorting` and `SpikeSortingOutput`.
+
+**Impact**: any caller that assumed a single row — `fetch1()`, or indexing the
+first row — will now see one row per electrode of the group.
+
+**Migration guide**:
+
+```python
+# OLD: one row per sort group
+info = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch1()
+
+# NEW: restrict to the electrode you want
+info = (
+    SpikeSortingOutput().get_sort_group_info(merge_keys) & {"electrode_id": 0}
+).fetch1()
+
+# ... or keep every electrode of the group
+rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+```
+
+### Documentation
+
+- Add LFP artifact detection to the LFP notebook #1641
+- Add File Backends developer page #1662
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
+- Rewrite the Data Sync notebook for the shared-store workflow, keeping kachery
+    in an appendix #1686
+
+### Infrastructure
+
+- Prevent errors during update for dandi standard from propagating to other
+    files #1677
+- Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
+    #1662
+- Deprecate `file_from_dandi` in favor of `file_is_remote` #1662
+- Add `prefer_download` custom config for stream-capable backends #1662
+- Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
+    targets #1679
+- Pin `ndx-ophys-devices>=0.3.1,<0.4` #1697
+- Fix handler loss in the DLC `file_log` decorator, which dropped the outer
+    call's file handler when these calls nested #1679
+- Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
+    the `None` return from `make_compute` #1679
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
+- Monitor open NWBs, and close under RAM or file-descriptior pressure. Adds
+    `close_nwb()` (and implements for `fetch_dataframe` and similar),
+    `custom.nwb_cache` config, and a `psutil` dependency #1606
+- Add a shared-storage file backend: `sharing_store` declaration and upload
+    tables, `StoreBackend` in the `get_nwb_file` resolution chain after local
+    disk, and a `spyglass-store` console script for `login`/`logout`/`status`
+    #1686
+- Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
+    #1686
+- Inherit shared-store visibility for derived analysis files, taking the
+    narrowest scope across their parents #1686
+- Expand `custom` config to specify per-backend data store behavior #1686
+- Add `requests` and `fsspec` as dependencies, for broker calls and
+    range-request streaming #1686
+- Deprecate kachery sharing, removed in 0.7.0. `kachery-cloud` is now an alias
+    for a new `kachery-legacy` extra #1686
+- Add `digest_file` to return several digests of a file's raw bytes in one read
+    #1686
+- Warn users on dirty installs #1601
+
+### Pipelines
+
+- Common
+
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
+
+- Decoding
+
+    - Pair waveform-feature units with spike times by label, not position #1678
+
+- Position
+
+    - Separate `DLCPosVideo`, `TrodesPosVideo`, and `PositionVideo` to tri-part
+        `make`; `PositionVideo` also closes the video NWB file handle it
+        previously left open #1679
+    - `DLCPosVideo` and `TrodesPosVideo` set `_parallel_make`, so
+        `populate(processes=N)` no longer fails on `VideoMaker`'s process pool
+        under DataJoint's daemonic workers #1679
+    - `TrodesPosVideo` and `PositionVideo` raise on an unmapped epoch instead of
+        committing `has_video=False`, and no longer repair `PositionIntervalMap`
+        or `VideoFile` from `make_fetch` #1679
+    - `DLCPosVideo` raises when a render writes no file, instead of reporting
+        success and inserting no row #1679
+    - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
+        across databases #1679
+    - `VideoMaker` raises on a failed partial render #1679
+
+- Spike Sorting
+
+    - Store `hash` on `SpikeSortingRecording` insert, and fix the `Path`/`str`
+        comparison that skipped hash verification on recompute. A recompute that
+        does not match the stored hash now deletes the new files and raises. Rows
+        written before this have a null hash; a recompute of one warns and is
+        accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
+        #1662
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
+        #1678
+
+## [0.6.0] (Sep 1st 2026)
+
+### Breaking Changes
+
+#### `insert_sessions` Returns a List (#1660)
+
+`insert_sessions` returned from inside its loop over `nwb_file_names`, so a list
+argument only ever processed its first file. It now processes every file and
+returns one `populate_all_common` result per file, rather than a single result.
+
+#### Ingestion Raises Instead of Skipping (#1660)
+
+Two cases ingestion used to pass over silently now raise.
+
+`_expected_duplicates` is read per table rather than once for the whole
+ingestion, so a table that legitimately recurs across files (`Task`) can be
+validated while the table driving the ingestion is not. `TaskEpoch`,
+`ImportedPose` and `ImportedLFP` no longer expect duplicates: re-ingesting an
+already-ingested file raises `DuplicateError` instead of validating and
+skipping.
+
+A `TaskEpoch` whose `camera_id` matched no `CameraDevice` in the NWB file or
+config was dropped with only an info log, and with it the `VideoFile`,
+`StateScriptFile` and `OptogeneticProtocol` rows referencing that epoch. A
+dangling camera reference now raises `ValueError`; an epoch that genuinely names
+no camera stores `camera_names = []` and is kept.
 
 #### NwbfileHasher Now Includes Dataset Content (#1600)
 
@@ -176,7 +346,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
-    #1484, #1489, #1507, #1614
+    #1484, #1489, #1507, #1614, #1660
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
@@ -184,7 +354,7 @@ for label, interval_data in results.groupby("interval_labels"):
     #1490
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
-    #1505
+    #1505, #1633
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
@@ -207,6 +377,38 @@ for label, interval_data in results.groupby("interval_labels"):
     `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Tests default `--base-dir` to `./tests/_data/` and ignore an exported
+    `SPYGLASS_BASE_DIR`. `SpyglassConfig.load_config` now resolves and validates
+    every path before creating anything, and under `test_mode` requires each
+    resolved directory to sit inside the base dir, keeping destructive tests off
+    shared/production filesystems. A config instance binds `test_mode` before an
+    explicit load is validated (or when an ambient load succeeds), refuses later
+    mode changes, and therefore cannot fall back to production paths after a
+    failed test-mode load. Ambient/implicit loads with an out-of-sandbox base
+    degrade gracefully rather than raising, so they never crash an unrelated
+    import #1573 #1574
+- `AnalysisNwbfile.cleanup()` follows leaf `*.nwb` symlinks and deletes their
+    targets, so analysis files spread across volumes are cleaned in one pass.
+    Directory symlinks are not traversed (`followlinks=False`), so cleanup
+    cannot follow a symlinked subdirectory out of `analysis_dir`; only leaf
+    `*.nwb` symlinks are eligible. The sweep uses the same trust-the-disk model
+    as other Spyglass cleanup routines: one tracked-path/filesystem snapshot, a
+    24-hour `mtime` gate, aggregate deletion limits, dry-run reporting, and
+    ordinary unlink error logging #1573 #1574
+- Add filesystem deletion limits to `AnalysisNwbfile.cleanup()`, computed over
+    the files the sweep was eligible to act on #1573 #1574
+- Analysis cleanup, including a dry-run preview, refuses a pre-existing
+    insert-blocking trigger, which may represent an active cleanup or stale
+    state. Confirm no cleanup is active before using
+    `AnalysisRegistry().unblock_new_inserts()`. This check is not a full cleanup
+    lease or per-run trigger-ownership protocol #1574
+- Fix: `AnalysisNwbfile.cleanup()` no longer deletes a **tracked** 0-byte
+    analysis file, which left a dangling DataJoint row (pre-existing)
+- Fix: honor `SpyglassConfig(test_mode=...)` and `debug_mode`; `load_config`
+    previously discarded the constructor/call kwargs in favor of `dj.config`
+    (pre-existing) #1574
+- The maintenance cron now propagates a cleanup refusal or failure instead of
+    reporting a successful run #1574
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
@@ -225,7 +427,38 @@ for label, interval_data in results.groupby("interval_labels"):
 - Save disk checks as csv, predict runway of primary data directory #1611
 - Fix package scanning without database import #1621
 - Allow `RestrGraph` to inspect tables outside of Spyglass #1595
-- Warn users on dirty installs #1601
+- Drop the `ghostipy` dependency by vendoring the FIR filter design and
+    out-of-core filtering it used (`scipy.fft` backend, no `pyfftw`). Filter
+    coefficients are bit-identical and the filtered float result matches the
+    previous implementation to round-off (~1e-15). Note that LFP is stored in
+    the raw data's dtype, so for `int16` raw data the float result is truncated
+    on write, and truncation can turn that round-off into a one-count difference
+    in a small fraction of stored samples -- recomputing an existing LFP entry
+    may not reproduce it exactly to the bit. Declares `scipy` explicitly and
+    ships Ghostipy's Apache-2.0 license #1635
+- Fix an inherited overlap-save bug in the vendored FIR filter: a signal shorter
+    than the filter combined with a tight `nfft` returned a wrong convolution.
+    Unreachable at the default `nfft`, so LFP output is unaffected #1635
+- Fix filtering an on-disk electrical series with 16 or more electrodes when a
+    block read is empty -- an interval starting at sample 0, or a trailing block
+    beginning at the end of the data -- which raised an h5py "Dataspaces don't
+    have hyperslab selections" error #1635
+- `FirFilterParameters.filter_data` and `filter_data_nwb` now raise when every
+    interval in `valid_times` is empty, instead of writing a zero-length
+    electrical series and then failing, and reject a reversed interval instead
+    of silently dropping it #1635
+- Electrode selections may again be given in any order, on-disk as well as
+    in-memory; rows are returned in the order requested #1635
+- Log a warning when an interval in `valid_times` is skipped for containing no
+    samples, instead of dropping it silently #1635
+- Split the vendored FIR sizing pass into its own `describe_output` function
+    instead of a `describe_dims` flag on `filter_data_fir`, so each returns one
+    type and arguments that cannot affect the sizing answer are rejected rather
+    than ignored #1635
+- Remove items scheduled for 0.6.0 deprecation #1633
+- Add `--container-vol-dir` pytest option to store the test container's MySQL
+    data on a chosen disk, and document it alongside the existing
+    `--container-name`/`--container-port` options #1661
 
 ### Pipelines
 
@@ -261,6 +494,12 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520
+    - Bypass delete permission check when removing null `PositionIntervalMap`
+        entries in `convert_epoch_interval_name_to_position_interval_name` #1640
+    - Clear a file's existing `InsertError` rows at the start of
+        `populate_all_common`, so a rerun no longer reports or rolls back on
+        failures logged by an earlier attempt #1497
+    - `PositionSource` ingestion is now responsible for `RawPosition` #1660
 
 - Decoding
 
@@ -276,6 +515,17 @@ for label, interval_data in results.groupby("interval_labels"):
         above.
     - Fix fetching position dataframe in
         `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
+    - Fix `DecodingOutput.create_decoding_view()` for 2D decoders: normalize the
+        posterior over the correct spatial dimension(s), auto-detect the
+        orientation column name, and pass the `linear_position` column (not the
+        whole DataFrame) to the 1D view #1616
+    - Import `non_local_detector` inside the decoding operations that use it, so a
+        broken `jax`/`numpy` stack no longer breaks `import   spyglass.common` or
+        data ingestion #1619
+    - Pin `numpy`, `scipy`, and `jax` to the combination `spikeinterface` 0.99
+        needs. Temporary, pending #1609 #1619
+    - Fix `DecodingParameters.insert_default()`, which raised `AttributeError` on
+        every call, and stop `insert` from mutating the caller's rows #1619
 
 - LFP
 
@@ -312,10 +562,24 @@ for label, interval_data in results.groupby("interval_labels"):
         `SpikeSortingRecording.hash`; previously only attrs/shape/dtype were
         hashed so in-place Dataset edits were invisible to the hasher #1600
     - Implement fix for `AutomaticCuration` incorrect labels #1537
+    - Fix `SortGroup.set_group_by_shank` to support non-numeric
+        `electrode_group_name`s by falling back to lexicographic ordering #1624
     - Fix `MetricCuration.populate` crash when no unit is labeled; skip the empty
         `curation_label` column #1626
     - Fix `MetricCuration` dropping non-empty `merge_groups` when writing to NWB
         #1626
+    - Add `unit_criteria` to `UnitSelectionParams`, allowing units to be selected
+        on arbitrary units table columns with numeric, range, and membership
+        criteria. A criterion naming a column a sorting's units table does not
+        have raises an error #1670
+    - Fix `SpikeSorting.populate` raising
+        `AttributeError: Bad parameters:   ['tempdir']` for SpikeInterface-native
+        sorters (e.g. `spykingcircus2`, `tridesclous2`). `_run_spike_sorter` now
+        injects the `tempdir` scratch-dir param only for sorters that declare it
+        (only `mountainsort4`), instead of injecting it into every sorter and
+        maintaining hardcoded removal lists #1655
+    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
+    - Add `unit_criteria` to `UnitSelectionParams` #1670
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -814,4 +1078,4 @@ for label, interval_data in results.groupby("interval_labels"):
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
-[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
+[0.6.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.6.0

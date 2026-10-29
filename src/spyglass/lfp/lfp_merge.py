@@ -47,8 +47,12 @@ class LFPOutput(_Merge, SpyglassMixin):
         """Fetch a single dataframe from the merged table."""
         # Note: `proj` below facilitates operator syntax eg Table & restrict
         _ = self.ensure_single_entry()
-        nwb_lfp = self.fetch_nwb(self.proj())[0]
-        return pd.DataFrame(
-            nwb_lfp["lfp"].data,
-            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-        )
+        try:
+            nwb_lfp = self.fetch_nwb(self.proj())[0]
+            return pd.DataFrame(
+                nwb_lfp["lfp"].data,
+                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
+            )
+        finally:
+            # Same projection the fetch used, or release misses the sources
+            self.close_nwb(self.proj())

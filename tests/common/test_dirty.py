@@ -8,6 +8,7 @@ Run with: conda run -n dirty pytest tests/common/test_dirty.py --no-teardown
 """
 
 import os
+import sys
 import time
 from subprocess import CompletedProcess
 from unittest.mock import MagicMock, patch
@@ -178,7 +179,10 @@ def test_with_pip_after_conda_only_fetches_pip(tmp_path, make_cache):
         cache.get()  # conda-only: conda export
         cache.get(with_pip=True)  # now needs pip: pip freeze
 
-    assert [c.args[0][0] for c in mock_run.call_args_list] == ["conda", "pip"]
+    cmds = [c.args[0] for c in mock_run.call_args_list]
+    assert cmds[0][0] == "conda"
+    # pip runs via the current interpreter, not PATH's pip
+    assert cmds[1] == [sys.executable, "-m", "pip", "freeze"]
     assert "pip" in yaml.safe_load(cache_path.read_text())  # disk completed
 
 

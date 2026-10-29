@@ -24,6 +24,7 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +51,7 @@ jobs:
           path: archive/
   test-package:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [build]
     strategy:
       matrix:
@@ -86,9 +88,30 @@ jobs:
       - name: Install archive # requires tag
         if: matrix.package == 'archive' && startsWith(github.ref, 'refs/tags/')
         run: pip install archive/archive.tgz
+      # The resolver can install a jax/numpy/spikeinterface combination that
+      # imports individually but not together. Not a cold `import
+      # spyglass.decoding`: that activates DataJoint schemas and needs a DB.
+      # TODO(#1609): revisit with the SpikeInterface bump.
+      - name: Smoke test installed dependency stack
+        if: matrix.package != 'archive' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          python -c "
+          import jax, numpy, scipy, spikeinterface
+          print('jax', jax.__version__)
+          print('numpy', numpy.__version__)
+          print('scipy', scipy.__version__)
+          print('spikeinterface', spikeinterface.__version__)
+
+          import non_local_detector
+          from non_local_detector import ContFragClusterlessClassifier
+          print('non_local_detector', non_local_detector.__version__)
+          ContFragClusterlessClassifier()
+          print('classifier construction OK')
+          "
   publish:
     name: Upload release to PyPI
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test-package]
     environment:
       name: pypi

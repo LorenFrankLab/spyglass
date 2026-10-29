@@ -187,11 +187,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_sort_group_info(cls, key):
         """get the sort group info associated with a spike sorting output
         (e.g. electrode location, brain region, etc.)
-        Parameters:
-        -----------
+
+        One row per electrode of each sort group.
+
+        Parameters
+        ----------
         key : dict
-            dictionary specifying the restriction (note: multi-source not currently supported)
-        Returns:
+            dictionary specifying the restriction (note: multi-source not
+            currently supported)
+
+        Returns
         -------
         sort_group_info : Table
             Table linking a merge id to information about the electrode group.
@@ -207,10 +212,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_spike_times(self, key):
         """Get spike times for the group"""
         spike_times = []
-        for nwb_file in self.fetch_nwb(key):
-            # V1 uses 'object_id', V0 uses 'units'
-            file_loc = "object_id" if "object_id" in nwb_file else "units"
-            spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())
+        try:
+            for nwb_file in self.fetch_nwb(key):
+                # V1 uses 'object_id', V0 uses 'units'
+                file_loc = "object_id" if "object_id" in nwb_file else "units"
+                spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())
+        finally:
+            # Same restriction the fetch used (see _Merge.close_nwb)
+            self.close_nwb(key)
         return spike_times
 
     @classmethod

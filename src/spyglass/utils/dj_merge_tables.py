@@ -504,6 +504,62 @@ class Merge(ExportMixin, dj.Manual):
         for part_parent in part_parents:
             super().delete(part_parent, **kwargs)
 
+    def _restricted_sources(self, restriction: str = None):
+        """Yield each source table restricted to this merge's entries.
+
+        Shared by ``fetch_nwb`` and ``close_nwb`` so the two resolve to the
+        same tables and rows; a release that resolved differently would leave
+        the fetched files held.
+
+        Parameters
+        ----------
+        restriction : str, optional
+            Restriction to apply to parents. Default: the table's own.
+
+        Yields
+        ------
+        tuple
+            The restricted source table, and the merge keys it came from.
+        """
+        if isinstance(self, dict):
+            raise ValueError("Try replacing Merge.method with Merge().method")
+        restriction = restriction or self.restriction or True
+        merge_restriction = self.extract_merge_id(restriction)
+
+        sources = set(
+            (self & merge_restriction).fetch(
+                self._reserved_sk, log_export=False
+            )
+        )
+        for source in sources:
+            source_restr = (
+                self
+                & dj.AndList([{self._reserved_sk: source}, merge_restriction])
+            ).fetch("KEY", log_export=False)
+            yield (
+                (self & source_restr).merge_restrict_class(
+                    restriction,
+                    permit_multiple_rows=True,
+                    add_invalid_restrict=False,
+                ),
+                source_restr,
+            )
+
+    def close_nwb(self, restriction: str = None) -> None:
+        """Release the NWB file holds that ``fetch_nwb`` took on the sources.
+
+        A merge master has no NWB foreign key of its own, so release has to
+        follow the source table the fetch read from.
+
+        Parameters
+        ----------
+        restriction : str, optional
+            Restriction to apply to parents before releasing. Default: the
+            table's own restriction, matching ``fetch_nwb``.
+        """
+        for source_table, _ in self._restricted_sources(restriction):
+            source_table.close_nwb()
+
     def fetch_nwb(
         self,
         restriction: str = None,
@@ -534,32 +590,10 @@ class Merge(ExportMixin, dj.Manual):
         -----
         Nwb files not strictly returned in same order as self
         """
-        if isinstance(self, dict):
-            raise ValueError("Try replacing Merge.method with Merge().method")
-        restriction = restriction or self.restriction or True
-        merge_restriction = self.extract_merge_id(restriction)
-
-        sources = set(
-            (self & merge_restriction).fetch(
-                self._reserved_sk, log_export=False
-            )
-        )
         nwb_list = []
         merge_ids = []
-        for source in sources:
-            source_restr = (
-                self
-                & dj.AndList([{self._reserved_sk: source}, merge_restriction])
-            ).fetch("KEY", log_export=False)
-            nwb_list.extend(
-                (self & source_restr)
-                .merge_restrict_class(
-                    restriction,
-                    permit_multiple_rows=True,
-                    add_invalid_restrict=False,
-                )
-                .fetch_nwb()
-            )
+        for source_table, source_restr in self._restricted_sources(restriction):
+            nwb_list.extend(source_table.fetch_nwb())
             if return_merge_ids:
                 merge_ids.extend(
                     [
@@ -942,26 +976,3 @@ _Merge = Merge
 
 # Underscore as class name avoids errors when this included in a Diagram
 # Aliased because underscore otherwise excludes from API docs.
-
-
-def delete_downstream_merge(
-    table: dj.Table,
-    **kwargs,
-) -> list:
-    """Given a table/restriction, id or delete relevant downstream merge entries
-
-    Passthrough to SpyglassMixin.delete_downstream_parts
-    """
-    from spyglass.common.common_usage import ActivityLog
-    from spyglass.utils.dj_mixin import SpyglassMixin
-
-    ActivityLog().deprecate_log(
-        name="delete_downstream_merge",
-        alternate="Table.delete_downstream_merge",
-    )
-
-    if not isinstance(table, SpyglassMixin):
-        raise ValueError("Input must be a Spyglass Table.")
-    table = table if isinstance(table, dj.Table) else table()
-
-    return table.delete_downstream_parts(**kwargs)

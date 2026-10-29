@@ -50,6 +50,7 @@ from functools import cached_property
 from pathlib import Path
 from pprint import pprint
 from subprocess import run as sub_run
+from sys import executable as sys_executable
 from typing import Optional, Tuple, Union
 
 import yaml
@@ -346,7 +347,12 @@ class CondaEnvCache:
         Does not reset conda state — it augments an already-fetched (or
         disk-loaded) conda export with pip data on demand.
         """
-        pip_result = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
+        # Use the running interpreter's pip, not whatever is first on PATH:
+        # PATH may hold another env's pip, or none at all when the env's
+        # python is invoked by absolute path without activation.
+        pip_result = sub_run(
+            [sys_executable, "-m", "pip", "freeze"], **SUBPROCESS_KWARGS
+        )
         if pip_result.returncode != 0:
             logger.error(  # pragma: no cover
                 "Failed to retrieve the pip environment. "

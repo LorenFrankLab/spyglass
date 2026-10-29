@@ -22,7 +22,7 @@ from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 
 @pytest.fixture(scope="module")
-def multifile_video_nwb(raw_dir, common, data_import, teardown):
+def multifile_video_nwb(raw_dir, common, data_import):
     """Create an NWB file with ImageSeries containing multiple external files.
 
     This fixture creates a mock NWB file that simulates the scenario described
@@ -149,11 +149,10 @@ def multifile_video_nwb(raw_dir, common, data_import, teardown):
 
     yield video_files
 
-    # Cleanup
-    if teardown:
-        (common.Nwbfile & nwb_dict).delete(safemode=False)
-        if nwb_path.exists():
-            nwb_path.unlink()
+    # Always clean up, even under --no-teardown, avoid phantom work next run
+    (common.Nwbfile & nwb_dict).delete(safemode=False)
+    if nwb_path.exists():
+        nwb_path.unlink()
 
 
 def test_multifile_video_import(common, multifile_video_nwb):

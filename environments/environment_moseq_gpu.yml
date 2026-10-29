@@ -19,17 +19,17 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
+  - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy
+  - numpy<2  # spikeinterface 0.99.1 calls np.issctype, removed in numpy 2.0
   - pip
   - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
-  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
   - python>=3.10,<3.13
   - pytorch<1.12.0
   - ripple_detection
@@ -38,6 +38,5 @@ dependencies:
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
-      - ghostipy # for common_filter
       - mountainsort4
       - ..[moseq-gpu]

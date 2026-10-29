@@ -23,7 +23,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 import datajoint as dj
 
-# ---------- Helpers to safely access @property without running __init__ ----------
+# ---------- Helpers to read declared mappings without running __init__ ----------
 
 
 def safe_new(cls):
@@ -35,17 +35,22 @@ def safe_new(cls):
         return object.__new__(cls)
 
 
-def get_property_value(cls, prop_name: str):
+def get_declared_value(cls, name: str):
     """
-    Call a @property (if present) on a dummy instance without invoking __init__.
+    Read a declared mapping, whether it is a plain class attribute or a
+    @property. A property is called on a dummy instance to avoid invoking
+    dj.Table.__init__; tables whose mapping needs no `self` declare it as a
+    plain attribute instead, and those are read directly.
+
     Returns (value, error_str) where error_str is None on success.
     """
     try:
-        prop = getattr(cls, prop_name, None)
-        if prop is None or not isinstance(prop, property):
-            return None, f"missing property {prop_name}"
-        inst = safe_new(cls)
-        return prop.fget(inst), None
+        attr = getattr(cls, name, None)
+        if attr is None:
+            return None, f"missing {name}"
+        if isinstance(attr, property):
+            return attr.fget(safe_new(cls)), None
+        return attr, None
     except NotImplementedError as e:
         return None, f"NotImplementedError: {e}"
     except Exception as e:
@@ -88,15 +93,11 @@ def is_spyglass_ingestion_subclass(cls) -> bool:
             and cls is not SpyglassIngestion
         )
     except Exception:
-        # Duck-typing fallback: has the two required @properties
+        # Duck-typing fallback: declares both, as attribute or property
         return (
             inspect.isclass(cls)
-            and isinstance(
-                getattr(cls, "table_key_to_obj_attr", None), property
-            )
-            and isinstance(
-                getattr(cls, "_source_nwb_object_type", None), property
-            )
+            and getattr(cls, "table_key_to_obj_attr", None) is not None
+            and getattr(cls, "_source_nwb_object_type", None) is not None
         )
 
 
@@ -129,6 +130,21 @@ def iter_modules(package_name: str) -> Iterable[types.ModuleType]:
             continue
 
 
+def iter_part_tables(cls) -> Iterable[type]:
+    """Yield a table's own Part classes.
+
+    Parts are nested inside their master, so they are not module members and
+    would otherwise be skipped -- even though a part can declare a mapping of
+    its own (OptogeneticProtocol.RippleTrigger, for one).
+    """
+    # vars(), not getattr/getmembers: enumerating attributes on a class the
+    # crawl never activated trips dj.Table.__getattribute__ via
+    # full_table_name. The class body also holds only this table's own parts.
+    for part in vars(cls).values():
+        if inspect.isclass(part) and issubclass(part, dj.Part):
+            yield part
+
+
 def discover_ingestion_classes(package_name: str) -> List[type]:
     """Return all SpyglassIngestion subclasses found in package modules."""
     classes: List[type] = []
@@ -139,8 +155,13 @@ def discover_ingestion_classes(package_name: str) -> List[type]:
                 continue
             if is_spyglass_ingestion_subclass(cls):
                 classes.append(cls)
+                classes.extend(
+                    part
+                    for part in iter_part_tables(cls)
+                    if is_spyglass_ingestion_subclass(part)
+                )
     # Keep deterministic order: by module then class name
-    classes.sort(key=lambda c: (c.__module__, c.__name__))
+    classes.sort(key=lambda c: (c.__module__, c.__qualname__))
     return classes
 
 
@@ -157,7 +178,7 @@ def extract_mapping_rows(cls: type) -> Tuple[List[Dict[str, Any]], List[str]]:
     warnings: List[str] = []
 
     # _source_nwb_object_type
-    source_type, err = get_property_value(cls, "_source_nwb_object_type")
+    source_type, err = get_declared_value(cls, "_source_nwb_object_type")
     if err:
         warnings.append(f"{qualname(cls)}: _source_nwb_object_type -> {err}")
     source_type_name = (
@@ -167,7 +188,7 @@ def extract_mapping_rows(cls: type) -> Tuple[List[Dict[str, Any]], List[str]]:
     )
 
     # table_key_to_obj_attr
-    mapping, err = get_property_value(cls, "table_key_to_obj_attr")
+    mapping, err = get_declared_value(cls, "table_key_to_obj_attr")
     if err:
         warnings.append(f"{qualname(cls)}: table_key_to_obj_attr -> {err}")
         mapping = {}
@@ -187,7 +208,7 @@ def extract_mapping_rows(cls: type) -> Tuple[List[Dict[str, Any]], List[str]]:
                 rows.append(
                     {
                         "module": cls.__module__,
-                        "class": cls.__name__,
+                        "class": cls.__qualname__,
                         "source_nwb_object_type": source_type_name,
                         "object_selector": obj_key,
                         "table_key": table_key,
@@ -200,7 +221,7 @@ def extract_mapping_rows(cls: type) -> Tuple[List[Dict[str, Any]], List[str]]:
                 rows.append(
                     {
                         "module": cls.__module__,
-                        "class": cls.__name__,
+                        "class": cls.__qualname__,
                         "source_nwb_object_type": source_type_name,
                         "object_selector": obj_key,
                         "table_key": table_key,
