@@ -12,6 +12,7 @@ import warnings
 from pathlib import Path
 
 from spyglass.common import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_user import UserEnvironment
 from spyglass.common.common_version import SpyglassVersions
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema
@@ -90,6 +91,10 @@ def main():
         with open(out_path, "w") as f:
             for tbl, cnt in issues.items():
                 f.write(f"{tbl}: {cnt}\n")
+    print("Checking for dirty install notifications...")
+    dirty_out = os.environ.get("DIRTY_ENVS_OUT")
+    if dirty_out:
+        UserEnvironment().write_dirty_notifications(dirty_out)
 
 
 if __name__ == "__main__":
