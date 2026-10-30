@@ -2587,14 +2587,15 @@ class Model(SpyglassMixin, dj.Computed):
 
         Creates the DLC project folder on disk, extracts frames for labeling,
         and inserts a ``Skeleton`` entry.  Does **not** insert into
-        ``ModelSelection`` or trigger training — return here with
-        ``Model.load(config_path)`` after labeling frames externally.
+        ``ModelSelection`` or trigger training — label frames externally, then
+        ``Model.load(config_path)`` registers the project and returns a
+        ``ModelSelection`` key for ``populate`` to train.
 
         .. note::
             There is no ``Project`` table in V2.  The DLC project folder and
-            its ``config.yaml`` are the on-disk record.  ``config.yaml`` is
-            stored in ``ModelParams`` only after training is complete via
-            ``Model.load()``.
+            its ``config.yaml`` are the on-disk record.  ``config.yaml``
+            reaches ``ModelParams`` when ``Model.load()`` registers the
+            project, before training.
 
         Parameters
         ----------
@@ -2663,8 +2664,10 @@ class Model(SpyglassMixin, dj.Computed):
                     {"nwb_file_name": "subject_20240101_.nwb", "epoch": 1},
                 ],
             )
-            # → label frames externally, then:
-            model_key = Model().load(project_info["config_path"])
+            # → label frames externally, then register the project. With no
+            # snapshot yet, this returns a ModelSelection key:
+            sel_key = Model().load(project_info["config_path"])
+            Model().populate(sel_key)  # trains; creates the Model row
 
         """
         try:
@@ -3088,7 +3091,11 @@ class Model(SpyglassMixin, dj.Computed):
         Returns
         -------
         dict
-            Primary key for the created Model entry
+            Primary key for the created Model entry. For a DLC project that
+            holds no trained snapshot, a ``ModelSelection`` key instead: there
+            is nothing to run inference with, so no ``Model`` row is created.
+            Pass that key to ``populate`` to train it. The two are told apart
+            by the presence of ``model_id``.
 
         Raises
         ------
@@ -3264,6 +3271,34 @@ class Model(SpyglassMixin, dj.Computed):
         """
         return override or default_pk_name(
             "DLC", dict(tool="DLC", task=task, model_path=str(stored_path))
+        )
+
+    @staticmethod
+    def _project_has_weights(config: dict, config_path) -> bool:
+        """Does this DLC project hold trained weights?
+
+        Covers both engines: PyTorch writes ``snapshot-*.pt``, TensorFlow
+        writes a ``*.index`` triple. Distinct from
+        :meth:`_project_training_mode`, which reports ``inference_only`` both
+        for a TensorFlow project that *can* infer and for a project with no
+        weights at all, which can do neither.
+
+        Parameters
+        ----------
+        config : dict
+            Parsed DLC ``config.yaml``.
+        config_path : str or pathlib.Path
+            Its location, used when the config carries no ``project_path``.
+
+        Returns
+        -------
+        bool
+            True when any snapshot is present.
+        """
+        project = Path(config.get("project_path") or Path(config_path).parent)
+        return bool(
+            next(project.rglob("snapshot-*.pt"), None)
+            or next(project.rglob("*.index"), None)
         )
 
     @staticmethod
@@ -3555,6 +3590,18 @@ class Model(SpyglassMixin, dj.Computed):
             skip_duplicates=True,
             allow_redundant_model=allow_redundant_model,
         )
+
+        # Step 4b: A project with no snapshot has nothing to run inference
+        # with, so it gets no Model row. The selection above is what
+        # `populate` trains.
+        if not self._project_has_weights(config, model_path):
+            self._info_msg(
+                f"Project has no trained weights: {model_path}. Registered "
+                "ModelSelection "
+                f"{sel_key['model_selection_id']} instead of a Model. Train "
+                "it with `Model().populate(<the returned key>)`."
+            )
+            return sel_key
 
         # Step 5: Generate model_id and insert directly into Model. The id must
         # be unique per model; see _dlc_model_id for why a short prefix matters.
