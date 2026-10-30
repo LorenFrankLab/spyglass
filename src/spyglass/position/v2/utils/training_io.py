@@ -105,23 +105,36 @@ def parse_training_csv(path: Path) -> "pd.DataFrame | None":
     col_map: dict = {}
     cols = list(df.columns)
 
-    if str(cols[0]) != "iteration":
+    if first_row_numeric:
+        # Headerless: column order is the only information available.
         col_map[cols[0]] = "iteration"
-    if str(cols[1]) != "loss":
         col_map[cols[1]] = "loss"
+        if len(cols) >= 3:
+            col_map[cols[2]] = "learning_rate"
+    else:
+        # Named columns identify themselves, so position is not consulted.
+        aliases = {
+            "iteration": ("iteration", "epoch", "step", "global_step"),
+            "loss": ("loss", "train_loss", "training_loss", "total_loss"),
+            "learning_rate": ("learning_rate", "lr"),
+        }
+        by_name = {str(c).lower(): c for c in cols}
+        for target, names in aliases.items():
+            for name in names:
+                column = by_name.get(name)
+                if column is not None and column not in col_map:
+                    col_map[column] = target
+                    break
 
-    lr_candidates = [
-        c
-        for c in cols
-        if isinstance(c, str)
-        and ("learning_rate" in c.lower() or c.lower() == "lr")
-    ]
-    if lr_candidates and str(lr_candidates[0]) != "learning_rate":
-        col_map[lr_candidates[0]] = "learning_rate"
-    elif (
-        not lr_candidates and len(cols) >= 3 and str(cols[2]) != "learning_rate"
-    ):
-        col_map[cols[2]] = "learning_rate"
+        # iteration and loss are required; learning_rate is not, and is left
+        # unset rather than guessed from a column such as val_loss.
+        for target in ("iteration", "loss"):
+            if target in col_map.values():
+                continue
+            for column in cols:
+                if column not in col_map:
+                    col_map[column] = target
+                    break
 
     if col_map:
         df = df.rename(columns=col_map)
