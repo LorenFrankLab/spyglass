@@ -22,7 +22,7 @@ from spyglass.spikesorting.spikesorting_merge import (
     source_class_dict,
 )
 from spyglass.spikesorting.v1 import SpikeSortingSelection
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.waveforms import _get_peak_amplitude
 
 schema = dj.schema("decoding_waveform_features")
@@ -413,9 +413,15 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             List of features for each unit
 
         """
-        per_unit = list(
-            chain(*[self._convert_data(data) for data in self.fetch_nwb()])
-        )
+
+        def converted_units():
+            """Materialize every unit's data, then release the files."""
+            try:
+                return [self._convert_data(d) for d in self.fetch_nwb()]
+            finally:
+                self.close_nwb()
+
+        per_unit = list(chain(*converted_units()))
         # ``zip(*[])`` collapses to an empty tuple ``()``; consumers (e.g.
         # ``ClusterlessDecodingV1.fetch_spike_data``) unpack the result into
         # ``spike_times, spike_waveform_features``, which would raise on ``()``.
@@ -686,6 +692,10 @@ def _write_waveform_features_to_nwb(
         legacy WaveformExtractor (v0/v1) or the v2 SortingAnalyzer adapter
         exposing ``.sorting`` and ``.get_waveforms(unit_id)``
     spike_times : pd.DataFrame
+        spike times indexed by unit id, as returned by ``fetch_nwb`` on the
+        upstream sorting. Curated sortings drop rejected units and give
+        merged units new ids, so this index is neither contiguous nor
+        zero-based, and it need not cover every unit in ``waveforms``.
     waveform_features : dict
         dictionary of waveform_features to be saved in the NWB file
 
@@ -698,7 +708,22 @@ def _write_waveform_features_to_nwb(
         object_id of the units table in the analysis NWB file
     """
 
-    unit_ids = [int(i) for i in waveforms.sorting.get_unit_ids()]
+    # Pair units with spike times by *label*, not position: the sorting
+    # reports every unit it was built from, while `spike_times` is indexed by
+    # the curated unit ids actually present in the upstream units table.
+    # Positional (`iloc`) lookup would read an unrelated row for any id that
+    # is not its own row number. See issue #1273.
+    available_ids = {int(i) for i in getattr(spike_times, "index", [])}
+    unit_ids, missing_ids = [], []
+    for unit_id in waveforms.sorting.get_unit_ids():
+        unit_id = int(unit_id)
+        (unit_ids if unit_id in available_ids else missing_ids).append(unit_id)
+
+    if missing_ids:
+        logger.warning(
+            f"Skipping {len(missing_ids)} unit(s) with no spike times in the "
+            + f"upstream sorting: {missing_ids}"
+        )
 
     # On the v2 path the per-spike features come from a freshly built analyzer
     # while ``spike_times`` come from the persisted units table -- two

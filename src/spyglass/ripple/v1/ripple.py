@@ -244,7 +244,10 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self) -> List[pd.DataFrame]:
         """Convenience function for returning all marks in a readable format"""
-        return [data["ripple_times"] for data in self.fetch_nwb()]
+        try:
+            return [data["ripple_times"] for data in self.fetch_nwb()]
+        finally:
+            self.close_nwb()
 
     @staticmethod
     def get_ripple_lfps_and_position_info(key) -> tuple:

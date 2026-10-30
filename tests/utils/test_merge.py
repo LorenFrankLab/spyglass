@@ -95,3 +95,31 @@ def test_merge_get_class_invalid(spike_merge):
     # 0.104 run-tests job.
     ret = spike_merge.merge_get_parent_class("bad")
     assert ret is None, "Should return None for invalid part name."
+
+
+def test_merge_close_nwb(spike_merge, pop_spike_merge):
+    """close_nwb on a merge table releases through the source fetch_nwb read.
+
+    A merge master has no NWB foreign key, so inheriting
+    FetchMixin.close_nwb raised NotImplementedError before a release could
+    happen.
+    """
+    import spyglass.utils.nwb_helper_fn as helper
+
+    cache = helper.__dict__["__open_nwb_files"]
+    restricted = spike_merge & pop_spike_merge
+
+    def held_paths():
+        return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
+
+    # The cache is process-wide, so ignore whatever other tests are holding.
+    # This call must also not raise -- that was the reported failure.
+    restricted.close_nwb()
+    before = held_paths()
+
+    restricted.fetch_nwb()
+    taken = held_paths() - before
+    assert taken, "fetch_nwb through the merge took no hold"
+
+    restricted.close_nwb()
+    assert not (taken & held_paths()), "merge close_nwb left holds"

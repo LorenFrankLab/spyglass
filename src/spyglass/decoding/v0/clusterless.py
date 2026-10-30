@@ -275,7 +275,12 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
         """Fetches the marks as a list of pandas dataframes"""
-        return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
+        try:
+            return [
+                self._convert_to_dataframe(data) for data in self.fetch_nwb()
+            ]
+        finally:
+            self.close_nwb()
 
     @staticmethod
     def _convert_to_dataframe(nwb_data) -> pd.DataFrame:
@@ -460,10 +465,13 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
         """Fetches the marks indicators as a list of pandas dataframes"""
-        return [
-            data["marks_indicator"].set_index("time")
-            for data in self.fetch_nwb()
-        ]
+        try:
+            return [
+                data["marks_indicator"].set_index("time")
+                for data in self.fetch_nwb()
+            ]
+        finally:
+            self.close_nwb()
 
     def fetch_xarray(self):
         """Fetches the marks indicators as an xarray DataArray"""

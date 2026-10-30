@@ -45,11 +45,16 @@ dependencies = [
   "bottleneck",
   "dask",
   "datajoint>=0.14.5,<2.0",
+  "fsspec",                       # Streaming reads; was an undeclared transitive
   "hdmf>=3.4.6",
   "ipympl",
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
-  "ndx-ophys-devices",
+  # ndx-ophys-devices 0.4.0 is a breaking spec change: ViralVectorInjection
+  # coordinates moved into a StereotacticPosition child, FiberInsertion was
+  # dropped, and OpticalLens* was renamed ObjectiveLens*. Our ingestion in
+  # common_optogenetics reads the 0.3.x layout.
+  "ndx-ophys-devices>=0.3.1,<0.4",
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
   "networkx",                       # imported by spikesorting v2 _matching.graph
@@ -69,10 +74,12 @@ dependencies = [
   "opencv-python",
   "position-tools>=0.1",
   "probeinterface>=0.3.2",         # required by spikeinterface 0.104
+  "psutil",                        # Detects available RAM for the NWB cache
   "pubnub<6.4",                    # TODO: remove this when sortingview is updated
   "pydantic>=2",                   # spikesorting v2 parameter models
   "pydotplus",
   "pynwb>=3.1.3",
+  "requests",                      # Shared-storage broker API
   "ripple-detection>=1.7",         # spyglass.mua needs core.normalize_signal
                                    # and the detector's normalization params
   "scipy>=1.13",                   # imported at top level across common/lfp/
@@ -108,7 +115,14 @@ optional-dependencies.docs = [
   "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
   "mkdocstrings[python]",   # Docs API docstrings
 ]
+# Deprecated alias for kachery-legacy, kept so an existing install command
+# does not break during the deprecation cycle. Removed with the extra itself.
 optional-dependencies.kachery-cloud = [
+  "spyglass-neuro[kachery-legacy]",
+]
+# Deprecated in 0.6.1, removed in 0.7.0. Superseded by the shared-storage
+# broker; nothing in the default install depends on these.
+optional-dependencies.kachery-legacy = [
   "kachery",
   "kachery-client",
   "kachery-cloud>=0.4",
@@ -213,6 +227,9 @@ optional-dependencies.test = [
 ]
 urls."Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 urls."Homepage" = "https://github.com/LorenFrankLab/spyglass"
+# Login has to work before a DataJoint session does: a new user may have no
+# working config yet, and should not need to open Python to get a token.
+scripts.spyglass-store = "spyglass.sharing.store_client:login_cli"
 
 [tool.hatch.version]
 source = "vcs"

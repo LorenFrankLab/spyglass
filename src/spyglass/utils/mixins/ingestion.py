@@ -399,16 +399,21 @@ class IngestionMixin(BaseMixin):
         self, entries: IngestionEntries, nwb_file_name: str = None
     ) -> None:
         """Run insert on compiled Dict[TableObject, inserts]."""
-        # An integrity here probably means a parallel insert was dropped
-        # check debug_backup in parent func for entries that were dropped
-        # One transaction for the whole plan
+        # Imported here, bc `common_lab` imports from this package
+        from spyglass.common.common_lab import forward_to_admin
+
         with self._safe_context():
             for table, table_entries in entries.items():
-                table.insert(
-                    table_entries,
-                    skip_duplicates=False,
-                    allow_direct_insert=True,
-                )
+                # Per table, so a refusal names the one that was denied
+                with forward_to_admin(
+                    f"{table.__class__.__name__}.insert({table_entries}, "
+                    + "skip_duplicates=True, allow_direct_insert=True)"
+                ):
+                    table.insert(
+                        table_entries,
+                        skip_duplicates=False,
+                        allow_direct_insert=True,
+                    )
                 self._insert_logline(nwb_file_name, len(table_entries), table)
 
     def _key_has_required_attrs(self, key):

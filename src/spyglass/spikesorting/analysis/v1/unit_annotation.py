@@ -130,14 +130,14 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         }
         unit_is_new = not self & unit_key
         if unit_is_new:
-            nwb_file = (
-                SpikeSortingOutput & {"merge_id": merge_id}
-            ).fetch_nwb()[0]
+            _ss_query = SpikeSortingOutput & {"merge_id": merge_id}
+            nwb_file = _ss_query.fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
             # Compare against the NWB's actual unit_id set, not the
             # count -- v2 sparse-id sortings break the count-as-bound
             # heuristic.
             nwb_unit_ids = set(_get_nwb_unit_ids(nwb_file, nwb_field_name))
+            _ss_query.close_nwb()
             if int(key["unit_id"]) not in nwb_unit_ids and not self._test_mode:
                 raise ValueError(
                     f"unit_id {key['unit_id']} is not present in "

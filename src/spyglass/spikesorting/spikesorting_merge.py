@@ -655,11 +655,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     def get_sort_group_info(cls, key):
         """get the sort group info associated with a spike sorting output
         (e.g. electrode location, brain region, etc.)
-        Parameters:
-        -----------
+
+        One row per electrode of each sort group.
+
+        Parameters
+        ----------
         key : dict
-            dictionary specifying the restriction (note: multi-source not currently supported)
-        Returns:
+            dictionary specifying the restriction (note: multi-source not
+            currently supported)
+
+        Returns
         -------
         sort_group_info : Table
             Table linking a merge id to information about the electrode group.
@@ -733,23 +738,27 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         type(self)._warn_preview_merge_ids(merge_ids)
         self._warn_multi_source_merge_ids(merge_ids)
         spike_times, unit_ids = [], []
-        for nwb_file, merge_id in zip(nwb_files, merge_ids):
-            # V1 uses 'object_id', V0 uses 'units'
-            file_loc = "object_id" if "object_id" in nwb_file else "units"
-            units = nwb_file[file_loc]
-            # A zero-unit sorting or curation (v1 with no units, or v2's
-            # ``require_units=False`` path) writes an empty Units table with
-            # no ``spike_times`` column; indexing it would raise
-            # ``KeyError: 'spike_times'``. Such a row contributes no spike
-            # trains, so skip it. Populated v0/v1/v2 units tables always
-            # carry the column, so this never changes their behavior.
-            if "spike_times" not in units:
-                continue
-            spike_times.extend(units["spike_times"].to_list())
-            unit_ids.extend(
-                {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
-                for unit_id in _get_nwb_unit_ids(nwb_file, file_loc)
-            )
+        try:
+            for nwb_file, merge_id in zip(nwb_files, merge_ids):
+                # V1 uses 'object_id', V0 uses 'units'
+                file_loc = "object_id" if "object_id" in nwb_file else "units"
+                units = nwb_file[file_loc]
+                # A zero-unit sorting or curation (v1 with no units, or v2's
+                # ``require_units=False`` path) writes an empty Units table
+                # with no ``spike_times`` column; indexing it would raise
+                # ``KeyError: 'spike_times'``. Such a row contributes no spike
+                # trains, so skip it. Populated v0/v1/v2 units tables always
+                # carry the column, so this never changes their behavior.
+                if "spike_times" not in units:
+                    continue
+                spike_times.extend(units["spike_times"].to_list())
+                unit_ids.extend(
+                    {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
+                    for unit_id in _get_nwb_unit_ids(nwb_file, file_loc)
+                )
+        finally:
+            # Same restriction the fetch used (see _Merge.close_nwb)
+            self.close_nwb(key)
         return spike_times, unit_ids
 
     def get_spike_times(self, key):

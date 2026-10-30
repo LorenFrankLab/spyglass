@@ -4,8 +4,10 @@
 
 ### Release Notes
 
+<!--
 Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
+-->
 
 This release moves Spyglass to SpikeInterface 0.104 and NumPy 2 and adds the
 Spike Sorting v2 pipeline (#1609). To upgrade:
@@ -63,6 +65,21 @@ from spyglass.spikesorting.v1.recompute import (
 
 RecordingRecomputeSelection().alter()
 RecordingRecompute().alter()
+```
+
+```python
+# Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
+# unique index, so run the DDL directly. `AFTER` keeps positional inserts in
+# the same order as a fresh instance. Restart Python afterward.
+from spyglass.common.common_lab import LabMember
+
+info = LabMember.LabMemberInfo
+info.connection.query(
+    f"ALTER TABLE {info.full_table_name} "
+    + "ADD COLUMN `github_user_name` varchar(200) DEFAULT NULL "
+    + 'COMMENT "For shared-store identity" AFTER `datajoint_user_name`, '
+    + "ADD UNIQUE INDEX (`github_user_name`)"
+)
 ```
 
 ### Breaking Changes
@@ -146,6 +163,55 @@ or `log_export` positionally must pass them by keyword.
     observed run, and numbers events uniquely in time order. Results change for
     intervals with more than one valid-time segment.
 
+#### `LabMemberInfo` Takes Five Values (#1686)
+
+`LabMember.LabMemberInfo` gains `github_user_name`, between
+`datajoint_user_name` and `admin`, so a positional insert now needs five values.
+
+```python
+# OLD: four values
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", 0])
+
+# NEW: five, with the GitHub login (None if the member has not linked one)
+LabMember.LabMemberInfo.insert1(["Firstname Lastname", "fl@uni.edu", "fl", None, 0])
+
+# ... or name the fields and stay insulated from column order
+LabMember.LabMemberInfo.insert1(
+    {
+        "lab_member_name": "Firstname Lastname",
+        "google_user_name": "fl@uni.edu",
+        "datajoint_user_name": "fl",
+        "github_user_name": "fl-gh",
+        "admin": 0,
+    }
+)
+```
+
+#### `get_sort_group_info` Returns Every Electrode (#1678)
+
+`get_sort_group_info` returned a single representative electrode per sort group,
+so a sort group spanning a whole tetrode was described by one of its four
+channels. It now returns one row per electrode, on `CurationV1`,
+`CuratedSpikeSorting` and `SpikeSortingOutput`.
+
+**Impact**: any caller that assumed a single row — `fetch1()`, or indexing the
+first row — will now see one row per electrode of the group.
+
+**Migration guide**:
+
+```python
+# OLD: one row per sort group
+info = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch1()
+
+# NEW: restrict to the electrode you want
+info = (
+    SpikeSortingOutput().get_sort_group_info(merge_keys) & {"electrode_id": 0}
+).fetch1()
+
+# ... or keep every electrode of the group
+rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+```
+
 ### Documentation
 
 - Add Spike Sorting v2 documentation: a quickstart, a user guide, a v1 to v2
@@ -154,6 +220,11 @@ or `log_export` positionally must pass them by keyword.
     `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
+- Repair stale notebook cross-links and guard them with a test #1678
+- Move Export tutorial into its own `Data Export` docs category #1678
+- Document admin-only table declaration and MySQL role activation #1678
+- Rewrite the Data Sync notebook for the shared-store workflow, keeping kachery
+    in an appendix #1686
 
 ### Infrastructure
 
@@ -203,10 +274,38 @@ or `log_export` positionally must pass them by keyword.
 - Add `prefer_download` custom config for stream-capable backends #1662
 - Pin `deeplabcut[tf]<3`; 3.x drops the TensorFlow backend the DLC pipeline
     targets #1679
+- Pin `ndx-ophys-devices>=0.3.1,<0.4` #1697
 - Fix handler loss in the DLC `file_log` decorator, which dropped the outer
     call's file handler when these calls nested #1679
 - Correct `Populate.md` on `_parallel_make`, the double `make_fetch` call, and
     the `None` return from `make_compute` #1679
+- Fix `SpyglassMixinPart.delete` recursion; add `force` for part deletes #1678
+- Grant `dj_user` all but `CREATE` on shared prefixes #1678
+- Grant `REFERENCES` alongside `SELECT` on all read-access schemas #1678
+- Default analysis schema prefix to `database.user` when unset #1678
+- Import `_fir_filter` in a fixture, not at test-module scope #1678
+- Neutralize DeepLabCut's `importlib.reload(logging)` in tests #1678
+- Stop calling `populate()` on deprecated `make`s in tests #1678
+- Repair a stale raw external checksum when a container is reused #1678
+- Force the v1 recompute selection attempt in its test fixture #1678
+- Monitor open NWBs, and close under RAM or file-descriptior pressure. Adds
+    `close_nwb()` (and implements for `fetch_dataframe` and similar),
+    `custom.nwb_cache` config, and a `psutil` dependency #1606
+- Add a shared-storage file backend: `sharing_store` declaration and upload
+    tables, `StoreBackend` in the `get_nwb_file` resolution chain after local
+    disk, and a `spyglass-store` console script for `login`/`logout`/`status`
+    #1686
+- Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
+    #1686
+- Inherit shared-store visibility for derived analysis files, taking the
+    narrowest scope across their parents #1686
+- Expand `custom` config to specify per-backend data store behavior #1686
+- Add `requests` and `fsspec` as dependencies, for broker calls and
+    range-request streaming #1686
+- Deprecate kachery sharing, removed in 0.7.0. `kachery-cloud` is now an alias
+    for a new `kachery-legacy` extra #1686
+- Add `digest_file` to return several digests of a file's raw bytes in one read
+    #1686
 
 ### Pipelines
 
@@ -218,12 +317,14 @@ or `log_export` positionally must pass them by keyword.
         renamed foreign key (regression from #1610) #1609
     - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
         from disk, so a rebuilt file is checked again #1609
+    - Run `UserEnvironment` pip freeze via the active interpreter #1678
 
 - Decoding
 
     - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
         amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
         #1609
+    - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
 
@@ -298,6 +399,10 @@ or `log_export` positionally must pass them by keyword.
         #1609
     - Deprecate `calculate_isi_violation(isi_threshold_s=...)` in favor of
         `isi_threshold_ms` (the value was always milliseconds) #1609
+    - Respect `safemode` in `RecordingRecompute.delete` #1678
+    - Split recording and artifact restrictions in merge-id lookup #1678
+    - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
+        #1678
 
 ## [0.6.0] (Sep 1st 2026)
 
@@ -678,6 +783,8 @@ for label, interval_data in results.groupby("interval_labels"):
         injects the `tempdir` scratch-dir param only for sorters that declare it
         (only `mountainsort4`), instead of injecting it into every sorter and
         maintaining hardcoded removal lists #1655
+    - Fix `MetricCuration` dropping non-empty `merge_groups` #1626
+    - Add `unit_criteria` to `UnitSelectionParams` #1670
 
 ## [0.5.5] (Aug 6, 2025)
 
