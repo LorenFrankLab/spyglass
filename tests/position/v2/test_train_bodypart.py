@@ -190,3 +190,159 @@ class TestBodyPartValidation:
 
         with pytest.raises(dj.DataJointError, match="definitely invalid xyz"):
             skeleton._validate_bodyparts(mixed_parts)
+
+
+class TestAcceptNewBodypartsScope:
+    """`accept_new_bodyparts=True` must skip *only* the admin check.
+
+    It auto-registers unresolved parts via ``BodyPart().insert()`` (plural),
+    which ``BodyPart`` does not override -- so it structurally cannot reach the
+    collision guard in ``insert1``. Today that is harmless: ``canonicalize``
+    and the guard derive their key from the same ``normalize_label``, so a name
+    that fails to resolve also cannot collide. These tests pin that equivalence
+    down, because it is the only thing keeping the flag honest -- scoping
+    ``canon_map`` (e.g. to curated-only parts) would silently open the hole.
+    """
+
+    def test_unresolved_implies_no_collision(self, bodypart):
+        """The invariant the flag leans on, asserted over the real table.
+
+        For every curated part, a name that ``canonicalize`` cannot resolve
+        must also have no collision under ``insert1``'s rule. If this ever
+        fails, ``accept_new_bodyparts`` is inserting past the guard.
+        """
+        from spyglass.position.v2.utils.skeleton import (
+            canonicalize,
+            normalize_label,
+        )
+
+        names = [str(b) for b in bodypart.fetch("bodypart")]
+        cmap = bodypart.canon_map()
+
+        probes = ["mouse_center", "tail1", "left_ear_tip", "wholly_novel_xyz"]
+        for probe in probes:
+            if canonicalize(probe, cmap) is not None:
+                continue  # resolves -- never reaches the insert
+            norm = normalize_label(probe)
+            collisions = [n for n in names if normalize_label(n) == norm]
+            assert not collisions, (
+                f"{probe!r} does not resolve but collides with {collisions} -- "
+                "accept_new_bodyparts would insert past the collision guard"
+            )
+
+    def test_resolvable_variant_is_not_duplicated(self, bodypart, skeleton):
+        """A separator variant maps onto the curated spelling, not a new row.
+
+        ``tail_base`` normalizes onto ``tailBase``; the skeleton must reuse the
+        curated identity rather than registering a second spelling.
+        """
+        assert bodypart & {"bodypart": "tailBase"}
+        before = set(bodypart.fetch("bodypart"))
+
+        skeleton.insert1(
+            {
+                "skeleton_id": "zoo_variant_probe",
+                "bodyparts": ["tail_base", "nose"],
+                "edges": [("tail_base", "nose")],
+            },
+            accept_new_bodyparts=True,
+            check_duplicates=False,
+        )
+
+        assert set(bodypart.fetch("bodypart")) == before  # no new rows
+        stored = (skeleton & {"skeleton_id": "zoo_variant_probe"}).fetch1(
+            "bodyparts"
+        )
+        assert "tailBase" in stored and "tail_base" not in stored
+
+    def test_novel_part_registered_for_nonadmin(
+        self, bodypart, skeleton, monkeypatch
+    ):
+        """The admin bypass is the flag's actual purpose -- it must hold."""
+        from spyglass.common import LabMember
+
+        monkeypatch.setattr(
+            LabMember, "user_is_admin", property(lambda self: False)
+        )
+        novel = "zooNovelPartXyz"
+        assert not (bodypart & {"bodypart": novel})
+
+        skeleton.insert1(
+            {
+                "skeleton_id": "zoo_nonadmin_probe",
+                "bodyparts": [novel, "nose"],
+                "edges": [(novel, "nose")],
+            },
+            accept_new_bodyparts=True,
+            check_duplicates=False,
+        )
+        assert bodypart & {"bodypart": novel}
+        (bodypart & {"bodypart": novel}).super_delete(
+            warn=False, safemode=False
+        )
+
+    def test_without_flag_unknown_part_raises(self, skeleton):
+        """Default stays strict: unknown parts are rejected, not registered."""
+        with pytest.raises(dj.DataJointError):
+            skeleton.insert1(
+                {
+                    "skeleton_id": "zoo_strict_probe",
+                    "bodyparts": ["definitelyNovelXyz", "nose"],
+                    "edges": [("definitelyNovelXyz", "nose")],
+                },
+                check_duplicates=False,
+            )
+
+
+class TestBodyPartSource:
+    """`BodyPart.source` partitions the vocabulary so it keeps controlling.
+
+    Zoo imports add ~119 names to a 27-entry curated table. Without a
+    partition, the first import silently widens what a hand-built lab project
+    may use. Resolution must still see everything (a zoo skeleton has to
+    resolve its own parts); only *validation* narrows to curated.
+
+    All RED until Z08.
+    """
+
+    def test_source_column_exists_and_defaults_curated(self, bodypart):
+        """Existing curated rows must not be reclassified by the migration."""
+        assert "source" in bodypart.heading.names
+        sources = set(bodypart.fetch("source"))
+        assert sources == {"curated"}
+
+    def test_validation_ignores_imported_parts(self, bodypart, skeleton):
+        """The whole point: a zoo-only name stays invalid for user projects."""
+        imported = "zooOnlyPartXyz"
+        bodypart.insert1(
+            {"bodypart": imported, "source": "imported"}, warn=False
+        )
+        try:
+            from spyglass.position.v2.utils.skeleton import normalize_label
+
+            with pytest.raises(dj.DataJointError):
+                skeleton._validate_bodyparts({normalize_label(imported)})
+        finally:
+            (bodypart & {"bodypart": imported}).super_delete(
+                warn=False, safemode=False
+            )
+
+    def test_canon_map_still_resolves_imported_parts(self, bodypart):
+        """Reads stay lenient -- else a zoo skeleton cannot read its own pose."""
+        from spyglass.position.v2.utils.skeleton import (
+            canonicalize,
+            normalize_label,
+        )
+
+        imported = "zooOnlyPartXyz"
+        bodypart.insert1(
+            {"bodypart": imported, "source": "imported"}, warn=False
+        )
+        try:
+            cmap = bodypart.canon_map()
+            assert cmap.get(normalize_label(imported)) == imported
+            assert canonicalize("zoo_only_part_xyz", cmap) == imported
+        finally:
+            (bodypart & {"bodypart": imported}).super_delete(
+                warn=False, safemode=False
+            )
