@@ -1993,9 +1993,10 @@ class Model(SpyglassMixin, dj.Computed):
     ) -> dict:
         """Evaluate a trained model on test dataset.
 
-        Runs DLC's evaluate_network to compute test/train errors and optionally
-        create labeled images. Results are stored in the evaluation-results
-        directory within the DLC project.
+        Dispatches to the model's tool strategy to compute test/train errors
+        and optionally create labeled images, then stores the results on the
+        ``Model`` row. DLC writes them to the evaluation-results directory
+        within its project.
 
         Parameters
         ----------
@@ -2027,7 +2028,8 @@ class Model(SpyglassMixin, dj.Computed):
         ValueError
             If model_key doesn't exist in Model table
         ImportError
-            If DLC is not installed or evaluate_network not available
+            From the DLC path only, when DeepLabCut is unavailable. A SLEAP
+            model evaluates through ``SLEAPStrategy`` without it.
         FileNotFoundError
             If model or config file not found
 
@@ -2048,12 +2050,6 @@ class Model(SpyglassMixin, dj.Computed):
             raise ValueError(
                 f"Model not found in database: {model_key}. "
                 "Cannot evaluate non-existent model."
-            )
-
-        if evaluate_network is None:
-            raise ImportError(
-                "DeepLabCut evaluate_network is required for evaluation. "
-                "Install with: pip install deeplabcut>=3.0"
             )
 
         # Fetch model info
@@ -2118,7 +2114,24 @@ class Model(SpyglassMixin, dj.Computed):
         -------
         dict
             Evaluation results
+
+        Raises
+        ------
+        ImportError
+            If DeepLabCut is unavailable. Checked here rather than in
+            :meth:`evaluate` so a SLEAP model still evaluates through
+            ``SLEAPStrategy``.
+        ValueError
+            If ``project_path`` is absent from the parameters.
+        FileNotFoundError
+            If the project's ``config.yaml`` is missing.
         """
+        if evaluate_network is None:
+            raise ImportError(
+                "DeepLabCut evaluate_network is required for evaluation. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
         params = params_entry["params"]
 
         # Get project path
