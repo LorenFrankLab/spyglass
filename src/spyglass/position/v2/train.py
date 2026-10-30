@@ -8,7 +8,6 @@ inefficient.
 """
 
 import getpass
-import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +28,6 @@ from spyglass.position.utils.path_helpers import (
 from spyglass.position.utils.protocols import ModelMetadata, default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
-from spyglass.position.v2.utils.config_io import _rename_leaves
 from spyglass.position.v2.utils.model import (
     rank_model_rows,
     redundant_model_msg,
@@ -2224,16 +2222,10 @@ class Model(SpyglassMixin, dj.Computed):
     def _canonicalize_dlc_project(self, config_path) -> dict:
         """Rewrite a DLC project's ``config.yaml`` names to canonical spelling.
 
-        Opt-in (via ``normalize_names=True`` on :meth:`load`) rewrite of the
-        user's project files so their body-part and skeleton names match the
-        curated ``BodyPart`` namespace. The original config is copied to a
-        timestamped backup (``config.yaml.<timestamp>.bak``) beside it before
-        any write, so repeated rewrites never overwrite an earlier backup.
-        Names with no canonical match raise -- a rewrite cannot invent a
-        curated part. A project holding ``CollectedData_*`` labels raises too,
-        since their columns name body parts and are not rewritten here. A
-        config that is already fully canonical is left untouched (no backup
-        written), labels or not.
+        Opt-in (via ``normalize_names=True`` on :meth:`load`). Resolves the
+        names against ``BodyPart`` here, since that is a table read, then
+        delegates the file rewrite to the tool's strategy. Names with no
+        canonical match raise: a rewrite cannot invent a curated part.
 
         Parameters
         ----------
@@ -2253,8 +2245,6 @@ class Model(SpyglassMixin, dj.Computed):
             files that the rewrite would leave inconsistent. Nothing is
             written in either case.
         """
-        from spyglass.position.utils.yaml_io import dump_yaml
-
         config_path = Path(config_path)
         config = load_yaml(config_path)
 
@@ -2266,54 +2256,9 @@ class Model(SpyglassMixin, dj.Computed):
                 "BodyPart. Correct the names or ask an admin to add them."
             )
 
-        mapping = resolved["mapping"]
-        changes = {k: v for k, v in mapping.items() if k != v}
-        if not changes:
-            return {}  # already canonical: no-op, no backup churn
-
-        # Labels carry body-part names as column headers, and nothing here
-        # rewrites them, so a rewritten config would disagree with the labels
-        # continued training reads. Checked after `changes`, since an already
-        # canonical project needs no rewrite and so cannot desync.
-        labels = sorted(
-            (config_path.parent / "labeled-data").rglob("CollectedData_*")
+        return ToolStrategyFactory.create_strategy("DLC").canonicalize_project(
+            config_path, config, resolved["mapping"], self
         )
-        if labels:
-            shown = "\n".join(
-                f"    {p.name} in {p.parent.name}/" for p in labels[:5]
-            )
-            if len(labels) > 5:
-                shown += f"\n    ... and {len(labels) - 5} more"
-            raise dj.DataJointError(
-                f"Cannot canonicalize DLC project: {len(labels)} label "
-                "file(s) hold body-part columns that the rewritten config "
-                f"would no longer match:\n{shown}\n\nNothing was written. "
-                "Either...\n"
-                "1. Import without `normalize_names`. Variant spellings "
-                f"({', '.join(sorted(changes))}) resolve to canonical names "
-                "in the database regardless, so the project files need no "
-                "change.\n"
-                "2. To reconcile the project on disk, rename the body-part "
-                "columns in the CollectedData CSVs, re-run "
-                "`deeplabcut.convertcsv2h5(config_path)`, then import."
-            )
-
-        # Timestamped backup so repeated rewrites never overwrite an earlier
-        # one (microseconds guarantee a unique name within the same second).
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        backup = config_path.with_name(f"{config_path.name}.{ts}.bak")
-        shutil.copy2(config_path, backup)
-
-        config["bodyparts"] = [
-            mapping.get(bp, bp) for bp in config.get("bodyparts", [])
-        ]
-        config["skeleton"] = _rename_leaves(config.get("skeleton", []), mapping)
-        dump_yaml(config_path, config)
-        self._info_msg(
-            f"Canonicalized {len(changes)} name(s) in {config_path.name}; "
-            f"original backed up to {backup.name}"
-        )
-        return changes
 
     def _augment_name_error(self, err, skeleton_config):
         """Return *err* with guidance on how to resolve unknown body parts.
@@ -2715,24 +2660,22 @@ class Model(SpyglassMixin, dj.Computed):
         external_videos = kwargs.pop("external_videos", False)
         vid_file_matches = kwargs.pop("vid_file_matches", None)
         extra_params = kwargs.pop("extra_params", None) or {}
-        if model_path.suffix not in [".yml", ".yaml"]:
-            raise ValueError("DLC model path must be a .yml or .yaml file")
 
         # Opt-in: rewrite the on-disk project to canonical names first, so the
-        # config read below (and any later re-training) uses canonical spelling.
+        # project read below (and any later re-training) uses canonical
+        # spelling. Resolution needs `BodyPart`, so it stays on the table.
         if normalize_names:
             self._canonicalize_dlc_project(model_path)
 
-        # A DLC project holds several models, distinguished by training
-        # choices the config does not record. `extra_params` carries them, so
-        # the params hash and the model identity differ per model.
-        config = {**load_yaml(model_path), **extra_params}
+        # The strategy knows the file type, the config layout and where the
+        # body-part names live. `extra_params` carries the training choices
+        # the config does not record, so one project's several models differ
+        # in the params hash.
+        project = dlc.read_project(model_path, extra_params)
+        config = project["config"]
 
-        # Step 1: Extract and insert skeleton from DLC config
-        skeleton_config = {
-            "bodyparts": config.get("bodyparts", []),
-            "skeleton": config.get("skeleton", []),
-        }
+        # Step 1: insert the skeleton the project declares
+        skeleton_config = project["skeleton"]
         try:
             skeleton_key = Skeleton().insert1(
                 skeleton_config,

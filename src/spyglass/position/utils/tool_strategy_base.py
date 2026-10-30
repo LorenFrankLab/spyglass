@@ -251,6 +251,79 @@ class PoseToolStrategy(ABC):
             f"Model import not implemented for {self.tool_name}"
         )
 
+    def read_project(self, model_path, extra_params: dict = None) -> dict:
+        """Read a trained project and return what the tables need from it.
+
+        Override per tool: the file type, the configuration layout and the
+        key holding body-part names are all tool-specific. The default
+        raises rather than guessing a format.
+
+        Parameters
+        ----------
+        model_path : pathlib.Path
+            The project's configuration file.
+        extra_params : dict, optional
+            Training parameters the configuration does not record, merged
+            over it. One project can hold several models distinguished only
+            by these, so they reach the parameter hash.
+
+        Returns
+        -------
+        dict
+            ``config``, the merged parameters, and ``skeleton``, a dict of
+            ``bodyparts`` and ``skeleton`` for ``Skeleton.insert1``.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless a subclass implements it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot read a project from disk. "
+            "Import this tool's models another way."
+        )
+
+    def canonicalize_project(
+        self, config_path, config: dict, mapping: dict, model_instance
+    ) -> dict:
+        """Rewrite a project's files to canonical body-part spelling.
+
+        Override where the tool stores names in files on disk. The default
+        raises: rewriting a user's project is a capability a strategy has to
+        claim, and silently doing nothing would report success.
+
+        The caller resolves the names, since that reads the ``BodyPart``
+        table, and passes the resulting *mapping* here.
+
+        Parameters
+        ----------
+        config_path : str or pathlib.Path
+            The project configuration file.
+        config : dict
+            Its already-parsed contents.
+        mapping : dict
+            ``{surface_form: canonical}`` for every name, resolved by the
+            caller.
+        model_instance
+            ``Model`` table instance, used for logging.
+
+        Returns
+        -------
+        dict
+            The subset of *mapping* that actually changed, empty when the
+            project was already canonical.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless a subclass implements it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot rewrite project files. Correct "
+            "the body-part names in the project by hand, or import without "
+            "`normalize_names`."
+        )
+
     def resolve_zoo_model(self, dataset: str, model_name, dest_dir):
         """Resolve a pretrained zoo model and place its weights on disk.
 
