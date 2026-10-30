@@ -54,15 +54,20 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
         if not has_pose_objects:
             return
 
-        # A real session NWB always has at least one electrode group.
-        # A pose-model artifact has pose data but nothing else.
-        if not nwbf.electrode_groups:
+        # A pose-model artifact carries pose objects and no session
+        # structure. Video-only sessions have no electrode groups either, so
+        # electrodes alone cannot tell the two apart; require every structural
+        # marker to be absent.
+        has_session_structure = bool(
+            nwbf.electrode_groups or nwbf.acquisition
+        ) or (nwbf.epochs is not None)
+        if not has_session_structure:
             raise ValueError(
                 f"'{nwb_abs_path.name}' appears to be a pose-model artifact "
-                "(ndx-pose objects present, no electrode groups). "
-                "Model files should not be passed to insert_sessions — "
-                "they have no session structure and would create incomplete "
-                "Nwbfile entries.\n\n"
+                "(ndx-pose objects present, no electrode groups, no "
+                "acquisition, no epochs). Model files should not be passed "
+                "to insert_sessions: they have no session structure and "
+                "would create incomplete Nwbfile entries.\n\n"
                 "To register an ndx-pose model in Position V2 use:\n"
                 "    from spyglass.position.v2 import Model\n"
                 "    Model().import_model('<path to nwb>')"
