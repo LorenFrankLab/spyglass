@@ -10,13 +10,11 @@ inefficient.
 import getpass
 import shutil
 import warnings
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import datajoint as dj
-import networkx as nx
 import pandas as pd
 from pynwb import NWBHDF5IO
 
@@ -29,20 +27,23 @@ from spyglass.position.utils.path_helpers import (
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
-from spyglass.position.utils.protocols import default_pk_name
+from spyglass.position.utils.protocols import ModelMetadata, default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.utils.config_io import _rename_leaves
+from spyglass.position.v2.utils.model import rank_model_rows
 from spyglass.position.v2.utils.skeleton import (
     build_canonical_map,
-    build_labeled_graph,
     canonicalize,
     clean_edges,
+    draw_skeleton,
     is_duplicate_skeleton,
-    norm_edges,
     normalize_label,
     shape_hash_from_edges,
     validate_skeleton_graph,
+)
+from spyglass.position.v2.utils.training_plots import (
+    build_training_history_figure,
 )
 from spyglass.position.v2.utils.training_io import (
     aggregate_training_stats,
@@ -73,25 +74,6 @@ schema = dj.schema("cbroz_position_v3_train")  # TODO: remove cbroz prefix
 
 
 # Parameter dataclasses for methods with 5+ parameters
-@dataclass
-class ModelMetadata:
-    """Parameter object for _write_model_metadata method."""
-
-    model_id: str
-    model_path: str
-    project_path: Path
-    config_path: Path
-    params: dict
-    config: dict
-    latest_model: dict
-    skeleton_id: str
-    parent_id: Optional[str] = None
-    # Sessions behind the training video group, sorted. The first is the
-    # ``AnalysisNwbfile`` parent; training may span sessions, so all are
-    # recorded in the metadata file.
-    session_files: List[str] = field(default_factory=list)
-
-
 # ---------------------------------- Tables -----------------------------------
 @schema
 class BodyPart(SpyglassMixin, dj.Lookup):
@@ -309,25 +291,6 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         return list(query.fetch("bodypart"))
 
-    # Thin wrappers so callers (including tests) can use instance methods.
-    # Implementations live in spyglass.position.v2.utils.skeleton.
-    def _normalize_label(self, s: str) -> str:
-        return normalize_label(s)
-
-    def _fuzzy_equal(self, a: str, b: str, threshold: float = 0.85) -> bool:
-        from spyglass.position.v2.utils.skeleton import fuzzy_equal
-
-        return fuzzy_equal(a, b, threshold)
-
-    def _norm_edges(self, edges):
-        return norm_edges(edges)
-
-    def _shape_hash_from_edges(self, labels, edges):
-        return shape_hash_from_edges(labels, edges)
-
-    def _build_labeled_graph(self, labels, edges):
-        return build_labeled_graph(labels, edges)
-
     def _validate_bodyparts(self, labels: "set[str]") -> bool:
         """Validate that all normalized labels exist in BodyPart table.
 
@@ -534,9 +497,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     def show_skeleton(self, skeleton_id: str = None):
         """Display skeleton graph visualization similar to datajoint.Diagram.
 
-        This method visualizes the skeleton structure showing bodyparts as nodes
-        and their connections as edges, similar to how DataJoint's Diagram shows
-        table relationships.
+        Fetches the row, then delegates the figure to
+        :func:`~spyglass.position.v2.utils.skeleton.draw_skeleton`.
 
         Parameters
         ----------
@@ -546,8 +508,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         Returns
         -------
-        matplotlib figure
-            Interactive plot showing the skeleton graph structure.
+        matplotlib.figure.Figure or None
+            The skeleton graph, or None when the skeleton has no bodyparts.
 
         Examples
         --------
@@ -557,154 +519,23 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         >>> # Show skeleton from current restriction
         >>> (Skeleton & {"skeleton_id": "4LED"}).show_skeleton()
         """
-        try:
-            import matplotlib.patches as patches
-            import matplotlib.pyplot as plt
-        except ImportError as e:
-            raise ImportError(
-                "Skeleton visualization requires matplotlib and networkx. "
-                "Install with: pip install matplotlib"
-            ) from e
-
-        # Get skeleton data
         if skeleton_id:
             skeleton_data = (self & {"skeleton_id": skeleton_id}).fetch1()
         else:
             skeleton_data = self.fetch1() if len(self) == 1 else self.fetch()[0]
 
         skeleton_id = skeleton_data["skeleton_id"]
-        bodyparts = skeleton_data["bodyparts"]
-        edges = skeleton_data["edges"] or []
+        bodyparts = skeleton_data["bodyparts"] or self.get_bodyparts(
+            skeleton_id
+        )
 
         if not bodyparts:
-            # Use existing method to get bodyparts
-            bodyparts = self.get_bodyparts(skeleton_id)
-
-        if not bodyparts:
-            print(f"No bodyparts found for skeleton '{skeleton_id}'")
+            self._warn_msg(f"No bodyparts found for skeleton '{skeleton_id}'")
             return None
 
-        # Use existing method to build graph for positioning
-        this_graph = build_labeled_graph(bodyparts, edges)
-
-        # Create figure with better sizing for zoomed-out view
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_aspect("equal")
-
-        # Calculate positions with expanded coordinate space
-        if len(bodyparts) == 1:
-            pos = {normalize_label(bodyparts[0]): (0, 0)}
-        else:
-            # Spring layout with larger separation (k parameter)
-            pos = nx.spring_layout(this_graph, k=3, iterations=150, seed=42)
-
-        # Create mapping from normalized labels back to original labels
-        label_map = {normalize_label(bp): bp for bp in bodyparts}
-
-        # Style settings for zoomed-out view
-        node_color = "#E8F4FD"  # Light blue like DataJoint tables
-        edge_color = "#2E86AB"  # DataJoint blue
-        circle_radius = 0.25  # Smaller circles for better proportions
-
-        # Draw edges first (behind nodes)
-        for u, v in this_graph.edges():  # G has normalized node names
-            if u in pos and v in pos:
-                x1, y1 = pos[u]
-                x2, y2 = pos[v]
-                ax.plot(
-                    [x1, x2],
-                    [y1, y2],
-                    color=edge_color,
-                    linewidth=2,
-                    alpha=0.7,
-                    zorder=1,
-                )
-
-        # Draw bodypart nodes using original names for display
-        for norm_label, (x, y) in pos.items():
-            original_label = label_map[norm_label]
-
-            # Draw circle
-            circle = patches.Circle(
-                (x, y),
-                circle_radius,
-                facecolor=node_color,
-                edgecolor=edge_color,
-                linewidth=1.5,
-                zorder=3,
-            )
-            ax.add_patch(circle)
-
-            # Add label with appropriate font size
-            fontsize = max(8, min(11, int(100 / max(len(original_label), 1))))
-            ax.text(
-                x,
-                y,
-                original_label,
-                horizontalalignment="center",
-                verticalalignment="center",
-                fontsize=fontsize,
-                fontweight="bold",
-                zorder=4,
-            )
-
-        # Set plot limits with margins for better zoom
-        if pos:
-            x_coords = [pos[node][0] for node in pos]
-            y_coords = [pos[node][1] for node in pos]
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-
-            # Add margins around the skeleton
-            x_margin = max(0.5, (x_max - x_min) * 0.2)
-            y_margin = max(0.5, (y_max - y_min) * 0.2)
-            ax.set_xlim(x_min - x_margin, x_max + x_margin)
-            ax.set_ylim(y_min - y_margin, y_max + y_margin)
-        else:
-            ax.set_xlim(-2, 2)
-            ax.set_ylim(-2, 2)
-        ax.set_title(
-            f"Skeleton: {skeleton_id}\n{len(bodyparts)} bodyparts, "
-            + f"{len(edges)} connections",
-            fontsize=14,
-            fontweight="bold",
-            pad=20,
+        return draw_skeleton(
+            skeleton_id, bodyparts, skeleton_data["edges"] or []
         )
-        ax.axis("off")
-
-        # Add legend with appropriately sized elements
-        legend_elements = [
-            patches.Circle(
-                (0, 0),
-                0.05,  # Smaller legend circle
-                facecolor=node_color,
-                edgecolor=edge_color,
-                label="Bodypart",
-            ),
-        ]
-        if edges:
-            legend_elements.append(
-                plt.Line2D(
-                    [0], [0], color=edge_color, linewidth=2, label="Connection"
-                )
-            )
-        ax.legend(handles=legend_elements, loc="upper right")
-
-        # Add bodypart list as simple text box at bottom
-        bodypart_text = f"Bodyparts: {', '.join(sorted(bodyparts))}"
-        ax.text(
-            0.02,
-            0.02,
-            bodypart_text,
-            transform=ax.transAxes,
-            fontsize=8,
-            verticalalignment="bottom",
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9),
-        )
-
-        plt.tight_layout()
-        # Don't call plt.show() to avoid double display in notebooks
-        return fig
 
     def get_centroid_method(self, skeleton_id: str = None) -> str:
         """Suggest appropriate centroid method for this skeleton.
@@ -925,24 +756,6 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.get_accepted_params()
 
-    def _append_aliases(self, tool: str, params: dict) -> dict:
-        """Append parameter aliases using strategy pattern.
-
-        Parameters
-        ----------
-        tool : str
-            Tool name
-        params : dict
-            Original parameters
-
-        Returns
-        -------
-        dict
-            Parameters with aliases added
-        """
-        strategy = ToolStrategyFactory.create_strategy(tool)
-        return strategy.append_aliases(params)
-
     def insert1(self, key, accept_default: bool = False, **kwargs):
         """Insert model parameters after validation and duplicate check.
 
@@ -971,7 +784,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             params = {k: v for k, v in params.items() if k not in skipped}
 
         # Append aliases using strategy
-        params = self._append_aliases(this_tool, params)
+        params = strategy.append_aliases(params)
 
         # Validate required parameters using strategy
         strategy.validate_params(params)
@@ -1090,7 +903,12 @@ class ModelSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def _own_model_ids(cls, row):
-        """model_id(s) already belonging to this exact selection (re-run)."""
+        """model_id(s) already belonging to this exact selection (re-run).
+
+        A named touchpoint rather than an inline fetch: `TestGuardBranches`
+        stubs it, alongside `_skeleton_for_params` and `_subjects`, to test
+        the guard's decision logic without a database.
+        """
         return list((Model & row).fetch("model_id"))
 
     def _guard_redundant_model(self, row, allow_redundant_model):
@@ -1204,7 +1022,6 @@ class Model(SpyglassMixin, dj.Computed):
         return cls & (ModelSelection & groups)
 
     # ── Inference-time model nudge (rank same-skeleton models by score) ──
-    _COMPARABLE_METRICS = ("test_error", "test_error_p")
 
     @classmethod
     def skeleton_of(cls, model_id: str) -> str:
@@ -1225,82 +1042,11 @@ class Model(SpyglassMixin, dj.Computed):
         ).fetch1("skeleton_id")
 
     @classmethod
-    def _rank_model_rows(cls, rows) -> list:
-        """Rank same-skeleton model rows by a comparable evaluation metric.
-
-        Pure helper (no DB). Each row is ``{"model_id", "evaluation"}`` where
-        ``evaluation`` is the tool-specific metrics dict (or None). A model is
-        *scored* when its evaluation carries a real (non-bool) numeric value
-        for ``test_error`` (preferred) or ``test_error_p`` (fallback); other
-        keys (e.g. ``train_error``) are not comparable. Scored models sort
-        first, grouped by metric and ascending by error within a group, since
-        a p-cutoff error is measured on a subset of predictions and so cannot
-        be ordered against a full-test error. Unscored models follow, ordered
-        only by a weak, deterministic ``training_iterations`` tiebreaker (more
-        iterations first). No order is ever fabricated for unscored models.
-
-        Parameters
-        ----------
-        rows : list[dict]
-            ``{"model_id": str, "evaluation": dict | None}`` rows.
-
-        Returns
-        -------
-        list[dict]
-            ``{"model_id", "metric", "value", "iterations"}`` sorted
-            best-first; ``metric``/``value`` are None when no comparable
-            metric is present.
-        """
-        ranked = []
-        for row in rows:
-            evaluation = row.get("evaluation")
-            metric, value, iterations = None, None, None
-            if isinstance(evaluation, dict):
-                for key in cls._COMPARABLE_METRICS:
-                    candidate = evaluation.get(key)
-                    if isinstance(candidate, bool):
-                        continue  # a bool is not a metric value
-                    if isinstance(candidate, (int, float)):
-                        metric, value = key, float(candidate)
-                        break
-                iters = evaluation.get("training_iterations")
-                if isinstance(iters, (int, float)) and not isinstance(
-                    iters, bool
-                ):
-                    iterations = int(iters)
-            ranked.append(
-                {
-                    "model_id": row.get("model_id"),
-                    "metric": metric,
-                    "value": value,
-                    "iterations": iterations,
-                }
-            )
-
-        # Group before comparing: test_error_p excludes predictions below a
-        # confidence cutoff, so it is systematically lower than test_error
-        # and the two cannot be ordered against each other.
-        metric_order = {
-            name: position
-            for position, name in enumerate(cls._COMPARABLE_METRICS)
-        }
-
-        def _sort_key(entry):
-            if entry["value"] is not None:
-                return (0, metric_order[entry["metric"]], entry["value"])
-            iters = entry["iterations"]
-            # unscored: after scored; more iterations first, missing last
-            return (1, 0, -iters if iters is not None else float("inf"))
-
-        ranked.sort(key=_sort_key)
-        return ranked
-
-    @classmethod
     def rank_for_skeleton(cls, skeleton_id: str) -> list:
         """Rank existing models sharing *skeleton_id*, best-scoring first.
 
         Fetches the same-skeleton models and delegates ordering to
-        :meth:`_rank_model_rows`.
+        :func:`~spyglass.position.v2.utils.model.rank_model_rows`.
 
         Parameters
         ----------
@@ -1315,7 +1061,7 @@ class Model(SpyglassMixin, dj.Computed):
         rows = cls.with_skeleton(skeleton_id).fetch(
             "model_id", "evaluation", as_dict=True
         )
-        return cls._rank_model_rows(rows)
+        return rank_model_rows(rows)
 
     @staticmethod
     def _reuse_candidates(rows, subjects=None) -> list:
@@ -1718,32 +1464,6 @@ class Model(SpyglassMixin, dj.Computed):
                 )
             else:
                 raise e
-
-    def _make_dlc_model(
-        self,
-        key: dict,
-        params: dict,
-        skeleton_id: str,
-        vid_group: dict,
-        sel_entry: dict,
-    ) -> dict:
-        """Legacy DLC training method - now delegates to strategy pattern.
-
-        This method is deprecated and maintained for backwards compatibility.
-        New code should use the strategy pattern via make() method.
-        """
-        from spyglass.common.common_usage import ActivityLog
-        from spyglass.position.utils.tool_strategies import DLCStrategy
-
-        ActivityLog().deprecate_log(
-            "_make_dlc_model",
-            alt="Model.make() with tool='DLC'",
-        )
-
-        strategy = DLCStrategy()
-        return strategy.train_model(
-            key, params, skeleton_id, vid_group, sel_entry, self
-        )
 
     def train(
         self,
@@ -2321,105 +2041,48 @@ class Model(SpyglassMixin, dj.Computed):
         save_path: Union[Path, str, None] = None,
         detailed: bool = False,
     ):
-        """Plot training loss curves for a model with enhanced visualization.
+        """Plot training loss curves for a model.
 
-        Displays training progress with enhanced visualization including
-        loss curves, improvement statistics, optional learning rate plotting,
-        and support for multiple data sources.
+        Fetches the history, then delegates the figure to
+        :func:`~spyglass.position.v2.utils.training_plots.build_training_history_figure`.
 
         Parameters
         ----------
         model_key : dict
-            Primary key for Model entry
+            Primary key for Model entry.
         save_path : Union[Path, str, None], optional
-            Path to save plot. If None, displays plot, by default None
+            Where to write the figure. Shown instead when None, by default
+            None.
         detailed : bool, optional
             If True, renders additional diagnostics including a smoothed
-            loss trend and optional validation loss panel, by default False
+            loss trend and optional validation loss panel, by default False.
 
         Returns
         -------
         matplotlib.figure.Figure
-            The figure object
+            The plotted figure.
+
+        Raises
+        ------
+        ValueError
+            If the model has no training history, or none with loss data.
 
         Examples
         --------
         >>> fig = model.plot_training_history({"model_id": "my_dlc_model"})
-        >>> # Or save to file
         >>> model.plot_training_history(
-        ...     {"model_id": "my_dlc_model"},
-        ...     save_path="training_loss.png"
+        ...     {"model_id": "my_dlc_model"}, save_path="history.png"
         ... )
         """
         import matplotlib.pyplot as plt
 
-        # Get training history with enhanced discovery
         df = self.get_training_history(model_key)
-
         if df is None:
             raise ValueError("No training history found for this model")
 
-        # Check available columns for flexible plotting
-        has_iteration = "iteration" in df.columns
-        has_loss = "loss" in df.columns
-        has_lr = "learning_rate" in df.columns
-        has_source = "source_file" in df.columns
-
-        if not has_loss:
-            raise ValueError("No loss data found to plot")
-
-        # X-axis: iteration if available, otherwise index
-        x_data = df["iteration"] if has_iteration else range(len(df))
-        x_label = "Training Iteration" if has_iteration else "Step"
-
-        fig, axes = self._setup_training_history_figure(
-            plt=plt, detailed=detailed, has_lr=has_lr
+        fig = build_training_history_figure(
+            df, model_id=model_key["model_id"], detailed=detailed
         )
-
-        self._plot_training_loss_panel(
-            ax=axes[0],
-            df=df,
-            x_data=x_data,
-            x_label=x_label,
-            model_id=model_key["model_id"],
-            has_iteration=has_iteration,
-            detailed=detailed,
-        )
-
-        if detailed:
-            self._plot_validation_panel(
-                ax=axes[1],
-                df=df,
-                x_data=x_data,
-            )
-            if has_lr:
-                self._plot_learning_rate_panel(
-                    ax=axes[2],
-                    x_data=x_data,
-                    learning_rate=df["learning_rate"],
-                    x_label=x_label,
-                    title_fontsize=13,
-                )
-            else:
-                axes[1].set_xlabel(x_label, fontsize=12)
-        elif has_lr:
-            self._plot_learning_rate_panel(
-                ax=axes[1],
-                x_data=x_data,
-                learning_rate=df["learning_rate"],
-                x_label=x_label,
-                title_fontsize=14,
-            )
-
-        # Add source file information if available
-        if has_source:
-            self._add_training_source_summary(fig=fig, df=df)
-
-        plt.tight_layout()
-
-        # Add some spacing if we have subtitle
-        if has_source:
-            plt.subplots_adjust(bottom=0.08)
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -2429,162 +2092,6 @@ class Model(SpyglassMixin, dj.Computed):
             plt.show()
 
         return fig
-
-    def _setup_training_history_figure(self, plt, detailed: bool, has_lr: bool):
-        """Create figure and axes layout for training-history plots."""
-        if detailed:
-            n_plots = 3 if has_lr else 2
-            fig, axes = plt.subplots(
-                n_plots,
-                1,
-                figsize=(11, 10 if has_lr else 8),
-                sharex=True,
-            )
-        else:
-            n_plots = 2 if has_lr else 1
-            fig, axes = plt.subplots(
-                n_plots,
-                1,
-                figsize=(10, 8 if n_plots == 2 else 6),
-            )
-
-        if n_plots == 1:
-            return fig, [axes]
-
-        return fig, list(axes)
-
-    def _plot_training_loss_panel(
-        self,
-        ax,
-        df: pd.DataFrame,
-        x_data,
-        x_label: str,
-        model_id: str,
-        has_iteration: bool,
-        detailed: bool,
-    ):
-        """Plot primary loss panel and overlay summary diagnostics."""
-        ax.plot(x_data, df["loss"], "b-", linewidth=2, alpha=0.8)
-        ax.set_xlabel(x_label, fontsize=12)
-        ax.set_ylabel("Loss", fontsize=12)
-        ax.set_title(
-            f"Training Loss Curve: {model_id}",
-            fontsize=14,
-            fontweight="bold",
-        )
-        ax.grid(True, alpha=0.3)
-
-        if detailed and len(df) > 10:
-            # Show trend independently of noisy step-to-step changes.
-            window = max(10, len(df) // 20)
-            smoothed_loss = df["loss"].rolling(window=window).mean()
-            ax.plot(
-                x_data,
-                smoothed_loss,
-                "g-",
-                linewidth=2,
-                alpha=0.8,
-                label=f"Smoothed Loss (window={window})",
-            )
-            ax.legend(loc="upper right", fontsize=9)
-
-        if len(df) > 1:
-            self._annotate_training_loss_stats(
-                ax=ax,
-                df=df,
-                has_iteration=has_iteration,
-            )
-
-    def _annotate_training_loss_stats(
-        self,
-        ax,
-        df: pd.DataFrame,
-        has_iteration: bool,
-    ):
-        """Add summary statistics and final-point annotation to loss panel."""
-        initial_loss = df["loss"].iloc[0]
-        final_loss = df["loss"].iloc[-1]
-        min_loss = df["loss"].min()
-        improvement = (
-            ((initial_loss - final_loss) / initial_loss) * 100
-            if initial_loss > 0
-            else 0
-        )
-
-        stats_text = (
-            f"Initial: {initial_loss:.6f}\n"
-            f"Final: {final_loss:.6f}\n"
-            f"Best: {min_loss:.6f}\n"
-            f"Improvement: {improvement:.1f}%"
-        )
-        ax.text(
-            0.02,
-            0.98,
-            stats_text,
-            transform=ax.transAxes,
-            verticalalignment="top",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
-            fontsize=9,
-        )
-
-        if has_iteration:
-            final_iter = df["iteration"].iloc[-1]
-            ax.annotate(
-                f"Final: {final_loss:.4f}",
-                xy=(final_iter, final_loss),
-                xytext=(10, 10),
-                textcoords="offset points",
-                bbox=dict(boxstyle="round,pad=0.5", fc="yellow", alpha=0.7),
-                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0"),
-            )
-
-    def _plot_validation_panel(self, ax, df: pd.DataFrame, x_data):
-        """Plot validation loss panel or fallback message."""
-        if "val_loss" in df.columns:
-            ax.plot(x_data, df["val_loss"], "m-", linewidth=2, alpha=0.85)
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                "Validation data not available",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-
-        ax.set_ylabel("Validation Loss", fontsize=12)
-        ax.set_title("Validation Loss", fontsize=13, fontweight="bold")
-        ax.grid(True, alpha=0.3)
-
-    def _plot_learning_rate_panel(
-        self,
-        ax,
-        x_data,
-        learning_rate,
-        x_label: str,
-        title_fontsize: int,
-    ):
-        """Plot learning-rate schedule panel with log-scaled y-axis."""
-        ax.plot(x_data, learning_rate, "r-", linewidth=2, alpha=0.8)
-        ax.set_xlabel(x_label, fontsize=12)
-        ax.set_ylabel("Learning Rate", fontsize=12)
-        ax.set_title(
-            "Learning Rate Schedule",
-            fontsize=title_fontsize,
-            fontweight="bold",
-        )
-        ax.grid(True, alpha=0.3)
-        ax.set_yscale("log")
-
-    def _add_training_source_summary(self, fig, df: pd.DataFrame):
-        """Add data-source summary subtitle when multiple CSV sources exist."""
-        unique_sources = df["source_file"].nunique()
-        if unique_sources > 1:
-            source_text = (
-                f"Data from {unique_sources} files: "
-                + f"{', '.join(df['source_file'].unique())}"
-            )
-            fig.suptitle(source_text, fontsize=10, y=0.02)
 
     def create_project(
         self,
@@ -3323,29 +2830,6 @@ class Model(SpyglassMixin, dj.Computed):
         return self.load(config_path, **kwargs)
 
     @staticmethod
-    def _dlc_model_id(task, stored_path, override=None) -> str:
-        """Build a unique ``model_id`` for a DLC import.
-
-        Uses a short prefix so the identifying hash of ``(task, model_path)``
-        survives the 32-char limit. A long prefix (e.g. embedding task and
-        date) pushes the hash past the limit, so two distinct models sharing a
-        task/date would collide on ``model_id`` and the insert would fail with
-        a duplicate-key error.
-
-        Parameters
-        ----------
-        task : str
-            DLC task name.
-        stored_path : str or pathlib.Path
-            Stored model path (the stable per-model identifier).
-        override : str, optional
-            Explicit model_id; returned as-is when provided.
-        """
-        return override or default_pk_name(
-            "DLC", dict(tool="DLC", task=task, model_path=str(stored_path))
-        )
-
-    @staticmethod
     def _project_has_weights(config: dict, config_path) -> bool:
         """Does this DLC project hold trained weights?
 
@@ -3678,10 +3162,14 @@ class Model(SpyglassMixin, dj.Computed):
             )
             return sel_key
 
-        # Step 5: Generate model_id and insert directly into Model. The id must
-        # be unique per model; see _dlc_model_id for why a short prefix matters.
+        # Step 5: Generate model_id and insert directly into Model. The
+        # prefix stays short so the identifying hash of (task, model_path)
+        # survives the 32-char limit: a longer prefix pushes the hash out and
+        # two distinct models sharing a task and date collide.
         task = config.get("Task", "DLCTask")
-        model_id = self._dlc_model_id(task, stored_path, kwargs.get("model_id"))
+        model_id = kwargs.get("model_id") or default_pk_name(
+            "DLC", dict(tool="DLC", task=task, model_path=str(stored_path))
+        )
         model_key = {
             **sel_key,
             "model_id": model_id,

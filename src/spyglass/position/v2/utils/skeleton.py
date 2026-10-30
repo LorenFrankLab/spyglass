@@ -410,3 +410,158 @@ def is_duplicate_skeleton(
         graph_new, graph_old, node_match=node_match
     )
     return graph_match.is_isomorphic()
+
+
+def draw_skeleton(skeleton_id: str, bodyparts: list, edges: list):
+    """Render a skeleton as a labelled graph.
+
+    Pure rendering: the caller fetches the row and passes its contents, so
+    this holds no database access.
+
+    Parameters
+    ----------
+    skeleton_id : str
+        Identifier, used in the title.
+    bodyparts : list of str
+        Node labels, in their stored (canonical) spelling.
+    edges : list
+        Pairs of body-part labels. May be empty for a single-part skeleton.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The composed figure. The caller shows or saves it.
+
+    Raises
+    ------
+    ImportError
+        If matplotlib is unavailable.
+    """
+    try:
+        import matplotlib.patches as patches
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        raise ImportError(
+            "Skeleton visualization requires matplotlib and networkx. "
+            "Install with: pip install matplotlib"
+        ) from e
+
+    this_graph = build_labeled_graph(bodyparts, edges)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.set_aspect("equal")
+
+    # Calculate positions with expanded coordinate space
+    if len(bodyparts) == 1:
+        pos = {normalize_label(bodyparts[0]): (0, 0)}
+    else:
+        # Spring layout with larger separation (k parameter)
+        pos = nx.spring_layout(this_graph, k=3, iterations=150, seed=42)
+
+    # Create mapping from normalized labels back to original labels
+    label_map = {normalize_label(bp): bp for bp in bodyparts}
+
+    # Style settings for zoomed-out view
+    node_color = "#E8F4FD"  # Light blue like DataJoint tables
+    edge_color = "#2E86AB"  # DataJoint blue
+    circle_radius = 0.25  # Smaller circles for better proportions
+
+    # Draw edges first (behind nodes)
+    for u, v in this_graph.edges():  # G has normalized node names
+        if u in pos and v in pos:
+            x1, y1 = pos[u]
+            x2, y2 = pos[v]
+            ax.plot(
+                [x1, x2],
+                [y1, y2],
+                color=edge_color,
+                linewidth=2,
+                alpha=0.7,
+                zorder=1,
+            )
+
+    # Draw bodypart nodes using original names for display
+    for norm_label, (x, y) in pos.items():
+        original_label = label_map[norm_label]
+
+        # Draw circle
+        circle = patches.Circle(
+            (x, y),
+            circle_radius,
+            facecolor=node_color,
+            edgecolor=edge_color,
+            linewidth=1.5,
+            zorder=3,
+        )
+        ax.add_patch(circle)
+
+        # Add label with appropriate font size
+        fontsize = max(8, min(11, int(100 / max(len(original_label), 1))))
+        ax.text(
+            x,
+            y,
+            original_label,
+            horizontalalignment="center",
+            verticalalignment="center",
+            fontsize=fontsize,
+            fontweight="bold",
+            zorder=4,
+        )
+
+    # Set plot limits with margins for better zoom
+    if pos:
+        x_coords = [pos[node][0] for node in pos]
+        y_coords = [pos[node][1] for node in pos]
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+
+        # Add margins around the skeleton
+        x_margin = max(0.5, (x_max - x_min) * 0.2)
+        y_margin = max(0.5, (y_max - y_min) * 0.2)
+        ax.set_xlim(x_min - x_margin, x_max + x_margin)
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
+    else:
+        ax.set_xlim(-2, 2)
+        ax.set_ylim(-2, 2)
+    ax.set_title(
+        f"Skeleton: {skeleton_id}\n{len(bodyparts)} bodyparts, "
+        + f"{len(edges)} connections",
+        fontsize=14,
+        fontweight="bold",
+        pad=20,
+    )
+    ax.axis("off")
+
+    # Add legend with appropriately sized elements
+    legend_elements = [
+        patches.Circle(
+            (0, 0),
+            0.05,  # Smaller legend circle
+            facecolor=node_color,
+            edgecolor=edge_color,
+            label="Bodypart",
+        ),
+    ]
+    if edges:
+        legend_elements.append(
+            plt.Line2D(
+                [0], [0], color=edge_color, linewidth=2, label="Connection"
+            )
+        )
+    ax.legend(handles=legend_elements, loc="upper right")
+
+    # Add bodypart list as simple text box at bottom
+    bodypart_text = f"Bodyparts: {', '.join(sorted(bodyparts))}"
+    ax.text(
+        0.02,
+        0.02,
+        bodypart_text,
+        transform=ax.transAxes,
+        fontsize=8,
+        verticalalignment="bottom",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9),
+    )
+
+    plt.tight_layout()
+    # Don't call plt.show() to avoid double display in notebooks
+    return fig
