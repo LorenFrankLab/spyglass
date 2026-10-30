@@ -554,9 +554,10 @@ def _compute_isolation_kdtree(
     neighbors are SI's; only exactly tied neighbors (duplicate PC features)
     can be ordered differently. Two units' spikes at the same frame project
     to identical features, so the score can differ from SI's in proportion
-    to such shared spikes: <= 3e-5 on a real 56-unit sort, but 0.18 on a
-    synthetic pair sharing ~20% of its spikes. SI's choice among the ties
-    is arbitrary too; neither score is the correct one.
+    to such shared spikes: <= 3e-5 on a real 56-unit sort and <= 2e-3 on
+    synthetic pairs sharing up to half their spikes, but 0.18 when a quarter
+    of one unit's spikes and a fifth of the other's sit on one point. SI's
+    choice among the ties is arbitrary too; neither score is the correct one.
 
     Each spike's own row is excluded as scikit-learn's ``kneighbors()``
     does: query one extra neighbor and drop the spike itself, or the first
@@ -575,6 +576,12 @@ def _compute_isolation_kdtree(
     -------
     float
         Fraction of neighbors that share each spike's cluster, in ``[0, 1]``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_neighbors`` equals ``n_spikes``, as scikit-learn raises in SI;
+        SI's callers turn it into a NaN metric.
     """
     import numpy as np
     from scipy.spatial import cKDTree
@@ -586,7 +593,14 @@ def _compute_isolation_kdtree(
         (np.zeros(n_spikes_target), np.ones(n_spikes_other))
     )
     n_spikes = len(label_concat)
-    n_neighbors_adjusted = min(n_neighbors, n_spikes - 1)
+    n_neighbors_adjusted = (
+        n_spikes - 1 if n_neighbors > n_spikes else n_neighbors
+    )
+    if n_neighbors_adjusted >= n_spikes:
+        raise ValueError(
+            f"n_neighbors={n_neighbors_adjusted} must be less than the "
+            f"{n_spikes} spikes searched"
+        )
     _, neighbors = cKDTree(pcs_concat).query(
         pcs_concat,
         k=n_neighbors_adjusted + 1,

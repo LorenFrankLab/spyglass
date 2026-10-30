@@ -126,6 +126,40 @@ def test_isolation_patch_excludes_each_spike_among_duplicates():
     assert result == _SI_COMPUTE_ISOLATION(target, other, 5) == 1.0
 
 
+def test_isolation_patch_excludes_the_spike_not_its_shared_twin():
+    """A spike both units share (same frame, same features) has its twin in
+    the other unit as nearest neighbor, never itself, though the k-d tree
+    returns either copy first. The shared spikes sit far from the rest, so
+    with one neighbor that pair is the only tie and the score is SI's."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _SI_COMPUTE_ISOLATION,
+        _compute_isolation_kdtree,
+    )
+
+    rng = np.random.default_rng(3)
+    shared = rng.normal(loc=100.0, size=(100, 7))
+    target = np.vstack([rng.normal(size=(200, 7)), shared])
+    other = np.vstack([shared, rng.normal(loc=0.8, size=(200, 7))])
+
+    result = _compute_isolation_kdtree(target, other, 1)
+    assert result == _SI_COMPUTE_ISOLATION(target, other, 1)
+
+
+def test_isolation_patch_raises_like_spikeinterface_when_k_is_all_spikes():
+    """``n_neighbors`` equal to the spike count leaves no neighbor to drop the
+    spike for: SI's scikit-learn search raises, and its callers report NaN."""
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        _SI_COMPUTE_ISOLATION,
+        _compute_isolation_kdtree,
+    )
+
+    points = np.random.default_rng(4).normal(size=(10, 7))
+    with pytest.raises(ValueError):
+        _SI_COMPUTE_ISOLATION(points[:5], points[5:], 10)
+    with pytest.raises(ValueError):
+        _compute_isolation_kdtree(points[:5], points[5:], 10)
+
+
 def test_isolation_workers_reach_the_search_and_reset(monkeypatch):
     """``isolation_workers`` sets the search's thread count for its block."""
     import scipy.spatial
