@@ -1024,9 +1024,14 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
         def compute(self, *args, **kwargs):
             captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(
-        si, "create_sorting_analyzer", lambda **k: _FakeAnalyzer()
-    )
+        def has_extension(self, name):
+            return False
+
+    def _fake_create(**kwargs):
+        kwargs["folder"].mkdir(exist_ok=True)  # SI creates the store
+        return _FakeAnalyzer()
+
+    monkeypatch.setattr(si, "create_sorting_analyzer", _fake_create)
 
     class _FakeSorting:
         def get_num_units(self):
@@ -1076,8 +1081,12 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
             captured["compute_args"] = args
             captured["compute_kwargs"] = kwargs
 
+        def has_extension(self, name):
+            return False
+
     def _fake_create(**kwargs):
         captured["create_kwargs"] = kwargs
+        kwargs["folder"].mkdir(exist_ok=True)  # SI creates the store
         return _FakeAnalyzer()
 
     monkeypatch.setattr(si, "create_sorting_analyzer", _fake_create)
@@ -1154,7 +1163,9 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
                 "sparse": True,
                 "method": "best_channels",
                 "num_channels": 6,
-                "peak_sign": "both",
+                # Polarity comes from the sorter (none set: neg), not the
+                # recipe's compatibility-only peak_sign.
+                "peak_sign": "neg",
             },
         ),
         ({"method": "dense"}, {"sparse": False}),

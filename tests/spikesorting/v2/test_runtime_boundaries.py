@@ -60,6 +60,9 @@ def test_analyzer_build_does_not_resolve_ambient_configuration(
         def compute(self, *args, **kwargs):
             calls.append(kwargs)
 
+        def has_extension(self, name):
+            return False
+
     monkeypatch.setattr(si, "create_sorting_analyzer", lambda **kw: Analyzer())
     _sorting_analyzer.build_analyzer(
         sorting,
