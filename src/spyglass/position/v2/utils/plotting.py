@@ -15,7 +15,7 @@ def _plot_trajectory(
 
     A 3D scatter is drawn when the dataframe carries a ``position_z`` column;
     otherwise a 2D scatter with equal aspect and (by default) an inverted
-    y-axis to match video pixel coordinates. Pure drawing helper — never
+    y-axis to match video pixel coordinates. A pure drawing helper: never
     calls ``plt.show``.
 
     Parameters

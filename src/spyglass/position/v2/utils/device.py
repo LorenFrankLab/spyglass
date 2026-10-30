@@ -1,7 +1,7 @@
 """CUDA device selection for V2 pose inference.
 
 Motivation (issue #1676): a bare ``device="cuda"`` is not a request for
-"a GPU" -- PyTorch resolves it to ``cuda:0`` specifically. On a shared
+"a GPU". PyTorch resolves it to ``cuda:0`` specifically. On a shared
 multi-GPU host that is an arbitrary and frequently wrong choice: the
 reported failure had ``cuda:0`` at 0.5 GiB free (saturated by other
 users) while nine sibling A100s sat at ~77 GiB free each. Inference then
@@ -10,7 +10,7 @@ died with a CUDA OOM part-way through a long run.
 That failure is invisible to
 :func:`~spyglass.position.v2.utils.nwb_io.check_gpu_available`, which
 only answers "is any GPU visible" (``torch.cuda.is_available()``, True in
-that case). This module answers the follow-up question -- *which* GPU.
+that case). This module answers which GPU.
 
 Lives under ``position/v2/utils/`` rather than the tool-agnostic
 ``position/utils/`` for the same reason ``check_gpu_available`` does: DLC
@@ -87,7 +87,7 @@ def _select_device(
         return (total - free) / total if total else 1.0
 
     candidates = [i for i in mem_by_index if used_frac(i) <= idle_frac]
-    if not candidates:  # every GPU is in use -- fall back to most free
+    if not candidates:  # every GPU in use: fall back to the most free
         candidates = list(mem_by_index)
 
     # sorted() first so ties break to the lowest index, not dict order.
@@ -141,8 +141,8 @@ def resolve_cuda_device(
     Returns
     -------
     str or None
-        ``"cuda:N"`` when *device* was a bare ``"cuda"``; otherwise
-        *device* unchanged.
+        ``"cuda:N"`` when *device* was a bare ``"cuda"``, and *device*
+        unchanged in every other case.
 
     Raises
     ------
@@ -151,10 +151,8 @@ def resolve_cuda_device(
 
     Notes
     -----
-    An explicit ``"cuda:N"`` is honored, not second-guessed -- the caller
-    named that device on purpose. It still gets a warning when it looks
-    too full to succeed, since silently proceeding to an OOM is the
-    behavior this module exists to eliminate.
+    An explicit ``"cuda:N"`` is honored. It still gets a warning when the
+    device looks too full to succeed.
     """
     if not device or "cuda" not in str(device).lower():
         return device
@@ -192,7 +190,7 @@ def resolve_cuda_device(
         if explicit:
             logger.warning(
                 f"{detail} It was requested explicitly, so it will be used "
-                f"anyway -- but cuda:{best} currently has "
+                f"anyway. cuda:{best} currently has "
                 f"{mem_by_index[best][0] / BYTES_PER_GIB:.1f} GiB free. "
                 "Expect a CUDA out-of-memory error. Pass device='cuda' to "
                 "let Spyglass pick the least-loaded GPU instead."

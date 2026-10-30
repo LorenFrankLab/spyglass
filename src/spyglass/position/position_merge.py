@@ -1,4 +1,4 @@
-"""PositionOutput merge table — unified interface to all position sources.
+"""PositionOutput merge table: one interface to all position sources.
 
 This module exposes ``PositionOutput``, a DataJoint merge table that collects
 position results from every upstream pipeline behind a single fetch interface:
@@ -6,7 +6,7 @@ position results from every upstream pipeline behind a single fetch interface:
 - ``IntervalPositionInfo`` (common/Trodes-based)
 - ``TrodesPosV1``
 - ``DLCPosV1`` / ``DLCPoseEstimation`` (DeepLabCut V1)
-- ``PoseV2`` (position V2 — ndx-pose / multi-tool)
+- ``PoseV2`` (position V2, ndx-pose and multi-tool)
 - ``ImportedPose``
 
 Typical usage

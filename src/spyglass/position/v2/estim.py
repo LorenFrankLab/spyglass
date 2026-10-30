@@ -92,10 +92,10 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose estimation inference.
 
     Stores tool-specific inference parameters (e.g. ``batch_size``) as
-    reusable named parameter sets. The compute ``device`` is deliberately
-    NOT stored here: it is a runtime selection passed to
-    ``PoseEstim().populate(..., make_kwargs={"device": ...})`` so it never
-    forks otherwise-identical parameter sets.
+    reusable named parameter sets. The compute ``device`` is not stored
+    here. It is a runtime selection passed as
+    ``PoseEstim().populate(..., make_kwargs={"device": ...})``, so identical
+    parameter sets stay one row.
 
     Attributes
     ----------
@@ -137,8 +137,8 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
         ----------
         params : dict
             Tool-specific inference parameters (e.g. ``batch_size``). The
-            compute ``device`` is a runtime ``populate`` kwarg, not a stored
-            param -- do not put it here.
+            compute ``device`` is a runtime ``populate`` kwarg. Do not put it
+            here.
         params_id : str, optional
             Name for this parameter set. If None, auto-generated using
             default_pk_name convention, by default None
@@ -206,13 +206,11 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
     def insert1(self, row, **kwargs):
         """Insert one inference task, requiring a single-session video group.
 
-        ``VidFileGroup`` deliberately permits multi-session groups so one model
-        can train across sessions (see ``ModelSelection``). Inference has no
-        such freedom: results that span two sessions have no well-defined
-        ``nwb_file_name``, and every downstream table -- ``PoseEstim``,
-        ``PoseV2``, ``PositionOutput`` -- assumes exactly one. Rejecting here
-        surfaces the problem at queue time rather than partway through
-        ``populate``.
+        ``VidFileGroup`` permits multi-session groups so one model can train
+        across sessions (see ``ModelSelection``). Inference requires exactly
+        one: ``PoseEstim``, ``PoseV2`` and ``PositionOutput`` each resolve a
+        single ``nwb_file_name``. The check runs at queue time rather than
+        during ``populate``.
 
         Parameters
         ----------
@@ -237,8 +235,8 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
                     f"Cannot queue pose estimation on video group "
                     f"'{vid_group_id}': {e} Pose estimation requires a group "
                     "whose videos all belong to one session. Multi-session "
-                    "groups are for model training (ModelSelection) only -- "
-                    "build a per-session group for inference, e.g. with "
+                    "groups are for model training (ModelSelection) only. "
+                    "Build a per-session group for inference, e.g. with "
                     "PoseEstimSelection().insert_from_videofile()."
                 ) from e
 
@@ -264,8 +262,8 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
             by default 'trigger'
         params : dict, optional
             Tool-specific inference parameters (e.g. ``batch_size``). The
-            compute ``device`` is a runtime ``populate`` kwarg, not a stored
-            param -- do not put it here. Ignored if key already contains
+            compute ``device`` is a runtime ``populate`` kwarg. Do not put it
+            here. Ignored if key already contains
             pose_estim_params_id.
         output_dir : str, optional
             Output directory. If None, inferred from model and video info
@@ -441,7 +439,7 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
         skeleton scores strictly better on the *same* comparable metric as the
         chosen model. Silent when the chosen model is already best, has no
         comparable metric, the best candidate uses a different metric, or on
-        any lookup failure -- an order is never fabricated.
+        any lookup failure. An order is never fabricated.
 
         Parameters
         ----------
@@ -682,8 +680,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         """Load pose estimation data from existing ndx-pose NWB file.
 
         This method validates and extracts metadata from NWB files that already
-        contain ndx-pose PoseEstimation data (e.g., from SLEAP, pre-processed
-        data, or previously created files).
+        contain ndx-pose PoseEstimation data, as written by SLEAP or by an
+        earlier Spyglass run.
 
         Parameters
         ----------
@@ -892,11 +890,10 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     def make_fetch(self, key, device=None):
         """Read every upstream input needed for pose estimation.
 
-        Read-only: the tri-part contract forbids writes here, and DataJoint
-        re-runs this method inside the transaction to verify (via ``DeepHash``)
-        that upstream data did not change during ``make_compute``.  All queries
-        for both the 2D and 3D paths — including those the NWB-store helpers
-        used to perform themselves — are resolved here.
+        Read-only. DataJoint re-runs this method inside the transaction and
+        ``DeepHash``es the result, which verifies upstream data did not change
+        during ``make_compute``. Every query for both the 2D and 3D paths is
+        resolved here.
 
         Parameters
         ----------
@@ -904,10 +901,10 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             Primary key from PoseEstimSelection
         device : str, optional
             Compute device for inference (e.g. ``"cuda:0"``, ``"cpu"``).
-            This is a *runtime* selection, not a stored/hashed parameter:
-            it is injected into a runtime copy of the fetched inference
-            params and never persisted, so it does not fork
-            otherwise-identical parameter sets. Pass it via ``populate``'s
+            A runtime selection, not a stored or hashed parameter. It is
+            folded into a copy of the fetched inference params and never
+            persisted, so identical parameter sets stay one row. Pass it via
+            ``populate``'s
             ``make_kwargs``, e.g.
             ``PoseEstim().populate(sel_key, make_kwargs={"device": "cuda:0"})``.
             DataJoint routes ``make_kwargs`` to ``make_fetch`` only, so the
@@ -917,7 +914,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         Returns
         -------
         list
-            ``[fetched]`` — a single dict consumed by :meth:`make_compute`.
+            ``[fetched]``, a single dict consumed by :meth:`make_compute`.
 
         Raises
         ------
@@ -975,10 +972,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # Resolve nwb_file_name via the VidFileGroup → Session link, failing
         # fast (before any expensive I/O) if it does not resolve to exactly
         # one. PoseEstimSelection.insert1 already gates this; the check
-        # remains for rows written by other means. Preserve the underlying
-        # cause -- a group spanning two sessions is a different problem from
-        # one whose videos were never registered, and the two were previously
-        # reported with the same misleading message.
+        # remains for rows written by other means. Keep the underlying cause:
+        # a group spanning two sessions and a group whose videos were never
+        # registered need distinguishable messages.
         try:
             nwb_file_name = VidFileGroup().get_nwb_file(key["vid_group_id"])[
                 "nwb_file_name"
@@ -1032,9 +1028,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         Database-free: every query is resolved by :meth:`make_fetch`.  This is
         the long-running stage (GPU inference, triangulation) and runs outside
-        the transaction, so it holds no table lock.  It does write tool output
-        to disk, which the tri-part contract permits — only database access is
-        barred.
+        the transaction, so it holds no table lock. Tool output is written to
+        disk here; only database access is barred.
 
         Parameters
         ----------
@@ -1090,10 +1085,10 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     "device": resolved_device,
                 }
 
-        # Branch — 3D triangulation vs standard 2D path.
+        # Branch: 3D triangulation vs standard 2D path.
         if fetched["is_3d"]:
             self._info_msg(
-                "3D mode detected — running per-camera triangulation."
+                "3D mode detected. Running per-camera triangulation."
             )
             return [
                 fetched,
@@ -1192,8 +1187,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     def make_insert(self, key, fetched, computed):
         """Write the analysis NWB file and insert the row.
 
-        Runs inside a transaction.  All database writes — including
-        ``AnalysisNwbfile.add``, which inserts — live here.
+        Runs inside a transaction. Every database write lives here,
+        including ``AnalysisNwbfile.add``.
 
         Parameters
         ----------
@@ -1492,10 +1487,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # tutorial/bootstrap sessions whose NWB object IDs are synthetic).
         # Uses the already-converted mp4 (the same one DLC inference runs
         # on) via the shared ensure_mp4, not the raw registered
-        # VideoFile.path directly -- OpenCV cannot read a frame count from
-        # a raw H.264 elementary stream (reports a nonsensical negative
-        # value instead of raising), the same limitation ensure_mp4/find_mp4
-        # elsewhere in this pipeline exist to work around.
+        # VideoFile.path directly: OpenCV reports a negative frame count for
+        # a raw H.264 elementary stream rather than raising, which is why
+        # ensure_mp4 and find_mp4 exist.
         video_path = (VideoFile & vf_keys[0]).fetch1("path")
         if video_path:
             try:
@@ -2023,14 +2017,14 @@ class PoseParams(SpyglassMixin, dj.Lookup):
     smoothing: json  # Smoothing/interpolation params
     """
 
-    # -- Supported orient methods and their required keys --
+    # Supported orient methods and their required keys
     orient_methods = {
         "two_pt": ["bodypart1", "bodypart2"],
         "bisector": ["led1", "led2", "led3"],
         "none": [],
     }
 
-    # -- Supported centroid methods: n_points, required point keys, extra keys
+    # Supported centroid methods: n_points, required point keys, extra keys
     centroid_methods = {
         "1pt": {
             "n_points": 1,
@@ -2054,7 +2048,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         },
     }
 
-    # -- Smoothing methods (validated at runtime via SMOOTHING_METHODS) --
+    # Smoothing methods, validated at runtime via SMOOTHING_METHODS
     smoothing_required = ["likelihood_thresh"]
 
     @classmethod
@@ -2069,7 +2063,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         bodypart1 is the rear (red) marker; bodypart2 is the front (green)
         marker.  ``two_pt_orientation`` returns the angle of the vector from
         point2 toward point1, so the resulting orientation points
-        front→back — identical to V1's ``red_green_LED`` parameter set.
+        front to back, matching V1's ``red_green_LED`` parameter set.
         """
         default_params = {
             "pose_params_id": "default",
@@ -2517,12 +2511,12 @@ class PoseSelection(SpyglassMixin, dj.Manual):
 class PoseV2(SpyglassMixin, dj.Computed):
     """Processed pose derivatives (orientation, centroid, velocity).
 
-    The recording session is *not* an attribute here. ``PoseV2`` reaches its
+    The recording session is not an attribute here. ``PoseV2`` reaches its
     videos through ``VidFileGroup``, whose ``vid_group_id`` collapses a set of
-    ``VideoFile`` rows into one opaque ID, so -- unlike ``DLCPosV1``, which
-    references ``VideoFile`` directly -- ``nwb_file_name`` and ``epoch`` do not
-    ride down the primary key. Use :meth:`fetch_by_epoch` to select entries by
-    session or epoch (issue #1680).
+    ``VideoFile`` rows into one opaque ID, so ``nwb_file_name`` and ``epoch``
+    do not ride down the primary key. ``DLCPosV1`` references ``VideoFile``
+    directly and does carry them. Use :meth:`fetch_by_epoch` to select
+    entries by session or epoch (issue #1680).
     """
 
     definition = """
@@ -2546,7 +2540,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         Parameters
         ----------
         restriction : dict, str, or query expression, optional
-            Any restriction valid on ``TaskEpoch`` -- e.g.
+            Any restriction valid on ``TaskEpoch``, e.g.
             ``{"nwb_file_name": "sub_2023_.nwb"}`` for a whole session, or
             ``{"nwb_file_name": ..., "epoch": 1}`` for one epoch. Default
             ``True`` (every epoch), which returns all entries whose video group
@@ -2577,9 +2571,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         -----
         A video group may hold several videos (one per camera on a 3-D rig, or
         several epochs). Matching *any* of them selects the entry, and the
-        result is deduplicated to one row per ``PoseV2`` entry -- joining
-        ``VidFileGroup.File`` directly would instead repeat the entry once per
-        matching video.
+        result is deduplicated to one row per ``PoseV2`` entry.
         """
         from spyglass.common import TaskEpoch
 
@@ -2721,8 +2713,8 @@ class PoseV2(SpyglassMixin, dj.Computed):
         ----------
         key : dict, optional
             Restriction identifying a single PoseV2 entry. When given, it is
-            applied before fetching; otherwise ``self`` must already resolve
-            to one row.
+            applied before fetching. Without one, ``self`` must already
+            resolve to a single row.
         ax : matplotlib.axes.Axes, optional
             Axes to draw on (see ``_plot_trajectory``).
         **kwargs
@@ -3008,8 +3000,8 @@ class PoseV2(SpyglassMixin, dj.Computed):
     def make_insert(self, key, nwb_file_name, outputs):
         """Write the analysis NWB file and insert the row.
 
-        Runs inside a transaction. All database writes — including
-        ``AnalysisNwbfile.add``, which inserts — live here.
+        Runs inside a transaction. Every database write lives here,
+        including ``AnalysisNwbfile.add``.
 
         Parameters
         ----------
@@ -3017,7 +3009,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
             Primary key from PoseSelection.
         nwb_file_name : str
             Parent NWB file name from :meth:`make_compute`, used to name the
-            analysis file. Not stored as an attribute -- see
+            analysis file. Not stored as an attribute. See
             :meth:`fetch_by_epoch` for selecting entries by session.
         outputs : dict
             Result of ``compute_pose_outputs``.
@@ -3073,11 +3065,10 @@ class PoseV2(SpyglassMixin, dj.Computed):
     def _get_nwb_file_name(key: dict):
         """Return the nwb_file_name common to this VidFileGroup's videos.
 
-        Delegates to ``VidFileGroup.get_nwb_file()``, which confirms all videos
-        share one NWB parent. The error is deliberately not swallowed: the only
-        consumer, ``_store_pose_nwb``, hands the value to
-        ``AnalysisNwbfile.create()``, which cannot accept ``None`` -- returning
-        it merely defers the failure to a less informative site.
+        Delegates to ``VidFileGroup.get_nwb_file()``, which confirms all
+        videos share one NWB parent. A lookup failure propagates: the only
+        consumer, ``_store_pose_nwb``, passes the value to
+        ``AnalysisNwbfile.create()``, which rejects ``None``.
 
         Parameters
         ----------

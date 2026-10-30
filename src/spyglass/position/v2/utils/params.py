@@ -107,7 +107,7 @@ class PoseParameterSet:
 def format_pose_params(params, name=None):
     """Render a PoseParams row as human-readable, multi-line text.
 
-    Pure formatter — no database access. The ``orient``, ``centroid``, and
+    A pure formatter, with no database access. The ``orient``, ``centroid``
     ``smoothing`` sub-dicts are each shown under a ``--- <section> ---``
     header; a missing or empty sub-dict renders as ``(not set)``.
 

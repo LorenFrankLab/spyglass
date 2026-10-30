@@ -1,4 +1,4 @@
-"""Position V2 pipeline — model training, inference, and pose processing.
+"""Position V2 pipeline: model training, inference, and pose processing.
 
 Typical workflow
 ----------------

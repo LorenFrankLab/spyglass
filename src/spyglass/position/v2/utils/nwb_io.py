@@ -28,20 +28,17 @@ def check_gpu_available(device: Union[str, None]) -> None:
     ``torch.load`` as a cryptic ``pickle.UnpicklingError`` after several
     minutes of setup work (see issue #1676).
 
-    This only checks basic driver/runtime visibility
-    (``torch.cuda.is_available()``); it cannot detect a GPU that is present
-    but locked/busy from another process's exclusive context -- that
-    condition is inherently racy to pre-check (the device can be grabbed
-    between the check and the actual use) and is handled instead by the
-    actionable hint in :meth:`PoseInferenceRunner.run_dlc_inference` if it
-    happens at load time.
+    Checks driver and runtime visibility only
+    (``torch.cuda.is_available()``). A GPU that is present but held by
+    another process still passes, since the device can be taken between the
+    check and the use; :meth:`PoseInferenceRunner.run_dlc_inference` reports
+    that case at load time.
 
-    DLC 3.x/PyTorch is the only V2 inference backend (V1's DeepLabCut used
-    TensorFlow instead), so this lives alongside ``PoseInferenceRunner``
-    rather than in the tool-agnostic ``position/utils/`` package -- a bare
-    ``torch.cuda.is_available()`` check would be silently wrong for a
-    TensorFlow caller, and V1 has no comparable ``device="cuda"`` string
-    convention to check (it takes an integer ``gputouse`` instead).
+    DLC 3.x on PyTorch is V2's only inference backend, so this lives
+    alongside ``PoseInferenceRunner`` rather than in the tool-agnostic
+    ``position/utils/`` package. V1 runs on TensorFlow and selects a device
+    by integer ``gputouse``, so the ``device="cuda"`` convention checked here
+    does not apply to it.
 
     Parameters
     ----------
@@ -58,7 +55,7 @@ def check_gpu_available(device: Union[str, None]) -> None:
     if not device or "cuda" not in str(device).lower():
         return
 
-    import torch  # pragma: no cover -- CI has no GPU, see below
+    import torch  # pragma: no cover; CI has no GPU
 
     if not torch.cuda.is_available():  # pragma: no cover
         raise RuntimeError(  # pragma: no cover
@@ -90,12 +87,12 @@ class PoseInferenceRunner(BaseMixin):
     def _assert_countable_videos(self, videos: list) -> None:
         """Last-resort guard for videos DeepLabCut cannot count frames for.
 
-        Shared :func:`ensure_mp4` already auto-converts every input DLC
-        cannot count — raw elementary streams and containers with unreadable
-        metadata alike — so by the time this runs the videos should be
-        countable. It fires only for the residual case a lossless remux
-        cannot fix in place (an mp4 with stripped metadata, or a corrupt
-        file), turning DLC's opaque ``ValueError: __len__() should return
+        Shared :func:`ensure_mp4` converts every input DLC cannot count,
+        including raw elementary streams and containers with unreadable
+        metadata, so videos reaching this point are countable. It fires for
+        the residual case a lossless remux cannot fix in place: an mp4 with
+        stripped metadata, or a corrupt file. It turns DLC's opaque
+        ``ValueError: __len__() should return
         >= 0`` into an actionable message instead of a mid-inference crash.
 
         Parameters
@@ -152,8 +149,8 @@ class PoseInferenceRunner(BaseMixin):
                 f"DeepLabCut {getattr(deeplabcut, '__version__', '?')} ships an "
                 f"invalid backbone catalog, so Model Zoo inference cannot run:\n"
                 f"  {catalog}\n  {err}\n"
-                "Fixed upstream in DeepLabCut 3.0.1 -- upgrade, or repair the "
-                "file in place (it is a stray trailing comma)."
+                "Fixed in DeepLabCut 3.0.1. Upgrade, or repair the file in "
+                "place by removing the stray trailing comma."
             ) from err
 
     def _run_superanimal_inference(
@@ -161,22 +158,20 @@ class PoseInferenceRunner(BaseMixin):
     ):
         """Run a DLC Model Zoo (SuperAnimal) model over videos.
 
-        ``video_inference_superanimal`` takes the zoo names directly -- no
-        config, no shuffle -- and routes the engine by backbone itself.
+        ``video_inference_superanimal`` takes the zoo names directly, with
+        no config and no shuffle, and routes the engine by backbone itself.
 
         ``max_individuals`` defaults to **1**. SuperAnimal models are
         multi-animal by construction (DLC hardcodes ``multi_animal=True``), so
         their output always carries an ``individuals`` column level. Pinning it
         to one animal makes that level length-1, which
         ``dlc_io.squeeze_individuals`` collapses to the ordinary single-animal
-        layout -- Spyglass position derives one centroid and one orientation
-        per entry, so more than one animal has nowhere to go.
+        layout. Position derives one centroid and one orientation per entry.
 
-        Raising it is possible but unsupported: the extra level survives to the
-        parser, which then requires ``allow_multi_animal`` and will still fail
-        downstream. On a video that truly holds several animals, a value of 1
-        returns one detection with no guarantee which -- a limitation of the
-        scoping, not a defect.
+        A higher value is unsupported: the extra level reaches the parser,
+        which then requires ``allow_multi_animal``. On a video holding
+        several animals, a value of 1 returns one detection, with no control
+        over which.
 
         Returns
         -------
@@ -225,7 +220,7 @@ class PoseInferenceRunner(BaseMixin):
                 f"max_individuals={params['max_individuals']} for {dataset}: "
                 "Spyglass position tracks one animal per entry, so the extra "
                 "`individuals` level will reach the parser and require "
-                "allow_multi_animal=True -- and still fail downstream."
+                "allow_multi_animal=True."
             )
 
         self._info_msg(
@@ -275,8 +270,8 @@ class PoseInferenceRunner(BaseMixin):
         # OpenCV cannot read a video's frame count (e.g. raw .h264 streams).
         # Auto-convert such videos to mp4 via the shared converter (same path
         # used at project creation) so inference proceeds without the user
-        # backtracking. Converted mp4s go to pose_video_dir — matching V1; the
-        # source is preserved. The final check is a last-resort guard.
+        # backtracking. Converted mp4s go to pose_video_dir, as in V1, and
+        # the source is preserved. The final check is a last-resort guard.
         from spyglass.position.utils.general import ensure_mp4
         from spyglass.settings import pose_video_dir
 
@@ -358,20 +353,17 @@ class PoseInferenceRunner(BaseMixin):
             ValueError,
             pickle.UnpicklingError,
         ) as e:
-            # torch.load's weights_only unpickler wraps ANY failure during
-            # snapshot loading -- including a low-level CUDA driver error --
-            # in a generic UnpicklingError with a scary "arbitrary code
-            # execution" warning that has nothing to do with the real cause.
-            # Detect the common case (GPU busy/unavailable/locked by another
-            # process) and add an actionable hint alongside the original
-            # message, rather than letting it look like a corrupt/untrusted
-            # snapshot file.
+            # torch.load's weights_only unpickler reports any failure during
+            # snapshot loading, a CUDA driver error included, as an
+            # UnpicklingError citing arbitrary code execution. Detect the
+            # common case of a busy or unavailable GPU and add a hint next to
+            # the original message.
             hint = ""
             if "cuda" in str(e).lower():
                 hint = (
                     " This looks like a GPU availability problem (busy, "
                     "locked by another process, or a driver/visibility "
-                    "issue) rather than a bad model file -- check "
+                    "issue) rather than a bad model file. Check "
                     "`nvidia-smi` on the inference host, or retry with a "
                     "CPU PoseEstimParams entry (device='cpu')."
                 )
@@ -445,8 +437,8 @@ class PoseInferenceRunner(BaseMixin):
         TensorFlow model directories (``best_model.h5`` +
         ``training_config.json``) are loaded by converting the UNet weights
         to PyTorch automatically. The ``.analysis.h5`` is written via
-        ``sleap_io.save_analysis_h5`` — the same path used to generate the
-        test fixtures (see ``tests/_data/sleap/make_real_analysis_h5.py``).
+        ``sleap_io.save_analysis_h5``, the path that also generates the test
+        fixtures (see ``tests/_data/sleap/make_real_analysis_h5.py``).
         """
         if not isinstance(video_path, (list, tuple)):
             video_path = [video_path]
@@ -461,7 +453,7 @@ class PoseInferenceRunner(BaseMixin):
                 f"SLEAP model directory not found: {model_path}"
             )
 
-        # Deferred import — mirrors the DLC pattern; avoids startup cost.
+        # Deferred import, as in the DLC path, to avoid startup cost.
         # SLEAP must live in its own env (see environments/environment_sleap
         # .yml); its NumPy-2 stack conflicts with DeepLabCut 3.x.
         try:
