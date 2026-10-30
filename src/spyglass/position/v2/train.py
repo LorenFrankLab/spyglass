@@ -3220,6 +3220,23 @@ class Model(SpyglassMixin, dj.Computed):
         # Prefer a DJ-managed config (prefixed with 'dj_dlc') when present
         dj_configs = [p for p in available if "dj_dlc" in p.name]
         config_path = dj_configs[0] if dj_configs else available[0]
+
+        # The project config is shared by every model trained from it. V1's
+        # unique index is (task, date, iteration, shuffle, snapshotindex,
+        # trainingsetindex), so these are what separate one V1 model from
+        # another, and they reach V2's params rather than the config alone.
+        extra_params = {
+            field: row[field]
+            for field in ("shuffle", "trainingsetindex", "snapshotindex")
+            if field in row
+        }
+        if config_template := row.get("config_template"):
+            extra_params["config_template"] = config_template
+        if model_prefix := row.get("model_prefix"):
+            extra_params["model_prefix"] = model_prefix
+        kwargs.setdefault("extra_params", {})
+        kwargs["extra_params"] = {**extra_params, **kwargs["extra_params"]}
+
         self._info_msg(
             f"Importing V1 model '{row['dlc_model_name']}' "
             f"from {config_path}"
@@ -3446,6 +3463,7 @@ class Model(SpyglassMixin, dj.Computed):
         normalize_names = kwargs.pop("normalize_names", False)
         allow_redundant_model = kwargs.pop("allow_redundant_model", False)
         external_videos = kwargs.pop("external_videos", False)
+        extra_params = kwargs.pop("extra_params", None) or {}
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
 
@@ -3454,7 +3472,10 @@ class Model(SpyglassMixin, dj.Computed):
         if normalize_names:
             self._canonicalize_dlc_project(model_path)
 
-        config = load_yaml(model_path)
+        # A DLC project holds several models, distinguished by training
+        # choices the config does not record. `extra_params` carries them, so
+        # the params hash and the model identity differ per model.
+        config = {**load_yaml(model_path), **extra_params}
 
         # Step 1: Extract and insert skeleton from DLC config
         skeleton_config = {
@@ -3509,22 +3530,24 @@ class Model(SpyglassMixin, dj.Computed):
                 "ms-dlc",
                 {"model_params_id": model_params_key["model_params_id"]},
             )
-        # Return an existing Model entry if one already exists for this path,
-        # before declaring the selection. model_selection_id embeds the date,
-        # so re-importing the same config on a later day is a new prospective
-        # selection that the redundancy guard would reject.
-        # model_path is the most stable identifier (default_pk_name embeds the
-        # date, so model_id changes across days), but it is NOT guaranteed
-        # unique: the training path can register several models on one path.
-        # Prefer the model tied to this exact selection; otherwise fall back to
-        # the most recent model on the path. Never assume a single match --
-        # ``fetch1`` on a multi-row set would raise.
+        # Return an existing Model entry if one already exists for this path
+        # and these training parameters, before declaring the selection.
+        # model_selection_id embeds the date, so re-importing the same config
+        # on a later day is a new prospective selection that the redundancy
+        # guard would reject; matching on the rest of the selection keeps that
+        # import idempotent. Matching on `model_path` alone would not: several
+        # models share one project's config.yaml, so it would return whichever
+        # was imported first. Never assume a single match -- ``fetch1`` on a
+        # multi-row set would raise.
         stored_path = _to_stored_path(model_path)
-        existing = self & {"model_path": stored_path}
+        dated = {"model_selection_id"}
+        existing = (
+            self
+            & {"model_path": stored_path}
+            & {k: v for k, v in sel_key.items() if k not in dated}
+        )
         if existing:
-            preferred = existing & sel_key
-            chosen = preferred if preferred else existing
-            key = chosen.fetch("KEY", order_by="model_id DESC", limit=1)[0]
+            key = existing.fetch("KEY", order_by="model_id DESC", limit=1)[0]
             return (self & key).fetch1()
 
         ModelSelection().insert1(
