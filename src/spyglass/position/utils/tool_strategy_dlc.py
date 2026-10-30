@@ -41,6 +41,7 @@ class DLCStrategy(PoseToolStrategy):
 
     @property
     def tool_name(self) -> str:
+        """``"DLC"``. See ``source_software`` for the spelling NWB stores."""
         return "DLC"
 
     @property
@@ -50,12 +51,30 @@ class DLCStrategy(PoseToolStrategy):
 
     @property
     def supports_training(self) -> bool:
+        """True. DLC trains, evaluates and verifies through this strategy."""
         return True
 
     def get_required_params(self) -> Set[str]:
+        """Parameters DLC training cannot default.
+
+        Returns
+        -------
+        Set[str]
+            ``project_path`` alone. DLC reads the rest of its configuration
+            from the project it names.
+        """
         return {"project_path"}  # project_path required for DLC training
 
     def get_skipped_params(self) -> Set[str]:
+        """Parameters Spyglass resolves instead of passing to DLC.
+
+        Returns
+        -------
+        Set[str]
+            The video set, model path and analysis file id, which come from
+            the tables; and ``device``/``gputouse``, which are runtime
+            choices routed through ``populate(make_kwargs=...)``.
+        """
         return {
             "video_sets",
             "model_path",
@@ -68,6 +87,17 @@ class DLCStrategy(PoseToolStrategy):
         }
 
     def get_accepted_params(self) -> Set[str]:
+        """Every parameter DLC training reads, across both engines.
+
+        Covers the TensorFlow length knobs (``maxiters``, ``saveiters``) and
+        the PyTorch ones (``epochs``, ``save_epochs``); ``validate_params``
+        checks which pair suits the configured engine.
+
+        Returns
+        -------
+        Set[str]
+            Core training parameters followed by project metadata.
+        """
         return {
             # Core DLC parameters
             "project_path",
@@ -124,6 +154,15 @@ class DLCStrategy(PoseToolStrategy):
         }
 
     def get_default_params(self) -> Dict[str, Any]:
+        """Values applied when a parameter set omits them.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A ResNet-50 trained for 200 epochs, snapshotting every 25, on
+            shuffle 1 of training set 0. The TensorFlow knobs are present and
+            ``None``, which leaves DLC's own defaults in place.
+        """
         # DLC 3.x defaults to the PyTorch engine, so the PyTorch-native length
         # knobs (``epochs``/``save_epochs``) are the primary defaults here.
         # ``epochs=200``/``save_epochs=25`` mirror DeepLabCut's own PyTorch
@@ -152,6 +191,15 @@ class DLCStrategy(PoseToolStrategy):
         }
 
     def get_parameter_aliases(self) -> Dict[str, list]:
+        """Alternative spellings accepted for four DLC parameters.
+
+        Returns
+        -------
+        Dict[str, list]
+            Canonical name to the names that also resolve to it. ``net_type``
+            resolves to ``backbone``, so a SLEAP-style parameter set names the
+            architecture the same way.
+        """
         return {
             "model_type": ["approach"],
             "backbone": ["backbone_type", "net_type"],
@@ -609,6 +657,7 @@ class DLCStrategy(PoseToolStrategy):
         want = {Path(v).name for v in videos}
 
         def _log(msg):
+            """Report ``msg`` through the table, when one was passed."""
             if model_instance is not None:
                 model_instance._info_msg(msg)
 
@@ -898,10 +947,11 @@ class DLCStrategy(PoseToolStrategy):
     def split_project_kwargs(self, kwargs: dict) -> tuple:
         """Divide kwargs between `create_new_project` and `extract_frames`.
 
-        Split by signature, so a caller reaches both steps by name. `algo`
-        and `userfeedback` are defaulted: DLC's own defaults are `kmeans` and
-        interactive prompting,
-        neither of which suits an unattended call.
+        Split by signature, so a caller reaches both steps by name. Two
+        extraction defaults are set here and differ from DeepLabCut's own:
+        `algo` becomes `uniform` (DLC uses `kmeans`) and `userfeedback`
+        becomes False (DLC prompts interactively). A caller's own value for
+        either is kept.
 
         See :meth:`PoseToolStrategy.split_project_kwargs` for parameters.
 

@@ -19,22 +19,41 @@ class SLEAPStrategy(PoseToolStrategy):
 
     @property
     def tool_name(self) -> str:
+        """``"SLEAP"``."""
         return "SLEAP"
 
     @property
     def source_software(self) -> str:
+        """``"SLEAP"``, which is already the canonical spelling."""
         return "SLEAP"
 
     @property
     def supports_training(self) -> bool:
+        """True. SLEAP trains, evaluates and verifies through this strategy."""
         return True
 
     def get_required_params(self) -> Set[str]:
+        """Parameters SLEAP training cannot default.
+
+        Returns
+        -------
+        Set[str]
+            ``model_type`` alone. It selects the architecture, so there is no
+            value to fall back on.
+        """
         return {
             "model_type",  # single_instance, centroid, etc.
         }
 
     def get_skipped_params(self) -> Set[str]:
+        """Parameters Spyglass resolves instead of passing to SLEAP.
+
+        Returns
+        -------
+        Set[str]
+            Paths and identifiers that come from the tables: the project and
+            model paths, the video set, and the analysis file id.
+        """
         return {
             "project_path",
             "video_sets",
@@ -43,6 +62,15 @@ class SLEAPStrategy(PoseToolStrategy):
         }
 
     def get_accepted_params(self) -> Set[str]:
+        """Every parameter SLEAP training reads.
+
+        Returns
+        -------
+        Set[str]
+            Names grouped by role: model architecture, training schedule,
+            augmentation, optimization, model-specific tuning, output naming
+            and version metadata.
+        """
         return {
             # Model architecture
             "model_type",
@@ -78,6 +106,14 @@ class SLEAPStrategy(PoseToolStrategy):
         }
 
     def get_default_params(self) -> Dict[str, Any]:
+        """Values applied when a parameter set omits them.
+
+        Returns
+        -------
+        Dict[str, Any]
+            A single-instance UNet trained for 200 epochs at batch size 4 and
+            learning rate 1e-4.
+        """
         return {
             "model_type": "single_instance",
             "backbone": "unet",
@@ -87,6 +123,13 @@ class SLEAPStrategy(PoseToolStrategy):
         }
 
     def get_parameter_aliases(self) -> Dict[str, list]:
+        """Alternative spellings accepted for four SLEAP parameters.
+
+        Returns
+        -------
+        Dict[str, list]
+            Canonical name to the names that also resolve to it.
+        """
         return {
             "model_type": ["approach"],
             "backbone": ["backbone_type"],

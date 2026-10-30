@@ -1862,8 +1862,12 @@ class Model(SpyglassMixin, dj.Computed):
         **kwargs
             Passed through to ``deeplabcut.create_new_project()`` and/or
             ``deeplabcut.extract_frames()`` based on each function's
-            signature.  For example, pass ``algo='uniform'`` to override
-            the default ``'kmeans'`` frame-extraction algorithm.
+            signature. Two extraction defaults differ from DeepLabCut's own:
+            ``algo`` is ``'uniform'`` here, so pass ``algo='kmeans'`` to
+            select clustered extraction; and ``userfeedback`` is ``False``,
+            which suppresses DLC's interactive prompts. Pass
+            ``userfeedback=True`` to restore them when extracting frames
+            with ``mode="manual"``.
 
         Returns
         -------
