@@ -783,7 +783,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
     ---
     params: json
     -> [nullable] Skeleton
-    params_hash: varchar(64) # hash of parameters
+    params_hash: varchar(64) # hash of params and skeleton together
     unique index (tool, params_hash)
     """
 
@@ -821,16 +821,45 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         },
     ]
 
-    contents = [
-        (
-            entry["model_params_id"],
-            entry["tool"],
-            entry["params"],
-            entry["skeleton_id"],
-            dj.hash.key_hash(entry["params"]),
+    @staticmethod
+    def get_params_hash(params: dict, skeleton_id: Union[str, None]) -> str:
+        """Hash a parameter set together with the skeleton it applies to.
+
+        Feeds ``params_hash``, which ``unique index (tool, params_hash)``
+        enforces. A skeleton inside the hash lets that index separate two
+        skeletons sharing parameters, including the null-skeleton default rows
+        that a nullable index column cannot constrain (MySQL treats NULLs as
+        distinct).
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters.
+        skeleton_id : str or None
+            Skeleton the parameters apply to.
+
+        Returns
+        -------
+        str
+            Hash over both.
+        """
+        return dj.hash.key_hash({"params": params, "skeleton_id": skeleton_id})
+
+    # A loop, not a comprehension: a comprehension body runs in its own scope
+    # and cannot see `get_params_hash`, which is called here at class-creation
+    # time.
+    contents = []
+    for _entry in default_entries_data:
+        contents.append(
+            (
+                _entry["model_params_id"],
+                _entry["tool"],
+                _entry["params"],
+                _entry["skeleton_id"],
+                get_params_hash(_entry["params"], _entry["skeleton_id"]),
+            )
         )
-        for entry in default_entries_data
-    ]
+    del _entry
 
     @classmethod
     def tool_info(cls) -> dict:
@@ -944,8 +973,13 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         # Validate required parameters using strategy
         strategy.validate_params(params)
 
-        # Check for existing entry with same params hash
-        params_hash_dict = dict(params_hash=dj.hash.key_hash(params))
+        # Check for an existing entry with the same identity. The hash covers
+        # the skeleton, so a shared parameter set under a second skeleton is a
+        # distinct row rather than a match on the first skeleton's key.
+        skeleton_id = key.get("skeleton_id")
+        params_hash_dict = dict(
+            params_hash=self.get_params_hash(params, skeleton_id)
+        )
         if dupe := self & params_hash_dict & dict(tool=key["tool"]):
             dupe_key = dupe.fetch1("KEY")
             self._warn_msg(f"Entry exists with same params: {dupe_key}")
@@ -953,9 +987,16 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
         model_params_id: str = (key.get("model_params_id") or "").strip()
         if not model_params_id:
-            # Always use default_pk_name for consistent naming
+            # Always use default_pk_name for consistent naming. The skeleton
+            # reaches the generated id too, so two skeletons sharing params do
+            # not collide on the primary key.
             model_params_id = default_pk_name(
-                "mp", dict(tool=key["tool"], params=params)
+                "mp",
+                dict(
+                    tool=key["tool"],
+                    params=params,
+                    skeleton_id=skeleton_id,
+                ),
             )
         key["model_params_id"] = model_params_id
 
@@ -1112,6 +1153,7 @@ class Model(SpyglassMixin, dj.Computed):
     -> ModelSelection
     -> [nullable] AnalysisNwbfile
     model_path         : varchar(255)
+    snapshot_path=NULL : varchar(255)  # this row's own checkpoint/weights file
     model_name=NULL    : varchar(64)   # human-readable; DLC Task, or zoo name
     training_mode='resumable': enum('resumable','weights_only','inference_only')
     evaluation=NULL    : json          # tool-specific evaluation metrics dict
@@ -1387,10 +1429,11 @@ class Model(SpyglassMixin, dj.Computed):
         re-runs this method inside the transaction to verify (via ``DeepHash``)
         that upstream data did not change during ``make_compute``.
 
-        When ``parent_id`` is set, the parent model's ``model_path`` is
-        resolved here and stashed on the returned ``sel_entry`` as
-        ``parent_model_path``, so the strategy's fine-tune path does not have
-        to query the database from within ``make_compute``.
+        When ``parent_id`` is set, the parent model's ``model_path`` and
+        ``snapshot_path`` are resolved here and stashed on the returned
+        ``sel_entry`` as ``parent_model_path`` and ``parent_snapshot_path``,
+        so the strategy's fine-tune path does not have to query the database
+        from within ``make_compute``.
 
         Parameters
         ----------
@@ -1428,13 +1471,17 @@ class Model(SpyglassMixin, dj.Computed):
         vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
         vid_group = (VidFileGroup() & vid_group_key).fetch1()
 
-        # Pre-resolve the parent model directory so the fine-tune path in
-        # make_compute stays database-free.
+        # Pre-resolve the parent model directory and checkpoint so the
+        # fine-tune path in make_compute stays database-free.
         if parent_id := sel_entry.get("parent_id"):
             parent = self.__class__ & {"model_id": parent_id}
-            sel_entry["parent_model_path"] = (
-                parent.fetch1("model_path") if parent else None
+            parent_path, parent_snapshot = (
+                parent.fetch1("model_path", "snapshot_path")
+                if parent
+                else (None, None)
             )
+            sel_entry["parent_model_path"] = parent_path
+            sel_entry["parent_snapshot_path"] = parent_snapshot
 
         return [sel_entry, params_entry, vid_group, device]
 
@@ -1811,6 +1858,13 @@ class Model(SpyglassMixin, dj.Computed):
                 new_params[k] = v
             else:
                 self._warn_msg(f"Ignoring unknown parameter: {k}")
+
+        # run_name names the trainer's output directory, so the child gets its
+        # own, keyed on parent_id to match model_selection_id below.
+        if new_params.get("run_name") and "run_name" not in overrides:
+            new_params["run_name"] = default_pk_name(
+                "run", {"parent_id": parent_id}
+            )
 
         # New ModelParams only if the params actually changed.
         if new_params == params_entry["params"]:
@@ -3404,13 +3458,10 @@ class Model(SpyglassMixin, dj.Computed):
                 "ms-dlc",
                 {"model_params_id": model_params_key["model_params_id"]},
             )
-        ModelSelection().insert1(
-            sel_key,
-            skip_duplicates=True,
-            allow_redundant_model=allow_redundant_model,
-        )
-
-        # Return an existing Model entry if one already exists for this path.
+        # Return an existing Model entry if one already exists for this path,
+        # before declaring the selection. model_selection_id embeds the date,
+        # so re-importing the same config on a later day is a new prospective
+        # selection that the redundancy guard would reject.
         # model_path is the most stable identifier (default_pk_name embeds the
         # date, so model_id changes across days), but it is NOT guaranteed
         # unique: the training path can register several models on one path.
@@ -3424,6 +3475,12 @@ class Model(SpyglassMixin, dj.Computed):
             chosen = preferred if preferred else existing
             key = chosen.fetch("KEY", order_by="model_id DESC", limit=1)[0]
             return (self & key).fetch1()
+
+        ModelSelection().insert1(
+            sel_key,
+            skip_duplicates=True,
+            allow_redundant_model=allow_redundant_model,
+        )
 
         # Step 5: Generate model_id and insert directly into Model. The id must
         # be unique per model; see _dlc_model_id for why a short prefix matters.

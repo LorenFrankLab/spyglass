@@ -438,7 +438,9 @@ def _make_dlc(ts, config, snapshot):
 
     cls = type("RecordingDLC", (_RecordingStrategy, ts.DLCStrategy), {})
     strategy = cls(filesystem=FakeFS(config=config))
-    strategy._resolve_parent_snapshot = lambda cfg, shuffle=None: snapshot
+    strategy._resolve_parent_snapshot = (
+        lambda cfg, shuffle=None, parent_snapshot=None: snapshot
+    )
     return strategy
 
 
