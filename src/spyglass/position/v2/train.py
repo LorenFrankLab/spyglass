@@ -1187,8 +1187,10 @@ class Model(SpyglassMixin, dj.Computed):
         *scored* when its evaluation carries a real (non-bool) numeric value
         for ``test_error`` (preferred) or ``test_error_p`` (fallback); other
         keys (e.g. ``train_error``) are not comparable. Scored models sort
-        first by ascending error; unscored models follow, ordered only by a
-        weak, deterministic ``training_iterations`` tiebreaker (more
+        first, grouped by metric and ascending by error within a group, since
+        a p-cutoff error is measured on a subset of predictions and so cannot
+        be ordered against a full-test error. Unscored models follow, ordered
+        only by a weak, deterministic ``training_iterations`` tiebreaker (more
         iterations first). No order is ever fabricated for unscored models.
 
         Parameters
@@ -1229,12 +1231,20 @@ class Model(SpyglassMixin, dj.Computed):
                 }
             )
 
+        # Group before comparing: test_error_p excludes predictions below a
+        # confidence cutoff, so it is systematically lower than test_error
+        # and the two cannot be ordered against each other.
+        metric_order = {
+            name: position
+            for position, name in enumerate(cls._COMPARABLE_METRICS)
+        }
+
         def _sort_key(entry):
             if entry["value"] is not None:
-                return (0, entry["value"])
+                return (0, metric_order[entry["metric"]], entry["value"])
             iters = entry["iterations"]
             # unscored: after scored; more iterations first, missing last
-            return (1, -iters if iters is not None else float("inf"))
+            return (1, 0, -iters if iters is not None else float("inf"))
 
         ranked.sort(key=_sort_key)
         return ranked
