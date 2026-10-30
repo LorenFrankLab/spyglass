@@ -3100,6 +3100,7 @@ class Model(SpyglassMixin, dj.Computed):
         normalize_names: bool = False,
         allow_redundant_model: bool = False,
         external_videos: bool = False,
+        vid_file_matches: Optional[Dict[str, Optional[Dict]]] = None,
         **kwargs,
     ):
         """Import an existing trained model into the database.
@@ -3135,6 +3136,13 @@ class Model(SpyglassMixin, dj.Computed):
             unavailable. The resulting group has no session link, so it cannot
             back inference; that guard is unchanged. Reuse discovery by subject
             will not surface the model, since its animals are unknown.
+        vid_file_matches : dict, optional
+            Explicit ``VideoFile`` keys for config video paths that automatic
+            matching cannot resolve, forwarded to
+            ``VidFileGroup.create_from_dlc_config``. Keys are paths exactly as
+            they appear in the config's ``video_sets``; values are primary-key
+            dicts. The ``ValueError`` raised for unresolved paths lists the
+            paths needing an entry.
         normalize_names : bool, optional
             For DLC imports, when True rewrite the project's ``config.yaml``
             body-part and skeleton names to their canonical ``BodyPart``
@@ -3206,6 +3214,7 @@ class Model(SpyglassMixin, dj.Computed):
                 normalize_names=normalize_names,
                 allow_redundant_model=allow_redundant_model,
                 external_videos=external_videos,
+                vid_file_matches=vid_file_matches,
             )
         )
 
@@ -3561,6 +3570,7 @@ class Model(SpyglassMixin, dj.Computed):
         normalize_names = kwargs.pop("normalize_names", False)
         allow_redundant_model = kwargs.pop("allow_redundant_model", False)
         external_videos = kwargs.pop("external_videos", False)
+        vid_file_matches = kwargs.pop("vid_file_matches", None)
         extra_params = kwargs.pop("extra_params", None) or {}
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
@@ -3615,7 +3625,9 @@ class Model(SpyglassMixin, dj.Computed):
         # provenance instead. Register sessions with insert_sessions() first
         # when the training videos *are* Spyglass sessions.
         vid_group_key = VidFileGroup.create_from_dlc_config(
-            model_path, external_videos=external_videos
+            model_path,
+            external_videos=external_videos,
+            vid_file_matches=vid_file_matches,
         )
         self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
 
