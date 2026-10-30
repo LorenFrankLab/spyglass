@@ -10,7 +10,7 @@ inefficient.
 import getpass
 import shutil
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -20,8 +20,7 @@ import networkx as nx
 import pandas as pd
 from pynwb import NWBHDF5IO
 
-# Register NWB file in AnalysisNwbfile using any available parent file
-from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
+from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import suppress_print_from_package
 from spyglass.position.utils.dlc_io import read_dlc_model_eval
 from spyglass.position.utils.path_helpers import (
@@ -76,7 +75,7 @@ schema = dj.schema("cbroz_position_v3_train")  # TODO: remove cbroz prefix
 # Parameter dataclasses for methods with 5+ parameters
 @dataclass
 class ModelMetadata:
-    """Parameter object for _register_model_metadata method."""
+    """Parameter object for _write_model_metadata method."""
 
     model_id: str
     model_path: str
@@ -87,6 +86,10 @@ class ModelMetadata:
     latest_model: dict
     skeleton_id: str
     parent_id: Optional[str] = None
+    # Sessions behind the training video group, sorted. The first is the
+    # ``AnalysisNwbfile`` parent; training may span sessions, so all are
+    # recorded in the metadata file.
+    session_files: List[str] = field(default_factory=list)
 
 
 # ---------------------------------- Tables -----------------------------------
@@ -1471,6 +1474,21 @@ class Model(SpyglassMixin, dj.Computed):
         vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
         vid_group = (VidFileGroup() & vid_group_key).fetch1()
 
+        # Sessions behind the group, for the AnalysisNwbfile parent. Resolved
+        # here so training does not run for hours before registration fails,
+        # and sorted so the chosen parent does not depend on row order. A
+        # group may span sessions; `get_nwb_file` asserts one and so is not
+        # usable here.
+        vid_group["nwb_file_names"] = sorted(
+            set((VidFileGroup.File & vid_group_key).fetch("nwb_file_name"))
+        )
+        if not vid_group["nwb_file_names"]:
+            raise ValueError(
+                f"Video group '{sel_entry['vid_group_id']}' resolves no "
+                "session, so a trained model has no analysis-file parent. "
+                "Add VidFileGroup.File entries for registered videos."
+            )
+
         # Pre-resolve the parent model directory and checkpoint so the
         # fine-tune path in make_compute stays database-free.
         if parent_id := sel_entry.get("parent_id"):
@@ -1566,13 +1584,14 @@ class Model(SpyglassMixin, dj.Computed):
                 f"{verb} not implemented for {tool}: {e}"
             ) from e
 
-        return [model_result]
+        return [model_result, vid_group["nwb_file_names"][0]]
 
-    def make_insert(self, key, model_result):
-        """Insert the trained model row.
+    def make_insert(self, key, model_result, analysis_parent):
+        """Register the metadata file and insert the trained model row.
 
-        Runs inside a transaction; the only database write in the tri-part
-        sequence.
+        Runs inside a transaction; the only database writes in the tri-part
+        sequence. The ``AnalysisNwbfile`` row is created here rather than
+        during :meth:`make_compute` so a failed insert leaves no orphan.
 
         Parameters
         ----------
@@ -1580,22 +1599,30 @@ class Model(SpyglassMixin, dj.Computed):
             Primary key from ModelSelection table.
         model_result : dict
             Row assembled by the tool strategy in :meth:`make_compute`.
+        analysis_parent : str
+            Session that owns the metadata file, from :meth:`make_fetch`.
         """
+        if analysis_file := model_result.get("analysis_file_name"):
+            self._register_analysis_file(analysis_file, analysis_parent)
         self.insert1(model_result)
         self._info_msg(f"Model training complete: {model_result['model_id']}")
 
-    def _register_model_metadata(self, metadata: ModelMetadata) -> str:
-        """Create NWB file with model metadata directly in project directory.
+    def _write_model_metadata(self, metadata: ModelMetadata) -> str:
+        """Write an NWB file holding the model's training metadata.
+
+        Writes to disk only. :meth:`make_insert` registers the result in
+        ``AnalysisNwbfile``, keeping that row inside the insertion
+        transaction per the tri-part contract.
 
         Parameters
         ----------
         metadata : ModelMetadata
-            Consolidated metadata for model registration
+            Consolidated metadata for model registration.
 
         Returns
         -------
         str
-            NWB file name for direct reference (stored in project directory)
+            NWB file name, for the row's ``analysis_file_name``.
         """
         from pynwb import NWBFile
 
@@ -1638,6 +1665,9 @@ class Model(SpyglassMixin, dj.Computed):
             ),
             "parent_id": metadata.parent_id or "",
             "skeleton_id": metadata.skeleton_id,
+            # All of them: only the first becomes the FK parent, so the rest
+            # would otherwise be unrecorded for a cross-session model.
+            "nwb_file_names": list(metadata.session_files),
         }
 
         # Convert to JSON string for NWB storage
@@ -1653,35 +1683,41 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Model metadata saved to NWB: {nwb_path}")
 
-        # Get any available NWB file as a dummy parent (foreign key requirement)
-        available_parents = Nwbfile().fetch("nwb_file_name")
-        if len(available_parents) == 0:
+        return nwb_file_name
+
+    def _register_analysis_file(self, analysis_file_name: str, parent: str):
+        """Register a written metadata file under its parent session.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            File written by :meth:`_write_model_metadata`.
+        parent : str
+            ``nwb_file_name`` of the session that owns it.
+
+        Raises
+        ------
+        ValueError
+            If *parent* is empty.
+        """
+        if not parent:
             raise ValueError(
-                "No NWB files available to use as parent for AnalysisNwbfile"
+                f"No parent session for analysis file {analysis_file_name}. "
+                "A model's metadata file belongs to the session(s) its "
+                "training videos came from."
             )
 
-        dummy_parent = available_parents[0]
-        self._info_msg(
-            f"Using '{dummy_parent}' as dummy parent for analysis file"
-        )
-
-        # Register the already-created NWB file in AnalysisNwbfile
         try:
-            AnalysisNwbfile().add(dummy_parent, nwb_file_name)
-            self._info_msg(f"Registered analysis file: {nwb_file_name}")
+            AnalysisNwbfile().add(parent, analysis_file_name)
+            self._info_msg(f"Registered analysis file: {analysis_file_name}")
         except Exception as e:
-            # File may already be registered, check if it exists
-            if (
-                len(AnalysisNwbfile() & {"analysis_file_name": nwb_file_name})
-                > 0
-            ):
+            # Re-running a selection rewrites the same file name.
+            if AnalysisNwbfile() & {"analysis_file_name": analysis_file_name}:
                 self._info_msg(
-                    f"Analysis file already registered: {nwb_file_name}"
+                    f"Analysis file already registered: {analysis_file_name}"
                 )
             else:
                 raise e
-
-        return nwb_file_name
 
     def _make_dlc_model(
         self,

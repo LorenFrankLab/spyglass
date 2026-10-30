@@ -931,7 +931,7 @@ class DLCStrategy(PoseToolStrategy):
         )
         latest_model = self.get_latest_model_info(config)
 
-        nwb_file_name = model_instance._register_model_metadata(
+        nwb_file_name = model_instance._write_model_metadata(
             ModelMetadata(
                 model_id=model_id,
                 model_path=model_path,
@@ -942,6 +942,7 @@ class DLCStrategy(PoseToolStrategy):
                 latest_model=latest_model,
                 skeleton_id=skeleton_id,
                 parent_id=parent_id,
+                session_files=vid_group.get("nwb_file_names", []),
             )
         )
 
