@@ -895,7 +895,9 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             )
         key["model_params_id"] = model_params_id
 
-        if "skeleton_id" in key and not (
+        # `skeleton_id` is nullable, and _derive_model passes it explicitly as
+        # None for the default parameter rows. Only check a non-null value.
+        if key.get("skeleton_id") and not (
             Skeleton() & dict(skeleton_id=key["skeleton_id"])
         ):
             raise dj.DataJointError(
@@ -960,11 +962,22 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         super().insert1(row, **kwargs)
 
     @staticmethod
-    def _skeleton_for_params(params_id):
-        """Skeleton id for a ModelParams row, or None if unset/missing."""
-        ids = (ModelParams & {"model_params_id": params_id}).fetch(
-            "skeleton_id"
-        )
+    def _skeleton_for_params(params_id, tool=None):
+        """Skeleton id for a ModelParams row, or None if unset/missing.
+
+        Parameters
+        ----------
+        params_id : str
+            The ``model_params_id`` to look up.
+        tool : str, optional
+            Restrict to this tool. ``ModelParams`` is keyed by
+            ``(model_params_id, tool)``, so an id alone can match rows for
+            another tool with a different skeleton.
+        """
+        restriction = {"model_params_id": params_id}
+        if tool:
+            restriction["tool"] = tool
+        ids = (ModelParams & restriction).fetch("skeleton_id")
         return ids[0] if len(ids) and ids[0] else None
 
     @classmethod
@@ -981,7 +994,7 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         params_id = row.get("model_params_id")
         if not params_id:
             return
-        skeleton_id = self._skeleton_for_params(params_id)
+        skeleton_id = self._skeleton_for_params(params_id, row.get("tool"))
         if not skeleton_id:  # no skeleton → nothing to match on
             return
         candidates = Model.reusable_for(
@@ -2087,7 +2100,14 @@ class Model(SpyglassMixin, dj.Computed):
         model_entry = (self & model_key).fetch1()
         model_path = resolve_model_path(str(model_entry["model_path"]))
 
-        if model_path.name != "config.yaml":
+        # Imports accept any DLC config suffix, including V1's
+        # dj_dlc_config.yaml, so gate on tool and suffix rather than the name.
+        if model_entry.get(
+            "tool"
+        ) != "DLC" or model_path.suffix.lower() not in (
+            ".yml",
+            ".yaml",
+        ):
             return None
 
         csv_files = discover_training_csvs(model_path)
@@ -3462,8 +3482,14 @@ class Model(SpyglassMixin, dj.Computed):
                 "model_info": model_info,
             }
 
-        # Check 2: Model path exists
-        model_path = Path(model_entry["model_path"])
+        # Check 2: Model path exists. DLC paths under pose_project_dir are
+        # stored relative by _to_stored_path, so they resolve through
+        # resolve_model_path; SLEAP output dirs stay cwd-relative.
+        model_path = (
+            resolve_model_path(str(model_entry["model_path"]))
+            if model_entry["tool"] == "DLC"
+            else Path(model_entry["model_path"])
+        )
         if not model_path.exists():
             errors.append(f"Model file not found: {model_path}")
         else:
@@ -3505,11 +3531,13 @@ class Model(SpyglassMixin, dj.Computed):
 
                 if not bodyparts or len(bodyparts) == 0:
                     errors.append("Skeleton has no bodyparts")
-                elif len(bodyparts) < 2:
-                    warn_list.append(
-                        f"Skeleton has only {len(bodyparts)} bodypart(s)"
-                    )
                 else:
+                    # Single-point skeletons are supported, including the 1LED
+                    # default, so one bodypart is valid and only warns.
+                    if len(bodyparts) < 2:
+                        warn_list.append(
+                            f"Skeleton has only {len(bodyparts)} bodypart(s)"
+                        )
                     checks["skeleton_valid"] = True
 
                 if edges is None or len(edges) == 0:
