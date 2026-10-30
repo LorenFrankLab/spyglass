@@ -338,9 +338,9 @@ adds two opt-in artifact families -- nothing is written unless a run passes
 - **Write-buffer memory (transient, not disk).** Applying motion is lazy but
     still holds about two float32 copies of each write buffer (the parent read
     plus the interpolation output) while writing: roughly 2 x n_channels x 4
-    bytes/frame for a ~30 s buffer, i.e. **~0.9 GB at 128 channels and ~2.8 GB
-    at 384 channels** (plus a smaller per-frame cost for chunk times/bin
-    indices). Size `write_buffer_gb` accordingly on a high-channel-count probe.
+    bytes/frame for a buffer of ~4 s at 128 channels and ~2.4 s at 384, i.e.
+    **~120 MB at 128 channels and ~220 MB at 384 channels** (plus a smaller
+    per-frame cost for chunk times/bin indices).
 - **Rebuild reapplies the saved motion, never re-estimates.** A missing
     `MotionCorrectedRecording` file is rebuilt from its saved `MotionEstimate`
     (never by estimating again), through the same locked, atomic,

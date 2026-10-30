@@ -357,8 +357,8 @@ def write_nwb_artifact(
 
     Streams the ``(n_samples, n_channels)`` trace array and the
     ``(n_samples,)`` timestamps vector into the ElectricalSeries
-    via HDMF's ``GenericDataChunkIterator`` with a channel-count-scaled
-    buffer (~30 s of data, capped at 5 GB; see ``write_buffer_gb``).
+    via HDMF's ``GenericDataChunkIterator``, in buffers of a few seconds
+    (~8 s at 32 channels, ~2.4 s at 384; see the comment at the iterator).
     Without streaming, a 30 kHz x 128 ch x 1 h recording
     (~110 GB float64) would have to materialize in RAM before the
     NWB write, which OOMs on any lab workstation.
@@ -514,7 +514,10 @@ def write_nwb_artifact(
         )
         # Bound the buffers to ~a fixed duration of data so a narrow sort
         # group (e.g. a 4-ch tetrode) does not buffer the whole recording
-        # in one 5 GB chunk; wide groups stay capped at 5 GB.
+        # in one 5 GB chunk. With every channel in each chunk, HDMF grows the
+        # buffer along time only, to about the square root of this ~30 s
+        # budget (~8 s at 32 ch). A full 30 s buffer wrote no faster (15 vs
+        # 13 s for 5 min at 32 ch, 60 s at 128 ch) at 2-5x the memory.
         stored_dtype = _stored_trace_dtype(recording.get_dtype())
         data_iterator = SpikeInterfaceRecordingDataChunkIterator(
             recording=recording,

@@ -2063,8 +2063,9 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
 ### Streaming writes and parallel populate
 
 - **Streaming `Recording` writes.** `Recording.make` streams the preprocessed
-    `ElectricalSeries` to NWB in chunks (a channel-count-scaled buffer of ≈30 s,
-    capped at 5 GB), never holding the full trace array in RAM. Preprocessing
+    `ElectricalSeries` to NWB in chunks (buffers of a few seconds: ≈8 s at 32
+    channels, ≈4 s at 128, ≈2.4 s at 384), never holding the full trace array
+    in RAM. Preprocessing
     runs in float64, but the file stores float32 traces (half the disk and read
     cost; the rounding is far below the raw int16 step), chunked so each chunk
     holds every channel and a short full-channel read is one contiguous read.
