@@ -323,22 +323,48 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 VideoFile().fetch_key_from_path(str(f)) for f in file_list
             ]
 
-        vid_files = (VideoFile() & file_list).fetch("KEY", as_dict=True)
+        # Resolve each requested file on its own, keeping input order, so a
+        # caller's camera_indices[i] belongs to file_list[i]. A single
+        # relational fetch returns database order instead.
+        resolved = []
+        for entry in file_list:
+            matches = (VideoFile() & entry).fetch("KEY", as_dict=True)
+            resolved.append(matches[0] if len(matches) == 1 else None)
+
+        vid_files = [pk for pk in resolved if pk is not None]
         if file_list and not vid_files:
             self._warn_msg(
                 "Provided files not found in VideoFile table. "
                 "Creating group without files. Provided: " + f"{files}"
             )
-            vid_files = []
-        elif file_list and not len(vid_files) == len(file_list):
+        elif len(vid_files) != len(file_list):
+            missing = [f for f, pk in zip(file_list, resolved) if pk is None]
             self._warn_msg(
-                f"Some provided files not found in VideoFile table. "
-                f"Provided: {file_list}, found: {vid_files}"
+                "Some provided files did not resolve to exactly one "
+                f"VideoFile entry. Unresolved: {missing}"
+            )
+
+        # Rejected against the requested count, not the resolved one, so a
+        # missing file cannot silently shift the remaining indices.
+        camera_indices = key.get("camera_indices")
+        if camera_indices is not None and len(camera_indices) != len(file_list):
+            raise ValueError(
+                f"camera_indices length ({len(camera_indices)}) must match "
+                f"number of requested video files ({len(file_list)})."
             )
 
         vid_group_key = dict(
             vid_group_id=str(  # Allows user-specified ID or hash fallback
-                key.get("vid_group_id") or key_hash({"files": vid_files})
+                key.get("vid_group_id")
+                # Sorted: the ID identifies the set of files, so it must not
+                # depend on the order they were passed in.
+                or key_hash(
+                    {
+                        "files": sorted(
+                            vid_files, key=lambda d: tuple(sorted(d.items()))
+                        )
+                    }
+                )
             )
         )
         existing = self & vid_group_key
@@ -351,18 +377,15 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             )
             return vid_group_key
 
-        # Build per-file rows with optional camera_index.
-        camera_indices = key.get("camera_indices")
-        if camera_indices is not None and len(camera_indices) != len(vid_files):
-            raise ValueError(
-                f"camera_indices length ({len(camera_indices)}) must match "
-                f"number of valid video files ({len(vid_files)})."
-            )
+        # Build per-file rows, pairing each camera_index with the file the
+        # caller gave at that position.
         file_rows = []
-        for i, vf in enumerate(vid_files):
-            row = dict(vid_group_key, **vf)
+        for position, pk in enumerate(resolved):
+            if pk is None:
+                continue
+            row = dict(vid_group_key, **pk)
             if camera_indices is not None:
-                row["camera_index"] = int(camera_indices[i])
+                row["camera_index"] = int(camera_indices[position])
             file_rows.append(row)
 
         # Provenance for training media not in VideoFile -- accepts plain
@@ -683,11 +706,18 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         # Set when the session (NWB) was found but narrowing could not pick one.
         ambiguous: Dict[str, List[Dict]] = {}
 
-        # Pre-populate from caller-supplied overrides.
+        # Pre-populate from caller-supplied overrides, resolving each to one
+        # full primary key: a partial key can name several recordings and a
+        # wrong one none, and neither identifies a video.
         if vid_file_matches:
             for vp, key_dict in vid_file_matches.items():
-                if vp in matched and key_dict is not None:
-                    matched[vp] = key_dict
+                if vp not in matched or key_dict is None:
+                    continue
+                candidates = (VideoFile() & key_dict).fetch("KEY", as_dict=True)
+                if len(candidates) == 1:
+                    matched[vp] = candidates[0]
+                elif candidates:
+                    ambiguous[vp] = candidates
 
         unresolved: set = {vp for vp, m in matched.items() if m is None}
 
@@ -702,16 +732,20 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         # ── Pass 1: subject_id + YYYYMMDD in the video path ─────────────────
         if unresolved:
             all_sessions = Session().with_date_str.fetch(as_dict=True)
-            for session in all_sessions:
-                if not unresolved:
-                    break
-                for vp in list(unresolved):
-                    if (
-                        session["session_date_str"] in vp
-                        and session["subject_id"] in vp
-                    ):
-                        nwbf_dict = {"nwb_file_name": session["nwb_file_name"]}
-                        _record_match(nwbf_dict, vp)
+            for vp in list(unresolved):
+                # Every matching session, not the first: one animal can have
+                # several sessions on one day, and accepting either would
+                # link the model to an arbitrary recording.
+                hits = [
+                    session
+                    for session in all_sessions
+                    if session["session_date_str"] in vp
+                    and session["subject_id"] in vp
+                ]
+                if len(hits) == 1:
+                    _record_match(
+                        {"nwb_file_name": hits[0]["nwb_file_name"]}, vp
+                    )
 
         # ── Pass 2: NWB stem as substring ────────────────────────────────────
         if unresolved:
@@ -725,13 +759,20 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
 
         # ── Pass 3: video basename (copy_videos=True fallback) ───────────────
         if unresolved:
-            basename_to_path = {Path(vp).name: vp for vp in unresolved}
-            for row in VideoFile().fetch("nwb_file_name", "path", as_dict=True):
-                if not basename_to_path:
-                    break
-                if row["path"] and Path(row["path"]).name in basename_to_path:
-                    vp = basename_to_path.pop(Path(row["path"]).name)
-                    _record_match({"nwb_file_name": row["nwb_file_name"]}, vp)
+            rows = VideoFile().fetch("nwb_file_name", "path", as_dict=True)
+            for vp in list(unresolved):
+                # A basename repeats across sessions, so accept it only when
+                # exactly one video carries it.
+                basename = Path(vp).name
+                hits = [
+                    row
+                    for row in rows
+                    if row["path"] and Path(row["path"]).name == basename
+                ]
+                if len(hits) == 1:
+                    _record_match(
+                        {"nwb_file_name": hits[0]["nwb_file_name"]}, vp
+                    )
 
         # ── Resolve ambiguity ────────────────────────────────────────────────
         # In test mode, accept the first candidate with a warning.
