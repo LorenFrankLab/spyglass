@@ -31,7 +31,11 @@ from spyglass.position.utils.protocols import ModelMetadata, default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.utils.config_io import _rename_leaves
-from spyglass.position.v2.utils.model import rank_model_rows
+from spyglass.position.v2.utils.model import (
+    rank_model_rows,
+    redundant_model_msg,
+    reuse_candidates,
+)
 from spyglass.position.v2.utils.skeleton import (
     build_canonical_map,
     canonicalize,
@@ -930,33 +934,7 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         )
         if not candidates:
             return
-        raise ValueError(self._redundant_model_msg(skeleton_id, candidates))
-
-    @staticmethod
-    def _redundant_model_msg(skeleton_id, candidates) -> str:
-        """Actionable message listing reusable models for a skeleton."""
-        lines = [
-            f"  model_id={c['model_id']} subjects={c['subjects']}"
-            + (f" (overlaps {c['overlap']})" if c["overlap"] else "")
-            for c in candidates
-        ]
-        example_id = candidates[0]["model_id"]
-        return (
-            f"{len(candidates)} existing model(s) already use skeleton "
-            f"'{skeleton_id}'. Reuse one instead of declaring a new model:\n"
-            + "\n".join(lines)
-            + "\n\nEither...\n"
-            "1. Train and/or reuse an existing model:\n"
-            f"    1.1. Explore these matching-skeleton models with "
-            f"`Model.reusable_for('{skeleton_id}')`\n"
-            "    1.2. Continue training a model with "
-            f"`Model().train({{'model_id': '{example_id}'}}, "
-            "epochs=<n>)`\n"
-            "    1.3. Run inference with that model (queue a "
-            "`PoseEstimSelection` task, then `PoseEstim.populate`)\n"
-            "2. Declare a new model with "
-            "`ModelSelection().insert1(your_key, allow_redundant_model=True)`"
-        )
+        raise ValueError(redundant_model_msg(skeleton_id, candidates))
 
 
 @schema
@@ -1063,31 +1041,6 @@ class Model(SpyglassMixin, dj.Computed):
         )
         return rank_model_rows(rows)
 
-    @staticmethod
-    def _reuse_candidates(rows, subjects=None) -> list:
-        """Group ``(model_id, subject_id)`` rows into per-model candidates.
-
-        Pure helper (no DB): collapses join rows to one entry per model with
-        its training subjects and the overlap with *subjects*.
-        """
-        from collections import defaultdict
-
-        by_model = defaultdict(set)
-        for r in rows:
-            by_model.setdefault(r["model_id"], set())
-            sid = r.get("subject_id")
-            if sid is not None:
-                by_model[r["model_id"]].add(sid)
-        want = set(subjects or [])
-        return [
-            {
-                "model_id": mid,
-                "subjects": sorted(subs),
-                "overlap": sorted(subs & want),
-            }
-            for mid, subs in sorted(by_model.items())
-        ]
-
     @classmethod
     def reusable_for(
         cls, skeleton_id: str, subjects=None, exclude=None
@@ -1129,7 +1082,7 @@ class Model(SpyglassMixin, dj.Computed):
         excl = set(exclude or [])
         return [
             c
-            for c in cls._reuse_candidates(rows, subjects)
+            for c in reuse_candidates(rows, subjects)
             if c["model_id"] not in excl
         ]
 

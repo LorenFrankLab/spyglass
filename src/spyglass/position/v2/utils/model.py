@@ -76,3 +76,54 @@ def rank_model_rows(rows) -> list:
 
     ranked.sort(key=_sort_key)
     return ranked
+
+
+def reuse_candidates(rows, subjects=None) -> list:
+    """Group ``(model_id, subject_id)`` rows into per-model candidates.
+
+    Pure helper (no DB): collapses join rows to one entry per model with
+    its training subjects and the overlap with *subjects*.
+    """
+    from collections import defaultdict
+
+    by_model = defaultdict(set)
+    for r in rows:
+        by_model.setdefault(r["model_id"], set())
+        sid = r.get("subject_id")
+        if sid is not None:
+            by_model[r["model_id"]].add(sid)
+    want = set(subjects or [])
+    return [
+        {
+            "model_id": mid,
+            "subjects": sorted(subs),
+            "overlap": sorted(subs & want),
+        }
+        for mid, subs in sorted(by_model.items())
+    ]
+
+
+def redundant_model_msg(skeleton_id, candidates) -> str:
+    """Actionable message listing reusable models for a skeleton."""
+    lines = [
+        f"  model_id={c['model_id']} subjects={c['subjects']}"
+        + (f" (overlaps {c['overlap']})" if c["overlap"] else "")
+        for c in candidates
+    ]
+    example_id = candidates[0]["model_id"]
+    return (
+        f"{len(candidates)} existing model(s) already use skeleton "
+        f"'{skeleton_id}'. Reuse one instead of declaring a new model:\n"
+        + "\n".join(lines)
+        + "\n\nEither...\n"
+        "1. Train and/or reuse an existing model:\n"
+        f"    1.1. Explore these matching-skeleton models with "
+        f"`Model.reusable_for('{skeleton_id}')`\n"
+        "    1.2. Continue training a model with "
+        f"`Model().train({{'model_id': '{example_id}'}}, "
+        "epochs=<n>)`\n"
+        "    1.3. Run inference with that model (queue a "
+        "`PoseEstimSelection` task, then `PoseEstim.populate`)\n"
+        "2. Declare a new model with "
+        "`ModelSelection().insert1(your_key, allow_redundant_model=True)`"
+    )
