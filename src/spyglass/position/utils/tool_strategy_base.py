@@ -251,6 +251,141 @@ class PoseToolStrategy(ABC):
             f"Model import not implemented for {self.tool_name}"
         )
 
+    def split_project_kwargs(self, kwargs: dict) -> tuple:
+        """Divide caller kwargs between project creation and extraction.
+
+        Override per tool, which knows its own entry points. The default
+        claims none of them.
+
+        Parameters
+        ----------
+        kwargs : dict
+            Extra keyword arguments the caller passed.
+
+        Returns
+        -------
+        tuple of (dict, dict)
+            Arguments for creating the project, and for extracting frames.
+        """
+        return {}, {}
+
+    def extract_frames(
+        self, config_path, videos: list, extract_kwargs: dict, model_instance
+    ) -> list:
+        """Extract labelling frames for any video that has none.
+
+        Override per tool. The default raises: a tool that cannot extract
+        frames must say so rather than report success having done nothing.
+
+        Parameters
+        ----------
+        config_path : pathlib.Path
+            The project configuration file.
+        videos : list
+            Video paths the project should hold frames for.
+        extract_kwargs : dict
+            Tool arguments from :meth:`split_project_kwargs`.
+        model_instance
+            ``Model`` table instance, used for logging.
+
+        Returns
+        -------
+        list
+            The videos frames were extracted for, empty when all were
+            already present.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless a subclass implements it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} cannot extract labelling frames. "
+            "Prepare the project with the tool directly."
+        )
+
+    @staticmethod
+    def resolve_stored_path(stored_path) -> Path:
+        """Turn a stored ``model_path`` into a path on this filesystem.
+
+        Override where the tool's paths are stored relative to a configured
+        root. The default treats the stored value as usable as-is.
+
+        Parameters
+        ----------
+        stored_path : str or pathlib.Path
+
+        Returns
+        -------
+        pathlib.Path
+        """
+        return Path(stored_path)
+
+    @staticmethod
+    def verify_model_path(model_path) -> tuple:
+        """Check that a model path looks like this tool's model.
+
+        Override where the tool expects a particular file. The default makes
+        no claim about the path's contents.
+
+        Parameters
+        ----------
+        model_path : pathlib.Path
+            An existing path, already confirmed present.
+
+        Returns
+        -------
+        tuple of (bool, list of str)
+            Whether it looks valid, and any warnings.
+        """
+        return True, []
+
+    @staticmethod
+    def verify_params(params: dict) -> tuple:
+        """Check that stored parameters are usable for this tool.
+
+        Override where the tool requires particular keys. The default asks
+        only that parameters exist.
+
+        Parameters
+        ----------
+        params : dict
+            The ``ModelParams`` row's parameters.
+
+        Returns
+        -------
+        tuple of (bool, list of str)
+            Whether they are valid, and any errors.
+        """
+        if params and isinstance(params, dict):
+            return True, []
+        return False, [f"Invalid params: {params}"]
+
+    def read_v1_model(self, v1_key: dict) -> dict:
+        """Locate a V1 model's project and the parameters that identify it.
+
+        Override where the tool has a V1 table in spyglass. The default
+        raises: only DeepLabCut does.
+
+        Parameters
+        ----------
+        v1_key : dict
+            Primary-key fields identifying one row in the tool's V1 table.
+
+        Returns
+        -------
+        dict
+            ``config_path``, ``extra_params`` and ``name`` (for logging).
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless a subclass implements it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} has no V1 table to import from."
+        )
+
     def read_project(self, model_path, extra_params: dict = None) -> dict:
         """Read a trained project and return what the tables need from it.
 

@@ -896,6 +896,227 @@ class DLCStrategy(PoseToolStrategy):
         """Import DLC model using existing _import_dlc_model method."""
         return model_instance._import_dlc_model(model_path, **kwargs)
 
+    def split_project_kwargs(self, kwargs: dict) -> tuple:
+        """Divide kwargs between `create_new_project` and `extract_frames`.
+
+        Split by signature so a caller controls both steps without this code
+        hard-coding every parameter name. `algo` and `userfeedback` are
+        defaulted: DLC's own defaults are `kmeans` and interactive prompting,
+        neither of which suits an unattended call.
+
+        See :meth:`PoseToolStrategy.split_project_kwargs` for parameters.
+
+        Raises
+        ------
+        ImportError
+            If DeepLabCut is unavailable.
+        """
+        from spyglass.position.utils import get_param_names
+
+        create_new_project, extract_frames = self._dlc_project_entry_points()
+
+        create_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in get_param_names(create_new_project)
+        }
+        extract_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in get_param_names(extract_frames)
+        }
+        extract_kwargs.setdefault("algo", "uniform")
+        extract_kwargs.setdefault("userfeedback", False)
+        return create_kwargs, extract_kwargs
+
+    @staticmethod
+    def _dlc_project_entry_points():
+        """The two DLC functions project creation drives.
+
+        Returns
+        -------
+        tuple of (callable, callable)
+            ``create_new_project`` and ``extract_frames``.
+
+        Raises
+        ------
+        ImportError
+            If DeepLabCut is unavailable.
+        """
+        try:
+            from deeplabcut import create_new_project, extract_frames
+        except ImportError as e:
+            raise ImportError(
+                "DeepLabCut is required for Model.create_project(). "
+                "Install with: pip install deeplabcut"
+            ) from e
+        return create_new_project, extract_frames
+
+    def extract_frames(
+        self, config_path, videos: list, extract_kwargs: dict, model_instance
+    ) -> list:
+        """Extract frames for each video lacking them.
+
+        Per video, not per project: `ensure_project` reuses a project whose
+        videos are a subset of those requested, so one populated
+        `labeled-data` subdirectory is no evidence for a newly added video.
+        DLC names each subdirectory after the video's stem.
+
+        See :meth:`PoseToolStrategy.extract_frames` for parameters.
+
+        Raises
+        ------
+        ValueError
+            If DLC cannot sample the requested number of frames.
+        """
+        from spyglass.position.utils import get_param_names
+
+        _, extract_frames = self._dlc_project_entry_points()
+
+        config_path = Path(config_path)
+        labeled_data_dir = config_path.parent / "labeled-data"
+        project_videos = config_path.parent / "videos"
+        pending = [
+            video
+            for video in videos
+            if not list((labeled_data_dir / Path(video).stem).glob("img*.png"))
+        ]
+        if not pending:
+            model_instance._info_msg("Frames already extracted — skipping.")
+            return []
+
+        extract_kwargs = dict(extract_kwargs)
+        # Name the videos where DLC supports it, so a reused project's
+        # already-extracted videos are left alone. `video_sets` holds the
+        # copies under the project, which is what DLC matches on.
+        if "videos_list" in get_param_names(extract_frames):
+            extract_kwargs["videos_list"] = [
+                str(project_videos / Path(video).name) for video in pending
+            ]
+        elif len(pending) < len(videos):
+            model_instance._warn_msg(
+                f"Installed DeepLabCut's extract_frames takes no "
+                f"`videos_list`, so all {len(videos)} videos are "
+                f"extracted rather than the {len(pending)} missing."
+            )
+
+        model_instance._info_msg(
+            f"Extracting frames for {len(pending)} video(s) "
+            f"(algo='{extract_kwargs['algo']}')…"
+        )
+        try:
+            extract_frames(str(config_path), **extract_kwargs)
+        except ValueError as exc:
+            if "larger sample than population" in str(exc):
+                raise ValueError(
+                    "DLC could not sample the requested number of frames "
+                    "from at least one training video. Try reducing "
+                    "frames_per_video (or use longer videos)."
+                ) from exc
+            raise
+        model_instance._info_msg("Frame extraction complete.")
+        return pending
+
+    @staticmethod
+    def resolve_stored_path(stored_path) -> Path:
+        """Resolve a DLC path stored relative to ``pose_project_dir``.
+
+        `to_stored_path` makes paths under that root relative, so they need
+        resolving back. See :meth:`PoseToolStrategy.resolve_stored_path`.
+        """
+        from .path_helpers import resolve_model_path
+
+        return resolve_model_path(str(stored_path))
+
+    @staticmethod
+    def verify_model_path(model_path) -> tuple:
+        """Check that the path is a readable DLC ``config.yaml``.
+
+        See :meth:`PoseToolStrategy.verify_model_path` for parameters.
+        """
+        model_path = Path(model_path)
+        if model_path.suffix not in [".yaml", ".yml"]:
+            return True, [
+                "DLC model path should be config.yaml, got: "
+                + f"{model_path.name}"
+            ]
+        try:
+            config = load_yaml(model_path)
+        except Exception as e:
+            return True, [f"Could not parse DLC config: {e}"]
+        if "project_path" not in config:
+            return True, ["DLC config missing 'project_path' field"]
+        return True, []
+
+    @staticmethod
+    def verify_params(params: dict) -> tuple:
+        """Check the parameters a DLC model needs.
+
+        An ndx-pose import carries ``nwb_file`` and none of DLC's training
+        configuration, so it is accepted as-is. See
+        :meth:`PoseToolStrategy.verify_params` for parameters.
+        """
+        if "nwb_file" in params:
+            return True, []
+        missing = [p for p in ["net_type"] if p not in params]
+        if missing:
+            return False, [f"Missing required DLC params: {missing}"]
+        return True, []
+
+    def read_v1_model(self, v1_key: dict) -> dict:
+        """Locate a V1 ``DLCModel``'s project config and its identity.
+
+        A DLC project's ``config.yaml`` is shared by every model trained from
+        it, and V1's unique index is
+        ``(task, date, iteration, shuffle, snapshotindex, trainingsetindex)``.
+        Those fields are what separate one V1 model from another, so they are
+        returned as ``extra_params`` and reach V2's parameter hash rather than
+        being lost to the shared config.
+
+        See :meth:`PoseToolStrategy.read_v1_model` for parameters.
+
+        Raises
+        ------
+        ImportError
+            If the V1 position schema is unavailable.
+        FileNotFoundError
+            If the V1 ``project_path`` holds no config file.
+        """
+        try:
+            from spyglass.position.v1.position_dlc_model import DLCModel
+        except Exception as exc:
+            raise ImportError(
+                "Could not import the V1 DLCModel table.  Make sure the "
+                "spyglass.position.v1 schema is available and that the V1 "
+                "tables have been created in your database."
+            ) from exc
+
+        row = (DLCModel & v1_key).fetch1()
+        project_path = Path(row["project_path"])
+        available = sorted(project_path.glob("*config.y*ml"))
+        if not available:
+            raise FileNotFoundError(
+                f"No config.yaml found in V1 project_path: {project_path}"
+            )
+        # Prefer a DJ-managed config (prefixed with 'dj_dlc') when present
+        dj_configs = [p for p in available if "dj_dlc" in p.name]
+
+        extra_params = {
+            field: row[field]
+            for field in ("shuffle", "trainingsetindex", "snapshotindex")
+            if field in row
+        }
+        if config_template := row.get("config_template"):
+            extra_params["config_template"] = config_template
+        if model_prefix := row.get("model_prefix"):
+            extra_params["model_prefix"] = model_prefix
+
+        return {
+            "config_path": dj_configs[0] if dj_configs else available[0],
+            "extra_params": extra_params,
+            "name": row["dlc_model_name"],
+        }
+
     def read_project(self, model_path, extra_params: dict = None) -> dict:
         """Read a DLC `config.yaml` and the skeleton it declares.
 

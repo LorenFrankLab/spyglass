@@ -1927,31 +1927,13 @@ class Model(SpyglassMixin, dj.Computed):
             Model().populate(sel_key)  # trains; creates the Model row
 
         """
-        try:
-            from deeplabcut import create_new_project, extract_frames
-        except ImportError as e:
-            raise ImportError(
-                "DeepLabCut is required for Model.create_project(). "
-                "Install with: pip install deeplabcut"
-            ) from e
-
-        from spyglass.position.utils import get_param_names, sanitize_filename
+        from spyglass.position.utils import sanitize_filename
         from spyglass.settings import pose_project_dir, pose_video_dir
 
-        # Split kwargs by function signature so callers control both steps
-        # without us needing to hard-code every parameter name.
-        create_kwargs = {
-            k: v
-            for k, v in kwargs.items()
-            if k in get_param_names(create_new_project)
-        }
-        extract_kwargs = {
-            k: v
-            for k, v in kwargs.items()
-            if k in get_param_names(extract_frames)
-        }
-        extract_kwargs.setdefault("algo", "uniform")
-        extract_kwargs.setdefault("userfeedback", False)
+        # The strategy owns its tool's entry points, so it divides the
+        # caller's kwargs between creating the project and extracting frames.
+        dlc = ToolStrategyFactory.create_strategy("DLC")
+        create_kwargs, extract_kwargs = dlc.split_project_kwargs(kwargs)
 
         if frames_per_video < 1:
             raise ValueError("frames_per_video must be >= 1")
@@ -2049,9 +2031,7 @@ class Model(SpyglassMixin, dj.Computed):
             or pose_project_dir
             or Path.home() / "dlc_projects"
         )
-        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
-
-        config_path = ToolStrategyFactory.create_strategy("DLC").ensure_project(
+        config_path = dlc.ensure_project(
             project_name=project_name,
             project_directory=project_directory,
             videos=dlc_videos,
@@ -2064,52 +2044,11 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         # ── 3. Extract frames for each video that has none ────────────────────
-        # Per video, not per project: `ensure_project` reuses a project whose
-        # videos are a subset of those requested, so one populated
-        # `labeled-data` subdirectory is no evidence for a newly added video.
-        # DLC names each subdirectory after the video's stem.
-        labeled_data_dir = config_path.parent / "labeled-data"
-        project_videos = config_path.parent / "videos"
-        pending = [
-            video
-            for video in dlc_videos
-            if not list((labeled_data_dir / Path(video).stem).glob("img*.png"))
-        ]
-
-        if not pending:
-            self._info_msg("Frames already extracted — skipping.")
-        else:
-            algo = extract_kwargs["algo"]
-            # Name the videos where DLC supports it, so a reused project's
-            # already-extracted videos are left alone. `video_sets` holds the
-            # copies under the project, which is what DLC matches on.
-            if "videos_list" in get_param_names(extract_frames):
-                extract_kwargs["videos_list"] = [
-                    str(project_videos / Path(video).name) for video in pending
-                ]
-            elif len(pending) < len(dlc_videos):
-                self._warn_msg(
-                    f"Installed DeepLabCut's extract_frames takes no "
-                    f"`videos_list`, so all {len(dlc_videos)} videos are "
-                    f"extracted rather than the {len(pending)} missing."
-                )
-            self._info_msg(
-                "Extracting "
-                + f"{effective_frames_per_video} frames/video for "
-                + f"{len(pending)} video(s) (algo='{algo}')…"
-            )
-            try:
-                extract_frames(str(config_path), **extract_kwargs)
-            except ValueError as exc:
-                if "larger sample than population" in str(exc):
-                    raise ValueError(
-                        "DLC could not sample the requested number of frames "
-                        + "from at least one training video. Try reducing "
-                        + "frames_per_video (or use longer videos). "
-                        + f"Requested: {effective_frames_per_video}."
-                    ) from exc
-                raise
-            self._info_msg("Frame extraction complete.")
+        # The strategy decides which videos still need frames and how its
+        # tool extracts them. The frame count reaches DLC through the config,
+        # which `ensure_project` wrote above: `extract_frames` itself takes no
+        # `numframes2pick` argument.
+        dlc.extract_frames(config_path, dlc_videos, extract_kwargs, self)
 
         # ── 4. Insert (or retrieve) Skeleton ──────────────────────────────────
         # BodyPart validation is deferred to Skeleton().insert1(): unknown
@@ -2471,47 +2410,20 @@ class Model(SpyglassMixin, dj.Computed):
         KeyError
             If *v1_key* does not match any row in ``DLCModel``.
         """
-        try:
-            from spyglass.position.v1.position_dlc_model import DLCModel
-        except Exception as exc:
-            raise ImportError(
-                "Could not import the V1 DLCModel table.  Make sure the "
-                "spyglass.position.v1 schema is available and that the V1 "
-                "tables have been created in your database."
-            ) from exc
+        # The strategy owns which V1 table to read, where a project keeps its
+        # config, and which V1 fields identify one model within a project.
+        v1 = ToolStrategyFactory.create_strategy("DLC").read_v1_model(v1_key)
 
-        row = (DLCModel & v1_key).fetch1()
-        project_path = Path(row["project_path"])
-        available = sorted(project_path.glob("*config.y*ml"))
-        if not available:
-            raise FileNotFoundError(
-                f"No config.yaml found in V1 project_path: {project_path}"
-            )
-        # Prefer a DJ-managed config (prefixed with 'dj_dlc') when present
-        dj_configs = [p for p in available if "dj_dlc" in p.name]
-        config_path = dj_configs[0] if dj_configs else available[0]
-
-        # The project config is shared by every model trained from it. V1's
-        # unique index is (task, date, iteration, shuffle, snapshotindex,
-        # trainingsetindex), so these are what separate one V1 model from
-        # another, and they reach V2's params rather than the config alone.
-        extra_params = {
-            field: row[field]
-            for field in ("shuffle", "trainingsetindex", "snapshotindex")
-            if field in row
-        }
-        if config_template := row.get("config_template"):
-            extra_params["config_template"] = config_template
-        if model_prefix := row.get("model_prefix"):
-            extra_params["model_prefix"] = model_prefix
         kwargs.setdefault("extra_params", {})
-        kwargs["extra_params"] = {**extra_params, **kwargs["extra_params"]}
+        kwargs["extra_params"] = {
+            **v1["extra_params"],
+            **kwargs["extra_params"],
+        }
 
         self._info_msg(
-            f"Importing V1 model '{row['dlc_model_name']}' "
-            f"from {config_path}"
+            f"Importing V1 model '{v1['name']}' from {v1['config_path']}"
         )
-        return self.load(config_path, **kwargs)
+        return self.load(v1["config_path"], **kwargs)
 
     def load_from_dlc_zoo(
         self,
@@ -2872,36 +2784,17 @@ class Model(SpyglassMixin, dj.Computed):
                 "model_info": model_info,
             }
 
-        # Check 2: Model path exists. DLC paths under pose_project_dir are
-        # stored relative by _to_stored_path, so they resolve through
-        # resolve_model_path; SLEAP output dirs stay cwd-relative.
-        model_path = (
-            resolve_model_path(str(model_entry["model_path"]))
-            if model_entry["tool"] == "DLC"
-            else Path(model_entry["model_path"])
-        )
+        # Check 2: Model path exists. How a stored path resolves is the
+        # tool's business: DLC stores paths under pose_project_dir relative,
+        # while SLEAP output dirs stay cwd-relative.
+        strategy = ToolStrategyFactory.create_strategy(model_entry["tool"])
+        model_path = strategy.resolve_stored_path(model_entry["model_path"])
         if not model_path.exists():
             errors.append(f"Model file not found: {model_path}")
         else:
             checks["model_path_exists"] = True
-
-            # For DLC models, verify it's a valid config file
-            if model_entry["tool"] == "DLC":
-                if model_path.suffix not in [".yaml", ".yml"]:
-                    warn_list.append(
-                        "DLC model path should be config.yaml, got: "
-                        + f"{model_path.name}"
-                    )
-                else:
-                    # Try to read config to verify it's valid YAML
-                    try:
-                        config = load_yaml(model_path)
-                        if "project_path" not in config:
-                            warn_list.append(
-                                "DLC config missing 'project_path' field"
-                            )
-                    except Exception as e:
-                        warn_list.append(f"Could not parse DLC config: {e}")
+            _, path_warnings = strategy.verify_model_path(model_path)
+            warn_list.extend(path_warnings)
 
         # Check 3: Skeleton is valid
         try:
@@ -2938,32 +2831,12 @@ class Model(SpyglassMixin, dj.Computed):
         except Exception as e:
             errors.append(f"Error validating skeleton: {e}")
 
-        # Check 4: ModelParams are valid
+        # Check 4: ModelParams are valid. Which keys a model needs is the
+        # tool's business.
         try:
-            # Verify required params exist for the tool
-            tool = model_entry["tool"]
-            params = params_entry["params"]
-
-            if tool == "DLC":
-                # Check if this is an NDX-pose import (has nwb_file param)
-                if "nwb_file" in params:
-                    # NDX-pose imports don't need traditional DLC config params
-                    checks["params_valid"] = True
-                else:
-                    # Traditional DLC model - check for required config params
-                    required = ["net_type"]  # Minimal requirement
-                    missing = [p for p in required if p not in params]
-                    if missing:
-                        errors.append(f"Missing required DLC params: {missing}")
-                    else:
-                        checks["params_valid"] = True
-            else:
-                # For non-DLC tools, just check params exist
-                if params and isinstance(params, dict):
-                    checks["params_valid"] = True
-                else:
-                    errors.append(f"Invalid params for tool {tool}: {params}")
-
+            ok, param_errors = strategy.verify_params(params_entry["params"])
+            checks["params_valid"] = ok
+            errors.extend(param_errors)
         except Exception as e:
             errors.append(f"Error validating ModelParams: {e}")
 
@@ -2971,8 +2844,6 @@ class Model(SpyglassMixin, dj.Computed):
         if check_inference and checks["model_path_exists"]:
             tool = model_entry["tool"]
             try:
-                strategy = ToolStrategyFactory.create_strategy(tool)
-
                 # Only run verification if the tool supports training
                 if strategy.supports_training:
                     tool_checks, tool_warnings = strategy.verify_model(
