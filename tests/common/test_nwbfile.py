@@ -958,3 +958,60 @@ def test_unblock_new_inserts_skips_absent_and_aggregates_drop_errors(
         "DROP TRIGGER db.broken_two_trigger;",
         "DROP TRIGGER db.after_trigger;",
     ]
+
+
+class TestCloseNwbFiles:
+    """`close_nwb_files` must read the cache by attribute, not by arity.
+
+    The cache holds `Opened`, a three-field NamedTuple. Unpacking it as a
+    two-tuple raised `ValueError` from the atexit handler, so every session
+    ended with a shutdown error.
+    """
+
+    def test_closes_every_handle(self, monkeypatch):
+        from spyglass.utils import nwb_helper_fn as helper
+        from spyglass.utils.file_backends import Opened
+
+        closed = []
+
+        class _IO:
+            def __init__(self, tag):
+                self.tag = tag
+
+            def close(self):
+                closed.append(self.tag)
+
+        cache = {
+            "a.nwb": Opened(io=_IO("a"), nwbfile=object(), streamed=False),
+            "b.nwb": Opened(io=_IO("b"), nwbfile=object(), streamed=True),
+        }
+        monkeypatch.setattr(helper, "__open_nwb_files", cache)
+
+        helper.close_nwb_files()
+
+        assert sorted(closed) == ["a", "b"]
+        assert cache == {}
+
+    def test_a_failing_handle_does_not_block_the_rest(self, monkeypatch):
+        from spyglass.utils import nwb_helper_fn as helper
+        from spyglass.utils.file_backends import Opened
+
+        closed = []
+
+        class _Bad:
+            def close(self):
+                raise OSError("unreadable")
+
+        class _Good:
+            def close(self):
+                closed.append("good")
+
+        cache = {
+            "bad.nwb": Opened(io=_Bad(), nwbfile=object(), streamed=False),
+            "good.nwb": Opened(io=_Good(), nwbfile=object(), streamed=False),
+        }
+        monkeypatch.setattr(helper, "__open_nwb_files", cache)
+
+        helper.close_nwb_files()
+
+        assert closed == ["good"]
