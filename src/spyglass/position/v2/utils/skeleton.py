@@ -356,9 +356,10 @@ def is_duplicate_skeleton(
     edges_existing: "list[tuple[str, str]]",
     threshold: float = 0.85,
 ) -> bool:
-    """Return True if the two skeletons are graph-isomorphic with similar labels.
+    """Return True if the skeletons are isomorphic with equal node labels.
 
-    Uses :mod:`networkx` graph isomorphism with fuzzy node-label matching.
+    Uses :mod:`networkx` graph isomorphism, matching nodes on their
+    normalized labels.
 
     Parameters
     ----------
@@ -367,7 +368,8 @@ def is_duplicate_skeleton(
     bodyparts_existing, edges_existing : list
         Skeleton already in the database.
     threshold : float, optional
-        SequenceMatcher ratio threshold for node-label similarity. Default 0.85.
+        Accepted for callers that still pass it; node matching is exact, so
+        it does not affect the result.
 
     Returns
     -------
@@ -399,10 +401,10 @@ def is_duplicate_skeleton(
         return False
 
     def node_match(a, b):
-        ratio = SequenceMatcher(
-            None, a.get("label", ""), b.get("label", "")
-        ).ratio()
-        return ratio >= threshold
+        # Exact on the normalized label. A similarity ratio made
+        # `redLED_L`/`redLED_R` match at 0.889, so skeletons wired to opposite
+        # sides compared as duplicates and insertion reused the wrong topology.
+        return a.get("label", "") == b.get("label", "")
 
     graph_match = nx.algorithms.isomorphism.GraphMatcher(
         graph_new, graph_old, node_match=node_match
