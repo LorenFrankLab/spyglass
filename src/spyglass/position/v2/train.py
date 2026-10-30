@@ -95,38 +95,45 @@ class BodyPart(SpyglassMixin, dj.Lookup):
 
     definition = """
     bodypart: varchar(32)
+    ---
+    source='curated': enum('curated','imported')  # imported = tool/zoo vocab
     """
 
     # Note: This reflects existing FrankLab body parts, rather than model zoo
-    contents = [
+    _curated = [
         # LEDs
-        ["greenLED"],
-        ["redLED_C"],
-        ["redLED_L"],
-        ["redLED_R"],
-        ["whiteLED"],
+        "greenLED",
+        "redLED_C",
+        "redLED_L",
+        "redLED_R",
+        "whiteLED",
         # Drive
-        ["driveBack"],
-        ["driveFront"],
+        "driveBack",
+        "driveFront",
         # Head
-        ["head"],
-        ["nose"],
-        ["earL"],
-        ["earR"],
+        "head",
+        "nose",
+        "earL",
+        "earR",
         # Body
-        ["forelimbL"],
-        ["forelimbR"],
-        ["hindlimbL"],
-        ["hindlimbR"],
-        *[[f"spine{i}"] for i in range(1, 6)],
+        "forelimbL",
+        "forelimbR",
+        "hindlimbL",
+        "hindlimbR",
+        *[f"spine{i}" for i in range(1, 6)],
         # Tail
-        ["tailBase"],
-        ["tailMid"],
-        ["tailTip"],
+        "tailBase",
+        "tailMid",
+        "tailTip",
         # DLC example project
-        *[[f"bodypart{i}"] for i in range(1, 4)],
-        ["objectA"],
+        *[f"bodypart{i}" for i in range(1, 4)],
+        "objectA",
     ]
+
+    # Dicts, not tuples: `source` has a default, and a dict lets these rows
+    # omit it. Positional rows would have to repeat 'curated' 27 times, and a
+    # short tuple silently breaks Lookup population when an attribute is added.
+    contents = [{"bodypart": bp} for bp in _curated]
 
     @classmethod
     def canon_map(cls) -> dict:
@@ -313,8 +320,12 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         bool
             True if all labels are valid.
         """
-        all_parts = BodyPart().fetch("bodypart")
-        valid = {normalize_label(x) for x in all_parts}
+        # Curated only: a zoo import must not widen what a hand-built lab
+        # project may use. `canon_map` deliberately still reads every row, so
+        # an imported skeleton can resolve its own parts ("reads lenient,
+        # writes strict").
+        curated = (BodyPart() & {"source": "curated"}).fetch("bodypart")
+        valid = {normalize_label(x) for x in curated}
         missing = {normalize_label(x) for x in labels} - valid
         if missing:
             raise dj.DataJointError(
@@ -382,7 +393,10 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                     f"BodyPart: {unresolved}"
                 )
                 BodyPart().insert(
-                    [{"bodypart": bp} for bp in unresolved],
+                    [
+                        {"bodypart": bp, "source": "imported"}
+                        for bp in unresolved
+                    ],
                     skip_duplicates=True,
                     allow_direct_insert=True,
                 )
@@ -1021,6 +1035,8 @@ class Model(SpyglassMixin, dj.Computed):
     -> ModelSelection
     -> [nullable] AnalysisNwbfile
     model_path         : varchar(255)
+    model_name=NULL    : varchar(64)   # human-readable; DLC Task, or zoo name
+    training_mode='resumable': enum('resumable','weights_only','inference_only')
     evaluation=NULL    : json          # tool-specific evaluation metrics dict
     """
 
@@ -2845,6 +2861,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_name: Union[str, None] = None,
         normalize_names: bool = False,
         allow_redundant_model: bool = False,
+        external_videos: bool = False,
         **kwargs,
     ):
         """Import an existing trained model into the database.
@@ -2866,8 +2883,20 @@ class Model(SpyglassMixin, dj.Computed):
         model_id : Union[str, None], optional
             Model ID to assign. If None, auto-generate
         model_name : Union[str, None], optional
-            For NWB files with multiple models, specify which model to import.
-            Required if NWB contains multiple PoseEstimation objects.
+            Human-readable label stored on the row. Defaults to the DLC
+            ``Task`` for a project import, or the zoo dataset name for a zoo
+            import. ``model_id`` is a date+hash, so this is what makes
+            ``Model()`` previews legible.
+        external_videos : bool, optional
+            Import even when the project's training videos are not registered
+            in ``VideoFile``, recording them as ``VidFileGroup.ExternalVideo``
+            provenance instead. Default False.
+
+            For pretrained models whose training media are not Spyglass
+            sessions -- pilot/scoping footage, or public models whose videos are
+            unavailable. The resulting group has no session link, so it cannot
+            back inference; that guard is unchanged. Reuse discovery by subject
+            will not surface the model, since its animals are unknown.
         normalize_names : bool, optional
             For DLC imports, when True rewrite the project's ``config.yaml``
             body-part and skeleton names to their canonical ``BodyPart``
@@ -2900,9 +2929,30 @@ class Model(SpyglassMixin, dj.Computed):
             If the tool is not supported or import not implemented.
         """
         # Validate model path
+        # A string that is not a path may name a DLC Model Zoo entry. Checked
+        # before the FileNotFoundError so `load` is one door for "import a
+        # pretrained model", whatever its provenance.
+        if not Path(model_path).exists():
+            from spyglass.position.v2.utils.fetch_dlc_zoo import (
+                is_zoo_model,
+                zoo_catalog,
+            )
+
+            if is_zoo_model(str(model_path)):
+                return self.load_from_dlc_zoo(
+                    str(model_path),
+                    model_params_id=model_params_id,
+                    model_id=model_id,
+                    allow_redundant_model=allow_redundant_model,
+                    **kwargs,
+                )
+            raise FileNotFoundError(
+                f"Model path does not exist, and is not a DLC Model Zoo "
+                f"entry: {str(model_path)!r}. "
+                f"Zoo models: {sorted(zoo_catalog())}"
+            )
+
         model_path = Path(model_path)
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
         kwargs.update(
             dict(
@@ -2913,6 +2963,7 @@ class Model(SpyglassMixin, dj.Computed):
                 model_name=model_name,
                 normalize_names=normalize_names,
                 allow_redundant_model=allow_redundant_model,
+                external_videos=external_videos,
             )
         )
 
@@ -3026,9 +3077,203 @@ class Model(SpyglassMixin, dj.Computed):
             "DLC", dict(tool="DLC", task=task, model_path=str(stored_path))
         )
 
+    @staticmethod
+    def _project_training_mode(config: dict, config_path) -> str:
+        """Can this imported DLC project be trained further?
+
+        Declared once at import, so ``Model`` rows can be filtered without
+        touching the filesystem. It is a *claim*, not enforcement --
+        ``Model.train`` still verifies the snapshot exists, because paths go
+        stale.
+
+        Parameters
+        ----------
+        config : dict
+            Parsed DLC ``config.yaml``.
+        config_path : str or pathlib.Path
+            Its location, used to find the project's ``dlc-models`` tree.
+
+        Returns
+        -------
+        str
+            - ``resumable`` — a PyTorch ``snapshot-*.pt`` is present.
+            - ``inference_only`` — TensorFlow engine (DLC-TF continuation is a
+              documented won't-do), or no snapshot to resume from.
+        """
+        if str(config.get("engine", "pytorch")).lower() != "pytorch":
+            return "inference_only"  # DLC-TF continuation: NotImplementedError
+
+        project = Path(config.get("project_path") or Path(config_path).parent)
+        if next(project.rglob("snapshot-*.pt"), None):
+            return "resumable"
+        return "inference_only"
+
+    @staticmethod
+    def _zoo_training_mode(model_name: str) -> str:
+        """Continuation capability for a zoo backbone.
+
+        Zoo models are never *resumed*: DLC's fine-tune entry point is
+        ``build_weight_init(super_animal=...)``, which seeds a **new** project
+        from SuperAnimal weights rather than continuing the imported model.
+
+        Returns
+        -------
+        str
+            ``inference_only`` for TensorFlow backbones (``dlcrnet``, whose
+            continuation is a won't-do here), ``weights_only`` otherwise.
+        """
+        from spyglass.position.v2.utils.fetch_dlc_zoo import backbone_framework
+
+        if backbone_framework(model_name) == "tensorflow":
+            return "inference_only"
+        return "weights_only"
+
+    def load_from_dlc_zoo(
+        self,
+        dataset: str,
+        model_name: Union[str, None] = None,
+        model_params_id: Union[str, None] = None,
+        model_id: Union[str, None] = None,
+        allow_redundant_model: bool = False,
+        **kwargs,
+    ):
+        """Import a DeepLabCut Model Zoo (SuperAnimal) model.
+
+        Reachable as ``Model().load("superanimal_topviewmouse")`` -- ``load``
+        dispatches here when the string is not a path.
+
+        Zoo models have no DLC project and no training videos: DLC ships their
+        configs with ``video_sets:`` empty, and the weights are public
+        checkpoints. So the import records provenance rather than sessions, and
+        the model is ``weights_only`` -- DLC fine-tunes a SuperAnimal by
+        *seeding a new project* (``build_weight_init``), never by resuming it.
+
+        Parameters
+        ----------
+        dataset : str
+            Zoo dataset, e.g. ``'superanimal_topviewmouse'``.
+        model_name : str, optional
+            Backbone. Defaults to the first the dataset offers -- these differ
+            per dataset, so there is no single valid default.
+        model_params_id, model_id : str, optional
+            Override the generated ids.
+        allow_redundant_model : bool, optional
+            Bypass the reuse guard, e.g. to import a second backbone for a
+            skeleton that already has models.
+
+        Returns
+        -------
+        dict
+            The inserted ``Model`` key.
+
+        Notes
+        -----
+        Downloads the weights (a few hundred MB) on first use and copies them
+        under ``pose_project_dir``. DLC caches them *inside its own package*,
+        which is per conda environment -- storing that path would yield a row
+        valid only for the importing user.
+        """
+        import shutil
+
+        from spyglass.position.v2.utils import fetch_dlc_zoo
+        from spyglass.settings import pose_project_dir
+
+        backbone = fetch_dlc_zoo.resolve_backbone(dataset, model_name)
+        config = fetch_dlc_zoo.project_config(dataset)
+
+        # Step 1: Skeleton. Zoo vocabulary is registered as `imported`, so it
+        # never widens what a hand-built lab project may use (BodyPart.source).
+        skeleton_key = Skeleton().insert1(
+            {
+                # `or []`, not a get-default: these keys exist in the zoo
+                # configs with a null value, and Skeleton.insert1 rejects None
+                # edges. SuperAnimal ships bodyparts but no skeleton graph.
+                "bodyparts": config.get("bodyparts") or [],
+                "edges": config.get("skeleton") or [],
+            },
+            check_duplicates=True,
+            skip_duplicates=True,
+            accept_new_bodyparts=True,
+        )
+        self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
+
+        # Step 2: ModelParams
+        model_params_key = ModelParams().insert1(
+            dict(
+                tool="DLC",
+                params={
+                    **config,
+                    "superanimal_name": dataset,
+                    "zoo_backbone": backbone,
+                },
+                model_params_id=model_params_id,
+                skeleton_id=skeleton_key["skeleton_id"],
+            ),
+            skip_duplicates=True,
+        )
+
+        # Step 3: a group with no File rows -- the training videos are not
+        # Spyglass sessions and never will be. `get_nwb_file` still refuses it,
+        # so this model can never back inference on unregistered data.
+        vid_group_key = VidFileGroup().insert1(
+            {
+                "vid_group_id": default_pk_name("zoo-vg", {"ds": dataset}),
+                "description": f"DLC Model Zoo: {dataset}",
+                "external_videos": [
+                    {
+                        "path": None,
+                        "source": f"dlc-modelzoo:{dataset}",
+                        "note": "training videos not publicly available",
+                    }
+                ],
+            },
+            skip_duplicates=True,
+        )
+        self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
+
+        # Step 4: ModelSelection
+        sel_key = {**model_params_key, **vid_group_key}
+        sel_key.setdefault(
+            "model_selection_id",
+            default_pk_name("ms-zoo", {"ds": dataset, "bb": backbone}),
+        )
+        ModelSelection().insert1(
+            sel_key,
+            skip_duplicates=True,
+            allow_redundant_model=allow_redundant_model,
+        )
+
+        # Step 5: weights. Copy out of DLC's per-env cache so `model_path`
+        # resolves for every user of this database.
+        cached = fetch_dlc_zoo.fetch(dataset, backbone)
+        dest_dir = Path(pose_project_dir) / "modelzoo"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / cached.name
+        if not dest.exists():
+            shutil.copy2(cached, dest)
+        stored_path = _to_stored_path(dest)
+
+        existing = self & {"model_path": stored_path}
+        if existing:
+            key = existing.fetch("KEY", order_by="model_id DESC", limit=1)[0]
+            return (self & key).fetch1()
+
+        model_key = {
+            **sel_key,
+            "model_id": model_id
+            or default_pk_name("zoo", {"ds": dataset, "bb": backbone}),
+            "model_path": stored_path,
+            "model_name": dataset,
+            "training_mode": self._zoo_training_mode(backbone),
+        }
+        self.insert1(model_key, allow_direct_insert=True)
+        self._info_msg(f"Zoo model imported: {model_key['model_id']}")
+        return model_key
+
     def _import_dlc_model(self, model_path: Path, **kwargs):
         normalize_names = kwargs.pop("normalize_names", False)
         allow_redundant_model = kwargs.pop("allow_redundant_model", False)
+        external_videos = kwargs.pop("external_videos", False)
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
 
@@ -3074,9 +3319,13 @@ class Model(SpyglassMixin, dj.Computed):
         self._info_msg(f"ModelParams: {model_params_key['model_params_id']}")
 
         # Step 3: Create VidFileGroup linked to registered Spyglass session.
-        # Raises ValueError if no session matches the DLC config's video paths.
-        # Register the session with insert_sessions() before calling load().
-        vid_group_key = VidFileGroup.create_from_dlc_config(model_path)
+        # Raises ValueError if no session matches the DLC config's video paths,
+        # unless external_videos=True, which records them as ExternalVideo
+        # provenance instead. Register sessions with insert_sessions() first
+        # when the training videos *are* Spyglass sessions.
+        vid_group_key = VidFileGroup.create_from_dlc_config(
+            model_path, external_videos=external_videos
+        )
         self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
 
         # Step 4: Create ModelSelection entry (no skeleton_id — it lives in
@@ -3117,6 +3366,8 @@ class Model(SpyglassMixin, dj.Computed):
             **sel_key,
             "model_id": model_id,
             "model_path": stored_path,
+            "model_name": kwargs.get("model_name") or task,
+            "training_mode": self._project_training_mode(config, model_path),
         }
         self.insert1(model_key, allow_direct_insert=True)
         self._info_msg(f"Model imported: {model_id}")

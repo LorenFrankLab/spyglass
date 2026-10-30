@@ -220,6 +220,48 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         camera_index = -1: tinyint   # 0-based camera slot; -1 for single-cam groups
         """
 
+    class ExternalVideo(dj.Part):
+        """Training media that is not — and may never be — in ``VideoFile``.
+
+        Model provenance for pretrained imports. Two cases motivate it:
+
+        - **Pilot / scoping videos**, recorded to test whether tracking is
+          feasible. Registrable in principle, but they are not recording
+          sessions, so a ``Session`` row for them would be a category error.
+        - **DLC Model Zoo models**, whose training videos do not exist
+          publicly. DLC ships those configs with ``video_sets:`` empty, so
+          there is a *source* but no paths at all.
+
+        Recording them here keeps the media documented and queryable without
+        claiming they are sessions. A fabricated ``Session`` would be worse
+        than silence: downstream it is indistinguishable from real data.
+
+        These are **not** ``File`` rows, so a group holding only these has no
+        session link and ``get_nwb_file()`` still refuses it — which is what
+        keeps such a model from ever backing a ``PoseV2`` entry.
+
+        Attributes
+        ----------
+        external_video_id : int
+            0-based index within the group.
+        path : str, optional
+            Original path, when one is known. NULL for zoo models.
+        source : str
+            Where it came from, e.g. ``'dlc-modelzoo:superanimal_topviewmouse'``
+            or ``'external-project'``.
+        note : str
+            Free text.
+        """
+
+        definition = """
+        -> master
+        external_video_id: int          # 0-based index within the group
+        ---
+        path = NULL : varchar(255)      # original path, when known
+        source = '' : varchar(255)      # e.g. dlc-modelzoo:<name>
+        note = ''   : varchar(255)
+        """
+
     class Calibration(dj.Part):
         """Optional calibration set linked to a multi-camera video group.
 
@@ -323,8 +365,25 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 row["camera_index"] = int(camera_indices[i])
             file_rows.append(row)
 
+        # Provenance for training media not in VideoFile -- accepts plain
+        # paths or dicts with path/source/note. See ExternalVideo's docstring.
+        external_rows = []
+        for i, ext in enumerate(key.get("external_videos") or []):
+            ext = ext if isinstance(ext, dict) else {"path": str(ext)}
+            external_rows.append(
+                dict(
+                    vid_group_key,
+                    external_video_id=i,
+                    path=ext.get("path"),
+                    source=ext.get("source", ""),
+                    note=ext.get("note", ""),
+                )
+            )
+
         super().insert1(dict(vid_group_key, **description_key), **kwargs)
         self.File().insert(file_rows)
+        if external_rows:
+            self.ExternalVideo().insert(external_rows)
 
         return vid_group_key
 
@@ -537,6 +596,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         description: str = None,
         vid_group_id: Union[str, None] = None,
         vid_file_matches: Optional[Dict[str, Optional[Dict[str, str]]]] = None,
+        external_videos: bool = False,
     ) -> dict:
         """Create a VidFileGroup from a DLC project config.yaml.
 
@@ -555,6 +615,15 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             Defaults to ``"DLC project: <Task> (<date>)"``.
         vid_group_id : str, optional
             Video group ID.  Auto-generated from description when ``None``.
+        external_videos : bool, optional
+            Record unresolved paths as :class:`VidFileGroup.ExternalVideo` rows
+            instead of raising. For pretrained-model imports whose training
+            videos are not Spyglass sessions -- pilot/scoping footage, or zoo
+            models whose videos do not exist. Default False, so the strict
+            behaviour is unchanged unless a caller opts out.
+
+            The resulting group has no ``File`` rows, so it has no session link
+            and cannot back inference; that guard is untouched.
         vid_file_matches : dict, optional
             Explicit overrides for video paths that automatic matching cannot
             resolve.  Keys are video path strings exactly as they appear in
@@ -711,8 +780,17 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 }
                 unresolved.discard(vp)
 
-        # ── Hard error on anything still unresolved ──────────────────────────
-        if unresolved:
+        # ── Unresolved paths: record as external, or hard error ─────────────
+        if unresolved and external_videos:
+            cls()._warn_msg(
+                f"{len(unresolved)}/{len(video_paths)} training video(s) are "
+                "not registered in VideoFile; recording them as "
+                "VidFileGroup.ExternalVideo provenance instead. This group has "
+                "no session link, so it cannot be used for inference -- that "
+                "is expected for a pretrained-model import."
+            )
+
+        if unresolved and not external_videos:
             unresolved_sorted = sorted(unresolved)
             hint_lines = "".join(
                 f"            {vp!r}: {{\n"
@@ -738,11 +816,16 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 "    )"
             )
 
-        vid_file_keys = list(matched.values())
+        external_rows = sorted(unresolved) if external_videos else []
+        # `matched` is pre-populated with None per path and filled in as passes
+        # resolve them; entries still falsy are unresolved (or ambiguous). Only
+        # the strict branch used to reach here, so this now needs filtering.
+        vid_file_keys = [key for key in matched.values() if key]
         return cls().insert1(
             {
                 "description": description,
                 "vid_group_id": vid_group_id,
+                "external_videos": external_rows,
                 "files": vid_file_keys,
             }
         )

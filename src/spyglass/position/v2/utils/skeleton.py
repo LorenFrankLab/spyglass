@@ -344,7 +344,8 @@ def validate_skeleton_graph(
         if normalize_label(a) not in bp_set or normalize_label(b) not in bp_set:
             raise ValueError(
                 f"Edge ({a!r}, {b!r}) references bodypart(s) "
-                + f"not in {sorted(bodyparts)}"
+                + f"not in {sorted(bodyparts)}."
+                + "\nThis is an edge in your skeleton with invalid body parts."
             )
 
 
