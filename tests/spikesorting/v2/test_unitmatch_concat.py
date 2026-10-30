@@ -1446,7 +1446,7 @@ def test_named_sort_plan_runs_without_a_group(
     [("late_first", "single_b"), ("early_first", "concat_day2")],
 )
 def test_named_plan_checks_every_generation_before_reuse(
-    daily_concat_match_inputs, order, stale_name
+    daily_concat_match_inputs, monkeypatch, order, stale_name
 ):
     """A stale second input is refused in either requested/chronological order."""
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1454,10 +1454,21 @@ def test_named_plan_checks_every_generation_before_reuse(
         plan_v2_unit_match_from_sorts,
         run_v2_unit_match,
     )
-    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatchSelection,
+    )
 
     roots = daily_concat_match_inputs["curations"]
     children, selections = {}, []
+    # The generation check precedes matching; a fixture matcher keeps the
+    # test independent of the optional UnitMatchPy backend.
+    saved = install_fixture_pairer(
+        monkeypatch,
+        matcher_name="generation_check_pairer",
+        matcher_params_name="generation_check_pairer_params",
+        pairs=[],
+    )
     try:
         for name in ("single_b", "concat_day2"):
             root = roots[name]
@@ -1478,6 +1489,7 @@ def test_named_plan_checks_every_generation_before_reuse(
                 child["sorting_id"]: child["curation_id"]
                 for child in children.values()
             },
+            matcher_params_name="generation_check_pairer_params",
         )
         assert plan.ok, plan.errors
         stale = children[stale_name]
@@ -1497,7 +1509,7 @@ def test_named_plan_checks_every_generation_before_reuse(
         # Set up the current-generation find-existing path independently of
         # the stale plan, then verify chronological ordering and frozen UUIDs.
         pk = UnitMatchSelection.insert_inputs(
-            list(children.values()), "unitmatch_default"
+            list(children.values()), "generation_check_pairer_params"
         )
         selections.append(pk)
         inputs = _input_rows(pk)
@@ -1525,6 +1537,11 @@ def test_named_plan_checks_every_generation_before_reuse(
             _drop(pk)
         for child in children.values():
             (CurationV2 & child).delete(safemode=False)
+        (
+            MatcherParameters
+            & {"matcher_params_name": "generation_check_pairer_params"}
+        ).super_delete(warn=False)
+        restore_matcher_registry(saved)
 
 
 def _expected_input_recordings(fx, name):
@@ -1947,7 +1964,10 @@ def test_group_run_receipt_adds_only_its_inputs(
             isinstance(seconds, float)
             for seconds in summary["stage_seconds"].values()
         )
-        assert summary["warnings"] == []
+        # The root curations' units carry no labels, so the preflight reports
+        # them; the run adds no warnings of its own.
+        assert summary["warnings"] == list(plan.preflight.warnings)
+        assert all("unlabeled" in w for w in summary["warnings"])
         # Members are listed b, a; inputs follow the recording times: a, b.
         assert [
             (

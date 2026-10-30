@@ -43,6 +43,7 @@ class _PeakRSS:
         self._proc = psutil.Process()
         self._interval_s = interval_s
         self._peak_bytes = 0
+        self._start_bytes = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._t0 = 0.0
@@ -56,7 +57,7 @@ class _PeakRSS:
             self._stop.wait(self._interval_s)
 
     def __enter__(self):
-        self._peak_bytes = self._proc.memory_info().rss
+        self._start_bytes = self._peak_bytes = self._proc.memory_info().rss
         self._thread = threading.Thread(target=self._sample, daemon=True)
         self._t0 = time.perf_counter()
         self._thread.start()
@@ -71,6 +72,11 @@ class _PeakRSS:
     @property
     def peak_mb(self) -> float:
         return self._peak_bytes / (1024 * 1024)
+
+    @property
+    def growth_mb(self) -> float:
+        """Peak RSS above the RSS on entry: what the body itself added."""
+        return (self._peak_bytes - self._start_bytes) / (1024 * 1024)
 
 
 @pytest.mark.slow
@@ -1992,15 +1998,18 @@ def test_concat_materialization_memory_runtime_is_measured(same_day_group):
             grp["group_key"], grp["preprocessing_params_name"]
         )
     logger.info(
-        "concat minirec materialization: peak_rss=%.0f MB, runtime=%.1f s",
+        "concat minirec materialization: peak_rss=%.0f MB (+%.0f MB), "
+        "runtime=%.1f s",
         measured.peak_mb,
+        measured.growth_mb,
         measured.elapsed_s,
     )
     assert ConcatenatedRecording & concat_pk
-    # Generous sanity bounds for a 2x5s 4-channel synthetic concat. The real
-    # lab budget (peak < 8 GB, runtime < 10 min) lives in the --run-chronic
-    # gate below.
-    assert measured.peak_mb < 4096
+    # Generous sanity bounds for a 2x5s 4-channel synthetic concat. Bound the
+    # growth, not the process RSS, which in a full suite already holds every
+    # earlier test's state. The real lab budget (peak < 8 GB, runtime < 10
+    # min) lives in the --run-chronic gate below.
+    assert measured.growth_mb < 4096
     assert measured.elapsed_s < 300
 
 

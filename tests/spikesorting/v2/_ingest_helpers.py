@@ -15,6 +15,7 @@ spyglass + SI 0.104.
 
 from __future__ import annotations
 
+import filecmp
 import inspect
 import shutil
 from pathlib import Path
@@ -52,8 +53,9 @@ def copy_and_insert_nwb(
     nwb_source = Path(nwb_source)
     ingest_name = dest_name or nwb_source.name
     raw_target = Path(raw_dir) / ingest_name
-    if not raw_target.exists():
-        shutil.copy(nwb_source, raw_target)
+    # A copy left by an earlier fixture version would otherwise be ingested.
+    if not (raw_target.exists() and filecmp.cmp(nwb_source, raw_target)):
+        shutil.copy2(nwb_source, raw_target)
     kwargs = {"raise_err": True}
     if "reinsert" in inspect.signature(insert_sessions).parameters:
         kwargs["reinsert"] = True

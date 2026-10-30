@@ -36,7 +36,7 @@ run_operation(**request)
 
 
 def _worker_error_tail(stream):
-    """Read a bounded UTF-8 diagnostic, even after a noisy scientific run."""
+    """Read a bounded utf-8 diagnostic, even after a noisy scientific run."""
     # Four bytes per character cover the final N Unicode characters without
     # loading the entire file. A partial leading character is outside the tail
     # or decoded with replacement rather than hiding the worker's exception.
