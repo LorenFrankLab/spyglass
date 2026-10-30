@@ -565,3 +565,62 @@ def draw_skeleton(skeleton_id: str, bodyparts: list, edges: list):
     plt.tight_layout()
     # Don't call plt.show() to avoid double display in notebooks
     return fig
+
+
+def centroid_method_for(bodyparts) -> str:
+    """Choose a centroid method for a set of body parts.
+
+    Pure: the caller fetches the skeleton's parts and passes them, so this
+    holds no database access.
+
+    Parameters
+    ----------
+    bodyparts : iterable of str
+        Body-part labels, in any spelling; they are normalized here.
+
+    Returns
+    -------
+    str
+        ``"4pt"`` when all four Frank Lab LEDs are present, ``"2pt"`` for two
+        or more parts, ``"1pt"`` for one.
+
+    Raises
+    ------
+    ValueError
+        If *bodyparts* is empty.
+    """
+    if not bodyparts:
+        raise ValueError("No bodyparts to choose a centroid method from")
+
+    # Normalize bodypart names for consistent matching
+    normalized_bodyparts = {normalize_label(bp) for bp in bodyparts}
+
+    # Required bodyparts for 4-point Frank Lab method
+    frank_lab_parts = {
+        normalize_label("greenLED"),
+        normalize_label("redLED_C"),
+        normalize_label("redLED_L"),
+        normalize_label("redLED_R"),
+    }
+
+    # Check if we have all Frank Lab LEDs (4pt method)
+    if frank_lab_parts.issubset(normalized_bodyparts):
+        return "4pt"
+
+    # Check for minimal LED setup (2pt method)
+    led_keywords = ["led", "green", "red", "marker", "point"]
+    led_count = 0
+    for bp in normalized_bodyparts:
+        if any(keyword in bp.lower() for keyword in led_keywords):
+            led_count += 1
+
+    # If we have 2+ LED-like bodyparts, suggest 2pt
+    if led_count >= 2:
+        return "2pt"
+
+    # If we have multiple bodyparts but not LED-like, still suggest 2pt
+    if len(bodyparts) >= 2:
+        return "2pt"
+
+    # Single bodypart - use 1pt method
+    return "1pt"
