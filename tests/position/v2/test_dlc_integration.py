@@ -311,6 +311,153 @@ class TestDLCFullImport:
         assert stored_path  # non-empty string
 
 
+class TestLoadUntrainedProject:
+    """A project holding no weights registers a selection, not a Model.
+
+    `_project_training_mode` reports `inference_only` both for a TensorFlow
+    project that can infer and for one with no weights, which can do neither.
+    A Model row for the latter claims a capability it does not have.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    @staticmethod
+    def _strip_weights(config_path):
+        """Remove every snapshot from a copy of the project."""
+        import shutil
+
+        source = Path(config_path).parent
+        bare = source.parent / f"{source.name}_untrained"
+        if not bare.exists():
+            shutil.copytree(source, bare)
+        for pattern in ("snapshot-*.pt", "*.index"):
+            for snap in bare.rglob(pattern):
+                snap.unlink()
+
+        import yaml
+
+        cfg_path = bare / Path(config_path).name
+        cfg = yaml.safe_load(cfg_path.read_text())
+        cfg["project_path"] = str(bare)
+        cfg_path.write_text(yaml.safe_dump(cfg))
+        return cfg_path
+
+    def test_untrained_project_makes_no_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """No weights means no Model row to run inference with."""
+        from spyglass.position.v2.train import ModelSelection
+
+        before = set(model.fetch("model_id"))
+        key = self._strip_weights(dlc_project_config)
+
+        result = model.load(str(key))
+
+        assert "model_id" not in result
+        assert set(model.fetch("model_id")) == before
+        assert ModelSelection() & result
+
+    def test_untrained_project_is_trainable(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """The returned key is a selection `populate` can train."""
+        from spyglass.position.v2.train import ModelSelection
+
+        key = self._strip_weights(dlc_project_config)
+
+        result = model.load(str(key))
+
+        assert set(result) >= set(ModelSelection.primary_key)
+
+    def test_trained_project_still_makes_a_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """Positive control: the snapshot-bearing project is unaffected."""
+        result = model.load(str(dlc_project_config))
+
+        assert "model_id" in result
+
+    def test_has_weights_detects_both_engines(self, model, tmp_path):
+        """PyTorch writes `snapshot-*.pt`; TensorFlow writes a `*.index`."""
+        for name in ("snapshot-010.pt", "snapshot-010.index"):
+            project = tmp_path / name.replace(".", "_")
+            train = project / "dlc-models" / "iteration-0" / "m" / "train"
+            train.mkdir(parents=True)
+            cfg = {"project_path": str(project)}
+
+            assert not model._project_has_weights(cfg, project / "config.yaml")
+            (train / name).touch()
+            assert model._project_has_weights(cfg, project / "config.yaml")
+
+
+class TestLoadVidFileMatches:
+    """`load` forwards explicit video matches to the group builder.
+
+    `create_from_dlc_config` has always accepted `vid_file_matches`, but
+    `load` swallowed it in `**kwargs`, so a project whose videos cannot be
+    matched automatically had no way through `load` at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    @staticmethod
+    def _config(tmp_path, video_path, task):
+        """A DLC config naming one unmatchable video and curated bodyparts."""
+        import yaml
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "Task": task,
+                    "project_path": str(tmp_path),
+                    "video_sets": {video_path: {"crop": "0,1,0,1"}},
+                    "bodyparts": ["whiteLED", "tailBase"],
+                    "skeleton": [["whiteLED", "tailBase"]],
+                }
+            )
+        )
+        return path
+
+    def test_load_without_matches_raises(self, model, tmp_path):
+        """The path cannot be resolved, so the import stops."""
+        cfg = self._config(
+            tmp_path, "/nowhere/pv2_t15_unmatched.mp4", "pv2_t15_none"
+        )
+
+        with pytest.raises(ValueError, match="pv2_t15_unmatched.mp4"):
+            model.load(str(cfg))
+
+    def test_load_forwards_vid_file_matches(
+        self, model, tmp_path, two_sessions
+    ):
+        """With an explicit match the same project imports."""
+        from spyglass.position.v2.video import VidFileGroup
+
+        video = "/nowhere/pv2_t15_overridden.mp4"
+        cfg = self._config(tmp_path, video, "pv2_t15_override")
+
+        result = model.load(
+            str(cfg),
+            vid_file_matches={video: dict(two_sessions["keys"][0])},
+        )
+        group = {"vid_group_id": result["vid_group_id"]}
+
+        try:
+            files = VidFileGroup.File() & group
+            assert len(files) == 1
+            assert files.fetch1("nwb_file_name") == two_sessions["names"][0]
+        finally:
+            # `two_sessions` teardown cascades to `VidFileGroup.File` but not
+            # to the master, and DataJoint refuses to delete a part before its
+            # master. Deleting it also clears ModelSelection and Model.
+            (VidFileGroup & group).super_delete(warn=False, safemode=False)
+
+
 # ---------------------------------------------------------------------------
 # load() error cases — DB required, no DLC or session needed
 # ---------------------------------------------------------------------------

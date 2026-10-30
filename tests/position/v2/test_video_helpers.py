@@ -2,10 +2,11 @@
 
 import pytest
 
-# VidFileGroup.insert1 derives vid_group_id from key_hash({"files": vid_files}).
-# When no files resolve to the VideoFile table, vid_files == [] and the ID is
-# this deterministic md5 digest of {"files": []}.
-_EMPTY_FILES_HASH = "d751713988987e9331980363e24189ce"
+# VidFileGroup.insert1 derives vid_group_id by hashing the resolved VideoFile
+# keys together with any external media paths. This digest is the empty case,
+# reachable only when neither is given: requesting files that do not resolve
+# raises, so a group is never created ahead of its videos.
+_EMPTY_FILES_HASH = "f6383428b86fcf5dd16653be0ee5ff67"
 
 
 class TestVidFileGroupHelpers:
@@ -21,14 +22,12 @@ class TestVidFileGroupHelpers:
         video1.touch()
         video2.touch()
 
-        # Create the group (videos won't be added since not in VideoFile table)
-        group_key = VidFileGroup.create_from_files(
-            video_files=[video1, video2], description="Test video group"
-        )
-
-        # No files match VideoFile, so the ID is the deterministic
-        # key_hash({"files": []}) fallback.
-        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
+        # Routed through insert1, which resolves each path and names the one
+        # it cannot match. A group is no longer created ahead of its videos.
+        with pytest.raises(ValueError, match="No unique entry in VideoFile"):
+            VidFileGroup.create_from_files(
+                video_files=[video1, video2], description="Test video group"
+            )
 
     def test_create_from_files_empty_list(self, position_v2):
         """Test that empty file list raises error."""
@@ -38,6 +37,82 @@ class TestVidFileGroupHelpers:
             VidFileGroup.create_from_files(
                 video_files=[], description="Empty group"
             )
+
+    def test_group_id_identifies_the_resolved_files(
+        self, position_v2, two_sessions
+    ):
+        """The auto ID derives from the files, not from an empty list.
+
+        `create_from_files` used to insert the group before adding files, so
+        every auto-generated ID was `key_hash({"files": []})` and two groups
+        with different videos collided on it.
+        """
+        VidFileGroup = position_v2.video.VidFileGroup
+        key_a, key_b = two_sessions["keys"]
+
+        group_a = VidFileGroup.create_from_files(
+            video_files=[dict(key_a)], description="group a"
+        )
+        group_b = VidFileGroup.create_from_files(
+            video_files=[dict(key_b)], description="group b"
+        )
+
+        try:
+            assert group_a["vid_group_id"] != _EMPTY_FILES_HASH
+            assert group_a["vid_group_id"] != group_b["vid_group_id"]
+            assert len(VidFileGroup.File() & group_a) == 1
+            assert len(VidFileGroup.File() & group_b) == 1
+        finally:
+            for group in (group_a, group_b):
+                (VidFileGroup & group).super_delete(warn=False, safemode=False)
+
+    def test_external_only_groups_do_not_collide(self, position_v2):
+        """External media is an external-only group's whole identity.
+
+        Such a group has no `File` rows, so hashing the resolved files alone
+        gave every one the same ID and `skip_duplicates` returned the first.
+        Two pilot-video imports silently became one group.
+        """
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        first = VidFileGroup().insert1(
+            {
+                "description": "pilot footage A",
+                "external_videos": ["/nowhere/pilot_a.mp4"],
+            },
+            skip_duplicates=True,
+        )
+        second = VidFileGroup().insert1(
+            {
+                "description": "pilot footage B",
+                "external_videos": ["/nowhere/pilot_b.mp4"],
+            },
+            skip_duplicates=True,
+        )
+
+        try:
+            assert first["vid_group_id"] != second["vid_group_id"]
+            for group in (first, second):
+                assert len(VidFileGroup.ExternalVideo() & group) == 1
+        finally:
+            for group in (first, second):
+                (VidFileGroup & group).super_delete(warn=False, safemode=False)
+
+    def test_group_id_ignores_input_order(self, position_v2, two_sessions):
+        """The ID identifies the set, so argument order cannot change it."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        key_a, key_b = (dict(k) for k in two_sessions["keys"])
+
+        forward = VidFileGroup.create_from_files(
+            video_files=[key_a, key_b], description="both, forward"
+        )
+        try:
+            reversed_ = VidFileGroup.create_from_files(
+                video_files=[key_b, key_a], description="both, reversed"
+            )
+            assert reversed_["vid_group_id"] == forward["vid_group_id"]
+        finally:
+            (VidFileGroup & forward).super_delete(warn=False, safemode=False)
 
     def test_create_from_directory_not_exists(self, position_v2):
         """Test that non-existent directory raises error."""
@@ -59,17 +134,15 @@ class TestVidFileGroupHelpers:
         (tmp_path / "video2.mp4").touch()
         (tmp_path / "video3.avi").touch()
 
-        # Create group (videos won't be added since not in VideoFile table)
-        group_key = VidFileGroup.create_from_directory(
-            position_v2.video.VideoGroupParams(
-                directory=tmp_path,
-                description="Test video group",
-                pattern="*.mp4",
+        # Delegates to create_from_files, so unregistered videos raise there.
+        with pytest.raises(ValueError, match="No unique entry in VideoFile"):
+            VidFileGroup.create_from_directory(
+                position_v2.video.VideoGroupParams(
+                    directory=tmp_path,
+                    description="Test video group",
+                    pattern="*.mp4",
+                )
             )
-        )
-
-        # No files in VideoFile table -> deterministic empty-files hash.
-        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
 
     def test_create_from_directory_no_matches(self, position_v2, tmp_path):
         """Test that no matching files raises error."""
@@ -95,18 +168,20 @@ class TestVidFileGroupHelpers:
         (tmp_path / "video1.mp4").touch()
         (subdir / "video2.mp4").touch()
 
-        # Test that recursive finds files in subdirectories
-        group_key = VidFileGroup.create_from_directory(
-            position_v2.video.VideoGroupParams(
-                directory=tmp_path,
-                description="Recursive group",
-                pattern="*.mp4",
-                recursive=True,
+        # Recursion reaches the subdirectory, so resolution is attempted for
+        # a file under it; neither is registered, so the first one raises.
+        with pytest.raises(ValueError) as err:
+            VidFileGroup.create_from_directory(
+                position_v2.video.VideoGroupParams(
+                    directory=tmp_path,
+                    description="Recursive group",
+                    pattern="*.mp4",
+                    recursive=True,
+                )
             )
-        )
 
-        # No files in VideoFile table -> deterministic empty-files hash.
-        assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
+        assert "No unique entry in VideoFile" in str(err.value)
+        assert ".mp4" in str(err.value)
 
     def test_add_files_group_not_exists(self, position_v2):
         """Test adding files to non-existent group raises error."""
@@ -250,3 +325,115 @@ class TestVidFileGroupGetNwbFile:
         result = VidFileGroup().get_nwb_file(test_group_id)
         assert "nwb_file_name" in result
         assert result["nwb_file_name"] == mini_dict["nwb_file_name"]
+
+
+class TestGroupConstruction:
+    """Group identity and camera assignment must follow the caller's input.
+
+    Four defects sat here: camera indices were paired with a relational
+    fetch's order rather than the input's, `create_from_files` inserted the
+    group before its files so every auto ID hashed an empty list, the
+    session/basename passes accepted their first hit across sessions, and
+    caller overrides were stored without resolving to one `VideoFile`.
+    """
+
+    def test_auto_id_differs_per_file_set(self, position_v2, video_keys):
+        """Two different file sets must not collapse onto one auto ID."""
+        VidFileGroup = position_v2.VidFileGroup
+
+        first = VidFileGroup().insert1(
+            {"files": [video_keys[0]], "description": "one"},
+            skip_duplicates=True,
+        )
+        both = VidFileGroup().insert1(
+            {"files": list(video_keys[:2]), "description": "two"},
+            skip_duplicates=True,
+        )
+
+        assert first["vid_group_id"] != both["vid_group_id"]
+
+    def test_auto_id_ignores_input_order(self, position_v2, video_keys):
+        """The ID names a set of files, so order must not change it."""
+        VidFileGroup = position_v2.VidFileGroup
+        if len(video_keys) < 2:
+            pytest.skip("needs two registered videos")
+
+        forward = VidFileGroup().insert1(
+            {"files": list(video_keys[:2])}, skip_duplicates=True
+        )
+        reverse = VidFileGroup().insert1(
+            {"files": list(reversed(video_keys[:2]))}, skip_duplicates=True
+        )
+
+        assert forward["vid_group_id"] == reverse["vid_group_id"]
+
+    def test_camera_index_length_checked_against_request(
+        self, position_v2, video_keys
+    ):
+        """The count is rejected against requested files, not resolved ones."""
+        VidFileGroup = position_v2.VidFileGroup
+
+        with pytest.raises(ValueError, match="requested video files"):
+            VidFileGroup().insert1(
+                {
+                    "files": [video_keys[0]],
+                    "camera_indices": [0, 1],
+                    "vid_group_id": "cam_len_mismatch",
+                }
+            )
+
+
+class TestOverrideResolution:
+    """A caller-supplied override must name exactly one `VideoFile`.
+
+    Overrides were stored verbatim, so a key naming nothing counted as
+    resolved and produced a group missing that video, while a partial key
+    could name several recordings.
+    """
+
+    @staticmethod
+    def _config(tmp_path, video_path):
+        """A minimal DLC config naming one video."""
+        import yaml
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "project_path": str(tmp_path),
+                    "video_sets": {video_path: {"crop": "0,1,0,1"}},
+                    "bodyparts": ["nose"],
+                }
+            )
+        )
+        return path
+
+    def test_override_naming_nothing_stays_unresolved(
+        self, position_v2, tmp_path
+    ):
+        VidFileGroup = position_v2.video.VidFileGroup
+        video = "/nowhere/absent_clip.mp4"
+        config = self._config(tmp_path, video)
+
+        with pytest.raises(ValueError) as err:
+            VidFileGroup.create_from_dlc_config(
+                config_path=config,
+                vid_file_matches={
+                    video: {"nwb_file_name": "no_such_file_.nwb"}
+                },
+            )
+
+        assert "absent_clip.mp4" in str(err.value)
+
+    def test_valid_override_resolves(self, position_v2, tmp_path, video_keys):
+        """A full, real key is accepted and lands in the group."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        video = "/nowhere/unmatchable_name.mp4"
+        config = self._config(tmp_path, video)
+
+        group = VidFileGroup.create_from_dlc_config(
+            config_path=config,
+            vid_file_matches={video: dict(video_keys[0])},
+        )
+
+        assert len(VidFileGroup.File() & group) == 1

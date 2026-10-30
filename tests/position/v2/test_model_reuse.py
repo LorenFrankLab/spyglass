@@ -79,7 +79,9 @@ class TestGuardBranches:
         self.ms = self.MS()
         # Default: a skeleton exists, no own models, empty subjects.
         monkeypatch.setattr(
-            self.MS, "_skeleton_for_params", staticmethod(lambda p: "skel1")
+            self.MS,
+            "_skeleton_for_params",
+            staticmethod(lambda p, tool=None: "skel1"),
         )
         monkeypatch.setattr(
             self.MS, "_subjects", classmethod(lambda cls, row: set())
@@ -125,7 +127,9 @@ class TestGuardBranches:
 
     def test_no_skeleton_exempt(self):
         self.monkeypatch.setattr(
-            self.MS, "_skeleton_for_params", staticmethod(lambda p: None)
+            self.MS,
+            "_skeleton_for_params",
+            staticmethod(lambda p, tool=None: None),
         )
         self._set_candidates(
             [{"model_id": "m1", "subjects": [], "overlap": []}]

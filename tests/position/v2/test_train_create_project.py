@@ -555,6 +555,130 @@ class TestCreateProjectUnit:
         # No default fallback: extract_frames must actually receive algo.
         assert captured["algo"] == "uniform"
 
+    # ── per-video extraction ─────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_spy(captured):
+        """A stand-in for `extract_frames` carrying DLC's real signature.
+
+        `get_param_names` inspects the signature, so a bare MagicMock would
+        report no `videos_list` and the per-video path would never be taken.
+        """
+
+        def _extract_frames(
+            config,
+            mode="automatic",
+            algo="kmeans",
+            userfeedback=True,
+            videos_list=None,
+            **kwargs,
+        ):
+            captured["config"] = config
+            captured["algo"] = algo
+            captured["videos_list"] = videos_list
+            captured["calls"] = captured.get("calls", 0) + 1
+
+        return _extract_frames
+
+    def _run_with_videos(self, tmp_path, videos, captured):
+        """Drive create_project over *videos*, capturing the extract call."""
+        cfg_path = self._make_fake_config(tmp_path)
+
+        fake_dlc = MagicMock()
+        fake_dlc.create_new_project.return_value = str(cfg_path)
+        fake_dlc.extract_frames = self._extract_spy(captured)
+
+        fake_vid_group = MagicMock()
+        fake_vid_group.create_from_files.return_value = {
+            "vid_group_id": "vg-test"
+        }
+        fake_skeleton = MagicMock()
+        fake_skeleton.return_value.insert1.return_value = {
+            "skeleton_id": "sk-test"
+        }
+        fake_vid_file = MagicMock()
+        fake_vid_file.get_abs_paths.return_value = videos
+
+        with (
+            patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
+            patch("spyglass.position.v2.train.VidFileGroup", fake_vid_group),
+            patch("spyglass.position.v2.train.Skeleton", fake_skeleton),
+            patch("spyglass.position.v2.train.VideoFile", fake_vid_file),
+            patch(
+                "spyglass.position.utils.dlc_io.read_yaml",
+                return_value=("config.yaml", {"numframes2pick": 5}),
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.save_yaml",
+                return_value=str(cfg_path),
+            ),
+        ):
+            self.model.create_project(
+                project_name="test",
+                bodyparts=["whiteLED"],
+                video_list=[{"nwb_file_name": "test.nwb", "epoch": 1}],
+                project_directory=str(tmp_path),
+            )
+
+    def test_extracted_video_is_skipped(self, tmp_path):
+        """A video with frames on disk needs no second extraction."""
+        frames = tmp_path / "labeled-data" / "vid"
+        frames.mkdir(parents=True)
+        (frames / "img000.png").touch()
+
+        captured = {}
+        self._run_with_videos(tmp_path, [str(tmp_path / "vid.avi")], captured)
+
+        assert captured.get("calls") is None
+
+    def test_only_the_unextracted_video_is_named(self, tmp_path):
+        """Adding a video to an existing project extracts just that video.
+
+        `ensure_project` reuses a project whose videos are a subset of those
+        requested, so `labeled-data/vid/` being populated says nothing about
+        a newly added second video.
+        """
+        import shutil
+
+        cfg_path = self._make_fake_config(tmp_path)
+        shutil.copy(tmp_path / "vid.avi", tmp_path / "vid2.avi")
+        frames = tmp_path / "labeled-data" / "vid"
+        frames.mkdir(parents=True)
+        (frames / "img000.png").touch()
+        del cfg_path
+
+        captured = {}
+        self._run_with_videos(
+            tmp_path,
+            [str(tmp_path / "vid.avi"), str(tmp_path / "vid2.avi")],
+            captured,
+        )
+
+        assert captured["calls"] == 1
+        assert captured["videos_list"] == [
+            str(tmp_path / "videos" / "vid2.avi")
+        ]
+
+    def test_fresh_project_extracts_every_video(self, tmp_path):
+        """With no frames anywhere, both videos are named."""
+        import shutil
+
+        self._make_fake_config(tmp_path)
+        shutil.copy(tmp_path / "vid.avi", tmp_path / "vid2.avi")
+
+        captured = {}
+        self._run_with_videos(
+            tmp_path,
+            [str(tmp_path / "vid.avi"), str(tmp_path / "vid2.avi")],
+            captured,
+        )
+
+        assert captured["calls"] == 1
+        assert captured["videos_list"] == [
+            str(tmp_path / "videos" / "vid.avi"),
+            str(tmp_path / "videos" / "vid2.avi"),
+        ]
+
     def test_algo_can_be_overridden(self, tmp_path):
         """User-supplied algo kwarg overrides the default 'uniform'."""
         cfg_path = self._make_fake_config(tmp_path)

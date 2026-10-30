@@ -242,3 +242,50 @@ class TestIsDuplicateSkeleton:
             ["a", "b"], [("a", "b")], ["a", "b"], [("a", "b")], 0.85
         )
         assert result is True
+
+
+class TestParseTrainingCsvNamedColumns:
+    """Named columns identify themselves; position is for headerless files.
+
+    Renaming by position gave `epoch,learning_rate,loss` two `loss` columns
+    and labelled `val_loss` as the learning rate.
+    """
+
+    @staticmethod
+    def _parse(tmp_path, name, body):
+        from spyglass.position.v2.utils.training_io import parse_training_csv
+
+        path = tmp_path / name
+        path.write_text(body)
+        df = parse_training_csv(path)
+        return [c for c in df.columns if c != "source_file"]
+
+    def test_epoch_lr_loss(self, tmp_path):
+        cols = self._parse(
+            tmp_path,
+            "a.csv",
+            "epoch,learning_rate,loss\n1,0.01,5.0\n2,0.009,4.0\n",
+        )
+        assert cols == ["iteration", "learning_rate", "loss"]
+
+    def test_val_loss_is_not_the_learning_rate(self, tmp_path):
+        cols = self._parse(
+            tmp_path,
+            "b.csv",
+            "iteration,loss,val_loss\n1,5.0,6.0\n2,4.0,5.5\n",
+        )
+        assert cols == ["iteration", "loss", "val_loss"]
+        assert "learning_rate" not in cols
+
+    def test_headerless_still_positional(self, tmp_path):
+        cols = self._parse(tmp_path, "c.csv", "1,5.0,0.01\n2,4.0,0.009\n")
+        assert cols == ["iteration", "loss", "learning_rate"]
+
+    def test_two_named_columns(self, tmp_path):
+        cols = self._parse(tmp_path, "d.csv", "iteration,loss\n1,5.0\n2,4.0\n")
+        assert cols == ["iteration", "loss"]
+
+    def test_unrecognized_names_fall_back_to_position(self, tmp_path):
+        """A file whose headers name nothing known keeps the old behaviour."""
+        cols = self._parse(tmp_path, "e.csv", "a,b\n1,5.0\n2,4.0\n")
+        assert cols == ["iteration", "loss"]

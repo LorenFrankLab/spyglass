@@ -206,8 +206,8 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
                     str(snapshot2): 2000,  # More recent
                 }[str(p)]
 
-                config_path, model_id = strategy._localize_trained_model(
-                    config, model_instance
+                config_path, model_id, snapshot_path = (
+                    strategy._localize_trained_model(config, model_instance)
                 )
 
             # The most-recent snapshot (200) is the one reported.
@@ -217,6 +217,7 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
 
             # Verify returned values
             assert config_path == project_path / "config.yaml"
+            assert snapshot_path == snapshot2
             assert model_id.startswith("mdl-")
             assert datetime.now().strftime("%Y%m%d") in model_id
 
@@ -266,8 +267,8 @@ def test_localize_trained_model_no_snapshots(tmp_path, skip_if_no_dlc):
             train_dir = model_dir / "train"
             train_dir.mkdir(parents=True)
 
-            config_path, model_id = strategy._localize_trained_model(
-                config, model_instance
+            config_path, model_id, snapshot_path = (
+                strategy._localize_trained_model(config, model_instance)
             )
 
             # Verify warning was logged for missing snapshots
@@ -279,6 +280,7 @@ def test_localize_trained_model_no_snapshots(tmp_path, skip_if_no_dlc):
             model_instance._info_msg.assert_called_with(
                 f"Located trained model - snapshot: 0, model_id: {model_id}"
             )
+            assert snapshot_path is None
 
 
 def test_localize_trained_model_missing_directory(tmp_path, skip_if_no_dlc):

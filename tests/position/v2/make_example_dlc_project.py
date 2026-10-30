@@ -177,6 +177,11 @@ def make_dlc_project(output_dir, overwrite=False):
         model_dir / "learning_stats.csv", stats, delimiter=",", fmt="%.5f"
     )
 
+    # A snapshot, so the project reads as trained: `Model.load` registers a
+    # ModelSelection rather than a Model for a project holding no weights,
+    # and `_project_training_mode` reports `resumable` only with one present.
+    (model_dir / "snapshot-006.pt").touch()
+
     # ---- Labeled frames (copy from shared test data if available) ----
     labeled_dir = project_dir / "labeled-data" / _NWB_STEM
     labeled_dir.mkdir(parents=True, exist_ok=True)

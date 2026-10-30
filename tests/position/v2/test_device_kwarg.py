@@ -73,6 +73,10 @@ def _run_model_make(device):
         train_mod.VidFileGroup.return_value.__and__.return_value.fetch1.return_value = {  # noqa: E501
             "vid_group_id": "v1"
         }
+        # make_fetch resolves the group's sessions for the analysis parent.
+        train_mod.VidFileGroup.File.__and__.return_value.fetch.return_value = [
+            "pv2_device_sess.nwb"
+        ]
         train_mod.ToolStrategyFactory.create_strategy.return_value = strategy
 
         # Tri-part make: `device` arrives via make_fetch (DataJoint routes

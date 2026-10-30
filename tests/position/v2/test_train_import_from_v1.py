@@ -235,3 +235,135 @@ class TestImportFromV1:
         ):
             with pytest.raises(KeyError):
                 self.model.import_from_v1({"dlc_model_name": "ghost"})
+
+    # ── V1 training identity carried into V2 params ──────────────────────────
+
+    def _v1_row_with_identity(self, project_path: str, **overrides):
+        """A V1 row carrying the fields that separate models in one project."""
+        row = self._mock_v1_row(project_path)
+        row.update(
+            {
+                "shuffle": 2,
+                "trainingsetindex": 1,
+                "snapshotindex": 5,
+                "config_template": {"scorer": "v1_scorer"},
+                "model_prefix": "pfx",
+            }
+        )
+        row.update(overrides)
+        return row
+
+    def _captured_extra_params(self, tmp_path, row):
+        """Run import_from_v1 with load() mocked; return its extra_params."""
+        cfg_path = self._make_project(tmp_path)
+        row = dict(row, project_path=str(cfg_path.parent))
+        cls_mock = _make_dlc_model_mock(row)
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "spyglass.position.v1.position_dlc_model": _v1_module(
+                        cls_mock
+                    )
+                },
+            ),
+            patch.object(
+                self.model, "load", return_value={"model_id": "m-id"}
+            ) as mock_load,
+        ):
+            self.model.import_from_v1(self._v1_key())
+
+        return mock_load.call_args[1].get("extra_params")
+
+    def test_v1_identity_reaches_load(self, tmp_path):
+        """The fields V1's unique index uses are carried, not dropped."""
+        captured = self._captured_extra_params(
+            tmp_path, self._v1_row_with_identity("")
+        )
+
+        assert captured == {
+            "shuffle": 2,
+            "trainingsetindex": 1,
+            "snapshotindex": 5,
+            "config_template": {"scorer": "v1_scorer"},
+            "model_prefix": "pfx",
+        }
+
+    def test_absent_v1_fields_are_omitted(self, tmp_path):
+        """A row without the training fields carries nothing extra."""
+        captured = self._captured_extra_params(tmp_path, self._mock_v1_row(""))
+
+        assert captured == {}
+
+    def test_two_v1_models_differ_in_params(self, tmp_path):
+        """Two models from one project no longer collapse onto one param set.
+
+        They share a project config, so only these fields separate them.
+        """
+        first = self._captured_extra_params(
+            tmp_path / "a", self._v1_row_with_identity("", shuffle=1)
+        )
+        second = self._captured_extra_params(
+            tmp_path / "b", self._v1_row_with_identity("", shuffle=2)
+        )
+
+        from spyglass.position.v2.train import ModelParams
+
+        assert ModelParams.get_params_hash(
+            first, "skel"
+        ) != ModelParams.get_params_hash(second, "skel")
+
+    def test_explicit_extra_params_win(self, tmp_path):
+        """A caller's value overrides the one read from the V1 row."""
+        cfg_path = self._make_project(tmp_path)
+        row = self._v1_row_with_identity(str(cfg_path.parent))
+        cls_mock = _make_dlc_model_mock(row)
+
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "spyglass.position.v1.position_dlc_model": _v1_module(
+                        cls_mock
+                    )
+                },
+            ),
+            patch.object(
+                self.model, "load", return_value={"model_id": "m-id"}
+            ) as mock_load,
+        ):
+            self.model.import_from_v1(
+                self._v1_key(), extra_params={"shuffle": 9}
+            )
+
+        assert mock_load.call_args[1]["extra_params"]["shuffle"] == 9
+        # Fields the caller did not override still come from the V1 row.
+        assert mock_load.call_args[1]["extra_params"]["trainingsetindex"] == 1
+
+
+class TestImportReuseDiscriminator:
+    """Re-importing matches on the training parameters, not the path alone."""
+
+    def test_same_path_different_params_is_not_reused(self, model, stub_model):
+        """Several models share one project's config.yaml.
+
+        Matching on `model_path` alone returned whichever was imported first,
+        which is how two V1 models collapsed onto one V2 model.
+        """
+        on_path = model & {"model_path": "stub_scorer"}
+        assert on_path, "stub_model should sit on this path"
+
+        same_training = on_path & {
+            "model_params_id": stub_model["model_params_id"],
+            "tool": "DLC",
+            "vid_group_id": stub_model["vid_group_id"],
+        }
+        other_training = on_path & {
+            "model_params_id": "pv2_t10_other_params",
+            "tool": "DLC",
+            "vid_group_id": stub_model["vid_group_id"],
+        }
+
+        assert len(same_training) == 1
+        assert len(other_training) == 0

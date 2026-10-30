@@ -248,13 +248,14 @@ def test_dlc_strategy_localize_model(pv2_train, tmp_path, skip_if_no_dlc):
                 str(snapshot2): 2000,  # More recent
             }[str(p)]
 
-            result_config, model_id = strategy._localize_trained_model(
-                config, model_instance
+            result_config, model_id, snapshot_path = (
+                strategy._localize_trained_model(config, model_instance)
             )
 
         # Verify the most recent snapshot (200) was selected
         info_call = str(model_instance._info_msg.call_args)
         assert "snapshot: 200" in info_call
+        assert snapshot_path == snapshot2
         assert result_config == project_path / "config.yaml"
         assert model_id.startswith("mdl-")
         # id must carry exactly one YYYYMMDD date segment (no doubled
@@ -263,6 +264,75 @@ def test_dlc_strategy_localize_model(pv2_train, tmp_path, skip_if_no_dlc):
 
         assert re.fullmatch(r"mdl-\d{8}-[0-9a-f]{8}", model_id), model_id
         assert len(re.findall(r"\d{8}", model_id)) == 1
+
+
+def test_dlc_strategy_localize_honours_params_shuffle(
+    pv2_train, tmp_path, skip_if_no_dlc
+):
+    """A shuffle override locates the folder that override trained into."""
+
+    from spyglass.position.utils.tool_strategies import DLCStrategy
+
+    strategy = DLCStrategy()
+    model_instance = Mock()
+    model_instance._info_msg = Mock()
+    model_instance._warn_msg = Mock()
+
+    project_path = tmp_path / "test_project"
+    project_path.mkdir()
+    (project_path / "config.yaml").touch()
+
+    with (
+        patch(
+            "deeplabcut.utils.auxiliaryfunctions.read_config",
+            return_value={
+                "TrainingFraction": [0.8, 0.95],
+                "shuffle": 1,
+                "modelprefix": "",
+            },
+        ),
+        patch(
+            "deeplabcut.utils.get_model_folder",
+            return_value="dlc-models/iteration-0/test-model",
+        ) as mock_folder,
+    ):
+        train_dir = project_path / "dlc-models/iteration-0/test-model" / "train"
+        train_dir.mkdir(parents=True)
+
+        strategy._localize_trained_model(
+            {"project_path": str(project_path)},
+            model_instance,
+            params={"shuffle": 2, "trainingsetindex": 1, "modelprefix": "pfx"},
+        )
+
+    passed = mock_folder.call_args[1]
+    assert passed["shuffle"] == 2
+    assert passed["trainFraction"] == 0.95
+    assert passed["modelprefix"] == "pfx"
+
+
+def test_dlc_strategy_localize_rejects_out_of_range_index(
+    pv2_train, tmp_path, skip_if_no_dlc
+):
+    """A trainingsetindex past the project's fractions is an error."""
+
+    from spyglass.position.utils.tool_strategies import DLCStrategy
+
+    strategy = DLCStrategy()
+    project_path = tmp_path / "test_project"
+    project_path.mkdir()
+    (project_path / "config.yaml").touch()
+
+    with patch(
+        "deeplabcut.utils.auxiliaryfunctions.read_config",
+        return_value={"TrainingFraction": [0.95], "shuffle": 1},
+    ):
+        with pytest.raises(IndexError, match="trainingsetindex 3"):
+            strategy._localize_trained_model(
+                {"project_path": str(project_path)},
+                Mock(),
+                params={"trainingsetindex": 3},
+            )
 
 
 def test_dlc_strategy_localize_model_no_snapshots(
@@ -304,8 +374,8 @@ def test_dlc_strategy_localize_model_no_snapshots(
         train_dir = model_dir / "train"
         train_dir.mkdir(parents=True)
 
-        result_config, model_id = strategy._localize_trained_model(
-            config, model_instance
+        result_config, model_id, snapshot_path = (
+            strategy._localize_trained_model(config, model_instance)
         )
 
         # Verify warning was logged and snapshot defaults to 0
@@ -314,6 +384,7 @@ def test_dlc_strategy_localize_model_no_snapshots(
         )
         info_call = str(model_instance._info_msg.call_args)
         assert "snapshot: 0" in info_call
+        assert snapshot_path is None
 
 
 def test_dlc_strategy_localize_model_missing_directory(

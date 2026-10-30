@@ -278,3 +278,40 @@ class TestSkeletonEdgeCases:
             ("earL", "nose"),
             ("earR", "tailBase"),
         }
+
+
+class TestTopologyMatchesLabelsExactly:
+    """Isomorphism must not treat similar labels as the same node.
+
+    `redLED_L` and `redLED_R` normalize to `red led l` / `red led r`, whose
+    SequenceMatcher ratio is 0.889 — above the old 0.85 node-match threshold —
+    so skeletons wired to opposite sides compared as duplicates.
+    """
+
+    NEW = (["greenLED", "redLED_L"], [("greenLED", "redLED_L")])
+    OLD = (["greenLED", "redLED_R"], [("greenLED", "redLED_R")])
+
+    def test_opposite_sides_are_not_duplicates(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        assert not is_duplicate_skeleton(*self.NEW, *self.OLD)
+
+    def test_identical_skeletons_still_match(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        assert is_duplicate_skeleton(*self.NEW, *self.NEW)
+
+    def test_spelling_variants_still_match(self):
+        """Normalization is kept: `green_led` and `greenLED` are one node."""
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        variant = (["green_led", "red_led_l"], [("green_led", "red_led_l")])
+        assert is_duplicate_skeleton(*variant, *self.NEW)
+
+    def test_threshold_no_longer_changes_the_verdict(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        for threshold in (0.0, 0.85, 1.0):
+            assert not is_duplicate_skeleton(
+                *self.NEW, *self.OLD, threshold=threshold
+            )

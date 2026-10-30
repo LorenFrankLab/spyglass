@@ -183,6 +183,66 @@ class TestOnDiskRoundTrip:
         assert len(list(tmp_path.glob("config.yaml.*.bak"))) == 1
 
 
+class TestLabelsBlockRewrite:
+    """A rewrite stops at projects whose labels would fall out of step.
+
+    `CollectedData_*` files carry body-part names as column headers and are
+    not rewritten here, so a rewritten config would disagree with the labels
+    continued training reads.
+    """
+
+    @staticmethod
+    def _project(tmp_path, bodyparts, *, with_labels):
+        """A project directory, optionally holding a label file."""
+        from spyglass.position.utils.yaml_io import dump_yaml
+
+        cfg = tmp_path / "config.yaml"
+        dump_yaml(cfg, {"bodyparts": bodyparts, "skeleton": []})
+        if with_labels:
+            label_dir = tmp_path / "labeled-data" / "vid0"
+            label_dir.mkdir(parents=True)
+            (label_dir / "CollectedData_scorer.csv").touch()
+        return cfg
+
+    def test_labels_block_a_rewrite(self, model, tmp_path):
+        """It raises, and leaves the project exactly as it was."""
+        import datajoint as dj
+
+        from spyglass.position.utils.yaml_io import load_yaml
+
+        cfg = self._project(
+            tmp_path, ["green_led", "red_led_c"], with_labels=True
+        )
+
+        with pytest.raises(dj.DataJointError, match="label file"):
+            model._canonicalize_dlc_project(cfg)
+
+        assert load_yaml(cfg)["bodyparts"] == ["green_led", "red_led_c"]
+        assert list(tmp_path.glob("config.yaml.*.bak")) == []
+
+    def test_message_offers_importing_without_normalizing(
+        self, model, tmp_path
+    ):
+        """The in-database path resolves variants without touching files."""
+        import datajoint as dj
+
+        cfg = self._project(tmp_path, ["green_led"], with_labels=True)
+
+        with pytest.raises(
+            dj.DataJointError, match="without `normalize_names`"
+        ):
+            model._canonicalize_dlc_project(cfg)
+
+    def test_canonical_project_with_labels_is_a_noop(self, model, tmp_path):
+        """Nothing to rewrite means nothing can fall out of step."""
+        cfg = self._project(
+            tmp_path, ["greenLED", "redLED_C"], with_labels=True
+        )
+
+        assert model._canonicalize_dlc_project(cfg) == {}
+        assert list(tmp_path.glob("config.yaml.*.bak")) == []
+
+
 class TestPermissionFallbackRoundTrip:
     """Non-admin imports of resolvable names succeed; novel names guide to admin."""
 
