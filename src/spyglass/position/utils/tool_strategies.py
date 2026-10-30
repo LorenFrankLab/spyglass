@@ -7,7 +7,7 @@ Provides a pluggable architecture for different pose estimation tools
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Union
 
 import datajoint as dj
 import yaml
@@ -668,29 +668,73 @@ class DLCStrategy(PoseToolStrategy):
             kwargs["epochs"] = int(epochs)
         return kwargs
 
-    def _resolve_parent_snapshot(self, config: dict, *, shuffle=None):
-        """Locate the parent project's latest training snapshot.
+    @staticmethod
+    def _shuffle_of(snapshot: Path) -> Union[int, None]:
+        """Read the shuffle number out of a snapshot's model-folder name.
 
-        Uses :meth:`get_latest_model_info` to find the most recent train
-        directory, then returns its newest PyTorch snapshot file
-        (``snapshot-*.pt``). Returns ``None`` when no resumable snapshot is
-        available — e.g. the requested ``shuffle`` differs from the trained
-        one, so weight-resume is invalid and the caller should degrade to a
-        fresh (parent-linked) train.
+        DLC names model folders ``<task>-<date>-trainset<pct>shuffle<n>``, so
+        the shuffle a checkpoint belongs to is recoverable from its path.
+
+        Parameters
+        ----------
+        snapshot : Path
+            Path to a snapshot file, nested under ``.../train/``.
+
+        Returns
+        -------
+        int or None
+            The shuffle number, or ``None`` if no ancestor encodes one.
+        """
+        import re as _re
+
+        for parent in snapshot.parents:
+            if match := _re.search(r"shuffle(\d+)", parent.name):
+                return int(match.group(1))
+        return None
+
+    def _resolve_parent_snapshot(
+        self, config: dict, *, shuffle=None, parent_snapshot=None
+    ):
+        """Locate the snapshot to resume the parent model from.
+
+        Uses *parent_snapshot*, the checkpoint recorded on the parent ``Model``
+        row, when it is still on disk. Otherwise falls back to
+        :meth:`get_latest_model_info`, which returns the most recently
+        modified train directory anywhere in the project; that path serves
+        rows predating ``snapshot_path``.
+
+        Returns ``None`` when no resumable snapshot is available, e.g. the
+        requested ``shuffle`` differs from the trained one, so weight-resume
+        is invalid and the caller should degrade to a fresh (parent-linked)
+        train.
 
         Parameters
         ----------
         config : dict
             DLC project configuration (must include ``project_path``).
         shuffle : int, optional
-            Requested shuffle; if it differs from the latest trained model's
-            shuffle, no snapshot is returned.
+            Requested shuffle; if it differs from the parent model's shuffle,
+            no snapshot is returned.
+        parent_snapshot : str or Path, optional
+            Snapshot stored on the parent ``Model`` row, as a stored-relative
+            or absolute path.
 
         Returns
         -------
         Path or None
-            Newest snapshot path, or ``None`` if none is resumable.
+            Snapshot path, or ``None`` if none is resumable.
         """
+        from .path_helpers import resolve_model_path
+
+        if parent_snapshot:
+            snapshot = resolve_model_path(parent_snapshot)
+            if self._fs.exists(snapshot):
+                if shuffle is not None and (
+                    self._shuffle_of(snapshot) not in (None, shuffle)
+                ):
+                    return None  # shuffle changed → weights can't be reused
+                return snapshot
+
         info = self.get_latest_model_info(config)
         if not info:
             return None
@@ -715,9 +759,10 @@ class DLCStrategy(PoseToolStrategy):
         *,
         epochs=None,
     ) -> dict:
-        """Resume DLC training from the parent model's latest snapshot.
+        """Resume DLC training from the parent model's own snapshot.
 
-        Resolves the parent snapshot from the project and wires it into the
+        Takes the checkpoint recorded on the parent ``Model`` row (passed
+        through ``sel_entry['parent_snapshot_path']``) and wires it into the
         PyTorch trainer via ``snapshot_path`` so training continues from those
         weights. When no resumable snapshot is available (missing snapshot, or
         a ``shuffle`` override that invalidates weight-resume) this degrades to
@@ -748,7 +793,11 @@ class DLCStrategy(PoseToolStrategy):
                 "DLC 3.x default) to continue training, or retrain fresh."
             )
         shuffle = int(params.get("shuffle", config.get("shuffle", 1)))
-        snapshot = self._resolve_parent_snapshot(config, shuffle=shuffle)
+        snapshot = self._resolve_parent_snapshot(
+            config,
+            shuffle=shuffle,
+            parent_snapshot=sel_entry.get("parent_snapshot_path"),
+        )
 
         if snapshot is None:
             model_instance._warn_msg(
@@ -877,8 +926,8 @@ class DLCStrategy(PoseToolStrategy):
         # generated model_id is unique per selection: default_pk_name("mdl")
         # with no params is deterministic per day, which collides when two
         # models are trained the same day (e.g. a parent and its continuation).
-        model_path, model_id = self._localize_trained_model(
-            config, model_instance, key=key
+        model_path, model_id, snapshot_path = self._localize_trained_model(
+            config, model_instance, key=key, params=params
         )
         latest_model = self.get_latest_model_info(config)
 
@@ -902,6 +951,9 @@ class DLCStrategy(PoseToolStrategy):
             model_id=model_id,
             analysis_file_name=nwb_file_name,
             model_path=_to_stored_path(model_path),
+            snapshot_path=(
+                _to_stored_path(snapshot_path) if snapshot_path else None
+            ),
         )
 
     def ensure_project(
@@ -1444,9 +1496,18 @@ class DLCStrategy(PoseToolStrategy):
                 raise
 
     def _localize_trained_model(
-        self, config: dict, model_instance, key: dict = None
-    ) -> tuple[Path, str]:
+        self,
+        config: dict,
+        model_instance,
+        key: dict = None,
+        params: dict = None,
+    ) -> tuple[Path, str, Union[Path, None]]:
         """Localize the trained model and generate model ID.
+
+        The train directory is resolved from *params* where they specify the
+        model, falling back to the project config. ``shuffle`` and
+        ``trainingsetindex`` are training parameters, so a model trained with
+        an override is located in the folder that override produced.
 
         Parameters
         ----------
@@ -1459,11 +1520,24 @@ class DLCStrategy(PoseToolStrategy):
             unique per selection (a parent and its same-day continuation get
             distinct ids). When ``None``, the id is deterministic per day
             (legacy behavior, retained for direct unit-test callers).
+        params : dict, optional
+            Training parameters. ``shuffle``, ``trainingsetindex`` and
+            ``modelprefix`` are read from here first.
 
         Returns
         -------
-        tuple of (Path, str)
-            The model config path and the generated ``model_id``.
+        tuple of (Path, str, Path or None)
+            The model config path, the generated ``model_id``, and this
+            model's newest snapshot file (``None`` when training produced no
+            snapshot).
+
+        Raises
+        ------
+        FileNotFoundError
+            If no train directory exists under the project.
+        IndexError
+            If ``trainingsetindex`` exceeds the project's
+            ``TrainingFraction`` list.
         """
         from deeplabcut.utils import get_model_folder
         from deeplabcut.utils.auxiliaryfunctions import read_config
@@ -1484,13 +1558,27 @@ class DLCStrategy(PoseToolStrategy):
         except ImportError:
             _engines = [None]  # older DLC — get_model_folder ignores engine
 
+        params = params or {}
+        fractions = dlc_config.get("TrainingFraction", [0.95])
+        set_index = int(params.get("trainingsetindex", 0))
+        if set_index >= len(fractions):
+            raise IndexError(
+                f"trainingsetindex {set_index} exceeds the project's "
+                f"{len(fractions)} TrainingFraction entries: {fractions}"
+            )
+        train_fraction = fractions[set_index]
+        shuffle = int(params.get("shuffle", dlc_config.get("shuffle", 1)))
+        model_prefix = params.get(
+            "modelprefix", dlc_config.get("modelprefix", "")
+        )
+
         train_dir = None
         for _engine in _engines:
             _kwargs = dict(
-                trainFraction=dlc_config.get("TrainingFraction", [0.95])[0],
-                shuffle=dlc_config.get("shuffle", 1),
+                trainFraction=train_fraction,
+                shuffle=shuffle,
                 cfg=dlc_config,
-                modelprefix=dlc_config.get("modelprefix", ""),
+                modelprefix=model_prefix,
             )
             if _engine is not None:
                 _kwargs["engine"] = _engine
@@ -1514,9 +1602,11 @@ class DLCStrategy(PoseToolStrategy):
             # In test mode or if training failed, there may be no snapshots
             model_instance._warn_msg("No snapshot files found after training")
             latest_snapshot = 0
+            snapshot_path = None
         else:
             # Find most recently modified snapshot
             latest_snapshot = 0
+            snapshot_path = None
             max_modified_time = 0
             for snapshot in snapshots:
                 modified_time = self._fs.getmtime(snapshot)
@@ -1526,6 +1616,7 @@ class DLCStrategy(PoseToolStrategy):
 
                     _m = _re.search(r"(\d+)", snapshot.stem)
                     latest_snapshot = int(_m.group(1)) if _m else 0
+                    snapshot_path = snapshot
                     max_modified_time = modified_time
 
         # Generate model ID. ``default_pk_name`` supplies the date segment,
@@ -1542,7 +1633,7 @@ class DLCStrategy(PoseToolStrategy):
 
         # Return the config path as the model path (standard DLC pattern)
         config_path = project_path / "config.yaml"
-        return config_path, model_id
+        return config_path, model_id, snapshot_path
 
 
 class SLEAPStrategy(PoseToolStrategy):
@@ -1894,12 +1985,14 @@ class SLEAPStrategy(PoseToolStrategy):
         model_instance._info_msg(f"SLEAP model saved to: {model_dir}")
 
         model_id = default_pk_name("sleap-mdl", key or {})
+        checkpoint = self._resolve_parent_checkpoint(model_dir)
 
         return dict(
             key,
             model_id=model_id,
             analysis_file_name=None,
             model_path=str(model_dir),
+            snapshot_path=str(checkpoint) if checkpoint else None,
         )
 
     def _resolve_parent_model_dir(self, sel_entry: dict, model_instance):
