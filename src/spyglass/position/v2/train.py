@@ -13,7 +13,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import datajoint as dj
 import networkx as nx
@@ -359,6 +359,64 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
     # ----------------- main insert -----------------
 
+    def _register_novel_bodyparts(
+        self, unresolved: List[str], bodyparts: List[str], accept: bool
+    ) -> None:
+        """Add incoming body part names that are absent from ``BodyPart``.
+
+        Parameters
+        ----------
+        unresolved : List[str]
+            Incoming names ``canonicalize`` could not resolve.
+        bodyparts : List[str]
+            The full incoming list, named in the error raised when *accept*
+            is False.
+        accept : bool
+            Register the names rather than raise.
+
+        Raises
+        ------
+        datajoint.DataJointError
+            When *accept* is False, naming the unknown parts; or when two
+            unresolved names normalize alike.
+        """
+        if not accept:
+            self._validate_bodyparts({normalize_label(bp) for bp in bodyparts})
+            return
+
+        # Check the batch against itself. The flag's safety argument covers
+        # collisions with existing rows only: two novel spellings of one
+        # concept are both unresolvable, so both would commit and
+        # canon_map() would then raise on every later read.
+        by_norm: Dict[str, List[str]] = {}
+        for bp in unresolved:
+            by_norm.setdefault(normalize_label(bp), []).append(bp)
+        clashes = {n: names for n, names in by_norm.items() if len(names) > 1}
+        if clashes:
+            detail = "; ".join(
+                f"{names} all normalize to {norm!r}"
+                for norm, names in clashes.items()
+            )
+            raise dj.DataJointError(
+                f"Novel bodyparts collide with each other: {detail}. "
+                "Use one spelling per concept."
+            )
+
+        # Register the incoming spelling itself as canonical so downstream
+        # tool output, which uses this spelling, matches.
+        self._warn_msg(
+            f"Auto-inserting {len(unresolved)} novel bodypart(s) into "
+            f"BodyPart: {unresolved}"
+        )
+        # Plural insert, deliberately: the flag exists so a non-admin can
+        # import a model whose parts are novel. See
+        # TestAcceptNewBodypartsScope.
+        BodyPart().insert(
+            [{"bodypart": bp, "source": "imported"} for bp in unresolved],
+            skip_duplicates=True,
+            allow_direct_insert=True,
+        )
+
     def insert1(
         self,
         key: dict,
@@ -407,27 +465,10 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             bp for bp in bodyparts if canonicalize(bp, canon_map) is None
         ]
         if unresolved:
-            if accept_new_bodyparts:
-                # Register the incoming spelling itself as canonical so that
-                # downstream tool output (which uses this spelling) matches.
-                self._warn_msg(
-                    f"Auto-inserting {len(unresolved)} novel bodypart(s) into "
-                    f"BodyPart: {unresolved}"
-                )
-                BodyPart().insert(
-                    [
-                        {"bodypart": bp, "source": "imported"}
-                        for bp in unresolved
-                    ],
-                    skip_duplicates=True,
-                    allow_direct_insert=True,
-                )
-                canon_map = BodyPart.canon_map()
-            else:
-                # Raises a DataJointError naming the unknown bodyparts.
-                self._validate_bodyparts(
-                    {normalize_label(bp) for bp in bodyparts}
-                )
+            self._register_novel_bodyparts(
+                unresolved, bodyparts, accept=accept_new_bodyparts
+            )
+            canon_map = BodyPart.canon_map()
 
         bodyparts = [
             canonicalize(bp, canon_map, default=bp) for bp in bodyparts
