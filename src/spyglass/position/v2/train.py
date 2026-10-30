@@ -23,6 +23,7 @@ from pynwb import NWBHDF5IO
 # Register NWB file in AnalysisNwbfile using any available parent file
 from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
 from spyglass.position.utils import suppress_print_from_package
+from spyglass.position.utils.dlc_io import read_dlc_model_eval
 from spyglass.position.utils.path_helpers import (
     resolve_model_path,
 )
@@ -2068,7 +2069,7 @@ class Model(SpyglassMixin, dj.Computed):
         return results
 
     def _parse_dlc_evaluation_results(
-        self, project_path: Path, shuffle: int, _trainingsetindex: int
+        self, project_path: Path, shuffle: int, trainingsetindex: int
     ) -> dict:
         """Parse DLC evaluation results from CSV file.
 
@@ -2086,59 +2087,32 @@ class Model(SpyglassMixin, dj.Computed):
         dict
             Parsed evaluation results
         """
-        # Find evaluation results
-        # Pattern: evaluation-results/iteration-X/
-        #          TASK-trainsetYshuffleZ/*-results.csv
-        eval_dir = project_path / "evaluation-results"
-
-        if not eval_dir.exists():
-            self._warn_msg(f"No evaluation results found in {eval_dir}")
+        try:
+            raw = read_dlc_model_eval(
+                project_path,
+                load_yaml(project_path / "config.yaml"),
+                shuffle,
+                trainingsetindex,
+            )
+        except (RuntimeError, KeyError, IndexError) as e:
+            self._warn_msg(f"No evaluation results for shuffle {shuffle}: {e}")
             return {}
 
-        # Find most recent iteration
-        iteration_dirs = sorted(eval_dir.glob("iteration-*"))
-        if not iteration_dirs:
-            self._warn_msg("No iteration directories found")
-            return {}
-
-        latest_iter = iteration_dirs[-1]
-
-        # Find results CSV for this shuffle
-        results_csvs = list(latest_iter.rglob("*-results.csv"))
-        results_csvs = [
-            f
-            for f in results_csvs
-            if f"shuffle{shuffle}" in str(f)
-            and "CombinedEvaluation" not in str(f)
-        ]
-
-        if not results_csvs:
-            self._warn_msg(f"No results CSV found for shuffle {shuffle}")
-            return {}
-
-        # Use most recent results file
-        results_csv = max(results_csvs, key=lambda p: p.stat().st_mtime)
-        self._logger.debug("Reading evaluation results: %s", results_csv)
-
-        # Parse CSV
-        df = pd.read_csv(results_csv)
-
-        # Get last row (latest snapshot)
-        if len(df) == 0:
-            return {}
-
-        last_row = df.iloc[-1]
+        def _num(field, cast=float):
+            """Cast a normalized field, tolerating one the CSV omits."""
+            value = raw.get(field)
+            return None if value in (None, "") else cast(value)
 
         return {
-            "train_error": float(last_row["Train error(px)"]),
-            "test_error": float(last_row["Test error(px)"]),
-            "train_error_p": float(last_row["Train error with p-cutoff"]),
-            "test_error_p": float(last_row["Test error with p-cutoff"]),
-            "p_cutoff": float(last_row["p-cutoff used"]),
-            "training_iterations": int(last_row["Training iterations:"]),
-            "shuffle": int(last_row["Shuffle number"]),
-            "train_fraction": int(last_row["%Training dataset"]),
-            "results_path": str(results_csv),
+            "train_error": _num(" Train error(px)"),
+            "test_error": _num(" Test error(px)"),
+            "train_error_p": _num("Train error with p-cutoff"),
+            "test_error_p": _num("Test error with p-cutoff"),
+            "p_cutoff": _num("p-cutoff used"),
+            "training_iterations": _num("Training iterations:", int),
+            "shuffle": int(shuffle),
+            "train_fraction": _num("%Training dataset", int),
+            "results_path": raw.get("results_path"),
         }
 
     def get_training_history(

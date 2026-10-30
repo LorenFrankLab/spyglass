@@ -920,7 +920,9 @@ def get_dlc_model_eval(
     # not fall back to another one, which evaluates a different training
     # fraction under the requested key.
     trainingsetindex = int(trainingsetindex)
-    trainFraction = dlc_config["TrainingFraction"][trainingsetindex]
+    # Looked up before evaluating: an out-of-range index must fail without
+    # spending a DLC evaluation first.
+    train_fraction = dlc_config["TrainingFraction"][trainingsetindex]
 
     with suppress_print_from_package():
         evaluate_network(
@@ -930,8 +932,66 @@ def get_dlc_model_eval(
             comparisonbodyparts="all",
         )
 
+    return read_dlc_model_eval(
+        project_path,
+        dlc_config,
+        shuffle,
+        trainingsetindex,
+        model_prefix,
+        train_fraction=train_fraction,
+    )
+
+
+def read_dlc_model_eval(
+    project_path: Union[str, Path],
+    dlc_config: dict,
+    shuffle: int,
+    trainingsetindex: int,
+    model_prefix: str = "",
+    train_fraction: Optional[float] = None,
+) -> dict:
+    """Read one model's evaluation results, normalized to 2.x field names.
+
+    Resolves the evaluation folder for exactly this shuffle and training
+    fraction, so a project holding several of either cannot return another
+    model's metrics.
+
+    Parameters
+    ----------
+    project_path : str or Path
+        DLC project directory.
+    dlc_config : dict
+        Parsed project config, read for ``TrainingFraction``.
+    shuffle : int
+        Shuffle to read.
+    trainingsetindex : int
+        Index into ``TrainingFraction``.
+    model_prefix : str, optional
+        DLC model prefix, by default "".
+    train_fraction : float, optional
+        The fraction for *trainingsetindex*. Looked up from *dlc_config* when
+        not given.
+
+    Returns
+    -------
+    dict
+        Evaluation fields in the DLC 2.x spellings, with any column the file
+        does not carry set to None.
+
+    Raises
+    ------
+    RuntimeError
+        If the folder is absent or its CSV cannot be parsed.
+    """
+    if get_evaluation_folder is None:  # pragma: no cover
+        raise RuntimeError("DeepLabCut is required to read evaluation results")
+
+    project_path = Path(project_path)
+    if train_fraction is None:
+        train_fraction = dlc_config["TrainingFraction"][int(trainingsetindex)]
+
     eval_folder = get_evaluation_folder(
-        trainFraction=trainFraction,
+        trainFraction=train_fraction,
         shuffle=shuffle,
         cfg=dlc_config,
         modelprefix=model_prefix,
@@ -949,7 +1009,9 @@ def get_dlc_model_eval(
         with open(csv_file, newline="") as f:
             csv_results = list(csv.DictReader(f, delimiter=","))[0]
 
-        return to_legacy_eval_fields(csv_results)
+        results = to_legacy_eval_fields(csv_results)
+        results["results_path"] = str(csv_file)
+        return results
 
     except (OSError, KeyError, ValueError, TypeError, AttributeError) as e:
         raise RuntimeError(
