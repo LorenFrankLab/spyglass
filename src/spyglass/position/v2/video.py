@@ -278,8 +278,9 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         """Insert video file group with automatic ID generation.
 
-        If vid_group_id is not provided, it is derived from the description
-        via key_hash (deterministic across processes).
+        If vid_group_id is not provided, it is derived by hashing the
+        resolved ``VideoFile`` keys via key_hash (deterministic across
+        processes, and independent of the order they were passed in).
 
         Parameters
         ----------
@@ -293,6 +294,15 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         -------
         dict
             Dictionary with the inserted vid_group_id as a str
+
+        Raises
+        ------
+        TypeError
+            If *key* is not a dictionary.
+        ValueError
+            If files were requested but none resolve to a ``VideoFile`` entry
+            and no ``external_videos`` were given, or if ``camera_indices``
+            does not match the number of requested files.
 
         Examples
         --------
@@ -323,6 +333,16 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 VideoFile().fetch_key_from_path(str(f)) for f in file_list
             ]
 
+        # Argument check before any lookup: a length mismatch is knowable
+        # from the inputs alone, and rejecting it here keeps a caller's
+        # camera_indices[i] paired with file_list[i] below.
+        camera_indices = key.get("camera_indices")
+        if camera_indices is not None and len(camera_indices) != len(file_list):
+            raise ValueError(
+                f"camera_indices length ({len(camera_indices)}) must match "
+                f"number of requested video files ({len(file_list)})."
+            )
+
         # Resolve each requested file on its own, keeping input order, so a
         # caller's camera_indices[i] belongs to file_list[i]. A single
         # relational fetch returns database order instead.
@@ -332,25 +352,24 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             resolved.append(matches[0] if len(matches) == 1 else None)
 
         vid_files = [pk for pk in resolved if pk is not None]
-        if file_list and not vid_files:
-            self._warn_msg(
-                "Provided files not found in VideoFile table. "
-                "Creating group without files. Provided: " + f"{files}"
+        external_videos = key.get("external_videos") or []
+        if file_list and not vid_files and not external_videos:
+            # The ID is derived from the resolved files, so a group with none
+            # of its requested videos would take the hash of an empty list --
+            # the same value for every such group, which `skip_duplicates`
+            # then folds together.
+            raise ValueError(
+                "None of the requested video files resolve to a VideoFile "
+                f"entry: {files}\n\nRegister the session's videos first with "
+                "`VideoFile().insert_from_nwbfile(nwb_file_name)`, or pass "
+                "them as `external_videos` to record media that is not a "
+                "Spyglass session."
             )
-        elif len(vid_files) != len(file_list):
+        if len(vid_files) != len(file_list):
             missing = [f for f, pk in zip(file_list, resolved) if pk is None]
             self._warn_msg(
                 "Some provided files did not resolve to exactly one "
                 f"VideoFile entry. Unresolved: {missing}"
-            )
-
-        # Rejected against the requested count, not the resolved one, so a
-        # missing file cannot silently shift the remaining indices.
-        camera_indices = key.get("camera_indices")
-        if camera_indices is not None and len(camera_indices) != len(file_list):
-            raise ValueError(
-                f"camera_indices length ({len(camera_indices)}) must match "
-                f"number of requested video files ({len(file_list)})."
             )
 
         vid_group_key = dict(
@@ -362,7 +381,14 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                     {
                         "files": sorted(
                             vid_files, key=lambda d: tuple(sorted(d.items()))
-                        )
+                        ),
+                        # An external-only group has no File rows, so its
+                        # media is the only identity it carries. Hashing the
+                        # files alone gave every such group the same ID.
+                        "external": sorted(
+                            str(e.get("path") if isinstance(e, dict) else e)
+                            for e in external_videos
+                        ),
                     }
                 )
             )
@@ -391,7 +417,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         # Provenance for training media not in VideoFile -- accepts plain
         # paths or dicts with path/source/note. See ExternalVideo's docstring.
         external_rows = []
-        for i, ext in enumerate(key.get("external_videos") or []):
+        for i, ext in enumerate(external_videos):
             ext = ext if isinstance(ext, dict) else {"path": str(ext)}
             external_rows.append(
                 dict(
@@ -413,7 +439,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
     @classmethod
     def create_from_files(
         cls,
-        video_files: List[Union[str, Path]],
+        video_files: List[Union[str, Path, Dict]],
         description: str,
         vid_group_id: Union[str, None] = None,
         camera_indices: Optional[List[int]] = None,
@@ -422,12 +448,15 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        video_files : List[Union[str, Path]]
-            List of video file paths.
+        video_files : List[Union[str, Path, Dict]]
+            Video file paths, or ``VideoFile`` primary-key dicts. Paths are
+            resolved through ``VideoFile.fetch_key_from_path``, which requires
+            the file to exist on disk; keys are matched directly.
         description : str
             Description of the video group.
         vid_group_id : Union[str, None], optional
-            Video group ID.  Auto-generated from description when ``None``.
+            Video group ID.  When ``None``, derived by hashing the resolved
+            ``VideoFile`` keys, so the ID identifies the set of videos.
         camera_indices : List[int], optional
             Zero-based camera slot index for each entry in *video_files*.
             Must have the same length as *video_files* when provided.
@@ -461,16 +490,19 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         if not video_files:
             raise ValueError("video_files list cannot be empty")
 
-        group_key = cls().insert1(
-            {"vid_group_id": vid_group_id, "description": description},
+        # One pass through `insert1`, which resolves the files, derives the ID
+        # from the resolved set, and inserts the group with its membership.
+        # Inserting the group first and calling `add_files` after hashed an
+        # empty list, so every auto-generated ID was the same constant.
+        return cls().insert1(
+            {
+                "vid_group_id": vid_group_id,
+                "description": description,
+                "files": video_files,
+                "camera_indices": camera_indices,
+            },
             skip_duplicates=True,
         )
-        cls().add_files(
-            group_key["vid_group_id"],
-            video_files,
-            camera_indices=camera_indices,
-        )
-        return group_key
 
     @classmethod
     def create_from_directory(cls, params: VideoGroupParams) -> dict:
@@ -637,7 +669,8 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             Description for the VidFileGroup.
             Defaults to ``"DLC project: <Task> (<date>)"``.
         vid_group_id : str, optional
-            Video group ID.  Auto-generated from description when ``None``.
+            Video group ID.  When ``None``, derived by hashing the resolved
+            ``VideoFile`` keys, so the ID identifies the set of videos.
         external_videos : bool, optional
             Record unresolved paths as :class:`VidFileGroup.ExternalVideo` rows
             instead of raising. For pretrained-model imports whose training
