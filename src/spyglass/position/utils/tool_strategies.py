@@ -56,6 +56,29 @@ class ToolStrategyFactory:
         return cls._strategies[tool]()
 
     @classmethod
+    def tool_for_suffix(cls, suffix: str) -> str:
+        """Which tool claims a project file with this suffix.
+
+        Each strategy declares its own `project_suffixes`, so adding a tool
+        does not mean editing a caller's extension map.
+
+        Parameters
+        ----------
+        suffix : str
+            File suffix without the leading dot, any case.
+
+        Returns
+        -------
+        str or None
+            The tool name, or None when no strategy claims it.
+        """
+        suffix = suffix.lower().lstrip(".")
+        for tool, strategy in cls._strategies.items():
+            if suffix in strategy.project_suffixes:
+                return tool
+        return None
+
+    @classmethod
     def get_available_tools(cls) -> list[str]:
         """Get list of available tool names."""
         return list(cls._strategies.keys())

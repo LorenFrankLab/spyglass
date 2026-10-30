@@ -251,6 +251,11 @@ class PoseToolStrategy(ABC):
             f"Model import not implemented for {self.tool_name}"
         )
 
+    #: Suffixes, without the dot, that name this tool's project
+    #: configuration. Empty where a tool's models are not identified by a
+    #: file extension, so it never claims another tool's file.
+    project_suffixes: Set[str] = set()
+
     def split_project_kwargs(self, kwargs: dict) -> tuple:
         """Divide caller kwargs between project creation and extraction.
 

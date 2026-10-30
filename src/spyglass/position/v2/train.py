@@ -2348,11 +2348,12 @@ class Model(SpyglassMixin, dj.Computed):
             )
         )
 
-        # Auto-detect tool from file extension if not provided
-        tool_suffix_map = {"yml": "DLC", "yaml": "DLC"}
+        # Auto-detect tool from file extension if not provided. Each
+        # strategy declares the suffixes it claims, so a new tool does not
+        # mean editing a map here.
         suffix = model_path.suffix.lstrip(".").lower()
         if tool is None:
-            tool = tool_suffix_map.get(suffix)
+            tool = ToolStrategyFactory.tool_for_suffix(suffix)
             if tool is None:
                 if suffix == "nwb":
                     raise ValueError(

@@ -896,6 +896,8 @@ class DLCStrategy(PoseToolStrategy):
         """Import DLC model using existing _import_dlc_model method."""
         return model_instance._import_dlc_model(model_path, **kwargs)
 
+    project_suffixes: Set[str] = {"yaml", "yml"}
+
     def split_project_kwargs(self, kwargs: dict) -> tuple:
         """Divide kwargs between `create_new_project` and `extract_frames`.
 
