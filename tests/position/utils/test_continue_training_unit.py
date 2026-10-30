@@ -491,7 +491,7 @@ class TestDLCContinueRouting:
     def test_explicit_epochs_kwarg_honored(self, ts):
         # A direct continue_training(..., epochs=N) call must reach the trainer
         # even when params carries no length knob (the make() path relies on
-        # params['epochs'] instead — see test_resumable_pytorch_wires_snapshot).
+        # params['epochs'] instead; see test_resumable_pytorch_wires_snapshot).
         strategy = _make_dlc(
             ts, {"engine": "pytorch"}, Path("/proj/train/snapshot-050.pt")
         )
