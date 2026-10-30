@@ -945,6 +945,17 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         tool_info = (ModelParams() & model_params_key).fetch1()
         tool = tool_info["tool"]
 
+        # Zoo models have no DLC project, so they cannot go through
+        # `analyze_videos`. Carry the marker set at import on the row that
+        # already reaches the inference runner, rather than re-querying
+        # ModelParams deeper in the stack (make_compute performs no DB reads).
+        zoo_params = tool_info.get("params") or {}
+        model_info = {
+            **model_info,
+            "superanimal_name": zoo_params.get("superanimal_name"),
+            "zoo_backbone": zoo_params.get("zoo_backbone"),
+        }
+
         # Fetch inference params from PoseEstimParams
         inference_params = (PoseEstimParams & key).fetch1("params")
         inference_params = inference_params or {}
@@ -1353,6 +1364,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             }
             params_info = (ModelParams() & model_params_key).fetch1()
             tool = params_info["tool"]
+            zoo_params = params_info.get("params") or {}
+            model_info = {
+                **model_info,
+                "superanimal_name": zoo_params.get("superanimal_name"),
+                "zoo_backbone": zoo_params.get("zoo_backbone"),
+            }
 
         self._logger.debug(f"Running inference with {tool} model: {model_key}")
 

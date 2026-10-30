@@ -115,6 +115,126 @@ class PoseInferenceRunner(BaseMixin):
             if count is None or count <= 0:
                 raise ValueError(self._unreadable_video_msg(str(vp)))
 
+    @staticmethod
+    def _assert_zoo_catalog_readable():
+        """Fail early if DLC's own backbone catalog is unparsable.
+
+        ``video_inference_superanimal`` loads
+        ``deeplabcut/modelzoo/models_to_framework.json`` internally. DLC
+        3.0.0rc14 ships that file with a trailing comma, so it is invalid JSON
+        and every zoo inference dies with a bare ``JSONDecodeError`` from deep
+        inside DLC, pointing nowhere useful. Fixed upstream in 3.0.1.
+
+        Raises
+        ------
+        RuntimeError
+            With the offending path and both remedies.
+        """
+        import json
+        from pathlib import Path as _Path
+
+        try:
+            import deeplabcut
+        except ImportError:  # pragma: no cover - handled by the caller
+            return
+
+        catalog = (
+            _Path(deeplabcut.__file__).parent
+            / "modelzoo"
+            / "models_to_framework.json"
+        )
+        if not catalog.exists():  # pragma: no cover - layout changed
+            return
+        try:
+            json.loads(catalog.read_text())
+        except json.JSONDecodeError as err:
+            raise RuntimeError(
+                f"DeepLabCut {getattr(deeplabcut, '__version__', '?')} ships an "
+                f"invalid backbone catalog, so Model Zoo inference cannot run:\n"
+                f"  {catalog}\n  {err}\n"
+                "Fixed upstream in DeepLabCut 3.0.1 -- upgrade, or repair the "
+                "file in place (it is a stray trailing comma)."
+            ) from err
+
+    def _run_superanimal_inference(
+        self, model_info, videos, destfolder=None, **kwargs
+    ):
+        """Run a DLC Model Zoo (SuperAnimal) model over videos.
+
+        ``video_inference_superanimal`` takes the zoo names directly -- no
+        config, no shuffle -- and routes the engine by backbone itself.
+
+        ``max_individuals`` defaults to **1**. SuperAnimal models are
+        multi-animal by construction (DLC hardcodes ``multi_animal=True``), so
+        their output always carries an ``individuals`` column level. Pinning it
+        to one animal makes that level length-1, which
+        ``dlc_io.squeeze_individuals`` collapses to the ordinary single-animal
+        layout -- Spyglass position derives one centroid and one orientation
+        per entry, so more than one animal has nowhere to go.
+
+        Raising it is possible but unsupported: the extra level survives to the
+        parser, which then requires ``allow_multi_animal`` and will still fail
+        downstream. On a video that truly holds several animals, a value of 1
+        returns one detection with no guarantee which -- a limitation of the
+        scoping, not a defect.
+
+        Returns
+        -------
+        str or list
+            Path(s) written by DLC, as for the project path.
+        """
+        try:
+            from deeplabcut.modelzoo.video_inference import (
+                video_inference_superanimal,
+            )
+        except ImportError as e:  # pragma: no cover - env dependent
+            raise ImportError(
+                "DeepLabCut 3.x is required for Model Zoo inference"
+            ) from e
+
+        self._assert_zoo_catalog_readable()
+
+        dataset = model_info["superanimal_name"]
+        from spyglass.position.v2.utils.fetch_dlc_zoo import (
+            resolve_backbone,
+            resolve_detector,
+        )
+
+        backbone = model_info.get("zoo_backbone") or resolve_backbone(dataset)
+
+        # PyTorch SuperAnimal inference is top-down and requires a detector;
+        # DLC raises without one. `superanimal_humanbody` has none (bottom-up),
+        # so None is valid there.
+        detector = resolve_detector(dataset, kwargs.get("detector_name"))
+
+        params = {
+            "videos": [videos] if isinstance(videos, str) else videos,
+            "superanimal_name": dataset,
+            "model_name": backbone,
+            "dest_folder": str(destfolder) if destfolder else None,
+            "max_individuals": int(kwargs.get("max_individuals", 1)),
+        }
+        if detector:
+            params["detector_name"] = detector
+        for name in ("batch_size", "device", "pcutoff", "cropping"):
+            if name in kwargs:
+                params[name] = kwargs[name]
+
+        if params["max_individuals"] != 1:
+            self._warn_msg(
+                f"max_individuals={params['max_individuals']} for {dataset}: "
+                "Spyglass position tracks one animal per entry, so the extra "
+                "`individuals` level will reach the parser and require "
+                "allow_multi_animal=True -- and still fail downstream."
+            )
+
+        self._info_msg(
+            f"Running DLC Model Zoo inference [{dataset} / {backbone}"
+            f"{f' + {detector}' if detector else ''}, "
+            f"max_individuals={params['max_individuals']}]: {videos}"
+        )
+        return video_inference_superanimal(**params)
+
     def run_dlc_inference(
         self,
         model_info: dict,
@@ -162,6 +282,14 @@ class PoseInferenceRunner(BaseMixin):
 
         videos = ensure_mp4(videos, pose_video_dir)
         self._assert_countable_videos(videos)
+
+        # Zoo models are bare checkpoints, not projects: no config.yaml, no
+        # shuffle, no trainingsetindex, so `analyze_videos` cannot run them.
+        # DLC exposes a separate entry point for them.
+        if model_info.get("superanimal_name"):
+            return self._run_superanimal_inference(
+                model_info, videos, destfolder, **kwargs
+            )
 
         model_path = resolve_model_path(model_info["model_path"])
         if not model_path.exists():
