@@ -539,6 +539,13 @@ class _AnalyzerWaveformAccessor:
         # Lazily filled on the first ``get_spike_locations`` call.
         self._spike_locations_by_unit = None
 
+    def __del__(self):
+        # Unmap the waveforms before the scratch folder's finalizer runs: on
+        # NFS a still-mapped file blocks the folder's removal, and attributes
+        # are otherwise released in assignment order (``_tmpdir`` first).
+        self._waveforms = None
+        self._analyzer = None
+
     @property
     def nbefore(self) -> int:
         """Spike-aligned sample index within each waveform window."""

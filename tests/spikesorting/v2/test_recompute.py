@@ -1556,6 +1556,7 @@ def test_analyzer_recompute_round_trip(
     backup = tmp_path / "analyzer-before-reclamation"
     with analyzer_cache_lock(populated_sorting["sorting_id"]):
         shutil.copytree(folder, backup)
+    rebuilt = None
     try:
         version_key = {
             "sorting_id": populated_sorting["sorting_id"],
@@ -1606,6 +1607,12 @@ def test_analyzer_recompute_round_trip(
         assert rc.SortingAnalyzerVersions & version_key
         assert not (rc.SortingAnalyzerRecomputeSelection & version_key)
     finally:
+        # Unmap the rebuilt analyzer first: on NFS its mapped files survive the
+        # rmtree, leaving a partial folder the copy below cannot replace.
+        import gc
+
+        rebuilt = None
+        gc.collect()
         # A failing loader cannot restore itself. Copy back the original cache
         # under the same real lock used by canonical readers/writers.
         with analyzer_cache_lock(populated_sorting["sorting_id"]):
