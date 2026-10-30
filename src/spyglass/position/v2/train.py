@@ -1798,6 +1798,8 @@ class Model(SpyglassMixin, dj.Computed):
         ------
         ValueError
             If *key* matches neither a ``Model`` nor a ``ModelSelection`` row.
+            A key carrying an attribute ``ModelSelection`` does not declare,
+            such as an unknown ``model_id``, reports that separately.
 
         Examples
         --------
@@ -1816,7 +1818,12 @@ class Model(SpyglassMixin, dj.Computed):
                 model_entry, epochs=epochs, overrides=overrides
             )
 
-        if ModelSelection() & key:  # selection exists, not yet trained → fresh
+        # A restriction naming an attribute the table lacks matches every row,
+        # so `model_id` must not reach this branch: it would populate every
+        # pending selection and then fail on the fetch1 below.
+        foreign = set(key) - set(ModelSelection.heading.names)
+
+        if key and not foreign and (ModelSelection() & key):
             if epochs is not None or overrides:
                 self._warn_msg(
                     "epochs/overrides are ignored for a fresh ModelSelection; "
@@ -1825,6 +1832,14 @@ class Model(SpyglassMixin, dj.Computed):
             self._info_msg(f"Training fresh model for selection: {key}")
             self.populate(key)
             return (self & key).fetch1("KEY")
+
+        if foreign:
+            raise ValueError(
+                f"No Model matches {key}, and {sorted(foreign)} is not part "
+                "of ModelSelection, so this key cannot name a selection to "
+                "train fresh. Pass the id of an existing model to continue "
+                "training, or a full ModelSelection key to train a new one."
+            )
 
         raise ValueError(
             f"Nothing to train for key: {key}. No matching Model or "
