@@ -6,9 +6,10 @@ tests pass a dict-backed stub there instead of building a project on disk.
 
 import hashlib
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 
 def default_pk_name(
@@ -67,3 +68,22 @@ class RealFileSystem:
     def getmtime(self, path: Union[str, Path]) -> float:
         """Get the modification time of a file."""
         return Path(path).stat().st_mtime
+
+
+@dataclass
+class ModelMetadata:
+    """Parameter object for _write_model_metadata method."""
+
+    model_id: str
+    model_path: str
+    project_path: Path
+    config_path: Path
+    params: dict
+    config: dict
+    latest_model: dict
+    skeleton_id: str
+    parent_id: Optional[str] = None
+    # Sessions behind the training video group, sorted. The first is the
+    # ``AnalysisNwbfile`` parent; training may span sessions, so all are
+    # recorded in the metadata file.
+    session_files: List[str] = field(default_factory=list)
