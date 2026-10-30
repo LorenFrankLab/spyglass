@@ -86,8 +86,7 @@ class BodyPart(SpyglassMixin, dj.Lookup):
     ]
 
     # Dicts, not tuples: `source` has a default, and a dict lets these rows
-    # omit it. Positional rows would have to repeat 'curated' 27 times, and a
-    # short tuple silently breaks Lookup population when an attribute is added.
+    # omit it. A short tuple breaks Lookup population when a column is added.
     contents = [{"bodypart": bp} for bp in _curated]
 
     @classmethod
@@ -96,8 +95,7 @@ class BodyPart(SpyglassMixin, dj.Lookup):
 
         This is the single source of truth used to resolve any surface form to
         its canonical spelling. If the curated table itself holds two spellings
-        of one concept, raise a clear, admin-actionable error -- the
-        inconsistency is in the reference table, not in the caller's input.
+        of one concept, raise an admin-actionable error naming both.
 
         Returns
         -------
@@ -116,9 +114,9 @@ class BodyPart(SpyglassMixin, dj.Lookup):
             raise dj.DataJointError(
                 "The BodyPart reference table is inconsistent: it holds two "
                 f"spellings of the same body part. {err} This is a "
-                "data-integrity problem in the curated BodyPart table -- not "
-                "in your model or config -- so it cannot be fixed by renaming "
-                "your bodyparts. An admin must reconcile the duplicate: choose "
+                "data-integrity problem in the curated BodyPart table, not "
+                "in your model or config, so renaming your bodyparts will not "
+                "fix it. An admin must reconcile the duplicate: choose "
                 "the canonical spelling, repoint any references to it, then "
                 "remove the other entry."
             ) from err
@@ -395,9 +393,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         # Resolve incoming names to the canonical BodyPart spelling so the
         # stored bodyparts blob, the edges blob, and the part-table FK all
-        # share one namespace. (Previously validation used normalized names
-        # but the FK insert used raw names, so a variant spelling could pass
-        # validation and then fail the FK with an opaque IntegrityError.)
+        # share one namespace.
         canon_map = BodyPart.canon_map()
         unresolved = [
             bp for bp in bodyparts if skel.canonicalize(bp, canon_map) is None
@@ -660,9 +656,8 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         tool_info = {}
 
         # Build tool_info for each registered strategy. A registered tool that
-        # fails to instantiate or introspect is a real defect (broken/mis-
-        # registered strategy), so it must surface loudly — never be silently
-        # skipped or collapsed into an empty result.
+        # fails to instantiate or introspect is a defect, so the error
+        # propagates rather than being skipped.
         for tool_name in ToolStrategyFactory.get_available_tools():
             try:
                 strategy = ToolStrategyFactory.create_strategy(tool_name)
@@ -1145,7 +1140,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         Pure with respect to the database: no queries or inserts. Writes
         training artifacts (checkpoints, the model-metadata NWB file) to disk,
-        which the tri-part contract permits — only database access is barred.
+        which the tri-part contract permits: only database access is barred.
 
         Parameters
         ----------
@@ -1302,8 +1297,7 @@ class Model(SpyglassMixin, dj.Computed):
             ),
             "parent_id": metadata.parent_id or "",
             "skeleton_id": metadata.skeleton_id,
-            # All of them: only the first becomes the FK parent, so the rest
-            # would otherwise be unrecorded for a cross-session model.
+            # All of them: only the first becomes the FK parent.
             "nwb_file_names": list(metadata.session_files),
         }
 
@@ -1363,7 +1357,7 @@ class Model(SpyglassMixin, dj.Computed):
         epochs: Union[int, None] = None,
         **overrides,
     ) -> dict:
-        """Train a model — either continuing an existing one or a fresh run.
+        """Train a model, either continuing an existing one or starting fresh.
 
         A single, tool-agnostic, state-driven verb. The path is chosen by
         ``bool(Model & key)``:
@@ -1382,9 +1376,9 @@ class Model(SpyglassMixin, dj.Computed):
           return the resulting ``Model`` key.
         - **Neither**: raise ``ValueError``.
 
-        The rule works for either key shape — a ``{'model_id': ...}`` key, or a
-        full ``ModelSelection`` key (which resolves a ``Model`` only once it has
-        been populated).
+        The rule works for either key shape: a ``{'model_id': ...}`` key, or
+        a full ``ModelSelection`` key, which resolves a ``Model`` only once it
+        has been populated.
 
         Parameters
         ----------
@@ -1470,9 +1464,10 @@ class Model(SpyglassMixin, dj.Computed):
         Shared plumbing for the continue/fine-tune path: builds the child's
         ``ModelParams`` (a new row only if the normalized params actually
         changed, otherwise the parent's is reused to keep content-addressing
-        clean), creates a ``ModelSelection`` with ``parent_id`` set — carrying
-        any tool-specific selection fields (SLEAP ``training_labels_path``) —
-        then populates ``make`` and returns the new ``Model`` key.
+        clean), creates a ``ModelSelection`` with ``parent_id`` set, carrying
+        any tool-specific selection fields such as SLEAP's
+        ``training_labels_path``, then populates ``make`` and returns the new
+        ``Model`` key.
 
         Parameters
         ----------
@@ -1550,7 +1545,7 @@ class Model(SpyglassMixin, dj.Computed):
         labels_path = (ModelSelection() & parent_sel_key).fetch1(
             "training_labels_path"
         )
-        if labels_path:  # SLEAP .slp labels — carry forward for populate()
+        if labels_path:  # SLEAP .slp labels: carry forward for populate()
             new_sel_key["training_labels_path"] = labels_path
 
         new_sel_key["model_selection_id"] = default_pk_name(
@@ -1611,8 +1606,8 @@ class Model(SpyglassMixin, dj.Computed):
         ValueError
             If model_key doesn't exist in Model table
         ImportError
-            From the DLC path only, when DeepLabCut is unavailable. A SLEAP
-            model evaluates through ``SLEAPStrategy`` without it.
+            From the DLC path only, when DeepLabCut is unavailable. SLEAP
+            models evaluate through ``SLEAPStrategy``.
         FileNotFoundError
             If model or config file not found
 
@@ -1824,7 +1819,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         Creates the DLC project folder on disk, extracts frames for labeling,
         and inserts a ``Skeleton`` entry.  Does **not** insert into
-        ``ModelSelection`` or trigger training — label frames externally, then
+        ``ModelSelection`` or trigger training. Label frames externally, then
         ``Model.load(config_path)`` registers the project and returns a
         ``ModelSelection`` key for ``populate`` to train.
 
@@ -1856,7 +1851,7 @@ class Model(SpyglassMixin, dj.Computed):
             in ``dj_local_conf.json``).  Falls back to ``~/dlc_projects`` if
             that setting is not configured.
         experimenter : str, optional
-            Name recorded as the DLC project's ``experimenter`` -- becomes
+            Name recorded as the DLC project's ``experimenter``. Becomes
             the middle component of the folder name DLC creates:
             ``{project_name}-{experimenter}-{date}``. Defaults to the
             current OS user (``getpass.getuser()``) if not given. Must be
@@ -1946,8 +1941,8 @@ class Model(SpyglassMixin, dj.Computed):
         self._warn_existing_models_for_videos(video_list)
 
         # Convert any raw video streams (h264/h265/hevc) to mp4 so DeepLabCut
-        # can read them — DLC's frame extraction fails on raw streams. V1 did
-        # this at project creation. The original paths (which map to VideoFile)
+        # can read them: DLC's frame extraction rejects raw streams. The
+        # original paths (which map to VideoFile)
         # are kept for the VidFileGroup below; DLC gets the converted paths.
         convert_dir = (
             pose_video_dir
@@ -1959,9 +1954,9 @@ class Model(SpyglassMixin, dj.Computed):
 
         dlc_videos = ensure_mp4(resolved_videos, convert_dir)
 
-        # Try to infer a safe frame budget from the shortest video.  If this
-        # fails (e.g., codec issues), we keep the user's requested value and
-        # rely on DLC's own validation below.
+        # Infer a safe frame budget from the shortest video. On failure
+        # (e.g. codec issues), keep the requested value and leave it to DLC's
+        # own validation below.
         effective_frames_per_video = frames_per_video
         try:
             import cv2
@@ -2003,9 +1998,9 @@ class Model(SpyglassMixin, dj.Computed):
         # ── 2. Create or update the DLC project (proactive config mgmt) ───────
         # DLCStrategy.ensure_project owns the create-or-update + config edits:
         # it reuses a matching project, creates one if absent, copies in the
-        # converted videos, and re-points video_sets/bodyparts/numframes2pick —
-        # so we never depend on create_new_project returning a fresh config for
-        # an existing folder.
+        # converted videos, and re-points
+        # video_sets/bodyparts/numframes2pick, which is what an existing
+        # folder needs: create_new_project returns its config unchanged.
         project_directory = str(
             project_directory
             or pose_project_dir
@@ -2085,7 +2080,7 @@ class Model(SpyglassMixin, dj.Computed):
         keyed by either the DLC ``"bodyparts"`` field or the ndx-pose / SLEAP
         ``"nodes"`` field. Reading a tool-specific model file from disk is the
         responsibility of that tool's import path, which parses it and passes
-        the names (or parsed dict) here -- e.g. ``load_yaml(path)`` for DLC.
+        the names (or parsed dict) here, e.g. ``load_yaml(path)`` for DLC.
 
         Raises
         ------
@@ -2107,8 +2102,8 @@ class Model(SpyglassMixin, dj.Computed):
         """Resolve body-part surface forms to their canonical spellings.
 
         Uses the ``BodyPart`` table as the source of truth for canonical
-        spelling. Names matching an existing part -- ignoring camelCase,
-        snake_case, kebab-case, and whitespace differences -- map to that
+        spelling. Names matching an existing part, ignoring camelCase,
+        snake_case, kebab-case and whitespace differences, map to that
         part's exact spelling; names with no match are returned as unresolved
         for the caller to decide what to do (e.g. error, or rewrite the DLC
         project with ``normalize_names=True``).
@@ -2242,8 +2237,9 @@ class Model(SpyglassMixin, dj.Computed):
             provenance instead. Default False.
 
             For pretrained models whose training media are not Spyglass
-            sessions -- pilot/scoping footage, or public models whose videos are
-            unavailable. The resulting group has no session link, so it cannot
+            sessions: pilot or scoping footage, or public models whose
+            videos are unavailable. The resulting group has no session link,
+            so it cannot
             back inference; that guard is unchanged. Reuse discovery by subject
             will not surface the model, since its animals are unknown.
         vid_file_matches : dict, optional
@@ -2417,13 +2413,13 @@ class Model(SpyglassMixin, dj.Computed):
     ):
         """Import a DeepLabCut Model Zoo (SuperAnimal) model.
 
-        Reachable as ``Model().load("superanimal_topviewmouse")`` -- ``load``
+        Reachable as ``Model().load("superanimal_topviewmouse")``: ``load``
         dispatches here when the string is not a path.
 
         Zoo models have no DLC project and no training videos: DLC ships their
         configs with ``video_sets:`` empty, and the weights are public
         checkpoints. So the import records provenance rather than sessions, and
-        the model is ``weights_only`` -- DLC fine-tunes a SuperAnimal by
+        the model is ``weights_only``: DLC fine-tunes a SuperAnimal by
         *seeding a new project* (``build_weight_init``), never by resuming it.
 
         Parameters
@@ -2431,7 +2427,7 @@ class Model(SpyglassMixin, dj.Computed):
         dataset : str
             Zoo dataset, e.g. ``'superanimal_topviewmouse'``.
         model_name : str, optional
-            Backbone. Defaults to the first the dataset offers -- these differ
+            Backbone. Defaults to the first the dataset offers; they differ
             per dataset, so there is no single valid default.
         model_params_id, model_id : str, optional
             Override the generated ids.
@@ -2448,8 +2444,8 @@ class Model(SpyglassMixin, dj.Computed):
         -----
         Downloads the weights (a few hundred MB) on first use and copies them
         under ``pose_project_dir``. DLC caches them *inside its own package*,
-        which is per conda environment -- storing that path would yield a row
-        valid only for the importing user.
+        which is per conda environment, so a row storing that path serves only
+        the importing user.
         """
         from spyglass.settings import pose_project_dir
 
@@ -2492,7 +2488,7 @@ class Model(SpyglassMixin, dj.Computed):
             skip_duplicates=True,
         )
 
-        # Step 3: a group with no File rows -- the training videos are not
+        # Step 3: a group with no File rows. The training videos are not
         # Spyglass sessions and never will be. `get_nwb_file` still refuses it,
         # so this model can never back inference on unregistered data.
         vid_group_key = VidFileGroup().insert1(
@@ -2610,8 +2606,8 @@ class Model(SpyglassMixin, dj.Computed):
         )
         self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
 
-        # Step 4: Create ModelSelection entry (no skeleton_id — it lives in
-        # ModelParams, not ModelSelection)
+        # Step 4: Create ModelSelection entry. skeleton_id lives in
+        # ModelParams, not here.
         sel_key = {**model_params_key, **vid_group_key}
         # Generate model_selection_id if not provided
         if "model_selection_id" not in sel_key:
@@ -2624,10 +2620,9 @@ class Model(SpyglassMixin, dj.Computed):
         # model_selection_id embeds the date, so re-importing the same config
         # on a later day is a new prospective selection that the redundancy
         # guard would reject; matching on the rest of the selection keeps that
-        # import idempotent. Matching on `model_path` alone would not: several
-        # models share one project's config.yaml, so it would return whichever
-        # was imported first. Never assume a single match -- ``fetch1`` on a
-        # multi-row set would raise.
+        # import idempotent. `model_path` alone is not enough: several
+        # models share one project's config.yaml. The match can be multi-row,
+        # so this fetches one row rather than calling ``fetch1``.
         stored_path = to_stored_path(model_path)
         dated = {"model_selection_id"}
         existing = (

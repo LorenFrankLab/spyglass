@@ -1,8 +1,7 @@
 """The pose-tool strategy interface.
 
-Its own module so each tool's strategy can import the base class without
-importing the others: `tool_strategies` imports all of them, so a strategy
-importing from there would be a cycle.
+Each strategy imports the base from here. `tool_strategies` imports every
+strategy, so the base cannot live there.
 """
 
 from abc import ABC, abstractmethod

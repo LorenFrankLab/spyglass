@@ -18,7 +18,7 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
 
     Pose model NWB files (produced by tools like DeepLabCut or SLEAP and
     imported via ``Model.import_model()``) contain ndx-pose objects
-    (``PoseEstimation`` / ``Skeletons``) but carry no session structure —
+    (``PoseEstimation`` / ``Skeletons``) but carry no session structure,
     no electrode groups, no task epochs.  Passing them to
     ``insert_sessions`` would register an incomplete ``Nwbfile`` entry and
     could inadvertently trigger V1 ``ImportedPose`` population.
@@ -34,7 +34,7 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
         If the file contains ndx-pose objects but no electrode groups.
     """
     try:
-        import ndx_pose  # noqa: F401 — only needed for isinstance checks
+        import ndx_pose  # noqa: F401  (isinstance checks only)
         from ndx_pose import PoseEstimation, Skeletons
     except ImportError:
         return  # ndx-pose not installed; skip detection
@@ -167,8 +167,7 @@ def insert_sessions(
             )
         )
 
-    # One result per file. Previously returned from inside the loop, so only
-    # the first file of a list was ever processed.
+    # One result per file, collected across the loop.
     return results
 
 

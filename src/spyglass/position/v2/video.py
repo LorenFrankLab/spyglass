@@ -56,7 +56,7 @@ class CameraRig(SpyglassMixin, dj.Manual):
     A rig groups one or more cameras that are physically co-located and used
     together for a recording.  Each camera slot is described by
     :class:`CameraRig.Camera`, which links a zero-based index to a
-    :class:`~spyglass.common.common_device.CameraDevice` entry — the
+    :class:`~spyglass.common.common_device.CameraDevice` entry, the
     authoritative source for camera identity and ``meters_per_pixel``.
 
     Insert order: :class:`~spyglass.common.common_device.CameraDevice` →
@@ -96,7 +96,7 @@ class CameraRig(SpyglassMixin, dj.Manual):
             Zero-based camera slot index within the rig.
         camera_name : str
             Foreign key to :class:`~spyglass.common.common_device.CameraDevice`
-            — must exist there before inserting into this table.
+            Must exist there before inserting into this table.
         """
 
         definition = """
@@ -174,7 +174,7 @@ class Calibration(SpyglassMixin, dj.Manual):
             Inherited from :class:`CameraRig` via the parent
             :class:`Calibration`.
         camera_index : int
-            Foreign key to :class:`CameraRig.Camera` — the camera slot must
+            Foreign key to :class:`CameraRig.Camera`. The camera slot must
             be registered in the rig before calibration can be stored.
         intrinsics : dict
             Focal length, principal point, and distortion coefficients.
@@ -221,24 +221,24 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         """
 
     class ExternalVideo(dj.Part):
-        """Training media that is not — and may never be — in ``VideoFile``.
+        """Training media that is not, and may never be, in ``VideoFile``.
 
         Model provenance for pretrained imports. Two cases motivate it:
 
         - **Pilot / scoping videos**, recorded to test whether tracking is
           feasible. Registrable in principle, but they are not recording
-          sessions, so a ``Session`` row for them would be a category error.
+          sessions, so a ``Session`` row does not describe them.
         - **DLC Model Zoo models**, whose training videos do not exist
           publicly. DLC ships those configs with ``video_sets:`` empty, so
           there is a *source* but no paths at all.
 
         Recording them here keeps the media documented and queryable without
-        claiming they are sessions. A fabricated ``Session`` would be worse
-        than silence: downstream it is indistinguishable from real data.
+        claiming they are sessions. A fabricated ``Session`` is
+        indistinguishable from real data downstream.
 
         These are **not** ``File`` rows, so a group holding only these has no
-        session link and ``get_nwb_file()`` still refuses it — which is what
-        keeps such a model from ever backing a ``PoseV2`` entry.
+        session link, and ``get_nwb_file()`` still refuses it, so such a
+        model never backs a ``PoseV2`` entry.
 
         Attributes
         ----------
@@ -414,7 +414,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 row["camera_index"] = int(camera_indices[position])
             file_rows.append(row)
 
-        # Provenance for training media not in VideoFile -- accepts plain
+        # Provenance for training media not in VideoFile. Accepts plain
         # paths or dicts with path/source/note. See ExternalVideo's docstring.
         external_rows = []
         for i, ext in enumerate(external_videos):
@@ -674,7 +674,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         external_videos : bool, optional
             Record unresolved paths as :class:`VidFileGroup.ExternalVideo` rows
             instead of raising. For pretrained-model imports whose training
-            videos are not Spyglass sessions -- pilot/scoping footage, or zoo
+            videos are not Spyglass sessions: pilot or scoping footage, or zoo
             models whose videos do not exist. Default False, so the strict
             behaviour is unchanged unless a caller opts out.
 
@@ -860,7 +860,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 f"{len(unresolved)}/{len(video_paths)} training video(s) are "
                 "not registered in VideoFile; recording them as "
                 "VidFileGroup.ExternalVideo provenance instead. This group has "
-                "no session link, so it cannot be used for inference -- that "
+                "no session link, so it cannot be used for inference. That "
                 "is expected for a pretrained-model import."
             )
 
@@ -911,9 +911,10 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         ``PoseEstim`` / ``PoseV2`` entry must derive from exactly one
         ``Nwbfile`` so its results have a well-defined session.
 
-        Note that a group **may** legitimately span sessions -- ``ModelSelection``
-        trains one model across several -- so this method is an assertion made
-        by callers that need one session, not an invariant of the table itself.
+        A group **may** legitimately span sessions, since
+        ``ModelSelection`` trains one model across several, so this method is
+        an assertion made by callers that need one session, not an invariant
+        of the table itself.
         Multi-camera (3-D) groups hold one ``File`` row per camera all sharing
         a single parent NWB; those collapse to that common file rather than
         counting once per camera.

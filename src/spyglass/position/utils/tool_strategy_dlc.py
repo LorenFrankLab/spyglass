@@ -60,10 +60,9 @@ class DLCStrategy(PoseToolStrategy):
             "video_sets",
             "model_path",
             "analysis_file_id",
-            # Compute-device selection is a runtime concern, not part of a
-            # param set's identity — pass it via
-            # ``populate(make_kwargs={"device": ...})`` instead. Stripped here so
-            # it never enters the content-addressed params hash.
+            # Device is a runtime choice, not part of a param set's
+            # identity. Pass it as
+            # ``populate(make_kwargs={"device": ...})``.
             "device",
             "gputouse",
         }
@@ -128,7 +127,7 @@ class DLCStrategy(PoseToolStrategy):
         # DLC 3.x defaults to the PyTorch engine, so the PyTorch-native length
         # knobs (``epochs``/``save_epochs``) are the primary defaults here.
         # ``epochs=200``/``save_epochs=25`` mirror DeepLabCut's own PyTorch
-        # defaults -- a good fit for the small (~100-frame) Frank Lab training
+        # defaults, which suit the small (~100-frame) Frank Lab training
         # sets. Do NOT carry a TensorFlow ``maxiters`` value (the old TF default
         # was 1,030,000 *iterations*) into ``epochs``: one epoch is a full pass
         # over the training set (many gradient steps), so ~1e6 epochs is a
@@ -179,8 +178,8 @@ class DLCStrategy(PoseToolStrategy):
         # Guardrail for the TF->PyTorch migration trap: ``epochs`` is a full
         # pass over the training set (many gradient steps), so a value in the
         # TF-``maxiters`` range (the old TF default was 1,030,000 *iterations*)
-        # is almost certainly a knob carried across engines. Warn, do not fail
-        # -- a user may legitimately want a long run.
+        # is almost certainly a knob carried across engines. Warn rather
+        # than fail: a long run is a legitimate request.
         epochs = params.get("epochs")
         if isinstance(epochs, (int, float)) and not isinstance(epochs, bool):
             if epochs > self._EPOCHS_SANITY_LIMIT:
@@ -252,8 +251,8 @@ class DLCStrategy(PoseToolStrategy):
         DLC 3.x PyTorch resumes from a checkpoint via ``snapshot_path`` (and
         optionally ``epochs``). TensorFlow-engine weight-resume is not
         supported and is rejected earlier in :meth:`continue_training`
-        (``init_weights`` is not a ``train_network`` kwarg, so it would be
-        silently dropped), so this helper is PyTorch-only.
+        (``init_weights`` is not a ``train_network`` kwarg), so this helper
+        is PyTorch-only.
 
         Parameters
         ----------
@@ -371,9 +370,8 @@ class DLCStrategy(PoseToolStrategy):
         PyTorch trainer via ``snapshot_path`` so training continues from those
         weights. When no resumable snapshot is available (missing snapshot, or
         a ``shuffle`` override that invalidates weight-resume) this degrades to
-        a fresh — but still ``parent_id`` linked — train, keeping the lineage
-        while starting weights from scratch. The caller never has to decide
-        this.
+        a fresh train that still carries ``parent_id``, keeping the lineage
+        while starting weights from scratch.
 
         The TensorFlow engine is not supported for continuation: its resume
         mechanism (``init_weights`` in ``pose_cfg``) is not a ``train_network``
@@ -393,8 +391,8 @@ class DLCStrategy(PoseToolStrategy):
         if self._is_tf_engine(config):
             raise NotImplementedError(
                 "DLC TensorFlow-engine continuation (weight-resume) is not "
-                "implemented: `init_weights` is not a `train_network` kwarg "
-                "and would be silently dropped. Use the PyTorch engine (the "
+                "implemented: `init_weights` is not a `train_network` kwarg. "
+                "Use the PyTorch engine (the "
                 "DLC 3.x default) to continue training, or retrain fresh."
             )
         shuffle = int(params.get("shuffle", config.get("shuffle", 1)))
@@ -567,11 +565,10 @@ class DLCStrategy(PoseToolStrategy):
         Proactive **create-or-update**: finds an existing project by name,
         creates one if absent, copies in any converted video DLC does not yet
         reference, and rewrites ``video_sets`` / ``bodyparts`` /
-        ``numframes2pick`` to the requested values. This never relies on
-        DeepLabCut's ``create_new_project`` returning a fresh config for an
-        existing folder — it returns the existing (possibly stale) config
-        unchanged, which is why a project first built from raw h264 otherwise
-        keeps pointing at the h264 after conversion.
+        ``numframes2pick`` to the requested values. ``create_new_project``
+        returns the existing config unchanged for a folder that already
+        exists, so the rewrite here is what repoints a project built from
+        raw h264 at the converted files.
 
         Parameters
         ----------
@@ -616,8 +613,8 @@ class DLCStrategy(PoseToolStrategy):
                 model_instance._info_msg(msg)
 
         # Reuse an existing project whose video_sets are a subset of the
-        # requested (converted) videos — DLC may silently drop invalid files,
-        # so a subset (not equality) avoids false negatives.
+        # requested (converted) videos. DLC may drop invalid files, so a
+        # subset rather than equality avoids false negatives.
         config_path = None
         for candidate in sorted(
             Path(project_directory).glob(f"{project_name}-*-*/config.yaml")
@@ -836,7 +833,7 @@ class DLCStrategy(PoseToolStrategy):
 
         Returns one entry per video, ``None`` where a video has no output.
         """
-        # If we got direct file info from inference, use it
+        # Prefer file info handed back by inference
         if output_file_info:
             if isinstance(output_file_info, str):
                 return [output_file_info]
@@ -901,9 +898,9 @@ class DLCStrategy(PoseToolStrategy):
     def split_project_kwargs(self, kwargs: dict) -> tuple:
         """Divide kwargs between `create_new_project` and `extract_frames`.
 
-        Split by signature so a caller controls both steps without this code
-        hard-coding every parameter name. `algo` and `userfeedback` are
-        defaulted: DLC's own defaults are `kmeans` and interactive prompting,
+        Split by signature, so a caller reaches both steps by name. `algo`
+        and `userfeedback` are defaulted: DLC's own defaults are `kmeans` and
+        interactive prompting,
         neither of which suits an unattended call.
 
         See :meth:`PoseToolStrategy.split_project_kwargs` for parameters.
@@ -984,7 +981,7 @@ class DLCStrategy(PoseToolStrategy):
             if not list((labeled_data_dir / Path(video).stem).glob("img*.png"))
         ]
         if not pending:
-            model_instance._info_msg("Frames already extracted — skipping.")
+            model_instance._info_msg("Frames already extracted; skipping.")
             return []
 
         extract_kwargs = dict(extract_kwargs)
@@ -1220,8 +1217,8 @@ class DLCStrategy(PoseToolStrategy):
         """Resolve a SuperAnimal backbone and copy its weights out of cache.
 
         DLC caches zoo weights inside its own package, which is per conda
-        environment, so a stored path pointing there would be valid only for
-        the importing user. The weights are copied to *dest_dir* first.
+        environment, so the weights are copied to *dest_dir* and the stored
+        path points there.
 
         See :meth:`PoseToolStrategy.resolve_zoo_model` for parameters.
         """
@@ -1291,8 +1288,8 @@ class DLCStrategy(PoseToolStrategy):
         Returns
         -------
         str
-            - ``resumable`` — a PyTorch ``snapshot-*.pt`` is present.
-            - ``inference_only`` — TensorFlow engine (DLC-TF continuation is a
+            - ``resumable``: a PyTorch ``snapshot-*.pt`` is present.
+            - ``inference_only``: TensorFlow engine (DLC-TF continuation is a
               documented won't-do), or no snapshot to resume from.
         """
         if str(config.get("engine", "pytorch")).lower() != "pytorch":
@@ -1646,9 +1643,8 @@ class DLCStrategy(PoseToolStrategy):
         # but ONLY for the PyTorch engine. `train_network` accepts `gputouse`
         # in its signature; the PyTorch engine ignores it (it selects the GPU
         # via `device`), so routing corrects a silent no-op there. The
-        # TensorFlow engine, however, DOES honor `gputouse` — popping it and
-        # setting `device` (which TF ignores) would silently change GPU
-        # selection — so leave TF-engine kwargs untouched.
+        # TensorFlow honors `gputouse` and ignores `device`, so TF-engine
+        # kwargs are left untouched.
         from spyglass.position.utils.dlc_io import route_gputouse_to_device
 
         if not self._is_tf_engine(config):
@@ -1736,7 +1732,7 @@ class DLCStrategy(PoseToolStrategy):
 
             _engines = [_Engine.PYTORCH, _Engine.TF]
         except ImportError:
-            _engines = [None]  # older DLC — get_model_folder ignores engine
+            _engines = [None]  # older DLC: get_model_folder has no engine
 
         params = params or {}
         fractions = dlc_config.get("TrainingFraction", [0.95])

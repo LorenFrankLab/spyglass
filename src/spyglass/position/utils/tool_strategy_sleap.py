@@ -182,7 +182,7 @@ class SLEAPStrategy(PoseToolStrategy):
             VidFileGroup entry (not used directly by SLEAP CLI)
         sel_entry : dict
             Full ModelSelection entry. Must include
-            ``training_labels_path`` — path to .slp labels file.
+            ``training_labels_path``, the .slp labels file.
         model_instance
             Model table instance for logging.
 
@@ -234,7 +234,7 @@ class SLEAPStrategy(PoseToolStrategy):
             legacy SLEAP <=1.4, ``best_model.h5``) to resume from. Despite the
             CLI help wording ("directory containing best_model.h5"), the modern
             sleap-nn trainer requires a checkpoint *file* whose extension is
-            ``.ckpt`` or ``.h5`` — a directory is rejected — so this must be the
+            ``.ckpt`` or ``.h5`` and rejects a directory, so this must be the
             file path, not its parent directory.
 
         Returns
@@ -407,7 +407,7 @@ class SLEAPStrategy(PoseToolStrategy):
                     model_instance.__class__ & {"model_id": parent_id}
                 ).fetch1("model_path")
             except dj.errors.DataJointError:
-                # missing row / no DB — caller degrades to fresh
+                # missing row or no DB: caller degrades to fresh
                 return None
         return Path(model_path) if model_path else None
 
@@ -452,7 +452,7 @@ class SLEAPStrategy(PoseToolStrategy):
         """Write a config copy with the training length set to *epochs*.
 
         SLEAP's trainer reads its length from the config file, not the CLI or
-        ``params`` — so honouring an ``epochs`` budget means editing a copy of
+        ``params``, so honouring an ``epochs`` budget means editing a copy of
         the config and pointing ``sleap-train`` at it (the user's original file
         is never touched). The epoch field differs by format: modern sleap-nn
         YAML uses ``trainer_config.max_epochs``; legacy SLEAP JSON uses
@@ -472,8 +472,8 @@ class SLEAPStrategy(PoseToolStrategy):
         -------
         pathlib.Path or None
             Path to the rewritten config copy, or ``None`` if the budget could
-            not be applied (no/invalid config) — in which case the caller falls
-            back to the original config and the length baked into it.
+            not be applied (no config, or an invalid one). The caller then
+            falls back to the original config and the length baked into it.
         """
         import json
         import tempfile
@@ -483,7 +483,7 @@ class SLEAPStrategy(PoseToolStrategy):
                 "SLEAP continuation received an epochs budget but no "
                 "'initial_config' to write it into. sleap-train reads training "
                 "length from the config, not from params, so the epochs value "
-                "cannot be applied — set max_epochs in a SLEAP training config. "
+                "cannot be applied. Set max_epochs in a SLEAP training config. "
                 "Ignoring epochs."
             )
             return None
@@ -503,7 +503,7 @@ class SLEAPStrategy(PoseToolStrategy):
                 data.setdefault("optimization", {})["epochs"] = epochs
                 payload = json.dumps(data, indent=2)
                 out_suffix = ".json"
-        except Exception as err:  # malformed config — don't break the resume
+        except Exception as err:  # malformed config: resume anyway
             model_instance._warn_msg(
                 f"Could not rewrite SLEAP config for epochs={epochs} "
                 f"({config_path}): {err}. Falling back to the config's own "
@@ -541,9 +541,10 @@ class SLEAPStrategy(PoseToolStrategy):
         Locates the parent model's checkpoint (``best.ckpt`` or legacy
         ``best_model.h5``) and passes it to ``sleap-train --base_checkpoint`` so
         the backbone and head layers initialise from those weights instead of
-        random init. When no checkpoint is found this degrades to a fresh — but
-        still ``parent_id`` linked — train (mirroring :class:`DLCStrategy`),
-        keeping the lineage while starting from scratch; the caller never has to
+        random init. When no checkpoint is found this degrades to a fresh
+        train that still carries ``parent_id`` (mirroring
+        :class:`DLCStrategy`), keeping the lineage while starting from
+        scratch; the caller never has to
         decide this.
 
         Training length ("more epochs") is honoured by writing a copy of the
@@ -678,7 +679,7 @@ class SLEAPStrategy(PoseToolStrategy):
 
         if show_errors and results:
             model_instance._info_msg(
-                f"SLEAP eval — OKS: {results.get('oks', 'N/A')}, "
+                f"SLEAP eval. OKS: {results.get('oks', 'N/A')}, "
                 f"mAP: {results.get('mAP', 'N/A')}"
             )
 

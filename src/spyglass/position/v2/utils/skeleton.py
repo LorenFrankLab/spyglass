@@ -83,8 +83,8 @@ def canonicalize(
 ) -> "str | None":
     """Resolve a surface form to its canonical spelling.
 
-    Looks *name* up by its normalized key in *canon_map*. The result is always
-    a canonical spelling from the map (or *default* on a miss) -- never the
+    Looks *name* up by its normalized key in *canon_map*. The result is a
+    canonical spelling from the map, or *default* on a miss, never the
     normalized form itself.
 
     Parameters
@@ -603,7 +603,7 @@ def centroid_method_for(bodyparts) -> str:
         normalize_label("redLED_R"),
     }
 
-    # Check if we have all Frank Lab LEDs (4pt method)
+    # All four Frank Lab LEDs: 4pt
     if frank_lab_parts.issubset(normalized_bodyparts):
         return "4pt"
 
@@ -614,13 +614,13 @@ def centroid_method_for(bodyparts) -> str:
         if any(keyword in bp.lower() for keyword in led_keywords):
             led_count += 1
 
-    # If we have 2+ LED-like bodyparts, suggest 2pt
+    # Two or more LED-like parts: 2pt
     if led_count >= 2:
         return "2pt"
 
-    # If we have multiple bodyparts but not LED-like, still suggest 2pt
+    # Two or more parts of any kind: 2pt
     if len(bodyparts) >= 2:
         return "2pt"
 
-    # Single bodypart - use 1pt method
+    # One part: 1pt
     return "1pt"

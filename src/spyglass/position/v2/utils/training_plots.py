@@ -96,7 +96,7 @@ def build_training_history_figure(df, model_id: str, detailed: bool = False):
 
     plt.tight_layout()
 
-    # Add some spacing if we have subtitle
+    # Bottom margin for the source subtitle
     if has_source:
         plt.subplots_adjust(bottom=0.08)
 
