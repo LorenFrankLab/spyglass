@@ -20,7 +20,6 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import suppress_print_from_package
-from spyglass.position.utils.dlc_io import read_dlc_model_eval
 from spyglass.position.utils.path_helpers import (
     resolve_model_path,
 )
@@ -57,17 +56,6 @@ from spyglass.position.v2.utils.training_io import (
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin, logger
-
-# ------------------------------ Optional imports ------------------------------
-with suppress_print_from_package():
-    try:
-        # Only import evaluation function for remaining Model.evaluate()
-        from deeplabcut import evaluate_network
-    except (ImportError, RecursionError):
-        # RecursionError can occur when TF 2.16+ (Keras 3) is installed without
-        # tf-keras; the TF compat layer loader recurses infinitely. Set
-        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend
-        evaluate_network = None
 
 # -------------------------------- Module setup --------------------------------
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
@@ -1544,7 +1532,7 @@ class Model(SpyglassMixin, dj.Computed):
         # Normalize epochs → the tool's native length knob.
         new_params = params_entry["params"].copy()
         new_params = strategy.apply_epochs(
-            new_params, epochs, config=self._project_config(new_params, tool)
+            new_params, epochs, config=strategy.project_config(new_params)
         )
 
         # Apply validated overrides.
@@ -1600,34 +1588,6 @@ class Model(SpyglassMixin, dj.Computed):
         new_model = (self & new_sel_key).fetch1("KEY")
         self._info_msg(f"New model trained: {new_model}")
         return new_model
-
-    @staticmethod
-    def _project_config(params: dict, tool: str) -> Union[dict, None]:
-        """Load a tool project's config for engine resolution (DLC only).
-
-        Parameters
-        ----------
-        params : dict
-            Training parameters (may contain ``project_path``).
-        tool : str
-            Tool name.
-
-        Returns
-        -------
-        dict or None
-            The project configuration, or ``None`` when unavailable / not
-            applicable.
-        """
-        if tool != "DLC" or not params.get("project_path"):
-            return None
-        cfg_path = Path(params["project_path"]) / "config.yaml"
-        try:
-            return load_yaml(cfg_path)
-        except OSError:
-            # Config genuinely unavailable (missing / unreadable) → best-effort
-            # None so the PyTorch default applies. A malformed-but-present
-            # config (YAMLError) is a real defect and is left to propagate.
-            return None
 
     def evaluate(
         self,
@@ -1731,152 +1691,6 @@ class Model(SpyglassMixin, dj.Computed):
             )
 
         return results
-
-    def _evaluate_dlc_model(
-        self,
-        _model_entry: dict,
-        params_entry: dict,
-        plotting: bool,
-        show_errors: bool,
-        **kwargs,
-    ) -> dict:
-        """Evaluate a DLC model.
-
-        Parameters
-        ----------
-        _model_entry : dict
-            Model table entry (unused; kept for API consistency)
-        params_entry : dict
-            ModelParams entry
-        plotting : bool
-            Create labeled images
-        show_errors : bool
-            Display errors
-        **kwargs
-            Additional DLC evaluation parameters
-
-        Returns
-        -------
-        dict
-            Evaluation results
-
-        Raises
-        ------
-        ImportError
-            If DeepLabCut is unavailable. Checked here rather than in
-            :meth:`evaluate` so a SLEAP model still evaluates through
-            ``SLEAPStrategy``.
-        ValueError
-            If ``project_path`` is absent from the parameters.
-        FileNotFoundError
-            If the project's ``config.yaml`` is missing.
-        """
-        if evaluate_network is None:
-            raise ImportError(
-                "DeepLabCut evaluate_network is required for evaluation. "
-                "Install with: pip install deeplabcut>=3.0"
-            )
-
-        params = params_entry["params"]
-
-        # Get project path
-        if "project_path" not in params:
-            raise ValueError(
-                "DLC evaluation requires 'project_path' in ModelParams"
-            )
-
-        project_path = Path(params["project_path"])
-        config_path = project_path / "config.yaml"
-
-        if not config_path.exists():
-            raise FileNotFoundError(f"DLC config not found: {config_path}")
-
-        # Get evaluation parameters
-        shuffle = kwargs.get("Shuffles", [params.get("shuffle", 1)])
-        if not isinstance(shuffle, list):
-            shuffle = [shuffle]
-
-        trainingsetindex = kwargs.get(
-            "trainingsetindex", params.get("trainingsetindex", 0)
-        )
-
-        self._info_msg(f"Running DLC evaluation on shuffles: {shuffle}")
-
-        # Run DLC evaluation
-        try:
-            with suppress_print_from_package():
-                evaluate_network(
-                    str(config_path),
-                    Shuffles=shuffle,
-                    trainingsetindex=trainingsetindex,
-                    plotting=plotting,
-                    show_errors=show_errors,
-                )
-        except Exception as e:
-            self._err_msg(f"DLC evaluation failed: {e}")
-            raise
-
-        self._info_msg("Evaluation completed successfully")
-
-        # Parse evaluation results
-        results = self._parse_dlc_evaluation_results(
-            project_path, shuffle[0], trainingsetindex
-        )
-
-        if show_errors and results:
-            self._info_msg(
-                f"Train error: {results['train_error']:.2f} px, "
-                f"Test error: {results['test_error']:.2f} px"
-            )
-
-        return results
-
-    def _parse_dlc_evaluation_results(
-        self, project_path: Path, shuffle: int, trainingsetindex: int
-    ) -> dict:
-        """Parse DLC evaluation results from CSV file.
-
-        Parameters
-        ----------
-        project_path : Path
-            DLC project path
-        shuffle : int
-            Shuffle number
-        trainingsetindex : int
-            Training set index
-
-        Returns
-        -------
-        dict
-            Parsed evaluation results
-        """
-        try:
-            raw = read_dlc_model_eval(
-                project_path,
-                load_yaml(project_path / "config.yaml"),
-                shuffle,
-                trainingsetindex,
-            )
-        except (RuntimeError, KeyError, IndexError) as e:
-            self._warn_msg(f"No evaluation results for shuffle {shuffle}: {e}")
-            return {}
-
-        def _num(field, cast=float):
-            """Cast a normalized field, tolerating one the CSV omits."""
-            value = raw.get(field)
-            return None if value in (None, "") else cast(value)
-
-        return {
-            "train_error": _num(" Train error(px)"),
-            "test_error": _num(" Test error(px)"),
-            "train_error_p": _num("Train error with p-cutoff"),
-            "test_error_p": _num("Test error with p-cutoff"),
-            "p_cutoff": _num("p-cutoff used"),
-            "training_iterations": _num("Training iterations:", int),
-            "shuffle": int(shuffle),
-            "train_fraction": _num("%Training dataset", int),
-            "results_path": raw.get("results_path"),
-        }
 
     def get_training_history(
         self, model_key: dict
@@ -2754,85 +2568,6 @@ class Model(SpyglassMixin, dj.Computed):
         )
         return self.load(config_path, **kwargs)
 
-    @staticmethod
-    def _project_has_weights(config: dict, config_path) -> bool:
-        """Does this DLC project hold trained weights?
-
-        Covers both engines: PyTorch writes ``snapshot-*.pt``, TensorFlow
-        writes a ``*.index`` triple. Distinct from
-        :meth:`_project_training_mode`, which reports ``inference_only`` both
-        for a TensorFlow project that *can* infer and for a project with no
-        weights at all, which can do neither.
-
-        Parameters
-        ----------
-        config : dict
-            Parsed DLC ``config.yaml``.
-        config_path : str or pathlib.Path
-            Its location, used when the config carries no ``project_path``.
-
-        Returns
-        -------
-        bool
-            True when any snapshot is present.
-        """
-        project = Path(config.get("project_path") or Path(config_path).parent)
-        return bool(
-            next(project.rglob("snapshot-*.pt"), None)
-            or next(project.rglob("*.index"), None)
-        )
-
-    @staticmethod
-    def _project_training_mode(config: dict, config_path) -> str:
-        """Can this imported DLC project be trained further?
-
-        Declared once at import, so ``Model`` rows can be filtered without
-        touching the filesystem. It is a *claim*, not enforcement --
-        ``Model.train`` still verifies the snapshot exists, because paths go
-        stale.
-
-        Parameters
-        ----------
-        config : dict
-            Parsed DLC ``config.yaml``.
-        config_path : str or pathlib.Path
-            Its location, used to find the project's ``dlc-models`` tree.
-
-        Returns
-        -------
-        str
-            - ``resumable`` — a PyTorch ``snapshot-*.pt`` is present.
-            - ``inference_only`` — TensorFlow engine (DLC-TF continuation is a
-              documented won't-do), or no snapshot to resume from.
-        """
-        if str(config.get("engine", "pytorch")).lower() != "pytorch":
-            return "inference_only"  # DLC-TF continuation: NotImplementedError
-
-        project = Path(config.get("project_path") or Path(config_path).parent)
-        if next(project.rglob("snapshot-*.pt"), None):
-            return "resumable"
-        return "inference_only"
-
-    @staticmethod
-    def _zoo_training_mode(model_name: str) -> str:
-        """Continuation capability for a zoo backbone.
-
-        Zoo models are never *resumed*: DLC's fine-tune entry point is
-        ``build_weight_init(super_animal=...)``, which seeds a **new** project
-        from SuperAnimal weights rather than continuing the imported model.
-
-        Returns
-        -------
-        str
-            ``inference_only`` for TensorFlow backbones (``dlcrnet``, whose
-            continuation is a won't-do here), ``weights_only`` otherwise.
-        """
-        from spyglass.position.v2.utils.fetch_dlc_zoo import backbone_framework
-
-        if backbone_framework(model_name) == "tensorflow":
-            return "inference_only"
-        return "weights_only"
-
     def load_from_dlc_zoo(
         self,
         dataset: str,
@@ -2878,13 +2613,15 @@ class Model(SpyglassMixin, dj.Computed):
         which is per conda environment -- storing that path would yield a row
         valid only for the importing user.
         """
-        import shutil
-
-        from spyglass.position.v2.utils import fetch_dlc_zoo
         from spyglass.settings import pose_project_dir
 
-        backbone = fetch_dlc_zoo.resolve_backbone(dataset, model_name)
-        config = fetch_dlc_zoo.project_config(dataset)
+        # The zoo is the tool's: the strategy resolves the backbone, fetches
+        # the weights and copies them somewhere this database can reach. The
+        # table rows below are this method's work.
+        zoo = ToolStrategyFactory.create_strategy("DLC").resolve_zoo_model(
+            dataset, model_name, Path(pose_project_dir) / "modelzoo"
+        )
+        backbone, config = zoo["backbone"], zoo["config"]
 
         # Step 1: Skeleton. Zoo vocabulary is registered as `imported`, so it
         # never widens what a hand-built lab project may use (BodyPart.source).
@@ -2948,15 +2685,8 @@ class Model(SpyglassMixin, dj.Computed):
             allow_redundant_model=allow_redundant_model,
         )
 
-        # Step 5: weights. Copy out of DLC's per-env cache so `model_path`
-        # resolves for every user of this database.
-        cached = fetch_dlc_zoo.fetch(dataset, backbone)
-        dest_dir = Path(pose_project_dir) / "modelzoo"
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / cached.name
-        if not dest.exists():
-            shutil.copy2(cached, dest)
-        stored_path = _to_stored_path(dest)
+        # Step 5: the weights the strategy placed for us.
+        stored_path = _to_stored_path(zoo["weights"])
 
         existing = self & {"model_path": stored_path}
         if existing:
@@ -2969,13 +2699,17 @@ class Model(SpyglassMixin, dj.Computed):
             or default_pk_name("zoo", {"ds": dataset, "bb": backbone}),
             "model_path": stored_path,
             "model_name": dataset,
-            "training_mode": self._zoo_training_mode(backbone),
+            "training_mode": zoo["training_mode"],
         }
         self.insert1(model_key, allow_direct_insert=True)
         self._info_msg(f"Zoo model imported: {model_key['model_id']}")
         return model_key
 
     def _import_dlc_model(self, model_path: Path, **kwargs):
+        # This method is the DLC import path, reached through
+        # `DLCStrategy.load`. The strategy answers the project-capability
+        # questions below.
+        dlc = ToolStrategyFactory.create_strategy("DLC")
         normalize_names = kwargs.pop("normalize_names", False)
         allow_redundant_model = kwargs.pop("allow_redundant_model", False)
         external_videos = kwargs.pop("external_videos", False)
@@ -3078,7 +2812,7 @@ class Model(SpyglassMixin, dj.Computed):
         # Step 4b: A project with no snapshot has nothing to run inference
         # with, so it gets no Model row. The selection above is what
         # `populate` trains.
-        if not self._project_has_weights(config, model_path):
+        if not dlc.project_has_weights(config, model_path):
             self._info_msg(
                 f"Project has no trained weights: {model_path}. Registered "
                 "ModelSelection "
@@ -3100,7 +2834,7 @@ class Model(SpyglassMixin, dj.Computed):
             "model_id": model_id,
             "model_path": stored_path,
             "model_name": kwargs.get("model_name") or task,
-            "training_mode": self._project_training_mode(config, model_path),
+            "training_mode": dlc.project_training_mode(config, model_path),
         }
         self.insert1(model_key, allow_direct_insert=True)
         self._info_msg(f"Model imported: {model_id}")

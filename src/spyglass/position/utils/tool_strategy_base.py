@@ -7,7 +7,7 @@ importing from there would be a cycle.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Union
 
 from .protocols import RealFileSystem
 
@@ -250,6 +250,108 @@ class PoseToolStrategy(ABC):
         raise NotImplementedError(
             f"Model import not implemented for {self.tool_name}"
         )
+
+    def resolve_zoo_model(self, dataset: str, model_name, dest_dir):
+        """Resolve a pretrained zoo model and place its weights on disk.
+
+        Override where the tool publishes a model zoo. The default raises:
+        a zoo is a capability a strategy has to claim, and a stub returning
+        nothing would let `Model.load` build a row around absent weights.
+
+        Parameters
+        ----------
+        dataset : str
+            Zoo dataset name.
+        model_name : str or None
+            Backbone to use, or None for the dataset's default.
+        dest_dir : pathlib.Path
+            Directory to copy the weights into, so the stored path resolves
+            for every user of the database rather than one environment's
+            package cache.
+
+        Returns
+        -------
+        dict
+            ``backbone``, ``config``, ``weights`` (a ``Path``) and
+            ``training_mode``.
+
+        Raises
+        ------
+        NotImplementedError
+            Always, unless a subclass implements it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} has no model zoo. Import a trained "
+            "project with `Model.load(<config path>)` instead."
+        )
+
+    @staticmethod
+    def project_has_weights(config: dict, config_path) -> bool:
+        """Does this tool's project hold trained weights?
+
+        Override where the tool keeps weights in a discoverable layout. The
+        default answers False: a strategy that does not claim weights must
+        not have them presumed. `Model.load` reads this to decide between a
+        `Model` row and a pending `ModelSelection`, so a True default would
+        register a model that cannot run inference.
+
+        Parameters
+        ----------
+        config : dict
+            Tool configuration.
+        config_path : str or pathlib.Path
+            Its location.
+
+        Returns
+        -------
+        bool
+            False unless a subclass finds weights.
+        """
+        return False
+
+    @staticmethod
+    def project_training_mode(config: dict, config_path) -> str:
+        """Can this imported project be trained further?
+
+        Override where the tool distinguishes the cases. The default answers
+        `inference_only`, the weakest of the three: continuing training is a
+        capability a strategy has to claim, not one it inherits.
+
+        Note this is the opposite of `Model.training_mode`'s column default,
+        which is `resumable` because a row written by `Model.make` was
+        trained in place. This hook answers for an *imported* project.
+
+        Parameters
+        ----------
+        config : dict
+            Tool configuration.
+        config_path : str or pathlib.Path
+            Its location.
+
+        Returns
+        -------
+        str
+            One of ``resumable``, ``weights_only``, ``inference_only``.
+        """
+        return "inference_only"
+
+    @staticmethod
+    def project_config(params: dict) -> Union[dict, None]:
+        """Load a project's configuration, for engine resolution.
+
+        Override where the tool has a project config on disk. The default
+        returns None, meaning no configuration is available.
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters.
+
+        Returns
+        -------
+        dict or None
+        """
+        return None
 
     def verify_model(
         self, model_path: Path, check_inference: bool = True

@@ -1,7 +1,7 @@
 """DeepLabCut implementation of the pose-tool strategy.
 
-Every DeepLabCut import is deferred into the method that needs it, so this
-module loads without DeepLabCut installed.
+DeepLabCut imports are deferred into the method that needs them, or guarded
+at module level, so this module loads without DeepLabCut installed.
 """
 
 import warnings
@@ -10,9 +10,26 @@ from typing import Any, Dict, Set, Union
 
 import yaml
 
+from .dlc_io import read_dlc_model_eval
 from .path_helpers import to_stored_path as _to_stored_path
 from .protocols import ModelMetadata, default_pk_name
+from .yaml_io import load_yaml
 from .tool_strategy_base import PoseToolStrategy
+
+from spyglass.utils import logger
+
+from spyglass.position.utils import suppress_print_from_package
+
+# Guarded rather than deferred so `evaluate_network is None` stays testable.
+with suppress_print_from_package():
+    try:
+        from deeplabcut import evaluate_network
+    except (ImportError, RecursionError):
+        # RecursionError can occur when TF 2.16+ (Keras 3) is installed
+        # without tf-keras; the TF compat loader recurses infinitely. Set
+        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore the TF
+        # backend.
+        evaluate_network = None
 
 
 class DLCStrategy(PoseToolStrategy):
@@ -664,10 +681,147 @@ class DLCStrategy(PoseToolStrategy):
         show_errors: bool = True,
         **kwargs,
     ) -> dict:
-        """Evaluate DLC model using existing _evaluate_dlc_model method."""
-        return model_instance._evaluate_dlc_model(
-            model_entry, params_entry, plotting, show_errors, **kwargs
+        """Evaluate a DLC model.
+
+        Parameters
+        ----------
+        model_entry : dict
+            Model table entry (unused; kept for API consistency)
+        params_entry : dict
+            ModelParams entry
+        model_instance
+            `Model` table instance, used for logging
+        plotting : bool
+            Create labeled images
+        show_errors : bool
+            Display errors
+        **kwargs
+            Additional DLC evaluation parameters
+
+        Returns
+        -------
+        dict
+            Evaluation results
+
+        Raises
+        ------
+        ImportError
+            If DeepLabCut is unavailable. Checked here rather than in
+            :meth:`evaluate` so a SLEAP model still evaluates through
+            ``SLEAPStrategy``.
+        ValueError
+            If ``project_path`` is absent from the parameters.
+        FileNotFoundError
+            If the project's ``config.yaml`` is missing.
+        """
+        if evaluate_network is None:
+            raise ImportError(
+                "DeepLabCut evaluate_network is required for evaluation. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        params = params_entry["params"]
+
+        # Get project path
+        if "project_path" not in params:
+            raise ValueError(
+                "DLC evaluation requires 'project_path' in ModelParams"
+            )
+
+        project_path = Path(params["project_path"])
+        config_path = project_path / "config.yaml"
+
+        if not config_path.exists():
+            raise FileNotFoundError(f"DLC config not found: {config_path}")
+
+        # Get evaluation parameters
+        shuffle = kwargs.get("Shuffles", [params.get("shuffle", 1)])
+        if not isinstance(shuffle, list):
+            shuffle = [shuffle]
+
+        trainingsetindex = kwargs.get(
+            "trainingsetindex", params.get("trainingsetindex", 0)
         )
+
+        model_instance._info_msg(
+            f"Running DLC evaluation on shuffles: {shuffle}"
+        )
+
+        # Run DLC evaluation
+        try:
+            with suppress_print_from_package():
+                evaluate_network(
+                    str(config_path),
+                    Shuffles=shuffle,
+                    trainingsetindex=trainingsetindex,
+                    plotting=plotting,
+                    show_errors=show_errors,
+                )
+        except Exception as e:
+            model_instance._err_msg(f"DLC evaluation failed: {e}")
+            raise
+
+        model_instance._info_msg("Evaluation completed successfully")
+
+        # Parse evaluation results
+        results = self._parse_dlc_evaluation_results(
+            project_path, shuffle[0], trainingsetindex
+        )
+
+        if show_errors and results:
+            model_instance._info_msg(
+                f"Train error: {results['train_error']:.2f} px, "
+                f"Test error: {results['test_error']:.2f} px"
+            )
+
+        return results
+
+    def _parse_dlc_evaluation_results(
+        self, project_path: Path, shuffle: int, trainingsetindex: int
+    ) -> dict:
+        """Parse DLC evaluation results from CSV file.
+
+        Parameters
+        ----------
+        project_path : Path
+            DLC project path
+        shuffle : int
+            Shuffle number
+        trainingsetindex : int
+            Training set index
+
+        Returns
+        -------
+        dict
+            Parsed evaluation results
+        """
+        try:
+            raw = read_dlc_model_eval(
+                project_path,
+                load_yaml(project_path / "config.yaml"),
+                shuffle,
+                trainingsetindex,
+            )
+        except (RuntimeError, KeyError, IndexError) as e:
+            logger.warning(f"No evaluation results for shuffle {shuffle}: {e}")
+            return {}
+
+        def _num(field, cast=float):
+            """Cast a normalized field, tolerating one the CSV omits."""
+            value = raw.get(field)
+            return None if value in (None, "") else cast(value)
+
+        return {
+            "train_error": _num(" Train error(px)"),
+            "test_error": _num(" Test error(px)"),
+            "train_error_p": _num("Train error with p-cutoff"),
+            "test_error_p": _num("Test error with p-cutoff"),
+            "p_cutoff": _num("p-cutoff used"),
+            "training_iterations": _num("Training iterations:", int),
+            "shuffle": int(shuffle),
+            "train_fraction": _num("%Training dataset", int),
+            "results_path": raw.get("results_path"),
+        }
 
     def find_output_files(
         self,
@@ -741,6 +895,138 @@ class DLCStrategy(PoseToolStrategy):
     def load(self, model_path: Path, model_instance, **kwargs) -> dict:
         """Import DLC model using existing _import_dlc_model method."""
         return model_instance._import_dlc_model(model_path, **kwargs)
+
+    def resolve_zoo_model(self, dataset: str, model_name, dest_dir):
+        """Resolve a SuperAnimal backbone and copy its weights out of cache.
+
+        DLC caches zoo weights inside its own package, which is per conda
+        environment, so a stored path pointing there would be valid only for
+        the importing user. The weights are copied to *dest_dir* first.
+
+        See :meth:`PoseToolStrategy.resolve_zoo_model` for parameters.
+        """
+        import shutil
+
+        from spyglass.position.v2.utils import fetch_dlc_zoo
+
+        backbone = fetch_dlc_zoo.resolve_backbone(dataset, model_name)
+        cached = fetch_dlc_zoo.fetch(dataset, backbone)
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / cached.name
+        if not dest.exists():
+            shutil.copy2(cached, dest)
+
+        return {
+            "backbone": backbone,
+            "config": fetch_dlc_zoo.project_config(dataset),
+            "weights": dest,
+            "training_mode": self.zoo_training_mode(backbone),
+        }
+
+    @staticmethod
+    def project_has_weights(config: dict, config_path) -> bool:
+        """Does this DLC project hold trained weights?
+
+        Covers both engines: PyTorch writes ``snapshot-*.pt``, TensorFlow
+        writes a ``*.index`` triple. Distinct from
+        :meth:`project_training_mode`, which reports ``inference_only`` both
+        for a TensorFlow project that *can* infer and for a project with no
+        weights at all, which can do neither.
+
+        Parameters
+        ----------
+        config : dict
+            Parsed DLC ``config.yaml``.
+        config_path : str or pathlib.Path
+            Its location, used when the config carries no ``project_path``.
+
+        Returns
+        -------
+        bool
+            True when any snapshot is present.
+        """
+        project = Path(config.get("project_path") or Path(config_path).parent)
+        return bool(
+            next(project.rglob("snapshot-*.pt"), None)
+            or next(project.rglob("*.index"), None)
+        )
+
+    @staticmethod
+    def project_training_mode(config: dict, config_path) -> str:
+        """Can this imported DLC project be trained further?
+
+        Declared once at import, so ``Model`` rows can be filtered without
+        touching the filesystem. It is a *claim*, not enforcement --
+        ``Model.train`` still verifies the snapshot exists, because paths go
+        stale.
+
+        Parameters
+        ----------
+        config : dict
+            Parsed DLC ``config.yaml``.
+        config_path : str or pathlib.Path
+            Its location, used to find the project's ``dlc-models`` tree.
+
+        Returns
+        -------
+        str
+            - ``resumable`` — a PyTorch ``snapshot-*.pt`` is present.
+            - ``inference_only`` — TensorFlow engine (DLC-TF continuation is a
+              documented won't-do), or no snapshot to resume from.
+        """
+        if str(config.get("engine", "pytorch")).lower() != "pytorch":
+            return "inference_only"  # DLC-TF continuation: NotImplementedError
+
+        project = Path(config.get("project_path") or Path(config_path).parent)
+        if next(project.rglob("snapshot-*.pt"), None):
+            return "resumable"
+        return "inference_only"
+
+    @staticmethod
+    def zoo_training_mode(model_name: str) -> str:
+        """Continuation capability for a zoo backbone.
+
+        Zoo models are never *resumed*: DLC's fine-tune entry point is
+        ``build_weight_init(super_animal=...)``, which seeds a **new** project
+        from SuperAnimal weights rather than continuing the imported model.
+
+        Returns
+        -------
+        str
+            ``inference_only`` for TensorFlow backbones (``dlcrnet``, whose
+            continuation is a won't-do here), ``weights_only`` otherwise.
+        """
+        from spyglass.position.v2.utils.fetch_dlc_zoo import backbone_framework
+
+        if backbone_framework(model_name) == "tensorflow":
+            return "inference_only"
+        return "weights_only"
+
+    @staticmethod
+    def project_config(params: dict) -> Union[dict, None]:
+        """Load the DLC project's config, for engine resolution.
+
+        Parameters
+        ----------
+        params : dict
+            Training parameters (may contain ``project_path``).
+
+        Returns
+        -------
+        dict or None
+            The project configuration, or ``None`` when unavailable.
+        """
+        if not params.get("project_path"):
+            return None
+        cfg_path = Path(params["project_path"]) / "config.yaml"
+        try:
+            return load_yaml(cfg_path)
+        except OSError:
+            # Config genuinely unavailable (missing / unreadable) → best-effort
+            # None so the PyTorch default applies. A malformed-but-present
+            # config (YAMLError) is a real defect and is left to propagate.
+            return None
 
     def verify_model(
         self, model_path: Path, check_inference: bool = True
