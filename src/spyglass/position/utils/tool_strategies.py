@@ -1694,10 +1694,9 @@ class SLEAPStrategy(PoseToolStrategy):
         """Train a SLEAP model via the sleap-train CLI.
 
         Thin wrapper over :meth:`_run_training` (a fresh train wires no base
-        checkpoint). SLEAP reads its training length from the ``initial_config``
-        file, not from ``params``; ``epochs``/``max_epochs`` baked into
-        ``params`` are inert here (they only take effect on the continuation
-        path via :meth:`continue_training`, which rewrites a config copy).
+        checkpoint). SLEAP reads its training length from the config file, so
+        a ``max_epochs``/``epochs`` budget in *params* is applied by writing a
+        config copy and training against that.
 
         Parameters
         ----------
@@ -1792,13 +1791,13 @@ class SLEAPStrategy(PoseToolStrategy):
         model_instance,
         *,
         base_checkpoint=None,
-        config_override=None,
+        epochs=None,
     ) -> dict:
         """Run ``sleap-train`` and register the resulting model.
 
-        The single implementation behind both fresh training and continuation.
-        *base_checkpoint* and *config_override* are the only continuation knobs;
-        when both are ``None`` this is a plain fresh train.
+        The single implementation behind both fresh training and
+        continuation, and the one place an epoch budget is turned into a
+        config copy. With no *base_checkpoint* this is a plain fresh train.
 
         Parameters
         ----------
@@ -1812,9 +1811,10 @@ class SLEAPStrategy(PoseToolStrategy):
             Model table instance for logging.
         base_checkpoint : str, Path, or None, optional
             Parent checkpoint file to resume from (see :meth:`_build_train_cmd`).
-        config_override : str, Path, or None, optional
-            Config to pass instead of ``params['initial_config']`` (used to
-            inject an ``epochs`` budget on the continuation path).
+        epochs : int or None, optional
+            Training length. Takes precedence over ``params['max_epochs']``
+            and ``params['epochs']``. When all are absent the config's own
+            length is used.
 
         Returns
         -------
@@ -1846,6 +1846,22 @@ class SLEAPStrategy(PoseToolStrategy):
             raise FileNotFoundError(
                 f"SLEAP labels file not found: {labels_path}"
             )
+
+        # SLEAP reads its training length from the config file, so a budget
+        # is applied by writing a config copy and training against that.
+        # An explicit *epochs* wins over one stored in *params*.
+        eff_epochs = (
+            epochs
+            if epochs is not None
+            else params.get("max_epochs", params.get("epochs"))
+        )
+        config_override = (
+            self._write_epochs_config(
+                params.get("initial_config"), int(eff_epochs), model_instance
+            )
+            if eff_epochs is not None
+            else None
+        )
 
         config_path = config_override or params.get("initial_config")
         if config_path:
@@ -2027,8 +2043,8 @@ class SLEAPStrategy(PoseToolStrategy):
             return None
 
         # delete=False: ``_run_training`` passes this config to the
-        # out-of-process ``sleap-train`` subprocess via ``config_override``,
-        # so it must outlive this function. OS temp reaping cleans it up.
+        # out-of-process ``sleap-train`` subprocess, so it must outlive this
+        # function. OS temp reaping cleans it up.
         out = tempfile.NamedTemporaryFile(
             prefix="sleap_cont_", suffix=out_suffix, delete=False
         )
@@ -2085,26 +2101,18 @@ class SLEAPStrategy(PoseToolStrategy):
                 key, params, skeleton_id, vid_group, sel_entry, model_instance
             )
 
-        # epochs: explicit kwarg wins; else the max_epochs baked into params by
-        # apply_epochs (Model.train's epochs= arrives here as params max_epochs,
-        # since make() does not thread the kwarg through).
-        eff_epochs = epochs if epochs is not None else params.get("max_epochs")
-        config_override = None
-        if eff_epochs is not None:
-            config_override = self._write_epochs_config(
-                params.get("initial_config"), int(eff_epochs), model_instance
-            )
-
         model_instance._info_msg(
             f"Resuming SLEAP training from parent checkpoint: {checkpoint}"
         )
+        # epochs: Model.train's epochs= arrives as params max_epochs, since
+        # make() does not thread the kwarg through.
         return self._run_training(
             key,
             params,
             sel_entry,
             model_instance,
             base_checkpoint=checkpoint,
-            config_override=config_override,
+            epochs=epochs,
         )
 
     def _find_model_output_dir(self, run_name: str, output_dir: str) -> Path:
