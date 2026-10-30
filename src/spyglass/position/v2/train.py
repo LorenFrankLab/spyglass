@@ -225,24 +225,37 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
     # Edges are optional to allow unconnected body parts
 
+    # Dicts, not positional rows: a later column with a default can then be
+    # omitted here. Each `hash` is shape_hash_from_edges(bodyparts, edges),
+    # matching what insert1 computes.
     contents = [
-        ["1LED", "whiteLED", None, "1042f79ba7ecbe933e43d9e23b8bb3e2"],
-        [
-            "2LED",
-            [("greenLED", "redLED_C")],
-            None,
-            "3bac2dea32a574e9d97917dc8ea8480a",
-        ],
-        [
-            "4LED",
-            [
+        {
+            "skeleton_id": "1LED",
+            "bodyparts": ["whiteLED"],
+            "edges": [],
+            "hash": "8999452509fdfa98335c5ba44ed05498",
+        },
+        {
+            "skeleton_id": "2LED",
+            "bodyparts": ["greenLED", "redLED_C"],
+            "edges": [("greenLED", "redLED_C")],
+            "hash": "3ba4ffe16dfe637510ed1c3676ec6cb0",
+        },
+        {
+            "skeleton_id": "4LED",
+            "bodyparts": [
+                "greenLED",
+                "redLED_C",
+                "redLED_L",
+                "redLED_R",
+            ],
+            "edges": [
                 ("greenLED", "redLED_C"),
                 ("greenLED", "redLED_L"),
                 ("greenLED", "redLED_R"),
             ],
-            None,
-            "cfe386902f8c79d228e8ae628079945e",
-        ],
+            "hash": "cde6b48ed870286595c1455af7aff8bd",
+        },
     ]
 
     # Bodyparts for default skeletons
@@ -281,6 +294,15 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             query = self.BodyPart & {"skeleton_id": skeleton_id}
         else:
             query = self.BodyPart & self.restriction
+
+        # `contents` populates the master without the part table, so the
+        # default skeletons have no rows until asked for. Same lazy idiom as
+        # V1's insert_default accessors.
+        if not query and (
+            skeleton_id is None or skeleton_id in self._default_bodyparts
+        ):
+            self._populate_default_bodyparts()
+
         return list(query.fetch("bodypart"))
 
     # Thin wrappers so callers (including tests) can use instance methods.
