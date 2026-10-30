@@ -5,16 +5,12 @@ weight-resume kwarg building, the parent-snapshot degrade path, and the
 ``NotImplementedError`` raised for tools without continuation support (SLEAP
 and the base strategy).
 
-Importing ``spyglass.position`` triggers a DB connection at import, which is
-unavailable in this environment. To keep these tests DB-free we load
-``tool_strategies`` directly by stubbing its parent packages in ``sys.modules``
-(bypassing the package ``__init__`` chain that connects to MySQL).
+``spyglass.position.__init__`` activates the DataJoint position schema, so
+these tests load ``tool_strategies`` through the
+``import_without_position_init`` fixture instead.
 """
 
-import importlib
 import json
-import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,41 +18,18 @@ import pytest
 
 import yaml
 
-_SRC = Path(__file__).resolve().parents[3] / "src"
-
 
 @pytest.fixture(scope="module")
-def ts():
+def ts(import_without_position_init):
     """Import ``tool_strategies`` without triggering a DB connection.
 
-    If the real ``spyglass`` package is already imported (e.g. another test
-    module ran first and connected to the DB), just import normally. Otherwise
-    stub the parent packages so the ``__init__`` chain that connects to MySQL
-    never runs — then tear the stubs down so a later *real* import of
-    ``spyglass`` in the same session starts from a clean slate.
+    The stubbing, and the restoration of any displaced real modules, live in
+    the ``import_without_position_init`` fixture.
     """
-    stub_mode = "spyglass" not in sys.modules
-    if not stub_mode:  # real package present → import directly
-        yield importlib.import_module("spyglass.position.utils.tool_strategies")
-        return
-
-    before = set(sys.modules)
-    for name, rel in (
-        ("spyglass", "spyglass"),
-        ("spyglass.position", "spyglass/position"),
-        ("spyglass.position.utils", "spyglass/position/utils"),
-    ):
-        mod = types.ModuleType(name)
-        mod.__path__ = [str(_SRC / rel)]
-        sys.modules[name] = mod
-    try:
-        yield importlib.import_module("spyglass.position.utils.tool_strategies")
-    finally:
-        # Remove every ``spyglass*`` entry we introduced so a later genuine
-        # import re-runs the real package (and its DB setup) from scratch.
-        for name in set(sys.modules) - before:
-            if name == "spyglass" or name.startswith("spyglass."):
-                sys.modules.pop(name, None)
+    with import_without_position_init(
+        "spyglass.position.utils.tool_strategies"
+    ) as module:
+        yield module
 
 
 class FakeFS:
