@@ -6,7 +6,7 @@ The project is designed to exercise:
   - VidFileGroup.create_from_dlc_config() (session matching)
   - Model.get_training_history() (fake learning_stats.csv)
 
-Usage as a script (filesystem only — no DB):
+Usage as a script (filesystem only, no DB):
     python make_example_dlc_project.py [output_dir]
 
 Usage as a module (filesystem only):
@@ -17,7 +17,7 @@ Session bootstrap from an existing DLC config (requires Spyglass DB connection):
     from tests.position.v2.make_example_dlc_project import bootstrap_dlc_session
     nwb_file_name = bootstrap_dlc_session(config_path)
 
-Session bootstrap from raw video paths — no config.yaml required (tutorial use):
+Session bootstrap from raw video paths, with no config.yaml (tutorial use):
     from tests.position.v2.make_example_dlc_project import *
     nwb_file_name, inf_vid_path = bootstrap_from_video_paths(video_paths)
 
@@ -78,7 +78,7 @@ def make_dlc_project(output_dir, overwrite=False):
     config_path = project_dir / "config.yaml"
 
     if config_path.exists() and not overwrite:
-        # Ensure video is non-empty — stale 0-byte placeholder from older runs
+        # Ensure video is non-empty; a stale 0-byte placeholder from older runs
         video_path = project_dir / "videos" / f"{_NWB_STEM}.avi"
         if not video_path.exists() or video_path.stat().st_size == 0:
             import subprocess
@@ -422,7 +422,7 @@ def bootstrap_from_video_paths(
     """Register minimal Spyglass DB entries from a list of video paths.
 
     Unlike ``bootstrap_dlc_session()``, this function does not require a DLC
-    ``config.yaml`` to already exist — pass raw video paths directly (e.g.
+    ``config.yaml`` to already exist. Pass raw video paths directly (e.g.
     from a DLC project's ``video_sets``, or videos you intend to train on).
 
     A 1-second inference clip is created from the first video in
@@ -455,7 +455,7 @@ def bootstrap_from_video_paths(
     Returns
     -------
     tuple[str, Path]
-        ``(nwb_file_name, inf_vid_path)`` — the registered NWB filename and
+        ``(nwb_file_name, inf_vid_path)``: the registered NWB filename and
         path to the 1-second inference clip written into ``video_dir``.
     """
     import subprocess
@@ -492,7 +492,7 @@ def bootstrap_from_video_paths(
                 capture_output=True,
             )
         else:
-            # Source is a placeholder — create a minimal synthetic clip
+            # Source is a placeholder: create a minimal synthetic clip
             subprocess.run(
                 [
                     "ffmpeg",
@@ -534,7 +534,7 @@ def seed_labeled_data(config_path):
 
     The generated annotations are random x/y values within the video
     dimensions read from ``config.yaml``.  This is intentionally unrealistic
-    data — it is only useful for testing that DLC's training pipeline runs
+    data. It is useful only for testing that DLC's training pipeline runs
     end-to-end without raising errors about missing annotations.
 
     Parameters
@@ -590,7 +590,7 @@ def seed_labeled_data(config_path):
             with _PILImage.open(frame_files[0]) as _im:
                 _w, _h = _im.size
         except Exception:
-            _w, _h = 64, 64  # fallback — large enough for any real frame
+            _w, _h = 64, 64  # fallback, large enough for any real frame
         _x_max = max(_w - 1, 1)
         _y_max = max(_h - 1, 1)
 

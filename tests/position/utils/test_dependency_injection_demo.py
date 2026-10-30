@@ -49,8 +49,8 @@ def test_pose_estim_with_injection():
     """Real PoseEstim DI seam resolves injected stub runner/builder classes.
 
     The stubs are injected onto the real ``PoseEstim`` (class attrs restored
-    afterwards) and the real ``_get_*_cls`` accessors — the seam ``make()``
-    relies on — must return them. The resolved doubles are then driven to
+    afterwards) and the real ``_get_*_cls`` accessors, the seam ``make()``
+    relies on, must return them. The resolved doubles are then driven to
     confirm they honour the runner/builder contract the pipeline expects.
     """
     from spyglass.position.v2.estim import PoseEstim

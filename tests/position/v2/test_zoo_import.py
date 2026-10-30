@@ -1,16 +1,16 @@
 """Importing pretrained models whose training videos are not in Spyglass.
 
-Plan: `.claude/TASKS_ZOO.md`. Two cases drive this — pilot/scoping videos that
-should not be registered as sessions, and DLC Model Zoo models whose training
-videos do not exist at all.
+Two cases drive this: pilot and scoping videos that should not be registered
+as sessions, and DLC Model Zoo models whose training videos do not exist at
+all.
 
 Every test here is RED until the matching task lands. Task IDs in the class
 docstrings map to TASKS_ZOO.md §4.
 
 Fixture rules (from the #1680 post-mortem, `CLAUDE.md`): no session-scoped
 fixture may insert `Session`/`Nwbfile`, and teardown uses
-``super_delete(warn=False, safemode=False)`` — plain ``delete()`` triggers
-``cautious_delete``'s *global* external-file sweep and deletes other suites'
+``super_delete(warn=False, safemode=False)``. Plain ``delete()`` triggers
+``cautious_delete``'s global external-file sweep, which deletes other suites'
 analysis files.
 """
 
@@ -22,7 +22,7 @@ from tests.conftest import skip_if_no_pose
 
 # DLC ships four SuperAnimal project configs. Names are 16-24 chars, which is
 # why they live in `model_name` and never in the 32-char `model_id` (a prefix
-# that long truncates the identifying hash -- see TASKS_ZOO.md §3.6).
+# that long truncates the identifying hash).
 ZOO_MODELS = [
     "superanimal_topviewmouse",
     "superanimal_quadruped",
@@ -37,7 +37,7 @@ def requires_network():
 
     Deliberately checks the cache rather than connectivity. One model is
     ~646 MB (152 MB pose + 494 MB detector for topviewmouse/hrnet_w32), so a
-    test run must never fetch it implicitly — CI also passes ``--no-pose``, so
+    test run must never fetch it implicitly. CI also passes ``--no-pose``, so
     these never run there regardless.
 
     Pre-fetch once with::
@@ -47,7 +47,7 @@ def requires_network():
     Returns
     -------
     callable
-        ``_require(dataset, model_name=None)`` -- skips if absent. ``None``
+        ``_require(dataset, model_name=None)``, which skips if absent. ``None``
         means "whichever backbone the dataset offers first", since backbones
         differ per dataset.
     """
@@ -69,7 +69,7 @@ def requires_network():
 
 
 class TestZooCatalog:
-    """`fetch_dlc_zoo` — catalog lookup, the basis of `Model.load` dispatch.
+    """`fetch_dlc_zoo` catalog lookup, the basis of `Model.load` dispatch.
 
     No weights needed: the catalog ships with dlclibrary, and snapshot paths
     are deterministic whether or not the file exists.
@@ -116,7 +116,7 @@ class TestZooCatalog:
         """PyTorch SuperAnimal inference is top-down and needs a detector.
 
         `video_inference_superanimal` raises "You have to specify a
-        detector_name when using the Pytorch framework" without one -- found by
+        detector_name when using the Pytorch framework" without one, found by
         running it for real, not from the docs.
         """
         for dataset in ("superanimal_topviewmouse", "superanimal_quadruped"):
@@ -141,24 +141,24 @@ class TestZooCatalog:
         assert zoo.is_cached("superanimal_topviewmouse") == path.exists()
 
     def test_is_cached_is_false_for_unknown(self, zoo):
-        """Unknown names must answer False, not raise -- `load` dispatch
+        """Unknown names must answer False, not raise, so `load` dispatch
         calls this on arbitrary strings."""
         assert zoo.is_cached("superanimal_notathing") is False
 
 
 class TestExternalVideoTable:
-    """Z01 — `VidFileGroup.ExternalVideo` records unregistered training media.
+    """`VidFileGroup.ExternalVideo` records unregistered training media.
 
-    The point is honesty: the videos are documented and queryable without
-    claiming they are recording sessions. A fabricated `Session` would be
-    indistinguishable from real data downstream.
+    The videos stay documented and queryable without being claimed as
+    recording sessions, which a fabricated `Session` cannot distinguish
+    itself from downstream.
     """
 
     def test_part_table_exists(self, VidFileGroup):
         assert hasattr(VidFileGroup, "ExternalVideo")
 
     def test_path_is_nullable(self, VidFileGroup):
-        """Zoo configs ship `video_sets:` empty — source without paths."""
+        """Zoo configs ship `video_sets:` empty: a source with no paths."""
         heading = VidFileGroup.ExternalVideo().heading
         assert "path" in heading.names
         assert heading.attributes["path"].nullable
@@ -180,7 +180,7 @@ class TestExternalVideoTable:
         assert row["source"].endswith("superanimal_topviewmouse")
 
     def test_coexists_with_fileless_group(self, VidFileGroup, make_vid_group):
-        """External rows are not `File` rows — the group stays session-less.
+        """External rows are not `File` rows, so the group stays session-less.
 
         This is what keeps the inference guard meaningful: `get_nwb_file()`
         must still refuse this group, so it can never back a `PoseV2` entry.
@@ -201,7 +201,7 @@ class TestExternalVideoTable:
 
 
 class TestModelName:
-    """Z02 — `Model` gains a human-readable name.
+    """`Model` gains a human-readable name.
 
     There is currently no such field: `model_id` is a date+hash, so `Model()`
     previews are unreadable. For a zoo model the name *is* the identity.
@@ -236,7 +236,7 @@ class TestModelName:
 
 
 class TestTrainingMode:
-    """Z04 — declared continuation capability.
+    """Declared continuation capability.
 
     Three states, not a boolean: DLC's zoo fine-tune entry point is
     `build_weight_init(super_animal=...)`, which *seeds a new project* rather
@@ -254,8 +254,8 @@ class TestTrainingMode:
     def test_defaults_to_resumable(self, stub_model, pv2_train):
         """A row inserted without the field is assumed locally trained.
 
-        That is the overwhelmingly common case -- `Model.make()` trains in
-        place. Import paths set it explicitly rather than relying on this.
+        That is the common case: `Model.make()` trains in place. Import paths
+        set it explicitly rather than relying on this.
         """
         mode = (pv2_train.Model & {"model_id": stub_model["model_id"]}).fetch1(
             "training_mode"
@@ -286,7 +286,7 @@ class TestTrainingMode:
         assert mode == "inference_only"
 
     def test_tensorflow_project_is_inference_only(self, pv2_train):
-        """DLC-TF continuation raises NotImplementedError -- say so up front."""
+        """DLC-TF continuation raises NotImplementedError, up front."""
         from spyglass.position.utils.tool_strategies import DLCStrategy
 
         mode = DLCStrategy.project_training_mode(
@@ -297,7 +297,7 @@ class TestTrainingMode:
 
 
 class TestLoadExternalVideos:
-    """Z05 — the pilot-video case: import a real project, skip registration."""
+    """The pilot-video case: import a real project, skip registration."""
 
     @pytest.fixture
     def unregistered_project(self, tmp_path_factory):
@@ -305,8 +305,8 @@ class TestLoadExternalVideos:
 
         The shared example project's video basename *is* registered by
         `dlc_bootstrapped_session`, and `create_from_dlc_config` falls back to
-        basename matching -- so reusing it would resolve and silently test the
-        wrong branch. Give the video a unique name instead.
+        basename matching, so reusing it resolves and tests the wrong branch.
+        Give the video a unique name instead.
         """
         import yaml
 
@@ -328,7 +328,7 @@ class TestLoadExternalVideos:
     def test_load_rejects_unregistered_by_default(
         self, pv2_train, unregistered_project, skip_if_no_dlc
     ):
-        """Default stays strict — opting out must be explicit."""
+        """Default stays strict: opting out must be explicit."""
         with pytest.raises(ValueError, match="could not be unambiguously"):
             pv2_train.Model().load(unregistered_project, external_videos=False)
 
@@ -357,11 +357,10 @@ class TestLoadExternalVideos:
         """The point of the feature: import without sessions, then *use* it.
 
         The safety argument rests on inference never reading the model's
-        *training* group -- it reads only `model_path` / `tool` / params, and
-        resolves sessions from the **inference** group in
-        `PoseEstimSelection`. That was verified by reading the code; this
-        asserts it, so a future change cannot quietly couple them and strand
-        every externally-imported model.
+        training group. It reads only `model_path`, `tool` and params, and
+        resolves sessions from the inference group in `PoseEstimSelection`.
+        Asserted here so a later change cannot couple them and strand every
+        externally-imported model.
         """
         key = pv2_train.Model().load(unregistered_project, external_videos=True)
 
@@ -382,8 +381,8 @@ class TestLoadExternalVideos:
     ):
         """The session guard is untouched: no File rows, no inference.
 
-        This is what makes relaxing the import safe -- an externally-sourced
-        model still cannot produce a `PoseV2` entry from unregistered data.
+        An externally-sourced model still cannot produce a `PoseV2` entry
+        from unregistered data.
         """
         from spyglass.position.v2.video import VidFileGroup
 
@@ -395,7 +394,7 @@ class TestLoadExternalVideos:
 
 @skip_if_no_pose
 class TestLoadDispatch:
-    """Z06 — one entry point for *any* pretrained model.
+    """One entry point for any pretrained model.
 
     The original request was pretrained models generally, not the zoo
     specifically. ``Model.load`` therefore takes a string and decides: an
@@ -427,7 +426,7 @@ class TestLoadDispatch:
         assert out["model_id"] == "zoo-stub"
 
     def test_unknown_string_names_both_possibilities(self, pv2_train):
-        """Neither a path nor a zoo entry -- say so, and list the catalog."""
+        """Neither a path nor a zoo entry: say so, and list the catalog."""
         with pytest.raises(FileNotFoundError) as exc:
             pv2_train.Model().load("not_a_path_nor_a_zoo_model")
         msg = str(exc.value)
@@ -443,7 +442,7 @@ class TestLoadDispatch:
     ):
         """Regression: the path branch is unchanged.
 
-        Needs ``dlc_bootstrapped_session`` -- the project's videos must be
+        Needs ``dlc_bootstrapped_session``, since the project's videos must be
         registered, or this fails on the very constraint this work relaxes
         rather than on dispatch.
         """
@@ -502,7 +501,7 @@ class TestLoadDispatch:
 
         `get_super_animal_snapshot_path` resolves inside the installed
         deeplabcut package, so storing it verbatim yields a path valid only in
-        the importing user's conda env -- a shared-database footgun.
+        the importing user's conda env, which is a shared-database footgun.
         """
         from pathlib import Path
 
@@ -548,7 +547,7 @@ class TestLoadDispatch:
 
 
 class TestZooInferenceDispatch:
-    """Z10 — a zoo model routes to `video_inference_superanimal`.
+    """A zoo model routes to `video_inference_superanimal`.
 
     `analyze_videos` needs a project (config + shuffle + trainingsetindex); a
     zoo model is a bare checkpoint and has none. Stubbed throughout: real
@@ -565,7 +564,7 @@ class TestZooInferenceDispatch:
     @pytest.fixture
     def video(self, mock_video_file):
         """A real file: `run_dlc_inference` validates videos before branching,
-        which is correct -- project and zoo paths both need a readable one."""
+        which is correct: project and zoo paths both need a readable one."""
         return str(mock_video_file)
 
     @pytest.fixture
@@ -615,9 +614,8 @@ class TestZooInferenceDispatch:
     def test_defaults_to_one_individual(self, runner, capture_zoo, video):
         """The scoping decision: zoo output is pinned single-animal.
 
-        SuperAnimal models are multi-animal by construction, so without this
-        every zoo result would carry an `individuals` level the pipeline
-        cannot use.
+        SuperAnimal models are multi-animal by construction, and the pin
+        drops the `individuals` level the pipeline cannot use.
         """
         runner.run_dlc_inference(
             {
@@ -646,7 +644,7 @@ class TestZooInferenceDispatch:
         )
 
     def test_more_individuals_warns(self, runner, capture_zoo, caplog, video):
-        """Opting out is allowed, loudly -- it will fail downstream.
+        """Opting out is allowed, loudly: it fails downstream.
 
         Captured at DEBUG: `BaseMixin._warn_msg` demotes to debug under
         `test_mode` to keep test output quiet, so a WARNING-level caplog would

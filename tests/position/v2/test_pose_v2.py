@@ -440,10 +440,10 @@ class TestCalculateVelocity:
             position, timestamps
         )
 
-        assert ~np.isnan(speed[0])  # forward diff: frames 0,1 — both valid
-        assert np.isnan(speed[1])  # central diff: frames 0,2 — frame 2 is NaN
-        assert ~np.isnan(speed[2])  # central diff: frames 1,3 — both valid
-        assert np.isnan(speed[3])  # backward diff: frames 2,3 — frame 2 is NaN
+        assert ~np.isnan(speed[0])  # forward diff: frames 0,1, both valid
+        assert np.isnan(speed[1])  # central diff: frames 0,2; frame 2 is NaN
+        assert ~np.isnan(speed[2])  # central diff: frames 1,3, both valid
+        assert np.isnan(speed[3])  # backward diff: frames 2,3; frame 2 is NaN
 
 
 class TestPoseV2Integration:
@@ -699,7 +699,7 @@ class TestPoseV2SessionResolution:
         """Multi-session group raises rather than returning None.
 
         The only consumer, ``_store_pose_nwb``, passes the value to
-        ``AnalysisNwbfile.create()``, which cannot accept None -- returning it
+        ``AnalysisNwbfile.create()``, which rejects None. Returning it
         merely defers the failure to a less informative site.
         """
         with pytest.raises(ValueError, match="Expected exactly 1 common NWB"):
@@ -709,7 +709,7 @@ class TestPoseV2SessionResolution:
 
 
 class TestFetchByEpoch:
-    """``PoseV2.fetch_by_epoch`` — select entries by recording session/epoch.
+    """``PoseV2.fetch_by_epoch``: select entries by recording session or epoch.
 
     This is the issue #1680 ask, answered with a helper rather than a stored
     attribute: the session is already reachable through ``VidFileGroup.File``,
@@ -725,7 +725,7 @@ class TestFetchByEpoch:
         }
 
     def test_excludes_other_session(self, PoseV2, pose_v2_row, two_sessions):
-        """A different session returns nothing — not everything.
+        """A different session returns nothing, not everything.
 
         Guards the DataJoint footgun this helper exists to avoid: restricting
         by an attribute a table does not have is silently ignored, so a naive
@@ -812,7 +812,7 @@ class TestParityV1Pipeline:
     shared V1 utility functions step by step.
 
     V1's DLC pipeline calls the same shared utils (centroid.py, orientation.py,
-    interpolation.py, velocity.py) as V2's compute_pose_outputs — just via
+    interpolation.py, velocity.py) as V2's compute_pose_outputs, via
     DataJoint table methods.  These tests verify that compute_pose_outputs
     orchestrates those utils in the exact same order and with the same
     parameters, so any future code change that breaks parity is caught

@@ -1,4 +1,4 @@
-"""SL04 — SLEAP NWB import smoke test.
+"""SLEAP NWB import smoke test.
 
 Tests that PoseEstim.load_from_nwb() can load a SLEAP-exported NWB file
 (ndx-pose PoseEstimation with source_software="SLEAP") with no code changes.
@@ -17,7 +17,7 @@ def sleap_nwb_path(tmp_path):
     """Minimal NWB file mimicking SLEAP's ndx-pose export format.
 
     Creates a PoseEstimation object with source_software="SLEAP" and
-    three bodypart series so we can verify load_from_nwb returns the
+    three bodypart series, which pins what load_from_nwb returns for the
     correct metadata without running any inference.
     """
     nwb_path = tmp_path / "sleap_output.nwb"

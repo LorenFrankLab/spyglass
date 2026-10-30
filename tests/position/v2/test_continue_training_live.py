@@ -1,6 +1,6 @@
 """Live end-to-end verification of DLC PyTorch continued training (T20).
 
-This is a *real* training test — no mocks of the DLC trainer. It:
+This is a real training test, with no mocks of the DLC trainer. It:
 
 1. Bootstraps a DLC project on disk with seeded labeled data that DLC can
    actually train on (``make_dlc_project`` + ``seed_labeled_data``).
@@ -180,7 +180,7 @@ class TestContinueTrainingLive:
         assert calls, "train_network was never called on the resume path"
         resume_kwargs = calls[-1]["kwargs"]
         assert "snapshot_path" in resume_kwargs, (
-            "snapshot_path NOT passed to train_network -- the resume degraded "
+            "snapshot_path NOT passed to train_network: the resume degraded "
             f"to a fresh train. train_network kwargs: {resume_kwargs}"
         )
         snap_passed = Path(resume_kwargs["snapshot_path"])

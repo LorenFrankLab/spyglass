@@ -1,8 +1,8 @@
 """Tests for inference log/warning noise reduction (issue #1676).
 
 A real populate emitted, for one NWB read, two hdmf warnings about the
-same schema-migration fact -- differing only in an interpolated device
-name -- plus three info lines all announcing the same "inference is
+same schema-migration fact, differing only in an interpolated device
+name, plus three info lines all announcing the same "inference is
 starting" event. ``dedupe_warnings`` addresses the first; the log lines
 were demoted to debug, leaving one info line in the tool runner.
 """
@@ -20,7 +20,7 @@ def dedupe():
     return dedupe_warnings
 
 
-# The real pair, verbatim apart from truncation -- Python's own duplicate
+# The real pair, verbatim apart from truncation. Python's own duplicate
 # filter does not collapse these, because the message text differs.
 HDMF_MSG = (
     "Device.model was detected as a string, but NWB 2.9 specifies "

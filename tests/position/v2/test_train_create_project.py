@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ── Unit tests — no DLC, no DB ───────────────────────────────────────────────
+# ── Unit tests: no DLC, no DB ───────────────────────────────────────────────
 
 
 class TestEnsureMp4:
@@ -34,11 +34,11 @@ class TestEnsureMp4:
         out = str(tmp_path)
         result = general.ensure_mp4(
             [
-                "/data/camA.mp4",  # container — untouched
-                "/data/camB.h264",  # raw — converted
-                "/data/camC.h265",  # raw — converted
-                "/data/camD.hevc",  # raw — converted
-                "/data/camE.avi",  # container — untouched
+                "/data/camA.mp4",  # container, untouched
+                "/data/camB.h264",  # raw, converted
+                "/data/camC.h265",  # raw, converted
+                "/data/camD.hevc",  # raw, converted
+                "/data/camE.avi",  # container, untouched
             ],
             out,
         )
@@ -141,7 +141,7 @@ class TestDeterministicVideoStem:
 class TestReconcileVideoSetsIntegration:
     """Real DLC: reconcile a stale h264 project so extraction succeeds.
 
-    No DB session needed — drives ``create_new_project`` + ``extract_frames``
+    No DB session needed. Drives ``create_new_project`` + ``extract_frames``
     directly. Skipped if DLC is not installed or ``--no-pose`` is set.
     """
 
@@ -226,7 +226,7 @@ class TestReconcileVideoSetsIntegration:
         suffixes = {Path(v).suffix for v in sets}
         assert suffixes == {".mp4"}, f"expected mp4-only, got {suffixes}"
 
-        # Extraction now succeeds (previously raised the __len__ ValueError).
+        # Extraction succeeds; a raw stream raises __len__ ValueError.
         extract_frames(
             str(result_cfg),
             mode="automatic",
@@ -363,9 +363,9 @@ class TestCreateProjectUnit:
     ):
         """Drive create_project(); return the experimenter passed to DLC.
 
-        Shared setup for the experimenter tests below -- same mocking
-        pattern as test_converted_mp4_passed_to_dlc_not_raw_h264, trimmed
-        to only what's needed to reach the create_new_project call.
+        Shared setup for the experimenter tests below, using the same mocking
+        pattern as test_converted_mp4_passed_to_dlc_not_raw_h264, trimmed to
+        what is needed to reach the create_new_project call.
         """
         h264 = tmp_path / "clip.1.h264"
         h264.touch()
@@ -423,10 +423,9 @@ class TestCreateProjectUnit:
         derived from project_name itself, so every project's folder
         duplicated the task name (e.g.
         ``RS6420260613_run-RS6420260613_run-2026-07-02``) instead of
-        naming a real experimenter -- and there was no way to override it
-        (passing experimenter via **kwargs collided with the hardcoded
-        one). It must now default to the current OS user and never equal
-        project_name.
+        naming a real experimenter, with no way to override it: passing
+        experimenter via **kwargs collided with the hardcoded one. It must
+        default to the current OS user and never equal project_name.
         """
         monkeypatch.setattr("getpass.getuser", lambda: "someuser")
         experimenter = self._create_project_and_capture_experimenter(
@@ -994,7 +993,7 @@ class TestCreateProjectUnit:
         assert captured_extract.get(create_only) != "val_c"
 
 
-# ── Integration test — requires DB + bootstrapped session ─────────────────────
+# ── Integration test: requires DB + bootstrapped session ────────────────────
 
 
 class TestCreateProjectIntegration:

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Helpers — build synthetic .analysis.h5 without a SLEAP install
+# Helpers: build synthetic .analysis.h5 without a SLEAP install
 # ---------------------------------------------------------------------------
 
 NODE_NAMES = ["nose", "earL", "tailBase"]
@@ -320,7 +320,7 @@ class TestSLEAPStrategyTraining:
         mock_instance._info_msg = MagicMock()
         mock_instance._warn_msg = MagicMock()
 
-        # Patch model directory discovery so we don't need a real SLEAP output
+        # Patch model directory discovery, which avoids a real SLEAP output
         with patch.object(
             strategy, "_find_model_output_dir", return_value=model_dir
         ):

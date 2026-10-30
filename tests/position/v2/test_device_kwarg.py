@@ -6,7 +6,7 @@ never a stored/hashed parameter. These tests drive ``Model.make`` and
 ``PoseEstim.make`` with heavily mocked table access (no live DB) and assert
 that a provided ``device`` is injected into the params handed downstream --
 to ``strategy.train_model`` for training and to ``run_inference`` for
-inference -- while ``device=None`` leaves those params untouched.
+inference, while ``device=None`` leaves those params untouched.
 """
 
 from unittest.mock import MagicMock, patch
@@ -145,7 +145,7 @@ def _run_pose_estim_make(device):
         # check_gpu_available also gates on this; pretend a CUDA device is
         # visible so a cuda:N device string doesn't fail this test on a
         # CPU-only box. Mocking is_available() alone is NOT enough for
-        # resolve_cuda_device -- torch.cuda.device_count() checks
+        # resolve_cuda_device: torch.cuda.device_count() checks
         # is_available() too, then calls the real (uncompiled, on a
         # CPU-only torch build) torch._C._cuda_getDeviceCount(), hence the
         # resolve_cuda_device mock above.

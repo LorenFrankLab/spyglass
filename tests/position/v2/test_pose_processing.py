@@ -1,4 +1,4 @@
-"""Tests for spyglass.position.utils.pose_processing — pure computation."""
+"""Tests for spyglass.position.utils.pose_processing: pure computation."""
 
 import numpy as np
 import pandas as pd
@@ -454,7 +454,7 @@ class TestComputePoseOutputsHighNaN:
         assert np.all(np.isnan(result["speed"]))
 
     def test_long_gap_beyond_max_interp_stays_nan(self):
-        """NaN gap longer than max_pts_to_interp stays NaN — not interpolated."""
+        """NaN gap longer than max_pts_to_interp stays NaN, uninterpolated."""
         pytest.importorskip("bottleneck")
         n, gap_start, gap_len = 200, 50, 80  # gap much longer than limit=10
         df = _make_2led_df(n=n, sr=20.0, gap_start=gap_start, gap_len=gap_len)
@@ -479,7 +479,7 @@ class TestComputePoseOutputsHighNaN:
         n, sr = 100, 20.0
         t = np.arange(n) / sr
         rng = np.random.default_rng(5)
-        # Tiny random jitter around fixed position — simulates motionless animal
+        # Tiny random jitter around fixed position: a motionless animal
         jitter = rng.normal(0, 1e-3, (n, 2))
         cols = pd.MultiIndex.from_tuples(
             [
@@ -552,7 +552,7 @@ class TestPipelineFrameAlignment:
         np.testing.assert_array_equal(result["timestamps"], df.index.values)
 
     def test_output_timestamps_monotonically_increasing(self):
-        """Output timestamps must be strictly increasing — no inversions."""
+        """Output timestamps must be strictly increasing, with no inversions."""
         pytest.importorskip("bottleneck")
         df = _make_2led_df(n=200, sr=20.0)
         result = self._run(df)
@@ -565,7 +565,7 @@ class TestPipelineFrameAlignment:
         rng = np.random.default_rng(3)
         n = 200
         nominal_dt = 1.0 / 20.0
-        # Add ±5 % jitter to inter-frame intervals — typical camera behaviour
+        # Add ±5 % jitter to inter-frame intervals: typical camera behaviour
         dt = nominal_dt + rng.uniform(-0.05 * nominal_dt, 0.05 * nominal_dt, n)
         timestamps = np.cumsum(dt)
 

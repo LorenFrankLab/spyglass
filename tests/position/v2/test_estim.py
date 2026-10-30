@@ -395,7 +395,7 @@ class TestPoseEstimMakeFetchSessionErrors:
             "vid_group_id": multi_session_group,
             "pose_estim_params_id": "default",
         }
-        # Bypass the insert1 guard on purpose -- see class docstring.
+        # Bypass the insert1 guard on purpose; see class docstring.
         PoseEstimSelection().insert(
             [{**sel, "task_mode": "load", "output_dir": ""}]
         )
@@ -697,7 +697,7 @@ class StubFileSystem:
         self.glob_results = {}  # pattern -> list of matches
 
     def exists(self, path):
-        """Check if path exists in our stub filesystem."""
+        """Check if path exists in the stub filesystem."""
         return self.files.get(str(path), False)
 
     def glob(self, pattern):

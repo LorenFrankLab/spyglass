@@ -134,7 +134,7 @@ class TestSmoothBodypartPositions:
         )
 
     def test_likelihood_column_unchanged(self):
-        """Likelihood values are preserved — only x/y are modified."""
+        """Likelihood values are preserved; only x/y are modified."""
         pytest.importorskip("bottleneck")
         df = _make_bodypart_df(noisy=True)
         params = {
@@ -245,7 +245,7 @@ class TestMaskLargeJumps:
         x = np.array([0.0, 0.0, 100.0, 1.0])
         y = np.zeros(4)
         xm, _ = self.fn(x, y, max_cm=5.0)
-        # Frame 2 masked; frame 3 is close to frame 1 (distance=1) — kept.
+        # Frame 2 masked; frame 3 is close to frame 1 (distance=1), so kept.
         assert np.isnan(xm[2])
         assert not np.isnan(xm[3])
 
@@ -297,11 +297,11 @@ class TestMaskShortValidIslands:
 
     def test_edge_island_not_masked(self):
         """An island at the start or end of the array is not masked (not surrounded)."""
-        # Island at beginning — not surrounded on left.
+        # Island at beginning: not surrounded on left.
         is_nan = np.array([False, True, True])
         result = self.fn(is_nan, min_island_len=5)
         assert not result[0]
-        # Island at end — not surrounded on right.
+        # Island at end: not surrounded on right.
         is_nan2 = np.array([True, True, False])
         result2 = self.fn(is_nan2, min_island_len=5)
         assert not result2[2]

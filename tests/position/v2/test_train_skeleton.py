@@ -195,7 +195,7 @@ class TestSkeletonCanonical:
         """A separator-variant config inserts cleanly via canonicalization.
 
         'green_led'/'red_led_c' are separator variants of the curated
-        'greenLED'/'redLED_C'. Previously validation (normalized) passed but
+        'greenLED'/'redLED_C'. Normalized validation passes while
         the raw part-table FK insert failed with an IntegrityError. Now the
         names canonicalize and the stored bodyparts are the canonical spelling.
         """
@@ -257,7 +257,7 @@ class TestSkeletonEdgeCases:
             "bodyparts": ["redLED_C", "greenLED", "tailBase", "tailMid"],
             "skeleton": [
                 ["redLED_C", "greenLED"],
-                # Nested group — should be expanded to two individual edges:
+                # Nested group: expanded to two individual edges:
                 [["tailBase", "tailBase"], ["tailMid", "tailMid"]],
             ],
         }
@@ -297,7 +297,7 @@ class TestTopologyMatchesLabelsExactly:
     """Isomorphism must not treat similar labels as the same node.
 
     `redLED_L` and `redLED_R` normalize to `red led l` / `red led r`, whose
-    SequenceMatcher ratio is 0.889 — above the old 0.85 node-match threshold —
+    SequenceMatcher ratio is 0.889, above the 0.85 node-match threshold,
     so skeletons wired to opposite sides compared as duplicates.
     """
 

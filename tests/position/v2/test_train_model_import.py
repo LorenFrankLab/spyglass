@@ -57,7 +57,7 @@ class TestCanonicalizeBodyparts:
         assert out["mapping"] == {"nose": "nose", "tail_base": "tailBase"}
 
     def test_bare_path_or_string_raises_typeerror(self, model, tmp_path):
-        """A bare path/string is ambiguous and tool-specific -- rejected.
+        """A bare path or string is ambiguous and tool-specific, so rejected.
 
         Reading a tool-specific config file is the import path's job; callers
         pass the parsed names or dict (e.g. load_yaml(path) for DLC).

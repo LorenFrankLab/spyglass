@@ -13,10 +13,10 @@ absent (e.g. the ``pv2`` env / CI ``--no-pose``) and *runs* where SLEAP lives
 
 Fixture data (downloaded to the git-ignored ``tests/_data/sleap/`` by
 ``data_downloader.py``; regenerate with the scripts in ``maintenance_scripts/``):
-  - ``small_robot_labeled.slp`` -- 2 user-labeled frames with embedded images,
+  - ``small_robot_labeled.slp``: 2 user-labeled frames with embedded images,
     single-instance skeleton A/B.  See
     ``maintenance_scripts/make_labeled_slp.py`` for provenance.
-  - ``model/`` -- a minimal single-instance UNet parent model
+  - ``model/``: a minimal single-instance UNet parent model
     (``best_model.h5`` + ``training_config.json``) used as the base checkpoint.
 """
 
@@ -92,8 +92,8 @@ class TestLiveSLEAPResume:
     ):
         """A parent checkpoint's weights load and 1 config epoch runs.
 
-        Drives the actual strategy helpers -- ``_resolve_parent_checkpoint``,
-        ``_write_epochs_config`` and ``_build_train_cmd`` -- then runs the
+        Drives the actual strategy helpers (``_resolve_parent_checkpoint``,
+        ``_write_epochs_config`` and ``_build_train_cmd``), then runs the
         command they produce and asserts on the live SLEAP output:
 
         1. the command completes (returncode 0);
@@ -106,7 +106,7 @@ class TestLiveSLEAPResume:
         strategy = SLEAPStrategy()
         stub = _StubModel()
 
-        # 1. Resolve the parent checkpoint -- must be the .h5 *file*, not dir.
+        # 1. Resolve the parent checkpoint: the .h5 file, not the dir.
         ckpt = strategy._resolve_parent_checkpoint(MODEL_DIR)
         assert ckpt is not None, "no resumable checkpoint found in model dir"
         assert Path(ckpt).name == "best_model.h5"
@@ -149,12 +149,12 @@ class TestLiveSLEAPResume:
         # 1. Completed cleanly.
         assert result.returncode == 0, f"sleap-train failed:\n{out}"
 
-        # 2. Base weights were loaded from our checkpoint.
+        # 2. Base weights were loaded from the checkpoint.
         assert "Loading backbone weights" in out, out[-3000:]
         assert "Loading head weights" in out, out[-3000:]
         assert str(ckpt) in out
 
-        # 3. Epochs override honoured -- trainer stopped at max_epochs=1.
+        # 3. Epochs override honoured: trainer stopped at max_epochs=1.
         assert "max_epochs=1" in out, out[-3000:]
 
         # 4. A fresh checkpoint was written for the resumed run.

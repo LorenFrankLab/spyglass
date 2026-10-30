@@ -26,7 +26,7 @@ class TestModelInference:
         ``analyze_videos`` is patched: its real behavior needs a trained
         shuffle this fake project lacks (and which only exists once a live
         training test has run), so a real call is order-dependent. Mocking it
-        keeps the test deterministic and focused on the spyglass wiring — tool
+        keeps the test deterministic and focused on the spyglass wiring. Tool
         dispatch, path handling, and output resolution.
         """
         from unittest.mock import patch
@@ -160,14 +160,14 @@ class TestCheckGpuAvailable:
 
     Lives alongside PoseInferenceRunner in nwb_io.py (DLC 3.x/PyTorch is
     the only V2 backend), not in the tool-agnostic position/utils/ package
-    -- a bare torch.cuda.is_available() check would be silently wrong for
-    a hypothetical V1/TensorFlow caller.
+    since a bare torch.cuda.is_available() check does not describe a
+    V1/TensorFlow caller.
 
     The torch.cuda-touching branch itself is marked ``# pragma: no cover``
     in source and deliberately untested here: CI never has a GPU, and
     mocking ``torch.cuda.is_available()`` to assert an ``if not X: raise``
-    fires is mock theatre -- it tests Python's control flow, not our
-    logic. The one thing worth asserting is the real branching decision:
+    fires is mock theatre: it tests Python's control flow, not the
+    function's logic. What is worth asserting is the branching decision:
     a non-CUDA device never reaches that code at all.
     """
 
@@ -333,7 +333,7 @@ class TestPoseEstimPopulation:
         )
 
         # Use the minirec session NWB (already a valid pynwb file) as the
-        # parent for AnalysisNwbfile.create() — avoids touching the 0-byte
+        # parent for AnalysisNwbfile.create(), which avoids the 0-byte
         # bootstrap NWB whose checksum is already tracked by DataJoint.
         mini_nwb = (Nwbfile & mini_restr).fetch1("nwb_file_name")
         analysis_file_name = AnalysisNwbfile().create(mini_nwb)
@@ -350,7 +350,7 @@ class TestPoseEstimPopulation:
             skip_duplicates=True,
         )
 
-        # Insert with a proper analysis_file_name — this is the primary goal.
+        # Insert with a proper analysis_file_name: the primary goal.
         estim_key = {**selection_key, "analysis_file_name": analysis_file_name}
         PoseEstim().insert1(estim_key)
 
@@ -397,7 +397,7 @@ class TestPoseEstimPopulation:
             assert len(pose_estimations) == 1
             pose_estimation = list(pose_estimations.values())[0]
 
-            # Verify we can read bodyparts and coordinates: the mock output
+            # Bodyparts and coordinates must read back: the mock output
             # has 4 bodyparts, so one series per bodypart.
             assert len(pose_estimation.pose_estimation_series) == 4
             # pose_estimation_series is a dict-like object
@@ -590,10 +590,10 @@ class TestFetchVideoTimestamps:
     1. The NWB lookup's exception was silently swallowed (``ts = None``
        with no logging), so a real failure (e.g. an NFS/HDF5 file-lock
        hiccup) was indistinguishable from "no NWB data, fall back as
-       expected" -- both just fell through to the same generic error.
+       expected": both fell through to the same generic error.
     2. The video-file fallback read frame count from the *raw* registered
        ``VideoFile.path`` (e.g. a ``.h264`` elementary stream) instead of
-       the already-converted mp4 -- OpenCV cannot read a frame count from
+       the already-converted mp4. OpenCV cannot read a frame count from
        a raw H.264 stream (it returns a nonsensical negative value rather
        than raising), so the fallback silently failed too.
     """
@@ -723,7 +723,7 @@ class TestInsertEstimationTaskValidation:
 
 
 class TestInsertFromVideoFile:
-    """PoseEstimSelection.insert_from_videofile() — VideoFile-keyed entry."""
+    """PoseEstimSelection.insert_from_videofile(): VideoFile-keyed entry."""
 
     def test_neither_videos_nor_restriction_raises(self, position_v2):
         PoseEstimSelection = position_v2.estim.PoseEstimSelection
@@ -776,7 +776,7 @@ class TestInsertFromVideoFile:
         pk_fields = ("model_id", "vid_group_id", "pose_estim_params_id")
         for k in keys:
             assert VidFileGroup() & {"vid_group_id": k["vid_group_id"]}
-            # restrict on the PK only — task_mode is a secondary attr a
+            # restrict on the PK only; task_mode is a secondary attr a
             # pre-existing row (shared container) may already hold.
             assert PoseEstimSelection() & {f: k[f] for f in pk_fields}
 

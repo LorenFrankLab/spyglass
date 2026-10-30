@@ -199,7 +199,7 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
 
             # Patch the strategy's filesystem mtime lookup so snapshot-200 is
             # the most-recently-modified. RealFileSystem.getmtime reads
-            # Path.stat, so patching os.path.getmtime would be a silent no-op.
+            # Path.stat, so patching os.path.getmtime is a silent no-op.
             with patch.object(strategy._fs, "getmtime") as mock_getmtime:
                 mock_getmtime.side_effect = lambda p: {
                     str(snapshot1): 1000,

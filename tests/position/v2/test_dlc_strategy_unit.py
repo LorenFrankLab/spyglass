@@ -526,7 +526,7 @@ def test_pose_params_default_orientation_convention():
     from spyglass.position.v2.estim import PoseParams
 
     # Call insert_default and capture the dict it would validate.
-    # We patch dj.Table.insert1 to avoid needing a live DB.
+    # dj.Table.insert1 is patched, which avoids needing a live DB.
     captured = {}
 
     def fake_insert1(self, key, **kwargs):

@@ -5,8 +5,8 @@ shared multi-GPU host may be the one saturated device.
 ``resolve_cuda_device`` picks the best GPU instead, preferring one that is
 genuinely unused over one that merely has the most free bytes.
 
-CI has no GPU, so ``cuda_memory_info`` -- the single function that touches
-``torch`` -- is patched. That is a real seam, not mock theatre: it exists
+CI has no GPU, so ``cuda_memory_info``, the single function that touches
+``torch``, is patched. That is a real seam, not mock theatre: it exists
 precisely to isolate "what the hardware currently reports" from the
 selection policy, and the policy is what these tests exercise. The
 ``torch``-touching body itself is ``# pragma: no cover``.
@@ -56,7 +56,7 @@ class TestSelectDevice:
 
         cuda:0 has more free memory in absolute terms, but it is sharing a
         card with someone else's 20 GiB job; cuda:1 is untouched. Prefer
-        the idle card -- no contention, and no co-tenant that might grow
+        the idle card: no contention, and no co-tenant that might grow
         into the memory this run was counting on.
         """
         select, _ = fns

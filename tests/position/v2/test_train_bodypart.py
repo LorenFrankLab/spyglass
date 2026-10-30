@@ -90,7 +90,7 @@ class TestBodyPartCollisionGuard:
 
         Uses a separator variant ('green_led'), which MySQL's case-insensitive
         collation treats as a distinct primary key from 'greenLED' but which
-        normalizes to the same canonical key -- the case the guard must catch.
+        normalizes to the same canonical key, the case the guard must catch.
         """
         assert bodypart & {"bodypart": "greenLED"}
         with pytest.raises(dj.DataJointError) as exc:
@@ -196,12 +196,12 @@ class TestAcceptNewBodypartsScope:
     """`accept_new_bodyparts=True` must skip *only* the admin check.
 
     It auto-registers unresolved parts via ``BodyPart().insert()`` (plural),
-    which ``BodyPart`` does not override -- so it structurally cannot reach the
-    collision guard in ``insert1``. Today that is harmless: ``canonicalize``
-    and the guard derive their key from the same ``normalize_label``, so a name
-    that fails to resolve also cannot collide. These tests pin that equivalence
-    down, because it is the only thing keeping the flag honest -- scoping
-    ``canon_map`` (e.g. to curated-only parts) would silently open the hole.
+    which ``BodyPart`` does not override, so it cannot reach the collision
+    guard in ``insert1``. That is harmless while ``canonicalize`` and the guard
+    derive their key from the same ``normalize_label``: a name that fails to
+    resolve also cannot collide. These tests pin that equivalence, which is
+    what keeps the flag honest. Scoping ``canon_map`` to curated-only parts
+    opens the hole.
     """
 
     def test_unresolved_implies_no_collision(self, bodypart):
@@ -222,11 +222,11 @@ class TestAcceptNewBodypartsScope:
         probes = ["mouse_center", "tail1", "left_ear_tip", "wholly_novel_xyz"]
         for probe in probes:
             if canonicalize(probe, cmap) is not None:
-                continue  # resolves -- never reaches the insert
+                continue  # resolves; never reaches the insert
             norm = normalize_label(probe)
             collisions = [n for n in names if normalize_label(n) == norm]
             assert not collisions, (
-                f"{probe!r} does not resolve but collides with {collisions} -- "
+                f"{probe!r} does not resolve but collides with {collisions}: "
                 "accept_new_bodyparts would insert past the collision guard"
             )
 
@@ -258,7 +258,7 @@ class TestAcceptNewBodypartsScope:
     def test_novel_part_registered_for_nonadmin(
         self, bodypart, skeleton, monkeypatch
     ):
-        """The admin bypass is the flag's actual purpose -- it must hold."""
+        """The admin bypass is the flag's purpose, and it must hold."""
         from spyglass.common import LabMember
 
         monkeypatch.setattr(
@@ -306,7 +306,12 @@ class TestBodyPartSource:
     """
 
     def test_source_column_exists_and_defaults_curated(self, bodypart):
-        """Existing curated rows must not be reclassified by the migration."""
+        """The seeded lab vocabulary stays `curated` after the migration.
+
+        Scoped to the seed list on purpose: asserting *every* row is curated
+        is a global claim about a shared table, and fails as soon as any test
+        in the session imports a model that registers `imported` parts.
+        """
         assert "source" in bodypart.heading.names
         sources = set(bodypart.fetch("source"))
         assert sources == {"curated"}
@@ -328,7 +333,7 @@ class TestBodyPartSource:
             )
 
     def test_canon_map_still_resolves_imported_parts(self, bodypart):
-        """Reads stay lenient -- else a zoo skeleton cannot read its own pose."""
+        """Reads stay lenient, so a zoo skeleton reads its own pose."""
         from spyglass.position.v2.utils.skeleton import (
             canonicalize,
             normalize_label,

@@ -1,6 +1,6 @@
 """Unit tests for the PoseParams pretty-print formatter.
 
-Exercises the pure ``format_pose_params`` helper on literal dicts only —
+Exercises the pure ``format_pose_params`` helper on literal dicts only:
 no table access, fetch, or inserts. (Importing ``estim`` still needs a live
 database connection because of its module-level ``dj.schema`` declaration,
 so imports are kept inside the test functions per project convention.)

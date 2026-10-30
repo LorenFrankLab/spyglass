@@ -16,7 +16,7 @@ import pytest
 def _make_dlc_model_mock(row: dict):
     """Return a DLCModel class mock
 
-    DataJoint tables are singletons — the & operator is called on the *class*,
+    DataJoint tables are singletons: the & operator is called on the class,
     not an instance.  MagicMock magic methods must be configured via
     ``.return_value`` on the existing magic attribute, not by assignment.
     """

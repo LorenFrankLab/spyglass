@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path Resolution — pure functions, no DB or DLC required
+# Path Resolution: pure functions, no DB or DLC required
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ class TestToStoredPath:
 
 
 # ---------------------------------------------------------------------------
-# DLC Model Info — synthetic project, skip_if_no_dlc guards DLC imports
+# DLC Model Info: synthetic project, skip_if_no_dlc guards DLC imports
 # ---------------------------------------------------------------------------
 
 
@@ -199,7 +199,7 @@ class TestGetLatestDLCModelInfo:
 
 
 # ---------------------------------------------------------------------------
-# Training history — exercises get_training_history() via synthetic CSV
+# Training history: exercises get_training_history() via synthetic CSV
 # ---------------------------------------------------------------------------
 
 
@@ -208,7 +208,7 @@ class TestGetTrainingHistory:
 
     After a successful load() the stored model_path is the
     config.yaml, so get_training_history() returns None (expected for
-    imported models — only trained models have a learning_stats.csv
+    imported models; only trained models have a learning_stats.csv
     in the stored path).
 
     The fake CSV produced by make_dlc_project is tested via direct CSV
@@ -250,7 +250,7 @@ class TestGetTrainingHistory:
 
 
 # ---------------------------------------------------------------------------
-# Full DLC import — requires bootstrapped Spyglass session
+# Full DLC import: requires bootstrapped Spyglass session
 # ---------------------------------------------------------------------------
 
 
@@ -482,7 +482,7 @@ class TestLoadVidFileMatches:
 
 
 # ---------------------------------------------------------------------------
-# load() error cases — DB required, no DLC or session needed
+# load() error cases: DB required, no DLC or session needed
 # ---------------------------------------------------------------------------
 
 
@@ -518,7 +518,7 @@ class TestImportModelErrors:
         Uses the dlc_project_config without bootstrapping a session, so
         create_from_dlc_config() must raise ValueError.
         """
-        # Avoid any previously imported entry (idempotent import would succeed)
+        # Avoid an already-imported entry, which imports idempotently
         # Use a fresh config with a non-matching video path
         import yaml
 

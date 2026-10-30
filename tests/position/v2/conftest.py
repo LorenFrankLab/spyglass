@@ -82,7 +82,7 @@ def model(pv2_train):
 
     Function-scoped with always-run post-yield teardown: models the test
     creates are removed afterward (cascading to their downstream pose
-    entries) so a trained model does not leak into a later test — e.g. making
+    entries) so a trained model does not leak into a later test, e.g. making
     a "weightless" inference unexpectedly succeed. Matters under
     ``--no-teardown``, where the database persists between tests.
     """
@@ -521,7 +521,7 @@ def _register_sessions(stems, videos_per_session=1):
     Returns
     -------
     tuple[tuple[str, ...], tuple[dict, ...]]
-        ``(names, keys)`` -- one name per stem, and one ``VideoFile`` primary
+        ``(names, keys)``: one name per stem, and one ``VideoFile`` primary
         key per (session, video).
     """
     from tests.position.v2.make_example_dlc_project import (
@@ -565,7 +565,7 @@ def two_sessions(mini_insert):
     ``AnalysisNwbfile.create()`` can open them.
 
     The video paths recorded in ``VideoFile.path`` are synthetic and are never
-    opened -- these fixtures support schema/query tests, not inference.
+    opened. These fixtures support schema and query tests, not inference.
 
     Teardown deletes both ``Nwbfile`` rows, which cascades to every group,
     model, and pose entry built on them. See the module note above on why this
@@ -654,12 +654,12 @@ def multicam_session(mini_insert):
     parent. ``get_nwb_file`` must collapse them to that one name rather than
     counting once per camera.
 
-    Function-scoped with teardown -- see the module note above.
+    Function-scoped with teardown; see the module note above.
 
     Returns
     -------
     dict
-        ``{"name": str, "keys": tuple[dict, ...]}`` -- three ``VideoFile``
+        ``{"name": str, "keys": tuple[dict, ...]}``: three ``VideoFile``
         primary keys, ``video_file_num`` 0/1/2.
     """
     names, keys = _register_sessions(("pv2_sess_3cam",), videos_per_session=3)
@@ -701,9 +701,9 @@ def training_group(two_sessions, pv2_video):
     Distinct from ``multi_session_group`` only in intent.
 
     Teardown deletes the group *master*. The ``two_sessions`` cascade reaches
-    only ``VidFileGroup.File`` (via ``VideoFile``), not the master row -- so
-    without this the group would survive as an empty shell, and the next test's
-    insert would short-circuit on "already exists" and leave it fileless.
+    only ``VidFileGroup.File`` (via ``VideoFile``), not the master row. An
+    undeleted master survives as an empty shell, and the next test's insert
+    short-circuits on "already exists" and leaves it fileless.
     Deleting the master also cascades to ``ModelSelection`` → ``Model``.
 
     Returns
@@ -799,14 +799,14 @@ def stub_model(pv2_train, training_group):
 def _make_pose_chain(pv2_estim, model_id, vid_group_id, nwb_file_name):
     """Build PoseEstimSelection → PoseEstim → PoseSelection → PoseV2 rows.
 
-    Direct inserts only -- no inference, no ``compute_pose_outputs``. The
+    Direct inserts only: no inference, no ``compute_pose_outputs``. The
     ``PoseV2`` row carries a real ``AnalysisNwbfile`` but no stored object ids,
     which is enough for selection/restriction tests.
 
     Returns
     -------
     tuple[dict, dict]
-        ``(pose_selection_key, selection_key)`` -- the second is the
+        ``(pose_selection_key, selection_key)``: the second is the
         ``PoseEstimSelection`` key, whose deletion cascades to the rest.
     """
     from spyglass.common import AnalysisNwbfile

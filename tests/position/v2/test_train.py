@@ -346,7 +346,7 @@ class TestModelParams:
         # Use actual DLC parameters instead of mocking to match real behavior
         result = model_params.get_accepted_params("DLC")
 
-        # Verify we get the expected DLC parameter names
+        # The expected DLC parameter names
         # These are the actual parameters supported by DLC strategy
         expected_dlc_params = {
             "Task",
@@ -942,7 +942,7 @@ class TestTrainingHistory:
 class TestDefaultSkeletons:
     """The shipped 1LED/2LED/4LED rows must describe real bodyparts.
 
-    `bodyparts` previously held edge pairs for 2LED/4LED and a bare string for
+    `bodyparts` must hold node names, not edge pairs or a bare string, for
     1LED, with `edges` null, so a caller reading the blob got tuples where it
     expected names.
     """
