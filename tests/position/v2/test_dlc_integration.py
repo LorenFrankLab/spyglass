@@ -1,7 +1,7 @@
 """Integration tests for DLC-specific V2 functionality.
 
 Covers:
-- Path resolution utilities (resolve_model_path, _to_stored_path)
+- Path resolution utilities (resolve_model_path, to_stored_path)
 - DLCStrategy.get_latest_model_info() using the synthetic test project
 - Model.get_training_history() using the synthetic test project
 - Model.load() via DLC config.yaml with bootstrapped session
@@ -31,7 +31,7 @@ class TestResolveModelPath:
 
     def test_absolute_path_returned_unchanged(self):
         """An absolute stored path is returned as-is."""
-        from spyglass.position.v2.train import resolve_model_path
+        from spyglass.position.utils.path_helpers import resolve_model_path
 
         p = "/some/absolute/path/config.yaml"
         assert resolve_model_path(p) == Path(p)
@@ -41,7 +41,7 @@ class TestResolveModelPath:
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", None)
-        from spyglass.position.v2.train import resolve_model_path
+        from spyglass.position.utils.path_helpers import resolve_model_path
 
         result = resolve_model_path("relative/config.yaml")
         assert result == Path.cwd() / "relative/config.yaml"
@@ -51,7 +51,7 @@ class TestResolveModelPath:
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
-        from spyglass.position.v2.train import resolve_model_path
+        from spyglass.position.utils.path_helpers import resolve_model_path
 
         result = resolve_model_path("project/config.yaml")
         assert result == tmp_path / "project/config.yaml"
@@ -61,57 +61,57 @@ class TestResolveModelPath:
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
-        from spyglass.position.v2.train import resolve_model_path
+        from spyglass.position.utils.path_helpers import resolve_model_path
 
         p = "/fixed/absolute.yaml"
         assert resolve_model_path(p) == Path(p)
 
 
 class TestToStoredPath:
-    """Tests for _to_stored_path() in train.py."""
+    """Tests for to_stored_path() in train.py."""
 
     def test_under_base_stored_as_relative(self, monkeypatch, tmp_path):
         """Path under pose_project_dir is stored as a relative string."""
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
-        from spyglass.position.v2.train import _to_stored_path
+        from spyglass.position.utils.path_helpers import to_stored_path
 
         full = tmp_path / "project" / "config.yaml"
-        assert _to_stored_path(full) == "project/config.yaml"
+        assert to_stored_path(full) == "project/config.yaml"
 
     def test_outside_base_stored_as_absolute(self, monkeypatch, tmp_path):
         """Path outside pose_project_dir is stored as an absolute string."""
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
-        from spyglass.position.v2.train import _to_stored_path
+        from spyglass.position.utils.path_helpers import to_stored_path
 
         outside = Path("/other/location/config.yaml")
-        assert _to_stored_path(outside) == str(outside)
+        assert to_stored_path(outside) == str(outside)
 
     def test_no_base_always_absolute(self, monkeypatch):
         """With pose_project_dir=None, paths are always stored as absolute."""
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", None)
-        from spyglass.position.v2.train import _to_stored_path
+        from spyglass.position.utils.path_helpers import to_stored_path
 
         p = Path("/some/path/config.yaml")
-        assert _to_stored_path(p) == str(p)
+        assert to_stored_path(p) == str(p)
 
     def test_roundtrip_under_base(self, monkeypatch, tmp_path):
-        """_to_stored_path → resolve_model_path recovers the original path."""
+        """to_stored_path -> resolve_model_path recovers the original path."""
         import spyglass.position.utils.path_helpers as ph_mod
 
         monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
-        from spyglass.position.v2.train import (
-            _to_stored_path,
+        from spyglass.position.utils.path_helpers import (
             resolve_model_path,
+            to_stored_path,
         )
 
         original = tmp_path / "project" / "config.yaml"
-        stored = _to_stored_path(original)
+        stored = to_stored_path(original)
         assert resolve_model_path(stored) == original
 
 
@@ -302,6 +302,25 @@ class TestDLCFullImport:
         key2 = model.load(str(dlc_project_config))
         assert key1["model_id"] == key2["model_id"]
 
+    def test_explicit_model_id_is_used(
+        self, model, dlc_project_config, dlc_bootstrapped_session, tmp_path
+    ):
+        """An explicit model_id wins over the generated one.
+
+        Imports a copy of the project: `load` returns an existing Model when
+        one is already registered on the path, and other tests in this file
+        register one on the shared project.
+        """
+        import shutil
+
+        project = tmp_path / "explicit_id_project"
+        shutil.copytree(Path(dlc_project_config).parent, project)
+        cfg = project / Path(dlc_project_config).name
+
+        model_key = model.load(str(cfg), model_id="pv2_d1_custom_id")
+
+        assert model_key["model_id"] == "pv2_d1_custom_id"
+
     def test_load_model_path_stored(
         self, model, dlc_project_config, dlc_bootstrapped_session
     ):
@@ -314,7 +333,7 @@ class TestDLCFullImport:
 class TestLoadUntrainedProject:
     """A project holding no weights registers a selection, not a Model.
 
-    `_project_training_mode` reports `inference_only` both for a TensorFlow
+    `project_training_mode` reports `inference_only` both for a TensorFlow
     project that can infer and for one with no weights, which can do neither.
     A Model row for the latter claims a capability it does not have.
     """
@@ -381,15 +400,19 @@ class TestLoadUntrainedProject:
 
     def test_has_weights_detects_both_engines(self, model, tmp_path):
         """PyTorch writes `snapshot-*.pt`; TensorFlow writes a `*.index`."""
+        from spyglass.position.utils.tool_strategies import DLCStrategy
+
         for name in ("snapshot-010.pt", "snapshot-010.index"):
             project = tmp_path / name.replace(".", "_")
             train = project / "dlc-models" / "iteration-0" / "m" / "train"
             train.mkdir(parents=True)
             cfg = {"project_path": str(project)}
 
-            assert not model._project_has_weights(cfg, project / "config.yaml")
+            assert not DLCStrategy.project_has_weights(
+                cfg, project / "config.yaml"
+            )
             (train / name).touch()
-            assert model._project_has_weights(cfg, project / "config.yaml")
+            assert DLCStrategy.project_has_weights(cfg, project / "config.yaml")
 
 
 class TestLoadVidFileMatches:

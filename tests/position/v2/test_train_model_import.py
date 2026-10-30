@@ -138,29 +138,36 @@ class TestCanonicalizeDlcProject:
 
 
 class TestDlcModelId:
-    """model_id must be unique per model (the hash must survive truncation)."""
+    """model_id must be unique per model (the hash must survive truncation).
 
-    def test_distinct_paths_give_distinct_ids(self, model):
-        a = model._dlc_model_id("DLCTask", "/projA/config.yaml")
-        b = model._dlc_model_id("DLCTask", "/projB/config.yaml")
+    `_import_dlc_model` builds the id inline, so these exercise the same
+    `default_pk_name` call it makes. The explicit-`model_id` override is
+    covered through `load` in `test_dlc_integration.py`.
+    """
+
+    @staticmethod
+    def _dlc_id(task, path):
+        from spyglass.position.utils.protocols import default_pk_name
+
+        return default_pk_name(
+            "DLC", dict(tool="DLC", task=task, model_path=str(path))
+        )
+
+    def test_distinct_paths_give_distinct_ids(self):
+        a = self._dlc_id("DLCTask", "/projA/config.yaml")
+        b = self._dlc_id("DLCTask", "/projB/config.yaml")
         assert a != b
         assert len(a) <= 32 and len(b) <= 32
 
-    def test_distinct_tasks_give_distinct_ids(self, model):
-        a = model._dlc_model_id("TaskA", "/proj/config.yaml")
-        b = model._dlc_model_id("TaskB", "/proj/config.yaml")
+    def test_distinct_tasks_give_distinct_ids(self):
+        a = self._dlc_id("TaskA", "/proj/config.yaml")
+        b = self._dlc_id("TaskB", "/proj/config.yaml")
         assert a != b
 
-    def test_same_inputs_give_same_id(self, model):
-        a = model._dlc_model_id("DLCTask", "/proj/config.yaml")
-        b = model._dlc_model_id("DLCTask", "/proj/config.yaml")
+    def test_same_inputs_give_same_id(self):
+        a = self._dlc_id("DLCTask", "/proj/config.yaml")
+        b = self._dlc_id("DLCTask", "/proj/config.yaml")
         assert a == b
-
-    def test_override_is_respected(self, model):
-        assert (
-            model._dlc_model_id("DLCTask", "/proj/config.yaml", "custom")
-            == "custom"
-        )
 
 
 class TestImportNameErrorFallback:

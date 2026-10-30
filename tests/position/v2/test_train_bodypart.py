@@ -4,6 +4,18 @@ import datajoint as dj
 import pytest
 
 
+@pytest.fixture
+def skel_utils():
+    """The skeleton primitives, called directly rather than via the table.
+
+    `Skeleton` used to carry thin instance-method wrappers for these purely
+    so tests could reach them; the wrappers are gone.
+    """
+    from spyglass.position.v2.utils import skeleton as skel
+
+    return skel
+
+
 class TestBodyPartTable:
     """Test BodyPart lookup table functionality."""
 
@@ -33,36 +45,36 @@ class TestBodyPartTable:
 class TestBodyPartNormalization:
     """Test bodypart name normalization (used by Skeleton)."""
 
-    def test_normalize_label_lowercase(self, skeleton):
+    def test_normalize_label_lowercase(self, skel_utils):
         """Test normalization converts to lowercase."""
-        assert skeleton._normalize_label("GreenLED") == "green led"
-        assert skeleton._normalize_label("NOSE") == "nose"
+        assert skel_utils.normalize_label("GreenLED") == "green led"
+        assert skel_utils.normalize_label("NOSE") == "nose"
 
-    def test_normalize_label_camel_case(self, skeleton):
+    def test_normalize_label_camel_case(self, skel_utils):
         """Test normalization handles camelCase properly.
 
         Given: Bodypart names in camelCase format
         When: Normalized
         Then: Spaces inserted before uppercase letters following lowercase
         """
-        assert skeleton._normalize_label("FirstSecond") == "first second"
-        assert skeleton._normalize_label("greenLED") == "green led"
-        assert skeleton._normalize_label("leftEar") == "left ear"
-        assert skeleton._normalize_label("tailBase") == "tail base"
+        assert skel_utils.normalize_label("FirstSecond") == "first second"
+        assert skel_utils.normalize_label("greenLED") == "green led"
+        assert skel_utils.normalize_label("leftEar") == "left ear"
+        assert skel_utils.normalize_label("tailBase") == "tail base"
         # Mixed camelCase and other separators
-        assert skeleton._normalize_label("greenLED_C") == "green led c"
-        assert skeleton._normalize_label("redLED-Left") == "red led left"
+        assert skel_utils.normalize_label("greenLED_C") == "green led c"
+        assert skel_utils.normalize_label("redLED-Left") == "red led left"
 
-    def test_normalize_label_replaces(self, skeleton):
+    def test_normalize_label_replaces(self, skel_utils):
         """Test normalization replaces underscores/hyphens with spaces."""
-        assert skeleton._normalize_label("green_led") == "green led"
-        assert skeleton._normalize_label("left_ear") == "left ear"
-        assert skeleton._normalize_label("green-led") == "green led"
-        assert skeleton._normalize_label("tail-base") == "tail base"
-        assert skeleton._normalize_label("  nose  ") == "nose"
-        assert skeleton._normalize_label("\tgreen led\n") == "green led"
-        assert skeleton._normalize_label("  Green_LED-C  ") == "green led c"
-        assert skeleton._normalize_label("TAIL_BASE") == "tail base"
+        assert skel_utils.normalize_label("green_led") == "green led"
+        assert skel_utils.normalize_label("left_ear") == "left ear"
+        assert skel_utils.normalize_label("green-led") == "green led"
+        assert skel_utils.normalize_label("tail-base") == "tail base"
+        assert skel_utils.normalize_label("  nose  ") == "nose"
+        assert skel_utils.normalize_label("\tgreen led\n") == "green led"
+        assert skel_utils.normalize_label("  Green_LED-C  ") == "green led c"
+        assert skel_utils.normalize_label("TAIL_BASE") == "tail base"
 
 
 class TestBodyPartCollisionGuard:
@@ -166,11 +178,13 @@ class TestBodyPartValidation:
 
         assert "admin" in str(exc_info.value).lower()
 
-    def test_validate_bodyparts_mixed_valid_invalid(self, bodypart, skeleton):
+    def test_validate_bodyparts_mixed_valid_invalid(
+        self, bodypart, skeleton, skel_utils
+    ):
         """Test validation with mix of valid and invalid bodyparts."""
         # Get one valid bodypart
         valid_part = bodypart.fetch("bodypart", limit=1)[0]
-        valid_part_norm = skeleton._normalize_label(valid_part)
+        valid_part_norm = skel_utils.normalize_label(valid_part)
 
         mixed_parts = {valid_part_norm, "definitely_invalid_xyz"}
 

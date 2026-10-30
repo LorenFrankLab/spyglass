@@ -4,6 +4,19 @@ import datajoint as dj
 import networkx as nx
 import pytest
 
+
+@pytest.fixture
+def skel_utils():
+    """The skeleton primitives, called directly rather than via the table.
+
+    `Skeleton` used to carry thin instance-method wrappers for these purely
+    so tests could reach them; the wrappers are gone.
+    """
+    from spyglass.position.v2.utils import skeleton as skel
+
+    return skel
+
+
 INSERT_KWARGS = dict(skip_duplicates=True, accept_default=True)
 
 
@@ -88,22 +101,22 @@ class TestSkeletonInsert:
 class TestSkeletonTopology:
     """Test skeleton topology hash computation."""
 
-    def test_shape_hash_same_for_equivalent_skeletons(self, skeleton):
+    def test_shape_hash_same_for_equivalent_skeletons(self, skel_utils):
         """Test topology hash is same for equivalent skeletons."""
 
         bodyparts = ["nose", "earL", "earR"]
         edges1 = [("nose", "earL"), ("nose", "earR")]
         edges2 = [("nose", "earR"), ("nose", "earL")]  # Different order
 
-        hash1 = skeleton._shape_hash_from_edges(bodyparts, edges1)
-        hash2 = skeleton._shape_hash_from_edges(bodyparts, edges2)
+        hash1 = skel_utils.shape_hash_from_edges(bodyparts, edges1)
+        hash2 = skel_utils.shape_hash_from_edges(bodyparts, edges2)
 
         # Same topology should give same hash (order-independent)
         assert hash1 == hash2
         # Exact Weisfeiler-Lehman hash for this 3-node, 2-edge star.
         assert hash1 == "5144181ac27497fdfa9bdb5b8b799630"
 
-    def test_shape_hash_different_for_different_skeletons(self, skeleton):
+    def test_shape_hash_different_for_different_skeletons(self, skel_utils):
         """Test topology hash differs for different skeletons."""
 
         bodyparts = ["nose", "earL", "earR", "tailbase"]
@@ -114,20 +127,20 @@ class TestSkeletonTopology:
             ("tailbase", "earR"),
         ]
 
-        hash1 = skeleton._shape_hash_from_edges(bodyparts, edges1)
-        hash2 = skeleton._shape_hash_from_edges(bodyparts, edges2)
+        hash1 = skel_utils.shape_hash_from_edges(bodyparts, edges1)
+        hash2 = skel_utils.shape_hash_from_edges(bodyparts, edges2)
 
         # Different topology should give different hash
         assert hash1 != hash2
         assert hash1 == "7b9c246532208479e16ead07d0fd9661"
         assert hash2 == "cde6b48ed870286595c1455af7aff8bd"
 
-    def test_build_labeled_graph_has_correct_parts(self, skeleton):
+    def test_build_labeled_graph_has_correct_parts(self, skel_utils):
         """Test graph has correct number of nodes/edges."""
         bodyparts = ["nose", "earL", "earR"]
         edges = [("nose", "earL"), ("nose", "earR")]
 
-        graph = skeleton._build_labeled_graph(bodyparts, edges)
+        graph = skel_utils.build_labeled_graph(bodyparts, edges)
 
         assert isinstance(graph, nx.Graph)
         # Nodes/edges carry normalized labels ('earL' -> 'ear l').
@@ -141,13 +154,13 @@ class TestSkeletonTopology:
 class TestSkeletonDuplicateDetection:
     """Test skeleton duplicate detection with graph isomorphism."""
 
-    def test_fuzzy_equal_match(self, skeleton):
+    def test_fuzzy_equal_match(self, skel_utils):
         """Test fuzzy matching for matches."""
-        assert skeleton._fuzzy_equal("nose", "nose", threshold=0.85)
-        assert skeleton._fuzzy_equal("Nose", "nose", threshold=0.85)
-        assert skeleton._fuzzy_equal("LEFT_EAR", "left_ear", threshold=0.85)
-        assert skeleton._fuzzy_equal("leftear", "left_ear", threshold=0.85)
-        assert not skeleton._fuzzy_equal("nose", "tailbase", threshold=0.85)
+        assert skel_utils.fuzzy_equal("nose", "nose", threshold=0.85)
+        assert skel_utils.fuzzy_equal("Nose", "nose", threshold=0.85)
+        assert skel_utils.fuzzy_equal("LEFT_EAR", "left_ear", threshold=0.85)
+        assert skel_utils.fuzzy_equal("leftear", "left_ear", threshold=0.85)
+        assert not skel_utils.fuzzy_equal("nose", "tailbase", threshold=0.85)
 
     def test_isomorphic_with_distinct_parts_not_duplicate(self):
         """Same topology + fuzzy-similar but distinct parts -> not duplicate.

@@ -31,7 +31,7 @@ class TestHelperFunctions:
         """Test default_pk_name generation."""
         import re
 
-        from spyglass.position.v2.train import default_pk_name
+        from spyglass.position.utils.protocols import default_pk_name
 
         # Format is PREFIX-YYYYMMDD-HASH8: 5 + 8 + 1 + 8 = 22 chars
         name = default_pk_name("test", {"param": "value"})
@@ -61,7 +61,7 @@ class TestHelperFunctions:
         """
         import re
 
-        from spyglass.position.v2.train import default_pk_name
+        from spyglass.position.utils.protocols import default_pk_name
 
         model_id = default_pk_name("mdl")
         assert re.fullmatch(r"mdl-\d{8}-[0-9a-f]{8}", model_id), model_id
@@ -69,7 +69,7 @@ class TestHelperFunctions:
 
     def test_resolve_model_path(self):
         """Test resolve_model_path function."""
-        from spyglass.position.v2.train import resolve_model_path
+        from spyglass.position.utils.path_helpers import resolve_model_path
         from spyglass.settings import pose_project_dir
 
         # Test absolute path
@@ -89,12 +89,12 @@ class TestHelperFunctions:
         assert resolved == expected
 
     def test_to_stored_path(self):
-        """Test _to_stored_path function."""
-        from spyglass.position.v2.train import _to_stored_path
+        """Test to_stored_path function."""
+        from spyglass.position.utils.path_helpers import to_stored_path
 
         # Test absolute path (no pose_project_dir)
         abs_path = Path("/absolute/path/to/model.pkl")
-        stored = _to_stored_path(abs_path)
+        stored = to_stored_path(abs_path)
         assert stored == str(abs_path)
 
     def test_prompt_default(self):
@@ -702,7 +702,7 @@ class TestModelMetadataRegistration:
     @staticmethod
     def _metadata(**overrides):
         """A `ModelMetadata` with every field populated."""
-        from spyglass.position.v2.train import ModelMetadata
+        from spyglass.position.utils.protocols import ModelMetadata
 
         defaults = dict(
             model_id="test_metadata",
@@ -857,11 +857,12 @@ class TestModelEvaluation:
 
         `evaluate` dispatches on tool and `SLEAPStrategy.evaluate_model`
         exists, but the `evaluate_network is None` check ran first and
-        reported DeepLabCut as required for every tool.
+        reported DeepLabCut as required for every tool. The check now lives
+        in `DLCStrategy.evaluate_model`, so the SLEAP path cannot reach it.
         """
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.tool_strategy_dlc as dlc_mod
 
-        monkeypatch.setattr(train_mod, "evaluate_network", None)
+        monkeypatch.setattr(dlc_mod, "evaluate_network", None)
 
         restricted = MagicMock()
         restricted.fetch1.return_value = {
@@ -894,14 +895,15 @@ class TestModelEvaluation:
 
     def test_dlc_evaluation_still_requires_deeplabcut(self, model, monkeypatch):
         """The check moved into the DLC path rather than being dropped."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.tool_strategy_dlc as dlc_mod
 
-        monkeypatch.setattr(train_mod, "evaluate_network", None)
+        monkeypatch.setattr(dlc_mod, "evaluate_network", None)
 
         with pytest.raises(ImportError, match="evaluate_network"):
-            model._evaluate_dlc_model(
+            dlc_mod.DLCStrategy().evaluate_model(
                 {},
                 {"params": {"project_path": "/nonexistent"}},
+                model,
                 False,
                 True,
             )
@@ -1051,9 +1053,9 @@ class TestRankComparableMetrics:
 
     @staticmethod
     def _rank(sgp, rows):
-        from spyglass.position.v2.train import Model
+        from spyglass.position.v2.utils.model import rank_model_rows
 
-        return Model._rank_model_rows(rows)
+        return rank_model_rows(rows)
 
     def test_p_cutoff_does_not_outrank_full_test(self, sgp):
         ranked = self._rank(
@@ -1116,7 +1118,7 @@ class TestEvaluationResultsParsing:
     CONFIG = {"TrainingFraction": [0.95], "Task": "t", "date": "d"}
 
     def _parsed(self, sgp, monkeypatch, raw, shuffle=1, index=0):
-        from spyglass.position.v2 import train as mod
+        from spyglass.position.utils import tool_strategy_dlc as mod
 
         captured = {}
 
@@ -1126,7 +1128,7 @@ class TestEvaluationResultsParsing:
 
         monkeypatch.setattr(mod, "read_dlc_model_eval", _read)
         monkeypatch.setattr(mod, "load_yaml", lambda p: self.CONFIG)
-        out = mod.Model()._parse_dlc_evaluation_results(
+        out = mod.DLCStrategy()._parse_dlc_evaluation_results(
             Path("/proj"), shuffle, index
         )
         return out, captured
@@ -1163,7 +1165,7 @@ class TestEvaluationResultsParsing:
         assert captured == {"shuffle": 10, "index": 2}
 
     def test_absent_results_return_empty(self, sgp, monkeypatch):
-        from spyglass.position.v2 import train as mod
+        from spyglass.position.utils import tool_strategy_dlc as mod
 
         def _raise(*a, **k):
             raise RuntimeError("Evaluation folder not found")
@@ -1171,7 +1173,10 @@ class TestEvaluationResultsParsing:
         monkeypatch.setattr(mod, "read_dlc_model_eval", _raise)
         monkeypatch.setattr(mod, "load_yaml", lambda p: self.CONFIG)
 
-        assert mod.Model()._parse_dlc_evaluation_results(Path("/p"), 1, 0) == {}
+        parsed = mod.DLCStrategy()._parse_dlc_evaluation_results(
+            Path("/p"), 1, 0
+        )
+        assert parsed == {}
 
 
 class TestParamsIdentityIncludesSkeleton:

@@ -11,7 +11,7 @@ mocking external DLC calls to avoid requiring GPU/trained models.
 Note: Tests are structured to avoid DataJoint imports during collection.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -219,7 +219,9 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
             assert config_path == project_path / "config.yaml"
             assert snapshot_path == snapshot2
             assert model_id.startswith("mdl-")
-            assert datetime.now().strftime("%Y%m%d") in model_id
+            # default_pk_name stamps UTC, so a naive local now() fails
+            # for the hours when the two dates differ.
+            assert datetime.now(timezone.utc).strftime("%Y%m%d") in model_id
 
 
 def test_localize_trained_model_no_snapshots(tmp_path, skip_if_no_dlc):

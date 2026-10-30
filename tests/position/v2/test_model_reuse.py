@@ -13,7 +13,10 @@ class TestReuseCandidates:
 
     @pytest.fixture(autouse=True)
     def _cls(self, pv2_train):
+        from spyglass.position.v2.utils.model import reuse_candidates
+
         self.Model = pv2_train.Model
+        self.reuse_candidates = staticmethod(reuse_candidates)
 
     def test_groups_rows_by_model_with_subjects(self):
         rows = [
@@ -21,7 +24,7 @@ class TestReuseCandidates:
             {"model_id": "m1", "subject_id": "B"},
             {"model_id": "m2", "subject_id": "A"},
         ]
-        out = self.Model._reuse_candidates(rows)
+        out = self.reuse_candidates(rows)
         by_id = {c["model_id"]: c for c in out}
         assert by_id["m1"]["subjects"] == ["A", "B"]
         assert by_id["m2"]["subjects"] == ["A"]
@@ -31,12 +34,12 @@ class TestReuseCandidates:
             {"model_id": "m1", "subject_id": "A"},
             {"model_id": "m1", "subject_id": "B"},
         ]
-        (cand,) = self.Model._reuse_candidates(rows, subjects={"B", "Z"})
+        (cand,) = self.reuse_candidates(rows, subjects={"B", "Z"})
         assert cand["overlap"] == ["B"]
 
     def test_model_with_no_subject_kept_with_empty_set(self):
         rows = [{"model_id": "m1", "subject_id": None}]
-        (cand,) = self.Model._reuse_candidates(rows)
+        (cand,) = self.reuse_candidates(rows)
         assert cand["subjects"] == [] and cand["overlap"] == []
 
     def test_sorted_and_deduped(self):
@@ -45,7 +48,7 @@ class TestReuseCandidates:
             {"model_id": "ma", "subject_id": "A"},
             {"model_id": "ma", "subject_id": "A"},  # dup
         ]
-        out = self.Model._reuse_candidates(rows)
+        out = self.reuse_candidates(rows)
         assert [c["model_id"] for c in out] == ["ma", "mb"]
         assert out[0]["subjects"] == ["A"]  # deduped
 
@@ -55,14 +58,17 @@ class TestRedundantModelMessage:
 
     @pytest.fixture(autouse=True)
     def _cls(self, pv2_train):
+        from spyglass.position.v2.utils.model import redundant_model_msg
+
         self.MS = pv2_train.ModelSelection
+        self.redundant_model_msg = staticmethod(redundant_model_msg)
 
     def test_message_lists_models_and_escape_hatch(self):
         cands = [
             {"model_id": "m1", "subjects": ["A"], "overlap": ["A"]},
             {"model_id": "m2", "subjects": ["B"], "overlap": []},
         ]
-        msg = self.MS._redundant_model_msg("skelX", cands)
+        msg = self.redundant_model_msg("skelX", cands)
         assert "skelX" in msg
         assert "m1" in msg and "m2" in msg
         assert "overlaps ['A']" in msg  # overlap annotated
@@ -209,8 +215,10 @@ class TestRankModelRows:
     """Pure ranking of same-skeleton models by comparable metric (no DB)."""
 
     @pytest.fixture(autouse=True)
-    def _cls(self, pv2_train):
-        self.Model = pv2_train.Model
+    def _rank_fn(self, pv2_train):
+        from spyglass.position.v2.utils.model import rank_model_rows
+
+        self.rank = staticmethod(rank_model_rows)
 
     def test_scored_models_sorted_by_error_ascending(self):
         rows = [
@@ -218,7 +226,7 @@ class TestRankModelRows:
             {"model_id": "lo", "evaluation": {"test_error": 2.0}},
             {"model_id": "mid", "evaluation": {"test_error": 5.0}},
         ]
-        ranked = self.Model._rank_model_rows(rows)
+        ranked = self.rank(rows)
         assert [d["model_id"] for d in ranked] == ["lo", "mid", "hi"]
         assert ranked[0]["metric"] == "test_error"
         assert ranked[0]["value"] == 2.0
@@ -229,7 +237,7 @@ class TestRankModelRows:
             {"model_id": "scored", "evaluation": {"test_error": 4.0}},
             {"model_id": "null2", "evaluation": {}},
         ]
-        ranked = self.Model._rank_model_rows(rows)
+        ranked = self.rank(rows)
         assert ranked[0]["model_id"] == "scored"
         # Both unscored carry no fabricated value.
         assert all(d["value"] is None for d in ranked[1:])
@@ -239,19 +247,19 @@ class TestRankModelRows:
             {"model_id": "a", "evaluation": None},
             {"model_id": "b", "evaluation": {"train_error": 3.0}},
         ]
-        ranked = self.Model._rank_model_rows(rows)
+        ranked = self.rank(rows)
         # train_error alone is not a comparable validation/test metric here.
         assert all(d["value"] is None and d["metric"] is None for d in ranked)
 
     def test_falls_back_to_test_error_p(self):
         row = {"model_id": "m", "evaluation": {"test_error_p": 1.5}}
-        (scored,) = self.Model._rank_model_rows([row])
+        (scored,) = self.rank([row])
         assert scored["metric"] == "test_error_p"
         assert scored["value"] == 1.5
 
     def test_bool_not_treated_as_metric(self):
         row = {"model_id": "m", "evaluation": {"test_error": True}}
-        (scored,) = self.Model._rank_model_rows([row])
+        (scored,) = self.rank([row])
         assert scored["value"] is None
 
     def test_iterations_are_weak_tiebreaker_for_unscored(self):
@@ -259,7 +267,7 @@ class TestRankModelRows:
             {"model_id": "few", "evaluation": {"training_iterations": 10}},
             {"model_id": "many", "evaluation": {"training_iterations": 99}},
         ]
-        ranked = self.Model._rank_model_rows(rows)
+        ranked = self.rank(rows)
         # More iterations sorts first among unscored (deterministic only).
         assert [d["model_id"] for d in ranked] == ["many", "few"]
 

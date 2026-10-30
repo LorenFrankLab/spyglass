@@ -17,7 +17,9 @@ import pytest
 class TestDiscoverTrainingCsvs:
     @pytest.fixture(autouse=True)
     def fn(self):
-        from spyglass.position.v2.train import discover_training_csvs
+        from spyglass.position.v2.utils.training_io import (
+            discover_training_csvs,
+        )
 
         self.fn = discover_training_csvs
 
@@ -65,7 +67,7 @@ class TestDiscoverTrainingCsvs:
 class TestParseTrainingCsv:
     @pytest.fixture(autouse=True)
     def fn(self):
-        from spyglass.position.v2.train import parse_training_csv
+        from spyglass.position.v2.utils.training_io import parse_training_csv
 
         self.fn = parse_training_csv
 
@@ -131,7 +133,9 @@ class TestParseTrainingCsv:
 class TestAggregateTrainingStats:
     @pytest.fixture(autouse=True)
     def fn(self):
-        from spyglass.position.v2.train import aggregate_training_stats
+        from spyglass.position.v2.utils.training_io import (
+            aggregate_training_stats,
+        )
 
         self.fn = aggregate_training_stats
 
@@ -176,7 +180,7 @@ class TestAggregateTrainingStats:
 class TestValidateSkeletonGraph:
     @pytest.fixture(autouse=True)
     def fn(self):
-        from spyglass.position.v2.train import validate_skeleton_graph
+        from spyglass.position.v2.utils.skeleton import validate_skeleton_graph
 
         self.fn = validate_skeleton_graph
 
@@ -204,7 +208,7 @@ class TestValidateSkeletonGraph:
 class TestIsDuplicateSkeleton:
     @pytest.fixture(autouse=True)
     def fn(self):
-        from spyglass.position.v2.train import is_duplicate_skeleton
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
 
         self.fn = is_duplicate_skeleton
 
