@@ -15,9 +15,15 @@ discover the canonical label set without importing a table module.
 from importlib import import_module
 
 from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._core.job_config import (
+    install_openblas_fork_repair,
+)
 from spyglass.spikesorting.v2._orchestration.exports import (
     PACKAGE_ROOT_REEXPORTS,
 )
+
+# SpikeInterface's forked workers otherwise deadlock SciPy's OpenBLAS.
+install_openblas_fork_repair()
 
 
 def initialize_v2_defaults() -> None:

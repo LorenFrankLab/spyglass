@@ -2083,13 +2083,14 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
     `dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"n_jobs": N}` to use N
     workers in every compute stage (an explicit `n_jobs` also sets the search
     threads). Each worker adds about 1 GB, and results do not depend on the
-    count. On Linux the workers are forked, and a fork while OpenBLAS's thread
-    pool is running can deadlock the next linear-algebra call in the main
-    process -- seen as a MountainSort5 sort that hangs in its PCA; add
-    `"mp_context": "spawn"` to avoid it, at a few seconds of start-up per stage.
-    Spawned workers (and macOS / Windows, and MountainSort4's workers on every
-    platform) re-import the calling script, so scripts need an
-    `if __name__ == "__main__":` guard.
+    count. On Linux the workers are forked; importing v2 repairs SciPy's bundled
+    OpenBLAS in the main process after each fork, whose next single-precision LU
+    otherwise deadlocks (a MountainSort5 sort hung in its PCA). Keep
+    `max_threads_per_worker` at its default of 1: multithreaded BLAS inside a
+    forked worker can hang. On macOS and Windows the workers start by
+    re-importing the calling script, so scripts need an
+    `if __name__ == "__main__":` guard there (MountainSort4's workers already
+    require it on every platform).
 
 ### Environment
 

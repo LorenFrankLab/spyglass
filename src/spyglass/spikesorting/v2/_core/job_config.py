@@ -26,6 +26,41 @@ def _usable_cpus() -> int:
         return os.cpu_count() or 1
 
 
+def _repair_openblas_after_fork() -> None:
+    """Rebuild each OpenBLAS thread pool in the parent after a fork.
+
+    SciPy's bundled OpenBLAS (0.3.30) shuts its pool down in its fork handler,
+    and its next parallel single-precision LU then deadlocks rebuilding it,
+    blocked on ``server_lock``: MountainSort5's float32 PCA hung after
+    SpikeInterface's forked workers. Setting a pool's thread count again
+    rebuilds it cleanly, in ~2 ms.
+    """
+    try:
+        from threadpoolctl import ThreadpoolController
+    except ImportError:
+        return
+    for lib in ThreadpoolController().lib_controllers:
+        if lib.internal_api == "openblas":
+            lib.set_num_threads(lib.num_threads)
+
+
+@functools.cache
+def install_openblas_fork_repair() -> None:
+    """Run :func:`_repair_openblas_after_fork` after every fork (once per process).
+
+    A Python-level hook covers ``os.fork`` and multiprocessing's fork start
+    method, which SpikeInterface's process pools use. It repairs only the
+    parent: multithreaded BLAS inside forked workers hangs even in float64 and
+    without this hook, and the same repair in the child did not help, so
+    workers must stay single-threaded (SpikeInterface's default
+    ``max_threads_per_worker=1``). ``subprocess`` forks below both Python and
+    OpenBLAS's fork handler and leaves the pool intact.
+    """
+    import os
+
+    os.register_at_fork(after_in_parent=_repair_openblas_after_fork)
+
+
 def _explicit_n_jobs(*row_job_kwargs: dict | None):
     """The ``n_jobs`` a layer set (a later row blob first), or ``None``."""
     import datajoint as dj
@@ -53,9 +88,9 @@ def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
     ``_DEFAULT_SEARCH_THREADS_CAP``: the search is ~75% of curation-evaluation
     metrics and its threads add no memory (on 11 real searches 1 / 4 / 16
     threads took 8.9 / 2.7 / 0.74 s). ``n_jobs`` itself stays at
-    SpikeInterface's one worker unless a layer sets it: forked workers
-    followed by an in-process sorter deadlocked MountainSort5's PCA in
-    OpenBLAS, and on a real 20 min epoch four of them saved only ~6 s.
+    SpikeInterface's one worker unless a layer sets it: on a real 20 min epoch
+    four worker processes saved only ~6 s, and sorting and the evaluation did
+    not get faster.
 
     Parameters
     ----------
