@@ -11,7 +11,7 @@ from typing import Any, Dict, Set, Union
 import yaml
 
 from .dlc_io import read_dlc_model_eval
-from .path_helpers import to_stored_path as _to_stored_path
+from .path_helpers import to_stored_path
 from .protocols import ModelMetadata, default_pk_name
 from .yaml_io import load_yaml
 from .tool_strategy_base import PoseToolStrategy
@@ -543,9 +543,9 @@ class DLCStrategy(PoseToolStrategy):
             key,
             model_id=model_id,
             analysis_file_name=nwb_file_name,
-            model_path=_to_stored_path(model_path),
+            model_path=to_stored_path(model_path),
             snapshot_path=(
-                _to_stored_path(snapshot_path) if snapshot_path else None
+                to_stored_path(snapshot_path) if snapshot_path else None
             ),
         )
 

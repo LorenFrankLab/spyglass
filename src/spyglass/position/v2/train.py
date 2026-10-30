@@ -21,37 +21,15 @@ from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import suppress_print_from_package
 from spyglass.position.utils.path_helpers import (
     resolve_model_path,
-)
-from spyglass.position.utils.path_helpers import (
-    to_stored_path as _to_stored_path,
+    to_stored_path,
 )
 from spyglass.position.utils.protocols import ModelMetadata, default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
-from spyglass.position.v2.utils.model import (
-    rank_model_rows,
-    redundant_model_msg,
-    reuse_candidates,
-)
-from spyglass.position.v2.utils.skeleton import (
-    build_canonical_map,
-    canonicalize,
-    centroid_method_for,
-    clean_edges,
-    draw_skeleton,
-    is_duplicate_skeleton,
-    normalize_label,
-    shape_hash_from_edges,
-    validate_skeleton_graph,
-)
-from spyglass.position.v2.utils.training_plots import (
-    build_training_history_figure,
-)
-from spyglass.position.v2.utils.training_io import (
-    aggregate_training_stats,
-    discover_training_csvs,
-    parse_training_csv,
-)
+from spyglass.position.v2.utils import model as mdl
+from spyglass.position.v2.utils import skeleton as skel
+from spyglass.position.v2.utils import training_io as tio
+from spyglass.position.v2.utils import training_plots as plots
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin, logger
 
@@ -133,7 +111,7 @@ class BodyPart(SpyglassMixin, dj.Lookup):
         """
         names = [str(bp) for bp in cls().fetch("bodypart")]
         try:
-            return build_canonical_map(names)
+            return skel.build_canonical_map(names)
         except dj.DataJointError as err:
             raise dj.DataJointError(
                 "The BodyPart reference table is inconsistent: it holds two "
@@ -160,12 +138,12 @@ class BodyPart(SpyglassMixin, dj.Lookup):
             return
         # Reject a different spelling of an existing concept. Scan only for a
         # clash with this name so unrelated legacy duplicates don't block it.
-        norm = normalize_label(bodypart)
+        norm = skel.normalize_label(bodypart)
         collision = next(
             (
                 bp
                 for bp in self.fetch("bodypart")
-                if bp != bodypart and normalize_label(bp) == norm
+                if bp != bodypart and skel.normalize_label(bp) == norm
             ),
             None,
         )
@@ -305,8 +283,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         # an imported skeleton can resolve its own parts ("reads lenient,
         # writes strict").
         curated = (BodyPart() & {"source": "curated"}).fetch("bodypart")
-        valid = {normalize_label(x) for x in curated}
-        missing = {normalize_label(x) for x in labels} - valid
+        valid = {skel.normalize_label(x) for x in curated}
+        missing = {skel.normalize_label(x) for x in labels} - valid
         if missing:
             raise dj.DataJointError(
                 f"Unknown bodypart name(s) (not in BodyPart): {sorted(missing)}"
@@ -339,7 +317,9 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             unresolved names normalize alike.
         """
         if not accept:
-            self._validate_bodyparts({normalize_label(bp) for bp in bodyparts})
+            self._validate_bodyparts(
+                {skel.normalize_label(bp) for bp in bodyparts}
+            )
             return
 
         # Check the batch against itself. The flag's safety argument covers
@@ -348,7 +328,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         # canon_map() would then raise on every later read.
         by_norm: Dict[str, List[str]] = {}
         for bp in unresolved:
-            by_norm.setdefault(normalize_label(bp), []).append(bp)
+            by_norm.setdefault(skel.normalize_label(bp), []).append(bp)
         clashes = {n: names for n, names in by_norm.items() if len(names) > 1}
         if clashes:
             detail = "; ".join(
@@ -420,7 +400,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         # validation and then fail the FK with an opaque IntegrityError.)
         canon_map = BodyPart.canon_map()
         unresolved = [
-            bp for bp in bodyparts if canonicalize(bp, canon_map) is None
+            bp for bp in bodyparts if skel.canonicalize(bp, canon_map) is None
         ]
         if unresolved:
             self._register_novel_bodyparts(
@@ -429,7 +409,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             canon_map = BodyPart.canon_map()
 
         bodyparts = [
-            canonicalize(bp, canon_map, default=bp) for bp in bodyparts
+            skel.canonicalize(bp, canon_map, default=bp) for bp in bodyparts
         ]
 
         # Structurally clean edges (flatten nested groups, drop empty slots),
@@ -439,25 +419,25 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 tuple(
                     sorted(
                         (
-                            canonicalize(u, canon_map, default=u),
-                            canonicalize(v, canon_map, default=v),
+                            skel.canonicalize(u, canon_map, default=u),
+                            skel.canonicalize(v, canon_map, default=v),
                         )
                     )
                 )
-                for (u, v) in (clean_edges(edges) or [])
+                for (u, v) in (skel.clean_edges(edges) or [])
             }
         )
 
         # Validate edge structure against the (canonical) bodypart set.
-        validate_skeleton_graph(bodyparts, edges)
+        skel.validate_skeleton_graph(bodyparts, edges)
 
-        shape_hash = shape_hash_from_edges(bodyparts, edges)
+        shape_hash = skel.shape_hash_from_edges(bodyparts, edges)
 
         explicit_id = key.get("skeleton_id")
         if check_duplicates and not explicit_id:
             for row in self & dict(hash=shape_hash):
                 row_bodyparts = self.get_bodyparts(row["skeleton_id"])
-                if is_duplicate_skeleton(
+                if skel.is_duplicate_skeleton(
                     bodyparts,
                     edges,
                     row_bodyparts,
@@ -524,7 +504,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             self._warn_msg(f"No bodyparts found for skeleton '{skeleton_id}'")
             return None
 
-        return draw_skeleton(
+        return skel.draw_skeleton(
             skeleton_id, bodyparts, skeleton_data["edges"] or []
         )
 
@@ -566,7 +546,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         if not bodyparts:
             bodyparts = self.get_bodyparts(skeleton_data["skeleton_id"])
 
-        return centroid_method_for(bodyparts)
+        return skel.centroid_method_for(bodyparts)
 
 
 @schema
@@ -892,7 +872,7 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         )
         if not candidates:
             return
-        raise ValueError(redundant_model_msg(skeleton_id, candidates))
+        raise ValueError(mdl.redundant_model_msg(skeleton_id, candidates))
 
 
 @schema
@@ -997,7 +977,7 @@ class Model(SpyglassMixin, dj.Computed):
         rows = cls.with_skeleton(skeleton_id).fetch(
             "model_id", "evaluation", as_dict=True
         )
-        return rank_model_rows(rows)
+        return mdl.rank_model_rows(rows)
 
     @classmethod
     def reusable_for(
@@ -1040,7 +1020,7 @@ class Model(SpyglassMixin, dj.Computed):
         excl = set(exclude or [])
         return [
             c
-            for c in reuse_candidates(rows, subjects)
+            for c in mdl.reuse_candidates(rows, subjects)
             if c["model_id"] not in excl
         ]
 
@@ -1311,7 +1291,7 @@ class Model(SpyglassMixin, dj.Computed):
             "tool": "DLC",
             "project_path": str(metadata.project_path),
             "config_path": str(metadata.config_path),
-            "model_path": _to_stored_path(metadata.model_path),
+            "model_path": to_stored_path(metadata.model_path),
             "shuffle": metadata.params.get("shuffle", 1),
             "trainingsetindex": metadata.params.get("trainingsetindex", 0),
             "iteration": lm.get("iteration", 0),
@@ -1732,7 +1712,7 @@ class Model(SpyglassMixin, dj.Computed):
         ):
             return None
 
-        csv_files = discover_training_csvs(model_path)
+        csv_files = tio.discover_training_csvs(model_path)
         if not csv_files:
             self._warn_msg(
                 f"No training stats found near: {model_path}. "
@@ -1742,7 +1722,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Found {len(csv_files)} training CSV file(s)")
 
-        parsed = [parse_training_csv(p) for p in csv_files]
+        parsed = [tio.parse_training_csv(p) for p in csv_files]
         valid = [df for df in parsed if df is not None]
         if not valid:
             self._warn_msg(
@@ -1751,7 +1731,7 @@ class Model(SpyglassMixin, dj.Computed):
             )
             return None
 
-        combined = aggregate_training_stats(valid)
+        combined = tio.aggregate_training_stats(valid)
 
         if "loss" in combined.columns and len(combined) > 0:
             initial_loss = combined["loss"].iloc[0]
@@ -1817,7 +1797,7 @@ class Model(SpyglassMixin, dj.Computed):
         if df is None:
             raise ValueError("No training history found for this model")
 
-        fig = build_training_history_figure(
+        fig = plots.build_training_history_figure(
             df, model_id=model_key["model_id"], detailed=detailed
         )
 
@@ -2151,7 +2131,7 @@ class Model(SpyglassMixin, dj.Computed):
         canon_map = BodyPart.canon_map()
         mapping, unresolved = {}, []
         for name in names:
-            canonical = canonicalize(name, canon_map)
+            canonical = skel.canonicalize(name, canon_map)
             if canonical is None:
                 unresolved.append(name)
             else:
@@ -2544,7 +2524,7 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         # Step 5: the weights the strategy placed for us.
-        stored_path = _to_stored_path(zoo["weights"])
+        stored_path = to_stored_path(zoo["weights"])
 
         existing = self & {"model_path": stored_path}
         if existing:
@@ -2648,7 +2628,7 @@ class Model(SpyglassMixin, dj.Computed):
         # models share one project's config.yaml, so it would return whichever
         # was imported first. Never assume a single match -- ``fetch1`` on a
         # multi-row set would raise.
-        stored_path = _to_stored_path(model_path)
+        stored_path = to_stored_path(model_path)
         dated = {"model_selection_id"}
         existing = (
             self
