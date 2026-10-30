@@ -45,14 +45,14 @@ from spyglass.position.utils.validation import (
     validate_orientation_params,
     validate_smoothing_params,
 )
+from spyglass.position.utils.path_helpers import resolve_model_path
+from spyglass.position.utils.protocols import default_pk_name
 from spyglass.position.v2.train import (
     BodyPart,
     Model,
     ModelParams,
     ModelSelection,
     Skeleton,
-    default_pk_name,
-    resolve_model_path,
 )
 from spyglass.position.v2.utils.device import resolve_cuda_device
 from spyglass.position.v2.utils.nwb_io import (
