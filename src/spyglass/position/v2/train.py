@@ -2819,26 +2819,40 @@ class Model(SpyglassMixin, dj.Computed):
             model_instance=self,
         )
 
-        # ── 3. Extract frames (skip if frames already exist) ──────────────────
+        # ── 3. Extract frames for each video that has none ────────────────────
+        # Per video, not per project: `ensure_project` reuses a project whose
+        # videos are a subset of those requested, so one populated
+        # `labeled-data` subdirectory is no evidence for a newly added video.
+        # DLC names each subdirectory after the video's stem.
         labeled_data_dir = config_path.parent / "labeled-data"
-        already_extracted = (
-            any(
-                list(d.glob("img*.png"))
-                for d in labeled_data_dir.iterdir()
-                if d.is_dir()
-            )
-            if labeled_data_dir.exists()
-            else False
-        )
+        project_videos = config_path.parent / "videos"
+        pending = [
+            video
+            for video in dlc_videos
+            if not list((labeled_data_dir / Path(video).stem).glob("img*.png"))
+        ]
 
-        if already_extracted:
+        if not pending:
             self._info_msg("Frames already extracted — skipping.")
         else:
             algo = extract_kwargs["algo"]
+            # Name the videos where DLC supports it, so a reused project's
+            # already-extracted videos are left alone. `video_sets` holds the
+            # copies under the project, which is what DLC matches on.
+            if "videos_list" in get_param_names(extract_frames):
+                extract_kwargs["videos_list"] = [
+                    str(project_videos / Path(video).name) for video in pending
+                ]
+            elif len(pending) < len(dlc_videos):
+                self._warn_msg(
+                    f"Installed DeepLabCut's extract_frames takes no "
+                    f"`videos_list`, so all {len(dlc_videos)} videos are "
+                    f"extracted rather than the {len(pending)} missing."
+                )
             self._info_msg(
                 "Extracting "
-                + f"{effective_frames_per_video} frames/video "
-                + f"(algo='{algo}')…"
+                + f"{effective_frames_per_video} frames/video for "
+                + f"{len(pending)} video(s) (algo='{algo}')…"
             )
             try:
                 extract_frames(str(config_path), **extract_kwargs)
