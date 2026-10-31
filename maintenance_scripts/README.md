@@ -28,14 +28,15 @@ regularly as cron jobs.
     - Used to send dirty-install notifications: `cleanup.py` writes a row per
         flagged user to `$DIRTY_ENVS_OUT`, and `run_jobs.sh` emails each user (CC
         `$SPYGLASS_EMAIL_DEST`). A user is flagged when their logged Spyglass
-        clone has local source edits or is far behind upstream, and the flag has
-        stood for at least 30 days. Users on a clean, current clone are never
-        emailed; a flag is also dropped once the user returns to a clean install
-        (resolution), or if they have not imported Spyglass from that environment
-        within the last 60 days (twice the warn window — stale, likely-abandoned
-        clones age out). Importing Spyglass logs the current environment and emits
-        a one-time warning for flagged installs, so the email is an escalation of
-        a warning the user has already seen.
+        clone has local source edits, and the flag has stood for at least 30 days.
+        The 30 days run from when the clone first went dirty, not from the most
+        recent session. A clone on an older official commit is not flagged; it
+        warns at import only. A flag is dropped once the user returns to a clean
+        install (resolution), or if they have not used Spyglass from that
+        environment within the last 60 days (twice the warn window —
+        likely-abandoned clones age out). Importing Spyglass warns for a flagged
+        install, so the email is an escalation of a warning the user has already
+        seen.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...

@@ -1554,8 +1554,143 @@ def test_dirty_installs_query(user_env_tbl, dirty_install_info):
     assert isinstance(rows[0]["days_since_warn"], int)
 
 
-def test_stale_install_flagged(user_env_tbl, stale_install_info):
-    """A clean-but-stale install (no edits) still populates dirty_path."""
+@pytest.fixture(scope="module")
+def same_commit_pair():
+    """Clean and dirty install info differing *only* in local edits.
+
+    The clean/dirty fixtures elsewhere also differ in ``commit_hash``, so a
+    test using them passes on the commit difference and says nothing about
+    whether dirty state itself is recorded.
+    """
+    shared = dict(is_dev=True, commit_hash="cafe1234", is_stale=False)
+    return (
+        dict(
+            **shared,
+            install_path=None,
+            has_local_changes=False,
+            is_official=True,
+        ),
+        dict(
+            **shared,
+            install_path="/home/user/spyglass",
+            has_local_changes=True,
+            is_official=False,
+        ),
+    )
+
+
+def _log_as(user_env_tbl, info):
+    """Clear cached state and log the environment under a given install info."""
+    with patch(
+        "spyglass.common.common_user.get_install_info", return_value=info
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        return user_env_tbl.insert_current_env()
+
+
+def test_clean_then_dirty_at_one_commit(user_env_tbl, same_commit_pair):
+    """Going dirty at an already-logged commit records a distinct row.
+
+    The clean and dirty states hash identically, so a table keyed on
+    ``env_hash`` alone could not represent the change: the dirty episode was
+    silently dropped and the user was never emailed.
+    """
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    clean_id = _log_as(user_env_tbl, clean)["env_id"]
+    dirty_id = _log_as(user_env_tbl, dirty)["env_id"]
+
+    assert clean_id != dirty_id
+    clean_row = (user_env_tbl & f'env_id="{clean_id}"').fetch1()
+    dirty_row = (user_env_tbl & f'env_id="{dirty_id}"').fetch1()
+
+    assert clean_row["env_hash"] is not None and clean_row["env"] is not None
+    assert dirty_row["env_hash"] is None and dirty_row["env"] is None
+    assert dirty_row["spyglass_commit"] == clean_row["spyglass_commit"]
+    assert dirty_id in list(user_env_tbl.dirty_installs().fetch("env_id"))
+
+
+def test_dirty_then_clean_at_one_commit_resolves(
+    user_env_tbl, same_commit_pair
+):
+    """Discarding edits at the same commit clears the escalation.
+
+    Without a recordable resolution the user kept receiving "not on an official
+    commit" email after they had already fixed it.
+    """
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    dirty_id = _log_as(user_env_tbl, dirty)["env_id"]
+    assert dirty_id in list(user_env_tbl.dirty_installs().fetch("env_id"))
+
+    _log_as(user_env_tbl, clean)
+    assert list(user_env_tbl.dirty_installs().fetch("env_id")) == []
+
+    import io
+
+    buf = io.StringIO()
+    with patch("sys.stdout", buf):
+        user_env_tbl.write_dirty_notifications()
+    assert buf.getvalue() == ""
+
+
+def test_dirty_path_runs_no_subprocess(user_env_tbl, same_commit_pair):
+    """A dirty install costs no conda export, no pip freeze and no hashing."""
+    _, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    with patch("spyglass.utils.env_cache.sub_run") as mock_run:
+        result = _log_as(user_env_tbl, dirty)
+
+    mock_run.assert_not_called()
+    assert result["env_id"] is not None
+
+
+def test_dirty_episode_logged_once(user_env_tbl, same_commit_pair):
+    """A second session refreshes last_seen rather than adding a row."""
+    _, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    first = _log_as(user_env_tbl, dirty)["env_id"]
+    before = (user_env_tbl & f'env_id="{first}"').fetch1("last_seen")
+
+    second = _log_as(user_env_tbl, dirty)["env_id"]
+    row = (user_env_tbl & f'env_id="{first}"').fetch1()
+
+    assert second == first
+    assert len(user_env_tbl & "env_hash IS NULL") == 1
+    assert row["last_seen"] >= before  # refreshed
+    assert row["timestamp"] <= row["last_seen"]  # first appearance held
+
+
+def test_episode_after_resolution_starts_fresh(user_env_tbl, same_commit_pair):
+    """A new dirty episode gets its own first-appeared date.
+
+    Deduping against every past dirty row would have matched the resolved one
+    and inherited its months-old timestamp, emailing the user on day one.
+    """
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    first = _log_as(user_env_tbl, dirty)["env_id"]
+    _log_as(user_env_tbl, clean)  # resolution
+    second = _log_as(user_env_tbl, dirty)["env_id"]
+
+    assert second != first
+    assert len(user_env_tbl & "env_hash IS NULL") == 2
+    assert list(user_env_tbl.dirty_installs().fetch("env_id")) == [second]
+
+
+def test_stale_install_is_not_dirty(user_env_tbl, stale_install_info):
+    """A clean-but-stale install gets a full row and is never escalated.
+
+    An older official commit is reproducible, so its environment is worth
+    storing and the user is owed the soft "consider updating" advisory rather
+    than the 30-day dirty-install email.
+    """
     with patch(
         "spyglass.common.common_user.get_install_info",
         return_value=stale_install_info,
@@ -1567,8 +1702,11 @@ def test_stale_install_flagged(user_env_tbl, stale_install_info):
 
     env_id = result["env_id"]
     row = (user_env_tbl & f'env_id="{env_id}"').fetch1()
-    assert row["dirty_path"] == stale_install_info["install_path"]
+    assert row["dirty_path"] is None
+    assert row["env_hash"] is not None  # a full row
+    assert row["env"] is not None
     assert row["spyglass_commit"] == stale_install_info["commit_hash"]
+    assert env_id not in list(user_env_tbl.dirty_installs().fetch("env_id"))
 
 
 def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
@@ -1588,39 +1726,43 @@ def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
 
 
 def test_dirty_installs_excludes_inactive(user_env_tbl):
-    """A dirty row older than 2x the warn window (no recent import) is dropped.
+    """A dirty row not seen within 2x the warn window is dropped.
 
-    A second dirty row within the window is kept — the cron only emails users
-    who have imported within twice the grace window.
+    The window tests ``last_seen``, not ``timestamp``: both rows below first
+    went dirty at the same long-ago moment, so keying on first-appearance would
+    drop them both and stop emailing a user who is dirty and still working.
     """
     from datetime import datetime, timedelta
 
     from spyglass.utils.git_utils import WARN_DIRTY_ENV_DAYS
 
     user_env_tbl.delete(safemode=False)
-    base_env = {"channels": ["x"], "dependencies": ["p=1=py"]}
-    stale_ts = datetime.now() - timedelta(days=2 * WARN_DIRTY_ENV_DAYS + 5)
+    old_ts = datetime.now() - timedelta(days=2 * WARN_DIRTY_ENV_DAYS + 5)
     active_ts = datetime.now() - timedelta(days=WARN_DIRTY_ENV_DAYS + 5)
 
+    # Partial rows: env_hash IS NULL is what marks a dirty install. Both went
+    # dirty long ago; they differ only in whether the user has been back.
     user_env_tbl.insert(
         [
             {
                 "env_id": "ghost_envstale_00",
-                "env_hash": "a" * 32,
-                "env": base_env,
-                "has_editable": False,
+                "env_hash": None,
+                "env": None,
+                "has_editable": None,
                 "dirty_path": "/old",
                 "spyglass_commit": "stale01",
-                "timestamp": stale_ts,
+                "timestamp": old_ts,
+                "last_seen": old_ts,
             },
             {
                 "env_id": "ghost_envactive_00",
-                "env_hash": "b" * 32,
-                "env": base_env,
-                "has_editable": False,
+                "env_hash": None,
+                "env": None,
+                "has_editable": None,
                 "dirty_path": "/recent",
                 "spyglass_commit": "active1",
-                "timestamp": active_ts,
+                "timestamp": old_ts,  # same first-appearance as the other
+                "last_seen": active_ts,  # but seen recently
             },
         ],
         skip_duplicates=True,
@@ -1628,18 +1770,26 @@ def test_dirty_installs_excludes_inactive(user_env_tbl):
     try:
         dirty_ids = list(user_env_tbl.dirty_installs().fetch("env_id"))
         assert "ghost_envstale_00" not in dirty_ids  # aged out (inactive)
-        assert "ghost_envactive_00" in dirty_ids  # still within 2x window
+        assert "ghost_envactive_00" in dirty_ids  # seen within 2x window
     finally:
         for eid in ("ghost_envstale_00", "ghost_envactive_00"):
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
 
 
-def test_has_matching_env_same_hash(user_env_tbl):
-    """has_matching_env returns True when the stored hash matches current env."""
-    for attr in ("env", "env_hash", "matching_env_id", "this_env"):
-        user_env_tbl.__dict__.pop(attr, None)
-    env_id = user_env_tbl.this_env["env_id"]
-    assert user_env_tbl.has_matching_env(env_id=env_id) is True
+def test_has_matching_env_same_hash(user_env_tbl, clean_install_info):
+    """has_matching_env returns True when the stored hash matches current env.
+
+    Patched clean: a dirty install logs a partial row with no environment, and
+    the test suite itself usually runs from a working tree with local edits.
+    """
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=clean_install_info,
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        env_id = user_env_tbl.this_env["env_id"]
+        assert user_env_tbl.has_matching_env(env_id=env_id) is True
 
 
 def test_has_matching_env_missing_id(user_env_tbl):
@@ -1668,11 +1818,18 @@ def test_get_dep_version_missing_package(user_env_tbl):
     assert result[env_id] == ""
 
 
-def test_write_env_yaml(user_env_tbl, tmp_path):
-    """write_env_yaml writes a YAML file named after the env_id."""
-    for attr in ("env", "env_hash", "matching_env_id", "this_env"):
-        user_env_tbl.__dict__.pop(attr, None)
-    env_id = user_env_tbl.this_env["env_id"]
+def test_write_env_yaml(user_env_tbl, tmp_path, clean_install_info):
+    """write_env_yaml writes a YAML file named after the env_id.
+
+    Patched clean, as above: a partial row has no environment to write.
+    """
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=clean_install_info,
+    ):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        env_id = user_env_tbl.this_env["env_id"]
     user_env_tbl.write_env_yaml(env_id=env_id, dest_path=str(tmp_path))
 
     yaml_file = tmp_path / f"{env_id}.yaml"
