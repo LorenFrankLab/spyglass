@@ -2,7 +2,9 @@ import os
 import random
 import string
 import subprocess
-from functools import cached_property
+import sys
+import sysconfig
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from uuid import uuid4
@@ -70,6 +72,37 @@ HASH_ERROR_MSG = (
     "NOTE: Mismatched file at '{file_path}' was deleted automatically.\n\n"
     "See: docs/troubleshooting.md#checksum-mismatch"
 )
+
+
+def _environment_key() -> tuple:
+    """Return a cheap key that changes whenever the Python environment does.
+
+    conda appends to ``conda-meta/history`` on every install, and pip changes
+    the site-packages directory when it adds or removes a distribution, so
+    their modification times move with any install made mid-session.
+    """
+
+    def mtime(path) -> float:
+        try:
+            return os.stat(path).st_mtime_ns
+        except OSError:
+            return -1
+
+    return (
+        mtime(Path(sys.prefix) / "conda-meta" / "history"),
+        mtime(sysconfig.get_paths()["purelib"]),
+    )
+
+
+@lru_cache(maxsize=1)
+def _conda_env_export(environment_key: tuple) -> str:
+    """Return ``conda env export`` for one state of the environment.
+
+    The export takes seconds and every new analysis file records it, so it
+    runs once per environment state instead of once per file. A failure is
+    not cached.
+    """
+    return subprocess.check_output(["conda", "env", "export"], text=True)
 
 
 class AnalysisMixin(BaseMixin):
@@ -353,10 +386,7 @@ class AnalysisMixin(BaseMixin):
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        python_env = subprocess.check_output(
-            ["conda", "env", "export"], text=True
-        )
-        env_info += python_env
+        env_info += _conda_env_export(_environment_key())
         return env_info
 
     @classmethod
