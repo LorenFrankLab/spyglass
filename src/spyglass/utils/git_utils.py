@@ -14,9 +14,10 @@ Detection logic
 2. ``commit_hash`` — ``git rev-parse --short HEAD`` when running from a clone,
    falling back to the ``+g<hash>`` suffix in ``__version__``.  ``None`` for
    standard pip installs of a release.
-3. ``install_path`` — the repo root if a ``.git`` directory is found as an
-   ancestor of ``spyglass.__file__``; ``None`` for site-packages installs.
-   Only set when the package is running from a local clone.
+3. ``install_path`` — the root of the spyglass clone this package runs from,
+   identified by ``<root>/src/spyglass/__init__.py`` resolving to
+   ``spyglass.__file__``; ``None`` otherwise, including an install inside an
+   unrelated git repo.
 4. ``has_local_changes`` — ``git diff --name-only HEAD -- src/`` returns
    non-empty output.  Scoped to ``src/`` so doc edits, notebook changes, and
    ``.claude/`` artefacts are intentionally ignored.
@@ -301,9 +302,10 @@ def get_install_info() -> dict:
         because ``_version.py`` is written at install and does not move with a
         ``git pull``.
     install_path : str or None
-        Absolute path to the repository root when running from a local clone
-        (i.e. a ``.git`` directory is found as an ancestor of
-        ``spyglass.__file__``).  ``None`` for site-packages installs.
+        Absolute path to the spyglass clone this package runs from, accepted
+        only when ``<root>/src/spyglass/__init__.py`` resolves to
+        ``spyglass.__file__``.  ``None`` for site-packages installs and for an
+        install that merely sits inside someone else's repo.
     has_local_changes : bool
         ``True`` when ``git diff --name-only HEAD -- src/`` produces output,
         meaning tracked source files have been modified relative to HEAD.
@@ -337,16 +339,24 @@ def _compute_install_info() -> dict:
     if m := _VCS_HASH_RE.search(__version__):
         commit_hash = m.group(1)
 
-    # ── install_path: walk up from spyglass package looking for .git ─────────
+    # ── install_path: the spyglass clone we are running from, if any ─────────
     install_path: Optional[str] = None
     try:
         import spyglass
 
-        pkg_path = Path(spyglass.__file__).resolve().parent  # …/spyglass/
+        pkg_init = Path(spyglass.__file__).resolve()  # …/src/spyglass/__init__
+        pkg_path = pkg_init.parent  # …/spyglass/
         for candidate in [pkg_path, *pkg_path.parents]:
-            if (candidate / ".git").exists():
+            if not (candidate / ".git").exists():
+                continue
+            # The first .git decides, and it only counts when this spyglass
+            # lives in it. A venv inside an unrelated repo (uv's default
+            # `.venv`, or `conda create --prefix ./env`) would otherwise adopt
+            # that repo's commit and dirty state.
+            clone_init = candidate / "src" / "spyglass" / "__init__.py"
+            if clone_init.exists() and clone_init.resolve() == pkg_init:
                 install_path = str(candidate)
-                break
+            break
     except Exception as exc:
         logger.debug(f"could not locate install path: {exc}")
 
