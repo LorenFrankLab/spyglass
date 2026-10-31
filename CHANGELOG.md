@@ -118,6 +118,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     #1686
 - Add `github_user_name` to `LabMember.LabMemberInfo` for shared-store identity
     #1686
+- Run `conda env export` once per environment state rather than once per
+    new analysis file #1702
 - Inherit shared-store visibility for derived analysis files, taking the
     narrowest scope across their parents #1686
 - Expand `custom` config to specify per-backend data store behavior #1686
