@@ -1097,7 +1097,7 @@
         "test_derive_tracked_units_unmatched_singleton": "unit",
         "test_divergent_electrode_space_members_empty_when_matching": "unit",
         "test_divergent_electrode_space_members_flags_distinct_probe": "unit",
-        "test_driftout_units_recovered_pooled": "unit",
+        "test_driftout_units_recovered_pooled": "stage",
         "test_external_matcher_satisfies_protocol_and_runs": "unit",
         "test_matcher_parameters_bulk_insert_is_validated": "db_unit",
         "test_matcher_parameters_duplicate_content_is_matcher_scoped": "db_unit",
