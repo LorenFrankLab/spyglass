@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import filecmp
 import inspect
+import os
 import shutil
 from pathlib import Path
 
@@ -54,8 +55,18 @@ def copy_and_insert_nwb(
     ingest_name = dest_name or nwb_source.name
     raw_target = Path(raw_dir) / ingest_name
     # A copy left by an earlier fixture version would otherwise be ingested.
+    # Generated fixtures differ on every write (NWB object ids are random), so
+    # first close the NWB file cache, which is keyed by path and would keep
+    # serving the old file. Then replace the copy rather than rewrite it in
+    # place: HDF5 matches open files by inode, so a handle still open on the
+    # old copy would otherwise be reused against the rewritten bytes.
     if not (raw_target.exists() and filecmp.cmp(nwb_source, raw_target)):
-        shutil.copy2(nwb_source, raw_target)
+        from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+        close_nwb_files()
+        staged = raw_target.with_name(raw_target.name + ".partial")
+        shutil.copy2(nwb_source, staged)
+        os.replace(staged, raw_target)
     kwargs = {"raise_err": True}
     if "reinsert" in inspect.signature(insert_sessions).parameters:
         kwargs["reinsert"] = True
