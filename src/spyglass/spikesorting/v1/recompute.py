@@ -255,8 +255,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
 
-        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
-        if at_creation and editable_env:  # assume fail if editable env
+        if at_creation and not UserEnvironment().is_trusted(self.env_dict):
             at_creation = False  # # pragma: no cover
 
         inserts = []

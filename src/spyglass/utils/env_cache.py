@@ -142,9 +142,11 @@ class CondaEnvCache:
     Attributes
     ----------
     has_editable : bool
-        Set to ``True`` after ``_merge_conda_pip()`` detects any non-spyglass,
-        non-jsonschema editable install.  Only meaningful after a
-        ``get(with_pip=True)`` call.
+        ``True`` when a dependency is installed editable, which recompute
+        treats as untrustworthy — an editable package's version string says
+        nothing about its contents. Spyglass itself is exempt: its upstream is
+        known, so an edited spyglass clone is detected through git instead.
+        Only meaningful after a ``get(with_pip=True)`` call.
     """
 
     def __init__(self) -> None:
@@ -563,7 +565,12 @@ class CondaEnvCache:
         return False
 
     def _warn_if_custom_or_conflict(self) -> None:
-        """Log warnings for non-standard pip installs and conda/pip conflicts."""
+        """Log warnings for non-standard pip installs and conda/pip conflicts.
+
+        Two packages are exempt: spyglass, often editable so updates can be
+        fetched without reinstalling, and jsonschema, which conda installs from
+        a temp directory.
+        """
         pip_custom_no_spy = {
             k: v
             for k, v in self._pip_custom.items()

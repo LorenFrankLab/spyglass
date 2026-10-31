@@ -265,6 +265,37 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         )
         return {"env_id": new_env_id}
 
+    def is_trusted(self, restriction=True) -> bool:
+        """Whether a logged environment may be assumed to reproduce its files.
+
+        Recompute uses this to decide whether an attempt can be logged as
+        passing at creation. Three states disqualify an environment:
+
+        * a dirty install (``env_hash`` null) — no environment was recorded;
+        * an untested environment (``has_editable`` null) — no ``pip freeze``
+          ran, so nothing is known about editable installs;
+        * an editable dependency (``has_editable`` true) — its version string
+          says nothing about its contents.
+
+        Parameters
+        ----------
+        restriction : dict or str, optional
+            Restriction selecting one row. Default all, which requires the
+            table to hold exactly one.
+
+        Returns
+        -------
+        bool
+            ``True`` only when the row records a fully examined, clean
+            environment.
+        """
+        has_editable, env_hash = (self & restriction).fetch1(
+            "has_editable", "env_hash"
+        )
+        if env_hash is None or has_editable is None:
+            return False
+        return not has_editable
+
     def unresolved_dirty(self) -> "dj.expression.QueryExpression":
         """Return partial rows whose dirty state has not been cleaned up.
 
