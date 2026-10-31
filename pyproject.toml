@@ -223,6 +223,7 @@ optional-dependencies.test = [
   "pytest-cov",             # code coverage
   "pytest-env",             # environment defaults in tool.pytest.ini_options
   "pytest-timeout",         # per-tier hang guard in tests/spikesorting/v2
+  "pytest-xdist",           # parallel workers; see tests/README.md
   "pytest-xvfb",            # for headless testing of Qt
   "tomli; python_version<'3.11'", # dependency-contract checks on Python 3.10
 ]

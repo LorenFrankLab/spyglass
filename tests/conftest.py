@@ -52,7 +52,7 @@ from pandas.errors import PerformanceWarning
 
 from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
-from .data_downloader import DataDownloader
+from .data_downloader import FILE_PATHS, DataDownloader
 
 # --------- Fix DeepLabCut's reload of the logging module ---------------------
 # deeplabcut.pose_estimation_tensorflow.training.train_network runs
@@ -453,7 +453,7 @@ def _refuse_preimported_spyglass(modules=None):
 
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
-    global NO_DLC
+    global NO_DLC, DATA_CLEANUP_ROOT
 
     TEST_FILE = "minirec20230622.nwb"
     unit_only = getattr(config.option, "v2_tier", None) == "unit"
@@ -494,7 +494,47 @@ def pytest_configure(config):
             stacklevel=2,
         )
 
+    # pytest-xdist: the controller runs no tests, so it starts no server; each
+    # worker gets its own server and data directory. v2 derives analyzer
+    # folders and selection keys from content, so two workers sharing either
+    # would write the same rows and paths.
+    # ``workerinput`` exists only on an xdist worker's own config; the
+    # PYTEST_XDIST_WORKER variable also leaks into pytest subprocesses that
+    # tests start, which are not workers.
+    workerinput = getattr(config, "workerinput", None)
+    xdist_worker = workerinput["workerid"] if workerinput else None
+    xdist_controller = (
+        bool(getattr(config.option, "numprocesses", None)) and not xdist_worker
+    )
+    if xdist_controller:
+        # Workers inherit this environment when they start. Without a cap,
+        # every worker's BLAS, torch and numba pools size themselves to the
+        # whole machine and the workers oversubscribe the cores.
+        threads = str(
+            max(1, (os.cpu_count() or 1) // config.option.numprocesses)
+        )
+        for name in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMBA_NUM_THREADS",
+        ):
+            os.environ.setdefault(name, threads)
+    if xdist_worker and config.option.no_docker and not unit_only:
+        raise pytest.UsageError(
+            "pytest-xdist workers need their own database server, so "
+            "--no-docker (one shared server) only works with --v2-tier unit."
+        )
+
     BASE_DIR = _requested_base
+    DATA_CLEANUP_ROOT = None  # None: teardown cleans only canonical tests/_data
+    if xdist_worker:
+        BASE_DIR = _requested_base / "xdist" / xdist_worker
+        _link_shared_downloads(_requested_base, BASE_DIR)
+        # A worker owns its directory under the canonical base, so it gets the
+        # canonical cleanup; under a custom --base-dir nothing is removed.
+        if _requested_base == (Path(__file__).parent / "_data").resolve():
+            DATA_CLEANUP_ROOT = BASE_DIR
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
 
@@ -507,8 +547,9 @@ def pytest_configure(config):
         vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_docker or unit_only,
+        null_server=config.option.no_docker or unit_only or xdist_controller,
         verbose=VERBOSE,
+        name_suffix=xdist_worker,
     )
     # Apply credentials now so that dj.config["custom"]["test_mode"] = True
     # is visible when spyglass is first imported (triggered by fixtures such as
@@ -532,6 +573,21 @@ def pytest_configure(config):
 
     if unit_only:
         _block_unit_database_access()
+
+
+def _link_shared_downloads(shared_base: Path, worker_base: Path) -> None:
+    """Link a worker's downloaded inputs to the shared copies, if present.
+
+    The downloads are read-only inputs (the raw session and its videos), so
+    workers share them instead of each fetching its own copy. Anything not yet
+    downloaded is fetched into the worker's own directory as usual.
+    """
+    for entry in FILE_PATHS:
+        source = shared_base / entry["relative_dir"] / entry["target_name"]
+        target = worker_base / entry["relative_dir"] / entry["target_name"]
+        if source.is_file() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(source)
 
 
 def _block_unit_database_access():
@@ -577,7 +633,13 @@ def pytest_unconfigure(config):
     steps = [("close_nwb_files", close_nwb_files)]
     if teardown:
         steps.append(("server.stop", server.stop))
-        steps.append(("data cleanup", lambda: _teardown_test_data(base_dir)))
+        cleanup_root = globals().get("DATA_CLEANUP_ROOT")
+        steps.append(
+            (
+                "data cleanup",
+                lambda: _teardown_test_data(base_dir, data_root=cleanup_root),
+            )
+        )
 
     for label, action in steps:
         try:

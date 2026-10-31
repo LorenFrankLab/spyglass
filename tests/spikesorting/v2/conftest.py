@@ -57,7 +57,9 @@ collect_ignore = [
     "fixtures/generate_mearec.py",
 ]
 
-# Tier and accumulated setup + call + teardown seconds, per test node id.
+# Tier and accumulated setup + call + teardown seconds, per test node id. The
+# tier comes from the report's keywords (its tier marker) rather than from
+# collection, because under pytest-xdist the reporting process collects nothing.
 _TEST_TIER: dict[str, str] = {}
 _TEST_SECONDS: dict[str, float] = {}
 
@@ -68,6 +70,10 @@ def pytest_configure(config):
 
 
 def pytest_runtest_logreport(report):
+    tier = next((t for t in TIERS if t in report.keywords), None)
+    if tier is None:
+        return
+    _TEST_TIER[report.nodeid] = tier
     _TEST_SECONDS[report.nodeid] = (
         _TEST_SECONDS.get(report.nodeid, 0.0) + report.duration
     )
@@ -79,8 +85,7 @@ def _over_budget() -> list[tuple[str, str, float]]:
         (
             (nodeid, _TEST_TIER[nodeid], seconds)
             for nodeid, seconds in _TEST_SECONDS.items()
-            if seconds
-            > TIER_BUDGETS_S.get(_TEST_TIER.get(nodeid), float("inf"))
+            if seconds > TIER_BUDGETS_S.get(_TEST_TIER[nodeid], float("inf"))
         ),
         key=lambda row: -row[2],
     )
@@ -179,7 +184,6 @@ def pytest_collection_modifyitems(config, items):
         item.add_marker(getattr(pytest.mark, tier))
         if timeouts and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(TIER_TIMEOUTS_S[tier]))
-        _TEST_TIER[item.nodeid] = tier
 
     requested = config.getoption("v2_tier", default=None)
     if requested is not None:

@@ -66,6 +66,24 @@ pytest tests/spikesorting/v2 -m "(unit or db_unit or smoke) and not regenerate" 
   --v2-tier-budgets
 ```
 
+To run the whole v2 suite in parallel locally, use pytest-xdist (the `test`
+extra) with `--dist loadfile`, so each module's fixtures are built once:
+
+```bash
+pytest tests/spikesorting/v2 -n 8 --dist loadfile \
+  --base-dir /local/disk/tests/_data
+```
+
+Each worker starts its own Docker MySQL server (`<container-name>-gw<N>`, on
+its own port) and uses its own data directory (`<base-dir>/xdist/gw<N>`);
+the raw session and videos are linked from `<base-dir>` instead of fetched
+again. The controller caps each worker's BLAS, torch and numba threads at
+cores / workers. A `--base-dir` on local disk avoids NFS latency; it must
+contain a `tests` path component. `--no-docker` cannot give workers separate
+servers, so with xdist it is refused except for `--v2-tier unit`. On a 96-core
+machine, 8 workers ran the full suite in 36 min (4.5 h serially); the longest
+module, `test_curation_evaluation.py`, bounds the wall time.
+
 `--v2-tier-budgets` fails the run when a test exceeds its tier's time budget
 (`TIER_BUDGETS_S` in `tests/spikesorting/v2/_test_tiers.py`); move such a test
 to a heavier tier in `test_tiers.json` or make its setup cheaper. With
