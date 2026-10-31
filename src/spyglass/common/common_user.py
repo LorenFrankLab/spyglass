@@ -199,7 +199,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         an antijoin against the newest clean timestamp per ``env_id`` base
         (aggregated with ``MAX``). ``DATEDIFF``/``MAX`` use server ``NOW()`` to
         avoid client/server timezone skew. The base is the id minus its trailing
-        ``_NN`` suffix (``REGEXP_REPLACE``).
+        ``_NN`` suffix (``REGEXP_REPLACE``, which requires MySQL 8.0.4 or
+        later).
 
         Returns a DataJoint query expression.  Callers needing a DataFrame
         can call ``.fetch(format='frame')`` on the result.
