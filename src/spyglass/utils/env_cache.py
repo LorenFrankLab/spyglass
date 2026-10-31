@@ -7,7 +7,7 @@ single source of truth.
 
 Cache-file format
 -----------------
-``{temp_dir}/.spyglass_conda_{os_user}_{conda_env}.yaml``
+``{temp_dir}/.spyglass_conda_{os_user}_{md5(sys.prefix)[:8]}.yaml``
 
 Contains two top-level keys::
 
@@ -33,9 +33,14 @@ Who uses which mode
 
 Cache staleness
 ---------------
-``conda-meta/history`` is updated by every ``conda install`` / ``remove``.
-The cache is stale when that file is newer than the cache file, or when
-``$CONDA_PREFIX`` is absent (pip-only environments).
+The cache is stale when any signal that moves with the environment is at least
+as new as the cache file: ``conda-meta/history`` for conda transactions, and
+the site-packages directories for pip, which adds or removes a ``*.dist-info``
+directory on install, upgrade, uninstall and reinstall.
+
+The guarantee is that the cache is as accurate as re-running the export. Edits
+to source inside an editable install move no mtime, but they change no
+``pip freeze`` line either.
 
 Atomic writes
 -------------
@@ -46,11 +51,14 @@ a single POSIX ``rename`` syscall.  Last writer wins; both produce valid YAML.
 import getpass
 import os
 import re
+import sysconfig
 from functools import cached_property
+from hashlib import md5
 from pathlib import Path
 from pprint import pprint
 from subprocess import run as sub_run
 from sys import executable as sys_executable
+from sys import prefix as sys_prefix
 from typing import Optional, Tuple, Union
 
 import yaml
@@ -159,15 +167,20 @@ class CondaEnvCache:
 
     @cached_property
     def _cache_path(self) -> Optional[Path]:
-        """Scoped cache file path, or ``None`` when ``temp_dir`` is unavailable."""
+        """Scoped cache file path, or ``None`` when ``temp_dir`` is unavailable.
+
+        Keyed on a digest of ``sys.prefix`` rather than the conda env name, so
+        two hosts whose environments share a name but not a prefix do not share
+        one cache file on a common ``temp_dir``.
+        """
         from spyglass.settings import temp_dir  # deferred to avoid import cycle
 
         if not temp_dir:
             return None
 
         os_user = getpass.getuser()
-        conda_env = os.environ.get("CONDA_DEFAULT_ENV", "base")
-        return Path(temp_dir) / f".spyglass_conda_{os_user}_{conda_env}.yaml"
+        prefix_key = md5(sys_prefix.encode()).hexdigest()[:8]
+        return Path(temp_dir) / f".spyglass_conda_{os_user}_{prefix_key}.yaml"
 
     @cached_property
     def _history_path(self) -> Optional[Path]:
@@ -178,18 +191,46 @@ class CondaEnvCache:
         candidate = Path(prefix) / "conda-meta" / "history"
         return candidate if candidate.exists() else None
 
+    @cached_property
+    def _site_packages_paths(self) -> Tuple[Path, ...]:
+        """Existing site-packages directories for this interpreter.
+
+        ``purelib`` and ``platlib`` are the same directory on most platforms
+        and differ on some; both are checked, deduplicated.
+        """
+        paths = {
+            sysconfig.get_paths().get(key) for key in ("purelib", "platlib")
+        }
+        return tuple(p for p in (Path(x) for x in paths if x) if p.is_dir())
+
     # ── Cache lifecycle ───────────────────────────────────────────────────────
 
     def is_stale(self) -> bool:
-        """Return ``True`` when the cache file is absent or older than conda history."""
+        """Return ``True`` when the cache file is absent or the env has changed.
+
+        Compares the cache file against every signal that moves when the
+        environment changes: ``conda-meta/history`` for conda transactions, and
+        the site-packages directories for pip, which adds or removes a
+        ``*.dist-info`` directory on install, upgrade, uninstall and
+        reinstall. An equal mtime counts as stale, since filesystem timestamp
+        granularity can place a change in the same tick as the write.
+
+        A clock difference between a ``temp_dir`` and a site-packages on
+        separate filesystems can mask a change.
+        """
         if self._cache_path is None or not self._cache_path.exists():
             return True
-        if self._history_path is None:
+
+        sources = [
+            p
+            for p in (self._history_path, *self._site_packages_paths)
+            if p is not None
+        ]
+        if not sources:  # nothing to compare against — assume changed
             return True
-        return (
-            self._history_path.stat().st_mtime
-            > self._cache_path.stat().st_mtime
-        )
+
+        cache_mtime = self._cache_path.stat().st_mtime
+        return any(p.stat().st_mtime >= cache_mtime for p in sources)
 
     def load(self) -> bool:
         """Read raw conda and pip data from the disk cache.

@@ -79,11 +79,23 @@ def make_cache(conda_env_cache_cls, not_computed):
     """Fixture factory — returns isolated CondaEnvCache instances."""
 
     def _factory(tmp_path, *, cache_exists=False, history_mtime=None):
-        """Create a fresh CondaEnvCache scoped to tmp_path."""
+        """Create a fresh CondaEnvCache scoped to tmp_path.
+
+        Both staleness signals are redirected into ``tmp_path`` — the real
+        site-packages would otherwise make every test's verdict depend on
+        whatever was last installed on the machine. They start well in the
+        past so a test must move one deliberately to induce staleness.
+        """
         cache = conda_env_cache_cls()
-        cache_path = tmp_path / ".spyglass_conda_test_base.yaml"
+        cache_path = tmp_path / ".spyglass_conda_test_prefix.yaml"
         history_path = tmp_path / "history"
+        site_path = tmp_path / "site-packages"
         history_path.write_text("# conda history\n")
+        site_path.mkdir()
+
+        past = time.time() - 100
+        for p in (history_path, site_path):
+            os.utime(p, (past, past))
         if history_mtime is not None:
             os.utime(history_path, (history_mtime, history_mtime))
         if cache_exists:
@@ -103,6 +115,7 @@ def make_cache(conda_env_cache_cls, not_computed):
             os.utime(history_path, (time.time(), time.time()))
         cache.__dict__["_cache_path"] = cache_path
         cache.__dict__["_history_path"] = history_path
+        cache.__dict__["_site_packages_paths"] = (site_path,)
         return cache, cache_path
 
     return _factory
@@ -355,9 +368,79 @@ def test_cache_no_temp_dir(conda_env_cache_cls):
 
 
 def test_cache_no_conda_prefix(tmp_path, make_cache):
-    """With _history_path=None, is_stale() always returns True (no crash)."""
-    cache, _ = make_cache(tmp_path)
+    """A pip-only venv uses site-packages alone, rather than always re-exporting.
+
+    With no ``CONDA_PREFIX`` there is no conda history to compare against. The
+    cache used to call itself stale in that case, so a uv or pip venv re-ran
+    the export on every import and in every spawn worker.
+    """
+    cache, cache_path = make_cache(tmp_path)
     cache.__dict__["_history_path"] = None
+    cache_path.write_text(yaml.dump({"conda": {"dependencies": []}}))
+
+    assert cache.is_stale() is False
+
+    future = time.time() + 10  # pip install
+    os.utime(cache.__dict__["_site_packages_paths"][0], (future, future))
+
+    assert cache.is_stale() is True
+
+
+def test_cache_no_signals_is_stale(tmp_path, make_cache):
+    """With neither conda history nor site-packages, assume the env changed."""
+    cache, cache_path = make_cache(tmp_path)
+    cache.__dict__["_history_path"] = None
+    cache.__dict__["_site_packages_paths"] = ()
+    cache_path.write_text(yaml.dump({"conda": {"dependencies": []}}))
+
+    assert cache.is_stale() is True
+
+
+def test_cache_stale_on_pip_install(tmp_path, make_cache, not_computed):
+    """A pip install with no conda transaction invalidates the cache.
+
+    pip adds or removes a ``*.dist-info`` directory in site-packages, so the
+    directory mtime moves. ``conda-meta/history`` does not, which is why it
+    cannot be the only signal.
+    """
+    cache, cache_path = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ):
+        cache.get()
+    assert cache_path.exists()
+    assert cache.is_stale() is False
+
+    future = time.time() + 10  # pip install, no conda transaction
+    os.utime(cache.__dict__["_site_packages_paths"][0], (future, future))
+    assert cache.is_stale() is True
+
+    cache._cached_conda = not_computed
+    cache._cached_pip = not_computed
+    cache._merged = not_computed
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ) as mock_run:
+        cache.get()
+
+    assert mock_run.call_count == 1  # re-exported
+
+
+def test_cache_equal_mtime_is_stale(tmp_path, make_cache):
+    """An mtime equal to the cache's counts as stale.
+
+    Filesystem timestamp granularity can place a change in the same tick as
+    the cache write; treating equal as fresh would lose it.
+    """
+    cache, cache_path = make_cache(tmp_path)
+    cache_path.write_text(yaml.dump({"conda": {"dependencies": []}}))
+
+    same = cache_path.stat().st_mtime
+    os.utime(cache.__dict__["_site_packages_paths"][0], (same, same))
 
     assert cache.is_stale() is True
 
@@ -381,15 +464,23 @@ def test_cache_scoped_by_user(tmp_path, monkeypatch, conda_env_cache_cls):
 
 
 def test_cache_scoped_by_env(tmp_path, monkeypatch, conda_env_cache_cls):
-    """Two conda environments for the same user get different cache paths."""
-    monkeypatch.setattr("spyglass.settings.temp_dir", str(tmp_path))
+    """Two conda environments for the same user get different cache paths.
 
-    monkeypatch.setenv("CONDA_DEFAULT_ENV", "env_a")
+    Scoped on ``sys.prefix`` rather than ``CONDA_DEFAULT_ENV``: two hosts can
+    each hold an env of the same name, and on a shared ``temp_dir`` the name
+    alone put them on one cache file.
+    """
+    monkeypatch.setattr("spyglass.settings.temp_dir", str(tmp_path))
+    monkeypatch.setenv("CONDA_DEFAULT_ENV", "same_name")
+
+    monkeypatch.setattr(
+        "spyglass.utils.env_cache.sys_prefix", "/opt/envs/alpha"
+    )
     cache_a = conda_env_cache_cls()
     with patch("spyglass.utils.env_cache.getpass.getuser", return_value="user"):
         path_a = cache_a._cache_path
 
-    monkeypatch.setenv("CONDA_DEFAULT_ENV", "env_b")
+    monkeypatch.setattr("spyglass.utils.env_cache.sys_prefix", "/opt/envs/beta")
     cache_b = conda_env_cache_cls()
     with patch("spyglass.utils.env_cache.getpass.getuser", return_value="user"):
         path_b = cache_b._cache_path
