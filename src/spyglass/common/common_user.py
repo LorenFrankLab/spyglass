@@ -356,15 +356,21 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     def write_dirty_notifications(self, out_path: str = None) -> None:
         """Write overdue dirty-install rows to out_path (or stdout if None).
 
-        Produces one tab-separated line per user where ``days_since_warn``
-        exceeds ``WARN_DIRTY_ENV_DAYS``:
+        One tab-separated line per user, not per row — a user with several
+        flagged clones, or one clone logged at several commits, gets a single
+        line naming all of them, since ``run_jobs.sh`` sends one email per
+        line on each cron run:
 
             user_email\\tdays_since_warn\\tspyglass_commit\\tdirty_path
 
+        ``days_since_warn`` is the largest across that user's rows, i.e. their
+        oldest unresolved episode, and the two trailing fields are
+        space-separated when there is more than one. Only users whose
+        ``days_since_warn`` exceeds ``WARN_DIRTY_ENV_DAYS`` appear.
+
         Called by ``maintenance_scripts/cleanup.py``; output is consumed by
-        ``run_jobs.sh`` which sends emails via ``email_utils.sh``.  Users with
-        no ``LabMember.LabMemberInfo`` email record are skipped with a message
-        to stderr.
+        ``run_jobs.sh`` which sends emails via ``script_utils.sh``.  A user with
+        no ``LabMember.LabMemberInfo`` email record is reported once to stderr.
 
         Parameters
         ----------
@@ -393,28 +399,48 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         }
         known_users = sorted(email_by_dj_user, key=len, reverse=True)
 
+        by_email: Dict[str, dict] = {}
+        unmatched = set()
+        for row in overdue:
+            env_id = row["env_id"]
+            dj_user = next(
+                (u for u in known_users if env_id.startswith(u + "_")),
+                None,
+            )
+            user_email = email_by_dj_user.get(dj_user) if dj_user else None
+            if user_email is None:
+                unmatched.add(dj_user or env_id)
+                continue
+
+            entry = by_email.setdefault(user_email, {"days": 0, "clones": {}})
+            entry["days"] = max(entry["days"], row["days_since_warn"])
+            # One clone may be logged at several commits. Name it once, at its
+            # newest commit — the smallest days_since_warn — so the email says
+            # where the clone is now rather than listing its history.
+            path = row["dirty_path"] or ""
+            age = row["days_since_warn"]
+            seen = entry["clones"].get(path)
+            if seen is None or age < seen[0]:
+                entry["clones"][path] = (age, row["spyglass_commit"] or "")
+
+        for name in sorted(unmatched):
+            print(
+                f"No LabMemberInfo email for '{name}' — skipping.",
+                file=sys.stderr,
+            )
+
         out = open(out_path, "w") if out_path else sys.stdout
         try:
-            for row in overdue:
-                env_id = row["env_id"]
-                dj_user = next(
-                    (u for u in known_users if env_id.startswith(u + "_")),
-                    None,
-                )
-                user_email = email_by_dj_user.get(dj_user) if dj_user else None
-                if user_email is None:
-                    print(
-                        f"No LabMemberInfo email for '{env_id}' — skipping.",
-                        file=sys.stderr,
-                    )
-                    continue
+            for user_email, entry in sorted(by_email.items()):
+                paths = sorted(entry["clones"])
+                commits = [entry["clones"][p][1] for p in paths]
                 print(
                     "\t".join(
                         [
                             user_email,
-                            str(row["days_since_warn"]),
-                            str(row["spyglass_commit"] or ""),
-                            str(row["dirty_path"] or ""),
+                            str(entry["days"]),
+                            " ".join(commits),
+                            " ".join(paths),
                         ]
                     ),
                     file=out,

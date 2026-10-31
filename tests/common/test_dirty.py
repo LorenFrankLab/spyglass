@@ -1959,6 +1959,107 @@ def test_write_dirty_notifications_writes_tsv(user_env_tbl, tmp_path):
     assert not any("carol" in ln for ln in lines)
 
 
+def test_write_dirty_notifications_one_line_per_user(user_env_tbl, tmp_path):
+    """Several overdue rows for one user collapse to a single line.
+
+    `run_jobs.sh` sends one email per line on each cron run, so a user with a
+    row per commit was emailed once per row, every day from day 30 to day 60,
+    with the admin copied on each.
+    """
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "alice_env_00",
+            "days_since_warn": 31,
+            "spyglass_commit": "aaa1111",
+            "dirty_path": "/home/alice/spyglass",
+        },
+        {
+            "env_id": "alice_env_01",  # same clone, later commit
+            "days_since_warn": 45,
+            "spyglass_commit": "bbb2222",
+            "dirty_path": "/home/alice/spyglass",
+        },
+        {
+            "env_id": "alice_env_02",  # a second clone
+            "days_since_warn": 33,
+            "spyglass_commit": "ccc3333",
+            "dirty_path": "/home/alice/other",
+        },
+        {
+            "env_id": "bob_env_00",
+            "days_since_warn": 40,
+            "spyglass_commit": "ddd4444",
+            "dirty_path": "/home/bob/sg",
+        },
+    ]
+    member_rows = [
+        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
+        {"datajoint_user_name": "bob", "google_user_name": "bob@lab.org"},
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo,
+            "fetch",
+            return_value=member_rows,
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    lines = [ln for ln in out_file.read_text().splitlines() if ln]
+    assert len(lines) == 2  # one per user, not one per row
+
+    by_email = {ln.split("\t")[0]: ln.split("\t") for ln in lines}
+    alice = by_email["alice@lab.org"]
+    assert alice[1] == "45"  # oldest episode, not the first row seen
+    # Both clones named, each at its newest commit: /home/alice/spyglass was
+    # logged at aaa1111 (day 31) and bbb2222 (day 45), so day 31 wins.
+    assert alice[3] == "/home/alice/other /home/alice/spyglass"
+    assert alice[2] == "ccc3333 aaa1111"  # paired with the paths, in order
+    assert len(alice) == 4  # run_jobs.sh reads exactly four fields
+
+    assert by_email["bob@lab.org"][1] == "40"
+
+
+def test_write_dirty_notifications_reports_user_once(
+    user_env_tbl, tmp_path, capsys
+):
+    """An unmatched user is reported once, not once per row."""
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "ghost_env_00",
+            "days_since_warn": 40,
+            "spyglass_commit": "aaa1111",
+            "dirty_path": "/home/ghost/a",
+        },
+        {
+            "env_id": "ghost_env_01",
+            "days_since_warn": 50,
+            "spyglass_commit": "bbb2222",
+            "dirty_path": "/home/ghost/b",
+        },
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo, "fetch", return_value=[]
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    assert out_file.read_text().strip() == ""
+    stderr = capsys.readouterr().err
+    assert stderr.count("No LabMemberInfo email") == 2  # distinct env ids
+
+
 def test_write_dirty_notifications_skips_unknown_user(
     user_env_tbl, tmp_path, capsys
 ):
