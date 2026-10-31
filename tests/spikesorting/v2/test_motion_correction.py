@@ -576,6 +576,17 @@ def test_stale_selection_is_refused_at_compute(drift_recording, monkeypatch):
 # 1e-9 Hz.
 
 
+def _assert_matches_recomputed(persisted, recomputed):
+    """Compare persisted corrected traces with a whole-span recomputation.
+
+    SI interpolates each time bin with a float32 ``np.matmul``; the writer
+    computes chunk by chunk, so BLAS sees different row counts than one
+    whole-span call and may round the last bits differently (1-4 ULP on CI).
+    The bounds sit far below a physical effect (µV) and far above that noise.
+    """
+    np.testing.assert_allclose(persisted, recomputed, rtol=1e-5, atol=1e-3)
+
+
 def _timestamps_at(recording_key, frames):
     from spyglass.spikesorting.v2.recording import Recording
 
@@ -1225,7 +1236,7 @@ def test_estimate_and_corrected_recording_round_trip(
     n = source_recording.get_num_samples()
 
     reloaded = corrected.get_traces()
-    np.testing.assert_array_equal(reloaded, captured["traces"])
+    _assert_matches_recomputed(reloaded, captured["traces"])
     # Motion was planted; the correction changed the traces.
     assert np.max(np.abs(reloaded - source_recording.get_traces())) > 10.0
     np.testing.assert_array_equal(
@@ -1457,7 +1468,7 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
 
     expected = _interpolated(lambda n: estimation_times(clock, np.arange(n)))
     persisted = MotionCorrectedRecording().get_recording(key)
-    np.testing.assert_array_equal(persisted.get_traces(), expected)
+    _assert_matches_recomputed(persisted.get_traces(), expected)
     np.testing.assert_array_equal(
         persisted.get_times(),
         Recording().get_recording(recording_key).get_times(),
