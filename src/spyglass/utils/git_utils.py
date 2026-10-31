@@ -11,8 +11,8 @@ Detection logic
 ---------------
 1. ``is_dev``  — ``".dev"`` present in ``__version__`` (set by
    vcs-versioning; always True for editable installs on non-release commits).
-2. ``commit_hash`` — parsed from the ``+g<hash>`` suffix in ``__version__``
-   before falling back to ``git rev-parse --short HEAD``.  ``None`` for
+2. ``commit_hash`` — ``git rev-parse --short HEAD`` when running from a clone,
+   falling back to the ``+g<hash>`` suffix in ``__version__``.  ``None`` for
    standard pip installs of a release.
 3. ``install_path`` — the repo root if a ``.git`` directory is found as an
    ancestor of ``spyglass.__file__``; ``None`` for site-packages installs.
@@ -295,9 +295,11 @@ def get_install_info() -> dict:
         ``True`` when ``".dev"`` appears in ``__version__``, indicating a
         non-release (editable or pre-release) build.
     commit_hash : str or None
-        Short git hash extracted from ``__version__`` (``+g<hash>`` suffix),
-        or obtained via ``git rev-parse`` when running from a local clone.
-        ``None`` for clean pip-installed releases.
+        Short git hash from ``git rev-parse`` when running from a local clone,
+        or extracted from ``__version__`` (``+g<hash>`` suffix) otherwise.
+        ``None`` for clean pip-installed releases. HEAD takes precedence
+        because ``_version.py`` is written at install and does not move with a
+        ``git pull``.
     install_path : str or None
         Absolute path to the repository root when running from a local clone
         (i.e. a ``.git`` directory is found as an ancestor of
@@ -352,9 +354,9 @@ def _compute_install_info() -> dict:
     has_local_changes = False
     is_stale = False
     if install_path is not None:
-        # Obtain commit_hash from git if not already parsed from __version__
-        if commit_hash is None:
-            commit_hash = _git_short_hash(install_path)
+        # Use HEAD. __version__ does not change after `git pull`, so use it
+        # only when git fails.
+        commit_hash = _git_short_hash(install_path) or commit_hash
 
         has_local_changes = _git_has_src_changes(install_path)
         is_stale = _git_head_is_stale(install_path)

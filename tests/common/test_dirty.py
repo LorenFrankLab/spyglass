@@ -39,6 +39,31 @@ def _proc(stdout="", returncode=0) -> CompletedProcess:
     )
 
 
+def _git_mock(rev_parse="abc1234\n", diff="", log="4102444800"):
+    """Return a ``git_utils.sub_run`` side effect keyed on the git subcommand.
+
+    Dispatching on the command rather than on call order: which git commands
+    ``_compute_install_info`` runs, and in what sequence, is an implementation
+    detail, and a positional ``side_effect`` list has to be re-shuffled every
+    time it moves. Each argument takes a string (stdout, returncode 0) or a
+    ``CompletedProcess`` for a non-zero exit.
+    """
+    by_subcommand = {"rev-parse": rev_parse, "diff": diff, "log": log}
+
+    def _dispatch(cmd, *_, **__):
+        joined = " ".join(cmd)
+        for subcommand, result in by_subcommand.items():
+            if subcommand in joined:
+                return (
+                    result
+                    if isinstance(result, CompletedProcess)
+                    else _proc(result)
+                )
+        return _proc("")  # an unstubbed git call reads as empty, not an error
+
+    return _dispatch
+
+
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -669,7 +694,7 @@ def test_dev_version_is_dev(compute_install_info_fn):
         with patch("spyglass.__file__", __file__):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[_proc("src/x.py\n"), _proc("4102444800")],
+                side_effect=_git_mock(diff="src/x.py\n"),
             ):
                 result = compute_install_info_fn()
 
@@ -691,11 +716,20 @@ def test_release_version_not_dev(tmp_path, compute_install_info_fn):
     assert result["is_dev"] is False
 
 
-def test_commit_hash_from_version(compute_install_info_fn):
-    """Commit hash is parsed from the +g<hash> suffix in __version__."""
+def test_commit_hash_parsed_from_version(compute_install_info_fn):
+    """The +g<hash> suffix in __version__ parses into commit_hash.
+
+    Mocked rev-parse, because this test file lives inside a clone: left
+    unmocked, ``install_path`` resolves to that clone and HEAD — which now
+    outranks ``__version__`` — supplies the real hash instead.
+    """
     with patch("spyglass.__version__", "0.5.6.dev1+gabcd1234"):
         with patch("spyglass.__file__", __file__):
-            result = compute_install_info_fn()
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(rev_parse=_proc("", returncode=128)),
+            ):
+                result = compute_install_info_fn()
 
     assert result["commit_hash"] == "abcd1234"
 
@@ -708,7 +742,7 @@ def test_git_dirty_sets_has_local_changes(compute_install_info_fn):
         with patch("spyglass.__file__", __file__):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[dirty_proc, _proc("4102444800")],
+                side_effect=_git_mock(diff=dirty_proc.stdout),
             ):
                 result = compute_install_info_fn()
 
@@ -724,7 +758,7 @@ def test_git_clean_no_changes(compute_install_info_fn):
         with patch("spyglass.__file__", __file__):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[clean_proc, _proc("4102444800")],
+                side_effect=_git_mock(diff=clean_proc.stdout),
             ):
                 result = compute_install_info_fn()
 
@@ -759,11 +793,47 @@ def test_git_short_hash_fallback(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[hash_proc, diff_proc, _proc("4102444800")],
+                side_effect=_git_mock(
+                    rev_parse=hash_proc.stdout, diff=diff_proc.stdout
+                ),
             ):
                 result = compute_install_info_fn()
 
     assert result["commit_hash"] == "abc1234"
+
+
+def test_head_outranks_version_hash(tmp_path, compute_install_info_fn):
+    """In a clone, HEAD supplies commit_hash even when __version__ carries one.
+
+    hatch-vcs writes ``_version.py`` at ``pip install -e .`` and a ``git pull``
+    does not rewrite it, so ``__version__`` keeps naming the commit the clone
+    was installed at. Recompute would then treat results from new code as
+    results from the old environment.
+    """
+    (tmp_path / ".git").mkdir()
+    fake_pkg = tmp_path / "spyglass" / "__init__.py"
+    fake_pkg.parent.mkdir(parents=True)
+    fake_pkg.write_text("")
+
+    with patch("spyglass.__version__", "0.5.6.dev1+gaaaaaaa"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(rev_parse="bbbbbbb\n"),
+            ):
+                result = compute_install_info_fn()
+
+    assert result["commit_hash"] == "bbbbbbb"
+
+
+def test_version_hash_used_without_a_clone(compute_install_info_fn):
+    """With no repo, commit_hash still comes from the __version__ suffix."""
+    with patch("spyglass.__version__", "0.5.6.dev1+gaaaaaaa"):
+        with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
+            result = compute_install_info_fn()
+
+    assert result["install_path"] is None
+    assert result["commit_hash"] == "aaaaaaa"
 
 
 def test_git_diff_nonzero_exit(tmp_path, compute_install_info_fn):
@@ -779,7 +849,7 @@ def test_git_diff_nonzero_exit(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[error_proc, _proc("4102444800")],
+                side_effect=_git_mock(diff=error_proc),
             ):
                 result = compute_install_info_fn()
 
@@ -818,7 +888,9 @@ def test_git_stale_old_head(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[clean_proc, old_proc],
+                side_effect=_git_mock(
+                    diff=clean_proc.stdout, log=old_proc.stdout
+                ),
             ):
                 result = compute_install_info_fn()
 
@@ -841,7 +913,9 @@ def test_clean_current_clone_is_official(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=[clean_proc, recent_proc],
+                side_effect=_git_mock(
+                    diff=clean_proc.stdout, log=recent_proc.stdout
+                ),
             ):
                 result = compute_install_info_fn()
 
