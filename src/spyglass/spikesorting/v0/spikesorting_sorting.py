@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.settings import sorting_dir, temp_dir
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.v0.spikesorting_artifact import (
     ArtifactRemovedIntervalList,
 )
@@ -214,7 +215,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         self, key: dict, recording_path, artifact_times, sorter, sorter_params
     ):
         """Compute method to run spike sorting and save the results."""
-        recording = si.load_extractor(recording_path)
+        recording = _si_compat.load_extractor(recording_path)
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
         _ = recording.get_sampling_frequency()
@@ -271,10 +272,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
-            sorting = si.NumpySorting.from_times_labels(
-                times_list=detected_spikes["sample_index"],
-                labels_list=np.zeros(len(detected_spikes), dtype=np.int32),
-                sampling_frequency=recording.get_sampling_frequency(),
+            sorting = _si_compat.numpy_sorting_from_samples_and_labels(
+                detected_spikes["sample_index"],
+                np.zeros(len(detected_spikes), dtype=np.int32),
+                recording.get_sampling_frequency(),
             )
         else:
             if "whiten" in sorter_params.keys():

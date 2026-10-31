@@ -20,10 +20,10 @@ from spyglass.common._nwbfile_cleanup import (
 )
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
     _acquire_nwb_file,
+    assert_safe_nwb_file_name,
     get_electrode_indices,
     get_nwb_file,
 )
@@ -174,6 +174,10 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        # Confine the caller-supplied name to a bare basename before the naive
+        # ``raw_dir + "/" + nwb_file_name`` join below, so a separator / ``..`` /
+        # absolute path cannot escape the raw-data directory.
+        assert_safe_nwb_file_name(nwb_file_name)
         file_path = raw_dir + "/" + nwb_file_name
         if new_file:
             return file_path

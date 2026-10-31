@@ -219,7 +219,13 @@ class CautiousDeleteMixin(BaseMixin):
             return
 
         if self._has_updated_dj_version and not isinstance(self, dj.Part):
-            kwargs["force_masters"] = True
+            # Most Spyglass masters register into merge tables through a part,
+            # so the default must remove the now-orphaned merge master too.
+            # A table with nested parts can opt out: DataJoint 0.14 may reach
+            # that table again through its own grandchild part, delete the root
+            # early, then see a zero-row outer delete and roll the transaction
+            # back. Such tables must clean their merge masters explicitly.
+            kwargs.setdefault("force_masters", True)
 
         external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 

@@ -144,4 +144,3 @@
 | spyglass.position.v1.imported_pose | ImportedPose | PoseEstimation | skeleton | skeleton_object_id | object_id | False |
 | spyglass.position.v1.imported_pose | ImportedPose.BodyPart | None | self | part_object_id | object_id | False |
 | spyglass.spikesorting.imported | ImportedSpikeSorting | Units | self | object_id | object_id | False |
-

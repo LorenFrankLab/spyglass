@@ -8,6 +8,7 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -30,14 +31,14 @@ def _create_spikesortingview_workspace(
 ):
     workspace = sv.create_workspace(label=workspace_label)
 
-    recording = si.load_extractor(recording_path)
+    recording = _si_compat.load_extractor(recording_path)
     if recording.get_num_segments() > 1:
         recording = si.concatenate_recordings([recording])
     recording_id = workspace.add_recording(
         label=recording_label, recording=recording
     )
 
-    sorting = si.load_extractor(sorting_path)
+    sorting = _si_compat.load_extractor(sorting_path)
     if len(merge_groups) != 0:
         sorting = MergedSortingExtractor(
             parent_sorting=sorting, merge_groups=merge_groups

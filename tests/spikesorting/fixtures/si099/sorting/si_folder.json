@@ -1,0 +1,11 @@
+{
+    "class": "spikeinterface.core.sortingfolder.NumpyFolderSorting",
+    "module": "spikeinterface",
+    "kwargs": {
+        "folder_path": "."
+    },
+    "version": "0.99.1",
+    "relative_paths": true,
+    "annotations": {},
+    "properties": {}
+}

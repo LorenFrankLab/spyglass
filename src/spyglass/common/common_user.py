@@ -134,6 +134,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         - package==1.2.3+dfsg (Debian Free Software Guidelines)
         - package==1.2.3+ds (Debian Source)
         - package==1.2.3+ubuntu1.2 (Ubuntu-specific)
+        - package==1.2.3+cpu (any other PEP 440 local label, e.g. PyTorch)
         """
         return re.compile(  # allows suffixes like a1, dev, post1, etc.
             r"""^
@@ -149,7 +150,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                         (?P<dev>dev\d*)|            # Developmental release (dev, dev1, ...)
                         (?P<dfsg>\+dfsg)|           # Debian Free Software Guidelines (+dfsg)
                         (?P<ds>\+ds)|               # Debian Source (+ds)
-                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*) # Ubuntu-specific (+ubuntu1.2)
+                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*)| # Ubuntu-specific (+ubuntu1.2)
+                        (?P<local>\+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*) # Other local label (+cpu, +cu121)
                     )
                 ?)
             $""",
