@@ -18,6 +18,23 @@ DB_FIXTURES = frozenset({"dj_conn", "dj_config", "server"})
 EXTERNAL_DATA_FIXTURES = frozenset(
     {"smoke_nwb", "mini_path", "mini_content", "mini_open", "mini_closed"}
 )
+# Hang guard per tier, in seconds: a pytest-timeout marker for every test that
+# does not set its own. Far above the slowest healthy test of the tier, so a
+# timeout means a hang (e.g. a stuck MySQL query plan), not a slow machine.
+TIER_TIMEOUTS_S = {
+    "unit": 300,
+    "db_unit": 900,
+    "stage": 1800,
+    "pipeline": 1800,
+    "regression_gate": 3600,
+}
+# Per-test budget (setup + call + teardown, in seconds) for the tiers every
+# pull request runs, enforced with ``--v2-tier-budgets``. A test over budget
+# belongs in a heavier tier, or its setup needs to get cheaper. The unit
+# budget leaves room for one per-process cost: the first test to compute
+# template similarity pays ~15-20 s of numba JIT compilation (SpikeInterface
+# does not cache it), while the same test otherwise takes well under 1 s.
+TIER_BUDGETS_S = {"unit": 30.0, "db_unit": 60.0}
 MANIFEST_PATH = Path(__file__).with_name("test_tiers.json")
 SUITE_PATH = MANIFEST_PATH.parent
 

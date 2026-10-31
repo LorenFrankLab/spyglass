@@ -45,6 +45,7 @@ def _ensure_journey_profile() -> str:
     return name
 
 
+@pytest.mark.smoke
 def test_browser_review_commit_verify_and_select(
     planted_two_unit_sort, curation_evaluation_defaults, tmp_path, monkeypatch
 ):

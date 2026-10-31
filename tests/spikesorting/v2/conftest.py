@@ -37,6 +37,8 @@ from tests.spikesorting.v2._sorter_stub import plant_sorter
 from tests.spikesorting.v2._test_tiers import (
     EXTERNAL_DATA_FIXTURES,
     SUITE_PATH,
+    TIER_BUDGETS_S,
+    TIER_TIMEOUTS_S,
     TIERS,
     TierClassificationError,
     classify_test,
@@ -54,6 +56,57 @@ collect_ignore = [
     "baseline_capture.py",
     "fixtures/generate_mearec.py",
 ]
+
+# Tier and accumulated setup + call + teardown seconds, per test node id.
+_TEST_TIER: dict[str, str] = {}
+_TEST_SECONDS: dict[str, float] = {}
+
+
+def pytest_configure(config):
+    _TEST_TIER.clear()
+    _TEST_SECONDS.clear()
+
+
+def pytest_runtest_logreport(report):
+    _TEST_SECONDS[report.nodeid] = (
+        _TEST_SECONDS.get(report.nodeid, 0.0) + report.duration
+    )
+
+
+def _over_budget() -> list[tuple[str, str, float]]:
+    """Return ``(nodeid, tier, seconds)`` for tests over their tier budget."""
+    return sorted(
+        (
+            (nodeid, _TEST_TIER[nodeid], seconds)
+            for nodeid, seconds in _TEST_SECONDS.items()
+            if seconds
+            > TIER_BUDGETS_S.get(_TEST_TIER.get(nodeid), float("inf"))
+        ),
+        key=lambda row: -row[2],
+    )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if session.config.getoption("v2_tier_budgets") and _over_budget():
+        if exitstatus == pytest.ExitCode.OK:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not config.getoption("v2_tier_budgets"):
+        return
+    over = _over_budget()
+    if not over:
+        return
+    terminalreporter.section("v2 tier budgets exceeded", red=True)
+    for nodeid, tier, seconds in over:
+        terminalreporter.line(
+            f"{seconds:7.1f}s > {TIER_BUDGETS_S[tier]:g}s ({tier}) {nodeid}"
+        )
+    terminalreporter.line(
+        "Move each test to a heavier tier (test_tiers.json) or make its "
+        "setup cheaper; budgets are TIER_BUDGETS_S in _test_tiers.py."
+    )
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -121,8 +174,12 @@ def pytest_collection_modifyitems(config, items):
                 node.own_markers[:] = [
                     mark for mark in node.own_markers if mark.name not in TIERS
                 ]
+    timeouts = config.pluginmanager.hasplugin("timeout")
     for item, tier in assignments:
         item.add_marker(getattr(pytest.mark, tier))
+        if timeouts and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(TIER_TIMEOUTS_S[tier]))
+        _TEST_TIER[item.nodeid] = tier
 
     requested = config.getoption("v2_tier", default=None)
     if requested is not None:

@@ -256,7 +256,9 @@
       "tier": "db_unit",
       "overrides": {
         "test_unit_waveform_features_v0v1_guard_unchanged_under_legacy": "unit",
-        "test_unit_waveform_features_v2_full_waveform_and_spike_location": "stage"
+        "test_unit_waveform_features_v2_clusterless_runs_under_si0104": "stage",
+        "test_unit_waveform_features_v2_full_waveform_and_spike_location": "stage",
+        "test_unit_waveform_features_v2_sparse_unit_ids": "stage"
       }
     },
     "test_concat_artifacts.py": {
@@ -413,7 +415,9 @@
     "test_export_safety.py": {
       "tier": "db_unit",
       "overrides": {
-        "test_export_helper_stops_logging_when_fetch_fails": "unit"
+        "test_export_helper_stops_logging_when_fetch_fails": "unit",
+        "test_v2_export_captures_curation_and_recording_files": "pipeline",
+        "test_v2_zero_unit_export_path": "pipeline"
       }
     },
     "test_figpack_curation.py": {
@@ -506,7 +510,7 @@
       "tier": "pipeline"
     },
     "test_merge_id_selectivity.py": {
-      "tier": "db_unit"
+      "tier": "pipeline"
     },
     "test_merge_probe.py": {
       "tier": "db_unit"
@@ -582,7 +586,12 @@
       }
     },
     "test_motion_estimation.py": {
-      "tier": "unit"
+      "tier": "unit",
+      "overrides": {
+        "test_masked_artifacts_do_not_reach_the_estimate": "stage",
+        "test_unmasked_single_span_estimate_equals_compute_motion": "stage",
+        "test_written_out_defaults_equal_the_bare_preset": "stage"
+      }
     },
     "test_motion_interpolation.py": {
       "tier": "unit"
@@ -941,6 +950,8 @@
       "tier": "unit",
       "overrides": {
         "test_nn_noise_overlap_invariant_to_excluded_sample_values": "stage",
+        "test_nn_noise_overlap_unchanged_by_noise_cluster_reuse": "stage",
+        "test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel": "stage",
         "test_sd_ratio_on_masked_sort_matches_clean_twin": "stage",
         "test_sd_ratio_unchanged_when_spans_cover_recording": "stage",
         "test_template_correction_reproduces_spikeinterface": "stage"

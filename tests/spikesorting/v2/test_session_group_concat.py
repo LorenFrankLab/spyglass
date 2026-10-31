@@ -2407,6 +2407,7 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
 
 
 @pytest.mark.slow
+@pytest.mark.smoke
 def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
 

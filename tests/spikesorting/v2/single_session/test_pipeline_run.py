@@ -88,6 +88,7 @@ def test_run_v2_pipeline_empty_call_still_reports_mode_choice():
 
 
 @pytest.mark.slow
+@pytest.mark.smoke
 def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     """``run_v2_pipeline`` chains recording -> artifact -> sort -> curation
     in one call and is idempotent on rerun.
@@ -404,6 +405,7 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
 
 
 @pytest.mark.slow
+@pytest.mark.smoke
 def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     """``run_v2_pipeline`` with the clusterless preset populates the
     full chain; verifies preset-to-row plumbing for the clusterless

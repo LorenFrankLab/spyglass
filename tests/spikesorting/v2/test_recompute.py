@@ -1503,6 +1503,7 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.smoke
 def test_analyzer_recompute_round_trip(
     populated_sorting, clean_recompute, tmp_path
 ):

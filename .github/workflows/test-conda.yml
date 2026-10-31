@@ -426,10 +426,31 @@ jobs:
           REQ="mearec_polymer_smoke"
         fi
         echo "SPYGLASS_V2_REQUIRE_FIXTURES=$REQ" >> "$GITHUB_ENV"
+    - name: Select the v2 test tiers for this run
+      # Push and pull request run the fast tiers (unit: no database; db_unit:
+      # metadata and schema checks) plus the ``smoke`` tests, one end-to-end
+      # check per main path. The nightly schedule and manual dispatch run every
+      # tier. Scheduled runs use the default branch, so a branch changing v2
+      # should get a manual dispatch ("Run workflow") before it merges.
+      # Every lane below selects with V2_MARKERS; pytest keeps only the LAST
+      # ``-m``, which replaces pyproject's ``-m "not regenerate"`` addopts, so
+      # both expressions repeat ``not regenerate``.
+      run: |
+        if [ "${{ github.event_name }}" = "push" ] || \
+           [ "${{ github.event_name }}" = "pull_request" ]; then
+          MARKERS="(unit or db_unit or smoke) and not regenerate"
+        else
+          MARKERS="not regenerate"
+        fi
+        echo "V2_MARKERS=$MARKERS" >> "$GITHUB_ENV"
     - name: Run modern spike-sorting tests
       # Runs this shard's slice of tests/spikesorting/v2 (matrix above):
       # single-session = single_session/, integration = the listed full-sort
-      # files, unit = everything else in the directory. The smoke fixture
+      # files, unit = everything else in the directory, narrowed to the tiers
+      # V2_MARKERS selects. --v2-tier-budgets fails the run when a unit or
+      # db_unit test exceeds its tier's time budget; every test also carries
+      # its tier's pytest-timeout. The JUnit report records each test's time
+      # and is uploaded at the end of the job. The smoke fixture
       # drives the per-PR integration + clusterless + zero-unit cases; when
       # the 60s polymer fixture is present (scheduled / manual runs) the
       # merge, MS5 ground-truth, and clusterless sparse-id cases run too --
@@ -447,7 +468,9 @@ jobs:
         # Each pytest invocation writes a distinct XML report: later runs in
         # the matching/curation environments replace .coverage, not this XML.
         python tests/spikesorting/v2/scripts/run_ci_shard.py \
-          ${{ matrix.shard.name }} --no-docker --no-dlc -q \
+          ${{ matrix.shard.name }} -m "$V2_MARKERS" --no-docker --no-dlc -q \
+          --v2-tier-budgets --durations=25 \
+          --junitxml=junit-v2-${{ matrix.shard.name }}.xml \
           --cov-config=tests/.coveragerc \
           --cov-report=xml:coverage-v2-${{ matrix.shard.name }}.xml
     - name: Upload v2 shard coverage to Codecov
@@ -513,19 +536,13 @@ jobs:
         # not silently skip the match path).
         conda run -n spyglass_v2_matching python \
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
-        # Tier of the end-to-end daily-concat workflow test
-        # (test_unitmatch_concat.py::test_daily_concat_workflow_matches_planted_neurons_end_to_end,
-        # marked very_slow): nightly schedule and manual dispatch only. It took
-        # ~230 s (92 s setup + 137 s call, ~1.9 GB peak) on a macOS arm64
-        # laptop, so on push and pull request it is deselected. pytest keeps only the LAST ``-m``,
-        # which replaces pyproject's ``-m "not regenerate"`` addopts, so the
-        # per-PR expression repeats ``not regenerate``.
-        marker_args=()
-        if [ "${{ github.event_name }}" = "push" ] || \
-           [ "${{ github.event_name }}" = "pull_request" ]; then
-          marker_args=(-m "not very_slow and not regenerate")
-        fi
-        conda run -n spyglass_v2_matching pytest "${marker_args[@]}" \
+        # V2_MARKERS (see "Select the v2 test tiers") keeps push and pull
+        # request to the fast tiers and smoke tests; the end-to-end
+        # daily-concat workflow test and the rest of the pipeline tier run
+        # nightly and on manual dispatch.
+        conda run -n spyglass_v2_matching pytest -m "$V2_MARKERS" \
+          --v2-tier-budgets --durations=25 \
+          --junitxml=junit-v2-matching.xml \
           tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
           tests/spikesorting/v2/test_unitmatch.py \
           tests/spikesorting/v2/test_unitmatch_concat.py \
@@ -658,7 +675,11 @@ jobs:
         # SPYGLASS_REQUIRE_BROWSER_TESTS makes a missing figpack / playwright /
         # browser FAIL the browser tests instead of skipping them, so this
         # required lane cannot go green on skips.
+        # V2_MARKERS (see "Select the v2 test tiers") keeps push and pull
+        # request to the fast tiers plus the smoke browser journey.
         SPYGLASS_REQUIRE_BROWSER_TESTS=1 conda run -n spyglass_v2_curation pytest \
+          -m "$V2_MARKERS" --v2-tier-budgets --durations=25 \
+          --junitxml=junit-v2-curation.xml \
           tests/spikesorting/v2/test_figpack_curation_integration.py \
           tests/spikesorting/v2/test_review_api_integration.py \
           tests/spikesorting/v2/test_review_delivery.py \
@@ -712,6 +733,14 @@ jobs:
         disable_search: true
         flags: spikesorting-v2-acceptance
         name: Spike sorting v2 acceptance
+    - name: Upload v2 test reports
+      # Per-test outcomes and durations for this shard's lanes, so the cost of
+      # each test can be tracked across runs. always(): failed runs included.
+      if: ${{ always() && hashFiles('junit-v2-*.xml') != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-v2-${{ matrix.shard.name }}
+        path: junit-v2-*.xml
 
   v2-supported-python:
     # The full v2 suite uses Python 3.11. Exercise supported endpoints too,

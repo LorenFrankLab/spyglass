@@ -2348,6 +2348,7 @@ def _row_counts() -> dict:
     }
 
 
+@pytest.mark.smoke
 def test_pipeline_motion_modes_on_one_recording(drift_recording):
     """``estimate`` saves the source's estimate and sorts exactly the ``off``
     sort; ``apply`` sorts the corrected recording of that estimate; every

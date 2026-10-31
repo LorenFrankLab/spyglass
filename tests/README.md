@@ -52,8 +52,25 @@ Every collected v2 test has exactly one effective tier:
 Run another tier with `--v2-tier stage`, for example. These dependency tiers are
 independent of speed markers; database tiers use the normal Docker/database
 setup. The CI workload shard named `unit` includes light database work to
-balance runtime. It is **not** the isolated `unit` tier. CI continues to run all
-three workload shards, with matching and browser extras in separate lanes.
+balance runtime. It is **not** the isolated `unit` tier.
+
+On push and pull request, every CI lane (the three workload shards and the
+matching and browser extras) runs only the `unit` and `db_unit` tiers plus the
+tests marked `smoke`, one end-to-end check per main path. The nightly schedule
+and a manual "Run workflow" dispatch run every tier; scheduled runs use the
+default branch, so dispatch one before merging a branch that changes v2. To run
+the pull-request selection locally:
+
+```bash
+pytest tests/spikesorting/v2 -m "(unit or db_unit or smoke) and not regenerate" \
+  --v2-tier-budgets
+```
+
+`--v2-tier-budgets` fails the run when a test exceeds its tier's time budget
+(`TIER_BUDGETS_S` in `tests/spikesorting/v2/_test_tiers.py`); move such a test
+to a heavier tier in `test_tiers.json` or make its setup cheaper. With
+`pytest-timeout` installed (the `test` extra), every v2 test also carries its
+tier's timeout (`TIER_TIMEOUTS_S`), so a hang fails instead of stalling the run.
 
 Architecture checks require canonical owner imports and docstring-only private
 package initializers. Current recording dictionary and pickle round trips must

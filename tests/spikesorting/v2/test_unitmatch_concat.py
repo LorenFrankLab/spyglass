@@ -730,6 +730,7 @@ def test_reselecting_after_a_session_start_correction_gives_a_new_selection(
         restore_matcher_registry(saved)
 
 
+@pytest.mark.smoke
 def test_concat_inputs_match_and_track_in_chronological_order(
     daily_concat_match_inputs, monkeypatch
 ):

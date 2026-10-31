@@ -222,6 +222,7 @@ optional-dependencies.test = [
   "pytest",                 # unit testing
   "pytest-cov",             # code coverage
   "pytest-env",             # environment defaults in tool.pytest.ini_options
+  "pytest-timeout",         # per-tier hang guard in tests/spikesorting/v2
   "pytest-xvfb",            # for headless testing of Qt
   "tomli; python_version<'3.11'", # dependency-contract checks on Python 3.10
 ]
@@ -340,6 +341,7 @@ markers = [
   "serial: Tests that must run serially (not parallel-safe)",
   "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
   "acceptance: End-to-end acceptance probes; run only with --run-acceptance",
+  "smoke: End-to-end v2 path check that also runs on every pull request",
 
   # Every collected v2 test receives one tier from test_tiers.json or an
   # explicit marker. Collection checks its resolved fixture dependencies.

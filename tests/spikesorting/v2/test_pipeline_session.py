@@ -840,6 +840,7 @@ def test_session_runner_all_groups(session_run, session_inputs):
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.smoke
 def test_session_runner_idempotent(session_run, session_inputs):
     """A second run returns the same root_merge_ids and every stage ``"reused"``."""
     second = run_v2_pipeline_session(

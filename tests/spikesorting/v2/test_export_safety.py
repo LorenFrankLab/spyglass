@@ -189,6 +189,7 @@ def test_export_helper_stops_logging_when_fetch_fails(monkeypatch):
 
 
 @pytest.mark.slow
+@pytest.mark.smoke
 def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
     """A v2 ``merge_id`` export captures the units NWB AND the recording
     cache in the final ``Export.File`` (v1 parity, via the FK cascade)."""

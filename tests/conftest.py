@@ -329,6 +329,16 @@ def pytest_addoption(parser):
         ),
     )
     parser.addoption(
+        "--v2-tier-budgets",
+        action="store_true",
+        dest="v2_tier_budgets",
+        default=False,
+        help=(
+            "Fail the session when a spikesorting v2 test exceeds its tier's "
+            "time budget (TIER_BUDGETS_S in tests/spikesorting/v2/_test_tiers.py)."
+        ),
+    )
+    parser.addoption(
         "--quiet-spy",
         action="store_true",
         dest="quiet_spy",

@@ -127,6 +127,7 @@ def test_get_sort_group_info_returns_multi_electrode_relation(
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.smoke
 def test_get_spike_times_returns_per_unit_arrays(populated_sorting):
     """``SpikeSortingOutput.get_spike_times`` returns per-unit arrays
     in seconds. The clusterless-decoding pipeline iterates this output.
@@ -234,6 +235,7 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.smoke
 def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     populated_sorting,
 ):
@@ -726,6 +728,7 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.smoke
 def test_downstream_consumer_reads_applied_merge_unit_set(
     planted_two_unit_sort,
 ):
