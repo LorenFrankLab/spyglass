@@ -465,14 +465,25 @@ jobs:
       # dispatch is always the most thorough v2 run; there is no fast v2 lane
       # by design.
       run: |
+        # The database-free unit tier runs first on pytest-xdist workers, one
+        # per core (--v2-tier unit starts no server, so --no-docker is safe);
+        # the database tiers then run serially against this job's MySQL
+        # service, appending to the same coverage data. Both always run, and
+        # the step fails if either does.
         # Each pytest invocation writes a distinct XML report: later runs in
         # the matching/curation environments replace .coverage, not this XML.
-        python tests/spikesorting/v2/scripts/run_ci_shard.py \
-          ${{ matrix.shard.name }} -m "$V2_MARKERS" --no-docker --no-dlc -q \
-          --v2-tier-budgets --durations=25 \
-          --junitxml=junit-v2-${{ matrix.shard.name }}.xml \
-          --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-${{ matrix.shard.name }}.xml
+        shard=${{ matrix.shard.name }}
+        common=(--no-docker --no-dlc -q --v2-tier-budgets --durations=25
+                --cov-config=tests/.coveragerc)
+        status=0
+        python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
+          --v2-tier unit -m "not regenerate" -n auto "${common[@]}" \
+          --junitxml="junit-v2-$shard-unit.xml" --cov-report= || status=$?
+        python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
+          -m "($V2_MARKERS) and not unit" "${common[@]}" --cov-append \
+          --junitxml="junit-v2-$shard.xml" \
+          --cov-report="xml:coverage-v2-$shard.xml" || status=$?
+        exit $status
     - name: Upload v2 shard coverage to Codecov
       if: ${{ !cancelled() && hashFiles(format('coverage-v2-{0}.xml', matrix.shard.name)) != '' }}
       uses: codecov/codecov-action@v5
