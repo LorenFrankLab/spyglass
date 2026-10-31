@@ -412,11 +412,14 @@ class CondaEnvCache:
         )  # shallow copy — don't mutate cache
         conda_deps: list = list(conda_export.get("dependencies", []))
 
-        # Extract the pip sub-list that conda embeds inside dependencies
+        # Extract the pip sub-list that conda embeds inside dependencies.
+        # `dep` is the dict held by `_cached_conda` — the copies above are
+        # both shallow — so read it, never `pop` from it, or a later
+        # conda-only `get()` returns dependencies with an empty pip entry.
         for i, dep in enumerate(conda_deps):
             if isinstance(dep, dict):
-                pip_obj = conda_deps.pop(i)
-                for entry in pip_obj.pop("pip", []):
+                conda_deps.pop(i)  # drop from the copy only
+                for entry in dep.get("pip", []):
                     pkg = entry.split("==", maxsplit=1)[0]
                     self._conda_pip_dict[pkg] = entry
                 break

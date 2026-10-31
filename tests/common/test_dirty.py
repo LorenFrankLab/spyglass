@@ -198,6 +198,35 @@ def test_cache_with_pip_hit(tmp_path, make_cache):
     assert merged1 is merged2
 
 
+def test_merge_leaves_cached_pip_intact(tmp_path, make_cache, not_computed):
+    """A merge must not strip the pip list from the cached conda export.
+
+    The conda export is shallow-copied before merging, so the embedded pip
+    dict is shared with the cache. Popping from it emptied the cached export,
+    and every later conda-only reader — analysis NWB ``source_script``, the
+    export ``environment.yml`` — then recorded no pip packages at all.
+    """
+    cache, _ = make_cache(tmp_path)
+
+    def pip_entries(env):
+        return next(
+            (d.get("pip") for d in env["dependencies"] if isinstance(d, dict)),
+            None,
+        )
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ):
+        cache.get(with_pip=True)
+        conda_only = cache.get()
+        cache._merged = not_computed  # force a second merge of the same raw
+        merged_again = cache.get(with_pip=True)
+
+    assert pip_entries(conda_only) == ["scipy==1.11.0", "spyglass==0.5.6"]
+    assert pip_entries(merged_again)  # re-merge still sees conda's pip list
+
+
 def test_get_conda_only_keys(tmp_path, make_cache):
     """get() returns only conda-export keys; no custom or pip-freeze artifacts."""
     cache, _ = make_cache(tmp_path)
