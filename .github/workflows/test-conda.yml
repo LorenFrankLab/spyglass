@@ -226,6 +226,12 @@ jobs:
     # ``if:`` guards below) so the matrix does not triple them. Adding a new
     # HEAVY (full-sort) test file? Add it once to INTEGRATION_MODULES in
     # tests/spikesorting/v2/scripts/run_ci_shard.py.
+    env:
+      # Hosted runners have no GPU. Offer pip the CPU torch wheels so the
+      # ``torch>=2`` requirement in this job's three environments resolves to
+      # ``+cpu`` instead of pulling several GB of CUDA libraries, which has
+      # run a runner out of disk during environment setup.
+      PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
     strategy:
       fail-fast: false
       matrix:
