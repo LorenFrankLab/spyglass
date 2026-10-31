@@ -800,9 +800,7 @@ def worker_id(request):
     """Get unique worker ID for pytest-xdist parallelization.
 
     Returns 'master' for serial execution, or 'gwN' for parallel workers.
-    This enables worker-specific database schema isolation.
-
-    NOTE: Not currently in use, but set up for future parallel test runs.
+    Names each worker's DataJoint config file (see ``dj_config``).
     """
     if hasattr(request.config, "workerinput"):
         return request.config.workerinput["workerid"]
@@ -810,14 +808,18 @@ def worker_id(request):
 
 
 @pytest.fixture(scope="session")
-def dj_config(verbose):
+def dj_config(verbose, worker_id):
     """Fixture for branch-specific config name"""
     SERVER.wait()  # ensure MySQL is ready before any test uses these credentials
 
-    # Worker-specific config file to avoid conflicts
     config_file = "dj_local_conf.json"
     if branch_name := SERVER.branch_name:
         config_file = f"dj_local_conf_{branch_name}.json"
+    if worker_id != "master":
+        # Each xdist worker has its own server. A shared file lets one worker
+        # overwrite it between another's save and load, so that worker would
+        # connect to the wrong server.
+        config_file = config_file.replace(".json", f"_{worker_id}.json")
 
     if Path(config_file).exists():
         os.remove(config_file)
@@ -836,10 +838,17 @@ def dj_config(verbose):
 def dj_conn(dj_config):
     """Fixture for datajoint connection with pytest-xdist support.
 
-    For parallel execution, each worker gets its own database schema prefix
-    to avoid race conditions and ensure test isolation.
+    For parallel execution, each worker connects to its own server, which
+    keeps workers isolated; the port check below makes a mix-up loud.
     """
     dj.config.load(dj_config)
+    expected_port = SERVER.credentials["database.port"]
+    if int(dj.config["database.port"]) != expected_port:
+        pytest.exit(
+            f"{dj_config} names port {dj.config['database.port']}, but this "
+            f"session's server is on {expected_port}; another session "
+            "rewrote the config file."
+        )
 
     try:
         dj.conn().ping()
