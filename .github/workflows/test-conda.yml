@@ -475,15 +475,18 @@ jobs:
         shard=${{ matrix.shard.name }}
         common=(--no-docker --no-dlc -q --v2-tier-budgets --durations=25
                 --cov-config=tests/.coveragerc)
-        status=0
+        unit_status=0
+        db_status=0
         python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
           --v2-tier unit -m "not regenerate" -n auto "${common[@]}" \
-          --junitxml="junit-v2-$shard-unit.xml" --cov-report= || status=$?
+          --junitxml="junit-v2-$shard-unit.xml" --cov-report= \
+          || unit_status=$?
         python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
           -m "($V2_MARKERS) and not unit" "${common[@]}" --cov-append \
           --junitxml="junit-v2-$shard.xml" \
-          --cov-report="xml:coverage-v2-$shard.xml" || status=$?
-        exit $status
+          --cov-report="xml:coverage-v2-$shard.xml" || db_status=$?
+        echo "unit tier exit $unit_status; database tiers exit $db_status"
+        [ "$unit_status" -eq 0 ] && [ "$db_status" -eq 0 ]
     - name: Upload v2 shard coverage to Codecov
       if: ${{ !cancelled() && hashFiles(format('coverage-v2-{0}.xml', matrix.shard.name)) != '' }}
       uses: codecov/codecov-action@v5
