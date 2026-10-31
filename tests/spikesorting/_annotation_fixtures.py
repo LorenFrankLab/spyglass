@@ -40,6 +40,9 @@ class FakeSpikeSortingOutput:
         payloads = [self.payloads[merge_id] for merge_id in merge_ids]
         return (payloads, merge_ids) if return_merge_ids else payloads
 
+    def close_nwb(self, restriction=None):
+        """No-op: the payloads are in memory, so no file is held."""
+
 
 def make_annotation_tables(dj_conn, schema_name):
     """Create an isolated annotation table using the production methods.
