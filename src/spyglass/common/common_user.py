@@ -98,6 +98,11 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         feature reproducible at the expense of a new row per commit on dev
         installs. Clean releases have ``commit_hash=None``, so their hash is
         unchanged and existing rows are unaffected.
+
+        A new row means a new ``env_id``, and ``RecordingRecomputeSelection``
+        keys on ``env_id``, so a dev clone gets a fresh set of recompute
+        selections per commit. Recompute is an admin operation, so this is
+        acceptable.
         """
         env_dict = self.parse_env_dict(self.env)
         commit = get_install_info().get("commit_hash")
