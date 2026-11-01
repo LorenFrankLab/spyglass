@@ -17,8 +17,8 @@ try:
     from spyglass.settings import test_mode as _test_mode
 
     if not _test_mode:
-        from spyglass.utils.git_utils import _warn_once
+        from spyglass.utils.git_utils import spyglass_install
 
-        _warn_once()
+        spyglass_install.warn_once()
 except Exception:
     pass

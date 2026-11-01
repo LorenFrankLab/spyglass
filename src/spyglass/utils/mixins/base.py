@@ -40,10 +40,10 @@ class BaseMixin:
         # because the insert it makes re-enters this hook.
         BaseMixin._logged_install_mode = True
 
-        from spyglass.utils.git_utils import log_install
+        from spyglass.common.common_user import UserEnvironment
 
         try:
-            log_install()
+            UserEnvironment().log_install()
         except Exception as exc:  # never block the caller's own write
             self._logger.debug(f"dirty env logging failed: {exc}")
 

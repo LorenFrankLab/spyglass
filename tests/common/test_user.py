@@ -14,6 +14,18 @@ _CLEAN_INSTALL = {
 }
 
 
+def _as_install(**facts):
+    """Patch the process-wide install to report these facts.
+
+    Each fact is a `cached_property`, so priming the instance dict is how they
+    are set — and a test need only name what it exercises. Returns a context
+    manager, so a test reads as "with this install, ...".
+    """
+    from spyglass.utils.git_utils import spyglass_install
+
+    return patch.dict(spyglass_install.__dict__, facts)
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _clean_install(user_env_tbl):
     """Pin the install state for this module.
@@ -31,10 +43,7 @@ def _clean_install(user_env_tbl):
     for attr in cached:
         user_env_tbl.__dict__.pop(attr, None)
 
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=_CLEAN_INSTALL,
-    ):
+    with _as_install(**_CLEAN_INSTALL):
         yield
 
     for attr in cached:

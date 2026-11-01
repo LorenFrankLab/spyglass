@@ -33,10 +33,31 @@ _CONDA_STDOUT = yaml.dump(
 _PIP_STDOUT = "scipy==1.11.0\nspyglass==0.5.6\n"
 
 
+def _as_install(**facts):
+    """Patch the process-wide install to report these facts.
+
+    Each fact is a `cached_property`, so priming the instance dict is how they
+    are set — and a test need only name what it exercises. Returns a context
+    manager, so a test reads as "with this install, ...".
+    """
+    from spyglass.utils.git_utils import spyglass_install
+
+    return patch.dict(spyglass_install.__dict__, facts)
+
+
 def _proc(stdout="", returncode=0) -> CompletedProcess:
     return CompletedProcess(
         args=[], returncode=returncode, stdout=stdout, stderr=""
     )
+
+
+def _warn_with(facts: dict) -> None:
+    """Warn as an install with these facts, bypassing real inspection."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    inst = SpyglassInstall()
+    inst.__dict__.update(facts)  # prime the cached properties
+    inst.warn()
 
 
 def _git_mock(
@@ -103,10 +124,30 @@ def warn_dirty_days():
 
 @pytest.fixture(scope="module")
 def compute_install_info_fn():
-    """Return the _compute_install_info function (deferred import)."""
-    from spyglass.utils.git_utils import _compute_install_info
+    """Inspect the install afresh, bypassing the process-wide instance.
 
-    return _compute_install_info
+    Every fact is read before returning. They are cached properties, so a
+    lazily-inspected instance would read whatever the working tree looks like
+    at the assertion rather than what the test had patched.
+    """
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    facts = (
+        "is_dev",
+        "commit_hash",
+        "install_path",
+        "has_local_changes",
+        "is_stale",
+        "is_official",
+    )
+
+    def _inspect():
+        fresh = SpyglassInstall()
+        for fact in facts:
+            getattr(fresh, fact)
+        return fresh
+
+    return _inspect
 
 
 @pytest.fixture
@@ -195,9 +236,9 @@ def _clear_dirty_marker_each_test():
     """Keep the local dirty marker from leaking across tests."""
     from spyglass.utils import git_utils
 
-    git_utils._clear_dirty_marker()
+    git_utils.spyglass_install.marker.clear()
     yield
-    git_utils._clear_dirty_marker()
+    git_utils.spyglass_install.marker.clear()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -710,9 +751,9 @@ def test_pip_install_no_git(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             result = compute_install_info_fn()
 
-    assert result["install_path"] is None
-    assert result["has_local_changes"] is False
-    assert result["is_official"] is True
+    assert result.install_path is None
+    assert result.has_local_changes is False
+    assert result.is_official is True
 
 
 def test_dev_version_is_dev(tmp_path, fake_clone, compute_install_info_fn):
@@ -728,9 +769,9 @@ def test_dev_version_is_dev(tmp_path, fake_clone, compute_install_info_fn):
             ):
                 result = compute_install_info_fn()
 
-    assert result["is_dev"] is True
-    assert result["has_local_changes"] is True
-    assert result["is_official"] is False
+    assert result.is_dev is True
+    assert result.has_local_changes is True
+    assert result.is_official is False
 
 
 def test_release_version_not_dev(tmp_path, compute_install_info_fn):
@@ -743,7 +784,7 @@ def test_release_version_not_dev(tmp_path, compute_install_info_fn):
         with patch("spyglass.__file__", str(fake_pkg)):
             result = compute_install_info_fn()
 
-    assert result["is_dev"] is False
+    assert result.is_dev is False
 
 
 def test_commit_hash_parsed_from_version(
@@ -763,7 +804,7 @@ def test_commit_hash_parsed_from_version(
             ):
                 result = compute_install_info_fn()
 
-    assert result["commit_hash"] == "abcd1234"
+    assert result.commit_hash == "abcd1234"
 
 
 def test_git_dirty_sets_has_local_changes(
@@ -780,8 +821,8 @@ def test_git_dirty_sets_has_local_changes(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is True
-    assert result["is_official"] is False
+    assert result.has_local_changes is True
+    assert result.is_official is False
 
 
 def test_git_clean_no_changes(tmp_path, fake_clone, compute_install_info_fn):
@@ -796,7 +837,7 @@ def test_git_clean_no_changes(tmp_path, fake_clone, compute_install_info_fn):
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
+    assert result.has_local_changes is False
 
 
 def test_git_unavailable_no_crash(
@@ -811,7 +852,7 @@ def test_git_unavailable_no_crash(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
+    assert result.has_local_changes is False
 
 
 def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
@@ -831,7 +872,7 @@ def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
             ):
                 result = compute_install_info_fn()
 
-    assert result["commit_hash"] == "abc1234"
+    assert result.commit_hash == "abc1234"
 
 
 def test_unpushed_head_is_not_official(
@@ -852,8 +893,8 @@ def test_unpushed_head_is_not_official(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is True
-    assert result["is_official"] is False
+    assert result.has_local_changes is True
+    assert result.is_official is False
 
 
 def test_published_head_with_clean_diff_is_official(
@@ -870,8 +911,8 @@ def test_published_head_with_clean_diff_is_official(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
-    assert result["is_official"] is True
+    assert result.has_local_changes is False
+    assert result.is_official is True
 
 
 def test_git_branch_failure_does_not_flag(
@@ -888,7 +929,7 @@ def test_git_branch_failure_does_not_flag(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
+    assert result.has_local_changes is False
 
 
 def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
@@ -903,9 +944,9 @@ def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
             result = compute_install_info_fn()
 
-    assert result["install_path"] is None
-    assert result["has_local_changes"] is True
-    assert result["is_official"] is False
+    assert result.install_path is None
+    assert result.has_local_changes is True
+    assert result.is_official is False
 
 
 def test_clean_wheel_is_not_flagged(compute_install_info_fn):
@@ -914,8 +955,8 @@ def test_clean_wheel_is_not_flagged(compute_install_info_fn):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
             result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
-    assert result["is_official"] is True
+    assert result.has_local_changes is False
+    assert result.is_official is True
 
 
 def test_venv_inside_another_repo_is_not_a_clone(
@@ -945,10 +986,10 @@ def test_venv_inside_another_repo_is_not_a_clone(
         with patch("spyglass.__file__", str(pkg_init)):
             result = compute_install_info_fn()
 
-    assert result["install_path"] is None
-    assert result["commit_hash"] is None
-    assert result["has_local_changes"] is False
-    assert result["is_official"] is True
+    assert result.install_path is None
+    assert result.commit_hash is None
+    assert result.has_local_changes is False
+    assert result.is_official is True
 
 
 def test_sibling_src_spyglass_is_not_this_install(
@@ -972,7 +1013,7 @@ def test_sibling_src_spyglass_is_not_this_install(
         with patch("spyglass.__file__", str(elsewhere)):
             result = compute_install_info_fn()
 
-    assert result["install_path"] is None
+    assert result.install_path is None
 
 
 def test_src_layout_clone_is_accepted(
@@ -989,8 +1030,8 @@ def test_src_layout_clone_is_accepted(
             ):
                 result = compute_install_info_fn()
 
-    assert result["install_path"] == str(tmp_path)
-    assert result["commit_hash"] == "abc1234"
+    assert result.install_path == str(tmp_path)
+    assert result.commit_hash == "abc1234"
 
 
 def test_head_outranks_version_hash(
@@ -1013,7 +1054,7 @@ def test_head_outranks_version_hash(
             ):
                 result = compute_install_info_fn()
 
-    assert result["commit_hash"] == "bbbbbbb"
+    assert result.commit_hash == "bbbbbbb"
 
 
 def test_version_hash_used_without_a_clone(compute_install_info_fn):
@@ -1022,8 +1063,8 @@ def test_version_hash_used_without_a_clone(compute_install_info_fn):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
             result = compute_install_info_fn()
 
-    assert result["install_path"] is None
-    assert result["commit_hash"] == "aaaaaaa"
+    assert result.install_path is None
+    assert result.commit_hash == "aaaaaaa"
 
 
 def test_git_diff_nonzero_exit(tmp_path, fake_clone, compute_install_info_fn):
@@ -1040,7 +1081,7 @@ def test_git_diff_nonzero_exit(tmp_path, fake_clone, compute_install_info_fn):
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
+    assert result.has_local_changes is False
 
 
 def test_git_diff_generic_exception(
@@ -1057,7 +1098,7 @@ def test_git_diff_generic_exception(
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
+    assert result.has_local_changes is False
 
 
 def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
@@ -1077,9 +1118,9 @@ def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
             ):
                 result = compute_install_info_fn()
 
-    assert result["has_local_changes"] is False
-    assert result["is_stale"] is True
-    assert result["is_official"] is False
+    assert result.has_local_changes is False
+    assert result.is_stale is True
+    assert result.is_official is False
 
 
 def test_clean_current_clone_is_official(
@@ -1101,10 +1142,10 @@ def test_clean_current_clone_is_official(
             ):
                 result = compute_install_info_fn()
 
-    assert result["is_dev"] is True
-    assert result["has_local_changes"] is False
-    assert result["is_stale"] is False
-    assert result["is_official"] is True  # being a few commits behind is fine
+    assert result.is_dev is True
+    assert result.has_local_changes is False
+    assert result.is_stale is False
+    assert result.is_official is True  # being a few commits behind is fine
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1121,10 +1162,8 @@ def test_warn_official_install_silent(caplog):
         "install_path": None,
         "commit_hash": None,
     }
-    from spyglass.utils.git_utils import warn_if_dirty
-
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert not any("repository" in r.message for r in caplog.records)
 
@@ -1133,7 +1172,6 @@ def test_warn_dirty_emits_warning(caplog, warn_dirty_days):
     """A dirty install (has_local_changes) emits the countdown warning."""
     import spyglass.common.common_lab as _lab_mod
     import spyglass.common.common_user as _user_mod
-    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
@@ -1153,7 +1191,7 @@ def test_warn_dirty_emits_warning(caplog, warn_dirty_days):
     with patch.object(_lab_mod, "LabMember", mock_lab):
         with patch.object(_user_mod, "UserEnvironment", mock_env):
             with caplog.at_level("WARNING"):
-                warn_if_dirty(info)
+                _warn_with(info)
 
     assert any("official commit" in r.message for r in caplog.records)
     assert any(f"{warn_dirty_days} days" in r.message for r in caplog.records)
@@ -1166,8 +1204,6 @@ def test_warn_admin_not_exempt_from_warning(caplog):
     a connection. Admins are exempt from the database record and the email,
     not from being told.
     """
-    from spyglass.utils.git_utils import warn_if_dirty
-
     info = {
         "is_official": False,
         "is_dev": True,
@@ -1178,15 +1214,13 @@ def test_warn_admin_not_exempt_from_warning(caplog):
     }
 
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert "not on an official commit" in caplog.text
 
 
 def test_warn_dev_but_clean_emits_stale_warning(caplog):
     """A clean-but-stale clone emits the softer 'older commit' advisory."""
-    from spyglass.utils.git_utils import warn_if_dirty
-
     info = {
         "is_official": False,
         "is_dev": True,
@@ -1197,7 +1231,7 @@ def test_warn_dev_but_clean_emits_stale_warning(caplog):
     }
 
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert "older commit" in caplog.text
     assert "not on an official commit" not in caplog.text  # no countdown
@@ -1211,8 +1245,6 @@ def test_warn_touches_no_database(caplog):
     """
     import datajoint as dj
 
-    from spyglass.utils.git_utils import warn_if_dirty
-
     info = {
         "is_official": False,
         "is_dev": True,
@@ -1224,7 +1256,7 @@ def test_warn_touches_no_database(caplog):
 
     with patch.object(dj, "conn", side_effect=AssertionError("connected!")):
         with caplog.at_level("WARNING"):
-            warn_if_dirty(info)
+            _warn_with(info)
 
     assert "not on an official commit" in caplog.text
 
@@ -1234,7 +1266,6 @@ def test_warn_countdown_runs_from_marker(caplog, warn_dirty_days):
     import datetime
 
     from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
@@ -1248,12 +1279,12 @@ def test_warn_countdown_runs_from_marker(caplog, warn_dirty_days):
     ten_days_ago = (
         datetime.date.today() - datetime.timedelta(days=10)
     ).isoformat()
-    git_utils._set_dirty_marker(
-        {"commit": "abc1234", "first_seen": ten_days_ago}
+    git_utils.spyglass_install.marker.write(
+        commit="abc1234", first_seen=ten_days_ago
     )
 
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert f"within {warn_dirty_days - 10} days" in caplog.text
 
@@ -1267,13 +1298,12 @@ def test_warn_countdown_survives_a_new_commit(caplog, warn_dirty_days):
     import datetime
 
     from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
 
     ten_days_ago = (
         datetime.date.today() - datetime.timedelta(days=10)
     ).isoformat()
-    git_utils._set_dirty_marker(
-        {"commit": "old_commit", "first_seen": ten_days_ago}
+    git_utils.spyglass_install.marker.write(
+        commit="old_commit", first_seen=ten_days_ago
     )
 
     info = {
@@ -1285,10 +1315,12 @@ def test_warn_countdown_survives_a_new_commit(caplog, warn_dirty_days):
         "commit_hash": "new_commit",  # moved on since first flagged
     }
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert f"within {warn_dirty_days - 10} days" in caplog.text
-    assert git_utils._read_dirty_marker()["first_seen"] == ten_days_ago
+    assert (
+        git_utils.spyglass_install.marker.read()["first_seen"] == ten_days_ago
+    )
 
 
 def test_warn_first_sight_starts_the_clock(caplog, warn_dirty_days):
@@ -1296,7 +1328,6 @@ def test_warn_first_sight_starts_the_clock(caplog, warn_dirty_days):
     import datetime
 
     from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
@@ -1308,18 +1339,16 @@ def test_warn_first_sight_starts_the_clock(caplog, warn_dirty_days):
     }
 
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert f"within {warn_dirty_days} days" in caplog.text
-    marker = git_utils._read_dirty_marker()
+    marker = git_utils.spyglass_install.marker.read()
     assert marker["first_seen"] == datetime.date.today().isoformat()
     assert marker["commit"] == "abc1234"
 
 
 def test_warn_clean_is_silent(caplog):
     """An official install warns about nothing."""
-    from spyglass.utils.git_utils import warn_if_dirty
-
     info = {
         "is_official": True,
         "is_dev": False,
@@ -1330,7 +1359,7 @@ def test_warn_clean_is_silent(caplog):
     }
 
     with caplog.at_level("WARNING"):
-        warn_if_dirty(info)
+        _warn_with(info)
 
     assert caplog.text == ""
 
@@ -1345,7 +1374,7 @@ def test_mixin_logs_install_once_per_session():
     itself: an instance attribute would shadow it and leave every other table
     unguarded.
     """
-    from spyglass.utils import git_utils
+    import spyglass.common.common_user as _user_mod
     from spyglass.utils.mixins.base import BaseMixin
 
     class TableA(BaseMixin):
@@ -1359,7 +1388,11 @@ def test_mixin_logs_install_once_per_session():
     calls = []
     BaseMixin._logged_install_mode = False
     try:
-        with patch.object(git_utils, "log_install", lambda: calls.append(1)):
+        with patch.object(
+            _user_mod.UserEnvironment,
+            "log_install",
+            lambda self: calls.append(1),
+        ):
             TableA()._log_install_once()
             TableB()._log_install_once()
             TableA()._log_install_once()
@@ -1369,32 +1402,61 @@ def test_mixin_logs_install_once_per_session():
     assert len(calls) == 1
 
 
-def test_log_install_writes_the_record():
-    """log_install itself always writes — the caller owns the gate."""
-    import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
-    from spyglass.utils import git_utils
+def _patched_env(insert_return=None, row_date=None):
+    """Patch UserEnvironment's collaborators, keeping the real log_install.
 
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/user/spyglass",
-        "commit_hash": "abc1234",
-    }
+    The method under test lives on the table now, so the class itself must not
+    be replaced — only what it calls out to.
+    """
+    import spyglass.common.common_user as _user_mod
+
+    inserted = MagicMock(
+        return_value=insert_return or {"env_id": "user_env_00"}
+    )
+    return (
+        _user_mod.UserEnvironment,
+        inserted,
+        patch.multiple(
+            _user_mod.UserEnvironment,
+            insert_current_env=inserted,
+            _row_first_seen=MagicMock(return_value=row_date),
+        ),
+    )
+
+
+_DIRTY_INFO = {
+    "is_official": False,
+    "is_dev": True,
+    "has_local_changes": True,
+    "is_stale": False,
+    "install_path": "/home/user/spyglass",
+    "commit_hash": "abc1234",
+}
+
+_CLEAN_INFO = {
+    "is_official": True,
+    "is_dev": False,
+    "has_local_changes": False,
+    "is_stale": False,
+    "install_path": None,
+    "commit_hash": None,
+}
+
+
+def test_log_install_writes_the_record():
+    """A dirty install is recorded on the session's first write."""
+    import spyglass.common.common_lab as _lab_mod
 
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
+    tbl, inserted, patches = _patched_env()
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_DIRTY_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    mock_inst.insert_current_env.assert_called_once()
+    inserted.assert_called_once()
 
 
 def test_log_install_adopts_the_rows_date():
@@ -1405,45 +1467,21 @@ def test_log_install_adopts_the_rows_date():
     email keeps counting, and a user can be emailed the same day they are told
     they have the full window left.
     """
-    import datetime
-
     import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
     from spyglass.utils import git_utils
 
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/user/spyglass",
-        "commit_hash": "abc1234",
-    }
-
-    # Marker cleared, as a temp_dir sweep would leave it; the row is older.
-    git_utils._clear_dirty_marker()
-    logged_on = datetime.datetime.now() - datetime.timedelta(days=12)
-
+    git_utils.spyglass_install.marker.clear()  # as a sweep would
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
-    mock_inst = MagicMock()
-    mock_inst.insert_current_env = MagicMock(
-        return_value={"env_id": "user_env_00"}
-    )
-    mock_row = MagicMock()
-    mock_row.fetch1 = MagicMock(return_value=logged_on)
-    mock_env = MagicMock(return_value=mock_inst)
-    mock_env.return_value.__and__ = MagicMock(return_value=mock_row)
+    tbl, _, patches = _patched_env(row_date="2026-10-01")
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_DIRTY_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    assert (
-        git_utils._read_dirty_marker()["first_seen"]
-        == logged_on.date().isoformat()
-    )
+    marker = git_utils.spyglass_install.marker.read()
+    assert marker["first_seen"] == "2026-10-01"
 
 
 def test_log_install_keeps_local_date_without_a_row():
@@ -1455,154 +1493,95 @@ def test_log_install_keeps_local_date_without_a_row():
     import datetime
 
     import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
     from spyglass.utils import git_utils
 
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/user/spyglass",
-        "commit_hash": "abc1234",
-    }
-
     today = datetime.date.today().isoformat()
-    git_utils._set_dirty_marker({"commit": "abc1234", "first_seen": today})
-
+    git_utils.spyglass_install.marker.write(commit="abc1234", first_seen=today)
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
-    mock_inst = MagicMock()
-    mock_inst.insert_current_env = MagicMock(return_value={"env_id": None})
-    mock_env = MagicMock(return_value=mock_inst)
+    tbl, _, patches = _patched_env(row_date=None)
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_DIRTY_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    assert git_utils._read_dirty_marker()["first_seen"] == today
+    marker = git_utils.spyglass_install.marker.read()
+    assert marker["first_seen"] == today
 
 
-def test_log_dirty_env_skips_second_call_same_day():
+def test_log_install_skips_second_call_same_day():
     """A dirty state already recorded today needs no second write."""
     import datetime
 
     import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
     from spyglass.utils import git_utils
 
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/user/spyglass",
-        "commit_hash": "abc1234",
-    }
-
-    git_utils._set_dirty_marker(
-        {
-            "commit": "abc1234",
-            "first_seen": "2026-01-01",
-            "last_logged": datetime.date.today().isoformat(),
-        }
+    git_utils.spyglass_install.marker.write(
+        commit="abc1234",
+        first_seen="2026-01-01",
+        last_logged=datetime.date.today().isoformat(),
     )
-
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
+    tbl, inserted, patches = _patched_env()
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_DIRTY_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    mock_inst.insert_current_env.assert_not_called()
+    inserted.assert_not_called()
 
 
-def test_log_dirty_env_admin_not_logged():
+def test_log_install_admin_not_logged():
     """An admin is warned but not recorded, and so never emailed."""
     import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
-    from spyglass.utils import git_utils
-
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/admin/spyglass",
-        "commit_hash": "abc1234",
-    }
 
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = True
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
+    tbl, inserted, patches = _patched_env()
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_DIRTY_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    mock_inst.insert_current_env.assert_not_called()
+    inserted.assert_not_called()
 
 
-def test_log_dirty_env_clean_no_marker_is_noop():
-    """A clean install never flagged here imports nothing and queries nothing."""
+def test_log_install_clean_no_marker_is_noop():
+    """A clean install never flagged here queries nothing at all."""
     import spyglass.common.common_lab as _lab_mod
-    from spyglass.utils import git_utils
-
-    info = {
-        "is_official": True,
-        "is_dev": False,
-        "has_local_changes": False,
-        "is_stale": False,
-        "install_path": None,
-        "commit_hash": None,
-    }
+    import spyglass.common.common_user as _user_mod
 
     mock_lab = MagicMock()
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_CLEAN_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            git_utils.log_install()
+            _user_mod.UserEnvironment().log_install()
 
     mock_lab.assert_not_called()
 
 
-def test_log_dirty_env_clean_with_marker_records_resolution():
+def test_log_install_clean_with_marker_records_resolution():
     """Clean with a marker logs the full row and clears the marker."""
     import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
     from spyglass.utils import git_utils
 
-    info = {
-        "is_official": True,
-        "is_dev": False,
-        "has_local_changes": False,
-        "is_stale": False,
-        "install_path": None,
-        "commit_hash": None,
-    }
-
-    git_utils._set_dirty_marker(
-        {"commit": "abc1234", "first_seen": "2026-01-01"}
+    git_utils.spyglass_install.marker.write(
+        commit="abc1234", first_seen="2026-01-01"
     )
-
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
+    tbl, inserted, patches = _patched_env()
 
-    with patch.object(git_utils, "get_install_info", return_value=info):
+    with _as_install(**_CLEAN_INFO):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            with patch.object(_user_mod, "UserEnvironment", mock_env):
-                git_utils.log_install()
+            with patches:
+                tbl().log_install()
 
-    mock_inst.insert_current_env.assert_called_once()
-    assert git_utils._dirty_marker_exists() is False
+    inserted.assert_called_once()
+    assert git_utils.spyglass_install.marker.exists() is False
 
 
 def test_warn_once_is_idempotent(caplog):
@@ -1622,16 +1601,17 @@ def test_warn_once_is_idempotent(caplog):
         "commit_hash": "abc1234",
     }
 
-    git_utils._warned = False
+    git_utils.spyglass_install.warned = False
     try:
-        with patch.object(git_utils, "get_install_info", return_value=info):
+        with _as_install(**info):
             with caplog.at_level("WARNING"):
-                git_utils._warn_once()
+                git_utils.spyglass_install.warn_once()
                 first = caplog.text.count("not on an official commit")
-                git_utils._warn_once()
+                git_utils.spyglass_install.warn_once()
                 second = caplog.text.count("not on an official commit")
     finally:
-        git_utils._warned = True  # leave the session as the import found it
+        # leave the session as the import found it
+        git_utils.spyglass_install.warned = True
 
     assert first == 1
     assert second == 1
@@ -1683,10 +1663,7 @@ def stale_install_info():
 
 def test_clean_install_null_fields(user_env_tbl, clean_install_info):
     """A clean install stores NULL for dirty_path and spyglass_commit."""
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.delete(safemode=False)
@@ -1700,10 +1677,7 @@ def test_clean_install_null_fields(user_env_tbl, clean_install_info):
 
 def test_dirty_path_populated(user_env_tbl, dirty_install_info):
     """A dirty install stores dirty_path and spyglass_commit."""
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=dirty_install_info,
-    ):
+    with _as_install(**dirty_install_info):
         # Clear cached properties so insert_current_env re-runs
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
@@ -1724,18 +1698,12 @@ def test_dirty_hash_differs_from_clean(
 
     _ = _env_cache.get(with_pip=True)
 
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id"):
             user_env_tbl.__dict__.pop(attr, None)
         clean_hash = user_env_tbl.env_hash
 
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=dirty_install_info,
-    ):
+    with _as_install(**dirty_install_info):
         for attr in ("env", "env_hash", "matching_env_id"):
             user_env_tbl.__dict__.pop(attr, None)
         dirty_hash = user_env_tbl.env_hash
@@ -1745,10 +1713,7 @@ def test_dirty_hash_differs_from_clean(
 
 def test_dirty_idempotent(user_env_tbl, dirty_install_info):
     """Calling insert_current_env twice with the same dirty commit is idempotent."""
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=dirty_install_info,
-    ):
+    with _as_install(**dirty_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.delete(safemode=False)
@@ -1765,10 +1730,7 @@ def test_dirty_idempotent(user_env_tbl, dirty_install_info):
 
 def test_dirty_installs_query(user_env_tbl, dirty_install_info):
     """dirty_installs() returns a DataJoint expression with days_since_warn."""
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=dirty_install_info,
-    ):
+    with _as_install(**dirty_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.delete(safemode=False)
@@ -1812,9 +1774,7 @@ def same_commit_pair():
 
 def _log_as(user_env_tbl, info):
     """Clear cached state and log the environment under a given install info."""
-    with patch(
-        "spyglass.common.common_user.get_install_info", return_value=info
-    ):
+    with _as_install(**info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         return user_env_tbl.insert_current_env()
@@ -1897,6 +1857,88 @@ def test_dirty_episode_logged_once(user_env_tbl, same_commit_pair):
     assert row["timestamp"] <= row["last_seen"]  # first appearance held
 
 
+def test_dirty_episode_survives_a_dependency_change(
+    user_env_tbl, same_commit_pair
+):
+    """A dependency update does not restart the 30-day clock.
+
+    The partial row holds no environment, so there is nothing for a
+    dependency change to alter, and the dedupe matches on the user's
+    unresolved row rather than on a hash. Day 0 therefore survives both a
+    dependency update and a new commit.
+    """
+    _, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    first = _log_as(user_env_tbl, dirty)["env_id"]
+    before = (user_env_tbl & f'env_id="{first}"').fetch1("timestamp")
+
+    moved_on = dict(dirty, commit_hash="deadbeef")
+    second = _log_as(user_env_tbl, moved_on)["env_id"]
+    row = (user_env_tbl & f'env_id="{second}"').fetch1()
+
+    assert second == first  # same episode
+    assert row["timestamp"] == before  # same day 0
+    assert row["spyglass_commit"] == "deadbeef"  # but the commit is current
+
+
+def test_dirty_episode_takes_the_oldest_row(user_env_tbl, same_commit_pair):
+    """With two unresolved rows, the countdown uses the older.
+
+    Concurrent sessions can both find no row and both insert, since MySQL
+    permits repeated nulls under the unique index. `fetch` has no guaranteed
+    order, so the oldest has to be chosen explicitly.
+    """
+    from datetime import datetime, timedelta
+
+    import datajoint as dj
+
+    _, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    # The dedupe is scoped to this user's env_ids, so the rows have to carry
+    # the real prefix rather than a ghost one.
+    user = dj.config.get("database.user", "")
+    older_id, newer_id = f"{user}_race_00", f"{user}_race_01"
+
+    older = datetime.now() - timedelta(days=20)
+    newer = datetime.now() - timedelta(days=2)
+    user_env_tbl.insert(
+        [
+            {
+                "env_id": newer_id,  # inserted second, newer
+                "env_hash": None,
+                "env": None,
+                "has_editable": None,
+                "dirty_path": "/home/user/spyglass",
+                "spyglass_commit": "cafe1234",
+                "timestamp": newer,
+                "last_seen": newer,
+            },
+            {
+                "env_id": older_id,
+                "env_hash": None,
+                "env": None,
+                "has_editable": None,
+                "dirty_path": "/home/user/spyglass",
+                "spyglass_commit": "cafe1234",
+                "timestamp": older,
+                "last_seen": older,
+            },
+        ],
+        skip_duplicates=True,
+    )
+
+    try:
+        with patch.object(type(user_env_tbl), "_increment_id") as never:
+            chosen = _log_as(user_env_tbl, dirty)["env_id"]
+            never.assert_not_called()  # reused, did not insert
+        assert chosen == older_id  # the older episode
+    finally:
+        for eid in (older_id, newer_id):
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
 def test_episode_after_resolution_starts_fresh(user_env_tbl, same_commit_pair):
     """A new dirty episode gets its own first-appeared date.
 
@@ -1922,10 +1964,7 @@ def test_stale_install_is_not_dirty(user_env_tbl, stale_install_info):
     storing and the user is owed the soft "consider updating" advisory rather
     than the 30-day dirty-install email.
     """
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=stale_install_info,
-    ):
+    with _as_install(**stale_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.delete(safemode=False)
@@ -1942,10 +1981,7 @@ def test_stale_install_is_not_dirty(user_env_tbl, stale_install_info):
 
 def test_clean_install_not_in_dirty_installs(user_env_tbl, clean_install_info):
     """A clean install is NOT surfaced by dirty_installs()."""
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.delete(safemode=False)
@@ -2013,10 +2049,7 @@ def test_has_matching_env_same_hash(user_env_tbl, clean_install_info):
     Patched clean: a dirty install logs a partial row with no environment, and
     the test suite itself usually runs from a working tree with local edits.
     """
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         env_id = user_env_tbl.this_env["env_id"]
@@ -2054,10 +2087,7 @@ def test_write_env_yaml(user_env_tbl, tmp_path, clean_install_info):
 
     Patched clean, as above: a partial row has no environment to write.
     """
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         env_id = user_env_tbl.this_env["env_id"]
@@ -2116,10 +2146,7 @@ def test_get_dep_version_multi_row(user_env_tbl, dirty_install_info):
     user_env_tbl.this_env
 
     # Insert a second row with a different hash
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=dirty_install_info,
-    ):
+    with _as_install(**dirty_install_info):
         for attr in ("env", "env_hash", "matching_env_id"):
             user_env_tbl.__dict__.pop(attr, None)
         user_env_tbl.insert_current_env()
@@ -2334,10 +2361,7 @@ def test_env_hash_clean_backward_compat(user_env_tbl, clean_install_info):
     from hashlib import md5
     from json import dumps as json_dumps
 
-    with patch(
-        "spyglass.common.common_user.get_install_info",
-        return_value=clean_install_info,
-    ):
+    with _as_install(**clean_install_info):
         for attr in ("env", "env_hash", "matching_env_id", "this_env"):
             user_env_tbl.__dict__.pop(attr, None)
         env_dict = user_env_tbl.parse_env_dict(user_env_tbl.env)

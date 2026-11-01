@@ -3,6 +3,7 @@ from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
 from os import environ as os_environ
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -11,11 +12,7 @@ import yaml
 
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.env_cache import _delim_split, _env_cache
-from spyglass.utils.git_utils import (
-    WARN_DIRTY_ENV_DAYS,
-    _warn_once,
-    get_install_info,
-)
+from spyglass.utils.git_utils import WARN_DIRTY_ENV_DAYS, spyglass_install
 
 schema = dj.schema("common_user")
 
@@ -107,7 +104,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         acceptable.
         """
         env_dict = self.parse_env_dict(self.env)
-        commit = get_install_info().get("commit_hash")
+        commit = spyglass_install.commit_hash
         if commit:
             env_dict["spyglass_commit"] = commit
         env_json = json_dumps(env_dict, sort_keys=True)
@@ -122,7 +119,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> Optional[dict]:
         """Return the environment key. Cached to avoid rerunning insert."""
-        _warn_once()
+        spyglass_install.warn_once()
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
         del self.matching_env_id  # clear the cached property
@@ -174,10 +171,9 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             ``{"env_id": <id>}``, or ``{"env_id": None}`` when the environment
             could not be captured.
         """
-        info = get_install_info()
 
-        if info.get("has_local_changes"):
-            return self._log_dirty_env(env_id, info)
+        if spyglass_install.has_local_changes:
+            return self._log_dirty_env(env_id)
 
         if not self.env:  # if conda dump fails, warned above
             return {"env_id": None}
@@ -204,14 +200,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 "env": self.env,
                 "has_editable": _env_cache.has_editable,
                 "dirty_path": None,
-                "spyglass_commit": info.get("commit_hash"),
+                "spyglass_commit": spyglass_install.commit_hash,
             },
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
         return {"env_id": new_env_id}
 
-    def _log_dirty_env(self, env_id: str, info: dict) -> dict:
+    def _log_dirty_env(self, env_id: str) -> dict:
         """Record a dirty install as a partial row, or refresh the existing one.
 
         Writes no environment and runs no subprocess: a dirty install is not
@@ -228,8 +224,6 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         ----------
         env_id : str
             Preferred environment id. A numeric suffix is added when taken.
-        info : dict
-            The dict returned by :func:`~spyglass.utils.git_utils.get_install_info`.
 
         Returns
         -------
@@ -241,13 +235,28 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         episode = self.unresolved_dirty() & mine
 
         if episode:
-            existing = episode.fetch("env_id")[0]
-            # Server-side NOW(), matching DIRTY_DAYS_SQL, so the activity
-            # window is not skewed by a client clock.
+            # Oldest first: `fetch` has no guaranteed order, and two
+            # unresolved rows can exist — nothing stops concurrent sessions
+            # both finding none and both inserting, since MySQL permits
+            # repeated nulls under the unique index. Taking the oldest keeps
+            # the countdown running from when the episode really began.
+            existing = episode.fetch("env_id", order_by="timestamp ASC")[0]
+            # Refresh what the email reports alongside the activity window:
+            # one row covers the whole episode, so a user who has committed
+            # or moved their clone since day 0 would otherwise be emailed
+            # about a commit they have left behind. `timestamp` is untouched —
+            # that is the clock. Server-side NOW(), matching DIRTY_DAYS_SQL,
+            # so the window is not skewed by a client clock.
             self.connection.query(
                 f"UPDATE {self.full_table_name} "
-                + "SET `last_seen` = NOW() "
-                + f"WHERE `env_id` = '{existing}'"
+                + "SET `last_seen` = NOW(), "
+                + "`spyglass_commit` = %s, `dirty_path` = %s "
+                + "WHERE `env_id` = %s",
+                args=(
+                    spyglass_install.commit_hash,
+                    spyglass_install.install_path,
+                    existing,
+                ),
             )
             return {"env_id": existing}
 
@@ -258,8 +267,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 "env_hash": None,
                 "env": None,
                 "has_editable": None,  # never tested — no pip freeze ran
-                "dirty_path": info.get("install_path"),
-                "spyglass_commit": info.get("commit_hash"),
+                "dirty_path": spyglass_install.install_path,
+                "spyglass_commit": spyglass_install.commit_hash,
             },
             skip_duplicates=False,
         )
@@ -295,6 +304,92 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if env_hash is None or has_editable is None:
             return False
         return not has_editable
+
+    def log_install(self) -> None:
+        """Record a dirty Spyglass install, once per session.
+
+        Called from the mixin on the session's first insert or populate rather
+        than at import: by then a connection exists, so this adds no
+        import-time cost and nothing at all in a process that never writes.
+        The once-per-session gate is the caller's — see
+        ``BaseMixin._logged_install_mode``, which must be set before this runs,
+        because the insert below re-enters the mixin hook.
+
+        Writes at most once a day per environment. A dirty state already on
+        record needs no more than a ``last_seen`` refresh, which the activity
+        window resolves in days, and the marker's ``last_logged`` date bounds
+        it without a query.
+
+        A clean install with a marker is the resolution case: the full row is
+        logged so the escalation clock stops, and the marker is cleared.
+
+        Fully guarded — a user without write permission sees nothing.
+        """
+        sg_install = spyglass_install
+        flagged = sg_install.has_local_changes or sg_install.is_stale
+        marker = sg_install.marker.read()
+
+        # Fast path: a clean install that was never flagged here has nothing to
+        # record and no resolution to log — no import, and no query.
+        if not flagged and not marker:
+            return
+
+        today = date.today().isoformat()
+        if flagged and marker.get("last_logged") == today:
+            return  # already on record today
+
+        from spyglass.common.common_lab import LabMember
+
+        try:
+            if LabMember().user_is_admin:
+                return
+        except Exception as exc:
+            logger.debug(f"admin check failed: {exc}")  # DB down — log anyway
+
+        try:
+            key = self.insert_current_env()
+        except Exception as exc:
+            logger.debug(f"dirty env logging failed: {exc}")
+            return
+
+        if sg_install.has_local_changes:
+            # Prefer the row's date, then whatever the warning recorded
+            # locally, then today — the marker may be absent entirely if it
+            # was swept between the warning and this write.
+            sg_install.marker.write(
+                last_logged=today,
+                first_seen=(
+                    self._row_first_seen(key)
+                    or marker.get("first_seen")
+                    or today
+                ),
+            )
+        else:  # resolution recorded; future clean sessions take the fast path
+            sg_install.marker.clear()
+
+    def _row_first_seen(self, key: dict) -> Optional[str]:
+        """Return the ISO date a logged dirty row first appeared, if readable.
+
+        The database is the shared record, so the warning's countdown defers to
+        it and the marker becomes a cache rather than a second clock. Without
+        this, clearing ``temp_dir`` — a cache, and cleared as one — restarts the
+        local countdown while the escalation email keeps counting, so a user
+        could be emailed on the same day they were told they had the full window
+        left.
+
+        Returns ``None`` when there is nothing to read, leaving the caller's
+        local date in place: the first warning of a new episode fires before any
+        row exists.
+        """
+        env_id = (key or {}).get("env_id")
+        if not env_id:
+            return None
+        try:
+            stamp = (self & f'env_id="{env_id}"').fetch1("timestamp")
+            return stamp.date().isoformat()
+        except Exception as exc:
+            logger.debug(f"could not read logged dirty date: {exc}")
+            return None
 
     def unresolved_dirty(self) -> "dj.expression.QueryExpression":
         """Return partial rows whose dirty state has not been cleaned up.
