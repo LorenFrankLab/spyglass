@@ -1,6 +1,44 @@
+from unittest.mock import patch
+
 import pytest
 import yaml
 from spikeinterface import __version__ as si_version
+
+_CLEAN_INSTALL = {
+    "is_dev": False,
+    "commit_hash": None,
+    "install_path": None,
+    "has_local_changes": False,
+    "is_stale": False,
+    "is_official": True,
+}
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _clean_install(user_env_tbl):
+    """Pin the install state for this module.
+
+    Every test here exercises the full-row path — the stored environment, its
+    hash, the versions read back out. A dirty install deliberately stores none
+    of that, and a developer's working tree is dirty by definition, so without
+    pinning, these tests assert against whatever state the checkout happens to
+    be in rather than against `UserEnvironment`.
+
+    Cached properties are cleared on both sides so the module neither inherits
+    another module's cache nor leaves its own behind.
+    """
+    cached = ("env", "env_hash", "matching_env_id", "this_env")
+    for attr in cached:
+        user_env_tbl.__dict__.pop(attr, None)
+
+    with patch(
+        "spyglass.common.common_user.get_install_info",
+        return_value=_CLEAN_INSTALL,
+    ):
+        yield
+
+    for attr in cached:
+        user_env_tbl.__dict__.pop(attr, None)
 
 
 def test_user_env(user_env_tbl):
@@ -72,6 +110,10 @@ def test_parse_env_fail(user_env_tbl):
 def test_clear_cache(user_env_tbl):
     """Test that clearing cache returns same env id."""
     pre_env = user_env_tbl.this_env["env_id"]
+    # Read it first so `del` has something to clear: `this_env` leaves
+    # `matching_env_id` uncached whenever it had to insert, so whether the
+    # delete succeeds otherwise depends on the table already holding this env.
+    _ = user_env_tbl.matching_env_id
     del user_env_tbl.matching_env_id
     post_env = user_env_tbl.this_env["env_id"]
     assert pre_env == post_env, "Environment should change after clearing cache"
