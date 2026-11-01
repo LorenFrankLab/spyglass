@@ -221,11 +221,12 @@ jobs:
     # others. Balanced by RUNTIME, not test count: the single-session sorts and
     # the cross-session / concat / recompute integration tests dominate
     # wall-clock and each get a shard; the ``unit`` shard runs the many fast
-    # DB-free + light-DB tests AND any file not routed above. The two heavy
-    # separate-env lanes (matching, figpack) each run in ONE shard (see their
-    # ``if:`` guards below) so the matrix does not triple them. Adding a new
-    # HEAVY (full-sort) test file? Add it once to INTEGRATION_MODULES in
-    # tests/spikesorting/v2/scripts/run_ci_shard.py.
+    # DB-free + light-DB tests AND any file not routed above. The separate-env
+    # lanes (matching, curation) and the manual-only motion benchmark are
+    # matrix entries of their own, so they run beside the workload shards
+    # rather than after one of them; the benchmark entry exists only on manual
+    # dispatch. Adding a new HEAVY (full-sort) test file? Add it once to
+    # INTEGRATION_MODULES in tests/spikesorting/v2/scripts/run_ci_shard.py.
     env:
       # Hosted runners have no GPU. Offer pip the CPU torch wheels so the
       # ``torch>=2`` requirement in this job's three environments resolves to
@@ -235,10 +236,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - name: single-session
-          - name: integration
-          - name: unit
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch'
+          && '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"},{"name":"motion-benchmark"}]'
+          || '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"}]') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -444,6 +444,7 @@ jobs:
         fi
         echo "V2_MARKERS=$MARKERS" >> "$GITHUB_ENV"
     - name: Run modern spike-sorting tests
+      if: contains(fromJSON('["single-session", "integration", "unit"]'), matrix.shard.name)
       # Runs this shard's slice of tests/spikesorting/v2 (matrix above):
       # single-session = single_session/, integration = the listed full-sort
       # files, unit = everything else in the directory, narrowed to the tiers
@@ -488,7 +489,7 @@ jobs:
         echo "unit tier exit $unit_status; database tiers exit $db_status"
         [ "$unit_status" -eq 0 ] && [ "$db_status" -eq 0 ]
     - name: Upload v2 shard coverage to Codecov
-      if: ${{ !cancelled() && hashFiles(format('coverage-v2-{0}.xml', matrix.shard.name)) != '' }}
+      if: ${{ !cancelled() && contains(fromJSON('["single-session", "integration", "unit"]'), matrix.shard.name) && hashFiles(format('coverage-v2-{0}.xml', matrix.shard.name)) != '' }}
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -504,10 +505,9 @@ jobs:
     # 3.2.8+ did), the assertion fires and the UnitMatchPy pin must be
     # revisited.
     - name: Matching-extra resolver evidence (separate env)
-      # Heavy separate-env lane: runs in ONE shard only (unit) so the matrix
-      # does not build its conda env + run the matcher suite three times. The
-      # unit shard's own slice is the lightest, leaving room for this lane.
-      if: matrix.shard.name == 'unit'
+      # Heavy separate-env lane: its own matrix entry, so it runs beside the
+      # workload shards instead of after one of them.
+      if: matrix.shard.name == 'matching'
       env:
         # Promotes the test's "extras not importable" branch from
         # ``pytest.skip`` to ``pytest.fail``. The install step below
@@ -578,7 +578,7 @@ jobs:
         flags: spikesorting-v2-matching
         name: Spike sorting v2 matching
     # --- Two-session matcher ground-truth check. Tier: nightly schedule and
-    # manual dispatch, in the unit shard, inside the spyglass_v2_matching env
+    # manual dispatch, in the matching entry, inside the spyglass_v2_matching env
     # the step above builds. test_v2_unitmatch_polymer_mearec_ground_truth
     # needs mearec_polymer_128ch_2sessions_{s1,s2}.nwb, which are NOT hosted
     # yet (their FIXTURE_URLS entries in tests/spikesorting/v2/fixtures/_fetch.py
@@ -590,7 +590,7 @@ jobs:
     # _fetch.py (tests/spikesorting/v2/fixtures/README.md); nothing else here
     # needs to change then. Do not mask the failure.
     - name: Two-session matcher ground-truth gate (nightly / manual dispatch)
-      if: matrix.shard.name == 'unit' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      if: matrix.shard.name == 'matching' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       run: |
         SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_2sessions_s1 mearec_polymer_128ch_2sessions_s2" \
           conda run -n spyglass_v2_matching pytest \
@@ -607,7 +607,7 @@ jobs:
         flags: spikesorting-v2-matching-ground-truth
         name: Spike sorting v2 matcher ground truth
     # --- Motion-correction development benchmark (manual dispatch only), in
-    # the unit shard and the default v2 env. SPYGLASS_V2_MOTION_BENCHMARK=1
+    # its own matrix entry and the default v2 env. SPYGLASS_V2_MOTION_BENCHMARK=1
     # runs the opt-in tests in test_motion_acceptance.py on the committed
     # development manifest (seeds 0-2): 117 cases, each generating, motion
     # correcting and MountainSort5-sorting a recording in its own process
@@ -630,11 +630,9 @@ jobs:
     # SPYGLASS_V2_REQUIRE_FIXTURES is set on this command only (overriding the
     # job-wide list): conftest's pytest_sessionstart downloads the drift
     # fixture and fails the session naming it if it is absent, instead of the
-    # representative run skipping. ``!cancelled()`` keeps this independent of
-    # the steps above: the two-session matcher check is expected to be red on
-    # manual runs, and a failure there must not suppress this evidence.
+    # representative run skipping.
     - name: Motion-correction development benchmark (manual dispatch only)
-      if: ${{ !cancelled() && matrix.shard.name == 'unit' && github.event_name == 'workflow_dispatch' }}
+      if: matrix.shard.name == 'motion-benchmark'
       run: |
         SPYGLASS_V2_MOTION_BENCHMARK=1 \
         SPYGLASS_V2_MOTION_BENCHMARK_OUT="$RUNNER_TEMP/motion-benchmark-development" \
@@ -654,7 +652,7 @@ jobs:
     - name: Upload the motion benchmark evidence (manual dispatch only)
       # always(): publish whatever case results were written, including on a
       # failed or timed-out benchmark run.
-      if: ${{ always() && matrix.shard.name == 'unit' && github.event_name == 'workflow_dispatch' }}
+      if: ${{ always() && matrix.shard.name == 'motion-benchmark' }}
       uses: actions/upload-artifact@v4
       with:
         name: motion-benchmark-development
@@ -670,9 +668,9 @@ jobs:
     # (services.mysql above; --no-docker skips starting a database container)
     # and need the smoke fixture, like the matcher lane.
     - name: FigPack curation tests (separate env)
-      # Heavy separate-env lane: runs in ONE shard only (single-session) so the
-      # matrix does not build its conda env + run the figpack suite three times.
-      if: matrix.shard.name == 'single-session'
+      # Heavy separate-env lane: its own matrix entry, so it runs beside the
+      # workload shards instead of after one of them.
+      if: matrix.shard.name == 'curation'
       run: |
         conda create -y -n spyglass_v2_curation python=3.11
         # NO ``|| true``: a failed curation install must fail the step. The
@@ -718,8 +716,8 @@ jobs:
         flags: spikesorting-v2-curation
         name: Spike sorting v2 curation
     # --- End-to-end acceptance probes (tests/spikesorting/v2/acceptance).
-    # Tier: nightly schedule and manual dispatch ONLY, in the single-session
-    # shard, inside the spyglass_v2_curation env the FigPack step above builds
+    # Tier: nightly schedule and manual dispatch ONLY, in the curation
+    # entry, inside the spyglass_v2_curation env the FigPack step above builds
     # (the probes import figpack and drive Chromium through Playwright). They
     # sort the 60 s tetrode fixture end to end (8 tests, ~11 min on a laptop
     # with a local MySQL), too slow for every push. Without --run-acceptance
@@ -731,7 +729,7 @@ jobs:
     # the job's MySQL is a service container reached with --no-docker, so
     # there is no Docker client for its mysqldump / docker exec restore.
     - name: End-to-end acceptance probes (nightly / manual dispatch)
-      if: matrix.shard.name == 'single-session' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      if: matrix.shard.name == 'curation' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
       run: |
         SPYGLASS_V2_REQUIRE_FIXTURES="mearec_tetrode_60s mearec_polymer_smoke" \
           conda run -n spyglass_v2_curation pytest \
