@@ -1397,6 +1397,93 @@ def test_log_install_writes_the_record():
     mock_inst.insert_current_env.assert_called_once()
 
 
+def test_log_install_adopts_the_rows_date():
+    """The marker's countdown defers to the logged row's own date.
+
+    The warning reads local state and the email reads the database, so without
+    this they drift: clearing `temp_dir` restarts the local clock while the
+    email keeps counting, and a user can be emailed the same day they are told
+    they have the full window left.
+    """
+    import datetime
+
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    # Marker cleared, as a temp_dir sweep would leave it; the row is older.
+    git_utils._clear_dirty_marker()
+    logged_on = datetime.datetime.now() - datetime.timedelta(days=12)
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+    mock_inst = MagicMock()
+    mock_inst.insert_current_env = MagicMock(
+        return_value={"env_id": "user_env_00"}
+    )
+    mock_row = MagicMock()
+    mock_row.fetch1 = MagicMock(return_value=logged_on)
+    mock_env = MagicMock(return_value=mock_inst)
+    mock_env.return_value.__and__ = MagicMock(return_value=mock_row)
+
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
+
+    assert (
+        git_utils._read_dirty_marker()["first_seen"]
+        == logged_on.date().isoformat()
+    )
+
+
+def test_log_install_keeps_local_date_without_a_row():
+    """With nothing readable in the database, the local date stands.
+
+    The first warning of an episode fires before any row exists, so the marker
+    has to be able to start the clock on its own.
+    """
+    import datetime
+
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    today = datetime.date.today().isoformat()
+    git_utils._set_dirty_marker({"commit": "abc1234", "first_seen": today})
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+    mock_inst = MagicMock()
+    mock_inst.insert_current_env = MagicMock(return_value={"env_id": None})
+    mock_env = MagicMock(return_value=mock_inst)
+
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
+
+    assert git_utils._read_dirty_marker()["first_seen"] == today
+
+
 def test_log_dirty_env_skips_second_call_same_day():
     """A dirty state already recorded today needs no second write."""
     import datetime

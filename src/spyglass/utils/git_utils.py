@@ -160,7 +160,7 @@ def warn_if_dirty(install_info: dict) -> None:
     Touches no database: the git check and the countdown both read local state,
     so an import never opens a connection, stalls behind a VPN, or prompts for
     a password. The database record is written later, by
-    :func:`log_dirty_env_once`, on the session's first insert or populate.
+    :func:`log_install`, on the session's first insert or populate.
 
     Two messages:
 
@@ -283,16 +283,43 @@ def log_install() -> None:
         logger.debug(f"admin check failed: {exc}")  # DB down — log anyway
 
     try:
-        UserEnvironment().insert_current_env()
+        key = UserEnvironment().insert_current_env()
     except Exception as exc:
         logger.debug(f"dirty env logging failed: {exc}")
         return
 
     if info.get("has_local_changes"):
         marker["last_logged"] = today
+        marker["first_seen"] = (
+            _row_first_seen(UserEnvironment, key) or marker["first_seen"]
+        )
         _set_dirty_marker(marker)
     else:  # resolution recorded; future clean sessions take the fast path
         _clear_dirty_marker()
+
+
+def _row_first_seen(user_env_tbl, key: dict) -> Optional[str]:
+    """Return the ISO date a logged dirty row first appeared, if readable.
+
+    The database is the shared record, so the warning's countdown defers to it
+    and the marker becomes a cache rather than a second clock. Without this,
+    clearing ``temp_dir`` — a cache, and cleared as one — restarts the local
+    countdown while the escalation email keeps counting, so a user could be
+    emailed on the same day they were told they had the full window left.
+
+    Returns ``None`` when there is nothing to read, leaving the caller's local
+    date in place: the first warning of a new episode fires before any row
+    exists.
+    """
+    env_id = (key or {}).get("env_id")
+    if not env_id:
+        return None
+    try:
+        stamp = (user_env_tbl() & f'env_id="{env_id}"').fetch1("timestamp")
+        return stamp.date().isoformat()
+    except Exception as exc:
+        logger.debug(f"could not read logged dirty date: {exc}")
+        return None
 
 
 def get_install_info() -> dict:
