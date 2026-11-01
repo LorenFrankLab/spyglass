@@ -1159,33 +1159,33 @@ def test_warn_dirty_emits_warning(caplog, warn_dirty_days):
     assert any(f"{warn_dirty_days} days" in r.message for r in caplog.records)
 
 
-def test_warn_admin_skipped(caplog):
-    """Admin users receive no warning."""
-    import spyglass.common.common_lab as _lab_mod
+def test_warn_admin_not_exempt_from_warning(caplog):
+    """An admin on a dirty clone still sees the warning.
+
+    The admin check is a query, so it cannot run on a path that must not open
+    a connection. Admins are exempt from the database record and the email,
+    not from being told.
+    """
+    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
         "is_dev": True,
         "has_local_changes": True,
+        "is_stale": False,
         "install_path": "/home/admin/spyglass",
         "commit_hash": "abc1234",
     }
-    from spyglass.utils.git_utils import warn_if_dirty
 
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = True
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
 
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with caplog.at_level("WARNING"):
-            warn_if_dirty(info)
-
-    assert not any("official commit" in r.message for r in caplog.records)
+    assert "not on an official commit" in caplog.text
 
 
 def test_warn_dev_but_clean_emits_stale_warning(caplog):
     """A clean-but-stale clone emits the softer 'older commit' advisory."""
-    import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
+    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
@@ -1193,70 +1193,187 @@ def test_warn_dev_but_clean_emits_stale_warning(caplog):
         "has_local_changes": False,
         "is_stale": True,
         "install_path": "/home/user/spyglass",
-        "commit_hash": "abc1234",
+        "commit_hash": "stale123",
     }
-    from spyglass.utils.git_utils import warn_if_dirty
 
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = False
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
 
-    mock_env = MagicMock()
-    mock_env.__and__ = MagicMock(return_value=mock_env)
-    mock_env.__bool__ = MagicMock(return_value=False)
-
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            with caplog.at_level("WARNING"):
-                warn_if_dirty(info)
-
-    assert any("older commit" in r.message for r in caplog.records)
-    assert not any("official commit" in r.message for r in caplog.records)
+    assert "older commit" in caplog.text
+    assert "not on an official commit" not in caplog.text  # no countdown
 
 
-def test_warn_countdown_uses_days_since_first_flag(caplog, warn_dirty_days):
-    """N counts down from WARN_DIRTY_ENV_DAYS based on the oldest dirty row."""
-    import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
+def test_warn_touches_no_database(caplog):
+    """Warning opens no connection and imports nothing from common.
+
+    This is the whole point of the split: `import spyglass` used to wait on a
+    connection and could prompt for a password.
+    """
+    import datajoint as dj
+
     from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": False,
         "is_dev": True,
         "has_local_changes": True,
+        "is_stale": False,
         "install_path": "/home/user/spyglass",
         "commit_hash": "abc1234",
     }
 
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = False
+    with patch.object(dj, "conn", side_effect=AssertionError("connected!")):
+        with caplog.at_level("WARNING"):
+            warn_if_dirty(info)
 
-    # warn_if_dirty now computes the day count DB-side:
-    # dirty.proj(_d=DIRTY_DAYS_SQL).fetch("_d"); oldest row -> largest count.
-    mock_proj = MagicMock()
-    mock_proj.fetch = MagicMock(return_value=[5])  # days since first flag
-
-    mock_dirty = MagicMock()
-    mock_dirty.__bool__ = MagicMock(return_value=True)
-    mock_dirty.__and__ = MagicMock(return_value=mock_dirty)
-    mock_dirty.proj = MagicMock(return_value=mock_proj)
-
-    mock_env = MagicMock()
-    mock_env.__and__ = MagicMock(return_value=mock_dirty)
-
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            with caplog.at_level("WARNING"):
-                warn_if_dirty(info)
-
-    expected_n = warn_dirty_days - 5
-    assert any(f"{expected_n} days" in r.message for r in caplog.records)
+    assert "not on an official commit" in caplog.text
 
 
-def test_warn_logs_dirty_install(caplog):
-    """A flagged non-admin install logs itself so the 30-day clock starts."""
+def test_warn_countdown_runs_from_marker(caplog, warn_dirty_days):
+    """The countdown counts from when this clone was first seen dirty."""
+    import datetime
+
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    ten_days_ago = (
+        datetime.date.today() - datetime.timedelta(days=10)
+    ).isoformat()
+    git_utils._set_dirty_marker(
+        {"commit": "abc1234", "first_seen": ten_days_ago}
+    )
+
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
+
+    assert f"within {warn_dirty_days - 10} days" in caplog.text
+
+
+def test_warn_countdown_survives_a_new_commit(caplog, warn_dirty_days):
+    """Committing while dirty does not restart the clock.
+
+    A user who commits every day would otherwise see a fresh 30 days each
+    time, and never reach the escalation.
+    """
+    import datetime
+
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    ten_days_ago = (
+        datetime.date.today() - datetime.timedelta(days=10)
+    ).isoformat()
+    git_utils._set_dirty_marker(
+        {"commit": "old_commit", "first_seen": ten_days_ago}
+    )
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "new_commit",  # moved on since first flagged
+    }
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
+
+    assert f"within {warn_dirty_days - 10} days" in caplog.text
+    assert git_utils._read_dirty_marker()["first_seen"] == ten_days_ago
+
+
+def test_warn_first_sight_starts_the_clock(caplog, warn_dirty_days):
+    """With no marker, the countdown is the full window and is recorded."""
+    import datetime
+
+    from spyglass.utils import git_utils
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
+
+    assert f"within {warn_dirty_days} days" in caplog.text
+    marker = git_utils._read_dirty_marker()
+    assert marker["first_seen"] == datetime.date.today().isoformat()
+    assert marker["commit"] == "abc1234"
+
+
+def test_warn_clean_is_silent(caplog):
+    """An official install warns about nothing."""
+    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": True,
+        "is_dev": False,
+        "has_local_changes": False,
+        "is_stale": False,
+        "install_path": None,
+        "commit_hash": None,
+    }
+
+    with caplog.at_level("WARNING"):
+        warn_if_dirty(info)
+
+    assert caplog.text == ""
+
+
+# ─── deferred logging: the database half ──────────────────────────────────────
+
+
+def test_mixin_logs_install_once_per_session():
+    """The first insert logs; later inserts, on any table, do not.
+
+    The gate is ``BaseMixin._logged_install_mode``, bound on ``BaseMixin``
+    itself: an instance attribute would shadow it and leave every other table
+    unguarded.
+    """
+    from spyglass.utils import git_utils
+    from spyglass.utils.mixins.base import BaseMixin
+
+    class TableA(BaseMixin):
+        _test_mode = False
+        _logger = MagicMock()
+
+    class TableB(BaseMixin):
+        _test_mode = False
+        _logger = MagicMock()
+
+    calls = []
+    BaseMixin._logged_install_mode = False
+    try:
+        with patch.object(git_utils, "log_install", lambda: calls.append(1)):
+            TableA()._log_install_once()
+            TableB()._log_install_once()
+            TableA()._log_install_once()
+    finally:
+        BaseMixin._logged_install_mode = True  # leave the session gated
+
+    assert len(calls) == 1
+
+
+def test_log_install_writes_the_record():
+    """log_install itself always writes — the caller owns the gate."""
     import spyglass.common.common_lab as _lab_mod
     import spyglass.common.common_user as _user_mod
-    from spyglass.utils.git_utils import warn_if_dirty
+    from spyglass.utils import git_utils
 
     info = {
         "is_official": False,
@@ -1269,24 +1386,60 @@ def test_warn_logs_dirty_install(caplog):
 
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = False
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
 
-    mock_inst = MagicMock()  # the UserEnvironment() instance
-    mock_env = MagicMock(return_value=mock_inst)  # UserEnvironment() -> inst
-    mock_env.__and__ = MagicMock(return_value=mock_env)
-    mock_env.__bool__ = MagicMock(return_value=False)
-
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            warn_if_dirty(info)
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
 
     mock_inst.insert_current_env.assert_called_once()
 
 
-def test_warn_admin_not_logged(caplog):
-    """An admin install is neither warned nor logged."""
+def test_log_dirty_env_skips_second_call_same_day():
+    """A dirty state already recorded today needs no second write."""
+    import datetime
+
     import spyglass.common.common_lab as _lab_mod
     import spyglass.common.common_user as _user_mod
-    from spyglass.utils.git_utils import warn_if_dirty
+    from spyglass.utils import git_utils
+
+    info = {
+        "is_official": False,
+        "is_dev": True,
+        "has_local_changes": True,
+        "is_stale": False,
+        "install_path": "/home/user/spyglass",
+        "commit_hash": "abc1234",
+    }
+
+    git_utils._set_dirty_marker(
+        {
+            "commit": "abc1234",
+            "first_seen": "2026-01-01",
+            "last_logged": datetime.date.today().isoformat(),
+        }
+    )
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
+
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
+
+    mock_inst.insert_current_env.assert_not_called()
+
+
+def test_log_dirty_env_admin_not_logged():
+    """An admin is warned but not recorded, and so never emailed."""
+    import spyglass.common.common_lab as _lab_mod
+    import spyglass.common.common_user as _user_mod
+    from spyglass.utils import git_utils
 
     info = {
         "is_official": False,
@@ -1299,25 +1452,21 @@ def test_warn_admin_not_logged(caplog):
 
     mock_lab = MagicMock()
     mock_lab.return_value.user_is_admin = True
-
     mock_inst = MagicMock()
     mock_env = MagicMock(return_value=mock_inst)
 
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            warn_if_dirty(info)
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
 
     mock_inst.insert_current_env.assert_not_called()
 
 
-# ─── dirty-marker fast path / resolution logging ──────────────────────────────
-
-
-def test_warn_clean_no_marker_is_noop():
-    """A clean install with no local marker skips common/DB entirely."""
+def test_log_dirty_env_clean_no_marker_is_noop():
+    """A clean install never flagged here imports nothing and queries nothing."""
     import spyglass.common.common_lab as _lab_mod
     from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
 
     info = {
         "is_official": True,
@@ -1329,20 +1478,53 @@ def test_warn_clean_no_marker_is_noop():
     }
 
     mock_lab = MagicMock()
-    with patch.object(git_utils, "_dirty_marker_exists", return_value=False):
+    with patch.object(git_utils, "get_install_info", return_value=info):
         with patch.object(_lab_mod, "LabMember", mock_lab):
-            result = warn_if_dirty(info)
+            git_utils.log_install()
 
-    assert result is True
-    mock_lab.assert_not_called()  # fast path: never imported/queried the DB
+    mock_lab.assert_not_called()
 
 
-def test_warn_flagged_sets_marker():
-    """A flagged install logs and sets the local dirty marker."""
+def test_log_dirty_env_clean_with_marker_records_resolution():
+    """Clean with a marker logs the full row and clears the marker."""
     import spyglass.common.common_lab as _lab_mod
     import spyglass.common.common_user as _user_mod
     from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
+
+    info = {
+        "is_official": True,
+        "is_dev": False,
+        "has_local_changes": False,
+        "is_stale": False,
+        "install_path": None,
+        "commit_hash": None,
+    }
+
+    git_utils._set_dirty_marker(
+        {"commit": "abc1234", "first_seen": "2026-01-01"}
+    )
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+    mock_inst = MagicMock()
+    mock_env = MagicMock(return_value=mock_inst)
+
+    with patch.object(git_utils, "get_install_info", return_value=info):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patch.object(_user_mod, "UserEnvironment", mock_env):
+                git_utils.log_install()
+
+    mock_inst.insert_current_env.assert_called_once()
+    assert git_utils._dirty_marker_exists() is False
+
+
+def test_warn_once_is_idempotent(caplog):
+    """_warn_once warns on the first call only.
+
+    No retry path: the warning needs no database, so there is no "not ready
+    yet" state for a later call to recover from.
+    """
+    from spyglass.utils import git_utils
 
     info = {
         "is_official": False,
@@ -1353,151 +1535,19 @@ def test_warn_flagged_sets_marker():
         "commit_hash": "abc1234",
     }
 
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = False
-
-    mock_env = MagicMock()
-    mock_env.__and__ = MagicMock(return_value=mock_env)
-    mock_env.__bool__ = MagicMock(return_value=False)
-
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            warn_if_dirty(info)
-
-    assert git_utils._dirty_marker_exists() is True
-
-
-def test_warn_clean_with_marker_records_resolution():
-    """Clean + marker + recent dirty log → log the clean env, clear marker."""
-    import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
-    from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
-
-    info = {
-        "is_official": True,
-        "is_dev": False,
-        "has_local_changes": False,
-        "is_stale": False,
-        "install_path": None,
-        "commit_hash": None,
-    }
-
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = False
-
-    # most-recent log: dirty, 10 days old (within 2x window)
-    mock_query = MagicMock()
-    mock_query.fetch = MagicMock(
-        return_value=[{"dirty_path": "/home/user/sg", "age_days": 10}]
-    )
-    mock_restr = MagicMock()
-    mock_restr.proj = MagicMock(return_value=mock_query)
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
-    mock_env.__and__ = MagicMock(return_value=mock_restr)
-
-    git_utils._set_dirty_marker()
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            warn_if_dirty(info)
-
-    mock_inst.insert_current_env.assert_called_once()  # resolution logged
-    assert git_utils._dirty_marker_exists() is False  # marker cleared
-
-
-def test_warn_clean_with_marker_stale_dirty_skips_log():
-    """Clean + marker but the dirty log is older than 2x window → no log."""
-    import spyglass.common.common_lab as _lab_mod
-    import spyglass.common.common_user as _user_mod
-    from spyglass.utils import git_utils
-    from spyglass.utils.git_utils import warn_if_dirty
-
-    info = {
-        "is_official": True,
-        "is_dev": False,
-        "has_local_changes": False,
-        "is_stale": False,
-        "install_path": None,
-        "commit_hash": None,
-    }
-
-    mock_lab = MagicMock()
-    mock_lab.return_value.user_is_admin = False
-
-    # most-recent log: dirty, 90 days old (beyond 2x window of 60)
-    mock_query = MagicMock()
-    mock_query.fetch = MagicMock(
-        return_value=[{"dirty_path": "/home/user/sg", "age_days": 90}]
-    )
-    mock_restr = MagicMock()
-    mock_restr.proj = MagicMock(return_value=mock_query)
-    mock_inst = MagicMock()
-    mock_env = MagicMock(return_value=mock_inst)
-    mock_env.__and__ = MagicMock(return_value=mock_restr)
-
-    git_utils._set_dirty_marker()
-    with patch.object(_lab_mod, "LabMember", mock_lab):
-        with patch.object(_user_mod, "UserEnvironment", mock_env):
-            warn_if_dirty(info)
-
-    mock_inst.insert_current_env.assert_not_called()  # too old to record
-    assert git_utils._dirty_marker_exists() is False  # marker still cleared
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-#     _warn_once import-time gating (mock-based, no DB)
-# ═════════════════════════════════════════════════════════════════════════════
-#
-# _warn_once() is the synchronous, once-per-process warning hook called from
-# spyglass/__init__.py (and lazily by UserEnvironment.this_env). These tests
-# cover its gating; the CondaEnvCache is_stale() gating is covered by the
-# test_cache_stale_* / test_cache_no_conda_prefix tests above.
-
-
-def test_warn_once_idempotent():
-    """_warn_once calls warn_if_dirty only once per process."""
-    import spyglass.utils.git_utils as gu
-
-    gu._warned = False
-    calls = []
+    git_utils._warned = False
     try:
-        with patch.object(gu, "get_install_info", return_value={}):
-            with patch.object(
-                gu,
-                "warn_if_dirty",
-                side_effect=lambda info: calls.append(info) or True,
-            ):
-                gu._warn_once()
-                gu._warn_once()
-        assert len(calls) == 1  # second call short-circuited by the flag
-        assert gu._warned is True
+        with patch.object(git_utils, "get_install_info", return_value=info):
+            with caplog.at_level("WARNING"):
+                git_utils._warn_once()
+                first = caplog.text.count("not on an official commit")
+                git_utils._warn_once()
+                second = caplog.text.count("not on an official commit")
     finally:
-        gu._warned = False
+        git_utils._warned = True  # leave the session as the import found it
 
-
-def test_warn_once_retries_when_not_ready():
-    """A False result (DB not ready) leaves the flag unset for a later retry."""
-    import spyglass.utils.git_utils as gu
-
-    gu._warned = False
-    outcomes = iter([False, True])
-    calls = []
-
-    def fake_warn(info):
-        calls.append(info)
-        return next(outcomes)
-
-    try:
-        with patch.object(gu, "get_install_info", return_value={}):
-            with patch.object(gu, "warn_if_dirty", side_effect=fake_warn):
-                gu._warn_once()  # returns False -> not decisive
-                assert gu._warned is False
-                gu._warn_once()  # returns True -> decisive, flag set
-                assert gu._warned is True
-        assert len(calls) == 2
-    finally:
-        gu._warned = False
+    assert first == 1
+    assert second == 1
 
 
 # ═════════════════════════════════════════════════════════════════════════════

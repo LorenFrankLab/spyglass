@@ -35,7 +35,9 @@ Detection logic
 
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
+from json import dumps as json_dumps
+from json import loads as json_loads
 from functools import cached_property
 from pathlib import Path
 from subprocess import run as sub_run
@@ -113,13 +115,30 @@ def _dirty_marker_exists() -> bool:
     return bool(p and p.exists())
 
 
-def _set_dirty_marker() -> None:
-    """Create the local dirty marker (best-effort)."""
+def _read_dirty_marker() -> dict:
+    """Return the recorded dirty state for this clone, or an empty dict.
+
+    Keys, when present: ``commit`` the hash first flagged, ``first_seen`` the
+    date this episode was first noticed locally, and ``last_logged`` the date
+    the database last heard about it.
+    """
+    p = _dirty_marker_path()
+    if p is None or not p.exists():
+        return {}
+    try:
+        return json_loads(p.read_text() or "{}")
+    except Exception as exc:
+        logger.debug(f"could not read dirty marker: {exc}")
+        return {}
+
+
+def _set_dirty_marker(state: Optional[dict] = None) -> None:
+    """Write the local dirty marker (best-effort)."""
     p = _dirty_marker_path()
     if p is None:
         return
     try:
-        p.touch()
+        p.write_text(json_dumps(state or {}))
     except Exception as exc:
         logger.debug(f"could not write dirty marker: {exc}")
 
@@ -135,127 +154,50 @@ def _clear_dirty_marker() -> None:
         logger.debug(f"could not clear dirty marker: {exc}")
 
 
-def warn_if_dirty(install_info: dict) -> bool:
-    """Warn non-admin users when running a non-official Spyglass install.
+def warn_if_dirty(install_info: dict) -> None:
+    """Warn when running a non-official Spyglass install.
 
-    Emits a ``logger.warning`` for two cases:
+    Touches no database: the git check and the countdown both read local state,
+    so an import never opens a connection, stalls behind a VPN, or prompts for
+    a password. The database record is written later, by
+    :func:`log_dirty_env_once`, on the session's first insert or populate.
 
-    * **Dirty** (``has_local_changes=True``): full countdown warning.
-    * **Stale** (``is_stale=True``, no local changes): softer "older commit"
-      advisory for clones that are months behind upstream.
+    Two messages:
 
-    Logging behaviour (to keep the escalation clock honest while minimising
-    writes):
+    * **Dirty** (``has_local_changes``): the countdown warning. Days are
+      counted from the local marker's ``first_seen``, written the first time
+      this clone was seen dirty.
+    * **Stale** (``is_stale``, no local changes): the softer "older commit"
+      advisory, with no countdown — an older official commit is reproducible.
 
-    * **Flagged** install: log the current env to ``UserEnvironment``
-      (idempotent) and set a local marker, so the 30-day clock starts at first
-      warning rather than only at recompute. The countdown is derived from the
-      logged timestamp.
-    * **Clean** install: only if the local marker is present (this clone was
-      flagged here before) and the user's most-recent log is dirty within twice
-      the warn window, log the (clean) env to record the *resolution* — which
-      lets :meth:`UserEnvironment.dirty_installs` drop the now-stale dirty row.
-      A clean install with no marker skips the ``common`` import and DB entirely.
-
-    Returns silently for official installs and admin users.  All
-    ``spyglass.common`` imports are deferred inside the function body to avoid
-    a circular dependency (``common/`` already imports from ``utils/``).
+    Admin users are not exempted here, because that check is a query. They are
+    exempted from the database record and the escalation email.
 
     Parameters
     ----------
     install_info : dict
         The dict returned by :func:`get_install_info`.
-
-    Returns
-    -------
-    bool
-        ``True`` when a decision was reached (official, admin, or a warning
-        emitted); ``False`` when the call could not proceed because
-        ``spyglass.common`` / the DB was not importable yet — signalling the
-        caller it may retry later.
     """
-    flagged = install_info.get("has_local_changes") or install_info.get(
-        "is_stale"
-    )
-
-    # Fast path: a clean install that has never logged a dirty env from this
-    # clone (no marker) needs no warning and has no resolution to record —
-    # skip the common import / DB entirely.
-    if not flagged and not _dirty_marker_exists():
-        return True
-
-    # Deferred imports — common/ imports utils/, so top-level imports here
-    # would create a circular dependency.
-    try:
-        import datajoint as dj
-
-        from spyglass.common.common_lab import LabMember
-        from spyglass.common.common_user import (
-            DIRTY_DAYS_SQL,
-            UserEnvironment,
-        )
-    except Exception as exc:
-        logger.debug(f"warn_if_dirty deferred import failed: {exc}")
-        return False  # not ready — let the caller retry later
-
-    try:
-        if LabMember().user_is_admin:
-            return True
-    except Exception as exc:
-        logger.debug(f"admin check failed: {exc}")  # DB down — warn anyway
-
-    dj_user = dj.config.get("database.user", "")
-    user_restr = f"env_id LIKE '{dj_user}_%'"
-
-    if not flagged:
-        # Clean now, but the marker says this clone was flagged before. Record
-        # a resolution (log the clean env) when the most-recent log is dirty
-        # and within 2x the warn window, so dirty_installs() drops the stale
-        # dirty row. Clear the marker either way so future clean imports stay
-        # on the fast path.
-        try:
-            rows = (
-                (UserEnvironment & user_restr)
-                .proj("dirty_path", age_days=DIRTY_DAYS_SQL)
-                .fetch("dirty_path", "age_days", as_dict=True)
-            )
-            if rows:  # most-recent log == smallest age (DATEDIFF from NOW)
-                newest = min(rows, key=lambda r: r["age_days"])
-                if (
-                    newest["dirty_path"] is not None
-                    and newest["age_days"] <= 2 * WARN_DIRTY_ENV_DAYS
-                ):
-                    UserEnvironment().insert_current_env()
-        except Exception as exc:
-            logger.debug(f"resolution logging failed: {exc}")
-        _clear_dirty_marker()
-        return True
-
-    # Flagged: log the current env so the 30-day clock runs (idempotent via
-    # matching_env_id; disk-cached conda export; called directly, not via
-    # this_env, to avoid recursing into _warn_once) and mark this clone dirty
-    # so a later clean import records the resolution.
-    try:
-        UserEnvironment().insert_current_env()
-        _set_dirty_marker()
-    except Exception as exc:
-        logger.debug(f"dirty env logging failed: {exc}")
-
-    # Days since this user's dirty install was first logged. Computed DB-side
-    # (shared DIRTY_DAYS_SQL) so it agrees with the admin notification and is
-    # not skewed by client-vs-server timezone. Oldest row → largest count.
-    days = 0
-    try:
-        dirty = UserEnvironment & user_restr & "dirty_path IS NOT NULL"
-        if dirty:
-            day_vals = dirty.proj(age_days=DIRTY_DAYS_SQL).fetch("age_days")
-            days = int(max(day_vals)) if len(day_vals) else 0
-    except Exception as exc:
-        logger.debug(f"dirty day-count failed: {exc}")
-
-    N = max(0, WARN_DIRTY_ENV_DAYS - days)
-
     if install_info.get("has_local_changes"):
+        marker = _read_dirty_marker()
+        today = date.today()
+        first_seen = marker.get("first_seen")
+        commit = install_info.get("commit_hash")
+
+        if not first_seen or marker.get("commit") != commit:
+            # A new episode, or the same episode at a new commit. Keep the
+            # original date in the second case: the user has been dirty
+            # throughout, so the clock should not restart on every commit.
+            first_seen = first_seen or today.isoformat()
+            marker.update(commit=commit, first_seen=first_seen)
+            _set_dirty_marker(marker)
+
+        try:
+            days = (today - date.fromisoformat(first_seen)).days
+        except Exception:  # unreadable date — start the clock over
+            days = 0
+        remaining = max(0, WARN_DIRTY_ENV_DAYS - days)
+
         logger.warning(
             "Your Spyglass repository is not on an official commit. "
             "Please ensure you are running Spyglass from a clean "
@@ -265,7 +207,7 @@ def warn_if_dirty(install_info: dict) -> bool:
             "reset your repository to an official commit.\n\n"
             "If you need assistance, please contact the support team. "
             "We will flag this issue for discussion if it is not "
-            f"resolved within {N} days."
+            f"resolved within {remaining} days."
         )
     elif install_info.get("is_stale"):
         logger.warning(
@@ -274,25 +216,83 @@ def warn_if_dirty(install_info: dict) -> bool:
             "features and bug fixes."
         )
 
-    return True
-
 
 def _warn_once() -> None:
     """Run :func:`warn_if_dirty` at most once per process.
 
-    Used by both the import-time hook (``spyglass/__init__.py``) and the lazy
-    path (``UserEnvironment.this_env``).  The flag is only set when
-    ``warn_if_dirty`` reports a decisive result, so an early import-time call
-    that finds the DB not yet ready will be retried by the lazy path.
+    Called from the import-time hook in ``spyglass/__init__.py``. Fully
+    guarded — a warning must never break an import.
     """
     global _warned
     if _warned:
         return
+    _warned = True  # set first: a failure here should not retry all session
     try:
-        if warn_if_dirty(get_install_info()):
-            _warned = True
+        warn_if_dirty(get_install_info())
     except Exception as exc:
         logger.debug(f"_warn_once failed: {exc}")
+
+
+def log_install() -> None:
+    """Record a dirty install in ``UserEnvironment``.
+
+    Called from the mixin on the first insert or populate, rather than at
+    import: by then a connection exists, so this adds no import-time cost and
+    nothing at all in a process that never writes.
+
+    The caller owns the once-per-session gate — see
+    ``BaseMixin._logged_install_mode``, which must be set *before* calling this,
+    since the insert below re-enters the mixin hook.
+
+    Writes at most once per day per (user, environment). A dirty state already
+    on record needs no more than a ``last_seen`` refresh, which the activity
+    window resolves in days, and the marker's ``last_logged`` date bounds it
+    without a query.
+
+    A clean install with a marker is the resolution case: the full row is
+    logged so the escalation clock stops, and the marker is cleared.
+
+    All ``spyglass.common`` imports are deferred inside the body to avoid a
+    circular dependency (``common/`` already imports from ``utils/``). Fully
+    guarded: a user without write permission sees nothing.
+    """
+    info = get_install_info()
+    flagged = info.get("has_local_changes") or info.get("is_stale")
+    marker = _read_dirty_marker()
+
+    # Fast path: a clean install that was never flagged here has nothing to
+    # record and no resolution to log — no import, no query.
+    if not flagged and not marker:
+        return
+
+    today = date.today().isoformat()
+    if flagged and marker.get("last_logged") == today:
+        return  # already on record today
+
+    try:
+        from spyglass.common.common_lab import LabMember
+        from spyglass.common.common_user import UserEnvironment
+    except Exception as exc:
+        logger.debug(f"dirty env logging deferred import failed: {exc}")
+        return
+
+    try:
+        if LabMember().user_is_admin:
+            return
+    except Exception as exc:
+        logger.debug(f"admin check failed: {exc}")  # DB down — log anyway
+
+    try:
+        UserEnvironment().insert_current_env()
+    except Exception as exc:
+        logger.debug(f"dirty env logging failed: {exc}")
+        return
+
+    if info.get("has_local_changes"):
+        marker["last_logged"] = today
+        _set_dirty_marker(marker)
+    else:  # resolution recorded; future clean sessions take the fast path
+        _clear_dirty_marker()
 
 
 def get_install_info() -> dict:
