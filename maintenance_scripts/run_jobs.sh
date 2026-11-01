@@ -101,7 +101,7 @@ rm -f "$FILE_ISSUES_OUT"
 # Send dirty-install email notifications (always CC admin)
 if [[ -s "$DIRTY_ENVS_OUT" ]]; then
   while IFS=$'\t' read -r user_email days commit dirty_path; do
-    subject="[Spyglass] Dirty installation flagged — action required"
+    subject="[Spyglass] Dirty installation flagged: action required"
     body="Your Spyglass repository at ${dirty_path} is not on an official \
 commit (${commit}). This was first flagged ${days} days ago.
 

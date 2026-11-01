@@ -70,8 +70,8 @@ def test_editable_dependency_is_not_trusted(user_env, env_row):
 def test_untested_env_is_not_trusted(user_env, env_row):
     """A null has_editable means no pip freeze ran, not "none found".
 
-    A boolean column could not express this: the value would read as falsy and
-    the environment would be trusted on the strength of a check never made.
+    A boolean column cannot express this: the value reads as falsy, trusting
+    the environment on the strength of a check never made.
     """
     restr = env_row(
         "trust_untested_00",

@@ -11,7 +11,7 @@ Cache-file format
 
 Contains two top-level keys::
 
-    conda: <raw conda env export dict — channels + dependencies>
+    conda: <raw conda env export dict: channels + dependencies>
     pip:   <raw pip freeze list>
 
 The merge of these two raw artifacts (conflict resolution, editable-install
@@ -21,15 +21,12 @@ and is never written back to disk.
 Who uses which mode
 -------------------
 ``get()`` (conda-only, default)
-    ``AnalysisMixin._logged_env_info`` and ``SQLDumpHelper._export_conda_env``.
-    These callers previously ran ``conda env export`` alone; they receive the
-    same data they always did, with no additional pip processing.
+    ``AnalysisMixin._logged_env_info`` and ``SQLDumpHelper._export_conda_env``
+    receive the raw ``conda env export`` output, with no pip processing.
 
 ``get(with_pip=True)`` (merged)
-    ``UserEnvironment``.  Triggers conflict resolution, pip-only package
-    discovery, and editable-install detection — logic that was always unique
-    to ``UserEnvironment``, now expressed as a flag rather than a separate
-    code path.
+    ``UserEnvironment``. Adds conflict resolution, pip-only package
+    discovery, and editable-install detection.
 
 Cache staleness
 ---------------
@@ -142,24 +139,24 @@ class CondaEnvCache:
     Attributes
     ----------
     has_editable : bool
-        ``True`` when a dependency is installed editable, which recompute
-        treats as untrustworthy — an editable package's version string says
-        nothing about its contents. Spyglass itself is exempt: its upstream is
-        known, so an edited spyglass clone is detected through git instead.
-        Only meaningful after a ``get(with_pip=True)`` call.
+        ``True`` when a dependency is installed editable. Recompute distrusts
+        those, because an editable package's version string says nothing about
+        its contents. Spyglass is exempt: its upstream is known, so an edited
+        clone is detected through git. Only meaningful after a
+        ``get(with_pip=True)`` call.
     """
 
     def __init__(self) -> None:
-        # Raw subprocess outputs — written to disk
+        # Raw subprocess outputs, written to disk
         self._cached_conda = _NOT_COMPUTED  # raw conda env export dict
         self._cached_pip = _NOT_COMPUTED  # raw pip freeze list
 
-        # Merged result — computed in-process, never written to disk
+        # Merged result, computed in-process and never written to disk
         self._merged = _NOT_COMPUTED
 
         self.has_editable: bool = False
 
-        # Merge-state — populated during _merge_conda_pip(), reset before each call
+        # Merge state, repopulated on each _merge_conda_pip() call
         self._conda_pip_dict: dict = {}
         self._pip_custom: dict = {}
         self._freeze_comments: dict = {}
@@ -228,7 +225,7 @@ class CondaEnvCache:
             for p in (self._history_path, *self._site_packages_paths)
             if p is not None
         ]
-        if not sources:  # nothing to compare against — assume changed
+        if not sources:  # nothing to compare against: assume changed
             return True
 
         cache_mtime = self._cache_path.stat().st_mtime
@@ -259,8 +256,8 @@ class CondaEnvCache:
     def save(self) -> None:
         """Atomically write raw conda and pip data to the cache file.
 
-        Writes to a PID-scoped temp file first, then renames — a single POSIX
-        ``rename`` syscall that is atomic even under concurrent writers.
+        Writes to a PID-scoped temp file first, then renames: a single POSIX
+        ``rename`` syscall, atomic even under concurrent writers.
         Only the raw subprocess outputs are persisted; the merged result is
         always recomputed in-process.
 
@@ -307,12 +304,12 @@ class CondaEnvCache:
         with_pip : bool, optional
             Default ``False``.
 
-            * ``False`` — return the raw ``conda env export`` output
+            * ``False``: the raw ``conda env export`` output
               (``channels`` + ``dependencies`` from conda's perspective).
               This is what ``AnalysisMixin`` and ``SQLDumpHelper`` use; it
               matches their pre-cache behaviour exactly.
 
-            * ``True`` — additionally run ``pip freeze``, resolve conda/pip
+            * ``True``: additionally run ``pip freeze``, resolve conda/pip
               version conflicts (pip wins), fold pip-only packages into the
               dependency list, and collect editable / non-standard installs
               into a ``custom`` section.  Pass ``True`` only when an accurate
@@ -337,17 +334,17 @@ class CondaEnvCache:
 
         Order of precedence for each piece (conda always; pip only when
         ``need_pip``):
-        1. Already in-process — no I/O.
-        2. Fresh disk cache — one file read.
-        3. Subprocess — ``conda env export`` and, when ``need_pip``,
+        1. Already in-process: no I/O.
+        2. Fresh disk cache: one file read.
+        3. Subprocess: ``conda env export`` and, when ``need_pip``,
            ``pip freeze``.
 
         Disk is (re)written only when something was fetched. A conda-only
         fetch persists ``{conda}`` alone (no ``pip`` key); a later
-        ``with_pip`` caller — even in another process — sees ``_cached_pip``
-        absent, runs ``pip freeze``, and rewrites the complete file. This keeps
-        the disk format backward-compatible while never producing a partial
-        cache that a ``with_pip`` reader could mistake for "no pip packages".
+        ``with_pip`` caller, in this process or another, sees ``_cached_pip``
+        absent, runs ``pip freeze``, and rewrites the complete file. A partial
+        cache is never written, so no reader mistakes one for "no pip
+        packages".
         """
         fetched = False
         if self._cached_conda is _NOT_COMPUTED:
@@ -387,8 +384,8 @@ class CondaEnvCache:
     def _fetch_pip(self) -> None:
         """Run ``pip freeze``, storing the raw pip list.
 
-        Does not reset conda state — it augments an already-fetched (or
-        disk-loaded) conda export with pip data on demand.
+        Augments an already-fetched or disk-loaded conda export with pip data,
+        leaving conda state alone.
         """
         # Use the running interpreter's pip, not whatever is first on PATH:
         # PATH may hold another env's pip, or none at all when the env's
@@ -429,9 +426,6 @@ class CondaEnvCache:
     def _merge_conda_pip(self) -> dict:
         """Merge raw conda export and pip freeze into a unified env dict.
 
-        This is the conflict-resolution pass that was previously the sole
-        domain of ``UserEnvironment``:
-
         * Pip-only packages (not tracked by conda) are added to the pip
           sub-list under ``dependencies``.
         * When conda and pip disagree on a version, pip wins and the
@@ -452,13 +446,13 @@ class CondaEnvCache:
 
         conda_export = dict(
             self._cached_conda
-        )  # shallow copy — don't mutate cache
+        )  # shallow copy; the cache must not be mutated
         conda_deps: list = list(conda_export.get("dependencies", []))
 
         # Extract the pip sub-list that conda embeds inside dependencies.
-        # `dep` is the dict held by `_cached_conda` — the copies above are
-        # both shallow — so read it, never `pop` from it, or a later
-        # conda-only `get()` returns dependencies with an empty pip entry.
+        # Both copies above are shallow, so `dep` is the dict held by
+        # `_cached_conda`. Read it; a `pop` here empties the cached export's
+        # pip entry for every later conda-only `get()`.
         for i, dep in enumerate(conda_deps):
             if isinstance(dep, dict):
                 conda_deps.pop(i)  # drop from the copy only
@@ -517,7 +511,7 @@ class CondaEnvCache:
                 self._conda_pip_dict[package.lower()] = line.lower()
                 return True
 
-            # Conflicting versions — record and let pip win
+            # Conflicting versions: record, and let pip win
             logger.debug(f"Conda/pip conflict: {line}")
             self._conda_conflicts[package] = [pip_version, conda_version]
             self._conda_pip_dict[package] = line

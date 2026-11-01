@@ -33,10 +33,9 @@ regularly as cron jobs.
         recent session. A clone on an older official commit is not flagged; it
         warns at import only. A flag is dropped once the user returns to a clean
         install (resolution), or if they have not used Spyglass from that
-        environment within the last 60 days (twice the warn window —
-        likely-abandoned clones age out). Importing Spyglass warns for a flagged
-        install, so the email is an escalation of a warning the user has already
-        seen.
+        environment within the last 60 days, twice the warn window. Importing
+        Spyglass warns for a flagged install, so the email escalates a warning the
+        user has already seen.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...

@@ -37,7 +37,7 @@ def _as_install(**facts):
     """Patch the process-wide install to report these facts.
 
     Each fact is a `cached_property`, so priming the instance dict is how they
-    are set — and a test need only name what it exercises. Returns a context
+    are set, and a test need only name what it exercises. Returns a context
     manager, so a test reads as "with this install, ...".
     """
     from spyglass.utils.git_utils import spyglass_install
@@ -156,8 +156,7 @@ def fake_clone():
 
     ``install_path`` is only accepted when ``<root>/src/spyglass/__init__.py``
     resolves to ``spyglass.__file__``, so a bare ``<root>/spyglass/`` or a
-    pointer at this test file is rejected — which is the point of the check,
-    and means tests have to build the real shape.
+    pointer at this test file is rejected, so tests build the real shape.
     """
 
     def _factory(tmp_path):
@@ -172,15 +171,15 @@ def fake_clone():
 
 @pytest.fixture
 def make_cache(conda_env_cache_cls, not_computed):
-    """Fixture factory — returns isolated CondaEnvCache instances."""
+    """Fixture factory returning isolated CondaEnvCache instances."""
 
     def _factory(tmp_path, *, cache_exists=False, history_mtime=None):
         """Create a fresh CondaEnvCache scoped to tmp_path.
 
-        Both staleness signals are redirected into ``tmp_path`` — the real
-        site-packages would otherwise make every test's verdict depend on
-        whatever was last installed on the machine. They start well in the
-        past so a test must move one deliberately to induce staleness.
+        Both staleness signals are redirected into ``tmp_path``, so a
+        verdict does not depend on whatever was last installed on this
+        machine. They start well in the past, so a test must move one
+        deliberately to induce staleness.
         """
         cache = conda_env_cache_cls()
         cache_path = tmp_path / ".spyglass_conda_test_prefix.yaml"
@@ -257,7 +256,7 @@ def test_cache_hit(tmp_path, make_cache):
         first = cache.get()
         second = cache.get()
 
-    assert mock_run.call_count == 1  # conda only — pip freeze skipped
+    assert mock_run.call_count == 1  # conda only; pip freeze skipped
     assert first is second  # same in-process dict object
 
 
@@ -272,7 +271,7 @@ def test_conda_only_skips_pip_freeze(tmp_path, make_cache):
         cache.get()
 
     assert [c.args[0][0] for c in mock_run.call_args_list] == ["conda"]
-    # Disk holds conda only — no partial pip list a with_pip reader could
+    # Disk holds conda only: no partial pip list a with_pip reader could
     # mistake for "no pip packages".
     assert "pip" not in yaml.safe_load(cache_path.read_text())
 
@@ -311,9 +310,9 @@ def test_merge_leaves_cached_pip_intact(tmp_path, make_cache, not_computed):
     """A merge must not strip the pip list from the cached conda export.
 
     The conda export is shallow-copied before merging, so the embedded pip
-    dict is shared with the cache. Popping from it emptied the cached export,
-    and every later conda-only reader — analysis NWB ``source_script``, the
-    export ``environment.yml`` — then recorded no pip packages at all.
+    dict is shared with the cache. A pop there empties the cached export, so
+    every later conda-only reader records no pip packages: the analysis NWB
+    ``source_script`` and the export ``environment.yml``.
     """
     cache, _ = make_cache(tmp_path)
 
@@ -399,7 +398,7 @@ def test_disk_cache_format(tmp_path, make_cache):
 
 
 def test_cache_stale_on_history_change(tmp_path, make_cache, not_computed):
-    """A newer conda-meta/history makes a previously-fresh cache stale."""
+    """A newer conda-meta/history makes a fresh cache stale."""
     cache, cache_path = make_cache(tmp_path)
     side_effects_round1 = [_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)]
     side_effects_round2 = [_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)]
@@ -467,8 +466,8 @@ def test_cache_no_conda_prefix(tmp_path, make_cache):
     """A pip-only venv uses site-packages alone, rather than always re-exporting.
 
     With no ``CONDA_PREFIX`` there is no conda history to compare against. The
-    cache used to call itself stale in that case, so a uv or pip venv re-ran
-    the export on every import and in every spawn worker.
+    cache calls itself stale only when a signal moves, so a uv or pip venv
+    no longer re-exports on every import and in every spawn worker.
     """
     cache, cache_path = make_cache(tmp_path)
     cache.__dict__["_history_path"] = None
@@ -793,8 +792,8 @@ def test_commit_hash_parsed_from_version(
     """The +g<hash> suffix in __version__ parses into commit_hash.
 
     Mocked rev-parse, because this test file lives inside a clone: left
-    unmocked, ``install_path`` resolves to that clone and HEAD — which now
-    outranks ``__version__`` — supplies the real hash instead.
+    unmocked, ``install_path`` resolves to that clone and HEAD supplies the
+    real hash, since HEAD now outranks ``__version__``.
     """
     with patch("spyglass.__version__", "0.5.6.dev1+gabcd1234"):
         with patch("spyglass.__file__", str(fake_clone(tmp_path))):
@@ -937,7 +936,7 @@ def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
 
     hatch-vcs adds the suffix when the tree it built from had uncommitted
     changes. `_VCS_HASH_RE` is anchored, so the suffix also prevents the commit
-    being parsed, and a non-editable wheel has no `.git` — leaving the version
+    being parsed, and a non-editable wheel has no `.git`, leaving the version
     string as the only trace.
     """
     with patch("spyglass.__version__", "0.6.1.dev1+gabcdef0.d20260101"):
@@ -1106,7 +1105,7 @@ def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
     fake_pkg = fake_clone(tmp_path)
 
     clean_proc = _proc("")  # no local changes
-    old_proc = _proc("100000000")  # 1973 — well past the staleness threshold
+    old_proc = _proc("100000000")  # 1973, well past the threshold
 
     with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
         with patch("spyglass.__file__", str(fake_pkg)):
@@ -1130,7 +1129,7 @@ def test_clean_current_clone_is_official(
     fake_pkg = fake_clone(tmp_path)
 
     clean_proc = _proc("")  # no local changes
-    recent_proc = _proc("4102444800")  # year 2100 — not stale
+    recent_proc = _proc("4102444800")  # year 2100, not stale
 
     with patch("spyglass.__version__", "0.5.6.dev42+gabc1234"):
         with patch("spyglass.__file__", str(fake_pkg)):
@@ -1240,8 +1239,8 @@ def test_warn_dev_but_clean_emits_stale_warning(caplog):
 def test_warn_touches_no_database(caplog):
     """Warning opens no connection and imports nothing from common.
 
-    This is the whole point of the split: `import spyglass` used to wait on a
-    connection and could prompt for a password.
+    This is what the split buys: a bare `import spyglass` neither waits on a
+    connection nor prompts for a password.
     """
     import datajoint as dj
 
@@ -1292,8 +1291,8 @@ def test_warn_countdown_runs_from_marker(caplog, warn_dirty_days):
 def test_warn_countdown_survives_a_new_commit(caplog, warn_dirty_days):
     """Committing while dirty does not restart the clock.
 
-    A user who commits every day would otherwise see a fresh 30 days each
-    time, and never reach the escalation.
+    A user who commits every day keeps one countdown, rather than a fresh 30
+    days each time, and so reaches the escalation.
     """
     import datetime
 
@@ -1406,7 +1405,7 @@ def _patched_env(insert_return=None, row_date=None):
     """Patch UserEnvironment's collaborators, keeping the real log_install.
 
     The method under test lives on the table now, so the class itself must not
-    be replaced — only what it calls out to.
+    be replaced, only what it calls out to.
     """
     import spyglass.common.common_user as _user_mod
 
@@ -1942,8 +1941,8 @@ def test_dirty_episode_takes_the_oldest_row(user_env_tbl, same_commit_pair):
 def test_episode_after_resolution_starts_fresh(user_env_tbl, same_commit_pair):
     """A new dirty episode gets its own first-appeared date.
 
-    Deduping against every past dirty row would have matched the resolved one
-    and inherited its months-old timestamp, emailing the user on day one.
+    Deduping against every past dirty row matches the resolved one and
+    inherits its months-old timestamp, emailing the user on day one.
     """
     clean, dirty = same_commit_pair
     user_env_tbl.delete(safemode=False)
@@ -2186,7 +2185,7 @@ def test_write_dirty_notifications_writes_tsv(user_env_tbl, tmp_path):
             "dirty_path": "/home/alice_bob/sg",
         },
         {
-            "env_id": "carol_env_00",  # below threshold — filtered out
+            "env_id": "carol_env_00",  # below threshold, filtered out
             "days_since_warn": 10,
             "spyglass_commit": "ccc3333",
             "dirty_path": "/home/carol/sg",

@@ -7,30 +7,30 @@ lifetime of the process.
 The result is used by ``UserEnvironment`` to populate ``dirty_path`` and
 ``spyglass_commit``, and by the warning system to advise non-admin users.
 
-Detection logic
----------------
-1. ``is_dev``  — ``".dev"`` present in ``__version__`` (set by
-   vcs-versioning; always True for editable installs on non-release commits).
-2. ``commit_hash`` — ``git rev-parse --short HEAD`` when running from a clone,
-   falling back to the ``+g<hash>`` suffix in ``__version__``.  ``None`` for
-   standard pip installs of a release.
-3. ``install_path`` — the root of the spyglass clone this package runs from,
-   identified by ``<root>/src/spyglass/__init__.py`` resolving to
-   ``spyglass.__file__``; ``None`` otherwise, including an install inside an
-   unrelated git repo.
-4. ``has_local_changes`` — the install deviates from a commit on the official
-   remote, by any of: ``git diff --name-only HEAD -- src/`` returning output
-   (scoped to ``src/``, so doc edits, notebook changes and ``.claude/``
-   artefacts are intentionally ignored); HEAD being contained by no remote
-   branch, i.e. committed locally and never pushed; or ``__version__``
-   carrying hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a
-   dirty tree, which has no repo to inspect.
-5. ``is_stale`` — HEAD's commit date is more than ``WARN_STALE_DAYS`` days
-   old, i.e. the clone has not fetched upstream in months.  Being a handful
-   of commits behind does not flag; only long-neglected clones do.
-6. ``is_official`` — ``not has_local_changes and not is_stale``.  Note this
-   is independent of ``is_dev``: a clone tracking ``master`` that is current
-   and unmodified is treated as official even though it is a dev build.
+Reported facts
+--------------
+``is_dev``
+    ``".dev"`` present in ``__version__``, set by vcs-versioning.
+``commit_hash``
+    ``git rev-parse --short HEAD`` in a clone, else the ``+g<hash>`` suffix of
+    ``__version__``. ``None`` for a release install.
+``install_path``
+    Root of the spyglass clone this package runs from, identified by
+    ``<root>/src/spyglass/__init__.py`` resolving to ``spyglass.__file__``.
+    ``None`` for any other layout, including an install inside an unrelated
+    git repo.
+``has_local_changes``
+    The install deviates from a commit on the official remote, by any of:
+    ``git diff --name-only HEAD -- src/`` returning output, scoped to ``src/``
+    so doc and notebook edits are ignored; HEAD contained by no remote branch,
+    i.e. committed locally and never pushed; or ``__version__`` carrying
+    hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a dirty tree.
+``is_stale``
+    HEAD's commit date is more than ``WARN_STALE_DAYS`` days old. A few
+    commits behind does not flag.
+``is_official``
+    Neither dirty nor stale. Independent of ``is_dev``: a current, unmodified
+    clone tracking ``master`` is official.
 """
 
 import os
@@ -68,26 +68,25 @@ STALE_MSG = (
 class _DirtyMarker:
     """The local "this clone has logged a dirty env" record.
 
-    Scoped per (DataJoint user, conda env) under ``temp_dir``. Using the DB
-    user — not the OS login — keeps markers from clashing when many users share
-    one ``temp_dir`` (and even one OS account), and aligns the marker with how
-    dirty installs are keyed for warnings and emails (``env_id`` prefix). The
-    DB user is read from ``dj.config`` (no ``spyglass.common`` import), so the
-    clean-install fast path stays lightweight.
+    Scoped per (DataJoint user, conda env) under ``temp_dir``. Keying on the
+    DataJoint user rather than the OS login matches how dirty installs are
+    keyed for warnings and emails, by ``env_id`` prefix, and keeps markers
+    distinct where many users share one ``temp_dir`` or one OS account. The
+    user is read from ``dj.config``, so the clean-install fast path needs no
+    ``spyglass.common`` import.
 
     Content is a JSON object: ``commit`` the hash first flagged, ``first_seen``
     the date the episode began, and ``last_logged`` the date the database last
-    heard about it. Every method is best-effort — a marker is a cache, and its
-    loss must never raise.
+    heard about it. A marker is a cache, so every method is best-effort and
+    losing one never raises.
     """
 
     @cached_property
     def path(self) -> Optional[Path]:
         """Marker path, resolved once per process.
 
-        ``None`` when ``temp_dir`` is unavailable. Neither the DataJoint user
-        nor ``temp_dir`` changes within a session, so this is cached rather
-        than rebuilt on each read and write.
+        ``None`` when ``temp_dir`` is unavailable. Cached: neither the
+        DataJoint user nor ``temp_dir`` changes within a session.
         """
         try:
             import datajoint as dj
@@ -118,9 +117,8 @@ class _DirtyMarker:
     def write(self, **fields) -> None:
         """Merge fields into the recorded state.
 
-        Merging rather than replacing, so a caller that knows one fact need
-        not read, update and hand back the whole record. Use :meth:`clear` to
-        drop the record entirely.
+        Merges, so a caller that knows one fact need not hand back the whole
+        record. :meth:`clear` drops the record.
         """
         if self.path is None:
             return
@@ -144,13 +142,12 @@ class _DirtyMarker:
 class SpyglassInstall:
     """Inspects the Spyglass installation this process is running from.
 
-        Holds the repository root once discovered, so the git queries below read it
-        rather than taking it as an argument apiece, and caches the resulting
-        summary for the lifetime of the instance.
+    Holds the repository root once discovered, so the git queries read it
+    rather than taking it as an argument apiece, and caches each fact it
+    reports for the lifetime of the instance.
 
-    The module-level :data:`spyglass_install` is the one instance normal code uses.
-        Constructing the class re-inspects from scratch, which is what makes the
-        inspection testable without reaching into module state.
+    The module-level :data:`spyglass_install` is the instance normal code uses.
+    Constructing the class inspects afresh.
     """
 
     _SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=10)
@@ -170,7 +167,7 @@ class SpyglassInstall:
 
     @cached_property
     def _version(self) -> str:
-        """deferred so import order does not matter."""
+        """``spyglass.__version__``, read lazily so import order is free."""
         from spyglass import __version__
 
         return __version__
@@ -180,9 +177,9 @@ class SpyglassInstall:
         """Root of the spyglass clone this package runs from, if any.
 
         A candidate is accepted only when its ``src/spyglass/__init__.py``
-        resolves to ``spyglass.__file__``: a venv inside an unrelated repo
-        (uv's default ``.venv``, or ``conda create --prefix ./env``) would
-        otherwise adopt that repo's commit and dirty state.
+        resolves to ``spyglass.__file__``, so a venv inside an unrelated repo
+        (uv's default ``.venv``, or ``conda create --prefix ./env``) is
+        rejected rather than read as a spyglass clone.
         """
         try:
             import spyglass
@@ -205,9 +202,8 @@ class SpyglassInstall:
     def _git(self, *args: str) -> Optional[str]:
         """Run git in the install path, returning stdout or ``None``.
 
-        ``None`` means "no answer": git missing, a non-zero exit, or no clone
-        to run in. Callers decide what that implies, and all of them fail safe
-        by not flagging the install.
+        ``None`` means no answer: git missing, a non-zero exit, or no clone to
+        run in. Each caller treats that as "not flagged".
         """
         if self.install_path is None:
             return None
@@ -236,10 +232,10 @@ class SpyglassInstall:
     def head_is_published(self) -> bool:
         """Return ``True`` if HEAD is contained by some remote branch.
 
-        ``git diff`` is empty for a commit that exists only locally, so
-        committing local work would otherwise read as clean. Reads the
-        remote-tracking refs already on disk, so no network is needed and a
-        clone that has never fetched reports nothing contained.
+        ``git diff`` is empty for a commit that exists only locally, so this
+        is what catches committed-but-unpushed work. Reads the remote-tracking
+        refs already on disk, needing no network; a clone that has never
+        fetched reports nothing contained.
 
         ``True`` when git gives no answer, so a failure does not flag.
         """
@@ -249,9 +245,9 @@ class SpyglassInstall:
     def has_src_changes(self) -> bool:
         """Return ``True`` if tracked files under ``src/`` differ from HEAD.
 
-        Covers staged and unstaged modifications. Untracked files and changes
-        outside ``src/`` are intentionally excluded, so doc edits, notebook
-        changes and ``.claude/`` artefacts do not flag an install.
+        Covers staged and unstaged modifications. Scoped to ``src/``, so
+        untracked files, doc edits and notebook changes do not flag an
+        install.
         """
         out = self._git("diff", "--name-only", "HEAD", "--", "src/")
         return bool(out and out.strip())
@@ -259,9 +255,8 @@ class SpyglassInstall:
     def head_is_stale(self) -> bool:
         """Return ``True`` if HEAD is older than ``WARN_STALE_DAYS``.
 
-        Committer date as a no-network proxy for "months behind upstream": a
-        clone that fetches regularly keeps a recent HEAD, a long-neglected one
-        does not.
+        Committer date as a no-network proxy for months behind upstream: a
+        clone that fetches regularly keeps a recent HEAD.
         """
         out = self._git("log", "-1", "--format=%ct", "HEAD")
         if not (out and out.strip()):
@@ -277,17 +272,16 @@ class SpyglassInstall:
 
     @cached_property
     def is_dev(self) -> bool:
-        """``".dev"`` appears in ``__version__`` — a non-release build."""
+        """``".dev"`` in ``__version__``, marking a non-release build."""
         return ".dev" in self._version
 
     @cached_property
     def commit_hash(self) -> Optional[str]:
         """Short hash of the running code, or ``None`` for a clean release.
 
-        HEAD wins over ``__version__``: ``_version.py`` is written at install
-        and does not move with a ``git pull``. A wheel built from a dirty tree
-        carries a ``.dYYYYMMDD`` suffix, which is also why the version may hold
-        no parseable hash.
+        HEAD wins over ``__version__``, which hatch-vcs writes at install and
+        a ``git pull`` does not move. A ``.dYYYYMMDD`` suffix on the version,
+        left by a wheel built from a dirty tree, also blocks the hash parse.
         """
         from_version = None
         if m := self._VCS_HASH_RE.search(self._version):
@@ -321,7 +315,7 @@ class SpyglassInstall:
         """Neither dirty nor stale.
 
         Independent of :attr:`is_dev`: a clean, current clone tracking
-        ``master`` is official even though it is a dev build.
+        ``master`` is official though it is a dev build.
         """
         return not self.has_local_changes and not self.is_stale
 
@@ -331,18 +325,18 @@ class SpyglassInstall:
         """Warn when running a non-official Spyglass install.
 
         Touches no database: the git check and the countdown both read local
-        state, so an import never opens a connection, stalls behind a VPN, or
-        prompts for a password. The record is written later by :meth:`log`, on
-        the session's first insert or populate.
+        state, so an import opens no connection. The record is written on the
+        session's first insert or populate, by
+        :meth:`~spyglass.common.common_user.UserEnvironment.log_install`.
 
         Two messages:
 
         * **Dirty** (``has_local_changes``): the countdown warning. Days are
           counted from the marker's ``first_seen``, written the first time this
           clone was seen dirty.
-        * **Stale** (``is_stale``, no local changes): the softer "older commit"
-          advisory, with no countdown — an older official commit is
-          reproducible.
+        * **Stale** (``is_stale``, no local changes): the softer "older
+          commit" advisory, with no countdown, since an older official commit
+          is reproducible.
 
         Admin users are not exempted here, because that check is a query. They
         are exempted from the database record and the escalation email.
@@ -356,9 +350,8 @@ class SpyglassInstall:
         """Days left before this dirty install is flagged for discussion.
 
         Counted from the marker's ``first_seen``, so the clock survives a new
-        session. A commit made while dirty keeps the original date: the user
-        has been dirty throughout, and the countdown should not restart every
-        time they commit.
+        session. A commit made while dirty keeps the original date, so the
+        countdown does not restart each time the user commits.
         """
         marker = self.marker.read()
         today = date.today()
@@ -373,15 +366,15 @@ class SpyglassInstall:
 
         try:
             days = (today - date.fromisoformat(first_seen)).days
-        except Exception:  # unreadable date — start the clock over
+        except Exception:  # unreadable date: start the clock over
             days = 0
         return max(0, WARN_DIRTY_ENV_DAYS - days)
 
     def warn_once(self) -> None:
         """Emit the warning at most once per process.
 
-        Called from the import-time hook in ``spyglass/__init__.py``. Fully
-        guarded — a warning must never break an import.
+        Called from the import-time hook in ``spyglass/__init__.py``, fully
+        guarded so a warning cannot break an import.
         """
         if self.warned:
             return
@@ -392,6 +385,6 @@ class SpyglassInstall:
             logger.debug(f"install warning failed: {exc}")
 
 
-# The install this process is running from. Construction is free — every fact
-# is a cached property, read on first use — so this costs nothing at import.
+# The install this process is running from. Every fact is a cached property,
+# read on first use, so construction costs nothing at import.
 spyglass_install = SpyglassInstall()

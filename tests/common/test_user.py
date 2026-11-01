@@ -18,7 +18,7 @@ def _as_install(**facts):
     """Patch the process-wide install to report these facts.
 
     Each fact is a `cached_property`, so priming the instance dict is how they
-    are set — and a test need only name what it exercises. Returns a context
+    are set, and a test need only name what it exercises. Returns a context
     manager, so a test reads as "with this install, ...".
     """
     from spyglass.utils.git_utils import spyglass_install
@@ -30,11 +30,10 @@ def _as_install(**facts):
 def _clean_install(user_env_tbl):
     """Pin the install state for this module.
 
-    Every test here exercises the full-row path — the stored environment, its
-    hash, the versions read back out. A dirty install deliberately stores none
-    of that, and a developer's working tree is dirty by definition, so without
-    pinning, these tests assert against whatever state the checkout happens to
-    be in rather than against `UserEnvironment`.
+    Every test here exercises the full-row path: the stored environment, its
+    hash, the versions read back out. A dirty install stores none of that, and
+    a developer's working tree is dirty by definition, so pinning keeps these
+    assertions about `UserEnvironment` rather than about the checkout.
 
     Cached properties are cleared on both sides so the module neither inherits
     another module's cache nor leaves its own behind.
@@ -120,8 +119,8 @@ def test_clear_cache(user_env_tbl):
     """Test that clearing cache returns same env id."""
     pre_env = user_env_tbl.this_env["env_id"]
     # Read it first so `del` has something to clear: `this_env` leaves
-    # `matching_env_id` uncached whenever it had to insert, so whether the
-    # delete succeeds otherwise depends on the table already holding this env.
+    # `matching_env_id` uncached whenever it had to insert, so the delete
+    # depends on the table already holding this env.
     _ = user_env_tbl.matching_env_id
     del user_env_tbl.matching_env_id
     post_env = user_env_tbl.this_env["env_id"]

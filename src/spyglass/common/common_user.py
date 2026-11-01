@@ -92,11 +92,10 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         The Spyglass commit hash is folded in when present. For an editable /
         local clone the conda+pip export does not capture the exact source
         revision (an editable install shows as ``-e ...`` with no version), so
-        the commit is the only thing that distinguishes two otherwise-identical
-        environments running different code. Including it keeps the recompute
-        feature reproducible at the expense of a new row per commit on dev
-        installs. Clean releases have ``commit_hash=None``, so their hash is
-        unchanged and existing rows are unaffected.
+        the commit is the only thing separating two environments whose exports
+        match but whose code differs. Including it keeps recompute reproducible,
+        at one row per commit on a dev install. A clean release has
+        ``commit_hash=None``, leaving its hash and existing rows untouched.
 
         A new row means a new ``env_id``, and ``RecordingRecomputeSelection``
         keys on ``env_id``, so a dev clone gets a fresh set of recompute
@@ -235,18 +234,15 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         episode = self.unresolved_dirty() & mine
 
         if episode:
-            # Oldest first: `fetch` has no guaranteed order, and two
-            # unresolved rows can exist — nothing stops concurrent sessions
-            # both finding none and both inserting, since MySQL permits
-            # repeated nulls under the unique index. Taking the oldest keeps
-            # the countdown running from when the episode really began.
+            # Oldest first: `fetch` has no guaranteed order, and concurrent
+            # sessions can each find no row and each insert one, since MySQL
+            # permits repeated nulls under a unique index. The oldest carries
+            # the date the episode began.
             existing = episode.fetch("env_id", order_by="timestamp ASC")[0]
-            # Refresh what the email reports alongside the activity window:
-            # one row covers the whole episode, so a user who has committed
-            # or moved their clone since day 0 would otherwise be emailed
-            # about a commit they have left behind. `timestamp` is untouched —
-            # that is the clock. Server-side NOW(), matching DIRTY_DAYS_SQL,
-            # so the window is not skewed by a client clock.
+            # One row covers the whole episode, so the commit and path are
+            # refreshed alongside the activity window to keep the email
+            # current. `timestamp` is the clock and stays put. Server-side
+            # NOW(), matching DIRTY_DAYS_SQL, so no client clock skews it.
             self.connection.query(
                 f"UPDATE {self.full_table_name} "
                 + "SET `last_seen` = NOW(), "
@@ -266,7 +262,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 "env_id": new_env_id,
                 "env_hash": None,
                 "env": None,
-                "has_editable": None,  # never tested — no pip freeze ran
+                "has_editable": None,  # untested: no pip freeze ran
                 "dirty_path": spyglass_install.install_path,
                 "spyglass_commit": spyglass_install.commit_hash,
             },
@@ -280,10 +276,10 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         Recompute uses this to decide whether an attempt can be logged as
         passing at creation. Three states disqualify an environment:
 
-        * a dirty install (``env_hash`` null) — no environment was recorded;
-        * an untested environment (``has_editable`` null) — no ``pip freeze``
-          ran, so nothing is known about editable installs;
-        * an editable dependency (``has_editable`` true) — its version string
+        * a dirty install (``env_hash`` null), which records no environment;
+        * an untested environment (``has_editable`` null), where no
+          ``pip freeze`` ran and editable installs are unknown;
+        * an editable dependency (``has_editable`` true), whose version string
           says nothing about its contents.
 
         Parameters
@@ -311,8 +307,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         Called from the mixin on the session's first insert or populate rather
         than at import: by then a connection exists, so this adds no
         import-time cost and nothing at all in a process that never writes.
-        The once-per-session gate is the caller's — see
-        ``BaseMixin._logged_install_mode``, which must be set before this runs,
+        The once-per-session gate belongs to the caller,
+        ``BaseMixin._logged_install_mode``, and must be set before this runs,
         because the insert below re-enters the mixin hook.
 
         Writes at most once a day per environment. A dirty state already on
@@ -323,14 +319,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         A clean install with a marker is the resolution case: the full row is
         logged so the escalation clock stops, and the marker is cleared.
 
-        Fully guarded — a user without write permission sees nothing.
+        Fully guarded, so a user without write permission sees nothing.
         """
         sg_install = spyglass_install
         flagged = sg_install.has_local_changes or sg_install.is_stale
         marker = sg_install.marker.read()
 
         # Fast path: a clean install that was never flagged here has nothing to
-        # record and no resolution to log — no import, and no query.
+        # record and no resolution to log: no import, and no query.
         if not flagged and not marker:
             return
 
@@ -344,7 +340,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             if LabMember().user_is_admin:
                 return
         except Exception as exc:
-            logger.debug(f"admin check failed: {exc}")  # DB down — log anyway
+            logger.debug(f"admin check failed: {exc}")  # DB down: log anyway
 
         try:
             key = self.insert_current_env()
@@ -353,9 +349,9 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             return
 
         if sg_install.has_local_changes:
-            # Prefer the row's date, then whatever the warning recorded
-            # locally, then today — the marker may be absent entirely if it
-            # was swept between the warning and this write.
+            # The row's date, else what the warning recorded locally, else
+            # today: the marker may be absent if it was swept between the
+            # warning and this write.
             sg_install.marker.write(
                 last_logged=today,
                 first_seen=(
@@ -371,14 +367,12 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         """Return the ISO date a logged dirty row first appeared, if readable.
 
         The database is the shared record, so the warning's countdown defers to
-        it and the marker becomes a cache rather than a second clock. Without
-        this, clearing ``temp_dir`` — a cache, and cleared as one — restarts the
-        local countdown while the escalation email keeps counting, so a user
-        could be emailed on the same day they were told they had the full window
-        left.
+        it, making the marker a cache of the database rather than a second
+        clock. ``temp_dir`` is a cache and gets cleared, which would restart a
+        local-only countdown while the escalation email kept counting.
 
         Returns ``None`` when there is nothing to read, leaving the caller's
-        local date in place: the first warning of a new episode fires before any
+        local date in place: the first warning of an episode fires before any
         row exists.
         """
         env_id = (key or {}).get("env_id")
@@ -395,10 +389,9 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         """Return partial rows whose dirty state has not been cleaned up.
 
         Resolution is stamped on the row when the same user next logs a full
-        row, rather than inferred by comparing timestamps: MySQL ``timestamp``
-        holds whole seconds, so a user who discards their edits in the same
-        second they were logged would produce two rows no comparison could
-        order, and the resolution would be lost.
+        row, rather than inferred by comparing timestamps. MySQL ``timestamp``
+        holds whole seconds, so edits discarded in the second they were logged
+        produce two rows no comparison can order.
 
         This is the single definition of "still dirty", shared by the warning
         countdown, the notification query, and the dedupe that keeps a session
@@ -427,9 +420,9 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         A partial row is included when it is:
 
-        * **Unresolved** — ``resolved_at`` is null; see
+        * **Unresolved**: ``resolved_at`` is null; see
           :meth:`unresolved_dirty`, and
-        * **Active** — seen within twice ``WARN_DIRTY_ENV_DAYS``. The window
+        * **Active**: seen within twice ``WARN_DIRTY_ENV_DAYS``. The window
           tests ``last_seen``, which each session refreshes, so a user who is
           dirty and still working stays in scope while an abandoned clone ages
           out.
@@ -451,10 +444,10 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     def write_dirty_notifications(self, out_path: str = None) -> None:
         """Write overdue dirty-install rows to out_path (or stdout if None).
 
-        One tab-separated line per user, not per row — a user with several
-        flagged clones, or one clone logged at several commits, gets a single
-        line naming all of them, since ``run_jobs.sh`` sends one email per
-        line on each cron run:
+        One tab-separated line per user, not per row. ``run_jobs.sh`` sends
+        one email per line on each cron run, so a user with several flagged
+        clones, or one clone logged at several commits, gets a single line
+        naming all of them:
 
             user_email\\tdays_since_warn\\tspyglass_commit\\tdirty_path
 
@@ -509,9 +502,9 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
             entry = by_email.setdefault(user_email, {"days": 0, "clones": {}})
             entry["days"] = max(entry["days"], row["days_since_warn"])
-            # One clone may be logged at several commits. Name it once, at its
-            # newest commit — the smallest days_since_warn — so the email says
-            # where the clone is now rather than listing its history.
+            # One clone may be logged at several commits. Name it once, at
+            # its newest commit, i.e. the smallest days_since_warn, so the
+            # email says where the clone is now.
             path = row["dirty_path"] or ""
             age = row["days_since_warn"]
             seen = entry["clones"].get(path)
@@ -520,7 +513,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         for name in sorted(unmatched):
             print(
-                f"No LabMemberInfo email for '{name}' — skipping.",
+                f"No LabMemberInfo email for '{name}'. Skipping.",
                 file=sys.stderr,
             )
 
@@ -610,12 +603,12 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
         stored_hash, stored_env = query.fetch1("env_hash", "env")
 
-        if stored_hash is None:  # partial row — a dirty install stored no env
+        if stored_hash is None:  # partial row: a dirty install stored no env
             logger.error(
                 f"Environment '{env_id}' was logged from a dirty install, "
                 + "so it holds no environment to compare."
             )
-            return False  # an empty prev_env would otherwise match everything
+            return False  # an empty prev_env matches everything
 
         if stored_hash == self.env_hash:
             return True
