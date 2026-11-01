@@ -18,9 +18,13 @@ Detection logic
    identified by ``<root>/src/spyglass/__init__.py`` resolving to
    ``spyglass.__file__``; ``None`` otherwise, including an install inside an
    unrelated git repo.
-4. ``has_local_changes`` — ``git diff --name-only HEAD -- src/`` returns
-   non-empty output.  Scoped to ``src/`` so doc edits, notebook changes, and
-   ``.claude/`` artefacts are intentionally ignored.
+4. ``has_local_changes`` — the install deviates from a commit on the official
+   remote, by any of: ``git diff --name-only HEAD -- src/`` returning output
+   (scoped to ``src/``, so doc edits, notebook changes and ``.claude/``
+   artefacts are intentionally ignored); HEAD being contained by no remote
+   branch, i.e. committed locally and never pushed; or ``__version__``
+   carrying hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a
+   dirty tree, which has no repo to inspect.
 5. ``is_stale`` — HEAD's commit date is more than ``WARN_STALE_DAYS`` days
    old, i.e. the clone has not fetched upstream in months.  Being a handful
    of commits behind does not flag; only long-neglected clones do.
@@ -55,6 +59,10 @@ _warned = False
 
 # Matches the ``+g<hash>`` VCS suffix appended by setuptools-scm / hatch-vcs.
 _VCS_HASH_RE = re.compile(r"\+g([0-9a-f]+)$")
+
+# Matches the `.dYYYYMMDD` suffix hatch-vcs appends when the tree it built from
+# had uncommitted changes.
+_VCS_DIRTY_RE = re.compile(r"\.d\d{8}$")
 
 
 class _InstallInfoCache:
@@ -307,9 +315,11 @@ def get_install_info() -> dict:
         ``spyglass.__file__``.  ``None`` for site-packages installs and for an
         install that merely sits inside someone else's repo.
     has_local_changes : bool
-        ``True`` when ``git diff --name-only HEAD -- src/`` produces output,
-        meaning tracked source files have been modified relative to HEAD.
-        Always ``False`` when ``install_path`` is ``None``.
+        ``True`` when the install deviates from a commit on the official
+        remote: modified sources under ``src/``, a HEAD on no remote branch,
+        or a version carrying the ``.dYYYYMMDD`` suffix of a wheel built from
+        a dirty tree. Only the last is detectable without a clone, so this is
+        otherwise ``False`` when ``install_path`` is ``None``.
     is_stale : bool
         ``True`` when HEAD's commit date is more than ``WARN_STALE_DAYS`` days
         old (the clone is months behind upstream).  Always ``False`` when
@@ -334,10 +344,14 @@ def _compute_install_info() -> dict:
 
     is_dev = ".dev" in __version__
 
-    # ── commit_hash: prefer version string, fall back to git ─────────────────
+    # ── commit_hash: HEAD when in a clone, else the version string ───────────
     commit_hash: Optional[str] = None
     if m := _VCS_HASH_RE.search(__version__):
         commit_hash = m.group(1)
+
+    # A wheel built from a dirty tree carries hatch-vcs's `.dYYYYMMDD` suffix.
+    # It has no repo to inspect, so this is the only trace of the edits.
+    built_dirty = bool(_VCS_DIRTY_RE.search(__version__))
 
     # ── install_path: the spyglass clone we are running from, if any ─────────
     install_path: Optional[str] = None
@@ -360,15 +374,19 @@ def _compute_install_info() -> dict:
     except Exception as exc:
         logger.debug(f"could not locate install path: {exc}")
 
-    # ── has_local_changes / is_stale: only meaningful inside a git repo ──────
-    has_local_changes = False
+    # ── has_local_changes / is_stale: mostly need a git repo to inspect ──────
+    has_local_changes = built_dirty  # knowable without one
     is_stale = False
     if install_path is not None:
         # Use HEAD. __version__ does not change after `git pull`, so use it
         # only when git fails.
         commit_hash = _git_short_hash(install_path) or commit_hash
 
-        has_local_changes = _git_has_src_changes(install_path)
+        has_local_changes = (
+            has_local_changes
+            or _git_has_src_changes(install_path)
+            or not _git_head_is_published(install_path)
+        )
         is_stale = _git_head_is_stale(install_path)
 
     return {
@@ -393,6 +411,34 @@ def _git_short_hash(repo_root: str) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def _git_head_is_published(repo_root: str) -> bool:
+    """Return ``True`` if HEAD is contained by some remote branch.
+
+    ``git diff`` is empty for a commit that exists only locally, so committing
+    local work would otherwise read as clean. ``git branch -r --contains``
+    needs no network — it reads the remote-tracking refs already on disk, so a
+    clone that has never fetched reports nothing contained and is treated as
+    unpublished.
+
+    Returns ``True`` on any error, so a git failure does not flag an install.
+    """
+    try:
+        result = sub_run(
+            ["git", "-C", repo_root, "branch", "-r", "--contains", "HEAD"],
+            **_SUBPROCESS_KWARGS,
+        )
+        if result.returncode == 0:
+            return bool(result.stdout.strip())
+        logger.debug(
+            f"git branch exited {result.returncode}: {result.stderr.strip()}"
+        )
+    except FileNotFoundError:
+        logger.debug("git not found; assuming HEAD is published")
+    except Exception as exc:
+        logger.debug(f"git branch failed: {exc}")
+    return True
 
 
 def _git_has_src_changes(repo_root: str) -> bool:

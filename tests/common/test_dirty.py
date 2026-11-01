@@ -39,7 +39,12 @@ def _proc(stdout="", returncode=0) -> CompletedProcess:
     )
 
 
-def _git_mock(rev_parse="abc1234\n", diff="", log="4102444800"):
+def _git_mock(
+    rev_parse="abc1234\n",
+    diff="",
+    log="4102444800",
+    branch="  origin/master\n",
+):
     """Return a ``git_utils.sub_run`` side effect keyed on the git subcommand.
 
     Dispatching on the command rather than on call order: which git commands
@@ -48,7 +53,12 @@ def _git_mock(rev_parse="abc1234\n", diff="", log="4102444800"):
     time it moves. Each argument takes a string (stdout, returncode 0) or a
     ``CompletedProcess`` for a non-zero exit.
     """
-    by_subcommand = {"rev-parse": rev_parse, "diff": diff, "log": log}
+    by_subcommand = {
+        "rev-parse": rev_parse,
+        "diff": diff,
+        "log": log,
+        "branch": branch,  # default: HEAD is on a remote branch
+    }
 
     def _dispatch(cmd, *_, **__):
         joined = " ".join(cmd)
@@ -822,6 +832,90 @@ def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
                 result = compute_install_info_fn()
 
     assert result["commit_hash"] == "abc1234"
+
+
+def test_unpushed_head_is_not_official(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """A commit that exists only locally counts as a local change.
+
+    `git diff` is empty once the work is committed, so committing was enough to
+    read as clean while still running code no one else can obtain.
+    """
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(diff="", branch=""),  # no remote branch
+            ):
+                result = compute_install_info_fn()
+
+    assert result["has_local_changes"] is True
+    assert result["is_official"] is False
+
+
+def test_published_head_with_clean_diff_is_official(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """A pushed HEAD and a clean diff is still official."""
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(diff="", branch="  origin/master\n"),
+            ):
+                result = compute_install_info_fn()
+
+    assert result["has_local_changes"] is False
+    assert result["is_official"] is True
+
+
+def test_git_branch_failure_does_not_flag(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """A failing `git branch` leaves the install unflagged, not flagged."""
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(branch=_proc("", returncode=129)),
+            ):
+                result = compute_install_info_fn()
+
+    assert result["has_local_changes"] is False
+
+
+def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
+    """A `.dYYYYMMDD` version flags an install with no repo to inspect.
+
+    hatch-vcs adds the suffix when the tree it built from had uncommitted
+    changes. `_VCS_HASH_RE` is anchored, so the suffix also prevents the commit
+    being parsed, and a non-editable wheel has no `.git` — leaving the version
+    string as the only trace.
+    """
+    with patch("spyglass.__version__", "0.6.1.dev1+gabcdef0.d20260101"):
+        with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
+            result = compute_install_info_fn()
+
+    assert result["install_path"] is None
+    assert result["has_local_changes"] is True
+    assert result["is_official"] is False
+
+
+def test_clean_wheel_is_not_flagged(compute_install_info_fn):
+    """A plain `+g` version with no dirty suffix stays official."""
+    with patch("spyglass.__version__", "0.6.1.dev1+gabcdef0"):
+        with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
+            result = compute_install_info_fn()
+
+    assert result["has_local_changes"] is False
+    assert result["is_official"] is True
 
 
 def test_venv_inside_another_repo_is_not_a_clone(
