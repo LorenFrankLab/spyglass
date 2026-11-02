@@ -181,9 +181,9 @@ class SpyglassInstall:
     def _remotes(self) -> Optional[str]:
         """``git remote -v`` output, or ``None`` when git gave no answer.
 
-        The ``None`` matters: a clone with no official remote is a different
-        thing from a clone where git could not be run, and they must not be
-        treated alike.
+        ``None`` separates a clone where git could not be run from a clone
+        that ran git and has no official remote. The two are treated
+        differently in :meth:`head_is_published`.
         """
         return self._git("remote", "-v")
 

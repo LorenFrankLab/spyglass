@@ -287,14 +287,12 @@ class CondaEnvCache:
         """Mark the cache file as still in use.
 
         ``cleanup.py`` deletes anything in ``temp_dir`` untouched for seven
-        days, and a cache hit does not rewrite the file, so a stable
-        environment would have its cache swept weekly and re-export on the
-        next session.
+        days, and a cache hit does not rewrite the file.
 
-        Safe only here, after :meth:`is_stale` has confirmed the file is newer
-        than every staleness signal: bumping it to now preserves that ordering,
-        and any later change moves a signal past the new mtime. Touching
-        before the check would hide a change.
+        Call only after :meth:`is_stale` has confirmed the file is newer than
+        every staleness signal. Bumping it to now preserves that ordering, and
+        any later change moves a signal past the new mtime; touching before the
+        check hides a change.
         """
         if self._cache_path is None:
             return

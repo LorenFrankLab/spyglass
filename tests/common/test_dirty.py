@@ -549,8 +549,8 @@ def test_cache_stale_on_pip_install(tmp_path, make_cache, not_computed):
 def test_cache_hit_refreshes_mtime(tmp_path, make_cache, not_computed):
     """A cache hit keeps the file off the weekly temp_dir sweep.
 
-    `cleanup.py` deletes anything untouched for seven days. A hit does not
-    rewrite the file, so a stable environment would be swept and re-export.
+    `cleanup.py` deletes anything untouched for seven days, and a hit does not
+    rewrite the file.
     """
     cache, cache_path = make_cache(tmp_path)
 
@@ -779,9 +779,9 @@ def test_parse_pip_line_editable_path_unrelated_dirname(conda_env_cache_cls):
     """The comment names the package, so the directory need not.
 
     A git worktree is named for its branch, so an editable Spyglass commonly
-    sits in a directory sharing no name with the distribution. Reading the
-    package out of the path raised here, and counted Spyglass itself as a
-    third-party editable, which gates recompute off.
+    sits in a directory sharing no name with the distribution. The package is
+    read from the comment, which also keeps Spyglass exempt from
+    ``has_editable``.
     """
     cache = conda_env_cache_cls()
     cache._parse_pip_line("# (spyglass-neuro==0.5.5a2.dev86+gf82724895)")
@@ -1792,8 +1792,8 @@ def test_log_install_trusts_the_cached_admin_check():
 def test_log_install_clean_admin_clears_the_marker():
     """An admin who resolves a dirty state returns to the fast path.
 
-    Nothing was recorded for them, so there is no resolution to log, but the
-    marker would otherwise keep its cached exemption and outlive the episode.
+    Nothing was recorded for them, so there is no resolution to log. The
+    marker is cleared so its cached exemption does not outlive the episode.
     """
     import spyglass.common.common_lab as _lab_mod
     from spyglass.utils.git_utils import spyglass_install
