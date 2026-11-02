@@ -60,11 +60,19 @@ def _warn_with(facts: dict) -> None:
     inst.warn()
 
 
+_OFFICIAL_REMOTE_V = (
+    "sg\thttps://github.com/LorenFrankLab/spyglass (fetch)\n"
+    "sg\thttps://github.com/LorenFrankLab/spyglass (push)\n"
+)
+
+
 def _git_mock(
     rev_parse="abc1234\n",
     diff="",
     log="4102444800",
     branch="  origin/master\n",
+    remote=_OFFICIAL_REMOTE_V,
+    merge_base="",
 ):
     """Return a ``git_utils.sub_run`` side effect keyed on the git subcommand.
 
@@ -76,15 +84,19 @@ def _git_mock(
     """
     by_subcommand = {
         "rev-parse": rev_parse,
+        "merge-base": merge_base,  # default: HEAD is on the official remote
         "diff": diff,
         "log": log,
-        "branch": branch,  # default: HEAD is on a remote branch
+        "branch": branch,
+        "remote": remote,  # default: an official remote is configured
     }
 
     def _dispatch(cmd, *_, **__):
-        joined = " ".join(cmd)
+        # The subcommand only, not the whole command: a tmp_path can contain
+        # a word like "branch" and silently claim the wrong stub.
+        name = cmd[3] if len(cmd) > 3 and cmd[1] == "-C" else ""
         for subcommand, result in by_subcommand.items():
-            if subcommand in joined:
+            if subcommand == name:
                 return (
                     result
                     if isinstance(result, CompletedProcess)
@@ -525,6 +537,65 @@ def test_cache_stale_on_pip_install(tmp_path, make_cache, not_computed):
     assert mock_run.call_count == 1  # re-exported
 
 
+def test_cache_hit_refreshes_mtime(tmp_path, make_cache, not_computed):
+    """A cache hit keeps the file off the weekly temp_dir sweep.
+
+    `cleanup.py` deletes anything untouched for seven days. A hit does not
+    rewrite the file, so a stable environment would be swept and re-export.
+    """
+    cache, cache_path = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ):
+        cache.get()
+
+    # The file is old enough for the sweep, but still newer than every
+    # staleness signal, so the cache itself is valid.
+    day = 60 * 60 * 24
+    for sig in (
+        cache.__dict__["_history_path"],
+        cache.__dict__["_site_packages_paths"][0],
+    ):
+        os.utime(sig, (time.time() - 10 * day,) * 2)
+    stale_time = time.time() - 8 * day
+    os.utime(cache_path, (stale_time, stale_time))
+
+    cache._cached_conda = not_computed  # a new session
+    cache._merged = not_computed
+    with patch("spyglass.utils.env_cache.sub_run") as mock_run:
+        cache.get()
+
+    mock_run.assert_not_called()  # served from disk
+    assert cache_path.stat().st_mtime > stale_time  # and kept alive
+
+
+def test_cache_not_touched_while_stale(tmp_path, make_cache, not_computed):
+    """A stale cache is re-exported, not touched into looking fresh."""
+    cache, cache_path = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ):
+        cache.get()
+
+    future = time.time() + 10  # a pip install after the cache was written
+    os.utime(cache.__dict__["_site_packages_paths"][0], (future, future))
+    assert cache.is_stale() is True
+
+    cache._cached_conda = not_computed
+    cache._merged = not_computed
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc(_PIP_STDOUT)],
+    ) as mock_run:
+        cache.get()
+
+    assert mock_run.call_count == 1  # re-exported rather than touched
+
+
 def test_cache_equal_mtime_is_stale(tmp_path, make_cache):
     """An mtime equal to the cache's counts as stale.
 
@@ -874,13 +945,64 @@ def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
     assert result.commit_hash == "abc1234"
 
 
+def test_official_remote_found_by_url(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """The official remote is identified by URL, whatever it is named.
+
+    Remote names are a local convention: a clone may call it `sg`, `upstream`
+    or `origin`, and may hold several forks alongside it.
+    """
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    fake_pkg = fake_clone(tmp_path)
+    remotes = (
+        "me\thttps://github.com/cbroz1/spyglass (fetch)\n"
+        "me\thttps://github.com/cbroz1/spyglass (push)\n"
+        "whatever\tgit@github.com:LorenFrankLab/spyglass.git (fetch)\n"
+        "whatever\tgit@github.com:LorenFrankLab/spyglass.git (push)\n"
+    )
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(remote=remotes),
+            ):
+                assert SpyglassInstall().official_remote == "whatever"
+
+
+def test_no_official_remote_is_not_published(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """A clone with no official remote cannot be reached from upstream."""
+    fake_pkg = fake_clone(tmp_path)
+    fork_only = (
+        "me\thttps://github.com/cbroz1/spyglass (fetch)\n"
+        "me\thttps://github.com/cbroz1/spyglass (push)\n"
+    )
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(remote=fork_only),
+            ):
+                result = compute_install_info_fn()
+
+    assert result.install_path is not None  # it is a clone
+    assert result.has_local_changes is True
+
+
 def test_unpushed_head_is_not_official(
     tmp_path, fake_clone, compute_install_info_fn
 ):
-    """A commit that exists only locally counts as a local change.
+    """A commit not reachable from the official remote is a local change.
 
     `git diff` is empty once the work is committed, so committing was enough to
-    read as clean while still running code no one else can obtain.
+    read as clean. Pushing to a fork is likewise not enough: the code is still
+    unreviewed and unobtainable from the official repository, and both cases are
+    the one condition of HEAD not being an ancestor of the official branch.
     """
     fake_pkg = fake_clone(tmp_path)
 
@@ -888,7 +1010,9 @@ def test_unpushed_head_is_not_official(
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=_git_mock(diff="", branch=""),  # no remote branch
+                # merge-base exits 1: HEAD is not an ancestor. rev-parse
+                # resolves, so the official branch exists to compare against.
+                side_effect=_git_mock(merge_base=_proc("", returncode=1)),
             ):
                 result = compute_install_info_fn()
 

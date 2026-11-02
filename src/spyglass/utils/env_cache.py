@@ -282,6 +282,26 @@ class CondaEnvCache:
             except Exception:
                 pass
 
+    def _touch(self) -> None:
+        """Mark the cache file as still in use.
+
+        ``cleanup.py`` deletes anything in ``temp_dir`` untouched for seven
+        days, and a cache hit does not rewrite the file, so a stable
+        environment would have its cache swept weekly and re-export on the
+        next session.
+
+        Safe only here, after :meth:`is_stale` has confirmed the file is newer
+        than every staleness signal: bumping it to now preserves that ordering,
+        and any later change moves a signal past the new mtime. Touching
+        before the check would hide a change.
+        """
+        if self._cache_path is None:
+            return
+        try:
+            self._cache_path.touch()
+        except Exception as exc:
+            logger.debug(f"could not touch env cache: {exc}")
+
     def preload(self) -> None:
         """Warm the in-process cache from disk if the disk cache is fresh.
 
@@ -349,7 +369,7 @@ class CondaEnvCache:
         fetched = False
         if self._cached_conda is _NOT_COMPUTED:
             if not self.is_stale() and self.load():
-                pass  # conda (and possibly pip) loaded from disk
+                self._touch()  # loaded from disk; keep it off the sweep
             else:
                 self._fetch_conda()
                 fetched = True
