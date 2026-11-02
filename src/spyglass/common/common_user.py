@@ -319,6 +319,11 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         A clean install with a marker is the resolution case: the full row is
         logged so the escalation clock stops, and the marker is cleared.
 
+        An admin is exempt from the record and the email. The check is a query,
+        so its answer is cached in the marker, which both spares the query on
+        later sessions and lets the import-time warning honour the exemption
+        without a connection of its own.
+
         Fully guarded, so a user without write permission sees nothing.
         """
         sg_install = spyglass_install
@@ -334,13 +339,22 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if flagged and marker.get("last_logged") == today:
             return  # already on record today
 
-        from spyglass.common.common_lab import LabMember
+        is_admin = sg_install.cached_is_admin
+        if is_admin is None:  # not cached, or cached too long ago
+            from spyglass.common.common_lab import LabMember
 
-        try:
-            if LabMember().user_is_admin:
-                return
-        except Exception as exc:
-            logger.debug(f"admin check failed: {exc}")  # DB down: log anyway
+            try:
+                is_admin = LabMember().user_is_admin
+            except Exception as exc:
+                logger.debug(f"admin check failed: {exc}")  # DB down
+                is_admin = False  # unknown: log, and ask again next session
+            if flagged:  # cached only where it silences a warning
+                sg_install.marker.write(is_admin=is_admin, admin_checked=today)
+
+        if is_admin:
+            if not flagged:  # resolved: drop the marker, restore fast path
+                sg_install.marker.clear()
+            return
 
         try:
             key = self.insert_current_env()
