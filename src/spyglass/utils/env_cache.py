@@ -160,6 +160,7 @@ class CondaEnvCache:
         self._conda_pip_dict: dict = {}
         self._pip_custom: dict = {}
         self._freeze_comments: dict = {}
+        self._last_comment = None
         self._conda_conflicts: dict = {}
 
     # ── Path helpers (lazy, computed once per process) ───────────────────────
@@ -432,6 +433,7 @@ class CondaEnvCache:
         self._conda_pip_dict = {}
         self._pip_custom = {}
         self._freeze_comments = {}
+        self._last_comment = None
         self._conda_conflicts = {}
 
     # ── Internal: merge layer (UserEnvironment only) ──────────────────────────
@@ -462,6 +464,7 @@ class CondaEnvCache:
         self._conda_pip_dict = {}
         self._pip_custom = {}
         self._freeze_comments = {}
+        self._last_comment = None
         self._conda_conflicts = {}
 
         conda_export = dict(
@@ -558,20 +561,28 @@ class CondaEnvCache:
         if match := _COMMENT_INSTALL.match(line):
             pkg = match.group("pkg").replace("_", "-")
             self._freeze_comments[pkg] = match.group("ver")
+            self._last_comment = (pkg, match.group("ver"))
             return True
 
         # ── ``-e /local/path`` (editable install from local path) ─────────────
         if match := _EDITABLE_PATH.match(line):
             path = match.group("path")
             path_name = Path(path).name.replace("_", "-")
-            comment = self._freeze_comments.get(path_name)
+            # pip emits the comment immediately before its own ``-e`` line, so
+            # the two pair positionally and the comment names the package. The
+            # directory need not: a git worktree or a renamed clone is commonly
+            # named for the branch instead.
+            pkg, comment = self._last_comment or (path_name, None)
+            self._last_comment = None  # consumed; the next -e needs its own
+            if comment is None:  # out-of-order freeze: try the path's name
+                comment = self._freeze_comments.get(path_name)
             if comment is None:
                 raise ValueError(
                     f"Editable path found without a preceding comment: {line}"
                 )
             logger.info(f"Editable from path: {line}")
-            self._pip_custom[path_name] = f"{comment} @ {path}"
-            if "spyglass" not in path_name and "jsonschema" not in path_name:
+            self._pip_custom[pkg] = f"{comment} @ {path}"
+            if "spyglass" not in pkg and "jsonschema" not in pkg:
                 self.has_editable = True
             return True
 
