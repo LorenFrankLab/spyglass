@@ -10,6 +10,7 @@ Run with: conda run -n dirty pytest tests/common/test_dirty.py --no-teardown
 import os
 import sys
 import time
+from datetime import date, timedelta
 from subprocess import CompletedProcess
 from unittest.mock import MagicMock, patch
 
@@ -132,6 +133,14 @@ def warn_dirty_days():
     from spyglass.utils.git_utils import WARN_DIRTY_ENV_DAYS
 
     return WARN_DIRTY_ENV_DAYS
+
+
+@pytest.fixture(scope="module")
+def admin_trust_days():
+    """Return the WARN_ADMIN_TRUST_DAYS constant (deferred import)."""
+    from spyglass.utils.git_utils import WARN_ADMIN_TRUST_DAYS
+
+    return WARN_ADMIN_TRUST_DAYS
 
 
 @pytest.fixture(scope="module")
@@ -766,6 +775,32 @@ def test_parse_pip_line_editable_path(conda_env_cache_cls):
     assert "some-package" in cache._pip_custom
 
 
+def test_parse_pip_line_editable_path_unrelated_dirname(conda_env_cache_cls):
+    """The comment names the package, so the directory need not.
+
+    A git worktree is named for its branch, so an editable Spyglass commonly
+    sits in a directory sharing no name with the distribution. Reading the
+    package out of the path raised here, and counted Spyglass itself as a
+    third-party editable, which gates recompute off.
+    """
+    cache = conda_env_cache_cls()
+    cache._parse_pip_line("# (spyglass-neuro==0.5.5a2.dev86+gf82724895)")
+
+    assert cache._parse_pip_line("-e /home/user/wrk/spyglass/dirty") is True
+    assert "spyglass-neuro" in cache._pip_custom
+    assert cache.has_editable is False  # spyglass is exempt, by any dirname
+
+
+def test_parse_pip_line_editable_comment_is_consumed(conda_env_cache_cls):
+    """One comment pairs with one '-e' line and is not reused by the next."""
+    cache = conda_env_cache_cls()
+    cache._parse_pip_line("# (some-package==1.2.3)")
+    cache._parse_pip_line("-e /path/to/whatever")
+
+    with pytest.raises(ValueError, match="preceding comment"):
+        cache._parse_pip_line("-e /path/to/second-editable")
+
+
 def test_parse_pip_line_editable_path_no_comment(conda_env_cache_cls):
     """'-e /path' without a preceding comment raises ValueError."""
     cache = conda_env_cache_cls()
@@ -1320,24 +1355,68 @@ def test_warn_dirty_emits_warning(caplog, warn_dirty_days):
     assert any(f"{warn_dirty_days} days" in r.message for r in caplog.records)
 
 
-def test_warn_admin_not_exempt_from_warning(caplog):
-    """An admin on a dirty clone still sees the warning.
+_ADMIN_INFO = {
+    "is_official": False,
+    "is_dev": True,
+    "has_local_changes": True,
+    "is_stale": True,  # an admin's branch is behind master as well as edited
+    "install_path": "/home/admin/spyglass",
+    "commit_hash": "abc1234",
+}
 
-    The admin check is a query, so it cannot run on a path that must not open
-    a connection. Admins are exempt from the database record and the email,
-    not from being told.
+
+def _cache_admin_check(is_admin=True, days_ago=0):
+    """Record an admin check in the marker, as `log_install` would."""
+    from spyglass.utils.git_utils import spyglass_install
+
+    checked = date.today() - timedelta(days=days_ago)
+    spyglass_install.marker.write(
+        is_admin=is_admin, admin_checked=checked.isoformat()
+    )
+
+
+def test_warn_cached_admin_is_exempt(caplog):
+    """A cached admin check silences both messages.
+
+    Admins run modified code deliberately, so neither the countdown nor the
+    stale advisory is news to them.
     """
-    info = {
-        "is_official": False,
-        "is_dev": True,
-        "has_local_changes": True,
-        "is_stale": False,
-        "install_path": "/home/admin/spyglass",
-        "commit_hash": "abc1234",
-    }
+    _cache_admin_check()
 
     with caplog.at_level("WARNING"):
-        _warn_with(info)
+        _warn_with(_ADMIN_INFO)
+
+    assert caplog.text == ""
+
+
+def test_warn_admin_warned_until_the_check_is_cached(caplog):
+    """An admin's first flagged session is warned.
+
+    The exemption is a query, so the import-time warning can only honour it
+    once an insert has cached the answer.
+    """
+    with caplog.at_level("WARNING"):
+        _warn_with(_ADMIN_INFO)
+
+    assert "not on an official commit" in caplog.text
+
+
+def test_warn_cached_admin_check_expires(caplog, admin_trust_days):
+    """An aged admin check stops exempting, so a demotion takes effect."""
+    _cache_admin_check(days_ago=admin_trust_days + 1)
+
+    with caplog.at_level("WARNING"):
+        _warn_with(_ADMIN_INFO)
+
+    assert "not on an official commit" in caplog.text
+
+
+def test_warn_cached_non_admin_is_warned(caplog):
+    """A cached negative is an answer, not a missing one."""
+    _cache_admin_check(is_admin=False)
+
+    with caplog.at_level("WARNING"):
+        _warn_with(_ADMIN_INFO)
 
     assert "not on an official commit" in caplog.text
 
@@ -1658,7 +1737,7 @@ def test_log_install_skips_second_call_same_day():
 
 
 def test_log_install_admin_not_logged():
-    """An admin is warned but not recorded, and so never emailed."""
+    """An admin is not recorded, and so never emailed."""
     import spyglass.common.common_lab as _lab_mod
 
     mock_lab = MagicMock()
@@ -1671,6 +1750,65 @@ def test_log_install_admin_not_logged():
                 tbl().log_install()
 
     inserted.assert_not_called()
+
+
+def test_log_install_caches_the_admin_check():
+    """The admin answer is left in the marker for the warning to read."""
+    import spyglass.common.common_lab as _lab_mod
+    from spyglass.utils.git_utils import spyglass_install
+
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = True
+    tbl, _, patches = _patched_env()
+
+    with _as_install(**_DIRTY_INFO):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patches:
+                tbl().log_install()
+
+        assert spyglass_install.cached_is_admin is True
+    assert spyglass_install.marker.read()["admin_checked"] == (
+        date.today().isoformat()
+    )
+
+
+def test_log_install_trusts_the_cached_admin_check():
+    """A cached exemption spares the query on later sessions."""
+    import spyglass.common.common_lab as _lab_mod
+
+    mock_lab = MagicMock()
+    tbl, inserted, patches = _patched_env()
+    _cache_admin_check()
+
+    with _as_install(**_DIRTY_INFO):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patches:
+                tbl().log_install()
+
+    mock_lab.assert_not_called()
+    inserted.assert_not_called()
+
+
+def test_log_install_clean_admin_clears_the_marker():
+    """An admin who resolves a dirty state returns to the fast path.
+
+    Nothing was recorded for them, so there is no resolution to log, but the
+    marker would otherwise keep its cached exemption and outlive the episode.
+    """
+    import spyglass.common.common_lab as _lab_mod
+    from spyglass.utils.git_utils import spyglass_install
+
+    mock_lab = MagicMock()
+    tbl, inserted, patches = _patched_env()
+    _cache_admin_check()
+
+    with _as_install(**_CLEAN_INFO):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patches:
+                tbl().log_install()
+
+    inserted.assert_not_called()
+    assert not spyglass_install.marker.exists()
 
 
 def test_log_install_clean_no_marker_is_noop():

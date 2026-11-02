@@ -22,9 +22,10 @@ Reported facts
 ``has_local_changes``
     The install deviates from a commit on the official remote, by any of:
     ``git diff --name-only HEAD -- src/`` returning output, scoped to ``src/``
-    so doc and notebook edits are ignored; HEAD contained by no remote branch,
-    i.e. committed locally and never pushed; or ``__version__`` carrying
-    hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a dirty tree.
+    so doc and notebook edits are ignored; HEAD not reachable from
+    :data:`OFFICIAL_REPO`, whether never committed, never pushed, or pushed
+    only to a fork; or ``__version__`` carrying hatch-vcs's ``.dYYYYMMDD``
+    suffix, left by a wheel built from a dirty tree.
 ``is_stale``
     HEAD's commit date is more than ``WARN_STALE_DAYS`` days old. A few
     commits behind does not flag.
@@ -46,7 +47,10 @@ from typing import Optional
 from spyglass.utils import logger
 
 WARN_DIRTY_ENV_DAYS = 30  # permitted days for locally edited spyglass
-WARN_STALE_DAYS = 90  # permitted days behind LorenFrankLab/master
+WARN_STALE_DAYS = 90  # permitted days behind the official remote
+WARN_ADMIN_TRUST_DAYS = 7  # days a cached admin check exempts a user
+
+OFFICIAL_REPO = "LorenFrankLab/spyglass"  # matched against remote fetch URLs
 
 DIRTY_MSG = (
     "Your Spyglass repository is not on an official commit. Please ensure you "
@@ -76,8 +80,9 @@ class _DirtyMarker:
     ``spyglass.common`` import.
 
     Content is a JSON object: ``commit`` the hash first flagged, ``first_seen``
-    the date the episode began, and ``last_logged`` the date the database last
-    heard about it. A marker is a cache, so every method is best-effort and
+    the date the episode began, ``last_logged`` the date the database last
+    heard about it, and ``is_admin``/``admin_checked`` the cached admin check
+    and its date. A marker is a cache, so every method is best-effort and
     losing one never raises.
     """
 
@@ -173,6 +178,37 @@ class SpyglassInstall:
         return __version__
 
     @cached_property
+    def _remotes(self) -> Optional[str]:
+        """``git remote -v`` output, or ``None`` when git gave no answer.
+
+        The ``None`` matters: a clone with no official remote is a different
+        thing from a clone where git could not be run, and they must not be
+        treated alike.
+        """
+        return self._git("remote", "-v")
+
+    @cached_property
+    def official_remote(self) -> Optional[str]:
+        """Name of the remote pointing at :data:`OFFICIAL_REPO`, if any.
+
+        Matched on the URL rather than the name, which is a local convention:
+        a clone may call it ``sg``, ``upstream``, ``origin`` or nothing at all,
+        and may hold several forks alongside it. Accepts both ``https://`` and
+        ``git@`` forms, with or without a trailing ``.git``.
+        """
+        out = self._remotes
+        if not out:
+            return None
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 3 or parts[2] != "(fetch)":
+                continue
+            url = parts[1].removesuffix("/").removesuffix(".git")
+            if url.endswith(OFFICIAL_REPO):
+                return parts[0]
+        return None
+
+    @cached_property
     def install_path(self) -> Optional[str]:
         """Root of the spyglass clone this package runs from, if any.
 
@@ -230,17 +266,32 @@ class SpyglassInstall:
         return out.strip() or None if out is not None else None
 
     def head_is_published(self) -> bool:
-        """Return ``True`` if HEAD is contained by some remote branch.
+        """Return ``True`` if HEAD is an ancestor of the official remote.
 
-        ``git diff`` is empty for a commit that exists only locally, so this
-        is what catches committed-but-unpushed work. Reads the remote-tracking
-        refs already on disk, needing no network; a clone that has never
-        fetched reports nothing contained.
+        ``git diff`` is empty for a commit that exists only locally, so this is
+        what catches committed-but-unpushed work. Scoped to
+        :data:`OFFICIAL_REPO`: a push to a personal fork leaves the code where
+        no one else can obtain it, so it does not count. Reads the
+        remote-tracking refs already on disk, needing no network.
 
-        ``True`` when git gives no answer, so a failure does not flag.
+        ``False`` when git reports no official remote, since nothing in such a
+        clone can be reached from the official repository. ``True`` whenever
+        git gives no answer at all, so an unusable git does not flag.
         """
-        out = self._git("branch", "-r", "--contains", "HEAD")
-        return True if out is None else bool(out.strip())
+        if self._remotes is None:  # git unusable: unknown, do not flag
+            return True
+        remote = self.official_remote
+        if remote is None:  # git worked and found no official remote
+            return False
+        for branch in ("master", "main"):
+            out = self._git(
+                "merge-base", "--is-ancestor", "HEAD", f"{remote}/{branch}"
+            )
+            if out is not None:  # exit 0: HEAD is contained
+                return True
+            if self._git("rev-parse", "--verify", f"{remote}/{branch}"):
+                return False  # the branch exists and does not contain HEAD
+        return True  # no branch to compare against; do not flag
 
     def has_src_changes(self) -> bool:
         """Return ``True`` if tracked files under ``src/`` differ from HEAD.
@@ -338,13 +389,47 @@ class SpyglassInstall:
           commit" advisory, with no countdown, since an older official commit
           is reproducible.
 
-        Admin users are not exempted here, because that check is a query. They
-        are exempted from the database record and the escalation email.
+        Admins are exempt from both, since they run modified code
+        deliberately, but only once :meth:`cached_is_admin` has an answer: the
+        check itself is a query and cannot run here. An admin's first flagged
+        session is therefore warned, and its first insert caches the exemption
+        for the sessions after it.
         """
+        if self.cached_is_admin:
+            return
+
         if self.has_local_changes:
             logger.warning(DIRTY_MSG.format(days=self._days_remaining()))
         if self.is_stale:
             logger.warning(STALE_MSG)
+
+    @property
+    def cached_is_admin(self) -> Optional[bool]:
+        """Whether this user is a lab admin, from the local marker.
+
+        ``LabMember().user_is_admin`` is a query, so the warning cannot ask it
+        and reads the answer :meth:`log_install` last cached instead. Not a
+        ``cached_property``: the answer can be written during the session that
+        reads it.
+
+        Returns
+        -------
+        bool or None
+            ``None`` when no check is cached or the cached one has aged past
+            ``WARN_ADMIN_TRUST_DAYS``, so a change in a user's role takes
+            effect within that window rather than lasting the life of the
+            marker.
+        """
+        marker = self.marker.read()
+        if "is_admin" not in marker:
+            return None
+        try:
+            checked = date.fromisoformat(marker.get("admin_checked", ""))
+        except ValueError:  # unreadable date: treat as never checked
+            return None
+        if (date.today() - checked).days > WARN_ADMIN_TRUST_DAYS:
+            return None
+        return bool(marker["is_admin"])
 
     def _days_remaining(self) -> int:
         """Days left before this dirty install is flagged for discussion.
