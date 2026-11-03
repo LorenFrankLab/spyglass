@@ -240,9 +240,11 @@ class ClusterlessThresholderSchema(BaseModel):
     ``noise_levels`` stays available as an ADVANCED explicit override.
     Precedence: if ``noise_levels`` is set, the runtime uses it
     verbatim; if ``noise_levels is None``, the runtime derives it from
-    ``threshold_unit`` as above. The runtime strips ``threshold_unit``
-    before the ``detect_peaks`` call (it is not a ``detect_peaks``
-    kwarg).
+    ``threshold_unit`` as above. Either way ``"uv"`` scales the recording to
+    microvolts, so an explicit ``noise_levels`` is in microvolts under
+    ``"uv"`` and in native units under ``"mad"``. The runtime strips
+    ``threshold_unit`` before the ``detect_peaks`` call (it is not a
+    ``detect_peaks`` kwarg).
 
     ``extra="forbid"`` enforces the field set at insert time.
     """
@@ -272,8 +274,10 @@ class ClusterlessThresholderSchema(BaseModel):
             "default detect_threshold=100 to give the production/real-data "
             "threshold; the simulation fixture opts into 'mad' explicitly. "
             "When noise_levels IS set explicitly it takes precedence and is "
-            "used verbatim -- threshold_unit is then descriptive only, and "
-            "the advanced override bypasses the implausible-MAD guard below. "
+            "used verbatim, but threshold_unit still sets the units it is "
+            "read in: 'uv' scales the recording to microvolts first, 'mad' "
+            "keeps the native units. The advanced override bypasses the "
+            "implausible-MAD guard below. "
             "Without an explicit noise_levels, a 'mad' multiplier above ~50 "
             "is rejected as a microvolt threshold left in the wrong unit."
         ),

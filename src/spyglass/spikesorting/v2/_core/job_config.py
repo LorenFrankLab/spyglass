@@ -241,8 +241,8 @@ def resolve_effective_seed(
         raise ValueError(
             "spikesorting v2 random_seed must be a non-negative integer, got "
             f"{resolved!r} ({type(resolved).__name__}). Set an int random_seed "
-            "in the per-row job_kwargs blob (or "
-            "dj.config['custom']['spikesorting_v2_job_kwargs'])."
+            "in the parameter row's job_kwargs blob (for a sort, the "
+            "SorterParameters row, since the sort rejects an ambient seed)."
         )
     effective = int(resolved)
     per_row_has_seed = any(
