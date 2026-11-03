@@ -51,3 +51,34 @@ def test_add_roles(add_roles, role):
         exp_user.add(f"GRANT ALL PRIVILEGES ON `{user}\\_%`.* TO `{user}`")
     act_user = grants_act(f"user_{role}")
     assert exp_user == act_user, f"Unexpected grants on user {role}."
+
+
+@pytest.mark.parametrize(
+    "table, expect",
+    [
+        ("`common_position`.`track_graph`", True),  # full table name
+        ("common_position", True),  # bare schema
+        ("common", True),  # prefix alone
+        ("`spikesorting_v1`.`__sorting`", True),
+        ("`alison_behav`.`__trials_info`", False),  # user's own schema
+        ("`testexport_nwbfile`.`analysis_nwbfile`", False),
+        ("temp_scratch", False),  # known, but not shared
+    ],
+)
+def test_table_is_shared(table, expect):
+    """Only spyglass-managed prefixes count as shared.
+
+    A user's own schemas are theirs alone, so callers that treat shared data
+    differently -- cascade traversal, whole-table export -- must not see them
+    as shared.
+    """
+    from spyglass.utils.database_settings import table_is_shared
+
+    assert table_is_shared(table) is expect, f"Misjudged {table}"
+
+
+def test_table_is_shared_accepts_table(common):
+    """A datajoint table is accepted, not just its name."""
+    from spyglass.utils.database_settings import table_is_shared
+
+    assert table_is_shared(common.Session()) is True

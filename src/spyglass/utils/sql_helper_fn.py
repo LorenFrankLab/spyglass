@@ -217,9 +217,19 @@ class SQLDumpHelper:
             .split(".")
         )
 
-        where = table.where_clause()
+        # mysqldump takes `--where` verbatim, with no paramstyle to consume the
+        # `%` datajoint doubles for pymysql. A column name cannot hold one, so
+        # every `%%` came from a value
+        where = table.where_clause().replace("%%", "%")
         if not where:
             return
+        if value_holds_double_quote(where):
+            raise ValueError(
+                f"Cannot dump {table.full_table_name}: a key value holds a "
+                "double quote, which a dump WHERE clause cannot carry.\n"
+                f"\tClause: {where}\n"
+                "Re-run the export with keys that hold no double quote."
+            )
         where = bash_escape_sql(where)
         if len(where) <= MAX_WHERE_LENGTH:
             file.write(
@@ -271,6 +281,35 @@ def remove_redundant(s):
     return re.sub(r"\b(and|or)\b", r" \1 ", as_str, flags=re.IGNORECASE)
 
 
+def value_holds_double_quote(s):
+    """Whether a WHERE clause has a `"` inside one of its values.
+
+    A `"` within a value is written as the pair `""`. The scan tracks whether
+    it is inside a value, so the empty-string literal `""` does not count.
+
+    Parameters
+    ----------
+    s : str
+        SQL restriction string, as `where_clause` returns it.
+
+    Returns
+    -------
+    bool
+        True if a value contains a double quote.
+    """
+    in_value = False
+    for i, char in enumerate(s):
+        if char != '"':
+            continue
+        if not in_value:
+            in_value = True
+        elif s[i + 1 : i + 2] == '"':
+            return True
+        else:
+            in_value = False
+    return False
+
+
 def bash_escape_sql(s, add_newline=True):
     """Escape restriction string for bash.
 
@@ -312,8 +351,6 @@ def bash_escape_sql(s, add_newline=True):
                 "#": "\\#",
             }
         )
-    else:  # Used in ExportMixin
-        replace_map.update({"%%%%": "%%"})  # Remove extra percent signs
 
     for old, new in replace_map.items():
         s = re.sub(re.escape(old), new, s)
