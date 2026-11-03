@@ -17,7 +17,11 @@ database connection::
 """
 
 import importlib.metadata as _md
+import importlib.util as _iu
+import os
 import shutil
+import sys
+from pathlib import Path
 
 # Packages that make up the legacy TensorFlow DeepLabCut backend. Position V1's
 # DeepLabCut used TensorFlow; V2's DeepLabCut 3.x uses PyTorch and does not need
@@ -68,6 +72,85 @@ def _blas_lapack_error():
     except Exception as exc:
         return str(exc)
     return None
+
+
+def _qt_plugin_dirs():
+    """Candidate directories holding Qt platform plugins.
+
+    Located without importing a Qt binding: ``find_spec`` on a top-level
+    package reads its path without executing it, and conda keeps the plugins
+    under the environment prefix.
+
+    Returns
+    -------
+    list[Path]
+        Existing directories, in no particular order.
+    """
+    roots = [
+        Path(sys.prefix) / "plugins" / "platforms",
+        Path(sys.prefix) / "lib" / "qt6" / "plugins" / "platforms",
+        Path(sys.prefix) / "lib" / "qt5" / "plugins" / "platforms",
+    ]
+    for pkg, sub in (
+        ("PyQt5", "Qt5"),
+        ("PyQt6", "Qt6"),
+        ("PySide2", "Qt"),
+        ("PySide6", "Qt"),
+    ):
+        try:
+            spec = _iu.find_spec(pkg)
+        except (ImportError, ValueError):  # pragma: no cover
+            continue
+        for location in getattr(spec, "submodule_search_locations", None) or []:
+            roots.append(Path(location) / sub / "plugins" / "platforms")
+    return [r for r in roots if r.is_dir()]
+
+
+def _qt_platform_problem():
+    """Report a session whose Qt platform plugin is missing.
+
+    DeepLabCut's frame-labelling GUI is a Qt application. Qt picks a platform
+    plugin from the session type, and a Wayland session needs the
+    ``qwayland`` plugin, which the Qt libraries do not carry on their own.
+    Without it the GUI aborts before drawing.
+
+    A headless environment is left alone: a compute node has no display and
+    needs none, so the absence of one is not a misconfiguration. An explicit
+    ``QT_QPA_PLATFORM`` is also honoured rather than second-guessed.
+
+    Returns
+    -------
+    str or None
+        The message, or None when a GUI can start or is not expected.
+    """
+    wayland = os.environ.get("WAYLAND_DISPLAY")
+    display = os.environ.get("DISPLAY")
+    requested = os.environ.get("QT_QPA_PLATFORM", "").strip().lower()
+
+    if not wayland and not display:
+        return None  # headless
+    if requested and requested != "wayland":
+        return None  # a platform was named; Qt will use it
+    if not wayland:
+        return None  # X11 session; the xcb plugin ships with Qt
+
+    searched = _qt_plugin_dirs()
+    if any(d.glob("libqwayland*.so") for d in searched):
+        return None
+
+    where = "\n      ".join(str(d) for d in searched) or "(no plugin dir found)"
+    return (
+        "This is a Wayland session (WAYLAND_DISPLAY is set) and no Qt "
+        "wayland platform plugin was found, so DeepLabCut's frame-labelling "
+        "GUI will abort with 'Could not load the Qt platform plugin "
+        '"wayland"\'.\n'
+        "    Fix: run the GUI through XWayland, which needs no new package:\n"
+        "      QT_QPA_PLATFORM=xcb python -c "
+        '"from deeplabcut import label_frames; ..."\n'
+        "    Or install the plugin for a native Wayland window:\n"
+        "      conda install -c conda-forge qt-wayland\n"
+        f"    Searched:\n      {where}"
+    )
 
 
 def check_environment(raise_on_error: bool = False, verbose: bool = True):
@@ -141,6 +224,10 @@ def check_environment(raise_on_error: bool = False, verbose: bool = True):
             "environments/environment_dlc.yml and environment_sleap.yml):\n"
             "      conda install -c conda-forge ffmpeg"
         )
+
+    qt_problem = _qt_platform_problem()
+    if qt_problem:
+        problems.append(qt_problem)
 
     blas_error = _blas_lapack_error()
     if blas_error:
