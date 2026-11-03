@@ -239,7 +239,9 @@ jobs:
         shard: ${{ fromJSON(github.event_name == 'workflow_dispatch'
           && '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"},{"name":"motion-benchmark"}]'
           || '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"}]') }}
-    runs-on: ubuntu-latest
+    # Pinned: the curation lane's Playwright 1.55 cannot install Chromium on
+    # ubuntu-26.04, which ubuntu-latest now resolves to.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash -el {0}
