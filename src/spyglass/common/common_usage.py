@@ -417,9 +417,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             One condition matching the union of the inputs.
         """
         ExportSelection._reject_trivially_true(table_name, restr_list, key)
-        # Each logged restriction was stored escaped for immediate use, and
-        # this result is itself stored and re-applied -- so the inputs give up
-        # their `%` pass here and `_literal_condition` withholds its own.
+        # A logged restriction arrives escaped for immediate use, and this
+        # result is stored and re-applied, so it carries a single `%`
         return RestrGraph._literal_condition(
             dj.FreeTable(dj.conn(), table_name),
             [r.replace("%%", "%") for r in sorted(set(restr_list))],

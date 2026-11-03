@@ -41,8 +41,8 @@ def test_value_holds_double_quote(clause, expected):
 def test_dump_where_keeps_percent_single(dump_helper, quoted_key_tables):
     """A `%` must reach `--where` singled.
 
-    `where_clause` doubles it for pymysql's paramstyle, but mysqldump passes
-    the text to the server verbatim, so a doubled `%` stops matching.
+    `where_clause` doubles it for pymysql's paramstyle; mysqldump passes the
+    text to the server verbatim.
     """
     parent = quoted_key_tables["DqParent"]
     file = StringIO()
@@ -61,10 +61,9 @@ def test_dump_refuses_quote_in_value(
 ):
     """A `"` in a value must raise rather than dump a changed value.
 
-    `--where` is bash double-quoted, so `bash_escape_sql` rewrites `"` as
-    `'`, which would silently turn `has"quote` into `has'quote`. The stored
-    condition is what the dump restricts by, and `_literal_condition` writes
-    the quote there as the pair `""`.
+    `bash_escape_sql` rewrites `"` as `'`, which changes the value MySQL
+    matches. The dump restricts by the stored condition, where
+    `_literal_condition` writes the quote as the pair `""`.
     """
     parent = quoted_key_tables["DqParent"]
     stored = AbstractGraph._literal_condition(parent, {"dq_name": 'has"quote'})

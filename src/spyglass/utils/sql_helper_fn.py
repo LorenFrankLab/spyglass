@@ -217,19 +217,16 @@ class SQLDumpHelper:
             .split(".")
         )
 
-        # Datajoint doubles `%` for pymysql's paramstyle, which consumes one
-        # pass. mysqldump takes `--where` verbatim, so the text has to carry a
-        # single `%`. A column name is backtick-quoted and cannot hold one, so
-        # every `%%` here came from a value.
+        # mysqldump takes `--where` verbatim, with no paramstyle to consume the
+        # `%` datajoint doubles for pymysql. A column name cannot hold one, so
+        # every `%%` came from a value
         where = table.where_clause().replace("%%", "%")
         if not where:
             return
         if value_holds_double_quote(where):
             raise ValueError(
-                f"Cannot dump {table.full_table_name}: a key value contains a "
-                '`"`, which this dump cannot represent. The `--where` argument '
-                "is itself bash double-quoted, so the quote has to be rewritten"
-                " as `'`, which changes the value MySQL matches.\n"
+                f"Cannot dump {table.full_table_name}: a key value holds a "
+                "double quote, which a dump WHERE clause cannot carry.\n"
                 f"\tClause: {where}\n"
                 "Re-run the export with keys that hold no double quote."
             )
@@ -287,9 +284,8 @@ def remove_redundant(s):
 def value_holds_double_quote(s):
     """Whether a WHERE clause has a `"` inside one of its values.
 
-    A `"` within a value is written as the pair `""`. Testing for that pair
-    alone would also match the empty-string literal `""`, so the scan tracks
-    whether it is inside a value and only reports a pair found there.
+    A `"` within a value is written as the pair `""`. The scan tracks whether
+    it is inside a value, so the empty-string literal `""` does not count.
 
     Parameters
     ----------

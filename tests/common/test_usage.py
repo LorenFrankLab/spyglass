@@ -257,9 +257,8 @@ def test_condense_restrictions_normalizes(export_tbls, common):
 def test_condense_restrictions_keeps_percent(export_tbls, common, value):
     """A condensed restriction must carry a single `%` per `%` in the value.
 
-    `_log_fetch` stores its restriction already escaped for immediate use, and
-    this result is stored in `Export.Table.restriction` and re-applied -- so a
-    second escape leaves the value matching nothing.
+    A logged restriction arrives escaped for immediate use, and this result is
+    stored in `Export.Table.restriction` and re-applied.
     """
     from datajoint.condition import make_condition
 

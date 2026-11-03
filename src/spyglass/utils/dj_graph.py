@@ -560,8 +560,8 @@ class AbstractGraph(ABC):
             }
         if isinstance(restr, (list, tuple)):
             fixed = [AbstractGraph._fix_double_quotes(r) for r in restr]
-            # `AndList` subclasses `list`, and datajoint reads a plain list as
-            # OR -- so rebuilding one as a list turns `a AND b` into `a OR b`.
+            # Datajoint reads a plain list as OR, and `AndList` subclasses
+            # `list`, so an `AndList` has to be rebuilt as one
             return dj.AndList(fixed) if isinstance(restr, dj.AndList) else fixed
         return restr
 

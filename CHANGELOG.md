@@ -35,10 +35,10 @@
 - Optimize `RestrGraph` generation during export #1673
 - Export logs an unrestricted fetch of a shared table as keys. `Export.populate`
     rejects older log rows that match a whole shared table. #1673
-- Export a key whose value holds `%`. The cascade, the stored restriction and
-    the export leaf each escaped it once too often, so the row was dropped. An
-    export whose key values hold `"` now fails at the SQL dump instead of
-    writing a value MySQL reads differently. #1673
+- Export a key whose value holds `%`; the cascade, the stored restriction and
+    the export leaf each escaped it twice. An export whose key values hold `"`
+    now fails at the SQL dump rather than writing a value MySQL reads
+    differently. #1673
 
 ### Pipelines
 
