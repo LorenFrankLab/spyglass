@@ -1315,6 +1315,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """Returns the sort group information for the curation
         (e.g. brain region, electrode placement, etc.)
 
+        One row per electrode of each sort group.
+
         Parameters
         ----------
         key : dict
@@ -1327,19 +1329,9 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """
         table = cls & key
 
-        electrode_restrict_list = []
-        for entry in table:
-            # Just take one electrode entry per sort group
-            electrode_restrict_list.extend(
-                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
-                    limit=1
-                )
-            )
         # Run joins with the tables with info and return
         sort_group_info = (
-            (Electrode & electrode_restrict_list)
-            * table
-            * SortGroup.SortGroupElectrode()
+            Electrode() * table * SortGroup.SortGroupElectrode()
         ) * BrainRegion()
         return sort_group_info
 

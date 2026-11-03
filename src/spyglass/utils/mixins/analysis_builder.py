@@ -65,7 +65,7 @@ class AnalysisFileBuilder:
         AnalysisMixin.build : Factory method that creates this builder
     """
 
-    def __init__(self, analysis_table, nwb_file_name: str):
+    def __init__(self, analysis_table, nwb_file_name: str, share_parents=None):
         """Initialize builder with table and parent file name.
 
         Parameters
@@ -74,9 +74,14 @@ class AnalysisFileBuilder:
             The table to create/register file in
         nwb_file_name : str
             Parent NWB file name
+        share_parents : list of str, optional
+            Additional analysis files this one derives from. Used only to
+            inherit visibility, narrowing to the narrowest scope any parent
+            declared. See `_queue_inherited_share`.
         """
         self._table = analysis_table
         self.nwb_file_name = nwb_file_name
+        self.share_parents = list(share_parents or [])
         self.analysis_file_name = None
         self._state = "INIT"
         self._exception_occurred = False
@@ -230,10 +235,100 @@ class AnalysisFileBuilder:
         self.close_and_write()
         self._table.add(self.nwb_file_name, self.analysis_file_name)
         self._state = "REGISTERED"
+        self._queue_inherited_share()
         logger.debug(
             f"Registered analysis file: {self.analysis_file_name} "
             f"(parent: {self.nwb_file_name})"
         )
+
+    def _queue_inherited_share(self):
+        """Declare this file for sharing at its parents' visibility.
+
+        Queuing is a database insert; `SharedAnalysisFile.populate()`
+        uploads, unless `sg_config.store_auto_upload` is set. Does nothing
+        when no parent was declared shared.
+
+        Copies the file into the common `AnalysisNwbfile` first, which is what
+        the selection table's foreign key names. Returns before importing
+        anything when no broker is configured, since importing
+        `sharing_store` declares its schema.
+
+        Warns rather than raising, naming which step failed: an analysis file
+        that is otherwise complete outlives a sharing failure. Inside a
+        caller's transaction it re-raises instead, because the failure may
+        have rolled that transaction back.
+        """
+        from spyglass.settings import sg_config
+
+        if not sg_config.store_url:
+            return
+
+        action = "register"  # which half the warning below should name
+
+        try:
+            from spyglass.sharing.sharing_store import (
+                SharedAnalysisFile,
+                queue_inherited_share,
+            )
+
+            self._table._copy_to_common([self.analysis_file_name])  # idempotent
+
+            action = "queue"
+
+            queued = queue_inherited_share(
+                self.analysis_file_name,
+                raw_files=[self.nwb_file_name],
+                analysis_files=self.share_parents,
+            )
+
+            if queued is None or not sg_config.store_auto_upload:
+                return
+
+            if self._table.connection.in_transaction:
+                # `populate` refuses an open transaction, and the caller's
+                # commit is not ours to wait for.
+                logger.info(
+                    f"Queued {self.analysis_file_name}, but did not upload "
+                    + "it: a populate cannot run inside the transaction this "
+                    + "was built in. Run `SharedAnalysisFile.populate()`."
+                )
+                return
+
+            action = "upload"
+
+            SharedAnalysisFile.populate(
+                {"analysis_file_name": self.analysis_file_name},
+                reserve_jobs=True,
+            )
+        except Exception as err:  # noqa: BLE001 - see docstring
+            if self._table.connection.in_transaction:
+                # The failure may already have rolled the caller's
+                # transaction back, and the recovery advice below assumes the
+                # analysis file survives.
+                logger.warning(
+                    f"Could not {action} {self.analysis_file_name} for the "
+                    + f"shared store: {err}"
+                )
+                raise
+
+            messages = {
+                "upload": (
+                    f"Could not upload {self.analysis_file_name} to the shared "
+                    + f"store: {err}. The declaration stands; run "
+                    + "`SharedAnalysisFile.populate()` to retry."
+                ),
+                "queue": (
+                    f"Could not queue {self.analysis_file_name} for sharing: "
+                    + f"{err}. Declare it by hand with "
+                    + "`spyglass.sharing.share_file` if it should be shared."
+                ),
+                "register": (
+                    f"Could not copy {self.analysis_file_name} into the common "
+                    + f"AnalysisNwbfile table: {err}. Sharing needs it there, "
+                    + "so the file was not declared."
+                ),
+            }
+            logger.warning(messages[action])
 
     def close_and_write(self):
         """Close open NWB file and write changes to disk.

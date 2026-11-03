@@ -493,7 +493,10 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetches the position data as a pandas dataframe."""
         _ = self.ensure_single_entry()
-        return self._data_to_df(self.fetch_nwb()[0])
+        try:
+            return self._data_to_df(self.fetch_nwb()[0])
+        finally:
+            self.close_nwb()
 
     @staticmethod
     def _data_to_df(
@@ -547,7 +550,12 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
     def fetch_video_path(self, key=dict()):
         key = (self & key).fetch1("KEY")
-        return (self & key).fetch_nwb()[0]["head_position"].get_comments()
+        restricted = self & key
+        try:
+            nwb = restricted.fetch_nwb()[0]
+            return nwb["head_position"].get_comments()
+        finally:
+            restricted.close_nwb()
 
 
 @schema

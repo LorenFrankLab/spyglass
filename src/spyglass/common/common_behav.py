@@ -270,15 +270,28 @@ class RawPosition(SpyglassIngestion, dj.Imported):
             "RawPosition.make is deprecated. Use insert_from_nwbfile."
         )
 
+    def _pos_objects(self):
+        """Return PosObject under this table's restriction.
+
+        Shared by ``fetch_nwb`` and ``close_nwb``: the release has to reach
+        the same part entries the fetch read from.
+        """
+        # restrict() avoids fetch_nwb on whole table
+        return self.PosObject().restrict(self.restriction)
+
     def fetch_nwb(self, *attrs, **kwargs) -> list:
         """
         Returns a condatenated list of nwb objects from RawPosition.PosObject
         """
-        return (
-            self.PosObject()
-            .restrict(self.restriction)  # Avoids fetch_nwb on whole table
-            .fetch_nwb(*attrs, **kwargs)
-        )
+        return self._pos_objects().fetch_nwb(*attrs, **kwargs)
+
+    def close_nwb(self) -> None:
+        """Release the NWB file holds ``fetch_nwb`` took on PosObject.
+
+        This table has no NWB foreign key of its own, so release follows the
+        part table the fetch read from.
+        """
+        self._pos_objects().close_nwb()
 
     def fetch1_dataframe(self):
         """Returns a dataframe with all RawPosition.PosObject items.
@@ -853,12 +866,18 @@ class VideoFile(SpyglassIngestion, dj.Imported):
         for row in existing_entries:
             if (cls & row).fetch1("camera_name"):
                 continue
-            video_nwb = (cls & row).fetch_nwb()[0]
-            if len(video_nwb) != 1:
-                raise ValueError(
-                    f"Expecting 1 video file per entry. {len(video_nwb)} found"
-                )
-            row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            restricted = cls & row
+            try:
+                video_nwb = restricted.fetch_nwb()[0]
+                if len(video_nwb) != 1:
+                    raise ValueError(
+                        "Expecting 1 video file per entry."
+                        f" {len(video_nwb)} found"
+                    )
+                camera = video_nwb[0]["video_file"].device.camera_name
+            finally:
+                restricted.close_nwb()
+            row["camera_name"] = camera
             cls.update1(row=row)
 
     @classmethod

@@ -267,9 +267,12 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
                 + "Setting add_frame_ind=False"
             )
             add_frame_ind = False
-        return IntervalPositionInfo._data_to_df(
-            self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
-        )
+        try:
+            return IntervalPositionInfo._data_to_df(
+                self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
+            )
+        finally:
+            self.close_nwb()
 
     def fetch_pose_dataframe(self):
         """Not applicable for TrodesPosV1 pipeline."""

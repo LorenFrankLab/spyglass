@@ -27,13 +27,12 @@
 #   [the Setup notebook](./00_Setup.ipynb)
 # - For additional info on DataJoint syntax, including table definitions and
 #   inserts, see
-#   [the Insert Data notebook](./01_Insert_Data.ipynb)
+#   [the Insert Data notebook](./02_Insert_Data.ipynb)
 #
 # This pipeline takes 2D position data from the `PositionOutput` table and
 # "linearizes" it to 1D position. If you haven't already done so, please generate
 # input data with either the [Trodes](./20_Position_Trodes.ipynb) or DLC notebooks
-# ([1](./21_Position_DLC_1.ipynb), [2](./22_Position_DLC_2.ipynb),
-# [3](./23_Position_DLC_3.ipynb)).
+# ([1](./21_DLC.ipynb), [2](./22_DLC_Loop.ipynb)).
 #
 
 # ## Imports
@@ -43,7 +42,6 @@
 # %autoreload 2
 
 # +
-import os
 import pynwb
 import numpy as np
 import datajoint as dj

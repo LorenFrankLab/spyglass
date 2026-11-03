@@ -16,6 +16,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       REPO_OWNER: ${{ github.repository_owner }}
     permissions:
