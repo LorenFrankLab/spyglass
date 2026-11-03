@@ -8,7 +8,7 @@ The artifact-removed ``valid_times`` row an artifact-detection run writes to
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection and
 activates no ``dj.schema`` at import: it is pure string handling over the
-naming convention, so the source-routing service module (``_curation_routing``)
+naming convention, so the source-routing service module (``_curation.routing``)
 and a DB-isolated worker can import the parser without a database. ``utils``
 re-exports all three names so existing
 ``from ...v2.utils import artifact_detection_interval_list_name`` (etc.) call

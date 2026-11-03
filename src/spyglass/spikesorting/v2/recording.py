@@ -18,7 +18,6 @@ to the sort stage so motion correction never sees whitened data).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import datajoint as dj
@@ -28,7 +27,6 @@ from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
-    Nwbfile,
 )  # noqa: F401
 from spyglass.spikesorting.v2._motion.estimation import (
     motion_from_storage_dict,
@@ -50,7 +48,6 @@ from spyglass.spikesorting.v2._recording.geometry import (
     fetch_interior_bad_channel_ids,
 )
 from spyglass.spikesorting.v2._storage.nwb import (
-    _ELECTRICAL_SERIES_NAME,
     _ELECTRICAL_SERIES_PATH,
     StoredTraces,
     write_nwb_artifact,
@@ -73,21 +70,17 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._recording.sort_groups import (
     _SortGroupPlan,
     _build_sort_group_rows,
-    _electrode_group_sort_key,
     _plan_sort_groups_by_column,
     _plan_sort_groups_by_shank,
-    _reference_electrode_group,
 )
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
 )
-from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 from spyglass.spikesorting.v2._core.reference_resolution import (
     _validate_reference_fields,
     assert_reference_not_member,
@@ -451,7 +444,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         # Pick sort_group_ids. Auto-allocation is only safe on a fresh
         # session; on rerun the caller must opt in via explicit
         # sort_group_ids or delete_existing_entries=True (enforced in
-        # ``_sort_group_insert.handle_existing``).
+        # ``_recording.sort_groups_insert.handle_existing``).
         explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
             sort_group_ids = _sort_group_insert.next_sort_group_ids(
@@ -724,7 +717,7 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     # column default tracks the schema version so a custom row that omits
     # the column is tagged with the current schema version, not a
     # mismatched one. The shipped rows are defined in
-    # ``_recipe_catalog.preprocessing_default_contents`` (single source).
+    # ``_core.recipe_catalog.preprocessing_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
@@ -839,7 +832,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     -> IntervalList
     -> PreprocessingParameters
     -> LabTeam
-    recording_input_hash = null : char(64)  # sha256 of resolved construction inputs, folded into recording_id and verified at make_fetch
+    recording_input_hash: char(64)  # sha256 of construction inputs; checked at make_fetch
     """
 
     @classmethod
@@ -862,8 +855,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
            caught and the existing row is returned.
         4. Raises ``DuplicateSelectionError`` if ANY existing row for this
            logical identity has a non-deterministic ``recording_id`` (a raw
-           ``dj.insert`` bypass or a legacy non-content-addressed row) -- even a
-           single one -- an integrity bug, not user error.
+           ``dj.insert`` bypass) -- even a single one -- an integrity bug, not
+           user error.
 
         Parameters
         ----------
@@ -955,8 +948,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         * the row at ``deterministic_id`` is the canonical, content-
           addressed selection -> return ``{"recording_id": ...}``;
         * ANY row with a different ``recording_id`` is non-deterministic
-          (a raw ``insert`` bypass or a legacy non-content-addressed row) and
-          violates the content-addressed-identity invariant -> raise
+          (a raw ``insert`` bypass) and violates the
+          content-addressed-identity invariant -> raise
           ``DuplicateSelectionError`` so it is reset rather than silently
           returned or ``[0]``-indexed.
 
@@ -977,9 +970,9 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 f"selection row(s) for logical identity {keys_minus_uuid} "
                 f"whose recording_id is not the deterministic id "
                 f"{deterministic_id}: {bypassed}. This is a "
-                "non-deterministic selection row (a raw insert or a "
-                "legacy non-content-addressed row); drop it and re-insert "
-                "via insert_selection."
+                "non-deterministic selection row (a raw insert bypassing "
+                "insert_selection); drop it and re-insert via "
+                "insert_selection."
             ),
         )
 
@@ -1006,9 +999,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     5. ``apply_spatial_preprocessing`` (bad-channel interpolation or
        removal, then referencing) -- per-sample across channels, so the
        interval joins cannot affect it;
-    6. ``maybe_apply_tetrode_geometry``, which spreads a legacy
-       four-channel ``tetrode_12.5`` group whose stored positions are
-       degenerate onto the 12.5 um square;
+    6. ``maybe_apply_tetrode_geometry``, which places every four-channel
+       ``tetrode_12.5`` group on the fixed 12.5 um square (replacing the
+       stored positions, as v1 does);
     7. ``assert_unique_contact_positions``, so the EFFECTIVE geometry -- what
        SpikeInterface will build a probe from -- is checked last: distinct
        positions, and a plane rather than still-3D locations (a dropped
@@ -1020,7 +1013,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ``AnalysisNwbfile``, validates the saved timestamp range covers the
     requested ``IntervalList.valid_times``, and records a representation-blind
     content fingerprint of the persisted file (``content_hash``; see
-    ``_recording_fingerprint``) so a content-identical rebuild can be
+    ``_recording.fingerprint``) so a content-identical rebuild can be
     verified. The populate body is split into ``make_fetch`` /
     ``make_compute`` / ``make_insert`` so the long-running write does
     not hold a DB transaction. ``get_recording`` exposes the cached
@@ -1087,7 +1080,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The long write (often many minutes) holds no DB lock. Reads only the
         inputs ``make_fetch`` resolved (the raw NWB path included); the one
         DB access left is staging the output file (see
-        :mod:`._recording_nwb`). The preprocessing and write are shared with
+        :mod:`._storage.nwb`). The preprocessing and write are shared with
         ``_rebuild_nwb_artifact`` via ``_compute_recording_artifact``; this
         method adds the over-request warning and the save expectation that
         ``make_insert`` checks.
@@ -1262,7 +1255,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         content_hash : str
             Representation-blind content fingerprint of the persisted
             recording (``combined_hash`` of the traces / timestamps /
-            geometry / metadata components; see ``_recording_fingerprint``),
+            geometry / metadata components; see ``_recording.fingerprint``),
             reproducible across a content-identical rebuild.
         saved_start : float
             First persisted timestamp, in seconds.
@@ -1368,7 +1361,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The DB half of :meth:`get_recording`: fetches the row and rebuilds a
         missing file (the same self-heal). A tri-part ``make_fetch`` calls
         this and its ``make_compute`` opens the result with
-        ``_recording_nwb.read_stored_traces``.
+        ``_storage.nwb.read_stored_traces``.
 
         Parameters
         ----------
@@ -1431,7 +1424,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
         Shared by ``make_compute`` and ``_rebuild_nwb_artifact``; the pipeline
-        is :func:`._recording_nwb.compute_recording_artifact`. A classmethod
+        is :func:`._storage.nwb.compute_recording_artifact`. A classmethod
         so ``RecordingArtifactRecompute.make_compute`` can run it without a
         table instance (constructing one queries the DB). The writer is an
         explicit dependency of the service.

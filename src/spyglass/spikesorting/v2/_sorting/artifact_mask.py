@@ -473,7 +473,7 @@ def boundary_spans_from_timestamps(recording) -> list[tuple[int, int]]:
     persisted timestamps.
 
     A gap is a step between consecutive persisted timestamps greater than
-    ``1.5 / fs`` (``base_intervals_and_gaps``, ``_signal_math.py``); a
+    ``1.5 / fs`` (``base_intervals_and_gaps``, ``_core/signal_math.py``); a
     recording with no explicit time vector (uniform sample-rate timestamps)
     has no gaps and yields a single span covering the whole recording.
 

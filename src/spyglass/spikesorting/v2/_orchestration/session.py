@@ -29,6 +29,7 @@ def run_v2_pipeline_session(
     nwb_file_name: str,
     interval_list_name: str,
     team_name: str,
+    *,
     pipeline_preset: str,
     sort_group_ids: "list[int] | None" = None,
     curation_description: str = "",

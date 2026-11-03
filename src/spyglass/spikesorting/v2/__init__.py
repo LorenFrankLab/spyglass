@@ -76,9 +76,9 @@ def initialize_v2_defaults() -> None:
     ensure_v2_unit_selection_policies()
 
     # ``insert_default`` skips existing-PK rows, so a stored same-name default
-    # whose content has diverged from the shipped content (e.g. a row seeded at
-    # an old schema version, or a hand-edited blob) is NOT reseeded and goes
-    # unnoticed. Audit for that here and WARN (non-strict) -- an admin can run
+    # whose content has diverged from the shipped content (e.g. a hand-edited
+    # blob) is NOT reseeded and goes unnoticed. Audit for that here and WARN
+    # (non-strict) -- an admin can run
     # ``verify_v2_default_catalog(strict=True)`` to fail hard.
     from spyglass.spikesorting.v2._orchestration.reporting import (
         verify_v2_default_catalog,

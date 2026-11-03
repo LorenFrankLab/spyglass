@@ -306,8 +306,10 @@ def maybe_apply_tetrode_geometry(
     Sort groups of exactly 4 channels on a single ``tetrode_12.5``
     probe and a single electrode group get an explicit
     ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm probe with 6.25 µm
-    contact radius. Covers legacy Frank-lab NWBs where contact
-    positions were never written into the electrode table.
+    contact radius. Exists for legacy Frank-lab NWBs where contact
+    positions were never written into the electrode table, but (as in
+    v1) it replaces whatever positions are stored whenever the gates
+    pass.
     Geometry-aware sorters (Kilosort, MountainSort5) on those
     recordings depend on this patch; clusterless_thresholder and
     MS4 are unaffected.
@@ -808,8 +810,9 @@ def flatten_planar_geometry(recording) -> None:
         raise ValueError(
             "The recording's contacts are not planar -- their third "
             f"coordinate varies (rel_z={locations[:, 2].tolist()}), so it "
-            "cannot be dropped. These artifacts predate geometry "
-            "normalization; re-populate the Recording rows."
+            "cannot be dropped. The stored geometry was not normalized to a "
+            "plane; check Probe.Electrode rel_x/rel_y/rel_z and re-populate "
+            "the Recording rows."
         )
     recording.set_channel_locations(locations[:, :2])
 

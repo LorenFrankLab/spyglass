@@ -9,7 +9,7 @@ live DB connection (the test imports THIS module, not a ``@schema``
 module, so collection needs no container). "No DB" means no connection /
 activation, NOT "no DataJoint installed" -- importing any spyglass module
 still pulls DataJoint / SpikeInterface via the package ``__init__``.
-Mirrors the ``_curation_transforms`` / ``_signal_math`` service modules.
+Mirrors the ``_curation.transforms`` / ``_core.signal_math`` service modules.
 """
 
 from __future__ import annotations

@@ -74,6 +74,7 @@ def isolated_interval_owners(dj_conn):
                         "interval_list_name": "raw data valid times",
                         "preprocessing_params_name": "unused_cleanup_recipe",
                         "team_name": "unused_cleanup_team",
+                        "recording_input_hash": "0" * 64,
                     },
                     allow_direct_insert=True,
                 )

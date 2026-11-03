@@ -24,14 +24,6 @@ from __future__ import annotations
 
 import pandas as pd
 
-# Re-exported from the central exceptions module (the single home for every
-# named v2 invariant); imported here so existing
-# ``from ..._visualization import MissingDisplayExtensionError`` paths keep
-# working.
-from spyglass.spikesorting.v2.exceptions import (  # noqa: F401
-    MissingDisplayExtensionError,
-)
-
 # Display-safe extensions each SpikeInterface display widget reads beyond the
 # sort-time base set (``random_spikes`` / ``noise_levels`` / ``templates`` /
 # ``waveforms``), pinned against SI 0.104.3 widget behavior. ``principal_components``

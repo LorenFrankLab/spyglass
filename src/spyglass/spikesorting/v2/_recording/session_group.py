@@ -219,17 +219,6 @@ def plan_concat_selection(
         assert_members_share_electrode_space,
     )
 
-    if "motion_correction_params_name" in key:
-        raise ValueError(
-            "ConcatenatedRecordingSelection.insert_selection does not "
-            "take motion_correction_params_name: concatenation never "
-            "corrects motion. Select the concat without it, then run the "
-            "motion stage on the resulting concat (run_v2_pipeline(..., "
-            'motion_mode="apply", motion_correction_params_name=...)). '
-            'The "Applying rigid_fast correction to a concatenation" '
-            "section of the Spike Sorting v2 docs shows the motion-stage "
-            "call."
-        )
     extra = sorted(
         set(key) - set(table_cls._IDENTITY_FIELDS) - {"concat_recording_id"}
     )

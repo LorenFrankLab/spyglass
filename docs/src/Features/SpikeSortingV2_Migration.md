@@ -59,47 +59,6 @@ the modern install; users who must *produce* new v0/v1 output should follow the
 legacy file verbatim and restore `pyproject.toml` afterwards. Packaging both
 stacks as installable profiles from unchanged metadata is not yet supported.
 
-### Upgrading a preproduction v2 database
-
-V2 uses one current development schema and artifact format. Recreate a
-preproduction v2 environment from the current pipeline and rerun its inputs;
-there is no in-place migration of retained v2 results.
-
-1. Create a fresh, isolated development database and storage directory using the
-    current checkout. Keep any existing v1/production database separate.
-2. Ingest the original source NWB files, initialize the current v2 defaults, and
-    recreate the required sort groups, intervals, and selections.
-3. Rerun recording, artifact detection, sorting, curation, and matching as
-    needed. Create new reviews for the resulting curation generations. Saved
-    review drafts identify their original `curation_uuid` and cannot be
-    attached to a newly created generation.
-
-Populated v2 Units tables require `spike_sample_index` and `obs_intervals`
-alongside `spike_times`. Readback uses stored sample frames; missing columns
-fail rather than being reconstructed from recording timestamps. Empty outputs
-remain valid. Sorting and curation writers require complete provenance,
-including the sort and source identities and the curation generation UUID on
-regular and member exports. Matching runs require both backend and
-input-preparer identities on the `UnitMatch` row and in the pairs NWB header.
-Unknown external package versions may be `None`; the metadata container and
-producer identities are required.
-
-Matching selections now require frozen unit eligibility
-(`Input.selection_snapshot`) and unmasked original-source sample coverage
-(`InputRecording.source_coverage`). Old development rows lack those snapshots
-and must be recreated through the sequence above; adding empty columns does not
-make old match results valid. Disjoint epochs of one NWB can be matched, while
-repeated acquisition samples remain an error. Pass exact completed curation
-handles to `plan_v2_unit_match_from_curations`; its default accepted-single-unit
-policy differs from the compatibility `v2_unflagged_units` default of the older
-group and named-sort planners. Automatic-only matching should name that policy
-explicitly. `final_curated` identifies a committed leaf, not human approval.
-
-Adding or altering database columns does not regenerate these NWB columns or
-headers. Rerunning the current pipeline produces the artifacts required by the
-current contract. Preserve any historical development results separately if they
-are still needed for reference.
-
 ### Porting a v1 sort to v2
 
 1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,
@@ -221,23 +180,13 @@ are still needed for reference.
 
 ## 2. What you query differently
 
-### Resuming reviews and rebuilding populations
+### Reviews and analysis populations
 
-Complete the
-[database upgrade/recreation sequence](#upgrading-a-preproduction-v2-database)
-first. Existing named profiles remain unchanged; start a new review with
-`franklab_hippocampus_2026_09_17` for current observed-time columns and view
-composition (view version 4).
-
-- Saved display version 1 retains its explicit fixed point caps when resumed.
-    New display version 2 uses duration-scaled 50 Hz budgets, optionally limited
-    by explicit caps. Resume/import an old draft through its original review,
-    commit it, then review that committed child with the new profile.
-- Newly created `SortedSpikesGroup.UnitSelection` snapshots include observed
-    intervals in `selection_provenance`. Use a new group name to create a
-    snapshot for a previously selected curation. Existing groups retain their
-    frozen membership and report unknown coverage where observation snapshots
-    are absent.
+Start a review with the `franklab_hippocampus_2026_09_17` profile for the
+observed-time columns and view composition (view version 4). Review display
+budgets scale with duration (50 Hz by default), optionally limited by explicit
+per-unit caps. `SortedSpikesGroup.UnitSelection` snapshots include observed
+intervals in `selection_provenance`.
 
 The connected local browser writes operation/result journals beside the saved
 bundle, without a workflow-status table. Hosted bundles still require the
@@ -324,11 +273,7 @@ for metric definitions, bin validity, and decoder restrictions.
     cortex `1.0/2.0 ms`; both 20000 spikes), recorded on
     `Sorting.display_waveform_params_name`. Template-derived values —
     `peak_amplitude_uv`, SNR, amplitude — depend on that window and subsample;
-    spike-train metrics (firing rate, ISI, presence ratio) do not. Pre-release
-    v2 sorts used a fixed `1.0/2.0 ms` window with a 500-spike subsample, so
-    their template-derived values differ for all sorts and further for
-    hippocampus sorts; re-curate against the current values rather than
-    comparing absolute amplitudes across the v1→v2 boundary.
+    spike-train metrics (firing rate, ISI, presence ratio) do not.
 
 ## 4. What has a v2 replacement
 
@@ -350,9 +295,8 @@ surface that stays v1-only is the stored per-pair burst metrics
     `d_prime`, `nearest_neighbor`, `mahalanobis`, `silhouette`) are computed on
     a **whitened** metric analyzer (decorrelated space), while amplitudes and
     voltage/spike-train metrics (`snr`, `amplitude_cutoff`, `firing_rate`,
-    `isi_violation`, …) stay on the unwhitened display analyzer — so PC/NN
-    values differ from those of pre-release v2 runs that used a single analyzer
-    (re-curate against the current scores). The metric recipe is tracked on
+    `isi_violation`, …) stay on the unwhitened display analyzer. The metric
+    recipe is tracked on
     `CurationEvaluationSelection.metric_waveform_params_name`. Quality-metric
     curation is provided by `CurationEvaluation`.
 - **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned
@@ -443,8 +387,8 @@ correct** differences:
 - **Disjoint (multi-interval) sorts: no obs/valid interval spans a gap.** v2
     splits artifact-removed valid_times and no-artifact obs_intervals at the
     recorded-chunk boundaries, so observation durations and firing-rate windows
-    exclude the inter-interval wall-clock gaps (v1 and pre-release v2 could
-    report a single gap-spanning envelope).
+    exclude the inter-interval wall-clock gaps (v1 could report a single
+    gap-spanning envelope).
 - **KS4 may differ after a SpikeInterface version bump** — caught by the
     pinned-version snapshot test rather than appearing silently.
 - **Seed pinning improves preprocessing reproducibility, but MS4/MS5/KS4 are not
@@ -470,12 +414,9 @@ itself does not correct motion -- that is a separate, optional stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
 that can layer on top of either a single-session `Recording` or a
 `ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
-reads the same masks. Concat materializations from a pre-release database cannot
-satisfy this selection; follow the
-[preproduction database sequence](#upgrading-a-preproduction-v2-database), which
-recreates the current tables in an isolated development environment, and rerun
-them. Raw SI duration metrics retain SI definitions. V2 `observed_*` metrics and
-sorted-spikes decoding through populations with observation snapshots honor
-usable time; legacy populations without snapshots report unknown coverage.
+reads the same masks. Raw SI duration metrics retain SI definitions. V2
+`observed_*` metrics and sorted-spikes decoding through populations with
+observation snapshots honor usable time; populations without snapshots (v0/v1
+merges) report unknown coverage.
 Custom downstream analyses must use the exposed observation intervals
 explicitly.

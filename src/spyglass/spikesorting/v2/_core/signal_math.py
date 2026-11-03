@@ -646,7 +646,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     Streams the timeline in contiguous ~1 s slices (bounded
     peak memory, no ``get_times()`` materialization) to derive the same gap
     structure the full-vector path computes from ``get_times()``. Generalizes
-    the chunked scan in ``_units_nwb._base_intervals_from_recording`` to also
+    the chunked scan in ``_storage.units_nwb._base_intervals_from_recording`` to also
     emit the gap frame indices. Returns:
 
     * ``base_intervals`` -- one ``[start, end]`` (inclusive first/last sample

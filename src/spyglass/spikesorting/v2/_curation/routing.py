@@ -4,7 +4,7 @@
 the v2 part-table convention keys and resolves it to the ``CurationV2`` rows it
 selects. Its work splits cleanly into two halves: a PURE classification +
 normalization half (here) and a DataJoint join-assembly half
-(:func:`._curation_restriction.resolve_restriction`).
+(:func:`._curation.restriction.resolve_restriction`).
 :func:`classify_and_normalize_restriction` validates the restriction keys, maps
 the ``artifact_detection_{uuid}`` ``interval_list_name`` convention back to
 ``artifact_detection_id``, normalizes that id to a ``uuid.UUID``, and splits
@@ -15,7 +15,7 @@ dicts.
 
 DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection and
 activates no ``dj.schema`` at import: it imports only the standard library and
-the DB-free ``_artifact_naming`` parser, so a DB-isolated worker can import it
+the DB-free ``_artifacts.naming`` parser, so a DB-isolated worker can import it
 and run the classification without a database.
 """
 
@@ -106,7 +106,7 @@ class RestrictionPlan(NamedTuple):
     own traces, and :data:`NO_MOTION_CORRECTION_RESTRICTION` matches both.
     ``restrict_by_artifact`` is the caller's flag, threaded through unchanged.
     ``unresolved_name_warning`` is the message
-    ``_curation_restriction.resolve_restriction`` emits via ``logger.warning``
+    ``_curation.restriction.resolve_restriction`` emits via ``logger.warning``
     when ``restrict_by_artifact`` was requested but the interval name carried
     no artifact id (``None`` when there is nothing to warn about).
     """

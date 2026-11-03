@@ -415,7 +415,7 @@ def _nn_advanced_missing(
     SI returns NaN when ``n_spikes < min_spikes`` or ``firing_rate < min_fr``
     (``metrics/quality/pca_metrics.py:619-630`` isolation, ``825-836`` noise
     overlap; Spyglass's patched noise overlap keeps both checks,
-    ``spyglass/spikesorting/v2/_si_metric_patches.py:224-227``). The rate is
+    ``_core.si_metric_patches._nn_noise_overlap_sparse_fixed``). The rate is
     ``n_spikes / (total_samples / fs)`` (``metrics/spiketrain/metrics.py:69-77``
     with ``metrics/utils.py:100-125``). A zero-spike unit fails every nn
     computation, so it is expected-missing even with ``min_spikes=0``.
@@ -820,7 +820,7 @@ def escalate_si_metric_errors(rule_columns: Collection[str]):
     warnings are still re-emitted.
 
     ``warnings.catch_warnings`` swaps process-wide state, so the block
-    holds ``SI_METRIC_STATE_LOCK`` (``_si_metric_patches``) from before the
+    holds ``SI_METRIC_STATE_LOCK`` (``_core.si_metric_patches``) from before the
     capture starts until its warnings are reported: captures on different
     threads run one after another and each records only its own thread's
     warnings. Warnings raised meanwhile by other (non-Spyglass) threads are
@@ -848,49 +848,33 @@ def escalate_si_metric_errors(rule_columns: Collection[str]):
         report_si_metric_errors(caught, rule_columns)
 
 
-def rules_payloads_match(
-    expected: dict,
-    stored: dict,
-    *,
-    rel_tol: float = 1e-6,
-    abs_tol: float = 1e-12,
-) -> bool:
-    """Return whether two normalized ``AutoCurationRules`` payloads are equal.
+def rules_payloads_match(expected: dict, stored: dict) -> bool:
+    """Return whether two normalized parameter payloads are equal.
 
     Compares the ``{master, rules}`` payloads built by
-    ``AutoCurationRules._payload_for_compare`` for the idempotency guard.
-    Numbers are compared with ``math.isclose`` rather than ``==`` because rows
-    stored before the ``Rule.threshold`` column became ``double`` keep their
-    single-precision values: a threshold such as ``0.1`` stored while the
-    column was still ``float`` reads back as ``0.10000000149...`` after the
-    column is widened, which is not bit-equal to the freshly validated Python
-    float. An exact comparison would raise a spurious "different payload"
-    error when re-inserting identical rules against such a row (e.g. running
-    ``insert_default()`` after the documented column upgrade), breaking
-    idempotency. The default ``rel_tol`` comfortably exceeds float32
-    round-off (~6e-8) while still distinguishing thresholds that differ by
-    more than one part per million.
+    ``AutoCurationRules._payload_for_compare`` for the idempotency guard, and
+    ``QualityMetricParameters`` content for
+    ``reject_stale_quality_metric_defaults``. The compared numeric columns
+    (``Rule.threshold``, ``observed_presence_bin_duration_s``) are ``double``,
+    so a stored value reads back bit-equal to the validated Python float and
+    numbers compare exactly.
     """
-    return _values_match(expected, stored, rel_tol=rel_tol, abs_tol=abs_tol)
+    return _values_match(expected, stored)
 
 
-def _values_match(a, b, *, rel_tol: float, abs_tol: float) -> bool:
-    """Recursively compare JSON-native values; floats within tolerance match."""
+def _values_match(a, b) -> bool:
+    """Recursively compare JSON-native values exactly; bools stay distinct."""
     # bool is an int subclass; compare by exact type+value so True and 1 do
-    # not conflate through the numeric branch below.
+    # not conflate through ``==``.
     if isinstance(a, bool) or isinstance(b, bool):
         return type(a) is type(b) and a == b
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-        return math.isclose(a, b, rel_tol=rel_tol, abs_tol=abs_tol)
     if isinstance(a, dict) and isinstance(b, dict):
         return a.keys() == b.keys() and all(
-            _values_match(a[key], b[key], rel_tol=rel_tol, abs_tol=abs_tol)
-            for key in a
+            _values_match(a[key], b[key]) for key in a
         )
     if isinstance(a, list) and isinstance(b, list):
         return len(a) == len(b) and all(
-            _values_match(x, y, rel_tol=rel_tol, abs_tol=abs_tol)
-            for x, y in zip(a, b)
+            _values_match(x, y) for x, y in zip(a, b)
         )
     return a == b
 
@@ -942,6 +926,34 @@ _AUTO_MERGE_EXTRA_EXTENSIONS = {
     # spike_amplitudes; add spike_locations only for that preset.
     "feature_neighbors": ("spike_locations",),
 }
+
+# SI presets with an ``snr`` step. That step reads the analyzer's stored
+# ``quality_metrics["snr"]`` (spikeinterface/curation/auto_merge.py:255-261),
+# which ``compute_metrics`` has just replaced with this evaluation's columns.
+_SNR_MERGE_PRESETS = frozenset({"feature_neighbors"})
+
+
+def assert_merge_preset_metrics(auto_merge_preset, metric_names) -> None:
+    """Raise if the auto-merge preset filters on SNR the evaluation lacks.
+
+    Without ``snr`` in ``metric_names`` the preset's ``snr`` step fails with a
+    bare ``KeyError`` after the metrics are computed. Requiring it also makes
+    the step use this evaluation's sorter-signed SNR (see
+    :func:`apply_snr_peak_sign`).
+
+    Raises
+    ------
+    ValueError
+        If ``auto_merge_preset`` has an ``snr`` step and ``snr`` is not
+        requested.
+    """
+    if auto_merge_preset in _SNR_MERGE_PRESETS and "snr" not in metric_names:
+        raise ValueError(
+            f"auto_merge_preset {auto_merge_preset!r} filters merge candidates "
+            "by SNR, but the metric params do not compute 'snr'. Add 'snr' to "
+            "the QualityMetricParameters metric_names, or choose another "
+            "auto-merge preset."
+        )
 
 
 def _requested_pc_metrics(metric_names) -> list[str]:
@@ -996,7 +1008,7 @@ def evaluate_analyzers(
     ``min_spikes``) follows the rule's ``missing_policy``.
 
     The whole evaluation holds ``SI_METRIC_STATE_LOCK``
-    (``_si_metric_patches``), taken after any ``analyzer_cache_lock``
+    (``_core.si_metric_patches``), taken after any ``analyzer_cache_lock``
     the caller holds, so evaluations on different threads of one process
     run one after another.
     """

@@ -59,7 +59,6 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
 
     from spyglass.spikesorting.v2._params.sorter import (
         _SORTER_SCHEMAS,
-        reject_internal_whiten,
         reject_reserved_execution_keys,
         validate_execution_params,
         validate_sorter_params_against_wrapper,
@@ -79,12 +78,6 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
                 f"Curated v2 sorters: {sorted(_SORTER_SCHEMAS)}; or any "
                 "sorter from spikeinterface.sorters.available_sorters()."
             )
-        # Internally-whitening sorters that fall through to the permissive
-        # generic schema (kilosort2_5 / kilosort3 / ironclust) must not
-        # carry a truthy ``whiten`` -- it would double-whiten via the
-        # runtime's external float64 whitening. (KS4 self-guards in its
-        # typed schema; MS4/MS5 use whiten=True deliberately.)
-        reject_internal_whiten(sorter, row["params"])
         # Permissive (``extra="allow"``) schemas pass unknown keys through;
         # check them against the installed SI wrapper's own parameter
         # vocabulary so a typo fails here, not minutes into the sort.

@@ -16,7 +16,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from spyglass.spikesorting.v2._curation.metrics import apply_snr_peak_sign
+from spyglass.spikesorting.v2._curation.metrics import (
+    apply_snr_peak_sign,
+    assert_merge_preset_metrics,
+)
 from spyglass.spikesorting.v2._core.job_config import (
     _resolved_job_kwargs,
     resolve_search_threads,
@@ -109,6 +112,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     ).fetch(as_dict=True)
 
     metric_names = list(qm["metric_names"])
+    assert_merge_preset_metrics(acr["auto_merge_preset"], metric_names)
     sorter_params = (SortingSelection * SorterParameters & sorting_key).fetch1(
         "params"
     )
@@ -263,7 +267,6 @@ def detect_stale_source(table_cls, key) -> dict:
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._storage.recompute import (
-        analyzer_content_hash_is_current,
         analyzer_hash_for_role,
     )
     from spyglass.spikesorting.v2.exceptions import (
@@ -308,12 +311,6 @@ def detect_stale_source(table_cls, key) -> dict:
         # reads during hashing. get_analyzer's nested lock is reentrant.
         with analyzer_cache_lock(sel["sorting_id"]):
             for role, stored in stored_hashes.items():
-                legacy_hash = not analyzer_content_hash_is_current(stored)
-                if legacy_hash:
-                    # Byte-only legacy digests cannot prove array shape/dtype
-                    # agreement. Keep the old snapshot readable, but require a
-                    # fresh evaluation before claiming its source is current.
-                    reasons.append(f"source_analyzer_hash_format:{role}")
                 try:
                     analyzer = Sorting().get_analyzer(
                         sort_key,
@@ -332,7 +329,7 @@ def detect_stale_source(table_cls, key) -> dict:
                     continue
                 current = analyzer_hash_for_role(analyzer, role)
                 current_hashes[role] = current
-                if not legacy_hash and current != stored:
+                if current != stored:
                     reasons.append(f"source_analyzer_hash:{role}")
 
     return {

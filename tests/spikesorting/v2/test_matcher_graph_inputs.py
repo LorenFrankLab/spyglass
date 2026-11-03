@@ -80,6 +80,16 @@ def test_chronological_input_order_reads_naive_times_as_utc():
     ]
 
 
+def _coverage(start_sample, end_sample, rate=30_000.0):
+    """Frozen source coverage of one recording's raw sample range."""
+    return {
+        "version": 1,
+        "source_object_id": "raw",
+        "sample_ranges": [[start_sample, end_sample]],
+        "time_ranges": [[start_sample / rate, (end_sample - 1) / rate]],
+    }
+
+
 def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
     input_rows = [
         {
@@ -90,6 +100,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "source_kind": "recording",
             "source_id": uuid.UUID(int=1),
             "motion_corrected_recording_id": None,
+            "selection_snapshot": {"policy": "all", "unit_ids": [1, 2]},
         },
         {
             "input_index": 1,
@@ -99,6 +110,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "source_kind": "concatenated_recording",
             "source_id": uuid.UUID(int=2),
             "motion_corrected_recording_id": None,
+            "selection_snapshot": {"policy": "all", "unit_ids": [3]},
         },
     ]
     recording_rows = [
@@ -111,6 +123,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "start_sample": 0,
             "end_sample": 150_000,
             "valid_times": [[0.0, 4.99996667]],
+            "source_coverage": _coverage(0, 150_000),
         },
         {
             "input_index": 1,
@@ -121,6 +134,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "start_sample": 0,
             "end_sample": 60_000,
             "valid_times": [[2.02, 3.21996667]],
+            "source_coverage": _coverage(0, 60_000),
         },
         {
             "input_index": 1,
@@ -131,6 +145,7 @@ def _parts(curation_uuid="00000000-0000-0000-0000-0000000000c1"):
             "start_sample": 60_000,
             "end_sample": 120_000,
             "valid_times": [[3.3, 4.89996667]],
+            "source_coverage": _coverage(0, 60_000),
         },
     ]
     return input_rows, recording_rows
@@ -175,6 +190,8 @@ def test_input_set_hash_is_row_order_and_uuid_form_independent():
         ("recording", 0, "valid_times", [[0.0, 4.9999]]),
         ("recording", 1, "valid_times", [[2.02, 2.5], [2.6, 3.21996667]]),
         ("recording", 0, "session_start_time", _DAY1 + dt.timedelta(minutes=1)),
+        ("recording", 1, "source_coverage", _coverage(10, 60_000)),
+        ("input", 1, "selection_snapshot", {"policy": "all", "unit_ids": []}),
         (
             "recording",
             2,
@@ -300,7 +317,6 @@ def test_matching_one_shared_original_sample_is_rejected_even_with_disjoint_mask
     )
     from spyglass.spikesorting.v2.exceptions import (
         OverlappingMatchInputError,
-        SameSessionMatchError,
     )
 
     early = _covered_input(_SID_EARLY, [[0, 21]], interval="sleep")
@@ -311,7 +327,7 @@ def test_matching_one_shared_original_sample_is_rejected_even_with_disjoint_mask
         OverlappingMatchInputError, match=r"raw samples \[20, 21\)"
     ) as error:
         assert_disjoint_source_coverage([early, late])
-    assert isinstance(error.value, SameSessionMatchError)
+    assert isinstance(error.value, ValueError)
     assert "sleep" in str(error.value) and "run" in str(error.value)
 
 
@@ -379,6 +395,31 @@ def test_canonicalize_orients_side_a_by_lower_input_index():
 
 
 @pytest.mark.parametrize(
+    ("drift", "fdr", "expected"),
+    [(None, None, (None, None)), (0.0, 0.0, (0.0, 0.0)), (2, 0.1, (2.0, 0.1))],
+    ids=["unknown", "measured-zero", "measured"],
+)
+def test_canonicalize_keeps_unknown_drift_and_fdr_apart_from_zero(
+    drift, fdr, expected
+):
+    """``None`` (unknown) survives as ``None``; a measured 0.0 stays 0.0."""
+    from spyglass.spikesorting.v2._matching.graph import (
+        canonicalize_match_pairs,
+    )
+    from spyglass.spikesorting.v2.matcher_protocol import MatchPair
+
+    pair = MatchPair(
+        "a", 0, 1, "b", 0, 2, 0.9, drift_estimate_um=drift, fdr_estimate=fdr
+    )
+    (row,) = canonicalize_match_pairs([pair], {("a", 0): 0, ("b", 0): 1})
+    assert (row["drift_estimate_um"], row["fdr_estimate"]) == expected
+    assert all(
+        value is None or type(value) is float
+        for value in (row["drift_estimate_um"], row["fdr_estimate"])
+    )
+
+
+@pytest.mark.parametrize(
     "field",
     [
         "session_a_curation_id",
@@ -429,7 +470,11 @@ def _order_rows(starts, input_starts=None):
         for index in range(len(starts))
     ]
     recording_rows = [
-        {"input_index": index, "session_start_time": start}
+        {
+            "input_index": index,
+            "nwb_file_name": f"session_{index}.nwb",
+            "session_start_time": start,
+        }
         for index, start in enumerate(starts)
     ]
     return input_rows, recording_rows
@@ -443,7 +488,11 @@ def test_frozen_order_errors_accepts_the_order_selection_writes():
     input_rows, recording_rows = _order_rows([_DAY1, _DAY2])
     # Input 1 is a concatenation whose second recording is later still.
     recording_rows.append(
-        {"input_index": 1, "session_start_time": _DAY2 + dt.timedelta(hours=3)}
+        {
+            "input_index": 1,
+            "nwb_file_name": "session_1_later.nwb",
+            "session_start_time": _DAY2 + dt.timedelta(hours=3),
+        }
     )
     assert frozen_order_errors(input_rows, recording_rows) == []
 

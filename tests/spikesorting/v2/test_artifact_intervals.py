@@ -1091,7 +1091,7 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
 # --------------------------------------------------------------------------- #
 # Gain-aware µV artifact detection (hermetic absolute-outcome).
 #
-# ``artifact._compute_artifact_chunk`` scales raw counts to microvolts with
+# ``_artifacts.compute._compute_artifact_chunk`` scales raw counts to microvolts with
 # the recording's stored per-channel gains (``traces_uv = traces * gains``)
 # before comparing against ``amplitude_threshold_uv``. Every other direct
 # artifact test uses ``gain = 1.0``, where counts and µV are numerically
@@ -1128,7 +1128,7 @@ def _flagged_frames(rec, n_frames, amplitude_threshold_uv):
     threshold; ``zscore_threshold = None`` disables the z-score detector so the
     outcome is governed purely by the µV amplitude comparison.
     """
-    from spyglass.spikesorting.v2.artifact import (
+    from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
     )

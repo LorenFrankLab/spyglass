@@ -76,7 +76,7 @@ _SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
 #: capture, so those Spyglass runs on different threads of one process are
 #: serialized. SpikeInterface calls made directly by other (non-Spyglass)
 #: threads do not take it and are not serialized.
-#: Lock order: acquire it after ``_analyzer_cache.analyzer_cache_lock``, never
+#: Lock order: acquire it after ``_storage.analyzer_cache.analyzer_cache_lock``, never
 #: before; code holding it acquires no other Spyglass lock.
 SI_METRIC_STATE_LOCK = threading.RLock()
 

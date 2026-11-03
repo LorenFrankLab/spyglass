@@ -38,7 +38,6 @@ from spyglass.spikesorting.v2._storage.analyzer_cache import (
 )
 from spyglass.spikesorting.v2._curation.transforms import ManualMergeAction
 from spyglass.spikesorting.v2._review.annotations import (
-    FIGPACK_INSTALL_HINT,
     FIGURE_CONFIG_FILENAME,
     curation_annotations_to_labels_and_merges,
     default_label_options,
@@ -289,7 +288,7 @@ def _assert_figure_identity(
 def _resolve_curation_view_inputs(
     curation_key: dict, display_options
 ) -> tuple[str, ReviewTimelineInputs]:
-    """Resolve the DB inputs of :func:`._review_view.build_curation_view`.
+    """Resolve the DB inputs of :func:`._review.view.build_curation_view`.
 
     Resolves the sort's display analyzer carrying the curation-view
     extensions -- building, rebuilding, or extending the published cache as
@@ -1058,20 +1057,8 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ephemeral=ephemeral,
             review_config=review_config,
         )
-        # An offline bundle lives under a temp dir that can be purged; if the
-        # row exists but its local bundle is gone, drop the stale row so populate
-        # rebuilds it rather than returning a dead path (mirrors run_v2_pipeline's
-        # figpack reuse guard). A hosted (upload=True) URI is remote, so the
-        # on-disk check does not apply.
-        built = cls & selection
-        reused = bool(built)
-        if (
-            not upload
-            and built
-            and not Path(built.fetch1("figpack_uri")).exists()
-        ):
-            built.delete(safemode=False)
-            reused = False
+        cls.drop_missing_local_bundle(selection)
+        reused = bool(cls & selection)
         if not reused:
             from spyglass.spikesorting.v2._core.progress import (
                 report_progress,
@@ -1083,6 +1070,84 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             uri=(cls & selection).fetch1("figpack_uri"),
             reused=reused,
         )
+
+    @classmethod
+    def drop_missing_local_bundle(cls, selection: dict) -> "str | None":
+        """Forget a built local view whose bundle folder is gone; say so.
+
+        A local bundle can be moved or purged outside Spyglass, leaving a row
+        that points at nothing. Populating again rebuilds it, so the row is
+        dropped and a warning names the missing path and what was lost: draft
+        labels saved only in that bundle. A hosted (``upload``) view is remote
+        and is left alone.
+
+        A bundle outside this machine's :func:`figpack_cache_root` was built
+        under another host's or user's FigPack folder, where it (and its draft
+        labels) may still exist. Its row is kept and only the warning is
+        returned, so two machines never take turns replacing each other's
+        bundle.
+
+        Parameters
+        ----------
+        selection : dict
+            A ``FigPackCurationSelection`` primary key.
+
+        Returns
+        -------
+        str or None
+            The warning, when the bundle is not readable here; otherwise
+            ``None``.
+
+        Raises
+        ------
+        PermissionError
+            When dropping the row and the user is not on a lab team with the
+            session's experimenter (the usual Spyglass delete permission).
+        """
+        from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
+        from spyglass.utils import logger
+
+        if (FigPackCurationSelection & selection).fetch1("upload"):
+            return None
+        # The same lock populate takes, so a concurrent run cannot rebuild the
+        # bundle between this check and the delete.
+        with advisory_key_lock(cls, selection):
+            built = cls & selection
+            if not built:
+                return None
+            uri = built.fetch1("figpack_uri")
+            if Path(uri).exists():
+                return None
+            sorting_id, curation_id = (
+                FigPackCurationSelection & selection
+            ).fetch1("sorting_id", "curation_id")
+            page = (
+                f"The saved review page for sorting {sorting_id} curation "
+                f"{curation_id}"
+            )
+            root = figpack_cache_root()
+            if Path(uri).parent != root:
+                message = (
+                    f"{page} was built at {uri}, outside this machine's FigPack "
+                    f"folder ({root}), and is not readable here. Open it on the "
+                    "machine that built it, or set "
+                    "dj.config['custom']['spikesorting_v2_figpack_dir'] to a "
+                    "folder every machine shares. The page was left in place."
+                )
+                logger.warning(message)
+                return message
+            message = (
+                f"{page} is missing (expected at {uri}); it was moved or its "
+                "folder was cleaned up. Rebuilding it. Draft labels saved only "
+                "in that page are lost; committed curations are unaffected."
+            )
+            logger.warning(message)
+            # The row only records where the bundle was written and no table
+            # depends on it, so remove just this row: no cascade or
+            # external-file sweep (an added dependent makes this raise).
+            built._check_delete_permission()
+            built.delete_quick()
+        return message
 
     @staticmethod
     def fetch_curation_from_uri(uri: str) -> tuple[dict, list]:

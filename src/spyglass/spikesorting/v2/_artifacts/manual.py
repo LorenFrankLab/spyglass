@@ -8,6 +8,12 @@ def resolve_manual_exclusions(value, *, concat=False):
     from collections.abc import Mapping
 
     if not concat:
+        if isinstance(value, Mapping):
+            raise TypeError(
+                "Single-session manual_excluded_times must be [start, stop] "
+                "intervals; a member_index mapping is for "
+                "run_v2_concat_pipeline / estimate_concat_motion."
+            )
         return normalize_manual_exclusions(value)
     if value is None:
         return {}

@@ -162,11 +162,15 @@ class MissingRecordingForConcatError(RuntimeError):
 
 
 class PipelineInputError(ValueError):
-    """Raise when ``run_v2_pipeline()`` gets an unknown pipeline preset.
+    """Raise when a pipeline entry point rejects its request before any DB work.
 
-    ``run_v2_pipeline()`` was given an unknown ``pipeline_preset`` name.
-    Message lists the available pipeline presets and points at
-    ``describe_pipeline_presets()`` / ``list_pipeline_presets()``.
+    Raised by ``run_v2_pipeline``, ``run_v2_concat_pipeline``,
+    ``run_v2_pipeline_session``, ``estimate_motion`` and
+    ``estimate_concat_motion`` for, e.g., an unknown ``pipeline_preset`` (the
+    message lists the presets and points at ``describe_pipeline_presets()``),
+    a source input passed as ``None``, a contradictory motion request, or
+    ``figpack_label_options`` / ``build_figpack_view=True`` without what they
+    need. The message names the entry point.
     """
 
 
@@ -340,7 +344,7 @@ class AnalyzerFolderInvalidError(AnalyzerFolderMissingError):
     ``Sorting.get_analyzer(..., rebuild=False)`` found a directory at the
     computed cache path, but SpikeInterface could not load it as a valid
     ``SortingAnalyzer``. This usually means a killed build, partial cleanup, or
-    out-of-band corruption left a half-written zarr store. It subclasses
+    out-of-band corruption left a half-written analyzer folder. It subclasses
     ``AnalyzerFolderMissingError`` so no-rebuild audit paths can treat invalid
     regeneratable scratch the same as absent scratch, while preserving a more
     precise diagnostic for callers and logs.
@@ -385,21 +389,11 @@ class UnknownMatcherError(ValueError):
     """
 
 
-class SameSessionMatchError(ValueError):
-    """Compatibility superclass for matching inputs that reuse source samples.
-
-    Disjoint epochs in the same NWB are supported. New overlap failures raise
-    ``OverlappingMatchInputError``; existing callers catching this superclass
-    continue to catch them.
-    """
-
-
-class OverlappingMatchInputError(SameSessionMatchError):
+class OverlappingMatchInputError(ValueError):
     """Matching inputs reuse original raw acquisition samples.
 
     Disjoint epochs of the same NWB are supported. Shared sample ranges are
     rejected regardless of artifact masks, preprocessing or interval names.
-    The superclass preserves callers catching the historical session error.
     """
 
 

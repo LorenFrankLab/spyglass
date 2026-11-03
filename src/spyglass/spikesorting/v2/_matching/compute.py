@@ -189,7 +189,7 @@ def _input_recording_spike_counts(plan: dict) -> list[dict]:
 
     Reads the input's curated units (sort frames) from ``plan["units"]``
     and splits every matchable unit's spikes by the recordings' frozen
-    ``[start_sample, end_sample)`` spans (:func:`._matcher_graph.
+    ``[start_sample, end_sample)`` spans (:func:`._matching.graph.
     count_recording_spikes`), which conserves every spike.
 
     Parameters
@@ -282,7 +282,7 @@ def unit_match_provenance_tables(
     Returns
     -------
     list of hdmf.common.DynamicTable
-        For ``_unitmatch_nwb.write_pairs_table(provenance_tables=...)``.
+        For ``_storage.matches_nwb.write_pairs_table(provenance_tables=...)``.
     """
     import json
 
@@ -321,7 +321,7 @@ def unit_match_provenance_tables(
                 {
                     "input_index": int(plan["input_index"]),
                     "selection_snapshot_json": json.dumps(
-                        plan.get("selection_snapshot", {}), sort_keys=True
+                        plan["selection_snapshot"], sort_keys=True
                     ),
                     "sorting_id": str(plan["sorting_id"]),
                     "curation_id": int(plan["curation_id"]),
@@ -347,7 +347,7 @@ def unit_match_provenance_tables(
                     "input_index": int(plan["input_index"]),
                     "recording_index": int(recording["recording_index"]),
                     "source_coverage_json": json.dumps(
-                        recording.get("source_coverage", {}), sort_keys=True
+                        recording["source_coverage"], sort_keys=True
                     ),
                     "nwb_file_name": str(recording["nwb_file_name"]),
                     "interval_list_name": str(recording["interval_list_name"]),

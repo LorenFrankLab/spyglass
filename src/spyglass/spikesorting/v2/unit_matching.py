@@ -60,20 +60,12 @@ from spyglass.spikesorting.v2._storage.staged_outputs import (
 from spyglass.spikesorting.v2._matching.compute import (
     _input_recording_spike_counts,
 )
-from spyglass.spikesorting.v2._matching.fetch import (
-    _member_match_files,
-    _member_waveform_traces,
-)
 from spyglass.spikesorting.v2._matching.inputs import (
-    _add_single_recording_frames,
-    _resolve_match_input,
     _validate_member_curations,
-    _warn_clusterless_match_once,
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
 from spyglass.spikesorting.v2.exceptions import (
-    TrackedUnitBudgetExceededError,
     UnknownMatcherError,
 )
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
@@ -119,11 +111,11 @@ class UnitMatchFetched(NamedTuple):
     units match; the times are the frozen ones, never re-read from
     ``Session``. ``waveform_traces`` names the trace artifact the input's
     bundle is extracted from
-    (:func:`._unit_match_fetch._member_waveform_traces`); ``sorting_input``
+    (:func:`._matching.fetch._member_waveform_traces`); ``sorting_input``
     locates that artifact with the artifact valid times the sorter's mask
     was built from, and ``units`` the curated units NWB, so compute opens
     the traces the sorter read without the DB
-    (:func:`._unit_match_fetch._member_match_files`). ``statistics_spans``
+    (:func:`._matching.fetch._member_match_files`). ``statistics_spans``
     are the sort's persisted statistics spans, which bound every sampled
     waveform window.
     ``sorting_id`` is a str, but
@@ -678,7 +670,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         Compares electrode IDENTITY (group + ids + regions) -- the lab-dependent
         signal channel geometry can't catch -- via
-        :func:`._matcher_graph.divergent_electrode_space_members`. The caller
+        :func:`._matching.graph.divergent_electrode_space_members`. The caller
         WARNS rather than blocks (see :meth:`_warn_on_divergent_electrode_space`)
         because electrode-group names / ids come from each NWB's
         ``ElectrodeGroup`` and are not guaranteed stable across labs' ingestion.
@@ -736,7 +728,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        See :func:`._unit_match_inputs.find_existing_pk`. Tests patch it, so
+        See :func:`._matching.inputs.find_existing_pk`. Tests patch it, so
         it stays on the class and ``insert_inputs`` calls it through the
         class.
         """
@@ -782,7 +774,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         UnitMatch operates on the curated, matchable unit set of the curations
         pinned by ``UnitMatchSelection.Input``, not the raw Sorting units. ``drift_estimate_um`` / ``fdr_estimate`` have no per-pair
         backend source (drift is applied internally per session-pair; FDR is a
-        session-level diagnostic) and keep their defaults.
+        session-level diagnostic) and stay NULL (unknown).
         """
 
         definition = """
@@ -792,7 +784,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         -> CurationV2.Unit.proj(session_a_sorting_id='sorting_id', session_a_curation_id='curation_id', unit_a_id='unit_id')
         -> CurationV2.Unit.proj(session_b_sorting_id='sorting_id', session_b_curation_id='curation_id', unit_b_id='unit_id')
         match_probability: float
-        drift_estimate_um=0.0: float
+        drift_estimate_um=NULL: float
         fdr_estimate=NULL: float
         """
 
@@ -1044,11 +1036,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         transaction. A single-input selection writes an empty pairs table
         without calling the matcher backend. Every input's matchable units
         are counted per constituent recording from its curated units file
-        (:func:`._unit_match_compute._input_recording_spike_counts`). The
+        (:func:`._matching.compute._input_recording_spike_counts`). The
         anchor AnalysisNwbfile parent is the first input's first recording's
         NWB (``input_plan`` is ``input_index``-ordered).
         Reads only the input files ``make_fetch`` resolved; the one DB access
-        left is staging the pairs NWB (see :mod:`._recording_nwb`).
+        left is staging the pairs NWB (see :mod:`._storage.nwb`).
         """
         import spikeinterface as si
 
@@ -1062,8 +1054,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             get_input_preparer,
             get_matcher,
         )
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
+        from spyglass.spikesorting.v2._storage.staged_outputs import (
+            unlink_staged_analysis_file as _unlink_staged_analysis_file,
         )
 
         # Producer provenance, resolved from the registry entry that runs, so
@@ -1360,7 +1352,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         UnitMatch/MatchableUnit inconsistency that should never occur, since both
         are written together in ``make_insert``. Detected sessions come from
         the frozen ``UnitMatch.RecordingSpikeCount`` rows
-        (:func:`._unit_match_readers._node_detections`).
+        (:func:`._matching.readers._node_detections`).
         """
         master_rows, member_rows = _unit_match_readers.tracked_unit_rows(key)
 
@@ -1384,7 +1376,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         each sort group are read live, so before reading an input the
         pinned curation and the input's source recordings are compared with
         the frozen rows
-        (:func:`._unit_match_readers._assert_run_input_unchanged`); the
+        (:func:`._matching.readers._assert_run_input_unchanged`); the
         region itself is read live by design, so a corrected ``Electrode``
         region shows.
 
@@ -1439,7 +1431,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         curation's units NWB and each member ``Recording``), so before an
         input is read its pinned curation and source recordings are compared
         with the frozen rows
-        (:func:`._unit_match_readers._assert_run_input_unchanged`): a
+        (:func:`._matching.readers._assert_run_input_unchanged`): a
         recording replaced after the run would otherwise shift the returned
         times.
 

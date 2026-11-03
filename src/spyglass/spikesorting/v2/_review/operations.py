@@ -186,6 +186,7 @@ class ReviewOperationService:
         if state.get("status") == "complete" and destination:
             from spyglass.spikesorting.v2._review.delivery import (
                 serve_review_bundle,
+                with_focus_units,
             )
 
             child_id = destination.get("review_id")
@@ -208,17 +209,9 @@ class ReviewOperationService:
                     message=f"The saved result could not be opened: {exc}. Retry the action; the scientific result is retained.",
                 )
                 return state
-            if destination.get("focus_unit_ids"):
-                from urllib.parse import urlencode
-
-                url += "?" + urlencode(
-                    {
-                        "spyglass_units": ",".join(
-                            map(str, destination["focus_unit_ids"])
-                        )
-                    }
-                )
-            state["url"] = url
+            state["url"] = with_focus_units(
+                url, destination.get("focus_unit_ids") or ()
+            )
         return state
 
     def close(self):

@@ -341,9 +341,11 @@ def _quality_metric_content(row: dict) -> dict:
     parameter Lookups, where ``params_schema_version`` and ``job_kwargs`` are
     fingerprinted as their own fields alongside (not inside) the ``params``
     blob. Shared by :func:`reject_duplicate_quality_metric_content` (whose
-    fingerprint must stay exactly as before -- do not add fields here) and
+    fingerprint must stay stable -- adding a field changes every stored row's
+    duplicate-content fingerprint) and
     :func:`reject_stale_quality_metric_defaults`, which separately folds
-    ``job_kwargs`` back in for its own comparison.
+    ``job_kwargs`` and ``params_schema_version`` back in for its own
+    comparison.
     """
     return {
         "metric_names": row["metric_names"],
@@ -433,17 +435,11 @@ def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:
     :class:`~spyglass.spikesorting.v2.exceptions.DuplicateParameterContentError`
     naming the row on a mismatch.
 
-    ``params_schema_version`` is excluded from the comparison: a row seeded
-    before ``observed_presence_bin_duration_s`` became a column keeps an
-    older version by design (see
-    ``docs/src/Features/SpikeSortingV2_Migration.md``), and that alone must
-    not be treated as stale content. Values are compared with
-    :func:`~spyglass.spikesorting.v2._curation.metrics.rules_payloads_match`'s
-    tolerance (rather than the exact comparison
-    :func:`reject_duplicate_quality_metric_content` uses) so a stored
-    ``observed_presence_bin_duration_s`` widened from single to double
-    precision in place still matches the shipped value. Identical content is
-    a silent no-op, so ``insert_default`` stays idempotent.
+    The comparison covers the scientific content, ``params_schema_version``
+    and ``job_kwargs``, exactly (bools stay distinct from ints; see
+    :func:`~spyglass.spikesorting.v2._curation.metrics.rules_payloads_match`).
+    Identical content is a silent no-op, so ``insert_default`` stays
+    idempotent.
 
     Parameters
     ----------
@@ -464,6 +460,10 @@ def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:
         actual = _jsonable_blob(_quality_metric_content(stored))
         expected["job_kwargs"] = _jsonable_blob(default.get("job_kwargs"))
         actual["job_kwargs"] = _jsonable_blob(stored.get("job_kwargs"))
+        expected["params_schema_version"] = int(
+            default["params_schema_version"]
+        )
+        actual["params_schema_version"] = int(stored["params_schema_version"])
         if not rules_payloads_match(expected, actual):
             raise DuplicateParameterContentError(
                 f"QualityMetricParameters {name!r} already exists with "

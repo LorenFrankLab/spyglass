@@ -14,29 +14,18 @@ import pytest
 # ---------- DB-free comparison logic ----------------------------------------
 
 
-def test_operator_xfail_is_not_inferred_as_automatic_unverifiable(dj_conn):
-    """Outcome routing uses distinct fields, not an operator-text prefix."""
+def test_operator_xfail_is_recorded_without_regenerating(dj_conn):
+    """An operator ``xfail`` reason short-circuits regeneration."""
     from spyglass.spikesorting.v2.recompute import _recompute_compute
 
     result = _recompute_compute(
         {"sorting_id": "sort"},
-        "legacy/unverifiable is an operator-authored explanation",
-        None,
+        "an operator-authored explanation",
         regen=lambda: pytest.fail("an xfail must not regenerate"),
         what="test",
     )
     assert result.outcome == "xfail"
     assert result.err_msg.startswith("xfail:")
-
-    automatic = _recompute_compute(
-        {"sorting_id": "sort"},
-        None,
-        "legacy/unverifiable: unseeded noise_levels",
-        regen=lambda: pytest.fail("an unverifiable row must not regenerate"),
-        what="test",
-    )
-    assert automatic.outcome == "unverifiable"
-    assert not automatic.err_msg.startswith("xfail:")
 
 
 def test_rebuild_refreshes_existing_analyzer_inventory(
@@ -162,45 +151,15 @@ def test_analyzer_seed_modes_classifies_seed_provenance():
     )
 
 
-def test_legacy_noise_inventory_is_explicitly_unverifiable():
-    """Legacy noise hashes never masquerade as corruption mismatches."""
-    from spyglass.spikesorting.v2._storage.recompute import (
-        analyzer_recompute_unverifiable_reason,
-    )
-
-    pinned = {
-        "extension_content_hash_version": 2,
-        "extension_content_hashes": {"noise_levels": "abc"},
-        "base_extension_seed_modes": {"noise_levels": 0},
-    }
-    assert analyzer_recompute_unverifiable_reason(pinned) is None
-
-    unseeded = {
-        "extension_content_hashes": {"noise_levels": "abc"},
-        "base_extension_seed_modes": {"noise_levels": "unseeded"},
-    }
-    assert "legacy/unverifiable" in analyzer_recompute_unverifiable_reason(
-        unseeded
-    )
-
-    pre_noise_hash = {
-        "extension_content_hashes": {"templates": "abc"},
-        "base_extension_seed_modes": {},
-    }
-    assert "not included" in analyzer_recompute_unverifiable_reason(
-        pre_noise_hash
-    )
-
-
-def test_analyzer_inventory_detects_rebuilt_and_legacy_storage():
-    """Folder generations refresh cheaply, including pre-fingerprint rows."""
+def test_analyzer_inventory_detects_rebuilt_storage():
+    """Folder generations refresh cheaply from the storage fingerprint."""
     from spyglass.spikesorting.v2._storage.recompute import (
         analyzer_inventory_storage_changed,
     )
 
     assert not analyzer_inventory_storage_changed({}, None)
     assert analyzer_inventory_storage_changed(
-        {"extension_content_hashes": {"templates": "abc"}}, "current"
+        {"storage_fingerprint": "previous"}, None
     )
     assert not analyzer_inventory_storage_changed(
         {
@@ -1559,36 +1518,6 @@ def test_analyzer_recompute_round_trip(
         shutil.copytree(folder, backup)
     rebuilt = None
     try:
-        version_key = {
-            "sorting_id": populated_sorting["sorting_id"],
-            "waveform_params_name": CORTEX_DISPLAY_WAVEFORMS,
-        }
-        manifest = (rc.SortingAnalyzerVersions & version_key).fetch1(
-            "analyzer_manifest"
-        )
-        legacy = dict(manifest)
-        legacy.pop("extension_content_hash_version")
-        rc.SortingAnalyzerVersions.update1(
-            {**version_key, "analyzer_manifest": legacy}
-        )
-        try:
-            with pytest.raises(
-                ValueError, match="current array-content hashes"
-            ):
-                rc.SortingAnalyzerRecompute().delete_files(
-                    populated_sorting,
-                    dry_run=False,
-                    force_stale_env=True,
-                    days_since_creation=0,
-                )
-            assert folder.exists()
-            assert not (
-                rc.SortingAnalyzerRecompute & populated_sorting & "deleted=1"
-            )
-        finally:
-            rc.SortingAnalyzerVersions.update1(
-                {**version_key, "analyzer_manifest": manifest}
-            )
         removed = rc.SortingAnalyzerRecompute().delete_files(
             populated_sorting, dry_run=False, days_since_creation=0
         )

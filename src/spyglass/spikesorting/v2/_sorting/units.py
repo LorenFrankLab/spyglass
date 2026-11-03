@@ -6,7 +6,7 @@ count; ``build_sorting_unit_rows`` turns that per-unit peak metadata into the
 ``Sorting.Unit`` rows; ``_to_int_unit_id`` coerces a sorter's unit id to the
 int PK v2 stores (raising the typed ``NonIntegerUnitIDError`` when it cannot).
 Pure (DB-free) row construction -- the sort-group/electrode fetches
-(``_sorting_fetch.fetch_unit_electrode_metadata``) and the
+(``_sorting.fetch.fetch_unit_electrode_metadata``) and the
 ``Sorting.Unit.insert`` live outside this module.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB

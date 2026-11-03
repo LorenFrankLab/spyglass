@@ -11,7 +11,7 @@ ask for the same logical selection compute the same id; the database accepts
 one master row and rejects the duplicate, and the loser refetches the winner's
 row.
 
-DB-FREE BY CONTRACT. Like ``_artifact_compute``, this module imports
+DB-FREE BY CONTRACT. Like ``_artifacts.compute``, this module imports
 neither DataJoint nor SpikeInterface and opens no database connection at
 import. The selection helpers compute a primary key here BEFORE touching
 the DB, and an HPC job array re-importing this module in a spawned worker
@@ -548,7 +548,7 @@ def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     The selection helpers derive each PK from the logical identity, so a
     caller normally omits it (``supplied is None`` -> no-op). If a caller
     DOES pass one, it must equal the deterministic id; a mismatch means a
-    hand-rolled random / legacy UUID that would silently fork the
+    hand-rolled random UUID that would silently fork the
     selection identity, so raise rather than honor it. Accepts ``str`` or
     ``uuid.UUID`` for ``supplied`` (normalized before comparison). A
     ``supplied`` value that is not even a well-formed UUID is, by
@@ -600,9 +600,8 @@ def existing_selection_pk(
     ``master_ids`` are the primary keys of every master row matching one
     logical selection, as the table's own find-existing query collected them.
     The row at ``canonical_id`` is the content-addressed selection. Any other
-    id is non-deterministic (a raw ``insert`` bypass or a legacy
-    non-content-addressed row) and violates the one-identity-one-id
-    invariant, so it is rejected rather than returned.
+    id is non-deterministic (a raw ``insert`` bypass) and violates the
+    one-identity-one-id invariant, so it is rejected rather than returned.
 
     Parameters
     ----------

@@ -3,9 +3,9 @@
 ``CurationV2.insert_curation`` is split into a pure planning half (here)
 and a DB half (the table method). :func:`build_curation_insert_plan`
 resolves the post-merge curated ``Unit`` rows (via
-:func:`._curation_transforms.build_curated_unit_rows`) and validates the
+:func:`._curation.transforms.build_curated_unit_rows`) and validates the
 supplied labels against the source/written unit sets.
-:func:`._curation_insert.plan_curation_insert` resolves the auto-increment
+:func:`._curation.insert.plan_curation_insert` resolves the auto-increment
 ``curation_id`` (a DB query) before calling it, and the table method stages
 the curated-units NWB and runs the atomic insert transaction on the plan.
 
@@ -18,7 +18,7 @@ Isolating the pure halves makes the row-shaping + stray-label decision
 matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop) and
 the summary formatting unit-testable without a DataJoint transaction.
 
-Dependency-light: imports only :mod:`_curation_transforms` (DB-free) and the
+Dependency-light: imports only :mod:`_curation.transforms` (DB-free) and the
 shared spyglass logger.
 """
 
@@ -125,9 +125,9 @@ def build_curation_insert_plan(
     and threaded in. ``sorting_units`` are the SOURCE units the curation
     composes from -- the raw ``Sorting.Unit`` rows for a root curation, or the
     parent curation's ``CurationV2.Unit`` rows for a child. Row shaping is
-    delegated to :func:`._curation_transforms.build_curated_unit_rows`, label
+    delegated to :func:`._curation.transforms.build_curated_unit_rows`, label
     inheritance/override to
-    :func:`._curation_transforms.compose_curation_labels`, and label-key
+    :func:`._curation.transforms.compose_curation_labels`, and label-key
     validation to :func:`validate_label_unit_ids`.
 
     ``parent_labels`` (``{parent_unit_id: [label, ...]}``, empty/None for a
@@ -190,7 +190,7 @@ def build_curation_summary(
 
     Pure formatter: given the already-fetched curation fields, build the
     notebook-printable summary. ``is_merge_preview`` is derived here from the
-    values in hand (:func:`._curation_transforms.is_merge_preview`, which
+    values in hand (:func:`._curation.transforms.is_merge_preview`, which
     ``has_unapplied_proposed_merges`` also uses) rather than re-fetching. No
     database access.
 

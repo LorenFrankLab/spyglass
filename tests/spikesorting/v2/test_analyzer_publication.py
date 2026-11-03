@@ -20,7 +20,9 @@ from tests.spikesorting.v2._sorter_stub import plant_sorter
 def test_duplicate_compute_keeps_winners_analyzer(
     planted_two_unit_sort, monkeypatch, winner_already_committed
 ):
-    from spyglass.spikesorting.v2.recording import _unlink_staged_analysis_file
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
+    )
     from spyglass.spikesorting.v2.sorting import Sorting
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
     from tests.spikesorting.v2._tripart_helpers import (
@@ -244,9 +246,14 @@ def test_orphan_audit_reclaims_only_abandoned_staging(
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
     sorting_id = uuid.uuid4()
     canonical = analyzer_path(sorting_id, "test")
-    # An older PID-named build has no surviving ownership lock.
-    abandoned = tmp_path / f".{canonical.stem}.build-123.analyzer"
+    # A build whose worker died has no surviving ownership lock.
+    abandoned = (
+        tmp_path / f".{canonical.stem}.build-{uuid.uuid4().hex}.analyzer"
+    )
     abandoned.mkdir()
+    # A hidden folder not named by the staging scheme is never a candidate.
+    unrelated = tmp_path / f".{canonical.stem}.build-123.analyzer"
+    unrelated.mkdir()
     with StagedAnalyzer(canonical) as active:
         active.folder.mkdir()
         report = Sorting.find_orphaned_analyzer_folders(sorting_id=sorting_id)
@@ -258,6 +265,7 @@ def test_orphan_audit_reclaims_only_abandoned_staging(
         )
         assert not abandoned.exists()
         assert active.folder.exists()
+        assert unrelated.exists()
 
 
 def test_copy_keeps_the_analyzers_sampling_frequency(tmp_path):

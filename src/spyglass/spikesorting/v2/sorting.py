@@ -205,7 +205,7 @@ class SortingComputed(NamedTuple):
     ownership lock until insertion either publishes or discards it. The cache
     folder is not a DB column; every reader resolves the
     canonical location from ``sorting_id`` via
-    ``_analyzer_cache.analyzer_path``.
+    ``_storage.analyzer_cache.analyzer_path``.
 
     NOTE: the field ORDER here is a positional wire contract -- the tri-part
     dispatch unpacks this tuple positionally into ``make_insert``
@@ -323,7 +323,7 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         )
 
     # The shipped rows are defined in
-    # ``_recipe_catalog.sorter_default_contents`` (single source).
+    # ``_core.recipe_catalog.sorter_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = sorter_default_contents()
 
     # Sorter names in ``_DEFAULT_CONTENTS`` that are NOT SpikeInterface
@@ -450,10 +450,10 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
           local ``'default'`` row would be rejected at populate.
         - **Curated** (mountainsort4, mountainsort5, kilosort4,
           spykingcircus2, tridesclous2, clusterless_thresholder). Their typed
-          ``extra='forbid'`` schemas intentionally strip some SI defaults
-          (e.g. ``MountainSort5Schema`` drops ``filter`` / ``freq_min``
-          because the recording is already filtered), so SI's full default
-          dict would fail validation or lose keys.
+          schemas intentionally differ from SI's defaults (e.g. the
+          ``extra='forbid'`` ``MountainSort5Schema`` leaves out
+          ``delete_temporary_recording`` and defaults ``filter=False``), so
+          SI's full default dict would fail validation or change values.
 
         Not called by ``initialize_v2_defaults``, so users who do not need v1
         sorter names do not pay for the inserts. Idempotent via
@@ -475,8 +475,8 @@ def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
     """Reject a non-path-safe ``waveform_params_name`` at insert.
 
     A ``per_row_hook`` for ``validate_lookup_rows``; delegates to the DB-free
-    :func:`._analyzer_cache.assert_path_safe_waveform_params_name` (the owner of
-    the analyzer-path policy), which the load path reuses.
+    :func:`._storage.analyzer_cache.assert_path_safe_waveform_params_name`
+    (the owner of the analyzer-path policy), which the load path reuses.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         assert_path_safe_waveform_params_name,
@@ -514,7 +514,7 @@ class AnalyzerWaveformParameters(
     """
 
     # The shipped region rows are defined in
-    # ``_recipe_catalog.waveform_params_default_contents`` (single source).
+    # ``_core.recipe_catalog.waveform_params_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = waveform_params_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
@@ -675,8 +675,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             motion itself.
         DuplicateSelectionError
             If any matching master has a non-deterministic ``sorting_id``
-            (a raw ``insert`` bypass or a legacy non-content-addressed row) --
-            even a single one; an integrity bug, not user error.
+            (a raw ``insert`` bypass) -- even a single one; an integrity bug,
+            not user error.
         SchemaBypassError
             If a deterministic master exists but its recording/artifact-detection
             source parts are missing/mismatched (a raw-insert orphan).
@@ -696,7 +696,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
 
-        See :func:`._sorting_selection_insert.find_existing_pk`. Tests patch
+        See :func:`._sorting.selection.find_existing_pk`. Tests patch
         it, so it stays on the class and ``insert_selection`` calls it through
         the class.
         """
@@ -932,7 +932,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         (``Recording``, ``ConcatenatedRecording`` or
         ``MotionCorrectedRecording``): a locked, verified rebuild whose
         content must match the stored ``content_hash``. Call it before
-        :func:`._source_resolution.load_effective_recording`, or use
+        :func:`._recording.source.load_effective_recording`, or use
         :meth:`load_stored_traces`.
 
         Parameters
@@ -944,7 +944,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         -------
         str
             Absolute path of the (present) file, for
-            :func:`._source_resolution.read_effective_recording`.
+            :func:`._recording.source.read_effective_recording`.
         """
         from spyglass.spikesorting.v2._storage.rebuilds import (
             ensure_artifact_file,
@@ -983,7 +983,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
         Self-heals through :meth:`ensure_effective_traces`, then opens the
         file it resolved with
-        :func:`._source_resolution.read_persisted_traces` (no artifact mask
+        :func:`._recording.source.read_persisted_traces` (no artifact mask
         applied at load).
 
         Parameters
@@ -1053,9 +1053,9 @@ class Sorting(
 
     ``make()`` resolves the source recording, applies sorter-owned
     preprocessing such as external MS4/MS5 whitening when requested,
-    runs the sorter, removes excess spikes, builds a
-    ``SortingAnalyzer(format="zarr", sparse=True)``, computes
-    the base extensions (``random_spikes``, ``noise_levels``,
+    runs the sorter, removes excess spikes, builds a ``binary_folder``
+    ``SortingAnalyzer`` (channel sparsity from the display waveform recipe),
+    computes the base extensions (``random_spikes``, ``noise_levels``,
     ``templates``, ``waveforms``), writes a fresh/whitelisted
     ``AnalysisNwbfile`` containing only the v2 sorting Units (NOT the
     parent NWB's units), and populates ``Sorting.Unit``.
@@ -1079,16 +1079,17 @@ class Sorting(
     # provenance in the database -- a sort cannot be inserted referencing a
     # recipe that is not tracked, and a referenced recipe row cannot be deleted.
     # The name is resolved at sort time from the source preprocessing recipe
-    # (region; see _recipe_catalog.waveform_params_for_preprocessing) and read
-    # back -- never re-resolved -- on every later rebuild, so the analyzer is
+    # (region; see _core.recipe_catalog.waveform_params_for_preprocessing) and
+    # read back -- never re-resolved -- on every later rebuild, so the analyzer is
     # deterministic for a sorting_id. It is NOT a free per-sort knob and is NOT
     # part of sorting_id identity. The whitened METRIC recipe is carried on
     # CurationEvaluationSelection.metric_waveform_params_name, not here.
     # The SortingAnalyzer cache folder is intentionally NOT a column: it is
     # large (5-50 GB) regeneratable scratch resolved at runtime from
-    # (sorting_id, display_waveform_params_name) via _analyzer_cache.analyzer_path.
-    # Persisting an absolute path here would drift from the
-    # accessor-computed path whenever temp_dir changes between runs.
+    # (sorting_id, display_waveform_params_name) via
+    # _storage.analyzer_cache.analyzer_path. Persisting an absolute path here
+    # would drift from the accessor-computed path whenever temp_dir changes
+    # between runs.
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.
@@ -2192,8 +2193,8 @@ class Sorting(
         """Insert the pre-built ``Sorting.Unit`` rows.
 
         The rows are built ONCE in ``make_compute``
-        (:func:`._sorting_units.build_unit_rows_from_analyzer`) and threaded through, so this
-        is a pure insert with no analyzer load or DB read. An empty list (a
+        (:func:`._sorting.units.build_unit_rows_from_analyzer`) and threaded
+        through, so this is a pure insert with no analyzer load or DB read. An empty list (a
         zero-unit sort) is a no-op.
         """
         Sorting.Unit.insert(unit_rows)

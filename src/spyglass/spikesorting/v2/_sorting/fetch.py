@@ -293,7 +293,7 @@ def fetch_unit_electrode_metadata(recording_id, nwb_file_name):
     building the ``Sorting.Unit`` rows (and matching NWB unit columns).
     Upstream inputs are resolved in ``make_fetch``; the only DB reads
     left in ``make_compute`` stage the units NWB (see
-    :mod:`._recording_nwb`). ``electrode_by_id`` comes from the unjoined
+    :mod:`._storage.nwb`). ``electrode_by_id`` comes from the unjoined
     ``SortGroupElectrode`` so it stays complete (the row-construction key set
     is unchanged); ``region_by_electrode`` is a best-effort
     ``electrode_id -> brain region`` map (an electrode without a region

@@ -20,8 +20,10 @@ from spyglass.spikesorting.v2._orchestration.exports import (
 _ROOT_REEXPORTS = frozenset(
     [
         "run_v2_pipeline",
+        "run_v2_concat_pipeline",
         "run_v2_pipeline_session",
         "estimate_motion",
+        "estimate_concat_motion",
         "run_v2_unit_match",
         "plan_v2_unit_match",
         "plan_v2_unit_match_from_sorts",
@@ -78,7 +80,9 @@ _FACADE_REEXPORTS = _ROOT_REEXPORTS | frozenset(
         "PipelineOutcome",
         "PipelineStageSeconds",
         "RunV2ConcatSummary",
+        "RunV2ConcatPipelineInputs",
         "RunV2PipelineInputs",
+        "RunV2PipelineOptions",
         "RunV2PipelineSessionFailed",
         "RunV2PipelineSessionInputs",
         "RunV2PipelineSessionOk",

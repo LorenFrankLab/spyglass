@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
 from spyglass.spikesorting.v2._core.recipe_catalog import (
     CORTEX_DISPLAY_WAVEFORMS,
 )
@@ -456,6 +457,7 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
                 "ms_after": 2.0,
                 "max_spikes_per_unit": 20000,
                 "whiten": False,
+                "sparsity": {},
                 "purpose": "display",
                 "schema_version": 1,
             },
@@ -1047,6 +1049,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
                 "metric_waveform_params_name": (
                     "franklab_cortex_metric_waveforms"
                 ),
+                "observation_version": OBSERVATION_VERSION,
             },
             allow_direct_insert=True,
         )
@@ -1127,6 +1130,7 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
                 "metric_waveform_params_name": (
                     "franklab_cortex_metric_waveforms"
                 ),
+                "observation_version": OBSERVATION_VERSION,
             },
             allow_direct_insert=True,
         )
@@ -1140,6 +1144,7 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
                 "metric_waveform_params_name": (
                     "franklab_hippocampus_metric_waveforms"
                 ),
+                "observation_version": OBSERVATION_VERSION,
             },
             allow_direct_insert=True,
         )

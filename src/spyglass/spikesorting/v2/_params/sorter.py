@@ -57,7 +57,7 @@ class MountainSort4Schema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
     detect_sign: Literal[-1, 0, 1] = -1
     adjacency_radius: float = Field(
         default=100.0,
@@ -117,13 +117,10 @@ class MountainSort5Schema(BaseModel):
     ``scheme2_training_recording_sampling_mode`` bound the scheme-2 training
     set, ``scheme3_block_duration_sec`` sets the scheme-3 block length, and
     ``scheme2_max_num_snippets_per_training_batch`` bounds training memory.
-    ``schema_version`` 2 added these long-recording / PCA / spatial fields;
-    a version-1 row validates unchanged (every new field defaults to the
-    SpikeInterface wrapper default, which a version-1 row also ran with).
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 2
+    schema_version: Literal[2] = 2
     scheme: Literal["1", "2", "3"] = "2"
     detect_sign: Literal[-1, 0, 1] = -1
     detect_threshold: float = Field(default=5.5, gt=0.0)
@@ -180,12 +177,11 @@ class Kilosort4Schema(BaseModel):
     surface at SI sort time, not at Lookup insert time -- this is the
     accepted cost of not pinning KS4's large, fast-moving parameter
     surface in the schema. The one exception is ``whiten`` (see
-    ``_reject_whiten``): KS4 has no such kwarg and a truthy value would
-    silently double-whiten via the runtime, so it is rejected at insert.
+    ``_reject_whiten``): KS4 has no such kwarg, so it is rejected at insert.
     """
 
     model_config = ConfigDict(extra="allow")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
     Th_universal: float = Field(default=9.0, gt=0.0)
     Th_learned: float = Field(default=8.0, gt=0.0)
     nblocks: int = Field(default=1, ge=0)
@@ -196,20 +192,21 @@ class Kilosort4Schema(BaseModel):
     def _reject_whiten(self):
         """Reject a ``whiten`` key -- KS4 whitens internally, no such kwarg.
 
-        The v2 runtime runs its external float64 whitening whenever the
-        sorter params carry a truthy ``whiten`` (``_sorting_dispatch.py``).
-        KS4 also whitens internally (``skip_kilosort_preprocessing=False``),
-        so a ``whiten`` key here -- which ``extra="allow"`` would otherwise
-        pass through silently -- would double-whiten the signal. Whitening is
-        controlled via ``skip_kilosort_preprocessing`` / ``whitening_range``.
+        The SI-wrapper key check (:func:`sorter_wrapper_vocabulary`) can only
+        list KS4's parameters when the ``kilosort`` package is installed, so
+        without it a ``whiten`` key -- which ``extra="allow"`` would otherwise
+        accept -- reaches the SI wrapper and fails at sort time, after the
+        recording stage. Rejecting it here catches it in every environment.
+        Whitening is controlled via ``skip_kilosort_preprocessing`` /
+        ``whitening_range``.
         """
         if "whiten" in self.model_dump():
             raise ValueError(
                 "Kilosort4 has no 'whiten' parameter; it whitens internally. "
-                "Remove 'whiten' -- setting it triggers the v2 runtime's "
-                "external float64 whitening on top of KS4's own, "
-                "double-whitening the signal. Control whitening via "
-                "skip_kilosort_preprocessing / whitening_range."
+                "Remove 'whiten' -- SpikeInterface's Kilosort4 wrapper does "
+                "not accept it. "
+                "Control whitening via skip_kilosort_preprocessing / "
+                "whitening_range."
             )
         return self
 
@@ -221,13 +218,6 @@ class ClusterlessThresholderSchema(BaseModel):
     is a Spyglass-specific peak-detection path built on
     ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``.
     ``extra="forbid"`` catches typos against the documented field set.
-
-    Two fields that carried no effect are intentionally absent:
-
-    * ``outputs`` was a Spyglass routing hint; the runtime always
-      treats the detector output as a sorting and never reads it.
-    * ``random_chunk_kwargs`` (renamed ``random_slices_kwargs``) is now
-      managed internally by SI 0.104 ``detect_peaks``.
 
     ``threshold_unit`` is the primary, self-documenting knob for how
     ``detect_threshold`` is interpreted:
@@ -254,14 +244,11 @@ class ClusterlessThresholderSchema(BaseModel):
     before the ``detect_peaks`` call (it is not a ``detect_peaks``
     kwarg).
 
-    ``schema_version`` is 4: 2 dropped ``outputs`` /
-    ``random_chunk_kwargs``; 3 made ``noise_levels`` optional; 4 added
-    ``threshold_unit``. ``extra="forbid"`` enforces the field set at
-    insert time.
+    ``extra="forbid"`` enforces the field set at insert time.
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 4
+    schema_version: Literal[4] = 4
     # Default 100.0 is the production/real-data clusterless threshold: a
     # microvolt / native-unit value under the default ``threshold_unit='uv'``
     # below (which derives noise_levels=[1.0]). Paired with
@@ -342,7 +329,7 @@ class SpykingCircus2Schema(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
 
 
 class Tridesclous2Schema(BaseModel):
@@ -353,7 +340,7 @@ class Tridesclous2Schema(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
 
 
 class GenericSorterParamsSchema(BaseModel):
@@ -366,7 +353,7 @@ class GenericSorterParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
 
 
 class SorterExecutionParamsSchema(BaseModel):
@@ -407,7 +394,7 @@ class SorterExecutionParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
     backend: Literal["local", "docker", "singularity"] = "local"
     container_image: str | None = None
     delete_container_files: bool = True
@@ -486,64 +473,6 @@ _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
     "tridesclous2": Tridesclous2Schema,
     "clusterless_thresholder": ClusterlessThresholderSchema,
 }
-
-# Sorters that whiten internally and have NO ``whiten`` kwarg, so a truthy
-# ``whiten`` in their params would trigger the v2 runtime's external float64
-# whitening (``_sorting_dispatch.py``) on top of the sorter's own --
-# double-whitening the signal (or being rejected by SpikeInterface at sort
-# time as an invalid kwarg). Kilosort4 is guarded separately by
-# ``Kilosort4Schema._reject_whiten`` (it has its own typed schema); these three
-# fall through to ``GenericSorterParamsSchema`` (``extra="allow"``), which
-# would pass ``whiten`` through silently, so the guard must run at the
-# ``SorterParameters`` insert via :func:`reject_internal_whiten`. MountainSort
-# 4/5 are intentionally NOT here: they DO take ``whiten=True``, which the
-# runtime routes through the external float64 whitening (whitening the signal
-# exactly once).
-#
-# This set coincides today with ``_sorting_dispatch.MATLAB_SORTERS`` (the
-# container-execution policy), but the two encode DIFFERENT concepts -- "whitens
-# internally with no whiten kwarg" here vs "ships only as a MATLAB container
-# image" there -- and are deliberately kept separate so a future sorter that is
-# one but not the other does not force a wrong coupling. Do not merge them.
-_INTERNAL_WHITEN_NO_KWARG_SORTERS: frozenset[str] = frozenset(
-    {"kilosort2_5", "kilosort3", "ironclust"}
-)
-
-
-def reject_internal_whiten(sorter: str, params: dict) -> None:
-    """Raise if an internally-whitening sorter is given a truthy ``whiten``.
-
-    ``kilosort2_5`` / ``kilosort3`` / ``ironclust`` whiten internally and have
-    no ``whiten`` parameter, but they validate against the permissive
-    ``GenericSorterParamsSchema`` (``extra="allow"``), so a ``whiten=True`` a
-    user copies from a Kilosort-style mental model would slip through and
-    trigger the v2 runtime's external float64 whitening on top of the sorter's
-    own. This mirrors ``Kilosort4Schema._reject_whiten`` for the sorters that
-    lack a dedicated typed schema. No-op for every other sorter (including
-    MountainSort 4/5, which use ``whiten=True`` deliberately).
-
-    Parameters
-    ----------
-    sorter : str
-        The ``sorter`` column value of a ``SorterParameters`` row.
-    params : dict
-        The (already schema-validated) ``params`` blob.
-
-    Raises
-    ------
-    ValueError
-        If ``sorter`` whitens internally and ``params`` carries a truthy
-        ``whiten``.
-    """
-    if sorter in _INTERNAL_WHITEN_NO_KWARG_SORTERS and params.get("whiten"):
-        raise ValueError(
-            f"Sorter {sorter!r} whitens internally and has no 'whiten' "
-            "parameter; a truthy 'whiten' triggers the v2 runtime's external "
-            "float64 whitening on top of the sorter's own, double-whitening "
-            "the signal (or is rejected by SpikeInterface at sort time). "
-            "Remove 'whiten' from the params blob."
-        )
-
 
 # The params key that switches each sorter's own motion correction, as the
 # SpikeInterface 0.104 wrappers read it: SpykingCircus2

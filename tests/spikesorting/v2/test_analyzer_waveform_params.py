@@ -595,13 +595,12 @@ def test_sparsity_params_default_matches_si_and_validates_methods():
         SparsityParams,
     )
 
-    assert ANALYZER_WAVEFORM_SCHEMA_VERSION == 2
+    assert ANALYZER_WAVEFORM_SCHEMA_VERSION == 3
     default = AnalyzerWaveformParamsSchema().model_dump()["sparsity"]
     assert default == {
         "method": "radius",
         "radius_um": 100.0,
         "num_channels": None,
-        "peak_sign": "neg",
         "num_spikes_for_sparsity": 100,
         "ms_before": 1.0,
         "ms_after": 2.5,
@@ -609,22 +608,24 @@ def test_sparsity_params_default_matches_si_and_validates_methods():
     assert SparsityParams().si_create_kwargs() == {
         "sparse": True,
         "method": "radius",
-        "peak_sign": "neg",
         "num_spikes_for_sparsity": 100,
         "ms_before": 1.0,
         "ms_after": 2.5,
         "radius_um": 100.0,
     }
-    # A pre-field blob (no ``sparsity`` key) validates to the same default.
-    legacy = {
+    # A recipe that omits ``sparsity`` validates to the same default, and
+    # polarity is not a recipe field (it comes from the sorter).
+    without_sparsity = {
         k: v
         for k, v in AnalyzerWaveformParamsSchema().model_dump().items()
         if k != "sparsity"
     }
     assert (
-        AnalyzerWaveformParamsSchema.model_validate(legacy).sparsity
+        AnalyzerWaveformParamsSchema.model_validate(without_sparsity).sparsity
         == SparsityParams()
     )
+    with pytest.raises(pydantic.ValidationError, match="peak_sign"):
+        SparsityParams(peak_sign="pos")
     assert SparsityParams(method="dense").si_create_kwargs() == {
         "sparse": False
     }

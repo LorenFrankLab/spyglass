@@ -39,18 +39,16 @@ from spyglass.spikesorting.v2.curation_api import RunResult
 
 
 def run_v2_pipeline(
-    nwb_file_name: "str | None" = None,
-    sort_group_id: "int | None" = None,
-    interval_list_name: "str | None" = None,
-    team_name: "str | None" = None,
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
+    *,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     curation_description: str = "",
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
-    *,
-    concat_session_group_owner: "str | None" = None,
-    concat_session_group_name: "str | None" = None,
     build_figpack_view: bool = False,
     figpack_label_options: "list[str] | None" = None,
     manual_excluded_times=None,
@@ -58,17 +56,11 @@ def run_v2_pipeline(
     motion_correction_params_name: "str | None" = None,
     motion_estimate_id: "uuid.UUID | str | None" = None,
 ) -> "RunResult":
-    """End-to-end sort in one call: select + populate every stage, then curate.
+    """End-to-end sort of one sort group: select + populate every stage, then curate.
 
-    Two input modes, exactly one required. Single-session mode (recording ->
-    optional artifact detection -> [motion] -> sort -> curation) needs
-    ``nwb_file_name``, ``sort_group_id``, ``interval_list_name``,
-    ``team_name``. Concat mode (member recordings -> member artifact masks ->
-    ConcatenatedRecording -> [motion] -> sort -> curation) needs
-    ``concat_session_group_owner`` + ``concat_session_group_name``
-    and rejects the single-session fields (member teams come from
-    ``SessionGroup.Member``). Supplying both, neither, or part of a mode raises
-    ``PipelineInputError``.
+    Stages: recording -> optional artifact detection -> [motion] -> sort ->
+    curation. To sort a concatenated session group instead, use
+    :func:`run_v2_concat_pipeline`, which takes the same options.
 
     Chains the v2 ``insert_selection`` + ``populate`` calls into one
     call. Idempotent: re-running with the same inputs reuses the same scientific
@@ -102,16 +94,7 @@ def run_v2_pipeline(
         valid times"`` for a full-session sort.
     team_name
         LabTeam owning the sort. Must already exist in
-        ``common.LabTeam``. Single-session mode only; rejected in concat mode.
-    concat_session_group_owner, concat_session_group_name
-        Concat mode (required together, mutually exclusive with the
-        single-session fields): the ``(session_group_owner, session_group_name)``
-        of an existing ``SessionGroup``. The orchestrator populates each
-        member's ``Recording``, concatenates them via ``ConcatenatedRecording``
-        (concatenation itself never corrects motion; see ``motion_mode``), and
-        sorts the result. Any preset runs in either mode; the mode is set by
-        which inputs are given. The artifact recipe is applied independently
-        to each member.
+        ``common.LabTeam``.
     pipeline_preset
         Pipeline-preset name from ``_PIPELINE_PRESETS``. The default is
         ``franklab_probe_hippocampus_30khz_ms4_2026_06`` (MountainSort4),
@@ -158,18 +141,9 @@ def run_v2_pipeline(
         the heaviest populate of the run.
     preflight
         If True (default), run a fast, read-only prerequisite check before any
-        populate; a failure raises ``PreflightError`` (with the exact fix). The
-        check is mode-specific:
-
-        - single-session: ``preflight_v2_pipeline`` -- the session / interval /
-          team / sort-group rows, the preset's parameter rows, and the sorter
-          binary.
-        - concat: ``assert_concat_preflight`` -- the ``SessionGroup`` and its
-          members, plus the preset's preprocessing / sorter / analyzer-waveform
-          param rows and the sorter binary/runtime (the compute-row checks
-          shared with the single-session preflight), including the member
-          artifact parameters.
-
+        populate; a failure raises ``PreflightError`` (with the exact fix):
+        ``preflight_v2_pipeline`` -- the session / interval / team /
+        sort-group rows, the preset's parameter rows, and the sorter binary.
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
     build_figpack_view
@@ -184,17 +158,15 @@ def run_v2_pipeline(
         Hosted upload is not offered here -- the bundle is always local.
     manual_excluded_times
         Immutable half-open [start, stop) exclusions in original session
-        seconds, composed with automatic artifact detection. For concat,
-        map each member_index to its intervals. Manual exclusions also apply
-        when the preset disables automatic detection.
+        seconds, composed with automatic artifact detection. Manual
+        exclusions also apply when the preset disables automatic detection.
     figpack_label_options
         Curation label palette (in display order) for the FigPack view; passed
         through to ``FigPackCurationSelection``. ``None`` (default) uses
-        ``["accept", "mua", "noise"]``. Ignored when
-        ``build_figpack_view=False``.
+        ``["accept", "mua", "noise"]``. Requires ``build_figpack_view=True``.
     motion_mode
-        The motion stage, in either input mode, run on the sort's source (the
-        recording under its artifact mask, or the concatenation):
+        The motion stage, run on the sort's source (the recording under its
+        artifact mask, or for ``run_v2_concat_pipeline`` the concatenation):
 
         - ``"off"`` (default): no motion stage; the sort reads the masked,
           uncorrected source.
@@ -225,13 +197,12 @@ def run_v2_pipeline(
         ``MotionEstimate`` instead of selecting the source's estimate. It is
         reused as is (never recomputed) and corrected with the interpolation
         row of ``motion_correction_params_name``. It must be a populated
-        estimate of this run's source and artifact mask (for concat: its
-        session group, preprocessing recipe, members and member masks) made
-        with that recipe's estimation row, on source traces unchanged since;
-        a mismatch names the estimate's value and the run's, and fails
-        preflight (``PreflightError``) or, with ``preflight=False``, the
-        ``motion_estimate`` stage (``PipelineStageError``), before any
-        sort. Given with another mode, or not a UUID, it raises
+        estimate of this run's source and artifact mask made with that recipe's
+        estimation row, on source traces unchanged since; a mismatch names the
+        estimate's value and the run's, and fails preflight
+        (``PreflightError``) or, with ``preflight=False``, the
+        ``motion_estimate`` stage (``PipelineStageError``), before any sort.
+        Given with another mode, or not a UUID, it raises
         ``PipelineInputError`` before any database access.
 
     Returns
@@ -244,7 +215,7 @@ def run_v2_pipeline(
         ``*_curation_uuid`` keys recorded at run time). A concat run keeps its
         synthetic-timeline root/analysis merge IDs unset and instead returns one
         session-safe merge ID per frozen member. The source-stage keys depend on
-        the input mode, discriminated by ``source_mode``.
+        the entry point, discriminated by ``source_mode``.
 
         Always present:
             ``pipeline_preset``          : the pipeline-preset name
@@ -270,7 +241,8 @@ def run_v2_pipeline(
             ``artifact_detection_id``    : RecordingArtifactSelection PK, or
                 ``None`` when the preset runs no artifact detection
                 (``artifact_detection_params_name`` is ``None``)
-        Concat mode adds member artifact detection and concat stages:
+        :func:`run_v2_concat_pipeline` adds member artifact detection and
+        concat stages:
             ``member_recording_ids``     : the per-member RecordingSelection PKs
             ``concat_recording_id``      : ConcatenatedRecording PK
             ``member_merge_ids``         : frozen ``member_index`` to
@@ -314,9 +286,9 @@ def run_v2_pipeline(
         unchanged):
             ``*_status`` (one per source/sort/curation stage above -- e.g.
                 ``recording_status`` / ``artifact_detection_status`` in
-                single-session mode, ``member_recording_status`` /
+                a single-session run, ``member_recording_status`` /
                 ``concat_recording_status`` / ``member_curation_status`` in
-                concat mode, plus
+                a concat run, plus
                 ``sorting_status`` / ``curation_status``) : ``"computed"`` if the
                 stage did work this call, ``"reused"`` if its row already existed
                 and the call no-opped, or ``"skipped"`` if the preset configured
@@ -336,8 +308,11 @@ def run_v2_pipeline(
     Raises
     ------
     PipelineInputError
-        If ``pipeline_preset`` is not a known name, or the motion request is
-        contradictory (see ``motion_mode`` and ``motion_estimate_id``).
+        Before any database access: if a source input is ``None``,
+        ``pipeline_preset`` is not a known name, the motion request is
+        contradictory (see ``motion_mode`` and ``motion_estimate_id``),
+        ``figpack_label_options`` is given without ``build_figpack_view``, or
+        ``build_figpack_view=True`` without the FigPack packages installed.
     PreflightError
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
@@ -364,63 +339,192 @@ def run_v2_pipeline(
         surfaces untranslated. ``preflight=True`` catches these earlier
         as a ``PreflightError`` with the exact fix.
     """
+    return _run_pipeline(
+        "run_v2_pipeline",
+        is_concat=False,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        pipeline_preset=pipeline_preset,
+        curation_description=curation_description,
+        require_units=require_units,
+        auto_curate=auto_curate,
+        preflight=preflight,
+        build_figpack_view=build_figpack_view,
+        figpack_label_options=figpack_label_options,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        motion_estimate_id=motion_estimate_id,
+    )
+
+
+def run_v2_concat_pipeline(
+    session_group_owner: str,
+    session_group_name: str,
+    *,
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
+    curation_description: str = "",
+    require_units: bool = False,
+    auto_curate: bool = False,
+    preflight: bool = True,
+    build_figpack_view: bool = False,
+    figpack_label_options: "list[str] | None" = None,
+    manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
+    motion_estimate_id: "uuid.UUID | str | None" = None,
+) -> "RunResult":
+    """End-to-end sort of a concatenated session group, then curate.
+
+    Stages: member recordings -> member artifact masks ->
+    ``ConcatenatedRecording`` -> [motion] -> sort -> curation. Each member's
+    ``Recording`` is populated and the preset's artifact recipe is applied to
+    each member independently; concatenation itself never corrects motion
+    (see ``motion_mode``). Member teams come from ``SessionGroup.Member``.
+    Any preset runs in either this or the single-session
+    :func:`run_v2_pipeline`, which documents the shared options.
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name
+        The primary key of an existing ``SessionGroup``.
+    manual_excluded_times
+        A mapping of each ``member_index`` to its half-open [start, stop)
+        exclusions in that member's session seconds, composed with automatic
+        artifact detection.
+    preflight
+        If True (default), first run ``assert_concat_preflight``: the
+        ``SessionGroup`` and each member's Raw / interval / sort-group rows
+        and sampling rate, the preset's parameter rows (including the member
+        artifact recipe and, with ``auto_curate``, the auto-curation rows),
+        the motion request and the sorter binary/runtime. A failure raises
+        ``PreflightError``.
+    motion_estimate_id
+        As in :func:`run_v2_pipeline`; the estimate must match this group's
+        preprocessing recipe, members and member masks.
+    pipeline_preset, curation_description, require_units, auto_curate, \
+build_figpack_view, figpack_label_options, motion_mode, \
+motion_correction_params_name
+        As in :func:`run_v2_pipeline`.
+
+    Returns
+    -------
+    RunResult
+        Wraps a ``RunV2ConcatSummary`` (``source_mode == "concat"``). Its
+        synthetic-timeline root / analysis merge ids stay ``None``; use the
+        session-safe ``member_merge_ids`` instead. See
+        :func:`run_v2_pipeline` for the shared keys.
+
+    Raises
+    ------
+    PipelineInputError, PreflightError, PipelineStageError, ZeroUnitSortError, \
+ValueError
+        As in :func:`run_v2_pipeline`.
+    """
+    return _run_pipeline(
+        "run_v2_concat_pipeline",
+        is_concat=True,
+        concat_session_group_owner=session_group_owner,
+        concat_session_group_name=session_group_name,
+        pipeline_preset=pipeline_preset,
+        curation_description=curation_description,
+        require_units=require_units,
+        auto_curate=auto_curate,
+        preflight=preflight,
+        build_figpack_view=build_figpack_view,
+        figpack_label_options=figpack_label_options,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        motion_estimate_id=motion_estimate_id,
+    )
+
+
+def _run_pipeline(
+    caller: str,
+    *,
+    is_concat: bool,
+    nwb_file_name: "str | None" = None,
+    sort_group_id: "int | None" = None,
+    interval_list_name: "str | None" = None,
+    team_name: "str | None" = None,
+    concat_session_group_owner: "str | None" = None,
+    concat_session_group_name: "str | None" = None,
+    pipeline_preset: str,
+    curation_description: str,
+    require_units: bool,
+    auto_curate: bool,
+    preflight: bool,
+    build_figpack_view: bool,
+    figpack_label_options: "list[str] | None",
+    manual_excluded_times,
+    motion_mode: MotionMode,
+    motion_correction_params_name: "str | None",
+    motion_estimate_id: "uuid.UUID | str | None",
+) -> "RunResult":
+    """Shared body of ``run_v2_pipeline`` / ``run_v2_concat_pipeline``."""
     # Validate the request DB-free, BEFORE importing the DataJoint table modules
     # (importing them activates @schema and needs a live connection). An unknown
     # preset, an incomplete input mode or a contradictory motion request then
     # fails fast with PipelineInputError even when the database is offline,
     # rather than an opaque connection error.
-    is_concat, bundle, manual_excluded_times, source_inputs = (
-        _validate_run_request(
-            "run_v2_pipeline",
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            interval_list_name=interval_list_name,
-            team_name=team_name,
-            concat_session_group_owner=concat_session_group_owner,
-            concat_session_group_name=concat_session_group_name,
-            pipeline_preset=pipeline_preset,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-            manual_excluded_times=manual_excluded_times,
-            motion_estimate_id=motion_estimate_id,
-        )
+    bundle, manual_excluded_times, source_inputs = _validate_run_request(
+        caller,
+        is_concat=is_concat,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        concat_session_group_owner=concat_session_group_owner,
+        concat_session_group_name=concat_session_group_name,
+        pipeline_preset=pipeline_preset,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        manual_excluded_times=manual_excluded_times,
+        motion_estimate_id=motion_estimate_id,
     )
 
+    if figpack_label_options is not None and not build_figpack_view:
+        from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+        raise PipelineInputError(
+            f"{caller}: figpack_label_options configures the FigPack view, "
+            "which only build_figpack_view=True creates. Pass "
+            "build_figpack_view=True, or drop figpack_label_options."
+        )
     # Fail fast (still DB-free, before the table imports) if a FigPack view was
     # requested without the optional packages installed -- otherwise the missing
     # install would surface only as an opaque import error after a full sort.
     if build_figpack_view:
-        _assert_figpack_installed()
+        _assert_figpack_installed(caller)
 
     # Import the merge, sorting, and curation table modules after the DB-free
     # checks and before preflight, so a schema that cannot activate fails the
-    # run before any compute. The names are unused here (each stage helper
-    # imports what it uses). The auto-curation (``metric_curation``) and
-    # FigPack (``figpack_curation``) schema modules load later -- at
-    # preflight or in their own stage -- and only when those options are on.
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2.curation import (
-        CONCAT_MERGE_GATE_MESSAGE,
-        CurationV2,
-    )
-    from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
-    )
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitSortError
-    from spyglass.spikesorting.v2.sorting import (
-        Sorting,
-        SortingSelection,
-    )
-    from spyglass.utils import logger
+    # run before any compute (each stage helper imports what it uses). The
+    # auto-curation (``metric_curation``) and FigPack (``figpack_curation``)
+    # schema modules load later -- at preflight or in their own stage -- and
+    # only when those options are on.
+    import importlib
 
-    # Fail fast: a read-only config check before any insert/populate. Single-
-    # session mode runs the full preflight; concat mode runs a minimal one (the
-    # full preflight checks single-session rows that do not apply to a concat
-    # SessionGroup). Bypass either with preflight=False.
+    for schema_module in (
+        "spyglass.spikesorting.spikesorting_merge",
+        "spyglass.spikesorting.v2.sorting",
+        "spyglass.spikesorting.v2.curation",
+        "spyglass.spikesorting.v2.concat_member_curation",
+    ):
+        importlib.import_module(schema_module)
+
+    # Fail fast: a read-only config check before any insert/populate. A
+    # single-session run gets preflight_v2_pipeline; a concat run gets
+    # assert_concat_preflight, its per-member and group equivalent (the
+    # single-session rows do not apply to a SessionGroup). Bypass either with
+    # preflight=False.
     preflight_warnings: list[str] = []
     if preflight:
         preflight_warnings = _run_preflight(
-            "run_v2_pipeline",
+            caller,
             is_concat=is_concat,
             source_inputs=source_inputs,
             bundle=bundle,

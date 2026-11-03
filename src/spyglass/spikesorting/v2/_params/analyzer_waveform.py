@@ -14,11 +14,9 @@ channel, SpikeInterface's default and the shipped recipes' setting),
 bounded choice for dense probes), or ``"dense"`` (every channel; only sensible
 for tetrodes / small groups). The SI ``estimate_sparsity`` sampling settings
 (``num_spikes_for_sparsity`` and its own ``ms_before`` / ``ms_after`` snippet
-window) are recorded explicitly. The pipeline derives sparsity's polarity
-from the tracked ``SorterParameters.params`` blob, just as it derives the
-unit's peak channel and amplitude. The serialized ``peak_sign`` field is
-retained for compatibility with existing recipes and standalone conversion;
-pipeline builds override it with the sorter's resolved polarity.
+window) are recorded explicitly. Sparsity's polarity is not a recipe field:
+the pipeline derives it from the tracked ``SorterParameters.params`` blob,
+just as it derives the unit's peak channel and amplitude.
 
 ``return_in_uV`` is intentionally NOT a field: it is derived from ``whiten`` at
 build time (an unwhitened display recipe returns real microvolts; a whitened
@@ -39,7 +37,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ANALYZER_WAVEFORM_SCHEMA_VERSION = 2
+ANALYZER_WAVEFORM_SCHEMA_VERSION = 3
 
 
 class SparsityParams(BaseModel):
@@ -52,18 +50,15 @@ class SparsityParams(BaseModel):
     ``num_channels`` and ignores ``radius_um``. The inert one must be ``None``
     so a row cannot record a value the build does not use. Defaults
     equal SpikeInterface 0.104.3's ``estimate_sparsity`` defaults
-    (``radius`` / 100 um / ``"neg"`` / 100 spikes / 1.0-2.5 ms snippets), so a
-    recipe that omits ``sparsity`` keeps the negative-sort baseline. Pipeline
-    builds derive ``peak_sign`` from the sorter params before estimating
-    radius or best-channel sparsity. The stored field remains accepted for
-    compatibility, but does not override the pipeline's detection polarity.
+    (``radius`` / 100 um / 100 spikes / 1.0-2.5 ms snippets). Pipeline
+    builds add ``peak_sign`` from the sorter params before estimating
+    radius or best-channel sparsity.
     """
 
     model_config = ConfigDict(extra="forbid")
     method: Literal["dense", "radius", "best_channels"] = "radius"
     radius_um: float | None = Field(default=None, gt=0.0)
     num_channels: int | None = Field(default=None, ge=1)
-    peak_sign: Literal["neg", "pos", "both"] = "neg"
     num_spikes_for_sparsity: int = Field(default=100, ge=1)
     ms_before: float = Field(default=1.0, gt=0.0)
     ms_after: float = Field(default=2.5, gt=0.0)
@@ -98,13 +93,12 @@ class SparsityParams(BaseModel):
         return self
 
     def si_create_kwargs(self) -> dict:
-        """Return recipe kwargs; pipeline builds then resolve sorter polarity."""
+        """Return recipe kwargs; the caller adds the sorter's ``peak_sign``."""
         if self.method == "dense":
             return {"sparse": False}
         kwargs = {
             "sparse": True,
             "method": self.method,
-            "peak_sign": self.peak_sign,
             "num_spikes_for_sparsity": int(self.num_spikes_for_sparsity),
             "ms_before": float(self.ms_before),
             "ms_after": float(self.ms_after),
@@ -124,12 +118,13 @@ class AnalyzerWaveformParamsSchema(BaseModel):
     pair so a row cannot claim one purpose with the other's whitening. The
     schema defaults (1.0 / 2.0 ms window, 20000 spikes, unwhitened display) are
     the wide cortex fallback used for any custom row and for unknown /
-    multi-region sorts. ``schema_version`` 2 added ``sparsity`` (default:
-    SI's radius / 100 um, i.e. the previous implicit behavior).
+    multi-region sorts. ``sparsity`` defaults to SI's radius / 100 um.
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = ANALYZER_WAVEFORM_SCHEMA_VERSION
+    schema_version: Literal[ANALYZER_WAVEFORM_SCHEMA_VERSION] = (
+        ANALYZER_WAVEFORM_SCHEMA_VERSION
+    )
     ms_before: float = Field(default=1.0, gt=0.0)
     ms_after: float = Field(default=2.0, gt=0.0)
     max_spikes_per_unit: int = Field(default=20000, ge=1)

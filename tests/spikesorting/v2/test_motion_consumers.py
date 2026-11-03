@@ -263,11 +263,17 @@ def _hand_input_plan(curations):
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.unit_matching import (
-        _add_single_recording_frames,
+    from spyglass.spikesorting.v2._matching.fetch import (
         _member_match_files,
         _member_waveform_traces,
+    )
+    from spyglass.spikesorting.v2._matching.coverage import (
+        enrich_recording_source_coverage,
+    )
+    from spyglass.spikesorting.v2._matching.inputs import (
+        _add_single_recording_frames,
         _resolve_match_input,
+        _resolve_unit_selections,
     )
 
     plan = []
@@ -276,6 +282,12 @@ def _hand_input_plan(curations):
             curation["sorting_id"], curation["curation_id"], ValueError
         )
         _add_single_recording_frames(resolved)
+        enrich_recording_source_coverage(
+            resolved["recordings"], allow_rebuild=True
+        )
+        # One input per call: both sorts share a recording, which a
+        # multi-input selection would reject.
+        (snapshot,) = _resolve_unit_selections([resolved], None).values()
         source = SortingSelection.resolve_effective_source(
             {"sorting_id": curation["sorting_id"]}
         )
@@ -301,6 +313,7 @@ def _hand_input_plan(curations):
                     int(u)
                     for u in CurationV2().get_matchable_unit_ids(curation)
                 ],
+                "selection_snapshot": snapshot,
                 **_member_waveform_traces(source.traces),
                 **_member_match_files(curation),
             }
@@ -652,14 +665,14 @@ def test_unitmatch_records_the_waveform_traces(
         read_long_provenance,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2.unit_matching import (
-        UnitMatch,
+    from spyglass.spikesorting.v2._matching.fetch import (
         _member_waveform_traces,
     )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
     def _traces(sort):
         return SortingSelection.resolve_effective_source(
@@ -1502,7 +1515,7 @@ def test_trace_accessors_have_one_meaning_each(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.unit_matching import _member_match_files
+    from spyglass.spikesorting.v2._matching.fetch import _member_match_files
 
     sorts = corrected_sorts
     source = Recording().get_recording(sorts["recording_key"])

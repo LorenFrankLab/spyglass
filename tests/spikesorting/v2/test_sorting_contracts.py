@@ -191,8 +191,8 @@ def test_sorting_make_compute_queries_db_only_to_stage_output(
     """``make_compute`` sorts the traces file ``make_fetch`` resolved and
     queries the DB only while staging its units NWB (no traces-row fetch,
     self-heal or input path lookup)."""
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
     from tests.spikesorting.v2._tripart_helpers import forbid_db_queries

@@ -4,7 +4,7 @@ Locks the unit conventions a silent error would corrupt:
 * clusterless ``threshold_unit="uv"`` is a TRUE microvolt threshold (the
   detector's input is scaled to uV via the stored gain), and requires gains;
 * ``firing_rate_from_spike_indicator`` returns spikes/second;
-* the clusterless-runtime threshold-unit defaulting and validation.
+* the clusterless-runtime threshold-unit validation.
 
 Most tests are hermetic (in-memory SpikeInterface objects); the
 clusterless-runtime and shipped-default-row cases take ``dj_conn`` because
@@ -84,55 +84,11 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
         )
 
 
-def test_clusterless_missing_threshold_unit_defaults_to_uv(
-    monkeypatch, dj_conn
-):
-    """A clusterless params blob MISSING ``threshold_unit`` (a legacy pre-v4
-    row, or a v1-parity default-shaped row carrying only ``noise_levels=[1.0]``)
-    falls back to 'uv' -- matching the schema default -- so the detector input
-    is scaled to microvolts, NOT thresholded in raw counts. Guards the runtime
-    fallback against silently disagreeing with the schema default: with a
-    'mad' fallback the detector would see 200 raw counts instead of 100 uV on
-    this 0.5 uV/count rig.
-    """
-    import spikeinterface.sortingcomponents.peak_detection as pd_mod
-
-    from spyglass.spikesorting.v2._sorting.dispatch import (
-        run_clusterless_thresholder,
-    )
-
-    rec = _rec_with_gain(np.full((200, 2), 200.0), gain=0.5)
-    captured = {}
-
-    def _spy(recording, *, method, method_kwargs, job_kwargs):
-        captured["recording"] = recording
-        return np.zeros(
-            0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
-        )
-
-    monkeypatch.setattr(pd_mod, "detect_peaks", _spy)
-    monkeypatch.setattr(
-        "spikeinterface.sortingcomponents.peak_detection.detect_peaks", _spy
-    )
-
-    # No threshold_unit -> must default to 'uv' and scale to microvolts.
-    run_clusterless_thresholder(
-        sorter_params={"detect_threshold": 100.0, "noise_levels": [1.0]},
-        recording=rec,
-        job_kwargs=None,
-    )
-    seen_max = captured["recording"].get_traces().max()
-    assert np.isclose(seen_max, 100.0), (
-        "a row missing threshold_unit must fall back to 'uv' (scale to "
-        f"microvolts), not raw counts; got max {seen_max} (expected 100 uV)"
-    )
-
-
 def test_clusterless_runtime_rejects_invalid_threshold_unit(
     monkeypatch, dj_conn
 ):
     """A clusterless params blob carrying an INVALID ``threshold_unit`` (e.g.
-    "microvolts" or "UV" from an ``update1`` write or a pre-validator row)
+    "microvolts" or "UV" from an ``update1`` write)
     raises at sort time rather than silently falling through to MAD behavior.
     The schema's ``Literal["uv", "mad"]`` enforces this at
     insert, but make/sort-time consumes the fetched blob WITHOUT re-validating,
@@ -284,8 +240,7 @@ def test_peak_amplitude_template_extremum_is_microvolts():
 #
 # Covers the singleton ``noise_levels`` broadcast, the shipped
 # ``clusterless_thresholder/default`` row contents, the sort-time MAD-footgun
-# guard, and the defensive stripping of stale ``outputs`` /
-# ``random_chunk_kwargs`` fields from a params row that bypassed validation.
+# guard.
 # --------------------------------------------------------------------------- #
 
 
@@ -376,8 +331,8 @@ def test_clusterless_default_row_ships_noise_levels_one():
 @pytest.mark.usefixtures("dj_conn")
 def test_clusterless_runtime_rejects_bypassed_mad_footgun():
     """Defense-in-depth at SORT time: a clusterless params blob that bypassed
-    the SorterParameters insert validator (written via ``update1`` or
-    predating the validator) is still caught -- a microvolt-scale
+    the SorterParameters insert validator (written via ``update1``) is
+    still caught -- a microvolt-scale
     detect_threshold left in MAD units with no noise_levels raises rather
     than running a silent ~zero-detection sort. The runtime consumes the
     fetched blob without re-validating the schema, so the guard must live in
@@ -399,61 +354,3 @@ def test_clusterless_runtime_rejects_bypassed_mad_footgun():
             recording=rec,
             job_kwargs=None,
         )
-
-
-@pytest.mark.usefixtures("dj_conn")
-def test_clusterless_runtime_strips_stale_fields(monkeypatch):
-    """The clusterless runtime defensively strips ``outputs`` /
-    ``random_chunk_kwargs`` from a params row that slipped past the Pydantic
-    gate (e.g. a raw ``dj.insert1``).
-
-    ``detect_peaks`` rejects those keys; the runtime pops them before the call
-    so a stale row does not crash the sort. We capture ``method_kwargs`` and
-    assert the stale keys are gone.
-    """
-    import numpy as np
-    import spikeinterface as si
-    import spikeinterface.sortingcomponents.peak_detection as pd_mod
-
-    from spyglass.spikesorting.v2._sorting.dispatch import (
-        run_clusterless_thresholder,
-    )
-
-    rec = si.generate_recording(
-        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
-    )
-    # threshold_unit="uv" requires the recording to carry channel gains
-    # (it scales to uV); generate_recording has none. Unity gain/offset make
-    # the uv scaling a no-op, so this test exercises field-stripping (its
-    # actual purpose) rather than the gains precondition.
-    rec.set_channel_gains(1.0)
-    rec.set_channel_offsets(0.0)
-    captured = {}
-
-    def _capture_detect(recording, *, method, method_kwargs, job_kwargs):
-        captured["method_kwargs"] = dict(method_kwargs)
-        return np.zeros(
-            0, dtype=[("sample_index", "int64"), ("channel_index", "int64")]
-        )
-
-    monkeypatch.setattr(
-        "spikeinterface.sortingcomponents.peak_detection.detect_peaks",
-        _capture_detect,
-    )
-    monkeypatch.setattr(pd_mod, "detect_peaks", _capture_detect)
-
-    # Stale fields that the Pydantic schema would forbid, planted as if a raw
-    # insert bypassed validation.
-    run_clusterless_thresholder(
-        sorter_params={
-            "detect_threshold": 100.0,
-            "threshold_unit": "uv",
-            "outputs": "sorting",
-            "random_chunk_kwargs": {"num_chunks_per_segment": 5},
-        },
-        recording=rec,
-        job_kwargs=None,
-    )
-    mk = captured["method_kwargs"]
-    assert "outputs" not in mk
-    assert "random_chunk_kwargs" not in mk

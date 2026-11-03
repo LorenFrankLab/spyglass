@@ -5,7 +5,7 @@ canonical semantic payload and hash without importing DataJoint or the optional
 FigPack runtime.  It deliberately reuses the existing FigPack configuration
 helpers so profile and figure configuration cannot drift on list semantics.
 The displayable metric columns come from SpikeInterface's quality-metric
-metadata (``_metric_curation.si_quality_metric_output_columns``), so checking
+metadata (``_curation.metrics.si_quality_metric_output_columns``), so checking
 a profile's displayed properties against its metric recipe imports
 SpikeInterface.
 """
@@ -292,7 +292,7 @@ class ReviewDisplayOptions:
                 raise ValueError(
                     "Display firing-rate limits must be finite and positive, or None."
                 )
-        if int(self.version) not in (1, REVIEW_DISPLAY_OPTIONS_VERSION):
+        if int(self.version) != REVIEW_DISPLAY_OPTIONS_VERSION:
             raise ValueError(
                 "ReviewDisplayOptions version "
                 f"{self.version!r} is not the supported "
@@ -317,19 +317,10 @@ class ReviewDisplayOptions:
                 f"display_options has unknown field(s) {unknown}; accepted: "
                 f"{sorted(cls.__dataclass_fields__)}."
             )
-        fields = dict(value)
-        if fields.get("version") == 1:
-            # Version-1 options used fixed 2000-point budgets with no
-            # duration scaling; keep them so a version-1 bundle reopens with
-            # the same displayed points.
-            fields.setdefault("max_raster_spikes_per_unit", 2000)
-            fields.setdefault("max_amplitudes_per_unit", 2000)
-            fields.setdefault("raster_max_firing_rate", None)
-            fields.setdefault("amplitude_max_firing_rate", None)
-        return cls(**fields)
+        return cls(**value)
 
     def point_limit(self, kind, duration_s):
-        """Resolve v1's duration-scaled budget and an optional smaller cap."""
+        """Resolve the duration-scaled point budget and an optional cap."""
         import math
 
         rate, cap = (

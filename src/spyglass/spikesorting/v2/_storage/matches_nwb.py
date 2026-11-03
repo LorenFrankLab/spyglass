@@ -1,15 +1,15 @@
 """DB-free NWB (de)serialization for cross-session match output.
 
 ``UnitMatch.make`` writes the pairs table into an ``AnalysisNwbfile``, next to
-the run's provenance tables (``_nwb_provenance``: the run header, one row per
+the run's provenance tables (``_storage.provenance``: the run header, one row per
 matching input, one row per constituent recording):
 
 ``unit_match_pairs``
     a long table, one row per match pair between two matching inputs, carrying
     both sides' ``(sorting_id, curation_id, unit_id)`` (``session_a_*`` is the
     input with the lower ``input_index``) plus the match probability and the
-    (default) drift / FDR columns. ``fdr_estimate`` has no per-pair backend
-    source, so a missing value is stored as a native HDF5 NaN (HDF5 cannot store
+    optional drift / FDR columns. UnitMatch has no per-pair source for either,
+    so a missing value is stored as a native HDF5 NaN (HDF5 cannot store
     ``None`` in a numeric column) and surfaced back as ``None`` on read.
 
 The structured, FK-validated copy of the same pairs lives in the
@@ -39,6 +39,7 @@ _INT_COLUMNS = (
     "unit_b_id",
 )
 _FLOAT_COLUMNS = ("match_probability", "drift_estimate_um", "fdr_estimate")
+_OPTIONAL_FLOAT_COLUMNS = ("drift_estimate_um", "fdr_estimate")
 
 
 def build_pairs_table(pairs: list[dict]) -> DynamicTable:
@@ -49,8 +50,8 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
     pairs : list[dict]
         Oriented pair dicts (output of
         :func:`~spyglass.spikesorting.v2._matching.graph.canonicalize_match_pairs`).
-        ``pair_index`` is assigned here in list order. A ``None`` ``fdr_estimate``
-        is stored as NaN.
+        ``pair_index`` is assigned here in list order. A ``None``
+        ``drift_estimate_um`` / ``fdr_estimate`` is stored as NaN.
 
     Returns
     -------
@@ -68,11 +69,11 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
             if name != "pair_index":
                 columns[name].append(int(pair[name]))
         columns["match_probability"].append(float(pair["match_probability"]))
-        columns["drift_estimate_um"].append(float(pair["drift_estimate_um"]))
-        fdr = pair.get("fdr_estimate")
-        columns["fdr_estimate"].append(
-            float("nan") if fdr is None else float(fdr)
-        )
+        for name in _OPTIONAL_FLOAT_COLUMNS:
+            value = pair.get(name)
+            columns[name].append(
+                float("nan") if value is None else float(value)
+            )
 
     # Concrete dtypes so even an empty (zero-pair) table writes: object for the
     # uuid strings, int64 / float64 for the numeric columns.
@@ -105,7 +106,7 @@ def write_pairs_table(
     Registering the file in the DataJoint ``AnalysisNwbfile`` table is the
     caller's responsibility (done inside the insert transaction).
 
-    ``provenance_tables`` (optional, from :mod:`._nwb_provenance`) are embedded
+    ``provenance_tables`` (optional, from :mod:`._storage.provenance`) are embedded
     as scratch in the same write so the artifact is self-describing; ``None``
     leaves only the pairs table.
     """
@@ -121,7 +122,7 @@ def write_pairs_table(
 
 
 def read_pairs(abs_path: str, object_id: str) -> list[dict]:
-    """Read the pairs table back to a list of dicts (NaN ``fdr_estimate`` -> None)."""
+    """Read the pairs table back to a list of dicts (NaN drift / FDR -> None)."""
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
         frame = nwbf.objects[object_id].to_dataframe()
@@ -129,6 +130,7 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
     # itertuples(index=False) is faster + cleaner than iterrows (no per-row
     # Series). Pair columns are valid identifiers, so attribute access works.
     for row in frame.itertuples(index=False):
+        drift = float(row.drift_estimate_um)
         fdr = float(row.fdr_estimate)
         rows.append(
             {
@@ -140,7 +142,7 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
                 "session_b_curation_id": int(row.session_b_curation_id),
                 "unit_b_id": int(row.unit_b_id),
                 "match_probability": float(row.match_probability),
-                "drift_estimate_um": float(row.drift_estimate_um),
+                "drift_estimate_um": None if np.isnan(drift) else drift,
                 "fdr_estimate": None if np.isnan(fdr) else fdr,
             }
         )

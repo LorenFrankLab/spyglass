@@ -409,7 +409,7 @@ def write_nwb_artifact(
         steps that actually ran (from :func:`filtering_description`).
     provenance_tables : list of hdmf.common.DynamicTable, optional
         Keyword-only. Pre-built provenance tables (from
-        :mod:`._nwb_provenance`) embedded as NWB scratch alongside the
+        :mod:`._storage.provenance`) embedded as NWB scratch alongside the
         ElectricalSeries so the artifact is self-describing. ``None``
         (default) writes no provenance and leaves the data path unchanged.
         Scratch does not enter the ``content_hash`` fingerprint.
@@ -418,7 +418,6 @@ def write_nwb_artifact(
         describes a pre-motion preprocessed recording of ``nwb_file_name``.
         The description does not enter the ``content_hash`` fingerprint.
     """
-    import numpy as np
     import pynwb
 
     from spyglass.spikesorting.v2._storage.iterators import (
@@ -442,7 +441,6 @@ def write_nwb_artifact(
     from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
-    from spyglass.utils import logger
 
     # ``AnalysisNwbfile().create`` writes a stub file to disk
     # before we open it for the streaming write. Track the

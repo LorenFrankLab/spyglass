@@ -1191,6 +1191,7 @@ def test_sorting_wrappers_forward_statistics_spans(
             "ms_after": 2.0,
             "max_spikes_per_unit": 50,
             "whiten": False,
+            "sparsity": {},
         },
         statistics_spans=spans,
     )

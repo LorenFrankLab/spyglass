@@ -4,12 +4,13 @@
 curation stages into one call so notebook users can populate an
 end-to-end single-session sort without writing the per-stage
 insert_selection / populate boilerplate. The same orchestrator also
-runs metric-driven auto-curation (``auto_curate=True``), same-day
-concatenated sorts (concat mode over a ``SessionGroup``), and a
-publishable browser curation view (``build_figpack_view=True``); cross-session
-unit matching is its own helper, ``run_v2_unit_match``. ``estimate_motion``
-builds the same source and saves only its motion estimate, for inspection
-before ``run_v2_pipeline(motion_mode="apply", motion_estimate_id=...)``.
+runs metric-driven auto-curation (``auto_curate=True``) and a publishable
+browser curation view (``build_figpack_view=True``).
+``run_v2_concat_pipeline`` runs the same stages on a same-day concatenated
+``SessionGroup``; cross-session unit matching is its own helper,
+``run_v2_unit_match``. ``estimate_motion`` / ``estimate_concat_motion`` build
+the same source and save only its motion estimate, for inspection before a
+run with ``motion_mode="apply", motion_estimate_id=...``.
 
 Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
 orchestrator looks them up at first call. The shipped presets are the dated
@@ -72,8 +73,14 @@ from spyglass.spikesorting.v2._orchestration.matching import (
     plan_v2_unit_match_from_curations,
     run_v2_unit_match,
 )
-from spyglass.spikesorting.v2._orchestration.motion import estimate_motion
-from spyglass.spikesorting.v2._orchestration.run import run_v2_pipeline
+from spyglass.spikesorting.v2._orchestration.motion import (
+    estimate_concat_motion,
+    estimate_motion,
+)
+from spyglass.spikesorting.v2._orchestration.run import (
+    run_v2_concat_pipeline,
+    run_v2_pipeline,
+)
 from spyglass.spikesorting.v2._orchestration.session import (
     run_v2_pipeline_session,
 )
@@ -123,7 +130,9 @@ from spyglass.spikesorting.v2._orchestration.types import (
     PipelineOutcome,
     PipelineStageSeconds,
     RunV2ConcatSummary,
+    RunV2ConcatPipelineInputs,
     RunV2PipelineInputs,
+    RunV2PipelineOptions,
     RunV2PipelineSessionFailed,
     RunV2PipelineSessionInputs,
     RunV2PipelineSessionOk,

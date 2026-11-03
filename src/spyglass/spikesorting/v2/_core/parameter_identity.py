@@ -9,15 +9,15 @@ under different names therefore share a fingerprint; that collision is the
 signal the duplicate-content guard and ``describe_parameter_rows`` use.
 
 This is parameter *content* identity, distinct from the selection *logical*
-identity in :mod:`_selection_identity` (which hashes a selection's logical
+identity in :mod:`_core.selection_identity` (which hashes a selection's logical
 inputs -- including parameter-row *names* -- into a primary-key UUID). The
 fingerprint hashes the blob the name points at; the selection identity
 hashes the name. They are intentionally separate concerns.
 
-DB-FREE BY CONTRACT. Like :mod:`_selection_identity`, this module imports
+DB-FREE BY CONTRACT. Like :mod:`_core.selection_identity`, this module imports
 neither DataJoint nor SpikeInterface and opens no database connection at
 import. Keep it to the standard library (plus the stdlib-only
-:mod:`_selection_identity`) so a spawned HPC worker that re-imports it never
+:mod:`_core.selection_identity`) so a spawned HPC worker that re-imports it never
 triggers a connection.
 """
 

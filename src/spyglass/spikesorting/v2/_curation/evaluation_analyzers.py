@@ -4,9 +4,10 @@ A committed root or label-only curation keeps the raw sort's unit set, so
 :func:`evaluate_cached_analyzers` loads (or rebuilds) the sort's canonical
 display and metric analyzers and evaluates them while holding the per-sort
 analyzer-cache lock. A committed applied-merge curation does not, so
-:func:`evaluate_temporary_analyzers` builds curation-scoped analyzers over the
-merged sorting in a temporary directory and evaluates them before that
-directory is removed. Both evaluate through
+:func:`evaluate_temporary_analyzers` evaluates curation-scoped analyzers over
+the merged sorting: working copies in a temporary directory that is removed
+afterwards, the display one copied from the curation's published merged
+analyzer (the cache its review page reads) when there is one. Both evaluate through
 :func:`._curation.metrics.evaluate_analyzers`.
 
 These functions read and write analyzer folders on disk, so they are kept out
@@ -88,7 +89,7 @@ def evaluate_cached_analyzers(
     # this curation's unit set. Hold the per-sort lock around the
     # canonical-folder load/rebuild, metric-extension mutation and source
     # hashing so the snapshot describes the same protected cache generation.
-    # (_metric_curation.compute_metrics / compute_merge_groups
+    # (_curation.metrics.compute_metrics / compute_merge_groups
     # mutate the shared analyzer in place).
     raw_sorting = read_stored_units(sorting_inputs.raw_units)
     with analyzer_cache_lock(sorting_inputs.sorting_id):

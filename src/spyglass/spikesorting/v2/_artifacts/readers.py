@@ -1,6 +1,6 @@
 """Database readers and ownership cleanup for artifact intervals.
 
-The construction kernels live in ``_artifact_intervals``. Schema imports occur
+The construction kernels live in ``_artifacts.intervals``. Schema imports occur
 only inside explicit query/cleanup calls, never when this adapter is imported.
 """
 

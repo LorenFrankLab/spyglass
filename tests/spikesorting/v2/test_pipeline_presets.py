@@ -942,128 +942,150 @@ def test_concat_preset_is_registered_and_shaped():
 
 @pytest.mark.database
 @pytest.mark.db_unit
-def test_run_v2_pipeline_concat_mode_accepts_single_session_preset(dj_conn):
-    """Concat mode does not require a motion-pinned preset: the input fields
-    set the mode, so a single-session preset reaches the concat preflight,
-    which rejects only the absent session group."""
+def test_run_v2_concat_pipeline_accepts_single_session_preset(dj_conn):
+    """A concat run does not require a motion-pinned preset: a single-session
+    preset reaches the concat preflight, which rejects only the absent
+    session group."""
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         DEFAULT_PIPELINE_PRESET,
     )
     from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import run_v2_concat_pipeline
 
     with pytest.raises(PreflightError, match="does not exist"):
-        run_v2_pipeline(
-            concat_session_group_owner="no_such_owner_xyz",
-            concat_session_group_name="no_such_group_xyz",
+        run_v2_concat_pipeline(
+            "no_such_owner_xyz",
+            "no_such_group_xyz",
             pipeline_preset=DEFAULT_PIPELINE_PRESET,
         )
 
 
-@pytest.mark.unit
-def test_run_v2_pipeline_requires_exactly_one_input_mode():
-    """run_v2_pipeline rejects missing / partial / mixed input modes DB-free.
-
-    Exactly one COMPLETE mode is required -- all single-session fields, or both
-    concat fields with no single-session field (team_name included). The
-    validation runs before any table import, so it is database-free.
-    """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    generic = "exactly one input mode"
-    # No mode, or fields from BOTH modes set, gets the generic mode explanation;
-    # a partial single/concat call names the specific missing field(s).
-    cases = (
-        ({}, generic),  # no mode at all
-        (
-            {  # both modes fully set -> a genuine clash
-                "nwb_file_name": "x.nwb",
-                "sort_group_id": 0,
-                "interval_list_name": "i",
-                "team_name": "t",
-                "concat_session_group_owner": "o",
-                "concat_session_group_name": "g",
-            },
-            generic,
-        ),
-        (
-            {  # concat + a stray single-session field -> clash
-                "concat_session_group_owner": "o",
-                "concat_session_group_name": "g",
-                "team_name": "t",
-            },
-            generic,
-        ),
-        (
-            {  # partial single-session -> names the missing field
-                "nwb_file_name": "x.nwb",
-                "sort_group_id": 0,
-                "interval_list_name": "i",
-            },
-            r"single-session mode is missing.*team_name",
-        ),
-        (
-            {"concat_session_group_owner": "o"},  # partial concat
-            r"concat mode is missing.*concat_session_group_name",
-        ),
-    )
-    for kwargs, expected in cases:
-        with pytest.raises(PipelineInputError, match=expected):
-            run_v2_pipeline(**kwargs)
-
-
-@pytest.mark.unit
-def test_run_v2_pipeline_concat_fields_are_keyword_only():
-    """Concat fields are keyword-only, preserving the positional order.
-
-    An existing positional call ``run_v2_pipeline(nwb, sort_group_id,
-    interval_list_name, team_name, pipeline_preset)`` must still bind the 5th
-    argument to ``pipeline_preset`` -- not to ``concat_session_group_owner``.
-    The concat fields are therefore keyword-only (after ``*``), and the first
-    five positional-or-keyword parameters keep their original order. DB-free.
-    """
-    import inspect
-
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    params = inspect.signature(run_v2_pipeline).parameters
-    positional = [
-        name
-        for name, p in params.items()
-        if p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-    ]
-    assert positional[:5] == [
+_POSITIONAL_SOURCE_FIELDS = {
+    "run_v2_pipeline": [
         "nwb_file_name",
         "sort_group_id",
         "interval_list_name",
         "team_name",
-        "pipeline_preset",
-    ]
-    for name in (
-        "concat_session_group_owner",
-        "concat_session_group_name",
-    ):
-        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
+    ],
+    "run_v2_concat_pipeline": ["session_group_owner", "session_group_name"],
+    "estimate_motion": [
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+    ],
+    "estimate_concat_motion": ["session_group_owner", "session_group_name"],
+    "run_v2_pipeline_session": [
+        "nwb_file_name",
+        "interval_list_name",
+        "team_name",
+    ],
+    "preflight_v2_pipeline": [
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+    ],
+    "preflight_v2_pipeline_session": [
+        "nwb_file_name",
+        "interval_list_name",
+        "team_name",
+    ],
+}
 
 
 @pytest.mark.unit
-def test_run_v2_pipeline_figpack_view_params_are_keyword_only():
-    """FigPack view options are keyword-only, like the concat fields.
-
-    New parameters go after ``*`` so they never shift the positional binding of
-    an existing ``run_v2_pipeline(nwb, sort_group_id, interval_list_name,
-    team_name, pipeline_preset)`` call. DB-free.
-    """
+@pytest.mark.parametrize("name", sorted(_POSITIONAL_SOURCE_FIELDS))
+def test_entry_points_take_only_source_fields_positionally(name):
+    """Each entry point's source fields are its only positional parameters,
+    so an option (a preset, a boolean flag) is always named at the call."""
     import inspect
 
+    from spyglass.spikesorting.v2 import pipeline
+
+    params = inspect.signature(getattr(pipeline, name)).parameters.values()
+    positional = [p.name for p in params if p.kind is p.POSITIONAL_OR_KEYWORD]
+    assert positional == _POSITIONAL_SOURCE_FIELDS[name]
+    assert all(
+        p.kind is p.KEYWORD_ONLY for p in params if p.name not in positional
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "single, concat",
+    [
+        ("run_v2_pipeline", "run_v2_concat_pipeline"),
+        ("estimate_motion", "estimate_concat_motion"),
+    ],
+)
+def test_single_and_concat_entry_points_share_their_options(single, concat):
+    """The single-session and concat entry points take the same options with
+    the same defaults; only their source fields differ."""
+    import inspect
+
+    from spyglass.spikesorting.v2 import pipeline
+
+    def options(name):
+        return {
+            p.name: p.default
+            for p in inspect.signature(
+                getattr(pipeline, name)
+            ).parameters.values()
+            if p.kind is p.KEYWORD_ONLY
+        }
+
+    assert options(single) == options(concat)
+
+
+@pytest.mark.unit
+def test_run_v2_pipeline_rejects_a_none_source_input():
+    """A source field passed as ``None`` fails DB-free, naming the called
+    entry point's own fields -- even when every one of them is ``None``."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_concat_motion,
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
+
+    with pytest.raises(
+        PipelineInputError, match="sort_group_id cannot be None"
+    ):
+        run_v2_pipeline("x.nwb", None, "i", "t")
+    with pytest.raises(
+        PipelineInputError, match="session_group_name cannot be None"
+    ):
+        run_v2_concat_pipeline("owner", None)
+    both_missing = (
+        r"^{}: required input\(s\) session_group_owner, "
+        r"session_group_name cannot be None\.$"
+    )
+    with pytest.raises(
+        PipelineInputError,
+        match=both_missing.format("run_v2_concat_pipeline"),
+    ):
+        run_v2_concat_pipeline(None, None)
+    with pytest.raises(
+        PipelineInputError,
+        match=both_missing.format("estimate_concat_motion"),
+    ):
+        estimate_concat_motion(
+            None, None, motion_correction_params_name="default"
+        )
+
+
+@pytest.mark.unit
+def test_figpack_label_options_require_the_figpack_view():
+    """Label options without ``build_figpack_view=True`` would be silently
+    ignored, so the call fails DB-free instead."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 
-    params = inspect.signature(run_v2_pipeline).parameters
-    for name in ("build_figpack_view", "figpack_label_options"):
-        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
-    assert params["build_figpack_view"].default is False
-    assert params["figpack_label_options"].default is None
+    with pytest.raises(PipelineInputError, match="build_figpack_view=True"):
+        run_v2_pipeline(
+            "x.nwb", 0, "i", "t", figpack_label_options=["accept", "noise"]
+        )
 
 
 @pytest.mark.unit

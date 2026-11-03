@@ -72,6 +72,10 @@ def test_manual_exclusion_normalization_and_identity():
     assert resolve_manual_exclusions({0: []}, concat=True) == {}
     with pytest.raises(ValueError):
         resolve_manual_exclusions({1.5: [[1, 2]]}, concat=True)
+    with pytest.raises(TypeError, match="member_index mapping is for"):
+        resolve_manual_exclusions({0: [[1, 2]]}, concat=False)
+    with pytest.raises(TypeError, match="must map member_index"):
+        resolve_manual_exclusions([[1, 2]], concat=True)
     with pytest.raises(ValueError):
         normalize_manual_exclusions([[2, 1]])
     kwargs = {
@@ -124,7 +128,10 @@ def test_pipeline_runner_applies_manual_exclusions(
         RecordingArtifactDetection,
         RecordingArtifactSelection,
     )
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -241,8 +248,8 @@ def test_pipeline_runner_applies_manual_exclusions(
             fixture["owner"], name, fixture["same_day_members"]
         )
         inputs = {
-            "concat_session_group_owner": fixture["owner"],
-            "concat_session_group_name": name,
+            "session_group_owner": fixture["owner"],
+            "session_group_name": name,
             "manual_excluded_times": exclusions,
         }
     else:
@@ -251,7 +258,8 @@ def test_pipeline_runner_applies_manual_exclusions(
             "team_name": fixture["owner"],
             "manual_excluded_times": exclusions[0],
         }
-    result = run_v2_pipeline(**inputs, pipeline_preset=name)
+    run = run_v2_concat_pipeline if concat else run_v2_pipeline
+    result = run(**inputs, pipeline_preset=name)
     assert len(received) == 1
     expected = np.concatenate(originals)
     manual_frames = np.zeros(len(expected), dtype=bool)
@@ -289,7 +297,7 @@ def test_pipeline_runner_applies_manual_exclusions(
             selection["manual_excluded_times"], exclusions[index]
         )
     # Identical requests reuse the sort, including the manual-mask identity.
-    again = run_v2_pipeline(**inputs, pipeline_preset=name)
+    again = run(**inputs, pipeline_preset=name)
     assert again["sorting_id"] == result["sorting_id"]
     assert again["sorting_status"] == "reused"
     assert len(received) == 1

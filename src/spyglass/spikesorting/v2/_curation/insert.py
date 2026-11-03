@@ -317,10 +317,10 @@ def plan_curation_insert(
     Resolves the auto-increment ``curation_id`` (the one DB-coupled
     step) and delegates row shaping, label composition, and label-key
     validation to the DB-free
-    :func:`._curation_plan.build_curation_insert_plan`. ``sorting_units``
+    :func:`._curation.plan.build_curation_insert_plan`. ``sorting_units``
     are the SOURCE units (raw for a root, parent ``CurationV2.Unit`` for a
     child); ``parent_labels`` + ``label_policy`` drive label inheritance.
-    Returns the :class:`._curation_plan.CurationInsertPlan` namedtuple
+    Returns the :class:`._curation.plan.CurationInsertPlan` namedtuple
     ``(curation_id, unit_rows, kept_unit_to_contributors, labels)``, which
     unpacks positionally.
     """

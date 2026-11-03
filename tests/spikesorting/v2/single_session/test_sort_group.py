@@ -203,7 +203,9 @@ def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
     names keep their natural order. (``dj_conn`` only because importing
     the module declares its schema.)
     """
-    from spyglass.spikesorting.v2.recording import _electrode_group_sort_key
+    from spyglass.spikesorting.v2._recording.sort_groups import (
+        _electrode_group_sort_key,
+    )
 
     # Numeric names keep NUMERIC (not lexical) order: "10" after "2".
     assert sorted(["10", "2", "1"], key=_electrode_group_sort_key) == [
@@ -918,7 +920,9 @@ def test_reference_electrode_group_existence_and_uniqueness():
     """
     import numpy as np
 
-    from spyglass.spikesorting.v2.recording import _reference_electrode_group
+    from spyglass.spikesorting.v2._recording.sort_groups import (
+        _reference_electrode_group,
+    )
 
     electrodes = np.array(
         [(0, "0"), (1, "0"), (1, "1"), (2, "1")],

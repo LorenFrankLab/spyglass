@@ -23,6 +23,16 @@ _AMBIGUOUS_CLOCK_ERROR = (
     "choose epochs with unambiguous timestamps."
 )
 
+#: Coverage computed outside a transaction, by ``(recording path, electrical
+#: series path, raw path, raw object id)`` -> ``(file identities, coverage)``.
+#: DataJoint runs a tri-part ``make_fetch`` twice, the second time inside the
+#: insert transaction; the scan reads every selected and raw timestamp (19 s
+#: for a 20-minute epoch when measured), so that second fetch reuses the first
+#: one's result while both files are unchanged. See ``_storage.rebuilds``.
+#: Entries live for the process and are never evicted; each holds only one
+#: recording's small range and time lists.
+_SCANNED_COVERAGE: dict[tuple, tuple[tuple, dict]] = {}
+
 
 def recording_source_coverage(recording, raw_recording, *, source_object_id):
     """Map selected original timestamps to exact, half-open raw sample ranges.
@@ -239,15 +249,10 @@ def resolve_recording_source_coverage(recording_row, *, allow_rebuild=False):
 
     from spyglass.common.common_ephys import Raw
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.spikesorting.v2._storage.provenance import (
         RECORDING_PROVENANCE,
         read_provenance_values,
     )
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        close_nwb_recording,
-    )
-    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
     row, path, selected_nwb = _base_artifact(
         recording_row, allow_rebuild=allow_rebuild
@@ -266,11 +271,56 @@ def resolve_recording_source_coverage(recording_row, *, allow_rebuild=False):
         raise FileNotFoundError(
             f"Matching source coverage needs the local raw NWB {selected_nwb!r}; no download is attempted."
         )
+    return _memoized_coverage(
+        (
+            str(path),
+            str(row["electrical_series_path"]),
+            str(raw_path),
+            source_object_id,
+        ),
+        in_transaction=Raw().connection.in_transaction,
+        scan=lambda: _scan_source_coverage(
+            path, row["electrical_series_path"], raw_path, source_object_id
+        ),
+    )
+
+
+def _memoized_coverage(memo_key, *, in_transaction: bool, scan) -> dict:
+    """Run ``scan`` once per unchanged file pair across a populate's fetches.
+
+    Inside a transaction a result scanned outside one is reused when the
+    recording and raw files (``memo_key[0]`` / ``memo_key[2]``) keep their
+    inode, size and modification time; anything else scans again.
+    """
+    import copy
+
+    from spyglass.spikesorting.v2._storage.rebuilds import _file_identity
+
+    identity = (_file_identity(memo_key[0]), _file_identity(memo_key[2]))
+    cached = _SCANNED_COVERAGE.get(memo_key)
+    if in_transaction and cached is not None and cached[0] == identity:
+        return copy.deepcopy(cached[1])
+    coverage = scan()
+    if not in_transaction:
+        _SCANNED_COVERAGE[memo_key] = (identity, copy.deepcopy(coverage))
+    return coverage
+
+
+def _scan_source_coverage(
+    path, electrical_series_path, raw_path, source_object_id
+) -> dict:
+    """Open the persisted and raw recordings and map their timestamps."""
+    from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        close_nwb_recording,
+    )
+    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
+
     series_path, explicit = raw_eseries_path_and_timestamp_mode(
         raw_path, object_id=source_object_id
     )
     selected = read_recording_nwb(
-        path, electrical_series_path=row["electrical_series_path"]
+        path, electrical_series_path=electrical_series_path
     )
     raw = None
     try:

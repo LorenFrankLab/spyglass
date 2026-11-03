@@ -12,6 +12,7 @@ and shared extraction controls from ``WaveformBundleParamsSchema``.
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -77,4 +78,4 @@ class UnitMatchParamsSchema(WaveformBundleParamsSchema, TrackingParamsSchema):
     model_config = ConfigDict(extra="forbid")
 
     match_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    schema_version: int = 1
+    schema_version: Literal[1] = 1

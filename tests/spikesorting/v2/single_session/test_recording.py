@@ -1420,8 +1420,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     # Bypass the helper to plant the duplicate (this is what the
     # guard exists to catch in case some script uses raw dj.insert). Both
     # planted rows carry the resolved input hash so they share the logical
-    # identity find-existing scopes to (FK set + recording_input_hash); a NULL
-    # hash would sit on a different identity axis and escape detection.
+    # identity find-existing scopes to (FK set + recording_input_hash).
     input_hash = resolve_recording_input_hash(
         nwb_file_name, sort_group_id, "default"
     )
@@ -1991,9 +1990,9 @@ def test_recording_make_compute_queries_db_only_to_stage_output(
     raw NWB path included) and queries the DB only while staging its output
     file; the staged traces reproduce the stored row's ``content_hash``."""
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
 

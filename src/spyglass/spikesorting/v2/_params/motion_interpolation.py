@@ -53,4 +53,6 @@ class MotionInterpolationParamsSchema(BaseModel):
     sigma_um: float = Field(gt=0, allow_inf_nan=False)
     p: int = Field(ge=1)
     num_closest: int = Field(ge=1)
-    schema_version: int = MOTION_INTERPOLATION_SCHEMA_VERSION
+    schema_version: Literal[MOTION_INTERPOLATION_SCHEMA_VERSION] = (
+        MOTION_INTERPOLATION_SCHEMA_VERSION
+    )

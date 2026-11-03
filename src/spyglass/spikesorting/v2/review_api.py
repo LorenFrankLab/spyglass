@@ -302,15 +302,9 @@ class FigPackReview:
                     self
                 ),
             )
-        if len(focus_unit_ids):
-            from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        from spyglass.spikesorting.v2._review.delivery import with_focus_units
 
-            parts = urlsplit(url)
-            query = dict(parse_qsl(parts.query))
-            query["spyglass_units"] = ",".join(
-                str(int(unit)) for unit in focus_unit_ids
-            )
-            url = urlunsplit(parts._replace(query=urlencode(query)))
+        url = with_focus_units(url, focus_unit_ids)
         if open_browser:
             webbrowser.open(url)
         return url

@@ -96,7 +96,9 @@ def test_displayed_unit_properties_reject_missing(
         )
 
 
-def test_selection_and_view_are_idempotent(populated_sorting_with_curation):
+def test_selection_and_view_are_idempotent(
+    populated_sorting_with_curation, tmp_path
+):
     """Identical config -> one selection id and one populated view."""
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCuration,
@@ -126,11 +128,41 @@ def test_selection_and_view_are_idempotent(populated_sorting_with_curation):
     import shutil
 
     shutil.rmtree(second_build.uri)
+    message = FigPackCuration.drop_missing_local_bundle(first)
+    assert second_build.uri in message and "Draft labels" in message
+    assert not (FigPackCuration & first)
+    assert FigPackCurationSelection & first
+    assert FigPackCuration.drop_missing_local_bundle(first) is None
+
+    rebuilt = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    assert Path(rebuilt.uri).is_dir()
+    shutil.rmtree(rebuilt.uri)
     rebuilt = FigPackCuration.build_curation_view_result(
         populated_sorting_with_curation, upload=False
     )
     assert not rebuilt.reused
     assert Path(rebuilt.uri).is_dir()
+
+    # A bundle under another machine's FigPack folder may still exist there:
+    # its row is kept and only a warning is returned.
+    import datajoint as dj
+
+    shutil.rmtree(rebuilt.uri)
+    with pytest.MonkeyPatch.context() as patch:
+        custom = dict(dj.config.get("custom") or {})
+        custom["spikesorting_v2_figpack_dir"] = str(tmp_path / "elsewhere")
+        patch.setitem(dj.config, "custom", custom)
+        message = FigPackCuration.drop_missing_local_bundle(first)
+        assert "outside this machine's FigPack folder" in message
+        assert (FigPackCuration & first).fetch1("figpack_uri") == rebuilt.uri
+    # Back under its own folder, the missing bundle is dropped and rebuilt.
+    assert "Draft labels" in FigPackCuration.drop_missing_local_bundle(first)
+    restored = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    assert Path(restored.uri).is_dir()
 
 
 def test_populate_rebuilds_reclaimed_inventoried_analyzer(
@@ -550,6 +582,7 @@ def test_upload_of_labeled_curation_is_seeded(
     captured = {}
 
     def fake_upload(tmpdir, **kwargs):
+        captured["n_uploads"] = captured.get("n_uploads", 0) + 1
         captured["upload_kwargs"] = kwargs
         captured["annotations"] = json.loads(
             (Path(tmpdir) / "annotations.json").read_text()
@@ -577,6 +610,11 @@ def test_upload_of_labeled_curation_is_seeded(
         assert captured["config"]["curation_uuid"] == str(
             (CurationV2 & labeled).fetch1("curation_uuid")
         )
+        # A hosted URI is not a local path, so the missing-bundle check must
+        # not drop its row: the second build reuses it without re-uploading.
+        again = FigPackCuration.build_curation_view_result(labeled, upload=True)
+        assert again.reused and again.uri == uri
+        assert captured["n_uploads"] == 1
     finally:
         clear_curations_for(planted_two_unit_sort)
 

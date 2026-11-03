@@ -49,7 +49,6 @@ from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 from spyglass.spikesorting.v2._curation.unit_selection import (
     UnitSelectionSnapshot,
     unit_selection_hash,
-    validate_unit_selection_snapshot,
 )
 
 #: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples

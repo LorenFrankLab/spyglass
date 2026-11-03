@@ -21,9 +21,7 @@ matplotlib.use("Agg")
 import pytest  # noqa: E402
 
 from spyglass.spikesorting.v2 import visualization as ssviz  # noqa: E402
-from spyglass.spikesorting.v2._review.visualization import (
-    MissingDisplayExtensionError,
-)
+from spyglass.spikesorting.v2.exceptions import MissingDisplayExtensionError
 
 
 class _FakeAnalyzer:
@@ -743,9 +741,7 @@ def test_plot_suggested_merges_compute_missing_requests_display_extensions(
     import spikeinterface.curation as sic
     import spikeinterface.widgets as sw
 
-    from spyglass.spikesorting.v2._review.visualization import (
-        MissingDisplayExtensionError,
-    )
+    from spyglass.spikesorting.v2.exceptions import MissingDisplayExtensionError
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
     monkeypatch.setattr(

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 from spyglass.spikesorting.v2._orchestration.presets import (
     _PIPELINE_PRESETS,
-    describe_pipeline_presets,
 )
 
 if TYPE_CHECKING:
@@ -486,26 +485,21 @@ def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
 
 
 def _content_equal(left, right) -> bool:
-    """Float-tolerant deep equality for fetched-vs-shipped default content.
+    """Deep equality for fetched-vs-shipped default content.
 
-    Deliberately NOT ``_metric_curation._values_match`` despite the near-identical
+    Deliberately NOT ``_curation.metrics._values_match`` despite the near-identical
     shape: this audit compares a SHIPPED Python value against a DB-FETCHED value,
     where a ``bool`` column comes back as ``int`` (DataJoint stores bool as
     tinyint), so ``False`` shipped must equal ``0`` stored -- the ``left == right``
     bool branch here conflates them on purpose. ``_values_match`` does the
     opposite (strict ``type(a) is type(b)``) because its own callers compare two
-    in-memory blobs where a bool-vs-int distinction is real. Float columns are
-    single precision, so floats compare with a tolerance and dicts/lists recurse;
-    both sides are pre-normalized via ``_jsonable_blob``.
+    in-memory blobs where a bool-vs-int distinction is real. The audited
+    columns are blobs and doubles, which round-trip exactly, so values compare
+    exactly; dicts/lists recurse. Both sides are pre-normalized via
+    ``_jsonable_blob``.
     """
-    import math
-
     if isinstance(left, bool) or isinstance(right, bool):
         return left == right
-    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        return math.isclose(
-            float(left), float(right), rel_tol=1e-6, abs_tol=1e-9
-        )
     if isinstance(left, dict) and isinstance(right, dict):
         return left.keys() == right.keys() and all(
             _content_equal(left[key], right[key]) for key in left

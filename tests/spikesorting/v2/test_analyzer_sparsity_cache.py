@@ -1,4 +1,4 @@
-"""Old sparse masks follow the same polarity contract as fresh analyzers."""
+"""Cached sparse analyzers must match their sorter's detection polarity."""
 
 import json
 
@@ -17,8 +17,15 @@ from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 pytestmark = pytest.mark.unit
 
 
-def _legacy_cache(tmp_path, *, sign, sparsity):
-    """Build an unmarked cache with the pre-fix recipe-only SI sparsity."""
+def _cached_analyzer(
+    tmp_path, *, sign, sparsity, built_peak_sign, receipt=True
+):
+    """Build a cache whose sparse mask used ``built_peak_sign``.
+
+    The receipt records ``built_peak_sign`` unless ``receipt`` is False, so a
+    test can stage a mask built with the wrong polarity, or one without a
+    receipt, without going through ``build_analyzer``.
+    """
     frames = np.array([1000, 3000, 5000, 7000, 9000])
     traces = np.zeros((10_000, 2), dtype=np.float32)
     traces[frames, 0] = sign * 100
@@ -33,15 +40,20 @@ def _legacy_cache(tmp_path, *, sign, sparsity):
     )
     sorting = si.NumpySorting.from_unit_dict({17: frames}, 30_000)
     params = AnalyzerWaveformParamsSchema(sparsity=sparsity).model_dump()
-    folder = tmp_path / "sparsity_cache__legacy.analyzer"
-    legacy = si.create_sorting_analyzer(
+    folder = tmp_path / "sparsity_cache__recipe.analyzer"
+    sparsity_kwargs = SparsityParams.model_validate(
+        params["sparsity"]
+    ).si_create_kwargs()
+    if sparsity_kwargs["sparse"]:
+        sparsity_kwargs["peak_sign"] = built_peak_sign
+    analyzer = si.create_sorting_analyzer(
         sorting,
         recording,
         format="binary_folder",
         folder=folder,
-        **SparsityParams.model_validate(params["sparsity"]).si_create_kwargs(),
+        **sparsity_kwargs,
     )
-    legacy.compute(
+    analyzer.compute(
         list(analyzer_service.BASE_ANALYZER_EXTENSIONS),
         extension_params={
             "random_spikes": {"seed": 0},
@@ -54,6 +66,10 @@ def _legacy_cache(tmp_path, *, sign, sparsity):
         n_jobs=1,
         progress_bar=False,
     )
+    if receipt and sparsity_kwargs["sparse"]:
+        analyzer_cache.write_analyzer_sparsity_receipt(
+            folder, peak_sign=built_peak_sign
+        )
     return {
         "sorting_id": "sparsity_cache",
         "n_units": 1,
@@ -109,20 +125,29 @@ def _write_curation_manifest(inputs, analyzer):
 
 
 @pytest.mark.parametrize(
-    "sorter_params, sign, sparsity",
+    "sorter_params, sign, built_peak_sign, receipt",
     [
-        ({"peak_sign": "pos"}, 1, {}),
-        ({"detect_sign": 0}, 1, {}),
-        ({"detect_sign": -1}, -1, {"peak_sign": "pos"}),
-        ({"peak_sign": "both"}, -1, {"peak_sign": "pos"}),
+        ({"peak_sign": "pos"}, 1, "neg", True),
+        ({"detect_sign": 0}, 1, "neg", True),
+        ({"detect_sign": -1}, -1, "pos", True),
+        ({"peak_sign": "both"}, -1, "pos", True),
+        # A sparse cache without a receipt has unknown polarity, so it is
+        # rebuilt even when its mask happens to match the sorter.
+        ({"detect_sign": -1}, -1, "neg", False),
     ],
 )
-def test_incompatible_legacy_sparse_cache_is_rejected_then_rebuilt(
-    tmp_path, monkeypatch, sorter_params, sign, sparsity
+def test_incompatible_sparse_cache_is_rejected_then_rebuilt(
+    tmp_path, monkeypatch, sorter_params, sign, built_peak_sign, receipt
 ):
     from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
 
-    inputs = _legacy_cache(tmp_path, sign=sign, sparsity=sparsity)
+    inputs = _cached_analyzer(
+        tmp_path,
+        sign=sign,
+        sparsity={},
+        built_peak_sign=built_peak_sign,
+        receipt=receipt,
+    )
     inputs["sorter_row"] = {"params": sorter_params}
     folder = inputs["analyzer_folder"]
     with pytest.raises(AnalyzerFolderInvalidError):
@@ -147,34 +172,25 @@ def test_incompatible_legacy_sparse_cache_is_rejected_then_rebuilt(
     assert builds == [folder], "the corrected cache must be reusable"
 
     # Curation derivatives and expert working copies preserve the receipt;
-    # otherwise a positive cache copy would look like an incompatible legacy
-    # neg cache when reused.
+    # otherwise a copy would have unknown polarity and be rebuilt when reused.
     copied = analyzer_cache.copy_analyzer_folder(
         rebuilt, tmp_path / "copy.analyzer"
     )
     analyzer_cache.assert_analyzer_sparsity_polarity(
-        copied,
-        waveform_params=inputs["waveform_params"],
-        expected_peak_sign=resolve_peak_sign(sorter_params),
+        copied, expected_peak_sign=resolve_peak_sign(sorter_params)
     )
     assert (copied.folder / analyzer_cache.ANALYZER_SPARSITY_RECEIPT).is_file()
 
 
-@pytest.mark.parametrize(
-    "sorter_params, sign, sparsity",
-    [
-        ({}, -1, {}),
-        ({"detect_sign": -1}, -1, {}),
-        ({"peak_sign": "pos"}, 1, {"peak_sign": "pos"}),
-        ({"peak_sign": "both"}, 1, {"peak_sign": "both"}),
-        ({"detect_sign": 1}, 1, {"method": "dense"}),
-    ],
-)
-def test_compatible_legacy_and_dense_caches_are_reused(
-    tmp_path, monkeypatch, sorter_params, sign, sparsity
-):
-    inputs = _legacy_cache(tmp_path, sign=sign, sparsity=sparsity)
-    inputs["sorter_row"] = {"params": sorter_params}
+def test_dense_cache_without_receipt_is_reused(tmp_path, monkeypatch):
+    """A dense analyzer keeps every channel, so it needs no polarity receipt."""
+    inputs = _cached_analyzer(
+        tmp_path, sign=1, sparsity={"method": "dense"}, built_peak_sign=None
+    )
+    assert not (
+        inputs["analyzer_folder"] / analyzer_cache.ANALYZER_SPARSITY_RECEIPT
+    ).exists()
+    inputs["sorter_row"] = {"params": {"detect_sign": 1}}
 
     def must_not_build(*args, **kwargs):
         raise AssertionError("a compatible cache must be reused")
@@ -187,12 +203,14 @@ def test_compatible_legacy_and_dense_caches_are_reused(
     )
 
 
-def test_public_sort_analyzer_rebuilds_incompatible_legacy_cache(
+def test_public_sort_analyzer_rebuilds_incompatible_cache(
     tmp_path, monkeypatch
 ):
     from spyglass.spikesorting.v2._sorting import fetch as sorting_fetch
 
-    inputs = _legacy_cache(tmp_path, sign=1, sparsity={})
+    inputs = _cached_analyzer(
+        tmp_path, sign=1, sparsity={}, built_peak_sign="neg"
+    )
     sorter_row = {"params": {"detect_sign": 1}}
     builds = []
 
@@ -226,24 +244,26 @@ def test_public_sort_analyzer_rebuilds_incompatible_legacy_cache(
     cached = analyzer_service.load_or_rebuild_analyzer(
         SortingRelation(),
         {"sorting_id": inputs["sorting_id"]},
-        waveform_params_name="legacy",
+        waveform_params_name="recipe",
     )
     assert builds == [{"sorting_id": inputs["sorting_id"]}]
     assert cached.get_extension("templates").get_data()[0, :, 0].max() == 100
 
 
-def test_curation_manifest_cache_rebuilds_incompatible_legacy_mask(tmp_path):
+def test_curation_manifest_cache_rebuilds_incompatible_mask(tmp_path):
     from spyglass.spikesorting.v2._curation import analyzer as curation_service
 
-    inputs = _legacy_cache(tmp_path, sign=1, sparsity={})
+    inputs = _cached_analyzer(
+        tmp_path, sign=1, sparsity={}, built_peak_sign="neg"
+    )
     folder = inputs["analyzer_folder"]
     expected = _write_curation_manifest(
         inputs, analyzer_cache.load_analyzer_folder(folder)
     )
     validate = analyzer_service.analyzer_sparsity_validator(
-        inputs["waveform_params"], lambda: {"peak_sign": "pos"}
+        lambda: {"peak_sign": "pos"}
     )
-    # Its old manifest is intact, so the polarity guard must discriminate.
+    # Its manifest is intact, so the polarity guard must discriminate.
     assert (
         curation_service._load_valid_cached_analyzer(folder, expected, "metric")
         is not None
@@ -283,7 +303,9 @@ def test_unavailable_sorter_params_do_not_invalidate_a_sparse_cache(
 ):
     from spyglass.spikesorting.v2._curation import analyzer as curation_service
 
-    inputs = _legacy_cache(tmp_path, sign=-1, sparsity={})
+    inputs = _cached_analyzer(
+        tmp_path, sign=-1, sparsity={}, built_peak_sign="neg"
+    )
     folder = inputs["analyzer_folder"]
 
     def unavailable_params():
@@ -292,9 +314,7 @@ def test_unavailable_sorter_params_do_not_invalidate_a_sparse_cache(
     def must_not_build(*args):
         raise AssertionError("unavailable inputs must not invalidate the cache")
 
-    validate = analyzer_service.analyzer_sparsity_validator(
-        inputs["waveform_params"], unavailable_params
-    )
+    validate = analyzer_service.analyzer_sparsity_validator(unavailable_params)
     if curation_cache:
         expected = _write_curation_manifest(
             inputs, analyzer_cache.load_analyzer_folder(folder)
@@ -316,7 +336,7 @@ def test_unavailable_sorter_params_do_not_invalidate_a_sparse_cache(
             return analyzer_service._load_analyzer_folder_or_rebuild(
                 folder,
                 sorting_id=inputs["sorting_id"],
-                recipe_label="legacy",
+                recipe_label="recipe",
                 rebuild=True,
                 rebuild_fn=must_not_build,
                 validate_analyzer=validate,

@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from spyglass.spikesorting.v2._curation.metrics import (
     apply_label_rules,
     apply_snr_peak_sign,
+    assert_merge_preset_metrics,
     assert_rule_metrics_computed,
     escalate_si_metric_errors,
     expected_missing_units,
@@ -464,18 +465,12 @@ def _payload(
     }
 
 
-def test_rules_payloads_match_tolerates_float32_round_trip():
-    """A threshold's single-precision round-off must not break idempotency."""
-    # 0.1 is not exactly representable in float32; this is the value the DB
-    # column returns on fetch, and what broke the exact-equality comparison.
-    stored = _payload(float(np.float32(0.1)))
-    expected = _payload(0.1)
-    assert stored["rules"][0]["threshold"] != expected["rules"][0]["threshold"]
-    assert rules_payloads_match(expected, stored)
-
-
-def test_rules_payloads_match_rejects_genuinely_different_threshold():
-    """Thresholds differing by more than float round-off are NOT equal."""
+def test_rules_payloads_match_compares_thresholds_exactly():
+    """``Rule.threshold`` is a double column, so thresholds compare exactly."""
+    assert rules_payloads_match(_payload(0.1), _payload(0.1))
+    assert not rules_payloads_match(
+        _payload(0.1), _payload(float(np.float32(0.1)))
+    )
     assert not rules_payloads_match(_payload(0.1), _payload(0.2))
 
 
@@ -1046,3 +1041,33 @@ def test_escalate_si_metric_errors_keeps_the_original_error(caplog):
     logged = [record.getMessage() for record in caplog.records]
     assert any("'isi_violation'" in m for m in logged)
     assert [str(w.message) for w in reemitted] == [_SI_WARNINGS[2]]
+
+
+@pytest.mark.parametrize(
+    "preset, metric_names, raises",
+    [
+        ("feature_neighbors", ["firing_rate"], True),
+        ("feature_neighbors", ["snr", "firing_rate"], False),
+        ("similarity_correlograms", ["firing_rate"], False),
+        ("none", [], False),
+    ],
+)
+def test_assert_merge_preset_metrics(preset, metric_names, raises):
+    """A preset with an ``snr`` step needs the evaluation to compute ``snr``;
+    otherwise SI's step raises a bare ``KeyError: 'snr'`` after the metrics."""
+    if raises:
+        with pytest.raises(ValueError, match="'snr'"):
+            assert_merge_preset_metrics(preset, metric_names)
+    else:
+        assert_merge_preset_metrics(preset, metric_names)
+
+
+def test_snr_merge_presets_match_spikeinterface():
+    """The guarded presets are exactly SI's presets with an ``snr`` step."""
+    from spikeinterface.curation.auto_merge import _compute_merge_presets
+
+    from spyglass.spikesorting.v2._curation.metrics import _SNR_MERGE_PRESETS
+
+    assert _SNR_MERGE_PRESETS == {
+        name for name, steps in _compute_merge_presets.items() if "snr" in steps
+    }

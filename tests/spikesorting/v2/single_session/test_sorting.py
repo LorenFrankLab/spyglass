@@ -25,6 +25,7 @@ _CAP500_DISPLAY = {
     "ms_after": 2.0,
     "max_spikes_per_unit": 500,
     "whiten": False,
+    "sparsity": {},
     "purpose": "display",
     "schema_version": 1,
 }
@@ -922,7 +923,11 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
 
     rec = _build_synthetic_rec(np.zeros((1000, 4), dtype=np.float32))
     run_clusterless_thresholder(
-        sorter_params={"detect_threshold": 5.0, "noise_levels": [1.0]},
+        sorter_params={
+            "detect_threshold": 5.0,
+            "threshold_unit": "uv",
+            "noise_levels": [1.0],
+        },
         recording=rec,
         job_kwargs={"random_seed": 7, "n_jobs": 1},
     )
@@ -1147,8 +1152,9 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     # The Spyglass-only random_seed knob is still stripped from the
     # forwarded job kwargs (SI.compute would reject it).
     assert "random_seed" not in captured["compute_kwargs"]
-    # Sparsity: the fixture omits ``sparsity`` -> SI's radius / 100 um default,
-    # passed EXPLICITLY (every effective value comes from the recipe).
+    # Sparsity: the fixture's empty ``sparsity`` -> SI's radius / 100 um
+    # default, passed EXPLICITLY (every effective value comes from the recipe;
+    # polarity comes from the sorter, neg when unset).
     assert ck.get("method") == "radius"
     assert ck.get("radius_um") == 100.0
     assert ck.get("peak_sign") == "neg"
@@ -1158,13 +1164,12 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     # dense (``sparse=False``) with no estimate_sparsity kwargs at all.
     for sparsity, expected in (
         (
-            {"method": "best_channels", "num_channels": 6, "peak_sign": "both"},
+            {"method": "best_channels", "num_channels": 6},
             {
                 "sparse": True,
                 "method": "best_channels",
                 "num_channels": 6,
-                # Polarity comes from the sorter (none set: neg), not the
-                # recipe's compatibility-only peak_sign.
+                # Polarity comes from the sorter (none set: neg).
                 "peak_sign": "neg",
             },
         ),

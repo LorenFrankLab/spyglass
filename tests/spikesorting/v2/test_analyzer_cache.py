@@ -30,6 +30,7 @@ _DISPLAY_PARAMS = {
     "ms_after": 2.0,
     "max_spikes_per_unit": 20000,
     "whiten": False,
+    "sparsity": {},
     "purpose": "display",
     "schema_version": 1,
 }
@@ -660,6 +661,7 @@ class TestBuildAnalyzerWaveformParams:
                 "ms_after": 0.5,
                 "max_spikes_per_unit": 20000,
                 "whiten": False,
+                "sparsity": {},
                 "purpose": "display",
                 "schema_version": 1,
             },
@@ -680,6 +682,7 @@ class TestBuildAnalyzerWaveformParams:
                 "ms_after": 2.0,
                 "max_spikes_per_unit": 20000,
                 "whiten": False,
+                "sparsity": {},
                 "purpose": "display",
                 "schema_version": 1,
             },
@@ -720,6 +723,7 @@ class TestBuildAnalyzerWaveformParams:
             "ms_before": 1.0,
             "ms_after": 2.0,
             "max_spikes_per_unit": 20000,
+            "sparsity": {},
             "schema_version": 1,
         }
         display = self._build(
@@ -774,6 +778,7 @@ class TestBuildAnalyzerWaveformParams:
                 "ms_after": 2.0,
                 "max_spikes_per_unit": 20000,
                 "whiten": True,
+                "sparsity": {},
                 "purpose": "metric",
                 "schema_version": 1,
             },

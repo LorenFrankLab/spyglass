@@ -91,21 +91,13 @@ class PreprocessingParamsSchema(BaseModel):
     filter -> bad-channel handling -> common reference (see
     ``apply_temporal_preprocessing`` / ``apply_spatial_preprocessing``).
 
-    ``schema_version`` history:
-    * 2 added ``min_segment_length`` (drops sub-second slivers from
-      the intersected sort interval before the sorter sees them) and
-      removed ``CommonReferenceParams.reference`` (dead field).
-    * 3 made ``bandpass_filter`` optional (``None`` = skip filtering,
-      so the ``"no_filter"`` preset is a real disable instead of a
-      wide-band pass).
-    * 4 removed the ``whiten`` field (whitening belongs to the sorter /
-      analyzer rows above).
-
-    Two optional fields carry no version bump because a row that omits them
-    validates unchanged and produces identical output: ``phase_shift`` (ADC
-    sample-shift correction for multiplexed acquisition; ``None`` = off) and
+    ``min_segment_length`` drops sub-second slivers from the intersected
+    sort interval before the sorter sees them. ``bandpass_filter`` is
+    optional (``None`` = skip filtering, so the ``"no_filter"`` preset is a
+    real disable instead of a wide-band pass). ``phase_shift`` is the ADC
+    sample-shift correction for multiplexed acquisition (``None`` = off), and
     ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``, default
-    ``"remove"``), which controls how curated ``Electrode.bad_channel`` flags
+    ``"remove"``) controls how curated ``Electrode.bad_channel`` flags
     are handled at materialization. Under ``"remove"`` the flagged channels
     stay excluded, as they already are at sort-group creation. Detection of
     bad channels is a separate concern handled by ``suggest_bad_channels``
@@ -113,7 +105,9 @@ class PreprocessingParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = PREPROCESSING_SCHEMA_VERSION
+    schema_version: Literal[PREPROCESSING_SCHEMA_VERSION] = (
+        PREPROCESSING_SCHEMA_VERSION
+    )
     phase_shift: PhaseShiftParams | None = Field(default=None)
     # phase_shift defaults to None: off in the franklab default and only a
     # no-op-until-present step for multiplexed-ADC (Neuropixels) recordings.

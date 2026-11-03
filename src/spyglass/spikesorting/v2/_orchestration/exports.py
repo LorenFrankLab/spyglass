@@ -8,8 +8,10 @@ importing DataJoint / SpikeInterface-backed modules at import time.
 # and by the facade.
 PACKAGE_ROOT_REEXPORTS = (
     "run_v2_pipeline",
+    "run_v2_concat_pipeline",
     "run_v2_pipeline_session",
     "estimate_motion",
+    "estimate_concat_motion",
     "run_v2_unit_match",
     "plan_v2_unit_match",
     "plan_v2_unit_match_from_sorts",
@@ -69,7 +71,9 @@ _FACADE_ONLY_EXPORTS = (
     "PipelineOutcome",
     "PipelineStageSeconds",
     "RunV2ConcatSummary",
+    "RunV2ConcatPipelineInputs",
     "RunV2PipelineInputs",
+    "RunV2PipelineOptions",
     "RunV2PipelineSessionFailed",
     "RunV2PipelineSessionInputs",
     "RunV2PipelineSessionOk",

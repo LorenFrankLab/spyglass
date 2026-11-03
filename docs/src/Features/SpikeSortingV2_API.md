@@ -47,10 +47,12 @@ first use, so `import spyglass.spikesorting.v2` stays lightweight.
 
 | Name                                                      | Use for                                                                                                                                            |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run_v2_pipeline`                                         | Sort one sort group (or a same-day concatenation) end to end: recording, artifacts, sort, curation, optional auto-curation. Returns a `RunResult`. |
+| `run_v2_pipeline`                                         | Sort one sort group end to end: recording, artifacts, sort, curation, optional auto-curation. Returns a `RunResult`.                               |
+| `run_v2_concat_pipeline`                                  | Sort a same-day `SessionGroup` concatenation end to end, with the same options as `run_v2_pipeline`. Returns a `RunResult`.                        |
 | `run_v2_pipeline_session`                                 | Sort every (or selected) sort group of a session in one call.                                                                                      |
 | `preflight_v2_pipeline` / `preflight_v2_pipeline_session` | Read-only check of a planned run (or whole session) before any compute; returns a `PreflightReport` / `PreflightSessionReport`.                    |
-| `estimate_motion`                                         | Save the motion estimate of a run's source without sorting, for inspection before applying it.                                                     |
+| `estimate_motion`                                         | Save the motion estimate of one sort group's recording without sorting, for inspection before applying it.                                         |
+| `estimate_concat_motion`                                  | Save the motion estimate of a `SessionGroup` concatenation without sorting, for inspection before applying it.                                     |
 | `describe_sort_groups` / `plot_sort_group_geometry`       | Inspect a session's sort groups and their electrode geometry before choosing one.                                                                  |
 | `list_pipeline_presets` / `describe_pipeline_presets`     | List the shipped presets / show them as a catalog table.                                                                                           |
 | `describe_pipeline_preset`                                | Unpack one preset into its full, validated parameter values.                                                                                       |
@@ -83,7 +85,7 @@ are also importable from `pipeline`)
 
 | Name                                                                  | Use for                                                                                                                                                                     |
 | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RunResult`                                                           | What `run_v2_pipeline` returns: a mapping with `root_curation`, `auto_labeled_curation`, and `start_review(...)`.                                                           |
+| `RunResult`                                                           | What `run_v2_pipeline` and `run_v2_concat_pipeline` return: a mapping with `root_curation`, `auto_labeled_curation`, and `start_review(...)`.                               |
 | `CurationRef`                                                         | A curation pinned to one exact row generation. Methods cover lineage, `evaluate`, `start_review`, `preview_merges`, `commit_merges`, `open_analyzer`, and subtree deletion. |
 | `save_manual_curation`                                                | Save a manual child curation (labels and/or merges) from a `CurationRef` parent.                                                                                            |
 | `preview_merges` / `commit_merges` / `merge_and_evaluate`             | Function forms of the merge operations; `merge_and_evaluate` commits a merge and re-evaluates the merged child.                                                             |

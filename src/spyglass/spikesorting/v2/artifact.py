@@ -41,14 +41,6 @@ import numpy as np
 
 from spyglass.common import IntervalList, Session  # noqa: F401
 
-# The worker kernels live in the DB-free ``_artifact_compute`` so a spawned
-# ``n_jobs>1`` worker opens no DB connection (see its docstring); re-exported
-# for ``from ...v2.artifact import _compute_artifact_chunk`` callers.
-from spyglass.spikesorting.v2._artifacts.compute import (
-    _compute_artifact_chunk,
-    _init_artifact_worker,
-)
-
 # Artifact-removed interval construction + IntervalList persistence live in a
 # DB-free service module so the artifact-detection tables stay thin
 # orchestrators.
@@ -78,7 +70,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     _insert_parameter_rows,
     split_leading_restrictions,
 )
-from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("spikesorting_v2_artifact")
@@ -113,7 +104,7 @@ class ArtifactDetectionParameters(
     proportion) and ``"franklab_50uv_p07_2026_06"`` (50 uV, 0.7). A preset that
     omits ``artifact_detection_params_name`` runs no detection at all (no
     ``ArtifactDetectionSource`` row on a standalone sort, or all-null member
-    detections on a concat selection). In concat mode this detector runs
+    detections on a concat selection). For a concat run this detector runs
     independently on each member before concatenation.
 
     ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
@@ -138,7 +129,7 @@ class ArtifactDetectionParameters(
     # Row-level ``params_schema_version`` matches the inner
     # ``ArtifactDetectionParamsSchema.schema_version``.
     # The shipped rows are defined in
-    # ``_recipe_catalog.artifact_default_contents`` (single source).
+    # ``_core.recipe_catalog.artifact_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = artifact_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):

@@ -18,7 +18,7 @@ connection at import: SpikeInterface / spyglass (``Electrode``,
 dependencies are imported lazily inside the functions. ``suggest_bad_channels``
 does touch the DB at CALL time (an ``Electrode`` fetch, plus ``Electrode.update1``
 when ``persist=True``) via those lazy imports -- mirroring
-``_recording_geometry.py``'s contract.
+``_recording/geometry.py``'s contract.
 """
 
 from __future__ import annotations

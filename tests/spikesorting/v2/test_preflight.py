@@ -37,6 +37,7 @@ from spyglass.spikesorting.v2.pipeline import (
     PreflightCheck,
     PreflightReport,
     preflight_v2_pipeline,
+    run_v2_concat_pipeline,
     run_v2_pipeline,
 )
 from tests.spikesorting.v2._ingest_helpers import (
@@ -125,7 +126,7 @@ def test_installed_sorters_probed_once_per_reuse_block():
     """
     from types import SimpleNamespace
 
-    from spyglass.spikesorting.v2._orchestration.preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight_runtime import (
         _installed_sorters,
         _installed_sorters_reused,
     )
@@ -280,9 +281,9 @@ def test_contradictory_motion_request_fails_before_any_query(
             motion_correction_params_name=name,
         )
     with pytest.raises(PipelineInputError, match=match):
-        run_v2_pipeline(
-            concat_session_group_owner="owner",
-            concat_session_group_name="group",
+        run_v2_concat_pipeline(
+            session_group_owner="owner",
+            session_group_name="group",
             motion_mode=mode,
             motion_correction_params_name=name,
         )
@@ -357,9 +358,9 @@ def test_motion_estimate_id_outside_apply_fails_before_any_query(
             **motion,
         )
     with pytest.raises(PipelineInputError, match=match):
-        run_v2_pipeline(
-            concat_session_group_owner="owner",
-            concat_session_group_name="group",
+        run_v2_concat_pipeline(
+            session_group_owner="owner",
+            session_group_name="group",
             **motion,
         )
 
@@ -391,20 +392,6 @@ _SINGLE_SESSION = {
     "inputs, match",
     [
         pytest.param(
-            _SINGLE_SESSION,
-            "requires motion_correction_params_name",
-            id="no-recipe",
-        ),
-        pytest.param(
-            {
-                "nwb_file_name": "x.nwb",
-                "motion_correction_params_name": "dredge_fast_v1",
-            },
-            "estimate_motion: single-session mode is missing required "
-            "field\\(s\\): sort_group_id",
-            id="incomplete-mode",
-        ),
-        pytest.param(
             {
                 **_SINGLE_SESSION,
                 "pipeline_preset": "not_a_real_preset",
@@ -418,9 +405,8 @@ _SINGLE_SESSION = {
 def test_estimate_motion_rejects_a_bad_request_before_any_query(
     monkeypatch, inputs, match
 ):
-    """``estimate_motion`` without a recipe, with an incomplete input mode,
-    or with an unknown preset fails with ``PipelineInputError`` naming
-    itself, before any database access."""
+    """``estimate_motion`` with an unknown preset fails with
+    ``PipelineInputError`` naming itself, before any database access."""
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import estimate_motion
 
@@ -435,8 +421,8 @@ def test_estimate_motion_rejects_a_bad_request_before_any_query(
 @pytest.mark.unit
 def test_estimate_motion_options_are_keyword_only():
     """Only the single-session source fields are positional, so a preset or
-    a preflight flag passed by position (as ``run_v2_pipeline`` accepts them)
-    is refused instead of landing on another parameter."""
+    a preflight flag passed by position is refused instead of landing on
+    another parameter."""
     from spyglass.spikesorting.v2.pipeline import estimate_motion
 
     with pytest.raises(TypeError, match="positional"):
@@ -585,7 +571,7 @@ def test_motion_setup_states_mode_recipe_preset_border_and_status(concat):
     """The scientific setup names the selected motion mode, recipe, resolved
     estimation preset, applied border mode and experimental status, in both
     run shapes; ``off`` says the sort reads the uncorrected source."""
-    from spyglass.spikesorting.v2._orchestration.preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight_scientific_setup import (
         MOTION_RECIPE_STATUS,
         _describe_motion,
     )
@@ -1185,7 +1171,7 @@ def test_preflight_sorter_runtime_backend_missing(
         "franklab_probe_hippocampus_30khz_ms4_2026_06"
     ].sorter
     monkeypatch.setattr(
-        "spyglass.spikesorting.v2._orchestration.preflight._SORTER_RUNTIME_BACKENDS",
+        "spyglass.spikesorting.v2._orchestration.preflight_runtime._SORTER_RUNTIME_BACKENDS",
         {default_sorter: ("definitely_absent_backend_xyz",)},
     )
 
@@ -1291,6 +1277,48 @@ def test_preflight_skips_artifact_when_params_none(
     # No artifact id is expected.
     assert report.expected_ids["artifact_detection_id"]["id"] is None
     assert report.expected_ids["artifact_detection_id"]["exists"] is False
+
+
+@pytest.mark.database
+@pytest.mark.parametrize("artifact_params_name", [None, "none"])
+def test_preflight_no_masking_advisory_skipped_with_manual_exclusions(
+    preflight_inputs, monkeypatch, artifact_params_name
+):
+    """Manual exclusions mask the sort even without automatic detection, so
+    the 'no artifact masking' advisory must not fire (matches concat)."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    preset = pl._PipelinePreset(
+        preprocessing_params_name="default",
+        artifact_detection_params_name=artifact_params_name,
+        sorter="mountainsort5",
+        sorter_params_name="franklab_30khz_ms5_2026_06",
+        metric_params_name="minimal",
+        auto_curation_rules_name="none",
+    )
+    monkeypatch.setitem(pl._PIPELINE_PRESETS, "_preflight_manual_only", preset)
+    start = float(
+        (
+            IntervalList
+            & {
+                "nwb_file_name": preflight_inputs["nwb_file_name"],
+                "interval_list_name": preflight_inputs["interval_list_name"],
+            }
+        ).fetch1("valid_times")[0][0]
+    )
+
+    report = preflight_v2_pipeline(
+        **{
+            **preflight_inputs,
+            "pipeline_preset": "_preflight_manual_only",
+            "manual_excluded_times": [[start + 1.0, start + 2.0]],
+        }
+    )
+    assert report.ok is True
+    assert not any(
+        "no artifact masking" in w for w in report.warnings
+    ), report.warnings
 
 
 @pytest.mark.database
@@ -1566,7 +1594,7 @@ def test_container_runtime_probes_return_bool_detail_unmocked():
     every mocked test would stay green. This calls the probes for real and only
     asserts the contract shape (either truth value is fine in any environment).
     """
-    from spyglass.spikesorting.v2._orchestration.preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight_runtime import (
         _container_runtime_available,
     )
 
@@ -1585,7 +1613,7 @@ def test_preflight_container_runtime_errors(preflight_inputs, monkeypatch):
     error naming the backend + image -- and never falls back to a local
     ``sorter_installed`` check.
     """
-    from spyglass.spikesorting.v2._orchestration import preflight as pf
+    from spyglass.spikesorting.v2._orchestration import preflight_runtime as pf
 
     monkeypatch.setattr(
         pf,
@@ -1620,7 +1648,7 @@ def test_preflight_reports_container_ms4_modern_host_path(
     report carries a non-blocking advisory making clear the host can stay on the
     v2 numpy>=2 environment because the MS4 runtime lives inside the container.
     """
-    from spyglass.spikesorting.v2._orchestration import preflight as pf
+    from spyglass.spikesorting.v2._orchestration import preflight_runtime as pf
 
     monkeypatch.setattr(
         pf,
@@ -1787,7 +1815,7 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
 ):
     """A container-backend preset's runtime is a BLOCKING preflight check
     (matching single-session), not silently skipped."""
-    import spyglass.spikesorting.v2._orchestration.preflight as preflight_mod
+    import spyglass.spikesorting.v2._orchestration.preflight_runtime as preflight_mod
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_preset_compute_rows,
@@ -1806,7 +1834,7 @@ def test_assert_preset_compute_rows_container_backend_checks_runtime(
         lambda backend: (False, f"{backend} not installed"),
     )
     with pytest.raises(
-        PreflightError, match="^run_v2_pipeline: .*not runnable here"
+        PreflightError, match="^run_v2_concat_pipeline: .*not runnable here"
     ):
         assert_preset_compute_rows(bundle)
 

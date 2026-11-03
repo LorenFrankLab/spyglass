@@ -67,6 +67,7 @@ from spyglass.spikesorting.v2.pipeline import (
     plan_v2_unit_match_from_sorts,
     plan_v2_unit_match_from_curations,
     preflight_v2_unit_match,
+    run_v2_concat_pipeline,
     run_v2_pipeline,
     run_v2_unit_match,
     select_units_for_analysis,
@@ -104,8 +105,9 @@ same_day_members = [
 ]
 concat_group_name = "day1_blocks"
 # Motion correction is independent of concatenation and off by default: pass
-# motion_mode / motion_correction_params_name to run_v2_pipeline to estimate or
-# apply it, the same way for a single-session or a concat preset.
+# motion_mode / motion_correction_params_name to run_v2_pipeline or
+# run_v2_concat_pipeline to estimate or apply it, the same way for a
+# single-session or a concat preset.
 concat_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 
 # Part B — sessions to sort INDEPENDENTLY and match, typically across days (same
@@ -154,7 +156,7 @@ LabTeam.insert1(
 # leaves `allow_multi_day=False`, so it raises if these members span dates.
 # (Recording dates are derived from each session, never supplied.)
 #
-# In concat mode, `run_v2_pipeline` takes the *group* instead of a single session:
+# `run_v2_concat_pipeline` takes the *group* instead of a single session:
 # it preprocesses each member, detects artifacts and masks that member, then
 # concatenates the masked traces (motion correction, if requested via
 # motion_mode, then runs on the concatenation before sorting). The summary
@@ -164,8 +166,7 @@ LabTeam.insert1(
 # Detection choices are frozen; no mask is inherited from an earlier sort. The synthetic concat curation itself stays out of `SpikeSortingOutput`;
 # the summary instead returns one wall-clock-aligned `member_merge_ids` entry per
 # frozen member, keyed by `member_index`. `auto_curate=True` makes those member
-# IDs point to the auto-curated child. Idempotent, like every `run_v2_pipeline`
-# call.
+# IDs point to the auto-curated child. Idempotent, like every pipeline run.
 
 if run_concat:
     concat_key = {
@@ -178,9 +179,9 @@ if run_concat:
         )
     display(SessionGroup.Member & concat_key)
 
-    concat_summary = run_v2_pipeline(
-        concat_session_group_owner=session_group_owner,
-        concat_session_group_name=concat_group_name,
+    concat_summary = run_v2_concat_pipeline(
+        session_group_owner,
+        concat_group_name,
         pipeline_preset=concat_preset,
         auto_curate=True,
     )

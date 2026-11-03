@@ -296,10 +296,9 @@ def find_existing_pk(
     * the master at ``deterministic_id`` is the canonical, content-
       addressed selection -> return ``{"sorting_id": ...}``;
     * ANY master with a different ``sorting_id`` is non-deterministic
-      (a raw ``insert`` bypass or a legacy non-content-addressed row) and
-      violates the content-addressed-identity invariant -> raise
-      ``DuplicateSelectionError`` so it is reset rather than silently
-      returned.
+      (a raw ``insert`` bypass) and violates the content-addressed-identity
+      invariant -> raise ``DuplicateSelectionError`` so it is reset rather
+      than silently returned.
 
     Used by ``insert_selection`` for both the pre-insert lookup and
     the post-duplicate-key refetch.
@@ -336,8 +335,8 @@ def find_existing_pk(
             f"motion_corrected_recording_id={motion_corrected_recording_id} "
             "whose sorting_id is not the "
             f"deterministic id {deterministic_id}: {bypassed}. This is a "
-            "non-deterministic selection row (a raw insert or a legacy "
-            "non-content-addressed row); drop it and re-insert via "
+            "non-deterministic selection row (a raw insert bypassing "
+            "insert_selection); drop it and re-insert via "
             "insert_selection."
         ),
     )

@@ -83,6 +83,7 @@ def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
                 "ms_before": 1.0,
                 "ms_after": 2.0,
                 "whiten": False,
+                "sparsity": {},
             },
         )
     message = str(excinfo.value)
@@ -126,6 +127,7 @@ def test_build_analyzer_accepts_distinct_contacts(tmp_path, monkeypatch):
                 "ms_before": 1.0,
                 "ms_after": 2.0,
                 "whiten": False,
+                "sparsity": {},
             },
         )
     assert reached["recording"].get_num_channels() == 4
@@ -153,6 +155,7 @@ def _waveform_params(*, whiten, sparsity=None):
         "ms_after": 2.0,
         "max_spikes_per_unit": 50,
         "whiten": whiten,
+        "sparsity": {},
     }
     if sparsity is not None:
         params["sparsity"] = sparsity

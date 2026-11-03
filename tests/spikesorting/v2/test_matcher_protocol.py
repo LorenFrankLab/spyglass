@@ -420,5 +420,5 @@ def test_match_pair_carries_both_side_keys(clean_registry):
         match_probability=0.9,
     )
     assert pair.unit_a_id == 3 and pair.unit_b_id == 7
-    assert pair.drift_estimate_um == 0.0
+    assert pair.drift_estimate_um is None
     assert pair.fdr_estimate is None

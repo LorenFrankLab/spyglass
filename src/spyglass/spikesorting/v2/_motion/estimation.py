@@ -103,7 +103,7 @@ _ESTIMATE_BOUND = frozenset(
 _NAMED_CALLABLES = {"numpy.log1p": np.log1p}
 
 #: Random-chunk budget of the noise estimate, taken from the span sampler
-#: (``_sorting_dispatch._sample_statistics_spans``) so the resolved
+#: (``_sorting.dispatch._sample_statistics_spans``) so the resolved
 #: configuration -- and hence the estimate's identity -- follows any change
 #: to that sampler.
 _NOISE_METHOD = "mad"
@@ -677,7 +677,7 @@ def check_estimation_eligibility(recording, resolved_params: dict) -> None:
     """Refuse a recording whose geometry cannot support the recipe.
 
     Flattens a reloaded artifact's constant third coordinate in place
-    (:func:`._recording_geometry.flatten_planar_geometry`), then requires:
+    (:func:`._recording.geometry.flatten_planar_geometry`), then requires:
 
     - finite, distinct 2D contact positions;
     - one shank (nonrigid windows are built along the motion axis only, so
@@ -794,7 +794,7 @@ def estimation_noise_levels(
     """Per-channel noise the detection threshold is scaled by.
 
     With spans that exclude samples, the MAD of seeded random samples drawn
-    only inside the statistics spans (``_sorting_dispatch.
+    only inside the statistics spans (``_sorting.dispatch.
     cache_span_noise_levels``, the estimate the analyzer noise levels use),
     so masked zeros and joins do not lower the threshold. With one span
     covering the recording, SpikeInterface's own ``get_noise_levels`` -- the
@@ -1317,7 +1317,7 @@ def estimate_motion_in_spans(
        (``motion.py:359``).
     3. Between localization and estimation, only peaks whose localization
        window lies inside one statistics span
-       (:func:`~._signal_math.frames_with_window_in_one_span`)
+       (:func:`~._core.signal_math.frames_with_window_in_one_span`)
        and whose detection did not read across a join between continuity
        spans (:func:`peaks_clear_of_joins`) are kept.
     4. ``estimate_motion`` reads peak times on the estimation clock
@@ -1772,7 +1772,7 @@ def motion_corrected_identity_payload(
     Returns
     -------
     dict
-        Payload for ``_selection_identity.deterministic_id``.
+        Payload for ``_core.selection_identity.deterministic_id``.
     """
     return {
         "motion_estimate_id": motion_estimate_id,
@@ -1814,43 +1814,6 @@ def motion_corrected_recording_artifact_lock(
     )
 
 
-#: Columns the removed in-concat motion correction left on the concat tables.
-#: A live heading that still carries one belongs to an un-recreated schema
-#: whose cached traces may already be motion corrected.
-LEGACY_CONCAT_MOTION_ATTRIBUTES = frozenset(
-    {"motion_preset", "motion_correction_params_name"}
-)
-
-
-def assert_concat_schema_current(*heading_names) -> None:
-    """Refuse concat tables whose live heading predates motion's removal.
-
-    Parameters
-    ----------
-    *heading_names : iterable of str
-        The live ``heading.names`` of ``ConcatenatedRecording`` and
-        ``ConcatenatedRecordingSelection``.
-
-    Raises
-    ------
-    ValueError
-        If any heading still carries a removed motion attribute, naming the
-        recreation the user must run first.
-    """
-    present = set().union(*(set(names) for names in heading_names))
-    legacy = sorted(LEGACY_CONCAT_MOTION_ATTRIBUTES & present)
-    if legacy:
-        raise ValueError(
-            "The v2 concat tables still carry the removed motion-correction "
-            f"column(s) {legacy}: this database was not recreated after "
-            "motion correction moved out of concatenation, so a cached concat "
-            "artifact may already be motion corrected and must not be "
-            "estimated or corrected again. Recreate the v2 concat tables as "
-            "the 'Upgrading a preproduction v2 database' section of the Spike "
-            "Sorting v2 migration guide describes, then re-populate them."
-        )
-
-
 def motion_estimate_identity_payload(
     *,
     source_kind: str,
@@ -1884,7 +1847,7 @@ def motion_estimate_identity_payload(
     Returns
     -------
     dict
-        Payload for ``_selection_identity.deterministic_id``.
+        Payload for ``_core.selection_identity.deterministic_id``.
     """
     payload = {
         "source_kind": source_kind,

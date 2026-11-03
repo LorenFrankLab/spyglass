@@ -238,13 +238,6 @@ def test_invalid_selection_is_rejected(motion_params, key, match):
         MotionEstimateSelection.insert_selection(key)
 
 
-def test_live_concat_heading_is_current(dj_conn):
-    """The recreated concat tables carry no removed motion column."""
-    from spyglass.spikesorting.v2.motion import _assert_concat_tables_current
-
-    _assert_concat_tables_current()
-
-
 def test_direct_insert_and_orphan_master_are_refused(drift_recording):
     import datajoint as dj
 
@@ -2486,14 +2479,16 @@ def test_pipeline_motion_apply_on_a_concatenation(discontinuous_sources):
         MotionCorrectedRecordingSelection,
         MotionEstimateSelection,
     )
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+    )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     summary = None
     try:
-        summary = run_v2_pipeline(
-            concat_session_group_owner=MOTION_TEAM,
-            concat_session_group_name=CONCAT_GROUP,
+        summary = run_v2_concat_pipeline(
+            session_group_owner=MOTION_TEAM,
+            session_group_name=CONCAT_GROUP,
             pipeline_preset=PIPELINE_PRESET,
             motion_mode="apply",
             motion_correction_params_name=MOTION_RECIPE,
@@ -2868,12 +2863,16 @@ def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
         PreflightError,
     )
     from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
 
     MotionCorrectionParameters.insert_default()
     run_recording_id = drift_recording["recording_key"]["recording_id"]
     saved = _saved_estimate_of_the_run(drift_recording)
     inputs = _pipeline_inputs(drift_recording)
+    run = run_v2_pipeline
     recipe = MOTION_RECIPE
     if case == "other_source":
         other_id = discontinuous_sources["member_b"]["recording_id"]
@@ -2892,17 +2891,18 @@ def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
     else:
         estimate = saved
         inputs = {
-            "concat_session_group_owner": MOTION_TEAM,
-            "concat_session_group_name": CONCAT_GROUP,
+            "session_group_owner": MOTION_TEAM,
+            "session_group_name": CONCAT_GROUP,
             "pipeline_preset": PIPELINE_PRESET,
         }
+        run = run_v2_concat_pipeline
         expected = [str(run_recording_id), "sorts a concatenation"]
 
     before = _row_counts()
     curations_before = len(CurationV2())
     raised_type = PreflightError if preflight else PipelineStageError
     with pytest.raises(raised_type) as raised:
-        run_v2_pipeline(
+        run(
             **inputs,
             preflight=preflight,
             motion_mode="apply",
@@ -3106,19 +3106,19 @@ def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
         MotionEstimateSelection,
     )
     from spyglass.spikesorting.v2.pipeline import (
-        estimate_motion,
-        run_v2_pipeline,
+        estimate_concat_motion,
+        run_v2_concat_pipeline,
     )
 
     concat = {
-        "concat_session_group_owner": MOTION_TEAM,
-        "concat_session_group_name": CONCAT_GROUP,
+        "session_group_owner": MOTION_TEAM,
+        "session_group_name": CONCAT_GROUP,
         "pipeline_preset": PIPELINE_PRESET,
     }
     before = _row_counts()
     receipt = applied = None
     try:
-        receipt = estimate_motion(
+        receipt = estimate_concat_motion(
             **concat, motion_correction_params_name=MOTION_RECIPE
         )
         assert receipt["source_mode"] == "concat"
@@ -3134,7 +3134,7 @@ def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
         )
         assert receipt["motion_diagnostics"]["n_peaks_kept"] > 0
 
-        applied = run_v2_pipeline(
+        applied = run_v2_concat_pipeline(
             **concat,
             motion_mode="apply",
             motion_correction_params_name=MOTION_RECIPE,
@@ -3163,12 +3163,16 @@ def test_estimate_motion_then_apply_on_a_concatenation(discontinuous_sources):
 def test_concat_preflight_names_the_calling_entry_point(dj_conn):
     """A concat preflight failure names the entry point that ran it."""
     from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.pipeline import estimate_motion
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_concat_motion,
+    )
 
-    with pytest.raises(PreflightError, match="^estimate_motion: SessionGroup"):
-        estimate_motion(
-            concat_session_group_owner="no_such_owner",
-            concat_session_group_name="no_such_group",
+    with pytest.raises(
+        PreflightError, match="^estimate_concat_motion: SessionGroup"
+    ):
+        estimate_concat_motion(
+            session_group_owner="no_such_owner",
+            session_group_name="no_such_group",
             pipeline_preset=PIPELINE_PRESET,
             motion_correction_params_name=MOTION_RECIPE,
         )
@@ -3182,6 +3186,9 @@ def test_estimate_motion_does_not_need_the_sorter(
     ``run_v2_pipeline`` call (which sorts) is still refused."""
     from spyglass.spikesorting.v2._orchestration import (
         preflight as _pipeline_preflight,
+    )
+    from spyglass.spikesorting.v2._orchestration import (
+        preflight_runtime as _preflight_runtime,
     )
     from spyglass.spikesorting.v2._orchestration.presets import (
         _PIPELINE_PRESETS,
@@ -3197,7 +3204,7 @@ def test_estimate_motion_does_not_need_the_sorter(
         check("sorter_installed", False, "planted: the sorter is unavailable")
 
     monkeypatch.setattr(
-        _pipeline_preflight, "_check_local_sorter_runtime", _unavailable
+        _preflight_runtime, "_check_local_sorter_runtime", _unavailable
     )
     inputs = _pipeline_inputs(drift_recording)
     motion = {
@@ -3247,13 +3254,13 @@ def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
     )
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import (
-        estimate_motion,
-        run_v2_pipeline,
+        estimate_concat_motion,
+        run_v2_concat_pipeline,
     )
 
     concat = {
-        "concat_session_group_owner": MOTION_TEAM,
-        "concat_session_group_name": CONCAT_GROUP,
+        "session_group_owner": MOTION_TEAM,
+        "session_group_name": CONCAT_GROUP,
         "pipeline_preset": PIPELINE_PRESET,
     }
     motion = {
@@ -3263,7 +3270,7 @@ def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
     t0 = discontinuous_sources["t0"]
     receipt = None
     try:
-        receipt = estimate_motion(
+        receipt = estimate_concat_motion(
             **concat, motion_correction_params_name=MOTION_RECIPE
         )
         estimate_id = receipt["motion_estimate_id"]
@@ -3280,7 +3287,7 @@ def test_concat_preflight_refuses_an_estimate_of_other_member_masks(
         }
         before = _row_counts()
         with pytest.raises(PreflightError) as raised:
-            run_v2_pipeline(
+            run_v2_concat_pipeline(
                 **concat,
                 **motion,
                 motion_estimate_id=estimate_id,
@@ -3656,7 +3663,9 @@ def test_concat_preflight_refuses_unsupported_motion(
     member whose geometry the recipe cannot estimate on -- and fails before
     any member, concat, motion or sort row is built."""
     from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+    )
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         SessionGroup,
@@ -3691,9 +3700,9 @@ def test_concat_preflight_refuses_unsupported_motion(
     before = {**_row_counts(), "concat": len(ConcatenatedRecording())}
     try:
         with pytest.raises(PreflightError, match=message):
-            run_v2_pipeline(
-                concat_session_group_owner=group["session_group_owner"],
-                concat_session_group_name=group["session_group_name"],
+            run_v2_concat_pipeline(
+                session_group_owner=group["session_group_owner"],
+                session_group_name=group["session_group_name"],
                 pipeline_preset=preset,
                 motion_mode="apply",
                 motion_correction_params_name=recipe,
@@ -3736,6 +3745,7 @@ def test_preflight_refuses_motion_on_an_unfiltered_recipe(
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import (
         preflight_v2_pipeline,
+        run_v2_concat_pipeline,
         run_v2_pipeline,
     )
     from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -3775,9 +3785,9 @@ def test_preflight_refuses_motion_on_an_unfiltered_recipe(
     with pytest.raises(PreflightError, match=message):
         run_v2_pipeline(**inputs, **motion)
     with pytest.raises(PreflightError, match=message):
-        run_v2_pipeline(
-            concat_session_group_owner=MOTION_TEAM,
-            concat_session_group_name=CONCAT_GROUP,
+        run_v2_concat_pipeline(
+            session_group_owner=MOTION_TEAM,
+            session_group_name=CONCAT_GROUP,
             pipeline_preset=unfiltered_preset,
             **motion,
         )

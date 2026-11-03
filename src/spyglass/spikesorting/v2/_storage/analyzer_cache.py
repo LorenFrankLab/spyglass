@@ -30,9 +30,8 @@ is bounded by the worker chunk buffers rather than
 ``n_spikes * n_samples * n_channels``. :func:`load_analyzer_folder` is the one
 loader: it maps ``waveforms.npy`` lazily (``mmap_mode="r"``) instead of SI's
 eager ``np.load``, so opening a cache for review or metrics does not read the
-whole waveform volume either. Analyzer folders in any other format (such as
-``*.zarr``) are never read: the cache rebuilds under this convention, and
-those folders can be deleted from the analyzer root by hand.
+whole waveform volume either. Analyzer folders in any other format are never
+read.
 
 This module reads ``dj.config`` and ``temp_dir`` but opens no DB connection
 and activates no ``dj.schema``; the reads happen at call time so import stays
@@ -70,25 +69,34 @@ def write_analyzer_sparsity_receipt(folder, *, peak_sign: str) -> None:
 
 
 def assert_analyzer_sparsity_polarity(
-    analyzer, *, waveform_params, expected_peak_sign: str
+    analyzer, *, expected_peak_sign: str
 ) -> None:
     """Compare cached polarity with the sorter's already-resolved peak sign.
 
-    An unmarked legacy cache used the waveform recipe's ``peak_sign`` (neg
-    when absent). It is still usable when that equals the sorter's polarity.
-    New builds record their effective polarity; this also survives derivative
-    copies. Dense caches need no polarity check because no channels were lost.
+    Every sparse build records its effective polarity in the sparsity receipt,
+    which derivative copies carry along. A sparse folder without a readable
+    receipt is invalid: the cache loader removes and rebuilds it (or, with
+    ``rebuild=False``, raises ``AnalyzerFolderInvalidError``). Dense caches
+    need no polarity check because no channels were dropped.
+
+    Raises
+    ------
+    ValueError
+        If the sparse analyzer has no receipt, an unknown receipt, or a
+        recorded polarity other than ``expected_peak_sign``.
     """
     if not analyzer.is_sparse():
         return
     receipt = Path(analyzer.folder) / ANALYZER_SPARSITY_RECEIPT
-    if receipt.exists():
-        recorded = json.loads(receipt.read_text())
-        if not isinstance(recorded, dict) or recorded.get("version") != 1:
-            raise ValueError(f"Unknown analyzer sparsity receipt: {receipt}")
-        actual = recorded.get("peak_sign")
-    else:
-        actual = (waveform_params.get("sparsity") or {}).get("peak_sign", "neg")
+    if not receipt.exists():
+        raise ValueError(
+            f"Sparse analyzer has no sparsity receipt ({receipt}); its "
+            "channel polarity is unknown. Rebuild the analyzer."
+        )
+    recorded = json.loads(receipt.read_text())
+    if not isinstance(recorded, dict) or recorded.get("version") != 1:
+        raise ValueError(f"Unknown analyzer sparsity receipt: {receipt}")
+    actual = recorded.get("peak_sign")
     if actual != expected_peak_sign:
         raise ValueError(
             "Analyzer sparsity polarity is incompatible with its sorter: "
@@ -454,7 +462,7 @@ def curation_analyzer_path(
     slot even when their human-readable recipe name is the same.
     ``extension_request_hash`` (16 hex chars) names a DERIVATIVE of the base
     cache that carries extra extensions with specific parameters (see
-    ``_curation_analyzer.derived_extension_request_hash``); ``None`` is the
+    ``_curation.analyzer.derived_extension_request_hash``); ``None`` is the
     base cache itself.
     """
     sorting_uuid = uuid.UUID(str(sorting_id))
@@ -858,10 +866,11 @@ def cleanup_analyzer_staging(
 
     Both locks are nonblocking: a cache publisher holds the sort lock, and a
     Sorting compute holds its build lock until insertion finishes. No PID or
-    age heuristic is needed, including on supported shared filesystems. Legacy
-    PID-named folders are recognized as well. Unrelated hidden directories are
-    never candidates. ``candidates`` limits a confirmed deletion to the paths
-    previously presented to the operator; ownership is still rechecked.
+    age heuristic is needed, including on supported shared filesystems. Only
+    folders named by ``_publish_sibling`` (a uuid4 hex suffix) are candidates;
+    other hidden directories are never touched. ``candidates`` limits a
+    confirmed deletion to the paths previously presented to the operator;
+    ownership is still rechecked.
     """
     from filelock import FileLock, Timeout
 
@@ -875,7 +884,7 @@ def cleanup_analyzer_staging(
         if allowed is not None and str(folder) not in allowed:
             continue
         match = re.fullmatch(
-            r"\.(.+)\.(?:build|trash)-([0-9a-f]+)\.analyzer", folder.name
+            r"\.(.+)\.(?:build|trash)-([0-9a-f]{32})\.analyzer", folder.name
         )
         if not match or not folder.is_dir():
             continue

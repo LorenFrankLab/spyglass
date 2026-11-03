@@ -111,6 +111,45 @@ def test_acquisition_span_clock_remains_lazy_when_reconstructed():
     )
 
 
+def test_lazy_clock_materializes_in_one_read(monkeypatch):
+    """SI's ``get_times`` (``np.asarray(time_vector)``) reads a lazy span
+    clock with one slice, not one ``__getitem__`` call per sample."""
+    from spyglass.spikesorting.v2._recording.acquisition_spans import (
+        AcquisitionSpanRecording,
+        _SpanTimestamps,
+    )
+    from spyglass.spikesorting.v2._recording.restriction import (
+        _LazyConcatenatedTimestamps,
+    )
+
+    fs, n = 30_000.0, 9_000
+    recording = si.NumpyRecording([np.zeros((n, 1), dtype=np.float32)], fs)
+    times = np.arange(n) / fs
+    times[n // 2 :] += 5.0
+    recording.set_times(times)
+
+    calls = []
+    original = _SpanTimestamps.__getitem__
+
+    def counting(self, item):
+        calls.append(item)
+        return original(self, item)
+
+    monkeypatch.setattr(_SpanTimestamps, "__getitem__", counting)
+    span = AcquisitionSpanRecording(recording, 100, n - 100)
+    np.testing.assert_array_equal(span.get_times(), times[100 : n - 100])
+    assert len(calls) == 1
+
+    parts = [
+        _SpanTimestamps(recording, 0, 10),
+        _SpanTimestamps(recording, 50, 60),
+    ]
+    np.testing.assert_array_equal(
+        np.asarray(_LazyConcatenatedTimestamps(parts), dtype=np.float32),
+        np.r_[times[0:10], times[50:60]].astype(np.float32),
+    )
+
+
 def test_gapped_nwb_preprocessing_streams_exact_timestamps(tmp_path):
     """Use the real lazy NWB reader and streaming writer across a gap."""
     from datetime import datetime, timezone

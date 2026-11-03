@@ -93,27 +93,6 @@ def test_structured_hash_ignores_alignment_padding(monkeypatch, nested):
     assert _hash(other[::-1][::-1]) == expected
 
 
-def test_legacy_hash_inventory_is_readable_but_requires_refresh():
-    manifest = {
-        "extension_content_hashes": {"noise_levels": "a" * 32},
-        "base_extension_seed_modes": {"noise_levels": 0},
-        "storage_fingerprint": "unchanged",
-    }
-    assert "shapes and canonical dtypes" in (
-        hashes.analyzer_recompute_unverifiable_reason(manifest)
-    )
-    assert hashes.analyzer_inventory_refresh_needed(
-        manifest, "unchanged", reclaimed=False
-    )
-    # Retain an audit for deliberately reclaimed storage, including legacy
-    # inventories; an algorithm upgrade must not erase that audit.
-    assert not hashes.analyzer_inventory_refresh_needed(
-        manifest, None, reclaimed=True
-    )
-    assert not hashes.analyzer_content_hash_is_current("a" * 64)
-    assert hashes.analyzer_content_hash_is_current(_hash(np.arange(3)))
-
-
 @pytest.mark.parametrize(
     "dtype",
     [np.dtype("float32"), np.dtype([("a", "u1"), ("b", "i8")], align=True)],
@@ -139,7 +118,7 @@ def test_production_role_hash_keeps_memmap_allocation_bounded(tmp_path, dtype):
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert hashes.analyzer_content_hash_is_current(result["display"])
+    assert result["display"].startswith(hashes.ANALYZER_CONTENT_HASH_PREFIX)
     # The old rounding + tobytes path allocated twice the complete volume.
     # Allow multiple chunk buffers and fixed overhead, never a volume copy.
     assert peak < 8 * hashes._HASH_CHUNK_BYTES, peak

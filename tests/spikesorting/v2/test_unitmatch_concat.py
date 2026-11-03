@@ -322,7 +322,7 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
     forged past the insert helper is refused by make() before extraction."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
-        SameSessionMatchError,
+        OverlappingMatchInputError,
         UnitMatchSelectionIntegrityError,
     )
     from spyglass.spikesorting.v2.unit_matching import (
@@ -357,13 +357,13 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
         (
             "concat plus its own member sort",
             [cur["concat_day1"], cur["single_a_first"]],
-            SameSessionMatchError,
+            OverlappingMatchInputError,
             nwb_a,
         ),
         (
             "two recordings of one session",
             [cur["single_a_first"], cur["single_a"]],
-            SameSessionMatchError,
+            OverlappingMatchInputError,
             nwb_a,
         ),
         (
@@ -3339,20 +3339,20 @@ def _assert_exclusion_is_the_only_mask(sort_key, spec, layout) -> None:
 
 
 def _sort_both_days(fixture, trains_by_n_samples, monkeypatch, receipts=None):
-    """``run_v2_pipeline`` on each day's concatenation group.
+    """``run_v2_concat_pipeline`` on each day's concatenation group.
 
     With ``receipts`` (``estimate_motion`` receipts by day), in ``apply``
     mode with exactly those estimates; otherwise ``motion_mode="off"``.
     """
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import run_v2_concat_pipeline
 
     summaries = {}
     with monkeypatch.context() as patch:
         plant_sorter(patch, _planted_daily_sorter(trains_by_n_samples))
         for label, day in fixture["days"].items():
             kwargs = {
-                "concat_session_group_owner": fixture["team"],
-                "concat_session_group_name": day["session_group_name"],
+                "session_group_owner": fixture["team"],
+                "session_group_name": day["session_group_name"],
                 "pipeline_preset": _WORKFLOW_PRESET,
                 "manual_excluded_times": day["manual_excluded_times"],
             }
@@ -3362,7 +3362,7 @@ def _sort_both_days(fixture, trains_by_n_samples, monkeypatch, receipts=None):
                     "motion_correction_params_name": _WORKFLOW_MOTION_RECIPE,
                     "motion_estimate_id": receipts[label]["motion_estimate_id"],
                 }
-            summaries[label] = run_v2_pipeline(**kwargs)
+            summaries[label] = run_v2_concat_pipeline(**kwargs)
     return summaries
 
 
@@ -3672,7 +3672,9 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
     planted drift moves every unit by up to 25 um within the day. Both runs
     print their per-neuron records before any recovery assertion.
     """
-    from spyglass.spikesorting.v2.pipeline import estimate_motion
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_concat_motion,
+    )
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
     from tests.spikesorting.v2 import _daily_match_fixtures as daily
     from tests.spikesorting.v2._motion_db_helpers import drop_pipeline_sorts
@@ -3683,9 +3685,9 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
     try:
         receipts, trains_by_n_samples, layouts = {}, {}, {}
         for label, day in fx["days"].items():
-            receipts[label] = estimate_motion(
-                concat_session_group_owner=fx["team"],
-                concat_session_group_name=day["session_group_name"],
+            receipts[label] = estimate_concat_motion(
+                session_group_owner=fx["team"],
+                session_group_name=day["session_group_name"],
                 pipeline_preset=_WORKFLOW_PRESET,
                 manual_excluded_times=day["manual_excluded_times"],
                 motion_correction_params_name=_WORKFLOW_MOTION_RECIPE,

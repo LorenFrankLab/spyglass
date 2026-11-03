@@ -25,15 +25,12 @@ from typing import NamedTuple
 # MATLAB-backed sorters, whose compiled runtime ships only as a container image:
 # a ``backend="local"`` row raises
 # (``assert_matlab_sorter_has_container_backend``). Unlike v1, the container
-# comes from the tracked ``execution_params``, never from the sorter name. The
-# set coincides with
-# ``_params.sorter._INTERNAL_WHITEN_NO_KWARG_SORTERS`` but encodes a different
-# concept (container policy, not whitening); keep them separate.
+# comes from the tracked ``execution_params``, never from the sorter name.
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
 # Sorters whose ``whiten=True`` the dispatcher routes to ``pinned_whiten``
 # (whitening exactly once). Any other sorter's ``whiten`` passes through
-# unchanged. The internal-whitening MATLAB sorters reject a truthy ``whiten`` at
-# insert, so they never reach this check with ``whiten=True``.
+# unchanged (KS2.5 / KS3 have no ``whiten`` key, so the SI-wrapper key check
+# rejects one at insert; ironclust's own ``whiten`` reaches its wrapper).
 _EXTERNAL_WHITEN_SORTERS = frozenset({"mountainsort4", "mountainsort5"})
 
 
@@ -625,29 +622,17 @@ def run_clusterless_thresholder(
     # ``radius_um`` in 0.101+.
     if "local_radius_um" in params:
         params["radius_um"] = params.pop("local_radius_um")
-    # SI 0.104 ``detect_peaks`` rejects stale routing hints
-    # via the new ``(method, method_kwargs, job_kwargs)`` shape:
-    # ``outputs`` was a Spyglass-only routing hint, and
-    # ``random_chunk_kwargs`` was renamed to
-    # ``random_slices_kwargs`` and is now managed internally.
-    for stale in ("outputs", "random_chunk_kwargs"):
-        params.pop(stale, None)
-
     # ``threshold_unit`` is a Spyglass-side knob, not a detect_peaks kwarg.
-    # A row without it (``schema_version`` < 4) falls back to the schema
-    # default "uv", so it is scaled to microvolts rather than thresholded in
-    # native counts (on Intan 0.195 uV/count, "100" would be ~19.5 uV).
-    threshold_unit = params.pop("threshold_unit", "uv")
+    threshold_unit = params.pop("threshold_unit")
     # The schema enforces ``Literal["uv", "mad"]`` at insert, but ``update1``
-    # and pre-validator rows bypass it and the fetched blob is not
-    # re-validated; any non-"uv" value would otherwise silently take the MAD
-    # path.
+    # bypasses it and the fetched blob is not re-validated; any non-"uv"
+    # value would otherwise silently take the MAD path.
     if threshold_unit not in ("uv", "mad"):
         raise ValueError(
             "clusterless_thresholder: threshold_unit must be 'uv' or "
-            f"'mad', got {threshold_unit!r}. A params row written via "
-            "update1 or before the SorterParameters validator existed can "
-            "carry an invalid value; fix the stored params row."
+            f"'mad', got {threshold_unit!r}. A params row edited via "
+            "update1 bypasses the SorterParameters validator; fix the "
+            "stored params row."
         )
     # Same bypass as above for the insert validator's MAD-multiplier check:
     # a microvolt-scale threshold read as a MAD multiplier (e.g. 100x MAD)
@@ -670,7 +655,7 @@ def run_clusterless_thresholder(
             "estimate per-channel MAD and detect almost nothing. Use "
             "threshold_unit='uv' for a microvolt/native threshold, or a "
             "MAD multiplier near 5. (This row likely bypassed the "
-            "SorterParameters insert validator via update1 or predates it.)"
+            "SorterParameters insert validator via update1.)"
         )
     nl_in = _clusterless_noise_levels(
         params.get("noise_levels"), threshold_unit

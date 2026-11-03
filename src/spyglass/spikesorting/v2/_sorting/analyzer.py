@@ -90,7 +90,7 @@ def ensure_extensions(
     Idempotent: an already-present extension is never recomputed (recomputing a
     parent cascade-deletes its children and rewrites template-derived values).
     ``random_seed`` is stripped from ``job_kwargs``
-    (:func:`._sorting_dispatch.without_random_seed`) because it is an extension
+    (:func:`._sorting.dispatch.without_random_seed`) because it is an extension
     param, not a ``ChunkRecordingExecutor`` job kwarg.
 
     Parameters
@@ -292,7 +292,7 @@ def _load_analyzer_folder_or_rebuild(
         return load()
 
 
-def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
+def analyzer_sparsity_validator(sorter_params_fn):
     """Resolve sorter polarity once, on the first sparse-cache validation."""
     peak_sign = None
 
@@ -318,9 +318,7 @@ def analyzer_sparsity_validator(waveform_params, sorter_params_fn):
         )
 
         assert_analyzer_sparsity_polarity(
-            analyzer,
-            waveform_params=waveform_params,
-            expected_peak_sign=peak_sign,
+            analyzer, expected_peak_sign=peak_sign
         )
 
     return validate
@@ -460,7 +458,7 @@ def load_or_rebuild_analyzer(
     )
 
     assert_path_safe_waveform_params_name(waveform_params_name)
-    waveform_params = fetch_waveform_params(waveform_params_name)
+    fetch_waveform_params(waveform_params_name)
 
     def sorter_params():
         from spyglass.spikesorting.v2._sorting.fetch import (
@@ -483,9 +481,7 @@ def load_or_rebuild_analyzer(
         ),
         recipe_label=waveform_params_name,
         sorting_id=sorting_id,
-        validate_analyzer=analyzer_sparsity_validator(
-            waveform_params, sorter_params
-        ),
+        validate_analyzer=analyzer_sparsity_validator(sorter_params),
     )
 
 
@@ -606,7 +602,7 @@ def load_or_rebuild_analyzer_from_resolved(
         recipe_label=analyzer_folder.name,
         sorting_id=sorting_id,
         validate_analyzer=analyzer_sparsity_validator(
-            waveform_params, lambda: sorter_row.get("params")
+            lambda: sorter_row.get("params")
         ),
     )
 
@@ -791,7 +787,7 @@ def rebuild_analyzer_folder(
     folder = analyzer_path(key["sorting_id"], waveform_params_name)
     # A Versions row and every dependent verdict describe the generation that
     # is about to be replaced. Retire them before publishing so an old
-    # legacy/unverifiable result can never remain attached to new bytes. If an
+    # verdict can never remain attached to new bytes. If an
     # inventory existed, restore it immediately for whichever folder survives
     # the atomic publish (new on success, old on failure).
     had_inventory = invalidate_sorting_analyzer_inventory(
@@ -857,7 +853,7 @@ def build_analyzer(
 ):
     """Build the ``binary_folder`` SortingAnalyzer + base extensions.
 
-    ``binary_folder`` is deliberate (see ``_analyzer_cache``): it is the only
+    ``binary_folder`` is deliberate (see ``_storage.analyzer_cache``): it is the only
     SI 0.104.3 format whose waveform extraction writes straight into a
     memmapped ``waveforms.npy`` instead of a shared-memory buffer sized for
     the whole waveform volume, so the extraction peak is bounded by the
@@ -945,17 +941,17 @@ def build_analyzer(
     # ``whiten`` is part of the recipe identity: display=False, metric=True
     # (PC/NN cluster-separation metrics).
     whiten = bool(waveform_params.get("whiten"))
-    # Channel sparsity comes from the tracked recipe (``SparsityParams``); a
-    # blob without the field means radius/100 um. Resolve the polarity before
-    # estimating sparsity, while all channels are still available: otherwise
-    # a legacy neg recipe can discard a positive/bidirectional sort's actual
-    # peak, which later unit attribution cannot recover from sparse templates.
+    # Channel sparsity comes from the tracked recipe (``SparsityParams``). Its
+    # polarity is the sorter's, resolved before estimating sparsity while all
+    # channels are still available: a mismatched polarity can discard a
+    # positive/bidirectional sort's actual peak, which later unit attribution
+    # cannot recover from sparse templates.
     from spyglass.spikesorting.v2._params.analyzer_waveform import (
         SparsityParams,
     )
 
     sparsity_kwargs = SparsityParams.model_validate(
-        waveform_params.get("sparsity") or {}
+        waveform_params["sparsity"]
     ).si_create_kwargs()
     if sparsity_kwargs["sparse"]:
         from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign

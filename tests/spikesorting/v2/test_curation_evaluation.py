@@ -573,22 +573,6 @@ def test_curation_evaluation_records_source_provenance(
     # Same environment -> not stale.
     assert CurationEvaluation.detect_stale_source(sel)["stale"] is False
 
-    # Legacy byte-only digests remain readable, but cannot establish current
-    # shape/dtype provenance even when the running SI version is unchanged.
-    expected_metrics = CurationEvaluation.get_metrics(sel)
-    CurationEvaluation.update1(
-        {**sel, "source_analyzer_hashes": {"display": "a" * 64}}
-    )
-    try:
-        legacy = CurationEvaluation.detect_stale_source(sel)
-        assert legacy["stale"] is True
-        assert legacy["reasons"] == ["source_analyzer_hash_format:display"]
-        assert CurationEvaluation.get_metrics(sel).equals(expected_metrics)
-    finally:
-        CurationEvaluation.update1(
-            {**sel, "source_analyzer_hashes": row["source_analyzer_hashes"]}
-        )
-
     # A SpikeInterface-version drift is flagged.
     monkeypatch.setattr(si, "__version__", "0.0.0-test")
     version_drift = CurationEvaluation.detect_stale_source(sel)
@@ -1535,6 +1519,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
         "ms_after": 2.0,
         "max_spikes_per_unit": 20000,
         "whiten": False,
+        "sparsity": {},
         "purpose": "display",
     }
 
@@ -1595,6 +1580,9 @@ def test_curation_evaluation_rejects_preview_at_make_fetch(
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
+    from spyglass.spikesorting.v2._core.observed_time import (
+        OBSERVATION_VERSION,
+    )
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
     )
@@ -1627,7 +1615,11 @@ def test_curation_evaluation_rejects_preview_at_make_fetch(
         }
         bypass_id = deterministic_id("curation_evaluation", identity)
         CurationEvaluationSelection().insert1(
-            {**identity, "curation_evaluation_id": bypass_id},
+            {
+                **identity,
+                "curation_evaluation_id": bypass_id,
+                "observation_version": OBSERVATION_VERSION,
+            },
             allow_direct_insert=True,
         )
         with pytest.raises(ValueError, match="preview"):
@@ -1843,8 +1835,8 @@ def test_make_compute_reads_fetched_traces_and_only_stages_output(
         CurationEvaluation,
         CurationEvaluationSelection,
     )
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
     from tests.spikesorting.v2._tripart_helpers import (

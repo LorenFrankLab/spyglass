@@ -266,3 +266,36 @@ def test_readonly_analysis_path_has_no_directory_fallback(
         with pytest.raises(FileNotFoundError, match="registered analysis path"):
             stored_analysis_path("new_123.nwb")
     assert not (tmp_path / "absent_analysis_dir").exists()
+
+
+def test_in_transaction_fetch_reuses_the_coverage_scan(monkeypatch, tmp_path):
+    """DataJoint's second (in-transaction) make_fetch must not rescan the clocks.
+
+    A scan outside the transaction is reused inside it while both files are
+    unchanged; a rewritten file is scanned again.
+    """
+    from spyglass.spikesorting.v2._matching import coverage
+
+    monkeypatch.setattr(coverage, "_SCANNED_COVERAGE", {})
+    recording, raw = tmp_path / "rec.nwb", tmp_path / "raw.nwb"
+    recording.write_bytes(b"rec")
+    raw.write_bytes(b"raw")
+    key = (str(recording), "es", str(raw), "object-id")
+    scans = []
+
+    def scan():
+        scans.append(1)
+        return {"sample_ranges": [[0, len(scans)]]}
+
+    first = coverage._memoized_coverage(key, in_transaction=False, scan=scan)
+    again = coverage._memoized_coverage(key, in_transaction=True, scan=scan)
+    assert len(scans) == 1 and again == first
+    again["sample_ranges"].append([9, 10])  # callers get their own copy
+    assert (
+        coverage._memoized_coverage(key, in_transaction=True, scan=scan)
+        == first
+    )
+
+    raw.write_bytes(b"rewritten")
+    coverage._memoized_coverage(key, in_transaction=True, scan=scan)
+    assert len(scans) == 2

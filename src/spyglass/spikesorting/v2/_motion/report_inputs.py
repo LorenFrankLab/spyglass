@@ -4,7 +4,7 @@
 fetches one estimate's stored arrays, where a concatenation's members join
 and, given a corrected recording, its border mode and removed channels;
 :func:`read_trace_window` reads original and corrected traces over a
-window. Both hand what they read to ``_motion_report``, which summarizes and
+window. Both hand what they read to ``_motion.report``, which summarizes and
 draws it.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
@@ -177,7 +177,7 @@ def read_trace_window(
     """Original and corrected traces of a few channels over a window.
 
     The window's source-clock times are mapped to frames with each
-    span's affine map (:func:`._motion_report.frame_of_source_time`);
+    span's affine map (:func:`._motion.report.frame_of_source_time`);
     the corrected recording has the source's frames. Both are read in
     microvolts (:func:`._motion.recording_in_microvolts`).
     """

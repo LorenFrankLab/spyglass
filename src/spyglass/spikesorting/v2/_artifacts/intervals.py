@@ -5,10 +5,10 @@ building the artifact-removed ``valid_times`` from a preprocessed
 recording (``scan_artifact_frames`` -> ``detect_artifacts``), building the
 ``IntervalList`` row contents (``build_artifact_interval_rows``), building
 the ownership part rows (``build_artifact_interval_part_rows``). Reading
-stored rows and ownership cleanup live in ``_artifact_readers``. These functions are
-pure (non-DB) compute over SpikeInterface objects, aside from
+stored rows and ownership cleanup live in ``_artifacts.readers``. These
+functions are pure (non-DB) compute over SpikeInterface objects, aside from
 ``detect_artifacts``'s diagnostic ``logger`` calls. The per-chunk kernels
-live in ``_artifact_compute``; ``scan_artifact_frames`` drives them through
+live in ``_artifacts.compute``; ``scan_artifact_frames`` drives them through
 SpikeInterface's ``ChunkRecordingExecutor``.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
@@ -279,7 +279,7 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
             "all-channel requirement."
         )
 
-    # The per-frame math (in ``_artifact_compute``) OR-combines the amplitude
+    # The per-frame math (in ``_artifacts.compute``) OR-combines the amplitude
     # and across-channel z-score detectors (an AND would make the
     # dual-threshold mode less sensitive than either single-threshold mode);
     # the z-score uses each frame's own channels, so chunk boundaries do not

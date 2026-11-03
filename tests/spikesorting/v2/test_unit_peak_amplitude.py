@@ -195,9 +195,8 @@ def test_row_producer_uses_off_alignment_extremum_and_configured_sign(
 @pytest.mark.parametrize(
     "sparsity",
     [
-        {},  # The shipped radius/100 um recipe, with its legacy neg field.
+        {},  # The shipped radius/100 um recipe.
         {"method": "best_channels", "num_channels": 1},
-        {"method": "radius", "peak_sign": "pos"},
         {"method": "dense"},
     ],
 )
@@ -208,8 +207,7 @@ def test_sparse_analyzer_retains_the_sorter_polarity_peak(
 
     The other electrode is outside the radius and has a deflection of the
     opposite sign, so estimating sparsity with the wrong polarity drops the
-    true peak. The actual build and row producer must retain its 100 uV peak,
-    including when a legacy recipe field disagrees with the sorter.
+    true peak. The actual build and row producer must retain its 100 uV peak.
     """
     import spikeinterface as si
 

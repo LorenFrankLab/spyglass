@@ -27,7 +27,6 @@ from spyglass.spikesorting.v2._recording import (
     concat_fetch as _concat_recording_fetch,
     session_group as _session_group_insert,
 )
-from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
 from spyglass.spikesorting.v2._storage.nwb import StoredTraces
 from spyglass.spikesorting.v2._storage.staged_outputs import (
@@ -45,7 +44,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     FactoryOnlyMaster,
     SelectionMasterInsertGuard,
 )
-from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 if TYPE_CHECKING:
@@ -420,8 +418,7 @@ class ConcatenatedRecordingSelection(
         ------
         ValueError
             If a required identity field is missing, or ``key`` carries any
-            other field -- including ``motion_correction_params_name``
-            (motion correction is a separate stage, never part of a concat).
+            other field.
         MissingRecordingForConcatError
             If any member has no populated ``Recording`` under
             ``preprocessing_params_name``.
@@ -506,9 +503,9 @@ class ConcatenatedRecordingSelection(
         too means two selections sharing a group name but over DIFFERENT frozen
         member sets do not collide -- each resolves to its own deterministic id.
         Any master matching this (identity, member set) whose
-        ``concat_recording_id`` is NOT the deterministic id is a raw-insert /
-        legacy bypass of the content-addressed invariant, and is
-        rejected rather than silently returned. Used by ``insert_selection`` for
+        ``concat_recording_id`` is NOT the deterministic id is a raw-insert
+        bypass of the content-addressed invariant, and is rejected rather
+        than silently returned. Used by ``insert_selection`` for
         both the pre-insert lookup and the post-duplicate-key refetch.
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
@@ -530,8 +527,8 @@ class ConcatenatedRecordingSelection(
                 f"{member_set_hash}) whose concat_recording_id is not the "
                 f"deterministic id {deterministic_concat_recording_id}: "
                 f"{bypassed}. This is a non-deterministic selection row (a raw "
-                "insert or legacy non-content-addressed row); drop it and "
-                "re-insert via insert_selection."
+                "insert bypassing insert_selection); drop it and re-insert "
+                "via insert_selection."
             ),
         )
 
@@ -726,7 +723,7 @@ class ConcatenatedRecording(
         Reuses each member's already-populated, cached ``Recording`` artifact
         (NEVER calls ``Recording.populate`` -- the files were resolved in
         ``make_fetch``; the only DB access here stages the output file, see
-        :mod:`._recording_nwb`), zeros each member's selected artifact intervals,
+        :mod:`._storage.nwb`), zeros each member's selected artifact intervals,
         stitches the members into one mono-segment recording, and writes a
         single ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. No motion
         correction and no whitening are applied here -- whitening stays a

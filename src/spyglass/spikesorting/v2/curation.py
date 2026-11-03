@@ -871,7 +871,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         """Stage the curated-units NWB and reconcile per-unit ``n_spikes``.
 
         Delegates the NWB write to
-        :func:`._units_nwb.write_curated_units_nwb`, then
+        :func:`._storage.units_nwb.write_curated_units_nwb`, then
         overwrites each ``unit_rows`` entry's ``n_spikes`` (mutated in
         place) with the staged train's actual post-dedup length so the
         ``Unit.n_spikes == len(get_sorting train)`` invariant holds for
@@ -1453,7 +1453,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         concat sort (see ``ConcatMemberCuration.get_sorting_input_recording``
         for a member on its own clock). This is the recording every analyzer
         rebuild and UnitMatch bundle extraction start from
-        (``_sorting_analyzer.resolve_canonical_recording`` opened by
+        (``_sorting.analyzer.resolve_canonical_recording`` opened by
         ``read_canonical_recording``).
 
         Parameters

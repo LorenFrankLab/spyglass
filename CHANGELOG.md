@@ -22,9 +22,7 @@ Spike Sorting v2 pipeline (#1609). To upgrade:
 - Audit existing `UnitAnnotation` rows and run the migration below once before
     reading or writing annotations that used positional unit ids.
 - If you used Spike Sorting v2 on a development database before this release,
-    follow
-    [Upgrading a preproduction v2 database](Features/SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database),
-    or start from a fresh database.
+    start from a fresh database; development v2 data is not migrated.
 
 ```python
 # UnitAnnotation.unit_id now stores the NWB unit id instead of the unit's
@@ -352,29 +350,27 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
     - Add Spike Sorting v2 (`spyglass.spikesorting.v2`). `run_v2_pipeline` runs
-        preprocessing, artifact detection, sorting and curation from a named
-        preset and registers the result in `SpikeSortingOutput`. It adds native
-        MountainSort4 as the default sorter (MountainSort5, Kilosort4,
-        SpykingCircus2 and Tridesclous2 also supported), content-addressed
-        parameters and selections, hash-verified recompute, same-day
-        concatenate-and-sort, optional experimental motion correction, browser-based
-        review with FigPack, and cross-session unit tracking with UnitMatch. See
-        the Spike Sorting v2 docs #1609
+        preprocessing, artifact detection, sorting and curation of one sort
+        group from a named preset and registers the result in
+        `SpikeSortingOutput`; `run_v2_concat_pipeline` does the same for a
+        same-day `SessionGroup` concatenation. v2 adds native MountainSort4 as
+        the default sorter (MountainSort5, Kilosort4, SpykingCircus2 and
+        Tridesclous2 also supported), content-addressed parameters and
+        selections, hash-verified recompute, optional experimental motion
+        correction, browser-based review with FigPack, and cross-session unit
+        tracking with UnitMatch. See the Spike Sorting v2 docs #1609
     - v2 unit matching accepts disjoint epochs within one NWB, orders them on the
         original acquisition clock, and rejects overlapping raw samples. Add
         `describe_epochs`, `plan_v2_unit_match_from_curations`, and a read-only
         matching preflight. Matching freezes the selected population's policy,
         evidence and unit IDs using the same resolver as downstream analysis; the
-        snapshots and source coverage are also stored in the run's NWB. Existing
-        preproduction matching schemas need recreation #1609
+        snapshots and source coverage are also stored in the run's NWB #1609
     - v2 sparse analyzers select channels using the sorter's spike polarity,
-        preserving positive and bidirectional peak electrode/amplitude metadata.
-        Incompatible existing analyzer caches rebuild on access. Already persisted
-        affected development sort metadata needs regeneration #1609
+        preserving positive and bidirectional peak electrode/amplitude metadata
+        #1609
     - v2 `isi_violation` uses original spike timestamps and excludes artificial
         concatenation joins, preventing acquisition gaps from creating false
-        refractory violations. Already persisted affected development curation
-        evaluations need regeneration #1609
+        refractory violations #1609
     - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCuration` parts,
         declared when the v2 module imports; if it cannot import, a warning names
         the cause and the parts are omitted. `get_restricted_merge_ids` now

@@ -13,7 +13,7 @@ import paths and the generated API reference.
 | Combine same-day blocks or track units across days     | [Concatenation](#chronic-same-day-recordings) and [unit tracking](#cross-session-unit-tracking)                                                     |
 | Select reviewed units for downstream analysis          | [Downstream consumers](#downstream-consumers)                                                                                                       |
 | Reclaim disk space or recover a missing cache          | [Storage management](./SpikeSortingV2StorageManagement.md)                                                                                          |
-| Upgrade an existing v1 or preproduction v2 environment | [Migration guide](./SpikeSortingV2_Migration.md)                                                                                                    |
+| Upgrade an existing v1 environment                     | [Migration guide](./SpikeSortingV2_Migration.md)                                                                                                    |
 
 ## Why
 
@@ -259,12 +259,12 @@ sample up to 20000 spikes per unit.
 Sparse analyzers estimate their channel masks with the sorter's detection
 polarity (`peak_sign` or `detect_sign`), so positive and bidirectional
 detections retain their peak channels before waveform extraction. This applies
-to the initial build, cache rebuilds, and curated analyzers. The historical
-`sparsity.peak_sign` field remains accepted in waveform recipes for
-compatibility; the pipeline derives its effective value from the sorter
-parameters. Cached sparse analyzers built with a conflicting polarity rebuild
-automatically when opened. Compatible legacy masks and dense analyzers remain
-reusable.
+to the initial build, cache rebuilds, and curated analyzers. Waveform recipes
+have no `sparsity.peak_sign` field; the polarity always comes from the sorter
+parameters. Each sparse analyzer records the polarity it was built with, and a
+cached sparse analyzer whose recorded polarity conflicts with its sorter (or
+that has no record) rebuilds automatically when opened. Dense analyzers keep
+every channel and need no polarity record.
 
 #### Reading `recommendation_status`
 
@@ -1162,8 +1162,9 @@ against an earlier estimator, so it does not cover the current estimator on
 discontinuous inputs (acquisition gaps, concatenations) or on sources that are
 not unit-calibrated float microvolts.
 
-`motion_mode` on `run_v2_pipeline` / `run_v2_pipeline_session` (and the matching
-preflight helpers) works for a single-session **or** a concat run:
+`motion_mode` on `run_v2_pipeline` / `run_v2_pipeline_session` /
+`run_v2_concat_pipeline` (and the matching preflight helpers) works for a
+single-session **or** a concat run:
 
 - `"off"` (default) -- no motion stage; the ordinary uncorrected sort.
 - `"estimate"` -- saves a `MotionEstimate` of the recording (or
@@ -1188,7 +1189,8 @@ concatenation's recipe) is refused by
 
 **Estimate, inspect, then apply that estimate.** `estimate_motion` takes the
 same source arguments as `run_v2_pipeline` plus the recipe, runs preflight,
-recording and artifact-detection stages, and saves only the `MotionEstimate`.
+recording and artifact-detection stages, and saves only the `MotionEstimate`;
+`estimate_concat_motion` does the same for a `run_v2_concat_pipeline` source.
 Pass its `motion_estimate_id` to an `"apply"` run, which corrects and sorts with
 exactly that estimate (never recomputing it):
 
@@ -1204,7 +1206,11 @@ source = dict(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
 )
 
-# Concat: pass concat_session_group_owner / concat_session_group_name instead.
+# Concat: receipt = estimate_concat_motion(owner, name,
+#     motion_correction_params_name="dredge_fast_v1"), then
+#     run_v2_concat_pipeline(owner, name, motion_mode="apply",
+#     motion_correction_params_name="dredge_fast_v1",
+#     motion_estimate_id=receipt["motion_estimate_id"]).
 receipt = estimate_motion(**source, motion_correction_params_name="dredge_fast_v1")
 receipt["motion_estimate_id"], receipt["motion_estimation_preset"]
 receipt["motion_diagnostics"]  # peaks detected/kept, max displacement, bins
@@ -1227,8 +1233,8 @@ recordings and masks), made with the recipe's **estimation** row, on traces
 unchanged since it was selected; any mismatch is an error before anything is
 corrected or sorted (from preflight, or with `preflight=False` from the
 `motion_estimate` stage). `motion_estimate_id` with `"off"` or `"estimate"` is a
-`PipelineInputError`. `estimate_motion` skips the sorter-only preflight checks;
-the `"apply"` run checks them.
+`PipelineInputError`. `estimate_motion` and `estimate_concat_motion` skip the
+sorter-only preflight checks; the `"apply"` run checks them.
 
 Without an explicit id, `"estimate"` and `"apply"` runs with the same source,
 mask and estimation row resolve to the same `motion_estimate_id`, so an
@@ -1413,7 +1419,7 @@ sort each session and match units across them
 ([Cross-session unit tracking](#cross-session-unit-tracking)); multi-day
 concatenation is experimental and needs an explicit opt-in. For an existing
 `SessionGroup`,
-`run_v2_pipeline(concat_session_group_owner=..., concat_session_group_name=..., pipeline_preset=...)`
+`run_v2_concat_pipeline(session_group_owner, session_group_name, pipeline_preset=...)`
 runs the member, concat, sort and curation stages (see the
 [Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb));
 the table-level steps are:
@@ -1507,7 +1513,7 @@ Key behaviors and caveats:
     `SpikeSortingOutput`: its synthetic gap-free timeline is unsafe for
     session-scoped consumers. `ConcatMemberCuration` registers one
     wall-clock-aligned merge row per frozen `member_index` (labels and unit IDs
-    shared across members); `run_v2_pipeline` returns them as
+    shared across members); `run_v2_concat_pipeline` returns them as
     `member_merge_ids`, keyed by that index.
 - **Artifacts are detected and masked per member before concatenation.** The
     selection freezes each detection by foreign key in its identity, so changing
@@ -2174,15 +2180,10 @@ preset with automatic detection disabled still applies them. The artifact
 recipe's `min_length_s` applies to the remaining valid spans. The session runner
 applies the supplied intervals to each requested sort group.
 
-For concatenated sorting, pass
+For `run_v2_concat_pipeline`, pass
 `manual_excluded_times={member_index: [[start, stop], ...]}`, each in that
 member's original session timestamps. Automatic and manual masks are composed
 before concatenation and survive reconstruction and member export; an optional
 motion stage excludes the same masked samples and re-applies the mask after
 correction. Manual exclusions mask time ranges; they do not edit individual
 spikes.
-
-Development databases created before this release must follow the
-[preproduction upgrade/recreation sequence](SpikeSortingV2_Migration.md#upgrading-a-preproduction-v2-database)
-before initializing defaults or creating selections. No production migration
-runs automatically.

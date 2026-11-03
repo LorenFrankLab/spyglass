@@ -238,6 +238,7 @@ def test_matcher_asset_provenance_round_trips_in_pairs_nwb(tmp_path):
         "input_start_time": "2026-01-01T00:00:00+00:00",
         "waveform_traces": "recording",
         "motion_corrected_recording_id": None,
+        "selection_snapshot": {"policy": "all", "unit_ids": [1]},
         "recordings": [
             {
                 "recording_index": 0,
@@ -247,6 +248,12 @@ def test_matcher_asset_provenance_round_trips_in_pairs_nwb(tmp_path):
                 "session_start_time": "2026-01-01T00:00:00+00:00",
                 "start_sample": 0,
                 "end_sample": 100,
+                "source_coverage": {
+                    "version": 1,
+                    "source_object_id": "raw",
+                    "sample_ranges": [[0, 100]],
+                    "time_ranges": [[0.0, 0.0033]],
+                },
             }
         ],
     }

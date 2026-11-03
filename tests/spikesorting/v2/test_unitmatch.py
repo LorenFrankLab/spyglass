@@ -384,7 +384,7 @@ def test_divergent_electrode_space_members_empty_when_matching():
 # --------------------------------------------------------------------------- #
 
 
-def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
+def test_pairs_nwb_round_trip_preserves_missing_drift_and_fdr(tmp_path):
     """Non-empty + empty pairs round-trip; a None fdr stores as NaN and reads
     back as None, while a real fdr survives and string ids stay str."""
     from datetime import datetime, timezone
@@ -417,7 +417,7 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
             "session_b_curation_id": 1,
             "unit_b_id": 7,
             "match_probability": 0.85,
-            "drift_estimate_um": 2.5,
+            "drift_estimate_um": None,
             "fdr_estimate": None,
         },
         {
@@ -439,7 +439,9 @@ def test_pairs_nwb_round_trip_preserves_fdr_none(tmp_path):
         object_id,
     )
     assert [row["pair_index"] for row in back] == [0, 1]
+    assert back[0]["drift_estimate_um"] is None
     assert back[0]["fdr_estimate"] is None
+    assert back[1]["drift_estimate_um"] == pytest.approx(-3.125)
     assert back[1]["fdr_estimate"] == pytest.approx(0.05)
     assert isinstance(back[0]["session_a_sorting_id"], str)
     assert back[0]["unit_a_id"] == 3 and back[0]["unit_b_id"] == 7
@@ -1775,10 +1777,12 @@ def test_clusterless_unit_semantics_derived_and_warned(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import SessionGroup
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2._matching.inputs import (
+        _warn_clusterless_match_once,
+    )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatchSelection,
-        _warn_clusterless_match_once,
     )
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2115,8 +2119,8 @@ def test_make_runs_full_matcher_table_path(
         # make_compute staged a fresh analysis NWB (separate from the populated
         # one); unlink it so the probe leaves no orphan even if the assertion
         # below fails.
-        from spyglass.spikesorting.v2.recording import (
-            _unlink_staged_analysis_file,
+        from spyglass.spikesorting.v2._storage.staged_outputs import (
+            unlink_staged_analysis_file as _unlink_staged_analysis_file,
         )
 
         try:
@@ -2151,8 +2155,8 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
     ``CurationV2.get_recording`` / ``get_sorting`` return for the member."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
-    from spyglass.spikesorting.v2.recording import (
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -2479,6 +2483,9 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         )
         assert int(pair["unit_a_id"]) == merged_uid
         assert int(pair["unit_b_id"]) == unit_b
+        # The fixture matcher reports no drift: stored as NULL (unknown),
+        # never as a fabricated 0 um.
+        assert pair["drift_estimate_um"] is None
 
         TrackedUnit.populate(selection_pk, reserve_jobs=False)
         matched = [
@@ -2751,7 +2758,7 @@ def test_all_excluded_member_raises_with_member_identity(
     the reason, and no UnitMatch row or staged pairs NWB is left behind.
     """
     pytest.importorskip("UnitMatchPy")
-    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+    from spyglass.spikesorting.v2._matching.waveforms import (
         NoMatchableUnitsError,
     )
     from spyglass.spikesorting.v2.unit_matching import UnitMatch

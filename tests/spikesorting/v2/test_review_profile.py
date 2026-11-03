@@ -196,11 +196,10 @@ def test_review_display_options_are_bounded_and_serializable():
     assert default.max_amplitudes_per_unit is None
     assert default.point_limit("amplitudes", 3600) == 180000
     assert default.point_limit("raster", 60) == 3000
-    old = ReviewDisplayOptions.from_mapping(
-        {"version": 1, "max_amplitudes_per_unit": 2000}
+    capped = ReviewDisplayOptions.from_mapping(
+        {"max_amplitudes_per_unit": 2000}
     )
-    assert old.point_limit("amplitudes", 3600) == 2000
-    assert old.point_limit("raster", 3600) == 2000
+    assert capped.point_limit("amplitudes", 3600) == 2000
     assert default.as_dict()["version"] == REVIEW_DISPLAY_OPTIONS_VERSION
     assert ReviewDisplayOptions.from_mapping(default.as_dict()) == default
     assert ReviewDisplayOptions.from_mapping(None) == default
@@ -217,6 +216,7 @@ def test_review_display_options_are_bounded_and_serializable():
         {"max_amplitudes_per_unit": 0},
         {"amplitude_sampling_seed": -1},
         {"min_similarity_for_correlograms": 1.5},
+        {"version": 1},
         {"version": 99},
         {"max_spikes_per_unit": 10},  # not a field: display != science
     ):

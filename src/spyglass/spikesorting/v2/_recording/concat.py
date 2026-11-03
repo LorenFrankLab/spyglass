@@ -713,7 +713,7 @@ def concat_continuity(member_recordings, member_sample_counts):
 
     Returns
     -------
-    _sorting_artifact_mask.Continuity
+    _sorting.artifact_mask.Continuity
         Concat-frame spans with each span's first and last timestamp on its
         member's clock.
     """

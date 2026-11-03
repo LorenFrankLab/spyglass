@@ -471,7 +471,7 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 def _base_intervals_from_recording(recording, fs):
     """Return recorded time chunks without materializing full timestamps.
 
-    The chunked/affine scan lives in ``_signal_math.base_intervals_and_gaps``
+    The chunked/affine scan lives in ``_core.signal_math.base_intervals_and_gaps``
     (which generalizes it to also emit the inter-chunk gap frame indices the
     artifact path needs); this writer only needs the per-chunk base intervals.
     """
@@ -582,8 +582,8 @@ def read_sorting_statistics_spans(
     if STATISTICS_SPANS_FIELD not in values:
         raise RuntimeError(
             f"Sorting sorting_id={str(sorting_id)!r} has no persisted "
-            f"statistics spans in its units NWB {str(abs_path)!r}; it was "
-            "written by a Spyglass version that did not record them. Delete "
+            f"statistics spans in its units NWB {str(abs_path)!r}; the file "
+            "is incomplete or was not written by the v2 Sorting writer. Delete "
             "and repopulate this Sorting (and its downstream) so noise and "
             "whitening statistics are estimated from its artifact-free spans."
         )
@@ -712,7 +712,6 @@ def _write_sorting_units_nwb_body(
     (from :mod:`._storage.provenance`, already validated by the caller) is
     embedded as a scratch header so the file is interpretable without the DB.
     """
-    import numpy as np
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile

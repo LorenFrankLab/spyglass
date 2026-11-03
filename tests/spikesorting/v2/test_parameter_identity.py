@@ -11,6 +11,7 @@ These tests are pure-stdlib and must not need a database.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from spyglass.spikesorting.v2._core.parameter_identity import (
@@ -402,59 +403,39 @@ def test_reject_stale_quality_metric_defaults_matches_identical_content():
     reject_stale_quality_metric_defaults(stored, shipped)  # no raise
 
 
-def test_reject_stale_quality_metric_defaults_accepts_old_schema_version():
-    """Identical content under an older ``params_schema_version`` is not stale.
-
-    Rows seeded before ``observed_presence_bin_duration_s`` became a column
-    keep ``params_schema_version=1`` by design (the migration doc promises
-    existing recipes are not overwritten), so the version alone must not
-    trip this check.
-    """
+@pytest.mark.parametrize(
+    "stored_overrides, shipped_overrides",
+    [
+        ({"params_schema_version": 1}, {"params_schema_version": 2}),
+        (
+            {"observed_presence_bin_duration_s": float(np.float32(1 / 3))},
+            {"observed_presence_bin_duration_s": 1 / 3},
+        ),
+    ],
+    ids=["schema_version", "float32_bin_duration"],
+)
+def test_reject_stale_quality_metric_defaults_compares_exactly(
+    stored_overrides, shipped_overrides
+):
+    """A different ``params_schema_version`` or a float32-rounded bin duration
+    under a shipped default's name is stale content, not a match."""
     from spyglass.spikesorting.v2._core.lookup_validation import (
         reject_stale_quality_metric_defaults,
     )
-
-    stored = [
-        _qmp_row(
-            "franklab_default", metric_names=["snr"], params_schema_version=1
-        )
-    ]
-    shipped = [
-        _qmp_row(
-            "franklab_default", metric_names=["snr"], params_schema_version=2
-        )
-    ]
-    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
-
-
-def test_reject_stale_quality_metric_defaults_tolerates_widened_bin_duration():
-    """A single-precision-widened ``observed_presence_bin_duration_s`` still
-    matches the shipped default within the ``rules_payloads_match`` tolerance.
-    """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        reject_stale_quality_metric_defaults,
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
     )
 
-    exact = 1 / 3
-    widened = float(np.float32(exact))
-    assert widened != exact  # the widening is real, not a no-op
     stored = [
-        _qmp_row(
-            "franklab_default",
-            metric_names=["snr"],
-            observed_presence_bin_duration_s=widened,
-        )
+        _qmp_row("franklab_default", metric_names=["snr"], **stored_overrides)
     ]
     shipped = [
-        _qmp_row(
-            "franklab_default",
-            metric_names=["snr"],
-            observed_presence_bin_duration_s=exact,
-        )
+        _qmp_row("franklab_default", metric_names=["snr"], **shipped_overrides)
     ]
-    reject_stale_quality_metric_defaults(stored, shipped)  # no raise
+    with pytest.raises(
+        DuplicateParameterContentError, match="franklab_default"
+    ):
+        reject_stale_quality_metric_defaults(stored, shipped)
 
 
 def test_reject_stale_quality_metric_defaults_ignores_other_names():
@@ -616,13 +597,15 @@ def test_insert_default_raises_on_stale_same_name_row(dj_conn):
 
 
 @pytest.mark.database
-def test_insert_default_accepts_old_schema_version_row(dj_conn):
-    """A stored row identical in content but at an older
-    ``params_schema_version`` is not treated as stale, so ``insert_default``
-    stays re-runnable against a database seeded before
-    ``observed_presence_bin_duration_s`` became a column."""
+def test_insert_default_rejects_other_schema_version_row(dj_conn):
+    """A stored row identical in content but at another
+    ``params_schema_version`` is stale: ``insert_default`` raises instead of
+    keeping it under the shipped name."""
     import datajoint as dj
 
+    from spyglass.spikesorting.v2.exceptions import (
+        DuplicateParameterContentError,
+    )
     from spyglass.spikesorting.v2.metric_curation import (
         QualityMetricParameters,
     )
@@ -631,16 +614,18 @@ def test_insert_default_accepts_old_schema_version_row(dj_conn):
     original = (
         QualityMetricParameters & {"metric_params_name": "franklab_default"}
     ).fetch1()
-    downgraded = dict(original, params_schema_version=1)
+    downgraded = dict(
+        original, params_schema_version=original["params_schema_version"] - 1
+    )
     free_table = dj.FreeTable(
         dj.conn(), QualityMetricParameters.full_table_name
     )
     try:
         free_table.update1(downgraded)
-        QualityMetricParameters.insert_default()  # must not raise
-        assert (
-            QualityMetricParameters & {"metric_params_name": "franklab_default"}
-        ).fetch1("params_schema_version") == 1
+        with pytest.raises(
+            DuplicateParameterContentError, match="franklab_default"
+        ):
+            QualityMetricParameters.insert_default()
     finally:
         free_table.update1(original)
 
@@ -1111,7 +1096,8 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
     column default. A row that omits the column and carries an explicit inner
     ``schema_version`` lands tagged with the blob's version, never a default that
     silently disagrees. A validator that does not backfill leaves the
-    omitted column absent from the returned row, and this test fails.
+    omitted column absent from the returned row, and this test fails. Each
+    schema accepts only its current version, so that is the blob's version.
     """
     import importlib
 
@@ -1125,15 +1111,15 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
         ),
         schema_name,
     )
-    sentinel = 9  # != any column default, so the backfilled value is observable
-    row = {"params": {"schema_version": sentinel}}
+    current = schema.model_fields["schema_version"].default
+    row = {"params": {"schema_version": current}}
     validated = validate_lookup_rows(
         [row],
         ["name", "params", "params_schema_version", "job_kwargs"],
         schema_for=lambda _row: schema,
         table_name="BackfillProbe",
     )
-    assert validated[0]["params_schema_version"] == sentinel
+    assert validated[0]["params_schema_version"] == current
 
 
 def test_outer_version_drift_still_trips_after_backfill():
@@ -1147,7 +1133,11 @@ def test_outer_version_drift_still_trips_after_backfill():
         PreprocessingParamsSchema,
     )
 
-    row = {"params": {"schema_version": 3}, "params_schema_version": 2}
+    current = PreprocessingParamsSchema().schema_version
+    row = {
+        "params": {"schema_version": current},
+        "params_schema_version": current - 1,
+    }
     with pytest.raises(ValueError, match="does not match"):
         validate_lookup_rows(
             [row],

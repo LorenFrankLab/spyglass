@@ -10,7 +10,7 @@ verified, current-environment match.
 Comparison uses reproducible CONTENT (preprocessed ``ElectricalSeries`` traces
 for recordings; deterministic analyzer extension data for analyzers) -- the same
 reproducible content the recording ``content_hash`` captures, never a volatile
-whole-file digest (see ``_recompute`` / ``_recording_fingerprint`` for why).
+whole-file digest (see ``_storage.recompute`` / ``_recording.fingerprint`` for why).
 ``rounding`` sets the float precision of the analyzer comparison.
 
 ``delete_files()`` is current-environment-aware: a ``matched=1`` row from a
@@ -41,7 +41,6 @@ from spyglass.spikesorting.v2._storage.recompute import (
     ANALYZER_CONTENT_HASH_VERSION,
     ANALYZER_RECOMPUTE_EXTENSIONS,
     analyzer_inventory_refresh_needed,
-    analyzer_recompute_unverifiable_reason,
     analyzer_seed_modes,
     combined_hash,
     compare_hash_dicts,
@@ -98,16 +97,15 @@ class RecomputeFetched(NamedTuple):
 
     ``parent_key`` carries its UUID PK (``recording_id`` / ``sorting_id``) as a
     str. ``regen_inputs`` is the table's regeneration inputs, resolved only
-    when the row is neither ``xfail`` nor ``unverifiable`` (``None``
-    otherwise); it keeps fetched UUIDs as ``uuid.UUID`` (e.g.
-    ``AnalyzerRegenInputs.sorting_id``, the effective traces' keys), which
-    DataJoint's DeepHash hashes by value, so both fetches still agree.
+    when the row is not ``xfail`` (``None`` otherwise); it keeps fetched
+    UUIDs as ``uuid.UUID`` (e.g. ``AnalyzerRegenInputs.sorting_id``, the
+    effective traces' keys), which DataJoint's DeepHash hashes by value, so
+    both fetches still agree.
     """
 
     parent_key: dict
     rounding: int
     xfail_reason: Optional[str]
-    unverifiable_reason: Optional[str]
     regen_inputs: Optional[tuple]
 
 
@@ -164,12 +162,10 @@ def _resolved(value):
 class RecomputeComputed(NamedTuple):
     """``make_compute`` -> ``make_insert`` carrier for the recompute tables.
 
-    ``outcome`` is ``'xfail'`` | ``'unverifiable'`` | ``'error'`` |
-    ``'compare'``. A regeneration failure is a VALID ``matched=0`` outcome
-    (``'error'``) encoded here rather than raised, so ``make_insert`` still
-    records the QC result instead of the populate aborting. Legacy analyzer
-    provenance that cannot support a meaningful deterministic comparison is
-    ``'unverifiable'``. ``stored_hashes`` / ``new_hashes`` are empty except on
+    ``outcome`` is ``'xfail'`` | ``'error'`` | ``'compare'``. A regeneration
+    failure is a VALID ``matched=0`` outcome (``'error'``) encoded here rather
+    than raised, so ``make_insert`` still records the QC result instead of the
+    populate aborting. ``stored_hashes`` / ``new_hashes`` are empty except on
     ``'compare'``.
     """
 
@@ -293,31 +289,21 @@ class AnalyzerVersionsComputed(NamedTuple):
 def _recompute_compute(
     parent_key,
     xfail_reason,
-    unverifiable_reason,
     *,
     regen,
     what,
 ) -> RecomputeComputed:
     """Shared off-transaction compute for the recompute QC tables.
 
-    Branches the four outcomes, all of which end in an INSERT: ``xfail``
-    (explicit skip), ``unverifiable`` (legacy provenance cannot support a
-    deterministic comparison), ``error`` (a caught regeneration failure ->
-    ``matched=0``, retryable), and ``compare`` (a real hash comparison). ``regen`` is a no-arg callable returning
-    ``(stored_hashes, new_hashes)``.
+    Branches the three outcomes, all of which end in an INSERT: ``xfail``
+    (explicit skip), ``error`` (a caught regeneration failure ->
+    ``matched=0``, retryable), and ``compare`` (a real hash comparison).
+    ``regen`` is a no-arg callable returning ``(stored_hashes, new_hashes)``.
     """
     if xfail_reason:
         return RecomputeComputed(
             outcome="xfail",
             err_msg=f"xfail: {xfail_reason}"[:255],
-            stored_hashes={},
-            new_hashes={},
-            parent_key=parent_key,
-        )
-    if unverifiable_reason:
-        return RecomputeComputed(
-            outcome="unverifiable",
-            err_msg=str(unverifiable_reason)[:255],
             stored_hashes={},
             new_hashes={},
             parent_key=parent_key,
@@ -356,8 +342,8 @@ def _insert_recompute_outcome(
     """Shared ``make_insert`` body: write the QC result atomically.
 
     ``compare`` routes through :func:`_insert_comparison` (master + Name/Hash
-    diff rows); ``xfail`` / ``unverifiable`` / ``error`` insert a single
-    ``matched=0`` master row.
+    diff rows); ``xfail`` / ``error`` insert a single ``matched=0`` master
+    row.
     ``_safe_context()`` no-ops inside the framework transaction but keeps a
     direct (non-populate) call atomic.
     """
@@ -642,8 +628,8 @@ class RecordingArtifactRecomputeSelection(
 
         if skip_probe:
             # v2 surfaces absent probe metadata as "no probe geometry" /
-            # "have no probe geometry" (see _recording_geometry /
-            # _recording_preprocessing) -- match that, not v1's "probe info".
+            # "have no probe geometry" (see _recording.geometry /
+            # _recording.preprocessing) -- match that, not v1's "probe info".
             if bool(prev_runs & 'err_msg LIKE "%probe geometry%"'):
                 return True, "missing_probe_info"
             try:  # proactive: is probe metadata on record for this recording?
@@ -742,7 +728,6 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
             parent_key=parent_key,
             rounding=TRACE_ROUNDING,
             xfail_reason=xfail_reason,
-            unverifiable_reason=None,
             regen_inputs=(
                 None
                 if xfail_reason
@@ -756,7 +741,6 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         parent_key,
         rounding,
         xfail_reason,
-        unverifiable_reason,
         regen_inputs,
     ) -> RecomputeComputed:
         """Fingerprint the current file + a fresh rebuild, off the transaction.
@@ -767,7 +751,7 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         ``matched`` on ``combined_hash(new) == Recording.content_hash``
         (recoverability) and reports the current-vs-fresh component diff.
         Reads only ``regen_inputs``; the one DB access left is staging the
-        fresh rebuild (see :mod:`._recording_nwb`).
+        fresh rebuild (see :mod:`._storage.nwb`).
         """
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
@@ -790,7 +774,6 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         return _recompute_compute(
             parent_key,
             xfail_reason,
-            unverifiable_reason,
             regen=_regen,
             what="RecordingArtifactRecompute",
         )
@@ -1123,8 +1106,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     def refresh_changed_folders(cls, restriction=True) -> int:
         """Refresh inventories whose analyzer-folder generation changed.
 
-        This catches canonical folders rebuilt by DB-free workers as well as
-        legacy inventory rows created before storage fingerprints existed.
+        This catches canonical folders rebuilt by DB-free workers.
         Dependent selections/verdicts are removed because they describe the
         prior generation, then the current folder is inventoried immediately.
         """
@@ -1202,12 +1184,7 @@ class SortingAnalyzerRecomputeSelection(
 
 @schema
 class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
-    """Regenerate an analyzer folder and compare extension content hashes.
-
-    Legacy inventories without deterministic ``noise_levels`` provenance are
-    recorded as explicitly unverifiable instead of producing a misleading hash
-    mismatch against the current seed-pinned rebuild.
-    """
+    """Regenerate an analyzer folder and compare extension content hashes."""
 
     definition = """
     -> SortingAnalyzerRecomputeSelection
@@ -1250,17 +1227,15 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         """Read the recompute inputs (no regeneration I/O except the
         self-heal rebuild of a missing traces file).
 
-        Unless the row is ``xfail`` or ``unverifiable``, resolves the recipe
-        and, when the stored folder exists, the canonical recording, units
-        and sorter row the fresh analyzer is built from (see
+        Unless the row is ``xfail``, resolves the recipe and, when the stored
+        folder exists, the canonical recording, units and sorter row the
+        fresh analyzer is built from (see
         :func:`_resolve_analyzer_regen_inputs`); a failure is carried as a
         :class:`FetchFailure` and recorded as the ``'error'`` outcome.
         """
         rounding, xfail_reason = (
             SortingAnalyzerRecomputeSelection & key
         ).fetch1("rounding", "xfail_reason")
-        manifest = (SortingAnalyzerVersions & key).fetch1("analyzer_manifest")
-        unverifiable_reason = analyzer_recompute_unverifiable_reason(manifest)
         parent = self.get_parent_key(key)
         # str the sorting_id UUID for a DeepHash-stable carrier.
         parent_key = {"sorting_id": str(parent["sorting_id"])}
@@ -1268,10 +1243,9 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
             parent_key=parent_key,
             rounding=int(rounding),
             xfail_reason=xfail_reason,
-            unverifiable_reason=unverifiable_reason,
             regen_inputs=(
                 None
-                if xfail_reason or unverifiable_reason
+                if xfail_reason
                 else _resolve_analyzer_regen_inputs(
                     parent_key, key["waveform_params_name"]
                 )
@@ -1284,7 +1258,6 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         parent_key,
         rounding,
         xfail_reason,
-        unverifiable_reason,
         regen_inputs,
     ) -> RecomputeComputed:
         """Regenerate the analyzer folder + hash extensions off the transaction.
@@ -1294,7 +1267,6 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         return _recompute_compute(
             parent_key,
             xfail_reason,
-            unverifiable_reason,
             regen=lambda: _recompute_analyzer_hashes(regen_inputs, rounding),
             what="SortingAnalyzerRecompute",
         )
@@ -1394,10 +1366,10 @@ def invalidate_sorting_analyzer_inventory(
     """Remove an inventory and verdicts tied to a folder being rebuilt.
 
     The inventory row describes one concrete on-disk generation. Keeping it
-    across a rebuild would leave old ``unverifiable`` or comparison results
-    attached to newly generated bytes. Return whether a row existed so the
-    rebuild path can restore the inventory after publishing (or after a failed
-    atomic publish that retained the old folder).
+    across a rebuild would leave old comparison results attached to newly
+    generated bytes. Return whether a row existed so the rebuild path can
+    restore the inventory after publishing (or after a failed atomic publish
+    that retained the old folder).
     """
     restriction = {
         "sorting_id": sorting_id,
@@ -1783,19 +1755,6 @@ def _delete_analyzer_folders(
         force_stale_env=force_stale_env,
         artifact_pk=artifact_pk,
     )
-    # An old matched verdict used byte-only hashes. Refuse all affected
-    # artifacts before removing anything, even under force_stale_env: that
-    # override concerns environments, not an unverifiable content format.
-    for artifact, _ in authorized:
-        manifest = (SortingAnalyzerVersions & artifact).fetch1(
-            "analyzer_manifest"
-        )
-        reason = analyzer_recompute_unverifiable_reason(manifest)
-        if reason:
-            raise ValueError(
-                "Analyzer reclamation requires current array-content hashes: "
-                f"{reason}. Refresh the inventory and recompute before deletion."
-            )
     deleted = []
     for artifact, authorizing_rows in authorized:
         if _too_recent_or_unknown(authorizing_rows, cutoff):

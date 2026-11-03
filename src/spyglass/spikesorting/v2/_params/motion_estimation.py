@@ -99,7 +99,9 @@ class MotionEstimationParamsSchema(BaseModel):
     estimate_motion_kwargs: dict = Field(default_factory=dict)
     noise_levels_seed: int = Field(default=0, ge=0)
     max_gap_s: float = Field(ge=0, allow_inf_nan=False)
-    schema_version: int = MOTION_ESTIMATION_SCHEMA_VERSION
+    schema_version: Literal[MOTION_ESTIMATION_SCHEMA_VERSION] = (
+        MOTION_ESTIMATION_SCHEMA_VERSION
+    )
 
     @model_validator(mode="after")
     def _reject_contract_changing_overrides(self):

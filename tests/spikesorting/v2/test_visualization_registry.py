@@ -29,13 +29,13 @@ _NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2_Curation.ipynb"
 
 from spyglass.spikesorting.v2._review.visualization import (
     DISPLAY_WIDGET_EXTENSIONS,
-    MissingDisplayExtensionError,
     SI_METRIC_WIDGET_EXTENSIONS,
     available_visualizations,
     format_missing_extension_error,
     missing_extensions,
     plot_metrics_figure,
 )
+from spyglass.spikesorting.v2.exceptions import MissingDisplayExtensionError
 
 
 class _FakeAnalyzer:

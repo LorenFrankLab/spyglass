@@ -182,7 +182,7 @@ def write_analyzer_curation_tables(
     ``AnalysisNwbfile`` table is the caller's responsibility (done inside the
     insert transaction).
 
-    ``provenance_tables`` (optional, from :mod:`._nwb_provenance`) are embedded
+    ``provenance_tables`` (optional, from :mod:`._storage.provenance`) are embedded
     as scratch in the same write so the artifact is self-describing; ``None``
     leaves only the result tables.
     """

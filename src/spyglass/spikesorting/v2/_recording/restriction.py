@@ -109,6 +109,12 @@ class _LazyTimestamps:
     def __len__(self):
         return self.shape[0]
 
+    def __array__(self, dtype=None, copy=None):
+        # SI's ``get_times`` calls ``np.asarray(time_vector)``; without this
+        # numpy would read the vector one ``__getitem__`` call per sample.
+        values = self[:]
+        return values if dtype is None else values.astype(dtype, copy=False)
+
     def _as_scalar_index(self, item, length: int) -> int:
         """Validate and normalize a scalar index; reject bool/fancy indexing."""
         import numpy as np

@@ -122,7 +122,7 @@ class MatchPair:
 
     ``drift_estimate_um`` and ``fdr_estimate`` have no per-pair source in
     UnitMatch (drift is applied internally per session-pair; FDR is a
-    session-level diagnostic), so they default to ``0.0`` / ``None`` and a
+    session-level diagnostic), so they default to ``None`` (unknown) and a
     backend only sets them if it genuinely produces per-pair values.
     """
 
@@ -133,7 +133,7 @@ class MatchPair:
     session_b_curation_id: int
     unit_b_id: int
     match_probability: float
-    drift_estimate_um: float = 0.0
+    drift_estimate_um: float | None = None
     fdr_estimate: float | None = None
 
 

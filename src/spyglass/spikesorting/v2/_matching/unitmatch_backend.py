@@ -28,14 +28,12 @@ a numpy-2 ``arange`` shim scoped to its ``param_functions`` module.
 from __future__ import annotations
 
 import functools
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 
 from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 from spyglass.spikesorting.v2._matching.waveforms import (
-    NoMatchableUnitsError,
     WaveformInputPreparer,
 )
 from spyglass.spikesorting.v2.matcher_protocol import (

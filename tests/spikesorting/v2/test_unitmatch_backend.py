@@ -811,8 +811,12 @@ def test_bundle_all_units_excluded_raises(tmp_path, saved_bundles):
             12: (np.array([3, n_samples - 3]), _planted_template(2), None),
         },
     )
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        NoMatchableUnitsError,
+    )
+
     session_dir = tmp_path / "sess"
-    with pytest.raises(backend.NoMatchableUnitsError) as excinfo:
+    with pytest.raises(NoMatchableUnitsError) as excinfo:
         backend.extract_unitmatch_bundle(
             session_dir, recording, sorting, seed=0
         )
@@ -1268,7 +1272,11 @@ def test_spans_exclude_units_without_two_supported_spikes(
 
     only_7 = sorting.select_units([7])
     lone_dir = tmp_path / "lone"
-    with pytest.raises(backend.NoMatchableUnitsError, match="statistics span"):
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        NoMatchableUnitsError,
+    )
+
+    with pytest.raises(NoMatchableUnitsError, match="statistics span"):
         backend.extract_unitmatch_bundle(
             lone_dir, recording, only_7, statistics_spans=spans, seed=0
         )

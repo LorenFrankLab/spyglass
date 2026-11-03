@@ -242,23 +242,20 @@ def _run_motion_correction(
 
 
 def estimate_motion(
-    nwb_file_name: "str | None" = None,
-    sort_group_id: "int | None" = None,
-    interval_list_name: "str | None" = None,
-    team_name: "str | None" = None,
+    nwb_file_name: str,
+    sort_group_id: int,
+    interval_list_name: str,
+    team_name: str,
     *,
+    motion_correction_params_name: str,
     pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
     preflight: bool = True,
-    concat_session_group_owner: "str | None" = None,
-    concat_session_group_name: "str | None" = None,
     manual_excluded_times=None,
-    motion_correction_params_name: "str | None" = None,
 ) -> "EstimateMotionReceipt":
-    """Save the motion estimate of a run's source, without sorting.
+    """Save the motion estimate of one sort group's source, without sorting.
 
     Builds the source exactly as ``run_v2_pipeline`` does with the same
-    arguments -- the recording and its artifact detection, or the member
-    recordings, member artifact masks and their concatenation -- and saves
+    arguments -- the recording and its artifact detection -- and saves
     its ``MotionEstimate`` with the estimation row of
     ``motion_correction_params_name``. Nothing is sorted or curated. Inspect
     the estimate (``MotionEstimate().get_motion`` /
@@ -284,11 +281,7 @@ def estimate_motion(
     Parameters
     ----------
     nwb_file_name, sort_group_id, interval_list_name, team_name
-        Single-session mode, as in :func:`run_v2_pipeline`. The only
-        positional parameters; every other one is keyword-only.
-    concat_session_group_owner, concat_session_group_name
-        Concat mode, as in :func:`run_v2_pipeline` (mutually exclusive with
-        the single-session fields).
+        The sort group, as in :func:`run_v2_pipeline`.
     pipeline_preset
         The preset whose preprocessing and artifact rows build the source; use
         the preset of the run that will apply the estimate.
@@ -320,9 +313,8 @@ def estimate_motion(
     Raises
     ------
     PipelineInputError
-        If ``motion_correction_params_name`` is missing, the input mode is
-        incomplete or mixed, or ``pipeline_preset`` is unknown -- before any
-        database access.
+        Before any database access: if ``pipeline_preset`` is unknown, or a
+        source input or ``motion_correction_params_name`` is ``None``.
     PreflightError
         If ``preflight=True`` and a prerequisite is missing.
     PipelineStageError
@@ -331,35 +323,104 @@ def estimate_motion(
     ValueError
         If the recipe row is missing and ``preflight=False``.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    return _estimate_motion(
+        "estimate_motion",
+        is_concat=False,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        motion_correction_params_name=motion_correction_params_name,
+        pipeline_preset=pipeline_preset,
+        preflight=preflight,
+        manual_excluded_times=manual_excluded_times,
+    )
 
-    if motion_correction_params_name is None:
-        raise PipelineInputError(
-            "estimate_motion requires motion_correction_params_name, a "
-            "MotionCorrectionParameters row (e.g. 'dredge_fast_v1'; see "
-            "MotionCorrectionParameters()). Its estimation row is estimated "
-            "here and its interpolation row is applied by the later "
-            "run_v2_pipeline(motion_mode='apply', motion_estimate_id=...)."
-        )
-    is_concat, bundle, manual_excluded_times, source_inputs = (
-        _validate_run_request(
-            "estimate_motion",
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            interval_list_name=interval_list_name,
-            team_name=team_name,
-            concat_session_group_owner=concat_session_group_owner,
-            concat_session_group_name=concat_session_group_name,
-            pipeline_preset=pipeline_preset,
-            motion_mode="estimate",
-            motion_correction_params_name=motion_correction_params_name,
-            manual_excluded_times=manual_excluded_times,
-        )
+
+def estimate_concat_motion(
+    session_group_owner: str,
+    session_group_name: str,
+    *,
+    motion_correction_params_name: str,
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
+    preflight: bool = True,
+    manual_excluded_times=None,
+) -> "EstimateMotionReceipt":
+    """Save the motion estimate of a session group's concatenation.
+
+    Builds the source exactly as ``run_v2_concat_pipeline`` does with the same
+    arguments -- the member recordings, member artifact masks and their
+    concatenation -- and saves its ``MotionEstimate``, as
+    :func:`estimate_motion` does for one sort group. Apply it with
+    ``run_v2_concat_pipeline(..., motion_mode="apply",
+    motion_estimate_id=receipt["motion_estimate_id"])``.
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name
+        The primary key of an existing ``SessionGroup``.
+    manual_excluded_times
+        A mapping of each ``member_index`` to its exclusions, as in
+        :func:`run_v2_concat_pipeline`.
+    motion_correction_params_name, pipeline_preset, preflight
+        As in :func:`estimate_motion`.
+
+    Returns
+    -------
+    EstimateMotionReceipt
+        As in :func:`estimate_motion`, with the member and concat stage ids.
+
+    Raises
+    ------
+    PipelineInputError, PreflightError, PipelineStageError, ValueError
+        As in :func:`estimate_motion`.
+    """
+    return _estimate_motion(
+        "estimate_concat_motion",
+        is_concat=True,
+        concat_session_group_owner=session_group_owner,
+        concat_session_group_name=session_group_name,
+        motion_correction_params_name=motion_correction_params_name,
+        pipeline_preset=pipeline_preset,
+        preflight=preflight,
+        manual_excluded_times=manual_excluded_times,
+    )
+
+
+def _estimate_motion(
+    caller: str,
+    *,
+    is_concat: bool,
+    nwb_file_name: "str | None" = None,
+    sort_group_id: "int | None" = None,
+    interval_list_name: "str | None" = None,
+    team_name: "str | None" = None,
+    concat_session_group_owner: "str | None" = None,
+    concat_session_group_name: "str | None" = None,
+    motion_correction_params_name: str,
+    pipeline_preset: str,
+    preflight: bool,
+    manual_excluded_times,
+) -> "EstimateMotionReceipt":
+    """Shared body of ``estimate_motion`` / ``estimate_concat_motion``."""
+    bundle, manual_excluded_times, source_inputs = _validate_run_request(
+        caller,
+        is_concat=is_concat,
+        nwb_file_name=nwb_file_name,
+        sort_group_id=sort_group_id,
+        interval_list_name=interval_list_name,
+        team_name=team_name,
+        concat_session_group_owner=concat_session_group_owner,
+        concat_session_group_name=concat_session_group_name,
+        pipeline_preset=pipeline_preset,
+        motion_mode="estimate",
+        motion_correction_params_name=motion_correction_params_name,
+        manual_excluded_times=manual_excluded_times,
     )
     warnings_list: list[str] = []
     if preflight:
         warnings_list = _run_preflight(
-            "estimate_motion",
+            caller,
             is_concat=is_concat,
             source_inputs=source_inputs,
             bundle=bundle,

@@ -315,3 +315,16 @@ def test_review_open_returns_url_without_launching_browser(bundle, monkeypatch):
     assert review.is_hosted
     assert review.open(open_browser=False) == "https://figpack.org/f/abc"
     assert launched == [url]
+
+
+def test_focus_units_merge_into_an_existing_query():
+    from spyglass.spikesorting.v2._review.delivery import with_focus_units
+
+    url = with_focus_units(
+        "https://host/view/?figure=a&spyglass_units=1", [2, 3]
+    )
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+    assert query == {"figure": ["a"], "spyglass_units": ["2,3"]}
+    assert (
+        with_focus_units("http://localhost:1/b/", ()) == "http://localhost:1/b/"
+    )

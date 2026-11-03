@@ -298,8 +298,8 @@ def compose_curation_labels(
     inherits the parent's labels (``label_policy="inherit"``); a caller wanting
     the supplied labels to be the whole child state passes
     ``label_policy="replace"``. Root curations have an empty ``parent_labels``,
-    so ``"inherit"`` reduces to "supplied labels only" -- the historical
-    full-state insert.
+    so ``"inherit"`` reduces to "supplied labels only" -- a full-state
+    insert.
 
     Inheritance is identity-preserving except across a committed merge:
 

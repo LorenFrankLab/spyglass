@@ -4,7 +4,7 @@
 matching ``CurationV2`` rows by joining through the selection tables of the
 input source the restriction names (single recording or concatenation), then
 applying the artifact-detection, motion-correction, sort and curation filters.
-The DB-free key classification it starts from lives in ``_curation_routing``.
+The DB-free key classification it starts from lives in ``_curation.routing``.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
 function.
@@ -40,7 +40,7 @@ def resolve_restriction(
 
     # Pure key-classification / normalization (unknown-key handling,
     # artifact-interval-name -> id mapping, uuid normalization, per-source
-    # split) lives in the DB-free ``_curation_routing`` module; this function
+    # split) lives in the DB-free ``_curation.routing`` module; this function
     # owns only the DataJoint join assembly.
     plan = classify_and_normalize_restriction(
         key, restrict_by_artifact=restrict_by_artifact, strict=strict

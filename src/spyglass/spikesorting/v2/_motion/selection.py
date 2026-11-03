@@ -37,7 +37,6 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
     from spyglass.spikesorting.v2.motion import (
         _SOURCE_TABLES,
         MotionEstimationParameters,
-        _assert_concat_tables_current,
         _source_filter_problem,
     )
     from spyglass.spikesorting.v2._core.lookup_validation import (
@@ -69,7 +68,6 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
         )
 
     if concat_recording_id is not None:
-        _assert_concat_tables_current()
         source_kind = "concatenated_recording"
         source_key = {
             "concat_recording_id": uuid.UUID(str(concat_recording_id))

@@ -8,10 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class TrackingParamsSchema(BaseModel):
     """Shared fields that matcher recipes may include for tracked-unit grouping.
 
-    These retain their established flat parameter names so existing immutable
-    recipes keep their content and identities. A backend can inherit this
-    schema to validate overrides at insert time. Recipes without these fields
-    use the same defaults when deriving tracked units.
+    These are flat fields of the matcher recipe blob. A backend can inherit
+    this schema to validate overrides at insert time. Recipes of a backend
+    that does not carry these fields use the same defaults when deriving
+    tracked units.
 
     Grouping currently uses the strict greedy maximal-clique partition. It is
     independent of the algorithm that produced the pair probabilities.

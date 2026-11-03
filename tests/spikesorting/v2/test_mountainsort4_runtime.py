@@ -11,7 +11,7 @@ import pytest
 def _runtime_checks():
     import spikeinterface.sorters as sis
 
-    from spyglass.spikesorting.v2._orchestration.preflight import (
+    from spyglass.spikesorting.v2._orchestration.preflight_runtime import (
         _check_local_sorter_runtime,
     )
 

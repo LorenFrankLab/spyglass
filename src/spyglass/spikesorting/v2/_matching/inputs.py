@@ -851,7 +851,7 @@ def _recording_valid_times(recording_id, nwb_file_name, artifact_detection_id):
     """Kept intervals of a single recording on its own clock, in seconds.
 
     The same intervals the sort records as its observation times
-    (``Sorting.make_fetch`` / ``_units_nwb``): the artifact-removed valid
+    (``Sorting.make_fetch`` / ``_storage.units_nwb``): the artifact-removed valid
     times when the sort pins an artifact detection, else the recorded chunks
     of the persisted traces (gaps between disjoint intervals kept) -- the
     rule ``ConcatenatedRecording`` uses for ``member_valid_times``.

@@ -20,18 +20,11 @@ import json
 
 import numpy as np
 
-# Persist the format on each digest. Earlier hashes concatenated raw array
-# bytes, omitting shapes/dtypes; they cannot establish the stronger contract.
+# Persist the format on each digest so a digest names the array-content
+# contract (shapes, canonical dtypes, values) it was computed under.
 ANALYZER_CONTENT_HASH_VERSION = 2
 ANALYZER_CONTENT_HASH_PREFIX = f"array-v{ANALYZER_CONTENT_HASH_VERSION}:"
 _HASH_CHUNK_BYTES = 1024 * 1024
-
-
-def analyzer_content_hash_is_current(value) -> bool:
-    """Whether a persisted digest uses the current array-content format."""
-    return isinstance(value, str) and value.startswith(
-        ANALYZER_CONTENT_HASH_PREFIX
-    )
 
 
 def _copy_named_fields(destination, source) -> None:
@@ -103,8 +96,7 @@ def hash_extension_data(
     Hashes extension data with shapes, canonical little-endian dtypes and
     array boundaries. Floats are rounded to ``rounding`` decimals. Streaming
     buffers bound extra memory independently of waveform volume. Returned
-    digests carry a format tag; legacy byte-only hashes are explicitly stale.
-    Only extensions that are present are hashed.
+    digests carry a format tag. Only extensions that are present are hashed.
     """
     hashes: dict[str, str] = {}
     for name in extensions:
@@ -162,62 +154,19 @@ def analyzer_seed_modes(analyzer) -> dict[str, object]:
     return modes
 
 
-def analyzer_recompute_unverifiable_reason(manifest) -> str | None:
-    """Explain why a legacy analyzer inventory cannot be recompute-verified.
-
-    Older inventories excluded ``noise_levels`` because the extension was not
-    seed-pinned. Comparing such a folder with today's deterministic rebuild
-    would yield an expected mismatch that looks like corruption. Return an
-    explicit reason so the recompute table records a safe ``matched=0`` without
-    attempting that misleading comparison.
-    """
-    if not manifest:
-        return None
-    content_hashes = manifest.get("extension_content_hashes") or {}
-    seed_modes = manifest.get("base_extension_seed_modes") or {}
-    if "noise_levels" not in content_hashes:
-        return (
-            "legacy/unverifiable analyzer inventory: noise_levels was not "
-            "included in the stored content hash"
-        )
-    if seed_modes.get("noise_levels") == "unseeded":
-        return (
-            "legacy/unverifiable analyzer inventory: stored noise_levels "
-            "has no deterministic seed provenance"
-        )
-    if manifest.get("extension_content_hash_version") != (
-        ANALYZER_CONTENT_HASH_VERSION
-    ):
-        return (
-            "legacy/unverifiable analyzer inventory: array-content hashes "
-            "do not record shapes and canonical dtypes; refresh the inventory"
-        )
-    return None
-
-
 def analyzer_inventory_storage_changed(
     manifest, current_fingerprint: str | None
 ) -> bool:
     """Whether a versions row describes a different folder generation.
 
-    Empty manifests intentionally represent absent or zero-unit analyzers. A
-    nonempty legacy manifest without a storage fingerprint is refreshed once;
-    afterward path/size/mtime drift identifies a rebuild without reading any
+    Empty manifests intentionally represent absent or zero-unit analyzers.
+    Otherwise path/size/mtime drift identifies a rebuild without reading any
     extension arrays.
     """
     manifest = manifest or {}
     if current_fingerprint is None and not manifest:
         return False
-    return (
-        "storage_fingerprint" not in manifest
-        or manifest["storage_fingerprint"] != current_fingerprint
-        or (
-            bool(manifest)
-            and current_fingerprint is not None
-            and manifest.get("extension_content_hash_version")
-            != ANALYZER_CONTENT_HASH_VERSION
-        )
-    )
+    return manifest.get("storage_fingerprint") != current_fingerprint
 
 
 def analyzer_inventory_refresh_needed(

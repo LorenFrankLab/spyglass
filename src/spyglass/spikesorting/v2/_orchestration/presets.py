@@ -72,7 +72,7 @@ class _PipelinePreset(BaseModel):
 
 
 # The preset bundles + UX metadata are the single source of truth in
-# ``_recipe_catalog.pipeline_preset_specs`` (alongside the parameter-row
+# ``_core.recipe_catalog.pipeline_preset_specs`` (alongside the parameter-row
 # recipes they reference); build the validated ``_PipelinePreset`` objects
 # from those plain-dict specs here.
 _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {

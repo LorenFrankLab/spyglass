@@ -28,10 +28,8 @@ fingerprint (traces, timestamps, persisted probe geometry, and scaling metadata)
 that defines `Recording.content_hash`, and for analyzers the deterministic
 extension data, including the seed-pinned `noise_levels` estimate. Neither uses
 a whole-file digest, which folds in volatile NWB metadata (`object_id`,
-timestamps) and is not reproducible across regenerations. A legacy analyzer
-inventory that omitted `noise_levels`, or records it as unseeded, is reported as
-`matched=0` with an explicit `legacy/unverifiable` message instead of a
-corruption-like hash mismatch. The recording identity has no `rounding` knob —
+timestamps) and is not reproducible across regenerations. The recording
+identity has no `rounding` knob —
 its precision is fixed by the fingerprint's `TRACE_ROUNDING` /
 `TIMESTAMP_ROUNDING` constants; `rounding` applies only to the analyzer
 extension comparison.
@@ -39,13 +37,6 @@ extension comparison.
 Analyzer extension hashes use the version-tagged `array-v2` format: array
 shapes, dtypes, and boundaries are hashed with canonical little-endian values.
 Hashing streams bounded buffers, including for memory-mapped waveforms.
-Inventories from the earlier byte-only format are refreshed when their folder is
-present; a new recompute verdict is required before reclamation. Their audit is
-retained when the folder was already reclaimed. Existing evaluation snapshots
-remain readable, but `detect_stale_source()` reports
-`source_analyzer_hash_format:<role>` until they are reevaluated. Evaluation
-calls reuse existing rows, so recreate the affected evaluation result before
-repopulating it.
 
 ## Workflow
 
@@ -87,7 +78,7 @@ The `SortingAnalyzer*` trio mirrors this for analyzer folders; deletion removes
 the folder, which `Sorting.get_analyzer()` rebuilds on the next access. A
 rebuild retires the prior `SortingAnalyzerVersions` generation and its dependent
 verdicts, then inventories the published folder again. `attempt_all()` also
-refreshes legacy inventories and folders rebuilt by DB-free workers using a
+refreshes inventories of folders rebuilt by DB-free workers using a
 path/size/mtime fingerprint, without reading waveform payloads.
 
 ## When deletion is allowed
@@ -110,7 +101,7 @@ path/size/mtime fingerprint, without reading waveform payloads.
 
 A completed comparison with `matched=0` records which objects differ in the
 `Name` (missing-from-old/new) and `Hash` (differing) part tables. Attempts that
-are explicitly skipped, legacy/unverifiable, or fail regeneration instead put
+are explicitly skipped or fail regeneration instead put
 the reason in `err_msg` and have no synthetic diff rows.
 
 ## Analyzer cache layout and memory
@@ -141,13 +132,9 @@ The analyzer's recording reference is saved as `recording.pickle`, including
 artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON loss
 of structured artifact intervals, including after probe projection. It stores
 extractor parameters and source paths; it does not copy the recording's trace
-data. Reopened derivative analyzers use the same serialization policy. An older
-cache whose recording cannot reload is treated as invalid and rebuilt through
-the usual cache recovery path.
-
-Folders written under the pre-launch `.zarr` convention are not read; they are
-disposable and rebuild on first access. Delete stale `*.zarr` folders under the
-analyzer root by hand.
+data. Reopened derivative analyzers use the same serialization policy. A cache
+whose recording cannot reload is treated as invalid and rebuilt through the
+usual cache recovery path.
 
 Scratch disk: budget for the preprocessed recording (`Recording`), the sorter's
 own scratch under `temp_dir` while it runs, the display and (when PC metrics are

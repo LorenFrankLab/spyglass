@@ -26,6 +26,7 @@ from spyglass.spikesorting.v2._orchestration.stages import (
 def _validate_run_request(
     caller: str,
     *,
+    is_concat: bool,
     nwb_file_name,
     sort_group_id,
     interval_list_name,
@@ -37,10 +38,10 @@ def _validate_run_request(
     motion_correction_params_name,
     manual_excluded_times,
     motion_estimate_id=None,
-) -> tuple[bool, Any, Any, dict]:
+) -> tuple[Any, Any, dict]:
     """Validate a run request without touching the database.
 
-    Determines the input mode, checks the preset name and the motion request,
+    Checks the source inputs, the preset name and the motion request,
     and folds manual exclusions into the preset's artifact recipe. Runs before
     any DataJoint table import (importing them activates ``@schema`` and needs
     a live connection), so a bad request fails fast even offline.
@@ -49,10 +50,13 @@ def _validate_run_request(
     ----------
     caller : str
         The public entry point, named in every error message.
+    is_concat : bool
+        True when ``caller`` is a concat entry point, which supplies the
+        concat inputs instead of the single-session ones.
     nwb_file_name, sort_group_id, interval_list_name, team_name
-        The single-session inputs (all or none).
+        The single-session inputs (``None`` in concat mode).
     concat_session_group_owner, concat_session_group_name
-        The concat inputs (both or neither).
+        The concat inputs (``None`` in single-session mode).
     pipeline_preset : str
         A ``_PIPELINE_PRESETS`` name.
     motion_mode, motion_correction_params_name
@@ -65,8 +69,6 @@ def _validate_run_request(
 
     Returns
     -------
-    is_concat : bool
-        True for concat mode, False for single-session mode.
     bundle : _PipelinePreset
         The preset, with a ``"none"`` artifact recipe when manual exclusions
         need a detection output and the preset scans for none.
@@ -80,15 +82,13 @@ def _validate_run_request(
     Raises
     ------
     PipelineInputError
-        On an incomplete or mixed input mode, an unknown preset, or a
-        contradictory motion request.
+        On a missing source input, an unknown preset, or a contradictory
+        motion request.
     """
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Exactly one COMPLETE mode is required: all single-session fields and no
-    # concat fields, or both concat fields and no single-session field
-    # (team_name is a single-session field, so it is rejected in concat mode --
-    # member teams come from SessionGroup.Member).
+    # Each public entry point supplies only its own mode's fields; a ``None``
+    # among them was passed explicitly.
     single_named = {
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
@@ -99,39 +99,15 @@ def _validate_run_request(
         "concat_session_group_owner": concat_session_group_owner,
         "concat_session_group_name": concat_session_group_name,
     }
-    single_set = {k for k, v in single_named.items() if v is not None}
-    concat_set = {k for k, v in concat_named.items() if v is not None}
-    is_single = len(single_set) == len(single_named) and not concat_set
-    is_concat = len(concat_set) == len(concat_named) and not single_set
-
-    if not (is_single or is_concat):
-        # When the caller clearly started ONE mode but left it incomplete, name
-        # the missing field(s) instead of the generic two-mode explanation --
-        # the common first-run slip (e.g. forgetting sort_group_id) otherwise
-        # misreads as if single-session and concat inputs were mixed.
-        if single_set and not concat_set:
-            missing = [k for k in single_named if k not in single_set]
-            raise PipelineInputError(
-                f"{caller}: single-session mode is missing required "
-                f"field(s): {', '.join(missing)}. Provide all of "
-                f"{', '.join(single_named)}, or switch to concat mode "
-                "(concat_session_group_owner + concat_session_group_name)."
-            )
-        if concat_set and not single_set:
-            missing = [k for k in concat_named if k not in concat_set]
-            raise PipelineInputError(
-                f"{caller}: concat mode is missing required field(s): "
-                f"{', '.join(missing)}. Provide both of "
-                f"{', '.join(concat_named)}, or switch to single-session mode "
-                "(nwb_file_name, sort_group_id, interval_list_name, team_name)."
-            )
-        # Nothing set, or fields from BOTH modes set (a genuine mode clash):
-        # explain the two available input modes.
+    source_inputs = concat_named if is_concat else single_named
+    missing = [
+        name.removeprefix("concat_")
+        for name, value in source_inputs.items()
+        if value is None
+    ]
+    if missing:
         raise PipelineInputError(
-            f"{caller} requires exactly one input mode: either "
-            "single-session fields (nwb_file_name, sort_group_id, "
-            "interval_list_name, team_name) or concat fields "
-            "(concat_session_group_owner, concat_session_group_name)"
+            f"{caller}: required input(s) {', '.join(missing)} cannot be None."
         )
 
     if pipeline_preset not in _PIPELINE_PRESETS:
@@ -162,8 +138,7 @@ def _validate_run_request(
     bundle = artifact_recipe_with_manual_exclusions(
         _PIPELINE_PRESETS[pipeline_preset], manual_excluded_times
     )
-    source_inputs = concat_named if is_concat else single_named
-    return is_concat, bundle, manual_excluded_times, source_inputs
+    return bundle, manual_excluded_times, source_inputs
 
 
 def _run_preflight(
@@ -182,9 +157,9 @@ def _run_preflight(
 ) -> list[str]:
     """Run the mode's read-only preflight; return its advisories.
 
-    Single-session mode runs the full :func:`preflight_v2_pipeline`; concat
-    mode runs :func:`assert_concat_preflight` (the full preflight checks
-    single-session rows that do not apply to a concat SessionGroup).
+    A single-session run gets :func:`preflight_v2_pipeline`; a concat run gets
+    :func:`assert_concat_preflight`, its per-member and group equivalent (the
+    single-session rows do not apply to a SessionGroup).
 
     Parameters
     ----------

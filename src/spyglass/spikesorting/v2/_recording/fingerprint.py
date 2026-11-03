@@ -50,7 +50,7 @@ DESIGN NOTES.
 
 DB-LIGHT AT IMPORT. This module activates no ``dj.schema`` and opens no DB
 connection at import: numpy / pynwb / SpikeInterface / filelock and the
-``_recompute`` helpers are imported lazily inside the functions, so both
+``_storage.recompute`` helpers are imported lazily inside the functions, so both
 ``recording.py`` and ``recompute.py`` import it without a cycle.
 """
 

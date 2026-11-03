@@ -1724,35 +1724,3 @@ def test_identity_omits_an_absent_artifact_detection():
         assert deterministic_id("motion_estimate", changed) != (
             deterministic_id("motion_estimate", unmasked)
         ), field
-
-
-@pytest.mark.parametrize(
-    "recording_heading, selection_heading",
-    [
-        (["concat_recording_id", "motion_preset"], ["concat_recording_id"]),
-        (
-            ["concat_recording_id"],
-            ["concat_recording_id", "motion_correction_params_name"],
-        ),
-    ],
-)
-def test_concat_heading_with_removed_motion_columns_is_refused(
-    recording_heading, selection_heading
-):
-    from spyglass.spikesorting.v2._motion.estimation import (
-        assert_concat_schema_current,
-    )
-
-    with pytest.raises(ValueError, match="Recreate the v2 concat tables"):
-        assert_concat_schema_current(recording_heading, selection_heading)
-
-
-def test_current_concat_heading_passes():
-    from spyglass.spikesorting.v2._motion.estimation import (
-        assert_concat_schema_current,
-    )
-
-    assert_concat_schema_current(
-        ["concat_recording_id", "content_hash", "statistics_spans"],
-        ["concat_recording_id", "member_set_hash"],
-    )

@@ -18,7 +18,7 @@ Raw-namespace curations instead share the sort analyzer and persist missing
 extensions through ``Sorting.add_extensions`` under its cache lock.
 
 Every folder is a ``binary_folder`` analyzer loaded through
-``_analyzer_cache.load_analyzer_folder`` (memmapped waveforms).
+``_storage.analyzer_cache.load_analyzer_folder`` (memmapped waveforms).
 """
 
 from __future__ import annotations
@@ -247,8 +247,8 @@ def hash_sorting_spike_content(sorting) -> str:
     # replace a sorting's frequency with the recording's nearly-equal float
     # while creating an analyzer (for example 100.0 vs 99.99999999999999).
     # Including it would therefore reject a scientifically identical cache
-    # after its first zarr round-trip. Source recording identity is validated
-    # independently by ``source_artifact_hashes``.
+    # after its first save/load round-trip. Source recording identity is
+    # validated independently by ``source_artifact_hashes``.
     digest.update(b"spyglass-curation-spikes-v1\0")
     digest.update(
         int(sorting.get_num_segments()).to_bytes(8, "little", signed=False)
@@ -727,7 +727,7 @@ def publish_resolved_merged_analyzer(
         role,
         _build_base,
         validate_analyzer=analyzer_sparsity_validator(
-            waveform_params, lambda: sorter_row.get("params")
+            lambda: sorter_row.get("params")
         ),
     )
 
@@ -784,9 +784,7 @@ def _resolve_curation_analyzer(
         )
         return sorter_row.get("params")
 
-    validate_analyzer = analyzer_sparsity_validator(
-        recipe_row["params"], sorter_params
-    )
+    validate_analyzer = analyzer_sparsity_validator(sorter_params)
     # The COMPLETE normalized request is the derivative's identity and its
     # required result; the subset that actually needs computing is a separate
     # local (``needs_compute``) so a later, larger request never reuses a

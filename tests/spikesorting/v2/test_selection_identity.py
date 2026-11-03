@@ -746,9 +746,6 @@ def test_recording_input_hash_matches_make_fetch(populated_sorting):
     )
     row = (RecordingSelection & {"recording_id": rec_id}).fetch1()
     stored = row["recording_input_hash"]
-    # The pipeline created this recording via insert_selection, so it carries a
-    # fingerprint (never NULL).
-    assert stored is not None
     live = resolve_recording_input_hash(
         row["nwb_file_name"],
         row["sort_group_id"],
@@ -792,7 +789,11 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     identity = fresh_recording_identity
-    row = {**identity, "recording_id": uuid.uuid4()}
+    row = {
+        **identity,
+        "recording_id": uuid.uuid4(),
+        "recording_input_hash": "0" * 64,
+    }
     # No flag -> rejected (before any DB write).
     with pytest.raises(dj.errors.DataJointError, match="is not supported"):
         RecordingSelection.insert1(row)

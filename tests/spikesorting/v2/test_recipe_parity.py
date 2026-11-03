@@ -217,8 +217,8 @@ def test_neuropixels_ks4_recipe_matches_aind(dj_conn):
     correction (``nblocks=5`` vs stock ``1``), and it pins the whitening /
     preprocessing config explicitly. Critically it carries NO ``whiten`` key:
     v2's external float64 whitening only runs when the sorter params hold
-    ``whiten=True`` (``_sorting_dispatch.py``), so omitting it keeps the signal
-    whitened exactly once -- by KS4 -- with no double-whitening.
+    ``whiten=True`` on MountainSort 4/5 (``_sorting/dispatch.py``), and KS4
+    rejects the key, so the signal is whitened exactly once -- by KS4.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 

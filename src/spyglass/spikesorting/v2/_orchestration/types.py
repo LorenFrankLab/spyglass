@@ -38,26 +38,12 @@ SourceMode: TypeAlias = Literal["single_session", "concat"]
 MotionMode: TypeAlias = Literal["off", "estimate", "apply"]
 
 
-class RunV2PipelineInputs(TypedDict, total=False):
-    """Keyword-argument bundle accepted by ``run_v2_pipeline``.
+class RunV2PipelineOptions(TypedDict, total=False):
+    """Options shared by ``run_v2_pipeline`` and ``run_v2_concat_pipeline``.
 
-    Useful for typed ``run_v2_pipeline(**inputs)`` call sites. Every key is
-    optional because the call accepts exactly one of two input modes, validated
-    at call time:
-
-    - single-session: ``nwb_file_name`` + ``sort_group_id`` +
-      ``interval_list_name`` + ``team_name``
-    - concat: ``concat_session_group_owner`` + ``concat_session_group_name``
-
-    The remaining keys mirror the function defaults.
+    Every key is optional and mirrors the function default.
     """
 
-    nwb_file_name: str
-    sort_group_id: int
-    interval_list_name: str
-    team_name: str
-    concat_session_group_owner: str
-    concat_session_group_name: str
     pipeline_preset: str
     curation_description: str
     require_units: bool
@@ -73,6 +59,25 @@ class RunV2PipelineInputs(TypedDict, total=False):
     motion_mode: MotionMode
     motion_correction_params_name: str | None
     motion_estimate_id: UUID | str | None
+
+
+class RunV2PipelineInputs(RunV2PipelineOptions):
+    """Keyword-argument bundle for a typed ``run_v2_pipeline(**inputs)`` call.
+
+    The sort group's four source fields are required; the options are not.
+    """
+
+    nwb_file_name: str
+    sort_group_id: int
+    interval_list_name: str
+    team_name: str
+
+
+class RunV2ConcatPipelineInputs(RunV2PipelineOptions):
+    """Keyword-argument bundle for ``run_v2_concat_pipeline(**inputs)``."""
+
+    session_group_owner: str
+    session_group_name: str
 
 
 class RunV2PipelineSessionRequiredInputs(TypedDict):
@@ -101,10 +106,11 @@ class RunV2PipelineSessionInputs(
 
 
 class PipelineStageSeconds(TypedDict):
-    """Per-stage wall-clock seconds for one ``run_v2_pipeline`` call.
+    """Per-stage wall-clock seconds for one pipeline run.
 
-    The source-stage keys depend on the input mode: single-session runs carry
-    ``recording`` (+ ``artifact_detection``), concat runs carry
+    The source-stage keys depend on the entry point: ``run_v2_pipeline`` runs
+    carry ``recording`` (+ ``artifact_detection``), ``run_v2_concat_pipeline``
+    runs carry
     ``member_recording``, ``member_artifact_detection``, ``concat_recording``,
     and ``member_curation`` instead. ``sorting`` / ``curation`` are always present.
     """
@@ -130,7 +136,7 @@ class PipelineStageSeconds(TypedDict):
 
 
 class _RunV2SummaryBase(TypedDict):
-    """Keys present in every ``run_v2_pipeline`` summary (both input modes).
+    """Keys in every ``run_v2_pipeline`` / ``run_v2_concat_pipeline`` summary.
 
     Not a public type on its own -- a summary always carries a ``source_mode``
     discriminant from one of the concrete subclasses below. This base holds the
@@ -241,7 +247,7 @@ class MemberArtifactSummary(TypedDict):
 
 
 class RunV2ConcatSummary(_RunV2SummaryBase):
-    """``run_v2_pipeline`` summary for a concat (SessionGroup) run.
+    """``run_v2_concat_pipeline`` summary (SessionGroup run).
 
     ``source_mode == "concat"``. Carries the per-member recording PKs and the
     ConcatenatedRecording keys in place of the single-session recording keys,
@@ -285,12 +291,12 @@ class MotionEstimateDiagnostics(TypedDict):
 
 
 class EstimateMotionReceipt(TypedDict):
-    """Return value of ``estimate_motion``.
+    """Return value of ``estimate_motion`` / ``estimate_concat_motion``.
 
-    The saved estimate of the source a ``run_v2_pipeline`` call with the same
-    source arguments would sort, before any sort. Pass
-    ``motion_estimate_id`` to ``run_v2_pipeline(motion_mode="apply",
-    motion_estimate_id=...)`` to sort the recording corrected with exactly
+    The saved estimate of the source a ``run_v2_pipeline`` (or
+    ``run_v2_concat_pipeline``) call with the same source arguments would
+    sort, before any sort. Pass ``motion_estimate_id`` to that entry point
+    with ``motion_mode="apply"`` to sort the recording corrected with exactly
     this estimate. ``source_mode`` says which source keys are present:
     single-session receipts carry the recording and artifact-detection keys
     (``artifact_detection_id`` is ``None`` and its status ``"skipped"`` when
@@ -468,7 +474,9 @@ __all__ = [
     "PipelineOutcome",
     "PipelineStageSeconds",
     "RunV2ConcatSummary",
+    "RunV2ConcatPipelineInputs",
     "RunV2PipelineInputs",
+    "RunV2PipelineOptions",
     "RunV2PipelineSessionFailed",
     "RunV2PipelineSessionInputs",
     "RunV2PipelineSessionOk",

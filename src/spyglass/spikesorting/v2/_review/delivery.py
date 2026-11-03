@@ -36,9 +36,6 @@ from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-#: The only file the browser may write: the FigPack annotation sidecar.
-from spyglass.spikesorting.v2._review.http import WRITABLE_BUNDLE_FILES
-
 
 @dataclass
 class _Bundle:
@@ -71,6 +68,18 @@ def review_bundle_url(port: int, bundle_id: str) -> str:
     enables local in-place editing only for ``http://localhost:<port>/``.
     """
     return f"http://localhost:{port}/bundles/{bundle_id}/"
+
+
+def with_focus_units(url: str, unit_ids) -> str:
+    """Return ``url`` with ``spyglass_units`` set to ``unit_ids`` (if any)."""
+    if not len(unit_ids):
+        return url
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query))
+    query["spyglass_units"] = ",".join(str(int(unit)) for unit in unit_ids)
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def serve_review_bundle(

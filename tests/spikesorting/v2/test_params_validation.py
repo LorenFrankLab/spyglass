@@ -98,22 +98,23 @@ def test_preprocessing_rejects_unknown_bad_channel_handling():
 
 
 def test_phase_shift_off_by_default():
-    """``phase_shift`` defaults to ``None`` (the franklab default is a no-op).
-
-    Existing rows that predate the field still validate because the new
-    optional field defaults to ``None`` (no ``schema_version`` bump).
-    """
+    """``phase_shift`` defaults to ``None`` (the franklab default is a no-op),
+    including for a blob that omits the key."""
     schema = PreprocessingParamsSchema()
     assert schema.phase_shift is None
     assert schema.model_dump()["phase_shift"] is None
-    # A pre-field blob (no ``phase_shift`` key) validates unchanged.
-    legacy = {
+    without_phase_shift = {
         "schema_version": 4,
         "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
         "common_reference": {"operator": "median"},
         "min_segment_length": 1.0,
     }
-    assert PreprocessingParamsSchema.model_validate(legacy).phase_shift is None
+    assert (
+        PreprocessingParamsSchema.model_validate(
+            without_phase_shift
+        ).phase_shift
+        is None
+    )
 
 
 def test_phase_shift_enabled_dumps_margin():
@@ -633,39 +634,37 @@ def test_kilosort4_schema_accepts_extra_kwargs():
 def test_kilosort4_schema_rejects_whiten(bad):
     """A ``whiten`` key on a KS4 row is rejected at validation.
 
-    KS4 has no ``whiten`` kwarg -- it whitens internally -- and the v2 runtime
-    runs its external float64 whitening whenever the sorter params carry a
-    truthy ``whiten`` (``_sorting_dispatch.py``). A ``whiten`` key, which
-    ``extra="allow"`` would otherwise pass through silently, would therefore
-    double-whiten the signal. The schema rejects it up front rather than
-    letting it surface as silently-wrong spike times at sort time. Any value
-    (even ``False``) is rejected, since KS4 has no such parameter at all.
+    KS4 has no ``whiten`` kwarg -- it whitens internally -- and the
+    dispatcher's external whitening is MountainSort-only, so a ``whiten`` key
+    (which ``extra="allow"`` would otherwise accept) would reach the SI
+    wrapper and fail there at sort time. The schema rejects it up front. Any
+    value (even ``False``) is rejected, since KS4 has no such parameter.
     """
     with pytest.raises(ValidationError, match="whiten"):
         Kilosort4Schema.model_validate({"whiten": bad})
 
 
-@pytest.mark.parametrize("sorter", ["kilosort2_5", "kilosort3", "ironclust"])
-def test_internal_whiten_sorters_reject_truthy_whiten(sorter):
-    """kilosort2_5 / kilosort3 / ironclust whiten internally and have no
-    ``whiten`` kwarg, so a truthy ``whiten`` would trigger the v2 runtime's
-    external float64 whitening on top of the sorter's own (double-whiten).
-    Unlike KS4 they fall through to the ``extra='allow'`` generic schema, so
-    the guard runs at ``SorterParameters`` insert via ``reject_internal_whiten``.
-    """
-    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
+@pytest.mark.parametrize("sorter", ["kilosort2_5", "kilosort3"])
+@pytest.mark.parametrize("value", [True, False])
+def test_no_whiten_kwarg_sorters_reject_any_whiten(sorter, value):
+    """KS2.5 / KS3 whiten internally and have no ``whiten`` parameter, so the
+    SI-wrapper key check rejects the key at insert whatever its value."""
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_sorter_params_against_wrapper,
+    )
 
-    with pytest.raises(ValueError, match="whitens internally"):
-        reject_internal_whiten(sorter, {"whiten": True})
+    with pytest.raises(ValueError, match="'whiten'"):
+        validate_sorter_params_against_wrapper(sorter, {"whiten": value})
 
 
-def test_internal_whiten_guard_allows_absent_or_falsy_whiten():
-    """An absent or falsy ``whiten`` is fine for the internal-whiten sorters."""
-    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
+def test_ironclust_accepts_whiten():
+    """IronClust has its own ``whiten`` option (channel whitening during its
+    preprocessing); the dispatcher passes it through unchanged."""
+    from spyglass.spikesorting.v2._params.sorter import (
+        validate_sorter_params_against_wrapper,
+    )
 
-    reject_internal_whiten("kilosort2_5", {})
-    reject_internal_whiten("kilosort3", {"whiten": False})
-    reject_internal_whiten("ironclust", {"whiten": 0})
+    validate_sorter_params_against_wrapper("ironclust", {"whiten": True})
 
 
 # ---------- quality-metric template (waveform-shape) columns ----------------
@@ -730,15 +729,6 @@ def test_template_metric_columns_validated():
     assert "half_width" not in available
 
 
-def test_internal_whiten_guard_ignores_mountainsort():
-    """MS4/MS5 intentionally use ``whiten=True`` (routed through the external
-    float64 whitening), so the guard must NOT reject them."""
-    from spyglass.spikesorting.v2._params.sorter import reject_internal_whiten
-
-    reject_internal_whiten("mountainsort4", {"whiten": True})
-    reject_internal_whiten("mountainsort5", {"whiten": True})
-
-
 @pytest.mark.parametrize(
     "schema_cls",
     [SpykingCircus2Schema, Tridesclous2Schema],
@@ -779,14 +769,66 @@ def test_schema_version_present_and_positive(schema_cls):
 
     Every params schema must carry this field so the Lookup row can store
     the schema generation number alongside the blob; a model-breaking
-    change bumps the version and adds a LegacyParams shim rather than
-    silently overwriting old rows. The exact value differs per schema
-    (preprocessing + artifact + clusterless were bumped to 2 when their
-    field sets changed).
+    change bumps the version. The exact value differs per schema.
     """
     blob = schema_cls().model_dump()
     assert isinstance(blob["schema_version"], int)
     assert blob["schema_version"] >= 1
+
+
+def _all_params_schemas():
+    from spyglass.spikesorting.v2._params.analyzer_waveform import (
+        AnalyzerWaveformParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        AutoCurationRulesSchema,
+        QualityMetricParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.motion_estimation import (
+        MotionEstimationParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.motion_interpolation import (
+        MotionInterpolationParamsSchema,
+    )
+    from spyglass.spikesorting.v2._params.sorter import (
+        SorterExecutionParamsSchema,
+    )
+
+    return [
+        PreprocessingParamsSchema,
+        ArtifactDetectionParamsSchema,
+        MountainSort4Schema,
+        MountainSort5Schema,
+        Kilosort4Schema,
+        ClusterlessThresholderSchema,
+        SpykingCircus2Schema,
+        Tridesclous2Schema,
+        GenericSorterParamsSchema,
+        SorterExecutionParamsSchema,
+        AnalyzerWaveformParamsSchema,
+        QualityMetricParamsSchema,
+        AutoCurationRulesSchema,
+        MotionEstimationParamsSchema,
+        MotionInterpolationParamsSchema,
+        UnitMatchParamsSchema,
+    ]
+
+
+@pytest.mark.parametrize(
+    "schema_cls", _all_params_schemas(), ids=lambda cls: cls.__name__
+)
+@pytest.mark.parametrize("offset", [-1, 1])
+def test_schema_accepts_only_its_current_version(schema_cls, offset):
+    """A blob stamped with any other ``schema_version`` fails validation.
+
+    Validation is per field, so the ``schema_version`` error is reported even
+    for a schema with other required fields.
+    """
+    current = schema_cls.model_fields["schema_version"].default
+    with pytest.raises(ValidationError) as excinfo:
+        schema_cls.model_validate({"schema_version": current + offset})
+    assert ("schema_version",) in [err["loc"] for err in excinfo.value.errors()]
 
 
 def test_schema_version_constants_match_schema_defaults():
@@ -881,13 +923,7 @@ def test_reference_fields_validation():
 
 
 def test_schema_versions_bumped():
-    """The schema-version markers reflect the current field sets.
-
-    ``ClusterlessThresholderSchema`` gained ``threshold_unit`` (3 -> 4)
-    and ``PreprocessingParamsSchema`` dropped the inert ``whiten`` field
-    (3 -> 4). An un-bumped marker would let a stale row validate against the
-    new field set.
-    """
+    """The schema-version markers reflect the current field sets."""
     assert ClusterlessThresholderSchema().schema_version == 4
     assert PreprocessingParamsSchema().schema_version == 4
 

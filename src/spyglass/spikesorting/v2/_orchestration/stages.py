@@ -114,7 +114,7 @@ def _populate_once(table, key) -> None:
         _populate_tolerating_concurrent_duplicate(table, key)
 
 
-def _assert_figpack_installed() -> None:
+def _assert_figpack_installed(caller: str) -> None:
     """Raise ``PipelineInputError`` unless the FigPack packages are installed.
 
     DB-free, so a run that asks for a FigPack view fails before any table
@@ -132,7 +132,7 @@ def _assert_figpack_installed() -> None:
         or importlib.util.find_spec("figpack_spike_sorting") is None
     ):
         raise PipelineInputError(
-            "run_v2_pipeline: build_figpack_view=True but the FigPack "
+            f"{caller}: build_figpack_view=True but the FigPack "
             f"packages are not installed. {FIGPACK_INSTALL_HINT}"
         )
 
@@ -526,7 +526,7 @@ def _run_member_curation_stage(
         member_merge_ids = _concat_member_merge_ids(member_curation_key)
         if len(member_merge_ids) != len(member_keys):
             raise ValueError(
-                "run_v2_pipeline: ConcatMemberCuration registration is "
+                "run_v2_concat_pipeline: ConcatMemberCuration registration is "
                 f"incomplete for {member_curation_key}: expected "
                 f"{len(member_keys)} member merge rows, found "
                 f"{len(member_merge_ids)}."
@@ -579,8 +579,6 @@ def _run_figpack_stage(
         run_summary["figpack_status"] = "skipped"
         stage_seconds["figpack"] = 0.0
     else:
-        from pathlib import Path
-
         from spyglass.spikesorting.v2.figpack_curation import (
             FigPackCuration,
             FigPackCurationSelection,
@@ -594,17 +592,15 @@ def _run_figpack_stage(
             label_options=figpack_label_options,
             upload=False,
         )
-        # Reuse only when the FigPackCuration row AND its offline bundle are
-        # both present. The run returns figpack_uri as an output, so a row
-        # whose local bundle was cleaned out (e.g. the figpack / temp dir was
-        # purged) must be rebuilt rather than reported "reused" with a dead
-        # path: drop the stale row so populate rebuilds the bundle.
-        built = FigPackCuration & figpack_selection
-        bundle_present = (
-            bool(built) and Path(built.fetch1("figpack_uri")).exists()
+        # The run returns figpack_uri, so a row whose local bundle was
+        # cleaned out is rebuilt rather than reported "reused" with a dead
+        # path, and one built on another machine comes with a warning.
+        stale_bundle = FigPackCuration.drop_missing_local_bundle(
+            figpack_selection
         )
-        if bool(built) and not bundle_present:
-            built.delete(safemode=False)
+        if stale_bundle:
+            warnings_list.append(stale_bundle)
+        bundle_present = bool(FigPackCuration & figpack_selection)
         (
             _,
             run_summary["figpack_status"],
@@ -614,9 +610,7 @@ def _run_figpack_stage(
             bundle_present,
             # Same concurrency handling as every other stage: serialize the
             # populate on the content-addressed selection and tolerate a
-            # benign duplicate. (The stale-bundle delete above runs outside
-            # the lock -- it only fires when the bundle is already gone, so
-            # it cannot race a live build.)
+            # benign duplicate.
             lambda: _populate_once(FigPackCuration, figpack_selection),
             run_summary,
         )

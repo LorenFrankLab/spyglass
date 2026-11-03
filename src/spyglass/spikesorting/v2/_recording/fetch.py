@@ -142,31 +142,28 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
         )
     # A changed membership, reference, or bad-channel set since
     # insert_selection would build content that does not match recording_id.
-    # A NULL hash (an allow_direct_insert bypass, or a row stored before the
-    # column existed) has nothing to compare.
-    stored_input_hash = sel.get("recording_input_hash")
-    if stored_input_hash is not None:
-        live_input_hash = recording_input_hash(
-            electrode_ids=channel_ids,
-            reference_mode=reference_mode,
-            reference_electrode_id=reference_electrode_id,
-            interpolated_bad_channel_ids=bad_channel_ids,
+    stored_input_hash = sel["recording_input_hash"]
+    live_input_hash = recording_input_hash(
+        electrode_ids=channel_ids,
+        reference_mode=reference_mode,
+        reference_electrode_id=reference_electrode_id,
+        interpolated_bad_channel_ids=bad_channel_ids,
+    )
+    if live_input_hash != stored_input_hash:
+        from spyglass.spikesorting.v2.exceptions import (
+            RecordingInputDriftError,
         )
-        if live_input_hash != stored_input_hash:
-            from spyglass.spikesorting.v2.exceptions import (
-                RecordingInputDriftError,
-            )
 
-            raise RecordingInputDriftError(
-                f"Recording {sel['recording_id']} was selected with input "
-                f"fingerprint {stored_input_hash} but the live sort-group "
-                f"inputs now hash to {live_input_hash}: the electrode "
-                "membership, reference, or interpolate bad-channel set "
-                "changed after insert_selection. Re-run insert_selection "
-                "for the current inputs (it mints a new recording_id for "
-                "the changed set), or restore the sort group's membership / "
-                "bad-channel flags."
-            )
+        raise RecordingInputDriftError(
+            f"Recording {sel['recording_id']} was selected with input "
+            f"fingerprint {stored_input_hash} but the live sort-group "
+            f"inputs now hash to {live_input_hash}: the electrode "
+            "membership, reference, or interpolate bad-channel set "
+            "changed after insert_selection. Re-run insert_selection "
+            "for the current inputs (it mints a new recording_id for "
+            "the changed set), or restore the sort group's membership / "
+            "bad-channel flags."
+        )
     return RecordingFetched(
         sel=sel,
         channel_ids=channel_ids,

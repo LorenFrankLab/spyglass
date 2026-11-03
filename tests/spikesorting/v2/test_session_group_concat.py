@@ -612,12 +612,11 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_concat_selection_rejects_a_stale_motion_key_and_unknown_fields():
-    """A concat selection never corrects motion: the removed
-    ``motion_correction_params_name`` key is refused with a pointer to the
-    motion stage instead of silently selecting an uncorrected concat, and any
-    other unknown field is refused too. Both checks run before any member is
-    read, so no group needs to exist."""
+def test_concat_selection_rejects_unknown_fields():
+    """A concat selection refuses any field outside its identity, including
+    ``motion_correction_params_name`` (motion correction is a separate stage,
+    never part of a concat). The check runs before any member is read, so no
+    group needs to exist."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
         SessionGroup,
@@ -629,7 +628,10 @@ def test_concat_selection_rejects_a_stale_motion_key_and_unknown_fields():
     }
     assert not (SessionGroup & group_key)
     request = {**group_key, "preprocessing_params_name": "default"}
-    with pytest.raises(ValueError, match='motion_mode="apply"'):
+    with pytest.raises(
+        ValueError,
+        match=r"unknown field\(s\) \['motion_correction_params_name'\]",
+    ):
         ConcatenatedRecordingSelection.insert_selection(
             {**request, "motion_correction_params_name": "auto_default"},
             artifact_detection_ids={},
@@ -1568,9 +1570,9 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
     """``make_fetch`` resolves each member's cached file (hash-stable across
     DataJoint's two fetches); ``make_compute`` reads those files and queries
     the DB only to stage its output, reproducing the stored content hash."""
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        _unlink_staged_analysis_file,
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        unlink_staged_analysis_file as _unlink_staged_analysis_file,
     )
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from tests.spikesorting.v2._tripart_helpers import (
@@ -2426,7 +2428,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.pipeline import (
         register_pipeline_preset,
-        run_v2_pipeline,
+        run_v2_concat_pipeline,
     )
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
@@ -2452,9 +2454,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         validate_rows=False,
     )
     try:
-        summary = run_v2_pipeline(
-            concat_session_group_owner=grp["group_key"]["session_group_owner"],
-            concat_session_group_name=grp["group_key"]["session_group_name"],
+        summary = run_v2_concat_pipeline(
+            session_group_owner=grp["group_key"]["session_group_owner"],
+            session_group_name=grp["group_key"]["session_group_name"],
             pipeline_preset=preset_name,
         )
         # Concat-shaped manifest: concat source keys, no single-session/artifact.
@@ -2493,9 +2495,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         )
 
         # Idempotent: a rerun reuses the concat sort + curation.
-        rerun = run_v2_pipeline(
-            concat_session_group_owner=grp["group_key"]["session_group_owner"],
-            concat_session_group_name=grp["group_key"]["session_group_name"],
+        rerun = run_v2_concat_pipeline(
+            session_group_owner=grp["group_key"]["session_group_owner"],
+            session_group_name=grp["group_key"]["session_group_name"],
             pipeline_preset=preset_name,
         )
         assert rerun["sorting_id"] == summary["sorting_id"]
@@ -2512,9 +2514,9 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         # The child and root remain off the unsafe concat timeline. Member IDs
         # now point at the analysis-ready child, one row per session. The
         # repeated gate is represented by one warning entry.
-        auto_summary = run_v2_pipeline(
-            concat_session_group_owner=grp["group_key"]["session_group_owner"],
-            concat_session_group_name=grp["group_key"]["session_group_name"],
+        auto_summary = run_v2_concat_pipeline(
+            session_group_owner=grp["group_key"]["session_group_owner"],
+            session_group_name=grp["group_key"]["session_group_name"],
             pipeline_preset=preset_name,
             auto_curate=True,
         )

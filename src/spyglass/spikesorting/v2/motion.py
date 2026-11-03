@@ -24,10 +24,10 @@ Tables:
 a sort's input. The DB-free computation
 (parameter resolution, the estimation adapter, the ``Motion`` serialization,
 applying a saved estimate) lives in ``_motion``. The selection insert paths
-are in ``_motion_selection_insert``, the pure ``make_compute`` steps in
-``_motion_compute``, the reads behind ``MotionEstimate.report`` in
-``_motion_report_inputs``, and the corrected artifact's rebuild in
-``_recording_nwb``.
+are in ``_motion.selection``, the pure ``make_compute`` steps in
+``_motion.compute``, the reads behind ``MotionEstimate.report`` in
+``_motion.report_inputs``, and the corrected artifact's rebuild in
+``_storage.nwb``.
 """
 
 from __future__ import annotations
@@ -285,23 +285,6 @@ def _source_filter_problem(source_kind: str, source_key: dict) -> str | None:
     )
 
 
-def _assert_concat_tables_current() -> None:
-    """Refuse concat tables that still carry in-concat motion columns.
-
-    See ``_motion.assert_concat_schema_current``: a pre-production v2
-    database whose concat tables were not recreated may hold
-    already-corrected concat traces.
-    """
-    from spyglass.spikesorting.v2._motion.estimation import (
-        assert_concat_schema_current,
-    )
-
-    assert_concat_schema_current(
-        ConcatenatedRecording.heading.names,
-        ConcatenatedRecordingSelection.heading.names,
-    )
-
-
 @schema
 class MotionEstimateSelection(
     SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
@@ -391,9 +374,7 @@ class MotionEstimateSelection(
             whose preprocessing recipe applies no temporal filter
             (:func:`._motion.unfiltered_source_problem`; for a concat, the
             concatenation's recipe), an artifact detection that does not
-            belong to the recording, concat tables that still carry
-            in-concat motion-correction columns (an un-recreated
-            pre-production schema), or a mismatched explicit
+            belong to the recording, or a mismatched explicit
             ``motion_estimate_id``.
         DuplicateSelectionError
             If a matching row has a non-deterministic ``motion_estimate_id``.
@@ -415,7 +396,7 @@ class MotionEstimateSelection(
 
         Matches masters with the same identity columns, source part and
         artifact state; any match whose id is not the deterministic one is a
-        bypassed or legacy row.
+        raw-insert bypass.
 
         Raises
         ------
@@ -728,10 +709,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         Rebuilds a missing source NWB through the owning table's own verified
         self-heal. Refuses a source whose ``content_hash`` changed since
-        selection, and concat tables that still carry in-concat
-        motion-correction columns (an un-recreated pre-production schema). A
-        concat source's continuity spans and their start
-        times come from its row.
+        selection. A concat source's continuity spans and their start times
+        come from its row.
 
         Raises
         ------
@@ -1017,7 +996,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         """Summarize and plot one estimate before (or after) applying it.
 
         Reads the stored arrays (and, for a concatenation, where its members
-        join) and hands them to ``_motion_report``. A continuity span that
+        join) and hands them to ``_motion.report``. A continuity span that
         kept no peak is corrected from the estimator's temporal prior alone;
         the summary lists such spans and the figure marks them.
 
@@ -1044,9 +1023,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         Returns
         -------
         matplotlib.figure.Figure
-            :func:`._motion_report.plot_motion_report`.
+            :func:`._motion.report.plot_motion_report`.
         dict
-            :func:`._motion_report.motion_report_summary` plus
+            :func:`._motion.report.motion_report_summary` plus
             ``motion_estimate_id`` and ``motion_corrected_recording_id``
             (``None`` without ``corrected_key``).
 
@@ -1103,8 +1082,6 @@ def _live_source_row(
         ``selected_hash``, the one the estimate was selected on: the saved
         motion no longer describes those traces.
     """
-    if lineage.kind == "concatenated_recording":
-        _assert_concat_tables_current()
     table = _SOURCE_TABLES[lineage.kind]
     source_row = (table & lineage.key).fetch1()
     if source_row["content_hash"] != selected_hash:
@@ -1446,7 +1423,7 @@ class MotionCorrectedRecording(
         Reads only the inputs ``make_fetch`` resolved. The artifact file is
         created through ``write_nwb_artifact`` (as every v2 trace writer
         does), whose staging is the one DB access left here (see
-        :mod:`._recording_nwb`), and registered only by :meth:`make_insert`. Its
+        :mod:`._storage.nwb`), and registered only by :meth:`make_insert`. Its
         provenance scratch describes the file on its own: the correction's
         ids, recipe and source, the statistics spans, each continuity span
         with its real start and end times and its start on the estimation

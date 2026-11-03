@@ -57,10 +57,10 @@ from contextlib import contextmanager
 
 from spyglass.spikesorting.v2._review import visualization as _viz
 from spyglass.spikesorting.v2._review.visualization import (
-    MissingDisplayExtensionError,
     available_visualizations,
     plot_metrics_figure,
 )
+from spyglass.spikesorting.v2.exceptions import MissingDisplayExtensionError
 
 __all__ = [
     "available_visualizations",

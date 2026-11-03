@@ -58,11 +58,10 @@ def _lock_name(table, key) -> str:
     from datajoint.hash import key_hash
 
     # MySQL lock names cap at 64 chars; "sgv2pop:" (8) + 32-char hash = 40.
-    # The prefix is UNCHANGED from when the best-effort lock lived in
-    # _pipeline_run, so a mixed-version populate worker still coordinates on the
-    # same name (and the lock-observability test that inspects it stays valid).
-    # It is pure namespace: the populate lock and the lifecycle lock never share
-    # a name -- they key on different tables -- so one prefix serves both.
+    # Keep the prefix stable: populate workers running different Spyglass
+    # versions must coordinate on the same lock name. It is pure namespace:
+    # the populate lock and the lifecycle lock never share a name -- they key
+    # on different tables -- so one prefix serves both.
     return "sgv2pop:" + key_hash({"__table__": table.full_table_name, **key})
 
 

@@ -4,7 +4,7 @@ Owns the dated Frank-lab recipe row names, their parameter blobs, and the
 pipeline-preset bundles + UX metadata. The per-stage parameter Lookup
 tables derive their ``_DEFAULT_CONTENTS`` from the builders here
 (:func:`preprocessing_default_contents` / :func:`artifact_default_contents`
-/ :func:`sorter_default_contents`), and ``_pipeline_presets`` builds
+/ :func:`sorter_default_contents`), and ``_orchestration.presets`` builds
 ``_PIPELINE_PRESETS`` from :func:`pipeline_preset_specs` -- so a recipe is
 defined in exactly one place. The metric-curation defaults
 (:func:`quality_metric_default_rows` / :func:`auto_curation_default_payloads`)
@@ -497,7 +497,7 @@ def sorter_default_contents() -> tuple:
             # There is deliberately NO ``whiten`` key: KS4 has no such param,
             # and the v2 runtime only runs its external float64 whitening when
             # the sorter params carry ``whiten=True`` (see
-            # ``_sorting_dispatch.py``), so omitting it keeps the signal
+            # ``_sorting/dispatch.py``), so omitting it keeps the signal
             # whitened exactly once (by KS4) -- adding ``whiten=True`` here
             # would double-whiten.
             "kilosort4",
@@ -527,10 +527,6 @@ def sorter_default_contents() -> tuple:
         _sorter_row(
             "clusterless_thresholder",
             "default",
-            # ClusterlessThresholderSchema is currently schema_version=4:
-            # v2 dropped ``outputs`` / ``random_chunk_kwargs``;
-            # v3 made ``noise_levels`` optional (None -> SI MAD);
-            # v4 added ``threshold_unit``.
             _validate_params(
                 _get_sorter_schema("clusterless_thresholder"),
                 # ``threshold_unit="uv"`` makes the shipped
@@ -766,7 +762,7 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
 def pipeline_preset_specs() -> dict[str, dict]:
     """Return ``{preset_name: _PipelinePreset field dict}`` for every preset.
 
-    ``_pipeline_presets`` constructs the validated ``_PipelinePreset`` objects
+    ``_orchestration.presets`` constructs the validated ``_PipelinePreset`` objects
     from these specs; keeping them as plain dicts here lets the catalog stay
     free of any dependency on the preset model (no import cycle).
     """
@@ -875,17 +871,15 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "Frank-lab same-day chronic hippocampal probes at 30 kHz: "
                 "concatenate a SessionGroup's members into one "
                 "ConcatenatedRecording and sort once (MountainSort5). Run it "
-                "via run_v2_pipeline's concat mode (concat_session_group_owner "
-                "/ concat_session_group_name)."
+                "with run_v2_concat_pipeline."
             ),
             threshold_units="sigma of the whitened signal (~5.5)",
             notes=(
                 "Detect and mask artifacts per member before concatenation. "
                 "Otherwise the same MS5 "
                 "hippocampus recipe as the single-session MS5 alternative; MS5 runs "
-                "under the v2 numpy>=2 baseline. Run it via run_v2_pipeline's "
-                "concat mode (concat_session_group_owner / "
-                "concat_session_group_name). Marked experimental: validate the "
+                "under the v2 numpy>=2 baseline. Run it with "
+                "run_v2_concat_pipeline. Marked experimental: validate the "
                 "recipe on your own same-day data before relying on it."
             ),
         ),

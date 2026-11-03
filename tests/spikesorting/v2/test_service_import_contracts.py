@@ -153,17 +153,7 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
     for name in pipeline_types.__all__:
         assert getattr(pipeline, name) is getattr(pipeline_types, name)
 
-    # Every input key is optional: the call accepts exactly one of two modes
-    # (single-session or concat), validated at runtime, so neither field group
-    # is unconditionally required.
-    assert pipeline_types.RunV2PipelineInputs.__required_keys__ == frozenset()
-    assert pipeline_types.RunV2PipelineInputs.__optional_keys__ == {
-        "nwb_file_name",
-        "sort_group_id",
-        "interval_list_name",
-        "team_name",
-        "concat_session_group_owner",
-        "concat_session_group_name",
+    options = {
         "pipeline_preset",
         "curation_description",
         "require_units",
@@ -176,6 +166,18 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_correction_params_name",
         "motion_estimate_id",
     }
+    assert pipeline_types.RunV2PipelineInputs.__required_keys__ == {
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "team_name",
+    }
+    assert pipeline_types.RunV2PipelineInputs.__optional_keys__ == options
+    assert pipeline_types.RunV2ConcatPipelineInputs.__required_keys__ == {
+        "session_group_owner",
+        "session_group_name",
+    }
+    assert pipeline_types.RunV2ConcatPipelineInputs.__optional_keys__ == options
     assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
         "nwb_file_name",
         "interval_list_name",

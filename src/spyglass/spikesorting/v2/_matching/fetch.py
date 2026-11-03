@@ -373,7 +373,7 @@ def _input_stored_units(curation_key: dict):
     Returns
     -------
     StoredUnits
-        For :func:`._units_nwb.read_stored_units`.
+        For :func:`._storage.units_nwb.read_stored_units`.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection

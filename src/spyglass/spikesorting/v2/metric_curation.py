@@ -258,7 +258,7 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
     @classmethod
     def _default_rows(cls) -> list[dict]:
-        """The shipped rows (``_recipe_catalog.quality_metric_default_rows``)."""
+        """The shipped rows (``_core.recipe_catalog.quality_metric_default_rows``)."""
         return quality_metric_default_rows()
 
     def insert(self, rows, *, allow_duplicate_params=False, **kwargs):
@@ -503,7 +503,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
     @classmethod
     def _default_payloads(cls) -> list[tuple[dict, list[dict]]]:
-        """The shipped rule sets (``_recipe_catalog``)."""
+        """The shipped rule sets (``_core.recipe_catalog``)."""
         return auto_curation_default_payloads()
 
     @classmethod
@@ -610,7 +610,7 @@ class CurationEvaluationSelection(
     -> QualityMetricParameters
     -> AutoCurationRules
     -> AnalyzerWaveformParameters.proj(metric_waveform_params_name="waveform_params_name")
-    observation_version=0: int  # zero identifies selections predating observed-time metrics
+    observation_version: int  # observed-time contract the evaluation was selected under
     """
 
     @classmethod
@@ -662,7 +662,7 @@ class CurationEvaluationSelection(
             "curation_id": key["curation_id"],
         }
         # Reject a preview/draft curation BEFORE the find-existing early-return,
-        # so a legacy / allow_direct_insert selection over a preview fails loudly
+        # so an allow_direct_insert selection over a preview fails loudly
         # here rather than being handed back as a "valid" row (also re-asserted
         # in make_fetch so the preview compute path stays unreachable).
         CurationV2.assert_committed_curation(
@@ -784,9 +784,10 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     Routing: a committed root / label-only curation (unit set unchanged from the
     raw sort) reuses the cached raw-sort analyzers (the fast path); a committed
-    applied-merge curation builds curation-scoped temporary analyzers over the
-    merged sorting and cleans them immediately (never published to the canonical
-    analyzer cache).
+    applied-merge curation never touches the sort's analyzer cache: its display
+    analyzer is reused from (or published to) the curation's merged-analyzer
+    cache when ``make_fetch`` resolves one -- the cache its review page reads --
+    and metrics run on temporary working copies that are cleaned immediately.
     """
 
     definition = """
@@ -816,7 +817,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     # DB transaction. make_compute performs no DB writes: every upstream input
     # is resolved in make_fetch and threaded through the carrier (no get_sorting
     # / get_analyzer in compute, and the traces are read by the path make_fetch
-    # healed). Its only DB reads stage the output file (see _recording_nwb) --
+    # healed). Its only DB reads stage the output file (see _storage.nwb) --
     # keeping the heavy NWB write off the commit txn.
     _parallel_make = True
 
@@ -848,7 +849,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sortings are reconstructed from those threaded inputs rather than via
         ``CurationV2.get_sorting`` / ``Sorting.get_analyzer``; the traces are
         read from the path ``make_fetch`` resolved. The only DB reads left
-        stage the output file (see :mod:`._recording_nwb`). The heavy NWB
+        stage the output file (see :mod:`._storage.nwb`). The heavy NWB
         write remains outside the commit transaction.
         """
         import spikeinterface as si
@@ -1466,7 +1467,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Standard display extensions are built before a merged analyzer is
         published. Any unusual missing extension is computed once into a
         disk-backed derivative keyed by the exact request (see
-        ``_curation_analyzer``), never into the published base cache.
+        ``_curation.analyzer``), never into the published base cache.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             curation_analyzer_with_extensions,

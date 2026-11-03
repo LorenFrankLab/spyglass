@@ -204,7 +204,9 @@ class QualityMetricParamsSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = QUALITY_METRIC_SCHEMA_VERSION
+    schema_version: Literal[QUALITY_METRIC_SCHEMA_VERSION] = (
+        QUALITY_METRIC_SCHEMA_VERSION
+    )
     metric_names: list[str] = Field(min_length=1)
     metric_kwargs: dict[str, dict] = Field(default_factory=dict)
     skip_pc_metrics: bool = True
@@ -316,7 +318,7 @@ class AutoCurationRuleSchema(BaseModel):
     that references a column absent from the computed metrics raises a clear
     error at populate time, not here. ``missing_policy`` records Spyglass's
     handling for a unit SpikeInterface cannot assess for this metric (see
-    ``expected_missing_units`` in ``_metric_curation`` for the registered
+    ``expected_missing_units`` in ``_curation.metrics`` for the registered
     columns and conditions): ``error`` raises; ``fail`` applies the label; and
     ``pass`` leaves the unit unlabelled by this rule. It does not cover any
     other non-finite value: a NaN for a unit that meets the metric's
@@ -351,7 +353,9 @@ class AutoCurationRulesSchema(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: int = AUTO_CURATION_RULES_SCHEMA_VERSION
+    schema_version: Literal[AUTO_CURATION_RULES_SCHEMA_VERSION] = (
+        AUTO_CURATION_RULES_SCHEMA_VERSION
+    )
     auto_merge_preset: AutoMergePreset = "none"
     auto_merge_kwargs: dict = Field(default_factory=dict)
     rules: list[AutoCurationRuleSchema] = Field(default_factory=list)

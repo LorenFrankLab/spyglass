@@ -45,6 +45,7 @@ def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
                 "interval_list_name": "raw data valid times",
                 "preprocessing_params_name": "default",
                 "team_name": "v2_a25_team",
+                "recording_input_hash": "0" * 64,
             },
             allow_direct_insert=True,
         )

@@ -361,7 +361,7 @@ def read_effective_recording(
 ) -> si.BaseRecording:
     """Open the effective traces from a resolved file path, masking if needed.
 
-    Opens the file with ``_recording_nwb.open_persisted_traces`` (the stored
+    Opens the file with ``_storage.nwb.open_persisted_traces`` (the stored
     ``electrical_series_path``, annotated ``is_filtered=True``). The artifact
     mask is applied exactly when ``traces.apply_artifact_mask`` is set.
 

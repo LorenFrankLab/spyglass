@@ -70,8 +70,8 @@ def input_set_hash(input_rows, recording_rows) -> str:
     input_rows : iterable of dict
         ``UnitMatchSelection.Input`` rows (``input_index``, ``sorting_id``,
         ``curation_id``, ``curation_uuid``, ``source_kind``, ``source_id``,
-        ``motion_corrected_recording_id``). UUID values may be ``uuid.UUID``
-        or ``str``; both hash identically.
+        ``motion_corrected_recording_id``, ``selection_snapshot``). UUID
+        values may be ``uuid.UUID`` or ``str``; both hash identically.
     recording_rows : iterable of dict
         ``UnitMatchSelection.InputRecording`` rows (``input_index``,
         ``recording_index``, ``recording_id``, ``recording_content_hash``,
@@ -79,7 +79,7 @@ def input_set_hash(input_rows, recording_rows) -> str:
         naive and an aware value of one instant hash identically),
         ``start_sample``, ``end_sample``, ``valid_times`` as an
         ``(n_intervals, 2)`` array of seconds; each float enters the digest
-        exactly). Rows whose ``input_index`` has no
+        exactly; ``source_coverage``). Rows whose ``input_index`` has no
         input row do not enter the digest; the caller rejects them with
         :func:`input_part_structure_errors`.
 
@@ -100,9 +100,8 @@ def input_set_hash(input_rows, recording_rows) -> str:
             np.asarray(row["valid_times"], dtype=np.float64)
             .reshape(-1, 2)
             .tolist(),
+            validate_source_coverage(row["source_coverage"]),
         ]
-        if row.get("source_coverage") is not None:
-            record.append(validate_source_coverage(row["source_coverage"]))
         recordings_by_input.setdefault(int(row["input_index"]), []).append(
             record
         )
@@ -122,10 +121,9 @@ def input_set_hash(input_rows, recording_rows) -> str:
                     None if corrected_id is None else str(corrected_id)
                 ),
                 "recordings": sorted(recordings_by_input.get(index, [])),
+                "selection_snapshot": row["selection_snapshot"],
             }
         )
-        if row.get("selection_snapshot") is not None:
-            canonical[-1]["selection_snapshot"] = row["selection_snapshot"]
     return sha256_json(canonical, separators=(", ", ": "))
 
 
@@ -196,7 +194,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     ``input_start_time`` is the earliest session start among an input's
     constituent recordings. Epoch inputs sharing one NWB are ordered by their
     earliest actual source sample before the UUID tie-break. Disjoint-NWB
-    inputs retain the historical sorting/curation-ID tie-break, so any caller
+    inputs fall back to the sorting/curation-ID tie-break, so any caller
     order of the same inputs yields the same order. UnitMatchPy aligns each
     input's drift to the previous input in
     feed order, so the matcher is fed in this order.
@@ -213,8 +211,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
         The same dicts, chronologically ordered.
     """
     # Epochs of one acquisition share its session start. Use their original
-    # source position before the UUID tie-break; historic inputs without source
-    # coverage retain their previous ordering.
+    # source position before the UUID tie-break.
     shared = {}
     for item in inputs:
         for row in item.get("recordings", ()):
@@ -226,10 +223,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     def epoch_start(item):
         values = []
         for row in item.get("recordings", ()):
-            if (
-                str(row.get("nwb_file_name")) not in shared
-                or row.get("source_coverage") is None
-            ):
+            if str(row.get("nwb_file_name")) not in shared:
                 continue
             if "session_start_time" in row and utc_datetime(
                 row["session_start_time"]
@@ -481,6 +475,7 @@ def canonicalize_match_pairs(
                 f"input units {identity}; (A, B) and (B, A) cannot both be "
                 "inserted. The backend must emit each unordered pair once."
             )
+        drift = pair.drift_estimate_um
         fdr = pair.fdr_estimate
         oriented[identity] = {
             "session_a_sorting_id": low[0],
@@ -490,7 +485,7 @@ def canonicalize_match_pairs(
             "session_b_curation_id": high[1],
             "unit_b_id": high_unit,
             "match_probability": float(pair.match_probability),
-            "drift_estimate_um": float(pair.drift_estimate_um),
+            "drift_estimate_um": None if drift is None else float(drift),
             "fdr_estimate": None if fdr is None else float(fdr),
             "input_a": low_input,
             "input_b": high_input,

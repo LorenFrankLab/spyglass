@@ -91,8 +91,6 @@ def selection_observations(merge_id, unit_ids):
     wanted = set(unit_ids)
     with NWBHDF5IO(path, "r", load_namespaces=True) as io:
         units = io.read().units
-        if "obs_intervals" not in units.colnames:
-            return None
         intervals = {
             int(unit): units["obs_intervals"][index]
             for index, unit in enumerate(units.id[:])

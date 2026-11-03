@@ -620,7 +620,9 @@ def test_member_artifact_failure_retry_and_reuse(
         RecordingArtifactSelection,
     )
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+    )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -723,16 +725,16 @@ def test_member_artifact_failure_retry_and_reuse(
         ),
     )
     pipeline_request = {
-        "concat_session_group_owner": fixture["owner"],
-        "concat_session_group_name": name,
+        "session_group_owner": fixture["owner"],
+        "session_group_name": name,
         "pipeline_preset": name,
     }
     with pytest.raises(PipelineStageError) as error:
-        run_v2_pipeline(**pipeline_request)
+        run_v2_concat_pipeline(**pipeline_request)
     assert error.value.stage == "member_artifact_detection"
     completed = error.value.partial_run_summary["member_artifacts"]
     assert len(completed) == 1 and completed[0]["masked_duration_s"] > 0
-    retry = run_v2_pipeline(**pipeline_request)
+    retry = run_v2_concat_pipeline(**pipeline_request)
     assert [member["status"] for member in retry["member_artifacts"]] == [
         "reused",
         "computed",
@@ -740,7 +742,7 @@ def test_member_artifact_failure_retry_and_reuse(
     assert retry["artifact_masked_duration_s"] == pytest.approx(
         sum(member["masked_duration_s"] for member in retry["member_artifacts"])
     )
-    again = run_v2_pipeline(**pipeline_request)
+    again = run_v2_concat_pipeline(**pipeline_request)
     assert again["sorting_id"] == retry["sorting_id"]
     assert again["concat_recording_id"] == retry["concat_recording_id"]
     assert again["member_artifact_detection_status"] == "reused"
@@ -765,7 +767,7 @@ def test_member_artifact_failure_retry_and_reuse(
         empty_second_member,
     )
     with pytest.raises(PipelineStageError) as error:
-        run_v2_pipeline(**pipeline_request)
+        run_v2_concat_pipeline(**pipeline_request)
     assert error.value.stage == "member_artifact_detection"
     assert str(artifact_id) in str(error.value)
     assert str(recording_id) in str(error.value)
