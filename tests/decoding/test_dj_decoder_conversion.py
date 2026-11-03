@@ -630,3 +630,50 @@ def test_paired_tutorial_model_insert_and_fetch(
         )
         assert type(scope["model"]) is getattr(nld, class_name)
         assert scope["model"].sampling_frequency == 500
+
+
+def test_insert_rejects_objects_that_are_neither_detector_nor_dict(
+    decoding_modules,
+):
+    """Arbitrary objects must not be serialized via ``vars()``."""
+
+    class Opaque:
+        def __init__(self):
+            self.public = 1
+            self._cache = {}
+
+    table = decoding_modules.core.DecodingParameters()
+    row = {
+        "decoding_param_name": "opaque",
+        "decoding_params": Opaque(),
+        "decoding_kwargs": {},
+    }
+
+    with pytest.raises(
+        TypeError, match=r"got Opaque.*get_params|get_params.*got Opaque"
+    ):
+        table.insert([row])
+    assert not hasattr(table, "inserted_rows")
+
+
+def test_insert_accepts_dict_rows_unchanged(decoding_modules):
+    """Already-serialized (legacy) dict params still insert."""
+    from non_local_detector.models import ContFragClusterlessClassifier
+
+    table = decoding_modules.core.DecodingParameters()
+    params = ContFragClusterlessClassifier().get_params(deep=False)
+    params["class_name"] = "ContFragClusterlessClassifier"
+
+    table.insert(
+        [
+            {
+                "decoding_param_name": "legacy",
+                "decoding_params": params,
+                "decoding_kwargs": {},
+            }
+        ]
+    )
+
+    stored = table.inserted_rows[0]["decoding_params"]
+    assert stored["class_name"] == "ContFragClusterlessClassifier"
+    assert stored.keys() == params.keys()

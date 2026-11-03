@@ -42,6 +42,9 @@
         parameter rows without persisting fitted state. Environments are stored
         as configuration only (`Environment.get_params()`); legacy rows holding
         fitted environment keys still load #1618
+    - `DecodingParameters.insert` raises `TypeError` for objects that are
+        neither a detector (`get_params`) nor a dict, instead of storing
+        `vars()` #1618
 
 - Spike Sorting
 
