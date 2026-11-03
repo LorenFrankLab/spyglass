@@ -355,8 +355,6 @@ def bash_escape_sql(s, add_newline=True):
                 "#": "\\#",
             }
         )
-    else:  # Used in ExportMixin
-        replace_map.update({"%%%%": "%%"})  # Remove extra percent signs
 
     for old, new in replace_map.items():
         s = re.sub(re.escape(old), new, s)

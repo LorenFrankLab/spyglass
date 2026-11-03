@@ -253,6 +253,34 @@ def test_condense_restrictions_normalizes(export_tbls, common):
     assert all(r in forward for r in restrs), "Condensing dropped a condition."
 
 
+@pytest.mark.parametrize("value", ["a%b.nwb", "a%%b.nwb", "50%.nwb"])
+def test_condense_restrictions_keeps_percent(export_tbls, common, value):
+    """A condensed restriction must carry a single `%` per `%` in the value.
+
+    `_log_fetch` stores its restriction already escaped for immediate use, and
+    this result is stored in `Export.Table.restriction` and re-applied -- so a
+    second escape leaves the value matching nothing.
+    """
+    from datajoint.condition import make_condition
+
+    from spyglass.utils.sql_helper_fn import bash_escape_sql
+
+    ExportSelection, _ = export_tbls
+    table = common.Nwbfile()
+    table_name = table.full_table_name
+
+    # As `_log_fetch` -> `_insert_log` writes it
+    logged = bash_escape_sql(
+        make_condition(table, {"nwb_file_name": value}, set()),
+        add_newline=False,
+    )
+    condensed = ExportSelection._condense_restrictions(table_name, [logged])
+
+    # Re-applying the stored text must reach the server as the plain value
+    served = make_condition(table, condensed, set()) % ()
+    assert value in served, f"Percent lost re-applying {condensed}: {served}"
+
+
 def test_export_selection_restr_deterministic(
     gen_export_selection, export_tbls
 ):
