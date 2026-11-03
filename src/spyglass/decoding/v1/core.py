@@ -123,8 +123,9 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         that ``vars()`` may include (historically, e.g.,
         ``_frozen_discrete_transition_rows_mask_``, since made a lazy property
         upstream), which would otherwise be passed back into the constructor as
-        unexpected keyword arguments on fetch. Plain dicts (legacy or already
-        converted rows) pass through; any other object raises ``TypeError``. The concrete class name is
+        unexpected keyword arguments on fetch. A dict of detector parameters
+        (holding nld objects, as ``get_params`` returns them) is also
+        accepted; any other object raises ``TypeError``. The concrete class name is
         recorded so that ``restore_classes`` can rebuild the exact subclass
         (preserving subclass-only parameters such as NonLocal's
         ``non_local_*_penalty``).
@@ -140,8 +141,8 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
             elif not isinstance(params, dict):
                 raise TypeError(
                     "decoding_params must be a non_local_detector model "
-                    "(an object with get_params) or a dict of already-"
-                    f"serialized parameters; got {type(params).__name__}."
+                    "(an object with get_params) or a dict of its parameters "
+                    f"as get_params returns them; got {type(params).__name__}."
                 )
             converted.append(
                 {**row, "decoding_params": convert_classes_to_dict(params)}
