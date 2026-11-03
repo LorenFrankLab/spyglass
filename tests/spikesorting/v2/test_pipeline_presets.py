@@ -534,9 +534,13 @@ def clone_env(dj_conn, monkeypatch):
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.sorting import (
+        PreprocessingWaveformParameters,
+        SorterParameters,
+    )
 
     for table, col in (
+        (PreprocessingWaveformParameters, "preprocessing_params_name"),
         (PreprocessingParameters, "preprocessing_params_name"),
         (ArtifactDetectionParameters, "artifact_detection_params_name"),
         (SorterParameters, "sorter_params_name"),
@@ -700,6 +704,34 @@ def test_clone_pipeline_preset_nested_dotted_override_round_trips(
         )
         == 600.0
     )
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_clone_pipeline_preset_preprocessing_override_keeps_waveform_windows(
+    dj_conn, clone_env
+):
+    """A forked preprocessing row keeps its base recipe's analyzer windows.
+
+    The windows are resolved from the source preprocessing row's name, so a
+    clone that tunes a preprocessing knob must not fall back to the cortex
+    windows, in this process or a later one.
+    """
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        HIPPOCAMPUS_PREPROC,
+        waveform_params_for_preprocessing,
+    )
+
+    new_name = "lab_hp700_windows_2026_06"
+    clone_env.append(new_name)
+
+    clone_pipeline_preset(
+        _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
+    )
+
+    assert waveform_params_for_preprocessing(
+        new_name
+    ) == waveform_params_for_preprocessing(HIPPOCAMPUS_PREPROC)
 
 
 @pytest.mark.database

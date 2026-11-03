@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from spyglass.spikesorting.v2._core.recipe_catalog import pipeline_preset_specs
+from spyglass.spikesorting.v2._core.recipe_catalog import (
+    pipeline_preset_specs,
+    waveform_params_for_preprocessing,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -859,7 +862,10 @@ def clone_pipeline_preset(
     from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.sorting import SorterParameters
+    from spyglass.spikesorting.v2.sorting import (
+        PreprocessingWaveformParameters,
+        SorterParameters,
+    )
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     # One descriptor per stage. ``sorter`` is the per-sorter dispatch key (and
@@ -993,6 +999,20 @@ def clone_pipeline_preset(
                 row["execution_params"] = stage["base_execution_params"]
             stage["table"].insert1(
                 row, allow_duplicate_params=allow_duplicate_params
+            )
+        if "preprocessing" in touched:
+            # Analyzer windows are resolved by preprocessing row name, so the
+            # forked row records the base recipe's windows.
+            display, metric = waveform_params_for_preprocessing(
+                base.preprocessing_params_name
+            )
+            PreprocessingWaveformParameters.insert1(
+                {
+                    "preprocessing_params_name": new_name,
+                    "display_waveform_params_name": display,
+                    "metric_waveform_params_name": metric,
+                },
+                skip_duplicates=True,
             )
 
     derived_preset = base.model_copy(

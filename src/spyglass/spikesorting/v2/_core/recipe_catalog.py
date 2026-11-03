@@ -592,7 +592,9 @@ def waveform_params_for_preprocessing(
     back to the wider cortex pair (1.0/2.0 ms). This is deliberate: the analyzer
     window is tuned for hippocampal vs cortical tetrode waveforms, and adding a
     tuned window for another region is a tracked-row-and-mapping change, not a
-    silent default. The fallback never mixes windows within a sort.
+    silent default. The fallback never mixes windows within a sort. A row that
+    ``clone_pipeline_preset`` forked from a recipe keeps that recipe's pair
+    through ``PreprocessingWaveformParameters``.
 
     Parameters
     ----------
@@ -604,10 +606,19 @@ def waveform_params_for_preprocessing(
     tuple of (str, str)
         The ``(display, metric)`` ``waveform_params_name`` pair.
     """
-    return _PREPROC_WAVEFORM_PARAMS.get(
-        preprocessing_params_name,
-        (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    if preprocessing_params_name in _PREPROC_WAVEFORM_PARAMS:
+        return _PREPROC_WAVEFORM_PARAMS[preprocessing_params_name]
+    from spyglass.spikesorting.v2.sorting import (
+        PreprocessingWaveformParameters,
     )
+
+    rows = (
+        PreprocessingWaveformParameters
+        & {"preprocessing_params_name": preprocessing_params_name}
+    ).fetch("display_waveform_params_name", "metric_waveform_params_name")
+    if len(rows[0]):
+        return rows[0][0], rows[1][0]
+    return CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS
 
 
 # Drift guard: every region in ``_REGION_PREPROC`` must have a waveform-params

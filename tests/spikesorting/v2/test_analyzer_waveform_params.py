@@ -173,7 +173,7 @@ def test_analyzer_waveform_params_schema_rejects_nonpositive_bounds():
 
 
 def test_waveform_params_for_preprocessing_literal_region_names():
-    """Region recipes map to their (display, metric) pairs; others fall back.
+    """Region recipes map to their (display, metric) pairs.
 
     Asserts the LITERAL recipe names (not the module constants the mapping is
     built from) so the test pins the actual region behavior rather than being a
@@ -189,6 +189,10 @@ def test_waveform_params_for_preprocessing_literal_region_names():
         "franklab_cortex_actual_waveforms",
         "franklab_cortex_metric_waveforms",
     )
+
+
+def test_waveform_params_for_preprocessing_falls_back_to_cortex(dj_conn):
+    """Recipes with no region mapping or recorded windows use the cortex pair."""
     # The schema-default "default" recipe and any unknown / multi-region recipe
     # fall back to the wide cortex pair -- never a silently mixed window.
     assert waveform_params_for_preprocessing("default") == (

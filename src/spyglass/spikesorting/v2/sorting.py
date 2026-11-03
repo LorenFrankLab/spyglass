@@ -91,7 +91,10 @@ from spyglass.spikesorting.v2.motion import (
     MotionCorrectedRecording,
     MotionCorrectedRecordingSelection,
 )
-from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
+from spyglass.spikesorting.v2.recording import (  # noqa: F401
+    PreprocessingParameters,
+    Recording,
+)
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,  # noqa: F401
 )
@@ -540,6 +543,25 @@ class AnalyzerWaveformParameters(
     def insert_default(cls):
         """Insert the region display/metric waveform recipes (idempotent)."""
         cls().insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+
+
+@schema
+class PreprocessingWaveformParameters(SpyglassMixin, dj.Manual):
+    """Analyzer windows for a preprocessing row derived from a region recipe.
+
+    ``waveform_params_for_preprocessing`` resolves a sort's analyzer windows
+    from its source preprocessing row's name. ``clone_pipeline_preset`` forks
+    that row under a new name when an override touches it, so it records the
+    base recipe's ``(display, metric)`` pair here; without it the clone would
+    fall back to the cortex windows.
+    """
+
+    definition = """
+    -> PreprocessingParameters
+    ---
+    -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")
+    -> AnalyzerWaveformParameters.proj(metric_waveform_params_name="waveform_params_name")
+    """
 
 
 @schema
