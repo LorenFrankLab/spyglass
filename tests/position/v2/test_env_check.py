@@ -15,7 +15,13 @@ def _fake_installed(versions):
     return _installed
 
 
-def _patch(monkeypatch, versions, ffmpeg_present=True, blas_error=None):
+def _patch(
+    monkeypatch,
+    versions,
+    ffmpeg_present=True,
+    blas_error=None,
+    qt_problem=None,
+):
     from spyglass.position.v2 import env_check
 
     monkeypatch.setattr(env_check, "_installed", _fake_installed(versions))
@@ -25,6 +31,9 @@ def _patch(monkeypatch, versions, ffmpeg_present=True, blas_error=None):
         lambda name: "/usr/bin/ffmpeg" if ffmpeg_present else None,
     )
     monkeypatch.setattr(env_check, "_blas_lapack_error", lambda: blas_error)
+    # Pinned so a result never depends on the session running the suite: the
+    # real probe reads WAYLAND_DISPLAY and the installed Qt plugins.
+    monkeypatch.setattr(env_check, "_qt_platform_problem", lambda: qt_problem)
     return env_check
 
 
@@ -91,3 +100,115 @@ class TestCheckEnvironment:
         )
         with pytest.raises(RuntimeError, match="TensorFlow"):
             env_check.check_environment(raise_on_error=True, verbose=False)
+
+
+class TestQtPlatformProbe:
+    """The Wayland platform-plugin probe, driven by env vars only."""
+
+    @staticmethod
+    def _probe(monkeypatch, *, wayland, display, requested, plugin):
+        from spyglass.position.v2 import env_check
+
+        for name, value in (
+            ("WAYLAND_DISPLAY", wayland),
+            ("DISPLAY", display),
+            ("QT_QPA_PLATFORM", requested),
+        ):
+            if value is None:
+                monkeypatch.delenv(name, raising=False)
+            else:
+                monkeypatch.setenv(name, value)
+        monkeypatch.setattr(
+            env_check,
+            "_qt_plugin_dirs",
+            lambda: [_FakeDir(["libqwayland.so"])] if plugin else [],
+        )
+        return env_check._qt_platform_problem()
+
+    def test_headless_is_not_a_problem(self, monkeypatch):
+        """A compute node has no display and needs none."""
+        assert (
+            self._probe(
+                monkeypatch,
+                wayland=None,
+                display=None,
+                requested=None,
+                plugin=False,
+            )
+            is None
+        )
+
+    def test_x11_session_is_not_a_problem(self, monkeypatch):
+        """The xcb plugin ships with Qt, so an X11 session is fine."""
+        assert (
+            self._probe(
+                monkeypatch,
+                wayland=None,
+                display=":0",
+                requested=None,
+                plugin=False,
+            )
+            is None
+        )
+
+    def test_explicit_platform_is_honoured(self, monkeypatch):
+        """A caller naming xcb is not second-guessed."""
+        assert (
+            self._probe(
+                monkeypatch,
+                wayland="wayland-0",
+                display=":0",
+                requested="xcb",
+                plugin=False,
+            )
+            is None
+        )
+
+    def test_wayland_with_plugin_is_not_a_problem(self, monkeypatch):
+        assert (
+            self._probe(
+                monkeypatch,
+                wayland="wayland-0",
+                display=None,
+                requested=None,
+                plugin=True,
+            )
+            is None
+        )
+
+    def test_wayland_without_plugin_reports_both_fixes(self, monkeypatch):
+        """The one failing case names the env var and the package."""
+        msg = self._probe(
+            monkeypatch,
+            wayland="wayland-0",
+            display=None,
+            requested=None,
+            plugin=False,
+        )
+        assert msg is not None
+        assert "QT_QPA_PLATFORM=xcb" in msg
+        assert "conda install -c conda-forge qt-wayland" in msg
+        assert 'Qt platform plugin "wayland"' in msg
+
+    def test_problem_reaches_check_environment(self, monkeypatch):
+        """The probe's result is one of check_environment's problems."""
+        env_check = _patch(
+            monkeypatch, {"torch": "2.10.0"}, qt_problem="wayland is unhappy"
+        )
+        problems = env_check.check_environment(verbose=False)
+        assert problems == ["wayland is unhappy"]
+
+
+class _FakeDir:
+    """Stands in for a plugin directory, answering `glob`."""
+
+    def __init__(self, names):
+        self._names = names
+
+    def glob(self, pattern):
+        import fnmatch
+
+        return [n for n in self._names if fnmatch.fnmatch(n, pattern)]
+
+    def __str__(self):
+        return "/fake/plugins/platforms"
