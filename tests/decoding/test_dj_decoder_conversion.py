@@ -234,6 +234,106 @@ def test_restore_classes_legacy_dict_strips_derived_attrs():
     assert isinstance(ClusterlessDetector(**restored), ClusterlessDetector)
 
 
+def _fitted_track_classifier():
+    """A classifier whose fitted environment copy holds a 1D track graph."""
+    import numpy as np
+    from non_local_detector import ContFragClusterlessClassifier
+    from non_local_detector.environment import Environment
+    from track_linearization import make_track_graph
+
+    graph = make_track_graph([(0.0, 0.0), (10.0, 0.0)], [(0, 1)])
+    env = Environment(
+        environment_name="track",
+        track_graph=graph,
+        edge_order=[(0, 1)],
+        edge_spacing=0,
+        place_bin_size=2.0,
+    )
+    classifier = ContFragClusterlessClassifier(environments=[env])
+    classifier.initialize_environments(
+        np.column_stack([np.linspace(0.0, 10.0, 50), np.zeros(50)])
+    )
+    return env, classifier
+
+
+def test_fitted_classifier_params_roundtrip_drops_fitted_state():
+    """Fitted environments serialize to configuration only and rebuild unfitted."""
+    from non_local_detector.environment import Environment
+
+    from spyglass.decoding.v1.dj_decoder_conversion import restore_classes
+
+    _, classifier = _fitted_track_classifier()
+    fitted_env = classifier.environments[0]
+    assert fitted_env._is_fitted
+
+    params = classifier.get_params(deep=False)
+    params["class_name"] = type(classifier).__name__
+    from spyglass.decoding.v1.dj_decoder_conversion import (
+        convert_classes_to_dict,
+    )
+
+    stored = convert_classes_to_dict(params)
+    env_dict = stored["environments"][0]
+    assert env_dict.keys() == Environment().get_params().keys()
+    assert set(env_dict["track_graph"]) == {"node_positions", "edges"}
+    json.dumps(env_dict["track_graph"], default=list)  # storable structure
+
+    restored = restore_classes(stored)
+
+    restored_env = restored.environments[0]
+    assert isinstance(restored_env, Environment)
+    assert not restored_env._is_fitted
+    assert restored_env.place_bin_centers_ is None
+    assert restored_env.environment_name == "track"
+    assert restored_env.track_graph.number_of_nodes() == 2
+    # Serialization did not mutate the live fitted environment.
+    assert fitted_env._is_fitted
+    assert fitted_env.track_graph.number_of_nodes() == 2
+
+
+@pytest.mark.parametrize("with_track_graph_dd", [False, True])
+def test_convert_env_dict_legacy_row_with_fitted_keys(with_track_graph_dd):
+    """Legacy rows stored fitted keys (None, maybe a track_graphDD dict)."""
+    from non_local_detector.environment import Environment
+
+    from spyglass.decoding.v1.dj_decoder_conversion import _convert_env_dict
+
+    legacy = {
+        **Environment(environment_name="old").get_params(),
+        "place_bin_centers_": None,
+        "edges_": None,
+        "track_graphDD": None,
+    }
+    if with_track_graph_dd:
+        legacy["track_graphDD"] = {
+            "node_positions": [(0.0, 0.0), (1.0, 0.0)],
+            "edges": [(0, 1)],
+        }
+
+    env = _convert_env_dict(legacy)
+
+    assert isinstance(env, Environment)
+    assert env.environment_name == "old"
+    assert not env._is_fitted
+    assert env.place_bin_centers_ is None
+
+
+def test_transition_to_dict_does_not_mutate_object():
+    """Adding ``class_name`` to the stored dict leaves the live object intact."""
+    from non_local_detector.continuous_state_transitions import RandomWalk
+
+    from spyglass.decoding.v1.dj_decoder_conversion import _to_dict
+
+    transition = RandomWalk()
+    before = dict(vars(transition))
+
+    stored = _to_dict(transition)
+
+    assert stored["class_name"] == "RandomWalk"
+    assert "class_name" not in vars(transition)
+    assert vars(transition) == before
+
+
 @pytest.mark.parametrize(
     "class_name",
     ["NonLocalClusterlessDetector", "NonLocalSortedSpikesDetector"],

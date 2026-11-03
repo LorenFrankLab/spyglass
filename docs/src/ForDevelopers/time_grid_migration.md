@@ -14,8 +14,11 @@ legacy NonLocal dictionaries reconstructed by the serialization helper retain
 their concrete class. Loading an old fitted model for inspection does not
 establish new rate units or transition clocks. Recompute fitted models, decoded
 results, and derived analyses from the original position and spike recording.
-GLM model persistence remains an unsupported upstream Patsy serialization path;
-this migration does not repair or qualify it.
+Environments are stored as configuration only (`Environment.get_params()`);
+fitted grids are rebuilt when a detector is fit, and legacy rows that stored
+fitted environment keys (including `track_graphDD`) load with those keys
+dropped. GLM model persistence remains an unsupported upstream Patsy
+serialization path; this migration does not repair or qualify it.
 
 PositionGroup preserves each source epoch's continuity in
 `position_info.attrs['valid_position_intervals']`, clipped to the fetched

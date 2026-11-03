@@ -123,7 +123,12 @@ def _convert_dict_to_class(d: dict, class_conversion: dict) -> object:
 
 
 def _convert_env_dict(env_params: dict) -> Environment:
-    """If the track graph is in the environment parameters, convert it to a networkx graph
+    """Rebuild an unfitted Environment from stored parameters
+
+    If the track graph is in the environment parameters, convert it to a
+    networkx graph. Only configuration keys are kept, so legacy rows that
+    stored fitted attributes (e.g. ``place_bin_centers_``, ``track_graphDD``)
+    still load.
 
     Parameters
     ----------
@@ -135,7 +140,9 @@ def _convert_env_dict(env_params: dict) -> Environment:
     """
     from non_local_detector.environment import Environment
 
-    if env_params["track_graph"] is not None:
+    config_keys = Environment().get_params().keys()
+    env_params = {k: v for k, v in env_params.items() if k in config_keys}
+    if env_params.get("track_graph") is not None:
         env_params["track_graph"] = make_track_graph(
             **env_params["track_graph"]
         )
@@ -145,7 +152,7 @@ def _convert_env_dict(env_params: dict) -> Environment:
 
 def _to_dict(transition: object) -> dict:
     """Helper function to convert a transition class into a dictionary"""
-    parameters = vars(transition)
+    parameters = dict(vars(transition))
     parameters["class_name"] = type(transition).__name__
 
     return parameters
@@ -281,28 +288,23 @@ def _convert_algorithm_params(algo_params: dict | None) -> dict | None:
 
 
 def _convert_environment_to_dict(env: Environment) -> dict:
-    """Converts an Environment instance into a dictionary so that datajoint can store it"""
-    if env.track_graph is not None:
-        track_graph = env.track_graph
-        env.track_graph = {
+    """Converts an Environment instance into a dictionary so that datajoint can store it
+
+    Only configuration parameters are stored (``env.get_params()``); fitted
+    state is recomputed when a detector is fit. The passed environment is not
+    modified.
+    """
+    params = env.get_params()
+    track_graph = params.get("track_graph")
+    if track_graph is not None:
+        params["track_graph"] = {
             "node_positions": [
                 v["pos"] for v in dict(track_graph.nodes).values()
             ],
             "edges": list(track_graph.edges),
         }
-    try:
-        if env.track_graphDD is not None:
-            track_graphDD = env.track_graphDD
-            env.track_graphDD = {
-                "node_positions": [
-                    v["pos"] for v in dict(track_graphDD.nodes).values()
-                ],
-                "edges": list(track_graphDD.edges),
-            }
-    except AttributeError:
-        pass
 
-    return vars(env)
+    return params
 
 
 def convert_classes_to_dict(params: dict) -> dict:

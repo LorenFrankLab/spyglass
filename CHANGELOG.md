@@ -39,7 +39,9 @@
 
     - Serialize constructor parameters and concrete model classes, preserving
         algorithm settings when parameters are fetched. Upgrade legacy NonLocal
-        parameter rows without persisting fitted state #1618
+        parameter rows without persisting fitted state. Environments are stored
+        as configuration only (`Environment.get_params()`); legacy rows holding
+        fitted environment keys still load #1618
 
 - Spike Sorting
 
