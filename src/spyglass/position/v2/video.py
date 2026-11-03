@@ -661,6 +661,10 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         ``vid_file_matches``; a ``ValueError`` naming the unresolved paths and
         a copy-paste re-run snippet is raised otherwise.
 
+        Calls ``VideoFile.update_entries()`` first, so a row ingested before
+        ``VideoFile.path`` existed is matchable by the time narrowing reads
+        it. That is a no-op once every row holds a path.
+
         Parameters
         ----------
         config_path : Union[str, Path]
@@ -727,6 +731,22 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             description = f"DLC project: {task} ({date})"
 
         from spyglass.common import Nwbfile, Session
+
+        # Fill any null VideoFile.path before matching. Pass 2 narrows by
+        # comparing stored paths, so a row ingested before the column existed
+        # matches nothing and the import fails on a path that is registered.
+        # The scan `fetch_key_from_path` declines by default is affordable
+        # here: importing a project is rare and interactive, and this is one
+        # query once every row has a path. A failure to backfill is reported
+        # and does not stop the import, which has other passes to try.
+        try:
+            VideoFile.update_entries()
+        except Exception as err:  # noqa: BLE001
+            cls()._warn_msg(
+                f"Could not backfill VideoFile.path: {type(err).__name__}: "
+                f"{err}\nMatching continues; run VideoFile.update_entries() "
+                "to see the full report."
+            )
 
         # matched: video_path -> VideoFile PK dict
         #   {"nwb_file_name": ..., "epoch": ..., "video_file_num": ...}
