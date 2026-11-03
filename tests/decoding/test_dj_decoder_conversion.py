@@ -318,6 +318,35 @@ def test_convert_env_dict_legacy_row_with_fitted_keys(with_track_graph_dd):
     assert env.place_bin_centers_ is None
 
 
+def test_convert_env_dict_warns_only_on_unknown_keys(monkeypatch):
+    """Known fitted/legacy keys are dropped quietly; unknown keys are reported."""
+    from non_local_detector.environment import Environment
+
+    from spyglass.decoding.v1 import dj_decoder_conversion
+
+    warnings = []
+    monkeypatch.setattr(
+        dj_decoder_conversion.logger, "warning", warnings.append
+    )
+    legacy = {
+        **Environment(environment_name="old").get_params(),
+        "place_bin_centers_": None,
+        "_is_fitted": False,
+        "_cache": None,
+        "track_graphDD": None,
+    }
+
+    dj_decoder_conversion._convert_env_dict(dict(legacy))
+    assert warnings == []
+
+    env = dj_decoder_conversion._convert_env_dict(
+        {**legacy, "place_bin_sise": 2.0}
+    )
+    assert env.environment_name == "old"
+    assert len(warnings) == 1
+    assert "place_bin_sise" in warnings[0]
+
+
 def test_transition_to_dict_does_not_mutate_object():
     """Adding ``class_name`` to the stored dict leaves the live object intact."""
     from non_local_detector.continuous_state_transitions import RandomWalk

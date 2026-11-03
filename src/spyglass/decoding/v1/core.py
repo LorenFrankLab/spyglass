@@ -125,9 +125,9 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         upstream), which would otherwise be passed back into the constructor as
         unexpected keyword arguments on fetch. A dict of detector parameters
         (holding nld objects, as ``get_params`` returns them) is also
-        accepted; any other object raises ``TypeError``. The concrete class name is
-        recorded so that ``restore_classes`` can rebuild the exact subclass
-        (preserving subclass-only parameters such as NonLocal's
+        accepted; any other object raises ``TypeError``. The concrete class
+        name is recorded so that ``restore_classes`` can rebuild the exact
+        subclass (preserving subclass-only parameters such as NonLocal's
         ``non_local_*_penalty``).
         """
         converted = []
