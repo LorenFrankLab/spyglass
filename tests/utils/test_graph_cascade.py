@@ -714,6 +714,22 @@ def test_merged_restrs_keep_percent(RestrGraph, quoted_key_tables):
     }, f"Merged union lost the percent row: {got}"
 
 
+def test_chained_restr_stays_and(RestrGraph, quoted_key_tables):
+    """A chained restriction must stay an AND when set on a node.
+
+    `Table & a & b` holds an AndList, as passed by `restrict_all` and the
+    delete permission check. DataJoint reads a plain list as an OR.
+    """
+    Parent = quoted_key_tables["DqParent"]
+    chained = Parent & "dq_parent_attr > 1" & "dq_parent_attr < 3"
+    graph = RestrGraph(seed_table=Parent, verbose=False)
+
+    graph._set_restr(Parent.full_table_name, chained.restriction)
+    got = graph._get_ft(Parent.full_table_name, with_restr=True)
+
+    assert len(got) == len(chained) == 1, "Chained restriction widened."
+
+
 def test_union_drops_empty_restrs(RestrGraph, graph_tables):
     """A merged union selecting nothing must not survive as a table entry.
 
