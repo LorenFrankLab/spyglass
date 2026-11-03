@@ -606,8 +606,7 @@ def test_enforce_strings_keeps_percent(RestrGraph, quoted_key_tables):
     `Export.Table.restriction` is a varchar, so this path has to produce a
     string; it cannot keep the relational form the way flattening does.
 
-    Scoped to the `%` key: a `"` key still cannot be stringified at all, which
-    is a separate, pre-existing defect in this path.
+    Scoped to the `%` key; `test_enforce_strings_keeps_quote` covers `"`.
     """
     parent = quoted_key_tables["DqParent"]
     child = quoted_key_tables["DqChild"]
