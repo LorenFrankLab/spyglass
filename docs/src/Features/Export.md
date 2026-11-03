@@ -60,6 +60,20 @@ MyTable & "a = b AND c > 5"  # Will capture 'a = b AND c > 5'
 MyTable & dj.AndList(["a = b", "c > 5"])  # Will capture 'a = b AND c > 5'
 ```
 
+An unrestricted fetch of a table in a shared schema is logged as the keys it
+returned, rather than as a restriction matching every row. Log entries written
+before this change still hold such a restriction, and `Export.populate` rejects
+a selection containing one, naming the table and the offending rows. To clear
+it, inspect the entries with
+
+```python
+ExportSelection.Table & export_key & {"table_name": full_table_name}
+```
+
+then either delete them and re-log the fetch with a restriction, or replace them
+with the explicit keys wanted. A table outside the shared schemas is exempt:
+`Export.populate` logs a warning and exports all of it.
+
 If this process captures too much, you can either run a process with logging
 disabled, or delete these entries from `ExportSelection` after the export is
 logged.
