@@ -372,8 +372,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             logger.warning("Cannot log for recompute without UserEnvironment.")
             return
 
-        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
-        if at_creation and editable_env:  # no assume pass if gen w/editable env
+        if at_creation and not UserEnvironment().is_trusted(self.env_dict):
             at_creation = False  # pragma: no cover
 
         inserts = []

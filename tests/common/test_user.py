@@ -1,6 +1,52 @@
+from unittest.mock import patch
+
 import pytest
 import yaml
 from spikeinterface import __version__ as si_version
+
+_CLEAN_INSTALL = {
+    "is_dev": False,
+    "commit_hash": None,
+    "install_path": None,
+    "has_local_changes": False,
+    "is_stale": False,
+    "is_official": True,
+}
+
+
+def _as_install(**facts):
+    """Patch the process-wide install to report these facts.
+
+    Each fact is a `cached_property`, so priming the instance dict is how they
+    are set, and a test need only name what it exercises. Returns a context
+    manager, so a test reads as "with this install, ...".
+    """
+    from spyglass.utils.git_utils import spyglass_install
+
+    return patch.dict(spyglass_install.__dict__, facts)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _clean_install(user_env_tbl):
+    """Pin the install state for this module.
+
+    Every test here exercises the full-row path: the stored environment, its
+    hash, the versions read back out. A dirty install stores none of that, and
+    a developer's working tree is dirty by definition, so pinning keeps these
+    assertions about `UserEnvironment` rather than about the checkout.
+
+    Cached properties are cleared on both sides so the module neither inherits
+    another module's cache nor leaves its own behind.
+    """
+    cached = ("env", "env_hash", "matching_env_id", "this_env")
+    for attr in cached:
+        user_env_tbl.__dict__.pop(attr, None)
+
+    with _as_install(**_CLEAN_INSTALL):
+        yield
+
+    for attr in cached:
+        user_env_tbl.__dict__.pop(attr, None)
 
 
 def test_user_env(user_env_tbl):
@@ -22,31 +68,43 @@ def test_user_env(user_env_tbl):
     assert no_version == "", "Expected empty string for nonexistent package"
 
 
-def test_comment_intstall_regex(user_env_tbl):
+def test_comment_intstall_regex():
     """Test that install line comment is parsed correctly."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     comment = "# (some-package==1.2.3)"
-    assert user_env_tbl._parse_pip_line(comment), f"Failed to parse '{comment}'"
+    assert cache._parse_pip_line(comment), f"Failed to parse '{comment}'"
 
 
-def test_editable_path_regex(user_env_tbl):
+def test_editable_path_regex():
     """Test that editable path is parsed correctly."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     comment = "# (some-package==1.2.3)"
-    _ = user_env_tbl._parse_pip_line(comment)  # set up comment for path
+    _ = cache._parse_pip_line(comment)  # set up comment for path
     path = "-e /path/to/some-package"
-    assert user_env_tbl._parse_pip_line(path), f"Failed to parse '{path}'"
+    assert cache._parse_pip_line(path), f"Failed to parse '{path}'"
 
 
-def test_editable_path_error(user_env_tbl):
+def test_editable_path_error():
     """Test that an error is raised for an invalid editable path."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     path = "-e /path/to/missing-comment"
     with pytest.raises(ValueError):
-        user_env_tbl._parse_pip_line(path)
+        cache._parse_pip_line(path)
 
 
-def test_parse_fail(user_env_tbl):
+def test_parse_fail():
     """Test that parsing returns false for invalid pip line."""
+    from spyglass.utils.env_cache import CondaEnvCache
+
+    cache = CondaEnvCache()
     invalid_line = "invalid pip line"
-    returned = user_env_tbl._parse_pip_line(invalid_line)
+    returned = cache._parse_pip_line(invalid_line)
     assert returned is False, f"Expected False for invalid line, got {returned}"
 
 
@@ -60,6 +118,10 @@ def test_parse_env_fail(user_env_tbl):
 def test_clear_cache(user_env_tbl):
     """Test that clearing cache returns same env id."""
     pre_env = user_env_tbl.this_env["env_id"]
+    # Read it first so `del` has something to clear: `this_env` leaves
+    # `matching_env_id` uncached whenever it had to insert, so the delete
+    # depends on the table already holding this env.
+    _ = user_env_tbl.matching_env_id
     del user_env_tbl.matching_env_id
     post_env = user_env_tbl.this_env["env_id"]
     assert pre_env == post_env, "Environment should change after clearing cache"
