@@ -358,6 +358,42 @@ def test_save_manual_curation_commit_merge_inherits_parent_labels(
 
 
 @pytest.mark.database
+@pytest.mark.slow
+def test_save_manual_curation_commit_merge_keeps_edited_contributor_labels(
+    polymer_60s_sort,
+):
+    """A committed merge labels the merged unit from the edited labels.
+
+    A FigPack import carries every unit's label keyed by the parent's unit ids,
+    so a reviewer who relabels a contributor and merges it supplies labels on
+    units the commit absorbs; the merged unit must not fall back to the
+    parent's labels.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    a, b = _two_unit_ids(polymer_60s_sort)
+    merged_id = max(_unit_ids(polymer_60s_sort)) + 1
+    clear_curations_for(polymer_60s_sort)
+    root = CurationV2.create_initial_curation(
+        polymer_60s_sort, labels={a: ["noise"], b: ["accept"]}
+    )
+
+    child = CurationV2.save_manual_curation(
+        polymer_60s_sort,
+        parent_curation_id=root["curation_id"],
+        labels={a: ["accept"], b: ["accept"]},
+        merge_groups=[[a, b]],
+        merge_action="commit",
+        curation_source="figpack",
+    )
+
+    merged = (CurationV2.UnitLabel & child & {"unit_id": merged_id}).fetch(
+        "curation_label"
+    )
+    assert sorted(merged) == ["accept"]
+
+
+@pytest.mark.database
 def test_save_manual_curation_rejects_root_reuse(
     populated_sorting,
 ):

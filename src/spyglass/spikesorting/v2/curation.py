@@ -37,6 +37,7 @@ from spyglass.spikesorting.v2._curation.transforms import (
     build_merge_provenance_rows,
     group_contributor_rows,
     is_merge_preview,
+    key_manual_labels_to_merged_units,
     manual_curation_applies_merges,
     normalize_manual_curation,
     validate_curation_label_rows,
@@ -1130,12 +1131,31 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         Manual UI edits inherit parent labels by default because the user is
         editing the visible parent curation state; pass ``label_policy="replace"``
-        when ``labels`` describes the full label state.
+        when ``labels`` describes the full label state. ``labels`` are keyed by
+        the parent's unit ids, so on a committed merge the contributors' labels
+        are unioned onto the merged unit.
         """
         labels, merge_groups = normalize_manual_curation(
             labels=labels, merge_groups=merge_groups
         )
         apply_merge = manual_curation_applies_merges(merge_action, merge_groups)
+        if apply_merge:
+            if parent_curation_id == -1:
+                source, parent_labels = Sorting.Unit & sorting_key, {}
+            else:
+                parent_key = {
+                    "sorting_id": sorting_key["sorting_id"],
+                    "curation_id": parent_curation_id,
+                }
+                source = cls.Unit & parent_key
+                parent_labels = cls._labels_by_unit(parent_key)
+            labels = key_manual_labels_to_merged_units(
+                labels,
+                merge_groups,
+                source_unit_ids=[int(u) for u in source.fetch("unit_id")],
+                parent_labels=parent_labels,
+                label_policy=label_policy,
+            )
 
         _curation_insert.assert_child_reuse_has_parent(
             parent_curation_id=parent_curation_id,

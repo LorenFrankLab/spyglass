@@ -442,6 +442,41 @@ def allocate_merged_unit_ids(
     }
 
 
+def key_manual_labels_to_merged_units(
+    labels: dict[int, list[str]],
+    merge_groups: list[list[int]],
+    *,
+    source_unit_ids: Iterable[int],
+    parent_labels: Mapping[int, Sequence[str]],
+    label_policy: str,
+) -> dict[int, list[str]]:
+    """Move a committed merge's contributor labels onto its merged unit.
+
+    Manual edits are keyed by the parent's unit ids, so labels supplied for
+    merge contributors would be dropped as absorbed and the merged unit would
+    inherit the parent's labels instead. Each merged unit gets the union of its
+    contributors' supplied labels; under ``"inherit"`` a contributor with no
+    supplied entry contributes its parent labels, the same union a commit
+    applies to parent labels. Labels that touch no contributor are returned
+    unchanged.
+    """
+    absorbed = {unit_id for group in merge_groups for unit_id in group}
+    if not absorbed & labels.keys():
+        return labels
+    keyed = {u: v for u, v in labels.items() if u not in absorbed}
+    for merged_id, group in allocate_merged_unit_ids(
+        source_unit_ids, merge_groups
+    ).items():
+        union: set[str] = set()
+        for unit_id in group:
+            if unit_id in labels:
+                union.update(labels[unit_id])
+            elif label_policy == "inherit":
+                union.update(parent_labels.get(unit_id, []))
+        keyed[merged_id] = sorted(union)
+    return keyed
+
+
 def build_curated_unit_rows(
     sorting_id,
     sorting_units: list[dict],
