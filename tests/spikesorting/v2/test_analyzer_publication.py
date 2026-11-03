@@ -1,5 +1,6 @@
 """A duplicate or interrupted compute cannot change the scientific winner."""
 
+import gc
 import os
 import shutil
 import signal
@@ -78,6 +79,66 @@ def test_duplicate_compute_keeps_winners_analyzer(
         # attempt's staged units NWB; unlink it ourselves.
         _unlink_staged_analysis_file(loser.analysis_file_name, context="test")
     assert_no_staged_analysis_files([loser.analysis_file_name])
+
+
+def test_resort_does_not_reuse_previous_sorts_metric_analyzer(
+    planted_two_unit_sort, monkeypatch
+):
+    """A re-sort under a reused sorting_id never loads the old sort's caches.
+
+    A delete starting at ``SortingSelection`` or ``Recording`` reaches
+    ``Sorting`` through the cascade, which skips ``Sorting.delete``, so the
+    old sort's analyzer folders stay on disk. The selection id is
+    deterministic, so re-running the selection reuses the ``sorting_id`` and
+    a nondeterministic sorter's new spike trains must not be scored with the
+    old metric analyzer.
+    """
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    table, key = Sorting(), planted_two_unit_sort
+    clear_curations_for(key)
+    original = table.get_sorting(key)
+    _, metric_name = waveform_params_for_preprocessing(
+        SortingSelection.resolve_source_preprocessing_params_name(key)
+    )
+    table.get_analyzer(key, metric_name)
+    gc.collect()  # Release it so the re-sort can remove the folder on NFS.
+    fetched = table.make_fetch(key)
+    shifted = si.NumpySorting.from_unit_dict(
+        {
+            int(u): original.get_unit_spike_train(u) + 20
+            for u in original.unit_ids
+        },
+        sampling_frequency=original.get_sampling_frequency(),
+    )
+    monkeypatch.setattr(Sorting, "_allow_insert", True)
+
+    def resort(sorting):
+        # super_delete bypasses the Sorting.delete override, as the cascade does.
+        (Sorting & key).super_delete(warn=False)
+        plant_sorter(monkeypatch, lambda *a, **k: sorting)
+        table.make_insert(key, *table.make_compute(key, *fetched))
+
+    try:
+        resort(shifted)
+        metric = table.get_analyzer(key, metric_name)
+        stored = table.get_sorting(key)
+        trains = {
+            u: metric.sorting.get_unit_spike_train(u) for u in stored.unit_ids
+        }
+        # Release the memmapped analyzer; NFS keeps a mapped folder busy.
+        del metric
+        gc.collect()
+        for unit_id, train in trains.items():
+            np.testing.assert_array_equal(
+                train, stored.get_unit_spike_train(unit_id)
+            )
+    finally:
+        resort(original)
 
 
 @pytest.mark.parametrize("kill_point", ["build", "swap"])

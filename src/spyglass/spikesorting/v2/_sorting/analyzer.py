@@ -200,6 +200,7 @@ def _load_analyzer_folder_or_rebuild(
     sorting_id,
     load_extensions=True,
     validate_analyzer=None,
+    restore_recording=None,
 ):
     """Load an analyzer folder; rebuild via ``rebuild_fn`` on missing/invalid.
 
@@ -215,10 +216,14 @@ def _load_analyzer_folder_or_rebuild(
     ``sorting_id`` is for the same messages. ``rebuild=False`` raises
     ``AnalyzerFolderMissingError`` / ``AnalyzerFolderInvalidError`` instead of
     rebuilding (the recompute audit observes the reclaimed/corrupt state).
+    ``restore_recording`` is an optional zero-arg callable that restores the
+    sort's trace file; a folder that loads without its recording is retried
+    once after calling it, before the folder is treated as invalid.
     """
     import shutil
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        AnalyzerRecordingUnavailableError,
         analyzer_cache_lock,
         load_analyzer_extensions,
         load_analyzer_folder,
@@ -228,8 +233,20 @@ def _load_analyzer_folder_or_rebuild(
         AnalyzerFolderMissingError,
     )
 
-    def load():
-        analyzer = load_analyzer_folder(folder)
+    def load(restore=restore_recording):
+        try:
+            analyzer = load_analyzer_folder(folder)
+        except AnalyzerRecordingUnavailableError:
+            if restore is None:
+                raise
+            # A reclaimed trace file leaves a valid cache without its
+            # recording; restoring the file is cheaper than a full rebuild and
+            # keeps extensions added after the sort. Reload in a fresh frame:
+            # pyparsing's packrat cache can pin this one during the restore's
+            # DataJoint queries, and a pinned local analyzer keeps its
+            # memmapped waveforms open.
+            restore()
+            return load(restore=None)
         _assert_complete_base_extensions(analyzer)
         if validate_analyzer is not None:
             validate_analyzer(analyzer)
@@ -469,6 +486,15 @@ def load_or_rebuild_analyzer(
             "params"
         )
 
+    def restore_recording():
+        from spyglass.spikesorting.v2.sorting import SortingSelection
+
+        SortingSelection.ensure_effective_traces(
+            SortingSelection.resolve_effective_source(
+                {"sorting_id": sorting_id}
+            ).traces
+        )
+
     folder = analyzer_path(sorting_id, waveform_params_name)
     return _load_analyzer_folder_or_rebuild(
         folder,
@@ -482,6 +508,7 @@ def load_or_rebuild_analyzer(
         recipe_label=waveform_params_name,
         sorting_id=sorting_id,
         validate_analyzer=analyzer_sparsity_validator(sorter_params),
+        restore_recording=restore_recording if rebuild else None,
     )
 
 

@@ -145,6 +145,7 @@
         "test_rebuild_analyzer_folder_recreates_on_missing": "pipeline",
         "test_rebuild_publishes_into_temp_not_canonical": "pipeline",
         "test_rebuild_reconstruction_validates_artifact_interval_ownership": "pipeline",
+        "test_reclaimed_traces_keep_the_cached_analyzer": "stage",
         "test_sorting_delete_removes_analyzer_folder": "pipeline"
       }
     },
@@ -155,6 +156,7 @@
       "tier": "unit",
       "overrides": {
         "test_duplicate_compute_keeps_winners_analyzer": "stage",
+        "test_resort_does_not_reuse_previous_sorts_metric_analyzer": "stage",
         "test_orphan_audit_reclaims_only_abandoned_staging": "db_unit",
         "test_orphan_audit_skips_orphan_folder_still_in_use": "db_unit"
       }

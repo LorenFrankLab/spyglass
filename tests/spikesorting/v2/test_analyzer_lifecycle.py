@@ -1316,3 +1316,35 @@ def test_curation_evaluation_display_derivative_delegates_without_mutation(
         assert analyzer is sentinel
 
     assert captured == {**request, "extra_extensions": extensions}
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_reclaimed_traces_keep_the_cached_analyzer(planted_two_unit_sort):
+    """A reclaimed trace file is restored instead of discarding the analyzer.
+
+    ``RecordingArtifactRecompute.delete_files`` reclaims trace NWBs while the
+    analyzer folder still references them. Loading the analyzer must restore
+    the traces and keep the cache, including extensions added after the sort.
+    """
+    import gc
+    from pathlib import Path
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    key = planted_two_unit_sort
+    Sorting().add_extensions(key, ["correlograms"])
+    gc.collect()
+    _, traces = SortingSelection.resolve_effective_source(key)
+    trace_path = Path(
+        AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"])
+    )
+    trace_path.unlink()
+
+    analyzer = Sorting().get_analyzer(key)
+    try:
+        assert trace_path.exists()
+        assert analyzer.has_extension("correlograms")
+    finally:
+        del analyzer
+        gc.collect()

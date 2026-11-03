@@ -286,6 +286,10 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     )
 
 
+class AnalyzerRecordingUnavailableError(ValueError):
+    """A cached analyzer folder loaded without its recording."""
+
+
 def load_analyzer_folder(folder, *, recording=None):
     """Load a cached ``binary_folder`` analyzer with memmapped waveforms.
 
@@ -323,10 +327,13 @@ def load_analyzer_folder(folder, *, recording=None):
         format="binary_folder",
     )
     if not analyzer.has_recording():
-        # SI can silently load a recordingless analyzer when recording.json is
-        # invalid. Treat that as an invalid cache so the normal rebuild path
-        # reconstructs the exact recording and artifact exclusions.
-        raise ValueError(f"Analyzer recording could not be loaded: {folder}")
+        # SI silently loads a recordingless analyzer when recording.json is
+        # invalid or its trace file is gone. Treat that as an invalid cache so
+        # the normal rebuild path reconstructs the exact recording and
+        # artifact exclusions.
+        raise AnalyzerRecordingUnavailableError(
+            f"Analyzer recording could not be loaded: {folder}"
+        )
     # Keep derivative save/select/merge operations on the same pickle contract
     # as build_analyzer. SI does not persist this flag when loading an extractor.
     from spyglass.spikesorting.v2._storage.spikeinterface import (
@@ -984,6 +991,39 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
         for folder in folders:
             shutil.rmtree(folder, ignore_errors=False)
     return True
+
+
+def remove_previous_sort_analyzer_caches(sorting_id, *, keep) -> None:
+    """Remove analyzer folders an earlier sort left under a reused ``sorting_id``.
+
+    Call only once a new ``Sorting`` insert owns ``sorting_id``. Selection ids
+    are deterministic, and a delete that reaches ``Sorting`` through a cascade
+    skips ``Sorting.delete``, so a re-sort can find the old sort's folders.
+    They hold the old spike trains, and the load path checks only extension
+    completeness, so they must not survive. Each is renamed to a trash sibling
+    first, so a folder another process still maps leaves the canonical slot
+    (``cleanup_analyzer_staging`` reclaims it later). Staging folders are
+    untouched.
+
+    Parameters
+    ----------
+    sorting_id
+        The sort whose new row was just inserted.
+    keep : path-like
+        The canonical folder the caller is about to replace atomically.
+    """
+    root = analyzer_cache_root()
+    if not root.exists():
+        return
+    keep = Path(keep)
+    with analyzer_cache_lock(sorting_id):
+        for folder in list(
+            root.glob(f"{sorting_id}__*{ANALYZER_FOLDER_SUFFIX}")
+        ):
+            if folder != keep:
+                trash = _publish_sibling(folder, "trash")
+                os.replace(folder, trash)
+                _remove_unless_in_use(trash)
 
 
 def collect_analyzer_cache_references(sorting_table) -> dict:

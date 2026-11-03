@@ -1515,6 +1515,7 @@ class Sorting(
         """
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_publication_transaction,
+            remove_previous_sort_analyzer_caches,
         )
 
         try:
@@ -1534,6 +1535,9 @@ class Sorting(
                 # The successful INSERT owns this sorting_id until commit or
                 # rollback. A duplicate worker cannot reach publication. Only
                 # a rename happens here; waveform extraction was in compute.
+                remove_previous_sort_analyzer_caches(
+                    key["sorting_id"], keep=staged_analyzer.canonical_folder
+                )
                 staged_analyzer.publish()
         finally:
             staged_analyzer.close()
