@@ -12,7 +12,11 @@ import yaml
 
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.env_cache import _delim_split, _env_cache
-from spyglass.utils.git_utils import WARN_DIRTY_ENV_DAYS, spyglass_install
+from spyglass.utils.git_utils import (
+    WARN_DIRTY_ENV_DAYS,
+    WARN_STALE_DAYS,
+    spyglass_install,
+)
 
 schema = dj.schema("common_user")
 
@@ -28,6 +32,11 @@ DEFAULT_ENV_ID = (
 # notification agree and neither is skewed by client-vs-server timezone.
 DIRTY_DAYS_SQL = "DATEDIFF(NOW(), `timestamp`)"
 
+# Age of the install's code, from the stored committer date. Server-side for
+# the same reason, and the counterpart of SpyglassInstall.is_stale, which can
+# only answer for the clone it runs in.
+STALE_DAYS_SQL = "DATEDIFF(NOW(), `commit_date`)"
+
 
 @schema
 class UserEnvironment(SpyglassMixin, dj.Manual):
@@ -41,6 +50,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     has_editable=null: bool  # 1 yes, 0 tested and no, null not tested
     dirty_path=null: varchar(255)  # Path of local Spyglass clone, if any
     spyglass_commit=null: varchar(40)  # Short git hash of the Spyglass install
+    commit_date=null: date  # Committer date of spyglass_commit; null off a clone
     last_seen=CURRENT_TIMESTAMP: timestamp  # Most recent session using this row
     resolved_at=null: timestamp  # When this dirty state was cleaned up
     """
@@ -200,6 +210,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 "has_editable": _env_cache.has_editable,
                 "dirty_path": None,
                 "spyglass_commit": spyglass_install.commit_hash,
+                "commit_date": spyglass_install.commit_date,
             },
             skip_duplicates=False,
         )
@@ -246,11 +257,13 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             self.connection.query(
                 f"UPDATE {self.full_table_name} "
                 + "SET `last_seen` = NOW(), "
-                + "`spyglass_commit` = %s, `dirty_path` = %s "
+                + "`spyglass_commit` = %s, `dirty_path` = %s, "
+                + "`commit_date` = %s "
                 + "WHERE `env_id` = %s",
                 args=(
                     spyglass_install.commit_hash,
                     spyglass_install.install_path,
+                    spyglass_install.commit_date,
                     existing,
                 ),
             )
@@ -265,6 +278,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 "has_editable": None,  # untested: no pip freeze ran
                 "dirty_path": spyglass_install.install_path,
                 "spyglass_commit": spyglass_install.commit_hash,
+                "commit_date": spyglass_install.commit_date,
             },
             skip_duplicates=False,
         )
@@ -454,6 +468,41 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         return (self.unresolved_dirty() & active).proj(
             ..., days_since_warn=DIRTY_DAYS_SQL
         )
+
+    def stale_installs(self) -> "dj.expression.QueryExpression":
+        """Return active full rows whose commit is older than the stale window.
+
+        The database counterpart of
+        :attr:`~spyglass.utils.git_utils.SpyglassInstall.is_stale`, which can
+        only answer for the clone it runs in. ``commit_date`` is stored so the
+        same question can be asked of every logged environment.
+
+        A row is included when it is:
+
+        * **Dated**: ``commit_date`` is not null, so a release install or a
+          clone git could not read is out of scope;
+        * **Reproducible**: ``env_hash`` is not null. A dirty row is excluded
+          because it runs a shorter clock already, through
+          :meth:`dirty_installs`;
+        * **Active**: seen within twice ``WARN_STALE_DAYS``, on ``last_seen``,
+          matching how :meth:`dirty_installs` ages out an abandoned clone.
+
+        ``days_stale`` is measured from ``commit_date``, so it reports the age
+        of the code rather than of the row.
+
+        Returns a DataJoint query expression.  Callers needing a DataFrame
+        can call ``.fetch(format='frame')`` on the result.
+        """
+        active = f"DATEDIFF(NOW(), `last_seen`) <= {2 * WARN_STALE_DAYS}"
+        stale = f"{STALE_DAYS_SQL} > {WARN_STALE_DAYS}"
+
+        return (
+            self
+            & "commit_date IS NOT NULL"
+            & "env_hash IS NOT NULL"
+            & active
+            & stale
+        ).proj(..., days_stale=STALE_DAYS_SQL)
 
     def write_dirty_notifications(self, out_path: str = None) -> None:
         """Write overdue dirty-install rows to out_path (or stdout if None).

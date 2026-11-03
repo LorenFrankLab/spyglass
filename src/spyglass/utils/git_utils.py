@@ -26,9 +26,13 @@ Reported facts
     :data:`OFFICIAL_REPO`, whether never committed, never pushed, or pushed
     only to a fork; or ``__version__`` carrying hatch-vcs's ``.dYYYYMMDD``
     suffix, left by a wheel built from a dirty tree.
+``commit_date``
+    Committer date of HEAD. ``None`` outside a clone. Stored on the
+    ``UserEnvironment`` row, so staleness is also measurable from the
+    database.
 ``is_stale``
-    HEAD's commit date is more than ``WARN_STALE_DAYS`` days old. A few
-    commits behind does not flag.
+    ``commit_date`` is more than ``WARN_STALE_DAYS`` days old. A few commits
+    behind does not flag.
 ``is_official``
     Neither dirty nor stale. Independent of ``is_dev``: a current, unmodified
     clone tracking ``master`` is official.
@@ -303,21 +307,34 @@ class SpyglassInstall:
         out = self._git("diff", "--name-only", "HEAD", "--", "src/")
         return bool(out and out.strip())
 
+    @cached_property
+    def commit_date(self) -> Optional[date]:
+        """Committer date of HEAD, or ``None`` outside a readable clone.
+
+        Stored on the ``UserEnvironment`` row so staleness can be measured
+        from the database, where a bare commit hash carries no date.
+        """
+        if self.install_path is None:
+            return None
+        out = self._git("log", "-1", "--format=%ct", "HEAD")
+        if not (out and out.strip()):
+            return None
+        try:
+            return datetime.fromtimestamp(int(out.strip())).date()
+        except Exception as exc:
+            logger.debug(f"unreadable HEAD date: {exc}")
+            return None
+
     def head_is_stale(self) -> bool:
         """Return ``True`` if HEAD is older than ``WARN_STALE_DAYS``.
 
         Committer date as a no-network proxy for months behind upstream: a
         clone that fetches regularly keeps a recent HEAD.
         """
-        out = self._git("log", "-1", "--format=%ct", "HEAD")
-        if not (out and out.strip()):
+        head_date = self.commit_date
+        if head_date is None:
             return False
-        try:
-            head_date = datetime.fromtimestamp(int(out.strip()))
-        except Exception as exc:
-            logger.debug(f"unreadable HEAD date: {exc}")
-            return False
-        return (datetime.now() - head_date).days > WARN_STALE_DAYS
+        return (date.today() - head_date).days > WARN_STALE_DAYS
 
     # ── Summary ───────────────────────────────────────────────────────────────
 
@@ -359,7 +376,7 @@ class SpyglassInstall:
     @cached_property
     def is_stale(self) -> bool:
         """HEAD is more than ``WARN_STALE_DAYS`` old. ``False`` without a clone."""
-        return False if self.install_path is None else self.head_is_stale()
+        return self.head_is_stale()
 
     @cached_property
     def is_official(self) -> bool:

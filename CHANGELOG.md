@@ -23,7 +23,7 @@ info.connection.query(
     + "ADD UNIQUE INDEX (`github_user_name`)"
 )
 
-# Add dirty_path and spyglass_commit columns to UserEnvironment
+# Add the dirty-install columns to UserEnvironment, and make env nullable
 from spyglass.common.common_user import UserEnvironment
 
 UserEnvironment().alter()

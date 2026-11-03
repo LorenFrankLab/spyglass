@@ -10,7 +10,7 @@ Run with: conda run -n dirty pytest tests/common/test_dirty.py --no-teardown
 import os
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from subprocess import CompletedProcess
 from unittest.mock import MagicMock, patch
 
@@ -1259,6 +1259,76 @@ def test_git_diff_generic_exception(
     assert result.has_local_changes is False
 
 
+def test_git_commit_date_reads_head(tmp_path, fake_clone):
+    """commit_date is HEAD's committer date, as a date."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    fake_pkg = fake_clone(tmp_path)
+    stamp = int(
+        datetime.combine(date(2024, 3, 7), datetime.min.time()).timestamp()
+    )
+
+    with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(log=str(stamp)),
+            ):
+                assert SpyglassInstall().commit_date == date(2024, 3, 7)
+
+
+def test_git_commit_date_none_off_a_clone():
+    """A release install has no clone, so no date to store."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    inst = SpyglassInstall()
+    inst.__dict__["install_path"] = None
+
+    assert inst.commit_date is None
+
+
+def test_git_commit_date_unreadable(tmp_path, fake_clone):
+    """Unparsable git output yields no date rather than raising."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(log="not-a-timestamp"),
+            ):
+                assert SpyglassInstall().commit_date is None
+
+
+@pytest.mark.parametrize(
+    "age_days, expected",
+    [(200, True), (5, False)],
+    ids=["months_old", "recent"],
+)
+def test_stale_is_measured_from_commit_date(age_days, expected):
+    """is_stale reads commit_date, the one date the row also stores."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    inst = SpyglassInstall()
+    inst.__dict__["install_path"] = "/home/user/spyglass"
+    inst.__dict__["commit_date"] = date.today() - timedelta(days=age_days)
+
+    assert inst.is_stale is expected
+
+
+def test_stale_false_without_a_commit_date():
+    """No date, no staleness claim."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    inst = SpyglassInstall()
+    inst.__dict__["install_path"] = None
+    inst.__dict__["commit_date"] = None
+
+    assert inst.is_stale is False
+
+
 def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
     """A clean clone with a months-old HEAD is is_stale=True, not official."""
     fake_pkg = fake_clone(tmp_path)
@@ -1893,6 +1963,7 @@ def clean_install_info():
         "has_local_changes": False,
         "is_stale": False,
         "is_official": True,
+        "commit_date": None,  # a release install has no clone to date
     }
 
 
@@ -1906,6 +1977,7 @@ def dirty_install_info():
         "has_local_changes": True,
         "is_stale": False,
         "is_official": False,
+        "commit_date": date.today() - timedelta(days=5),
     }
 
 
@@ -1919,6 +1991,7 @@ def stale_install_info():
         "has_local_changes": False,
         "is_stale": True,
         "is_official": False,
+        "commit_date": date.today() - timedelta(days=200),
     }
 
 
@@ -2302,6 +2375,143 @@ def test_dirty_installs_excludes_inactive(user_env_tbl):
     finally:
         for eid in ("ghost_envstale_00", "ghost_envactive_00"):
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
+def _insert_dated_rows(user_env_tbl, rows):
+    """Insert ghost rows with explicit commit_date/last_seen, and clean up."""
+    user_env_tbl.insert(rows, skip_duplicates=True)
+    return [r["env_id"] for r in rows]
+
+
+def test_stale_installs_surfaces_old_full_rows(user_env_tbl):
+    """A reproducible row whose code is months old is surfaced, with its age.
+
+    ``days_stale`` is measured from ``commit_date``, so it reports the age of
+    the code and not of the row: both rows below were logged today.
+    """
+    from spyglass.utils.git_utils import WARN_STALE_DAYS
+
+    old = date.today() - timedelta(days=WARN_STALE_DAYS + 40)
+    fresh = date.today() - timedelta(days=5)
+    rows = [
+        {
+            "env_id": "ghost_stale_00",
+            "env_hash": "a" * 32,
+            "env": {"dependencies": []},
+            "has_editable": False,
+            "spyglass_commit": "old0001",
+            "commit_date": old,
+        },
+        {
+            "env_id": "ghost_fresh_00",
+            "env_hash": "b" * 32,
+            "env": {"dependencies": []},
+            "has_editable": False,
+            "spyglass_commit": "new0001",
+            "commit_date": fresh,
+        },
+    ]
+    ids = _insert_dated_rows(user_env_tbl, rows)
+    try:
+        got = user_env_tbl.stale_installs().fetch("env_id", "days_stale")
+        surfaced = dict(zip(*got))
+
+        assert "ghost_stale_00" in surfaced
+        assert "ghost_fresh_00" not in surfaced
+        assert surfaced["ghost_stale_00"] == WARN_STALE_DAYS + 40
+    finally:
+        for eid in ids:
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
+def test_stale_installs_excludes_dirty_and_undated(user_env_tbl):
+    """A dirty row and an undated row are both out of scope.
+
+    A dirty install runs the shorter 30-day clock through ``dirty_installs``,
+    and a release install stores no date to measure.
+    """
+    from spyglass.utils.git_utils import WARN_STALE_DAYS
+
+    old = date.today() - timedelta(days=WARN_STALE_DAYS + 40)
+    rows = [
+        {  # dirty: env_hash null, dated and old
+            "env_id": "ghost_dirtydated_00",
+            "env_hash": None,
+            "env": None,
+            "has_editable": None,
+            "dirty_path": "/home/user/spyglass",
+            "spyglass_commit": "dirty01",
+            "commit_date": old,
+        },
+        {  # release: reproducible, but no clone to date
+            "env_id": "ghost_undated_00",
+            "env_hash": "c" * 32,
+            "env": {"dependencies": []},
+            "has_editable": False,
+            "dirty_path": None,
+            "spyglass_commit": None,
+            "commit_date": None,
+        },
+    ]
+    ids = _insert_dated_rows(user_env_tbl, rows)
+    try:
+        stale_ids = list(user_env_tbl.stale_installs().fetch("env_id"))
+
+        assert "ghost_dirtydated_00" not in stale_ids
+        assert "ghost_undated_00" not in stale_ids
+    finally:
+        for eid in ids:
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
+def test_stale_installs_excludes_abandoned_clone(user_env_tbl):
+    """An old clone nobody has used in two stale windows ages out."""
+    from spyglass.utils.git_utils import WARN_STALE_DAYS
+
+    old = date.today() - timedelta(days=WARN_STALE_DAYS + 40)
+    gone = datetime.now() - timedelta(days=2 * WARN_STALE_DAYS + 5)
+    rows = [
+        {
+            "env_id": "ghost_abandoned_00",
+            "env_hash": "d" * 32,
+            "env": {"dependencies": []},
+            "has_editable": False,
+            "spyglass_commit": "aband01",
+            "commit_date": old,
+            "last_seen": gone,
+        }
+    ]
+    ids = _insert_dated_rows(user_env_tbl, rows)
+    try:
+        stale_ids = list(user_env_tbl.stale_installs().fetch("env_id"))
+
+        assert "ghost_abandoned_00" not in stale_ids
+    finally:
+        for eid in ids:
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
+def test_stale_row_stores_its_commit_date(user_env_tbl, stale_install_info):
+    """A full row keeps the date staleness is measured from."""
+    with _as_install(**stale_install_info):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        user_env_tbl.delete(safemode=False)
+        result = user_env_tbl.insert_current_env()
+
+    row = (user_env_tbl & f'env_id="{result["env_id"]}"').fetch1()
+    assert row["commit_date"] == stale_install_info["commit_date"]
+
+
+def test_dirty_row_stores_its_commit_date(user_env_tbl, dirty_install_info):
+    """A partial row stores the date too, though it is not what escalates it."""
+    with _as_install(**dirty_install_info):
+        user_env_tbl.delete(safemode=False)
+        result = user_env_tbl.insert_current_env()
+
+    row = (user_env_tbl & f'env_id="{result["env_id"]}"').fetch1()
+    assert row["env_hash"] is None  # a partial row
+    assert row["commit_date"] == dirty_install_info["commit_date"]
 
 
 def test_has_matching_env_same_hash(user_env_tbl, clean_install_info):
