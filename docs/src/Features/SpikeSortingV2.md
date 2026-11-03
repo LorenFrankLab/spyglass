@@ -5,15 +5,16 @@ session, sort it, review the units, and select them for analysis. This page is
 the full workflow reference; use the [API map](./SpikeSortingV2_API.md) to find
 import paths and the generated API reference.
 
-| Task                                                   | Go to                                                                                                                                               |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Review or correct a curation                           | [Browser review](#browser-first-curation-review) and [merge recovery](#where-am-i-and-how-do-i-undo-a-merge)                                        |
-| Automate evaluation and curation                       | [Scripted curation](#scripted-curation-facade-automation-and-debugging) and [quality metrics](#quality-metrics-and-the-scripted-evaluatemerge-loop) |
-| Sort a whole session                                   | [Session runner](#sort-a-whole-session)                                                                                                             |
-| Combine same-day blocks or track units across days     | [Concatenation](#chronic-same-day-recordings) and [unit tracking](#cross-session-unit-tracking)                                                     |
-| Select reviewed units for downstream analysis          | [Downstream consumers](#downstream-consumers)                                                                                                       |
-| Reclaim disk space or recover a missing cache          | [Storage management](./SpikeSortingV2StorageManagement.md)                                                                                          |
-| Upgrade an existing v1 environment                     | [Migration guide](./SpikeSortingV2_Migration.md)                                                                                                    |
+| Task                                                | Go to                                                                                                                                               |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Review or correct a curation                        | [Browser review](#browser-first-curation-review) and [merge recovery](#where-am-i-and-how-do-i-undo-a-merge)                                        |
+| Automate evaluation and curation                    | [Scripted curation](#scripted-curation-facade-automation-and-debugging) and [quality metrics](#quality-metrics-and-the-scripted-evaluatemerge-loop) |
+| Sort a whole session                                | [Session runner](#sort-a-whole-session)                                                                                                             |
+| Sort several epochs or files from one day together  | [Same-day recordings](#chronic-same-day-recordings)                                                                                                 |
+| Track units across days or separately sorted epochs | [Unit tracking](#cross-session-unit-tracking)                                                                                                       |
+| Select reviewed units for downstream analysis       | [Downstream consumers](#downstream-consumers)                                                                                                       |
+| Reclaim disk space or recover a missing cache       | [Storage management](./SpikeSortingV2StorageManagement.md)                                                                                          |
+| Upgrade an existing v1 environment                  | [Migration guide](./SpikeSortingV2_Migration.md)                                                                                                    |
 
 ## Why
 
@@ -1409,6 +1410,19 @@ To compare it, insert a `MotionEstimationParameters` row with
 
 ### Chronic same-day recordings
 
+Pick the path by where the day's data lives and which outputs you want:
+
+| Your data                                                 | Path                                                                                                                                        |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Several epochs (e.g. runs and sleeps) in **one** NWB file | One `IntervalList` covering the epochs, then `run_v2_pipeline`. One sort, one `merge_id`; restrict to an epoch's interval at analysis time. |
+| Same-day recordings in **separate** NWB files             | `run_v2_concat_pipeline` (below). One sort, one `member_merge_ids` entry per member on that member's own clock.                             |
+| Epochs you want sorted and curated **independently**      | Sort each epoch's interval, then [match them](#matching-separate-epochs-in-one-nwb).                                                        |
+
+Both of the first two paths sort the epochs as one recording, so a unit keeps
+one identity across them; the single-session path never sorts the gaps between
+disjoint intervals. Concatenation adds per-member artifact detection and
+per-member outputs, and is the only one of the two that spans files.
+
 When a chronic implant is recorded across several files on the **same day**, you
 can concatenate the per-member recordings into one masked recording and sort
 them together; this recovers units a per-file sort would split and is the
@@ -1560,8 +1574,11 @@ independently, then match units across sessions. Matching never concatenates raw
 data: it pins one committed curation per **matching input** and reads only the
 traces that sort's sorter read. A matching input is one curated sort -- a
 single-recording `CurationV2` row or a same-day concatenation's parent curation
--- so a two-block daily concatenation contributes one input, not two. Separately
-sorted, disjoint epochs of one NWB can also be matching inputs; see
+-- so a two-block daily concatenation contributes one input, not two. Inputs
+must be v2 curations: a v1 or imported sort cannot be matched until it is
+re-sorted and curated in v2 (see the
+[Migration guide](./SpikeSortingV2_Migration.md#porting-a-v1-sort-to-v2)).
+Separately sorted, disjoint epochs of one NWB can also be matching inputs; see
 [Epoch matching](#matching-separate-epochs-in-one-nwb).
 
 **Overlap restrictions**, enforced by `UnitMatchSelection.insert_inputs` and
@@ -2070,14 +2087,13 @@ with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
 
 - **Streaming `Recording` writes.** `Recording.make` streams the preprocessed
     `ElectricalSeries` to NWB in chunks (buffers of a few seconds: ≈8 s at 32
-    channels, ≈4 s at 128, ≈2.4 s at 384), never holding the full trace array
-    in RAM. Preprocessing
-    runs in float64, but the file stores float32 traces (half the disk and read
-    cost; the rounding is far below the raw int16 step), chunked so each chunk
-    holds every channel and a short full-channel read is one contiguous read.
-    This bounds the write, not the whole workflow: sorting, analyzers and
-    browser payloads have their own costs, and hour-long lab recordings have not
-    been measured. See
+    channels, ≈4 s at 128, ≈2.4 s at 384), never holding the full trace array in
+    RAM. Preprocessing runs in float64, but the file stores float32 traces (half
+    the disk and read cost; the rounding is far below the raw int16 step),
+    chunked so each chunk holds every channel and a short full-channel read is
+    one contiguous read. This bounds the write, not the whole workflow: sorting,
+    analyzers and browser payloads have their own costs, and hour-long lab
+    recordings have not been measured. See
     [Release workload measurement](./SpikeSortingV2StorageManagement.md#release-workload-measurement).
 - **Parallel populate.** `Recording`, the artifact-detection result tables, and
     `Sorting` compute outside DataJoint's framework transaction, so a long sort

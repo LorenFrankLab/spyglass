@@ -21,9 +21,13 @@
 # Part D can run independently:
 #
 # 1. **Concatenate same-day recordings and sort them as one** (Part A). When an
-#    animal was recorded in several blocks on the *same day* on the same probe,
-#    sorting the concatenation (rather than each block separately) keeps a unit's
-#    identity consistent across the blocks. Concatenation is intended for
+#    animal was recorded in several NWB files on the *same day* on the same
+#    probe, sorting the concatenation (rather than each file separately) keeps a
+#    unit's identity consistent across the files. If the day's epochs (e.g. runs
+#    and sleeps) are all in **one** NWB file, you do not need Part A: sort one
+#    interval list covering them with `run_v2_pipeline` (notebook 10). Use Part A
+#    for one-file epochs only if you want per-epoch artifact detection and
+#    per-epoch outputs. Concatenation is intended for
 #    same-day recordings (multi-day concatenation is supported but experimental,
 #    via `allow_multi_day`) and never corrects motion; to follow units across
 #    days, sort each day independently and match them with UnitMatch (Parts B/C).
@@ -44,6 +48,10 @@
 #    existing intervals, sort and review each independently, then match the
 #    exact reviewed curations. Disjoint original raw samples are required;
 #    artifact masks cannot make overlapping epochs independent.
+#
+# Every matching input must be a v2 curation. A sort made and curated in v1
+# cannot be matched directly; re-sort and curate it in v2 first (see
+# `docs/src/Features/SpikeSortingV2_Migration.md`).
 #
 # Parts A and B start from a `SessionGroup`: a named bundle of *members*, where
 # each member is a `(session, sort group, interval)` tuple. Part C names sorts
@@ -88,7 +96,7 @@ dj.config["display.limit"] = 12
 team_name = "my_team"
 session_group_owner = team_name
 
-# Part A — same-day blocks to concatenate and sort as ONE. Each member is a
+# Part A — same-day recordings to concatenate and sort as ONE. Each member is a
 # (session, sort group/shank, interval) tuple, recorded the same day on the same
 # probe. Same-day is the default (allow_multi_day stays False).
 same_day_members = [
