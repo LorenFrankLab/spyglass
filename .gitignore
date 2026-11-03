@@ -6,10 +6,12 @@ mysql_config
 memray*
 root_*.y*ml
 
+# Claude Code planning notes (local only)
+.claude/docs/
+
 # Notebooks
 *.ipynb
 !notebooks/[0-9]*.ipynb
-!notebooks/dev/*.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
