@@ -536,3 +536,95 @@ class TestOutputPositionalAlignment:
         found = DLCStrategy().find_output_files(videos, output_dir=str(out))
 
         assert found == [None, None]
+
+
+class TestSleapEpochBudget:
+    """An epoch budget must reach the run, fresh or continued.
+
+    SLEAP reads its length from the config file, so a budget takes effect only
+    if a config copy carrying it is written. That derivation lives in
+    `_run_training`, the one path both entry points go through.
+    """
+
+    def _resolve(self, SLEAPStrategy, tmp_path, params, **kwargs):
+        """Drive _run_training far enough to resolve the config, then stop."""
+        recorded = {}
+        strategy = SLEAPStrategy()
+
+        labels = tmp_path / "l.slp"
+        labels.touch()
+        rewritten = tmp_path / "rewritten.json"
+        rewritten.touch()
+
+        def _write(config_path, epochs, model_instance):
+            recorded["written"] = (str(config_path), epochs)
+            return rewritten
+
+        def _cmd(config_path, *args, **kw):
+            recorded["config_path"] = config_path
+            raise _Stop
+
+        strategy._write_epochs_config = _write
+        strategy._build_train_cmd = _cmd
+
+        params = {**params}
+        if params.get("initial_config") == "<real>":
+            original = tmp_path / "cfg.json"
+            original.touch()
+            params["initial_config"] = str(original)
+
+        with pytest.raises(_Stop):
+            strategy._run_training(
+                {},
+                params,
+                {"training_labels_path": str(labels)},
+                _Logger(),
+                **kwargs,
+            )
+        recorded["rewritten"] = rewritten
+        return recorded
+
+    def test_params_max_epochs_is_applied(self, SLEAPStrategy, tmp_path):
+        rec = self._resolve(
+            SLEAPStrategy,
+            tmp_path,
+            {"max_epochs": 200, "initial_config": "<real>"},
+        )
+        assert rec["written"][1] == 200
+        assert rec["config_path"] == rec["rewritten"]
+
+    def test_epochs_alias_is_applied(self, SLEAPStrategy, tmp_path):
+        rec = self._resolve(
+            SLEAPStrategy, tmp_path, {"epochs": 50, "initial_config": "<real>"}
+        )
+        assert rec["written"][1] == 50
+
+    def test_explicit_epochs_wins_over_params(self, SLEAPStrategy, tmp_path):
+        rec = self._resolve(
+            SLEAPStrategy,
+            tmp_path,
+            {"max_epochs": 200, "initial_config": "<real>"},
+            epochs=7,
+        )
+        assert rec["written"][1] == 7
+
+    def test_no_budget_uses_the_original_config(self, SLEAPStrategy, tmp_path):
+        rec = self._resolve(
+            SLEAPStrategy, tmp_path, {"initial_config": "<real>"}
+        )
+        assert "written" not in rec
+        assert rec["config_path"].name == "cfg.json"
+
+
+class _Stop(Exception):
+    """Raised by a stub to end _run_training before it spawns anything."""
+
+
+class _Logger:
+    """Minimal stand-in for the Model table's logging surface."""
+
+    def _info_msg(self, *a, **k):
+        pass
+
+    def _warn_msg(self, *a, **k):
+        pass
