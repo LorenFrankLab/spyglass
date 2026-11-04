@@ -47,6 +47,9 @@
         `vars()` #1618
     - `get_ahead_behind_distance` works on results stored before explicit
         decode bins by matching tracking at the stored decode times #1618
+    - `fetch_environments` returns the detector's fitted environments
+        (`environments_`); the detector's `environments` parameter stays
+        configuration #1618
 
 - Spike Sorting
 

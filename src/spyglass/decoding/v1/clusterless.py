@@ -595,8 +595,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        List[TrackGraph]
-            list of track graphs in the trained model
+        tuple[Environment, ...]
+            The environments fitted on the decoding's position data
         """
         from non_local_detector.models.base import ClusterlessDetector
 
@@ -632,7 +632,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             environment_labels=decoding_kwargs.get("environment_labels", None),
         )
 
-        return classifier.environments
+        # fitted copies; ``environments`` keeps the configuration
+        return classifier.environments_
 
     @classmethod
     def fetch_position_info(cls, key):

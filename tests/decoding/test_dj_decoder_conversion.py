@@ -263,7 +263,7 @@ def test_fitted_classifier_params_roundtrip_drops_fitted_state():
     from spyglass.decoding.v1.dj_decoder_conversion import restore_classes
 
     _, classifier = _fitted_track_classifier()
-    fitted_env = classifier.environments[0]
+    fitted_env = classifier.environments_[0]
     assert fitted_env._is_fitted
 
     params = classifier.get_params(deep=False)
