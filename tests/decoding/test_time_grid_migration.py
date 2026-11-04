@@ -919,3 +919,93 @@ def test_actual_fetch_make_and_decode_keep_fractional_boundary_anchors(family):
         distance = method(consumer)
     assert distance.shape == (100,)
     np.testing.assert_allclose(distance, 0.0, atol=1e-12)
+
+
+def legacy_tracking():
+    time = np.arange(11) / 10
+    tracking = pd.DataFrame(
+        {
+            "projected_x_position": 10 * time,
+            "projected_y_position": 0.0,
+            "track_segment_id": np.arange(11) % 3,
+            "head_orientation": np.linspace(-3, 3, 11),
+        },
+        index=time,
+    )
+    return tracking, ["projected_x_position", "projected_y_position"]
+
+
+def align_legacy(tracking, columns, times, caplog=None):
+    results = xr.Dataset(coords={"time": times})
+    return utils.align_tracking_for_results(
+        tracking,
+        results,
+        columns,
+        categorical_columns=["track_segment_id"],
+        circular_columns=["head_orientation"],
+    )
+
+
+def test_results_without_bin_coords_match_tracking_at_decode_times(caplog):
+    tracking, columns = legacy_tracking()
+    times = tracking.index.to_numpy()[2:8]
+    with caplog.at_level(logging.INFO):
+        aligned, valid = align_legacy(tracking, columns, times)
+    assert valid.dtype == bool and valid.all()
+    np.testing.assert_array_equal(aligned.index.to_numpy(), times)
+    np.testing.assert_array_equal(
+        aligned.to_numpy(), tracking.iloc[2:8].to_numpy()
+    )
+    assert aligned["track_segment_id"].tolist() == [2, 0, 1, 2, 0, 1]
+    assert any("predate explicit decode bins" in m for m in caplog.messages)
+
+
+def test_legacy_matching_tolerates_float_jitter_within_half_a_sample():
+    tracking, columns = legacy_tracking()
+    times = tracking.index.to_numpy()[:6] + np.array([1e-9, -1e-9] * 3)
+    aligned, valid = align_legacy(tracking, columns, times)
+    assert valid.all()
+    np.testing.assert_array_equal(
+        aligned[columns].to_numpy(), tracking[columns].iloc[:6].to_numpy()
+    )
+
+
+def test_legacy_unmatched_and_nonfinite_rows_are_invalid():
+    tracking, columns = legacy_tracking()
+    tracking.iloc[3, 0] = np.nan
+    times = np.array([0.0, 0.3, 0.54, 1.5, 2.0])
+    aligned, valid = align_legacy(tracking, columns, times)
+    # 0.3 has NaN position; 0.54 is within half a sample of 0.5; 1.5 and
+    # 2.0 are past the tracking range.
+    assert valid.tolist() == [True, False, True, False, False]
+    assert np.isnan(aligned["projected_x_position"].iloc[[3, 4]]).all()
+
+
+def test_results_with_bin_coords_use_align_tracking_to_results():
+    tracking, columns = legacy_tracking()
+    results = xr.Dataset(
+        coords={
+            "time": [0.25, 0.75],
+            "time_bin_start": ("time", [0.0, 0.5]),
+            "time_bin_end": ("time", [0.5, 1.0]),
+        }
+    )
+    kwargs = dict(
+        position_columns=columns,
+        valid_position_intervals=[[0.0, 1.0]],
+        categorical_columns=["track_segment_id"],
+        circular_columns=["head_orientation"],
+    )
+    direct = analysis.align_tracking_to_results(tracking, results, **kwargs)
+    with patch.object(
+        analysis,
+        "align_tracking_to_results",
+        wraps=analysis.align_tracking_to_results,
+    ) as spy:
+        aligned, valid = utils.align_tracking_for_results(
+            tracking, results, **kwargs
+        )
+    spy.assert_called_once()
+    assert spy.call_args.kwargs == kwargs
+    pd.testing.assert_frame_equal(aligned, direct[0])
+    np.testing.assert_array_equal(valid, direct[1])

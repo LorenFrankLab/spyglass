@@ -27,6 +27,7 @@ from spyglass.decoding.utils import resolve_orientation_col
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
 from spyglass.decoding.v1.utils import (
+    align_tracking_for_results,
     _get_interval_range,
     declared_tracking_intervals,
     decoder_interval_labels,
@@ -873,7 +874,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             tracking = self.fetch_linear_position_info(self.fetch1("KEY"))
             orientation = self.get_orientation_col(tracking)
             columns = ["projected_x_position", "projected_y_position"]
-            aligned, valid = analysis.align_tracking_to_results(
+            aligned, valid = align_tracking_for_results(
                 tracking,
                 results,
                 position_columns=columns,
@@ -903,7 +904,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         else:
             tracking, columns = self.fetch_position_info(self.fetch1("KEY"))
             orientation = self.get_orientation_col(tracking)
-            aligned, valid = analysis.align_tracking_to_results(
+            aligned, valid = align_tracking_for_results(
                 tracking,
                 results,
                 position_columns=columns,

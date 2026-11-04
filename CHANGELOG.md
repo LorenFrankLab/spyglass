@@ -45,6 +45,8 @@
     - `DecodingParameters.insert` raises `TypeError` for objects that are
         neither a detector (`get_params`) nor a dict, instead of storing
         `vars()` #1618
+    - `get_ahead_behind_distance` works on results stored before explicit
+        decode bins by matching tracking at the stored decode times #1618
 
 - Spike Sorting
 

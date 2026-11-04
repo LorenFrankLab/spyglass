@@ -8,6 +8,10 @@ import numpy.typing as npt
 import xarray as xr
 from scipy.ndimage import label
 
+# A child of the "spyglass" logger; importing spyglass.utils here would
+# load the DataJoint stack that the hermetic decoding tests avoid.
+logger = logging.getLogger(__name__)
+
 
 def create_interval_labels(
     is_missing: npt.NDArray[np.bool_],
@@ -444,3 +448,67 @@ def decoder_interval_labels(edges, intervals):
     for number, selected in enumerate(_interval_bin_masks(edges, intervals)):
         labels[selected] = number
     return labels
+
+
+def align_tracking_for_results(
+    tracking,
+    results,
+    position_columns,
+    valid_position_intervals=None,
+    categorical_columns=(),
+    circular_columns=(),
+):
+    """Align tracking rows to decoding results, including legacy results.
+
+    Results with ``time_bin_start`` and ``time_bin_end`` coordinates go
+    through ``non_local_detector.analysis.align_tracking_to_results``.
+    Results stored before explicit decode bins have only ``time`` and were
+    decoded at the tracking timestamps, so tracking is matched at
+    ``results.time``: exact rows, or the nearest row within half the median
+    tracking sample interval to tolerate float round-off. Unmatched rows and
+    rows with non-finite position are not valid. Categorical and circular
+    columns keep their plain values in this fallback, and
+    ``valid_position_intervals`` is not used.
+
+    Parameters
+    ----------
+    tracking : pd.DataFrame, shape (n_tracking, n_columns)
+        Tracking indexed by time in seconds.
+    results : xr.Dataset
+        Decoding results with a ``time`` coordinate of length ``n_time``.
+    position_columns : list of str
+        Position columns of ``tracking``.
+    valid_position_intervals : optional
+        Passed to ``align_tracking_to_results`` when bin coordinates exist.
+    categorical_columns, circular_columns : sequence of str
+        Passed to ``align_tracking_to_results`` when bin coordinates exist.
+
+    Returns
+    -------
+    aligned : pd.DataFrame, shape (n_time, n_columns)
+    valid : np.ndarray of bool, shape (n_time,)
+    """
+    from non_local_detector.analysis import align_tracking_to_results
+
+    if "time_bin_start" in results.coords and "time_bin_end" in results.coords:
+        return align_tracking_to_results(
+            tracking,
+            results,
+            position_columns=position_columns,
+            valid_position_intervals=valid_position_intervals,
+            categorical_columns=list(categorical_columns),
+            circular_columns=list(circular_columns),
+        )
+    logger.info(
+        "Decoding results predate explicit decode bins; matching tracking "
+        "at the decode times."
+    )
+    times = np.asarray(results["time"].values)
+    tracking = tracking[~tracking.index.duplicated()]
+    steps = np.diff(tracking.index.to_numpy(dtype=float))
+    tolerance = 0.5 * np.median(steps) if steps.size else 0.0
+    aligned = tracking.reindex(times, method="nearest", tolerance=tolerance)
+    valid = np.isfinite(
+        aligned[list(position_columns)].to_numpy(dtype=float)
+    ).all(axis=1)
+    return aligned, valid
