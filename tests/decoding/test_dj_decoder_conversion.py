@@ -283,7 +283,7 @@ def test_fitted_classifier_params_roundtrip_drops_fitted_state():
     restored_env = restored.environments[0]
     assert isinstance(restored_env, Environment)
     assert not restored_env._is_fitted
-    assert restored_env.place_bin_centers_ is None
+    assert getattr(restored_env, "place_bin_centers_", None) is None
     assert restored_env.environment_name == "track"
     assert restored_env.track_graph.number_of_nodes() == 2
     # Serialization did not mutate the live fitted environment.
@@ -315,7 +315,7 @@ def test_convert_env_dict_legacy_row_with_fitted_keys(with_track_graph_dd):
     assert isinstance(env, Environment)
     assert env.environment_name == "old"
     assert not env._is_fitted
-    assert env.place_bin_centers_ is None
+    assert getattr(env, "place_bin_centers_", None) is None
 
 
 def test_convert_env_dict_warns_only_on_unknown_keys(monkeypatch):
@@ -331,6 +331,9 @@ def test_convert_env_dict_warns_only_on_unknown_keys(monkeypatch):
     legacy = {
         **Environment(environment_name="old").get_params(),
         "place_bin_centers_": None,
+        "edges_": None,
+        "distance_between_nodes_": None,
+        "nodes_df_": None,
         "_is_fitted": False,
         "_cache": None,
         "track_graphDD": None,

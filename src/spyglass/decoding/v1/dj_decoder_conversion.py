@@ -4,7 +4,6 @@ so that datajoint can store them in tables."""
 from __future__ import annotations
 
 import copy
-import dataclasses
 import inspect
 import logging
 from typing import TYPE_CHECKING
@@ -146,14 +145,17 @@ def _convert_env_dict(env_params: dict) -> Environment:
     from non_local_detector.environment import Environment
 
     config_keys = Environment().get_params().keys()
-    # Legacy rows were stored with vars(env): fitted attributes and private
-    # state, which are dropped. Anything else is unexpected (a typo, or a
-    # setting from a newer non_local_detector), so say so instead of hiding it.
-    legacy_keys = {
-        field.name
-        for field in dataclasses.fields(Environment)
-        if field.metadata.get("fitted")
-    } | {"_is_fitted", "_cache", "track_graphDD"}
+    # Legacy rows were stored with vars(env): fitted attributes (named with a
+    # trailing underscore, plus track_graphDD) and private state, which are
+    # dropped. Environment no longer declares the fitted attributes as fields,
+    # so they are recognized by name. Anything else is unexpected (a typo, or
+    # a setting from a newer non_local_detector), so say so instead of hiding
+    # it.
+    legacy_keys = {key for key in env_params if key.endswith("_")} | {
+        "_is_fitted",
+        "_cache",
+        "track_graphDD",
+    }
     unknown = sorted(set(env_params) - set(config_keys) - legacy_keys)
     if unknown:
         logger.warning(
