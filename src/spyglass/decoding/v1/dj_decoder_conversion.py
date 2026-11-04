@@ -145,15 +145,17 @@ def _convert_env_dict(env_params: dict) -> Environment:
     from non_local_detector.environment import Environment
 
     config_keys = Environment().get_params().keys()
-    # Legacy rows were stored with vars(env): fitted attributes (named with a
+    # Rows stored with vars(env) also hold fitted attributes (named with a
     # trailing underscore, plus track_graphDD) and private state, which are
-    # dropped. Environment no longer declares the fitted attributes as fields,
-    # so they are recognized by name. Anything else is unexpected (a typo, or
-    # a setting from a newer non_local_detector), so say so instead of hiding
-    # it.
+    # dropped: _is_fitted and _cache from earlier releases, _place_grid (the
+    # fitted geometry) from current ones. Environment no longer declares the
+    # fitted attributes as fields, so they are recognized by name. Anything
+    # else is unexpected (a typo, or a setting from a newer
+    # non_local_detector), so say so instead of hiding it.
     legacy_keys = {key for key in env_params if key.endswith("_")} | {
         "_is_fitted",
         "_cache",
+        "_place_grid",
         "track_graphDD",
     }
     unknown = sorted(set(env_params) - set(config_keys) - legacy_keys)

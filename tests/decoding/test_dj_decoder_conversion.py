@@ -342,6 +342,15 @@ def test_convert_env_dict_warns_only_on_unknown_keys(monkeypatch):
     dj_decoder_conversion._convert_env_dict(dict(legacy))
     assert warnings == []
 
+    # vars() of a current fitted environment holds its grid as _place_grid.
+    dj_decoder_conversion._convert_env_dict(
+        {
+            **Environment(environment_name="old").get_params(),
+            "_place_grid": None,
+        }
+    )
+    assert warnings == []
+
     env = dj_decoder_conversion._convert_env_dict(
         {**legacy, "place_bin_sise": 2.0}
     )
