@@ -50,6 +50,10 @@
     - `fetch_environments` returns the detector's fitted environments
         (`environments_`); the detector's `environments` parameter stays
         configuration #1618
+    - Fitted models are saved in non_local_detector's versioned `.nld` format
+        instead of a pickle; models stored as `.pkl` by earlier runs still load,
+        and `cleanup` removes unregistered files of both kinds. `fetch_model`
+        trusts the transition formulas of the models Spyglass saved #1618
 
 - Spike Sorting
 

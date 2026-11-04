@@ -81,7 +81,14 @@ class DecodingOutput(_Merge, SpyglassMixin):
                         logger.warning(f"Unable to remove {path}, skipping")
 
         table_model_paths = self._fetch_registered_paths("classifier_path")
-        for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
+        analysis_dir = Path(config["SPYGLASS_ANALYSIS_DIR"])
+        # Models are .nld files; entries made before non_local_detector 0.7
+        # point at .pkl files.
+        model_files = [
+            *analysis_dir.glob("**/*.nld"),
+            *analysis_dir.glob("**/*.pkl"),
+        ]
+        for path in model_files:
             if str(path) not in table_model_paths:
                 self._info_msg(f"Removing {path}")
                 if not dry_run:

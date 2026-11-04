@@ -534,7 +534,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         results_path : Path
             Path where results were saved (.nc file)
         classifier_path : Path
-            Path where classifier was saved (.pkl file)
+            Path where classifier was saved (.nld file)
         """
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
@@ -554,7 +554,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Save results and model to disk
         classifier.save_results(results, results_path)
 
-        classifier_path = results_path.with_suffix(".pkl")
+        classifier_path = results_path.with_suffix(".nld")
         classifier.save_model(classifier_path)
 
         return results_path, classifier_path
@@ -582,7 +582,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         """Retrieve the decoding model"""
         from non_local_detector.models.base import ClusterlessDetector
 
-        return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
+        # Spyglass reads models it saved itself, so their transition formulas
+        # are trusted. Older entries point at .pkl files, which load_model
+        # still reads (it detects the format from the file, not the suffix).
+        return ClusterlessDetector.load_model(
+            self.fetch1("classifier_path"), trust_formulas=True
+        )
 
     @classmethod
     def fetch_environments(cls, key):
