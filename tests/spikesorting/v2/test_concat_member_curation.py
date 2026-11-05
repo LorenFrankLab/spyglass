@@ -365,45 +365,56 @@ def test_session_consumers_read_member_row(concat_member_curation):
 
     UnitSelectionParams.insert_default()
     group_name = "concat_member_curation_consumer"
-    SortedSpikesGroup().create_group(
-        group_name=group_name,
-        nwb_file_name=row["nwb_file_name"],
-        unit_filter_params_name="all_units",
-        keys=[{"spikesorting_merge_id": merge_id}],
-    )
-    group_key = {
-        "nwb_file_name": row["nwb_file_name"],
-        "unit_filter_params_name": "all_units",
-        "sorted_spikes_group_name": group_name,
-    }
-    spikes, ids = SortedSpikesGroup.fetch_spike_data(
-        group_key, return_unit_ids=True
-    )
-    assert ids == [{"spikesorting_merge_id": merge_id, "unit_id": unit_id}]
-    np.testing.assert_array_equal(spikes[0], expected_spikes)
-
-    annotation_key = {
-        "spikesorting_merge_id": merge_id,
-        "unit_id": unit_id,
-        "annotation": "cell_type",
-        "label": "test_cell",
-    }
-    UnitAnnotation().add_annotation(annotation_key)
-    annotation_unit_key = {
-        key: annotation_key[key] for key in ("spikesorting_merge_id", "unit_id")
-    }
-    annotated = (UnitAnnotation & annotation_unit_key).fetch_unit_spikes()
-    np.testing.assert_array_equal(annotated[0], expected_spikes)
-
-    # The generic merge FK cannot encode the group's Session. The explicit
-    # member-session guard rejects a valid member output placed in the wrong
-    # session rather than silently mixing incompatible wall-clock axes.
-    with pytest.raises(ValueError, match="different session"):
+    try:
         SortedSpikesGroup().create_group(
-            group_name="concat_member_wrong_session",
-            nwb_file_name=ctx["rows"][1]["nwb_file_name"],
+            group_name=group_name,
+            nwb_file_name=row["nwb_file_name"],
             unit_filter_params_name="all_units",
             keys=[{"spikesorting_merge_id": merge_id}],
+        )
+        group_key = {
+            "nwb_file_name": row["nwb_file_name"],
+            "unit_filter_params_name": "all_units",
+            "sorted_spikes_group_name": group_name,
+        }
+        spikes, ids = SortedSpikesGroup.fetch_spike_data(
+            group_key, return_unit_ids=True
+        )
+        assert ids == [{"spikesorting_merge_id": merge_id, "unit_id": unit_id}]
+        np.testing.assert_array_equal(spikes[0], expected_spikes)
+
+        annotation_key = {
+            "spikesorting_merge_id": merge_id,
+            "unit_id": unit_id,
+            "annotation": "cell_type",
+            "label": "test_cell",
+        }
+        UnitAnnotation().add_annotation(annotation_key)
+        annotation_unit_key = {
+            key: annotation_key[key]
+            for key in ("spikesorting_merge_id", "unit_id")
+        }
+        annotated = (UnitAnnotation & annotation_unit_key).fetch_unit_spikes()
+        np.testing.assert_array_equal(annotated[0], expected_spikes)
+
+        # The generic merge FK cannot encode the group's Session. The explicit
+        # member-session guard rejects a valid member output placed in the wrong
+        # session rather than silently mixing incompatible wall-clock axes.
+        with pytest.raises(ValueError, match="different session"):
+            SortedSpikesGroup().create_group(
+                group_name="concat_member_wrong_session",
+                nwb_file_name=ctx["rows"][1]["nwb_file_name"],
+                unit_filter_params_name="all_units",
+                keys=[{"spikesorting_merge_id": merge_id}],
+            )
+    finally:
+        # Both rows refer to the shared fixture's member curation, whose
+        # delete refuses while they exist.
+        (
+            SortedSpikesGroup & {"sorted_spikes_group_name": group_name}
+        ).super_delete(warn=False, safemode=False)
+        (UnitAnnotation & {"spikesorting_merge_id": merge_id}).super_delete(
+            warn=False, safemode=False
         )
 
 
