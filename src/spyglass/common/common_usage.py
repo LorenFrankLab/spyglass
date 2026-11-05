@@ -329,6 +329,28 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         return restr_graph
 
+    @staticmethod
+    def _graph_analysis_tables(restr_graph: RestrGraph) -> List[str]:
+        """Return names of the analysis tables a cascaded RestrGraph restricts.
+
+        Parameters
+        ----------
+        restr_graph : RestrGraph
+            A cascaded RestrGraph object.
+
+        Returns
+        -------
+        table_names : List[str]
+            Full table names of common and custom AnalysisNwbfile tables.
+        """
+        return sorted(
+            name
+            for name in restr_graph.included_tables
+            if name.endswith("_nwbfile`.`analysis_nwbfile`")
+            # A node can be in the graph without contributing rows
+            and restr_graph._get_restr(name)
+        )
+
     def _add_registry_to_restr_graph(
         self, restr_graph: RestrGraph
     ) -> RestrGraph:
@@ -351,10 +373,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """
         schemas = {
             name.split(".")[0].strip("`")
-            for name in restr_graph.included_tables
-            if name.endswith("_nwbfile`.`analysis_nwbfile`")
-            # A node can be in the graph without contributing rows
-            and restr_graph._get_restr(name)
+            for name in self._graph_analysis_tables(restr_graph)
         }
 
         if not schemas:
@@ -375,6 +394,62 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             restr=f"full_table_name REGEXP '{pattern}'",
         )
         restr_graph.visited.add(registry_name)
+
+        return restr_graph
+
+    def _add_custom_externals_to_restr_graph(
+        self, restr_graph: RestrGraph
+    ) -> RestrGraph:
+        """Add custom analysis external tables to a cascaded RestrGraph.
+
+        Each custom AnalysisNwbfile schema keeps its own external table, which
+        is how its `analysis_file_abs_path` resolves. Common's externals are
+        added before the cascade from logged file names; custom tables are only
+        known once the cascade has run.
+
+        Parameters
+        ----------
+        restr_graph : RestrGraph
+            A cascaded RestrGraph object to add the external tables to.
+
+        Returns
+        -------
+        restr_graph : RestrGraph
+            The updated RestrGraph
+        """
+        custom_tables = [
+            name
+            for name in self._graph_analysis_tables(restr_graph)
+            if name != AnalysisNwbfile().full_table_name
+        ]
+        if not custom_tables:
+            return restr_graph
+
+        externals = {
+            ext.database: ext for ext in AnalysisRegistry().get_externals()
+        }
+
+        for name in custom_tables:
+            database = name.split(".")[0].strip("`")
+            if not (ext_tbl := externals.get(database)):
+                logger.warning(f"No analysis external table for {database}")
+                continue
+
+            files = restr_graph._get_ft(name, with_restr=True).fetch(
+                "analysis_file_name"
+            )
+            if not len(files):
+                continue
+
+            # REGEXP rather than `in`, as in _add_externals_to_restr_graph:
+            # filepath holds a subdir-relative path, not a bare file name
+            ext_name = ext_tbl.full_table_name
+            restr_graph.graph.add_node(
+                ext_name,
+                ft=ext_tbl,
+                restr="filepath REGEXP '" + "|".join(files) + "'",
+            )
+            restr_graph.visited.add(ext_name)
 
         return restr_graph
 
@@ -431,6 +506,9 @@ class ExportSelection(SpyglassMixin, dj.Manual):
                 # After the cascade: custom analysis tables arrive as parents
                 # of the logged leaves, not as leaves themselves.
                 restr_graph = self._add_registry_to_restr_graph(restr_graph)
+                restr_graph = self._add_custom_externals_to_restr_graph(
+                    restr_graph
+                )
             return restr_graph
 
         # Restrict the graph to only include entries stemming from the
@@ -468,6 +546,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         if cascade:
             restr_graph.cascade()
             restr_graph = self._add_registry_to_restr_graph(restr_graph)
+            restr_graph = self._add_custom_externals_to_restr_graph(restr_graph)
 
         return restr_graph
 
