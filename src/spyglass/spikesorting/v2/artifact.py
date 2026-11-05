@@ -1396,3 +1396,12 @@ def assert_artifact_detection_covers_recording(
         "SharedGroupArtifactDetection. Populate the artifact detection "
         "before linking it."
     )
+
+
+# Declare the ArtifactDetectionOutput merge with this module. Detection
+# make_insert writes its merge row inside the populate transaction, where
+# DataJoint cannot create a table. This import is last because
+# artifact_output imports the detection tables above.
+from spyglass.spikesorting.v2 import (  # noqa: E402, F401
+    artifact_output as _artifact_output,
+)

@@ -577,3 +577,40 @@ def test_shared_group_member_set_frozen(monkeypatch):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         for rid in (rid_a, rid_b, rid_c):
             _drop_fake_recording(rid)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_importing_artifact_declares_the_detection_output_merge(tmp_path):
+    """Importing ``artifact`` alone declares ``ArtifactDetectionOutput``.
+
+    Detection ``make_insert`` registers its merge row inside the populate
+    transaction, where DataJoint refuses to create a table. A fresh process
+    that imports only ``artifact`` must therefore already have the merge
+    table, or the first populate on a new database fails.
+    """
+    import os
+    import subprocess
+    import sys
+
+    import datajoint as dj
+
+    env = {
+        **os.environ,
+        "DJ_HOST": f"{dj.config['database.host']}:{dj.config['database.port']}",
+        "DJ_USER": dj.config["database.user"],
+        "DJ_PASS": dj.config["database.password"],
+    }
+    code = (
+        "import sys\n"
+        "import spyglass.spikesorting.v2.artifact\n"
+        "print('spyglass.spikesorting.v2.artifact_output' in sys.modules)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip().splitlines()[-1] == "True"
