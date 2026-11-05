@@ -15,7 +15,11 @@ from datajoint.condition import make_condition
 from pynwb import NWBHDF5IO
 from tqdm import tqdm
 
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_nwbfile import (
+    AnalysisNwbfile,
+    AnalysisRegistry,
+    Nwbfile,
+)
 from spyglass.settings import debug_mode, test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dandi_file_updates import update_analysis_for_dandi_standard
@@ -325,6 +329,55 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         return restr_graph
 
+    def _add_registry_to_restr_graph(
+        self, restr_graph: RestrGraph
+    ) -> RestrGraph:
+        """Add AnalysisRegistry to a cascaded RestrGraph, if needed.
+
+        The registry is keyed by other tables' names and has no foreign keys,
+        so the cascade cannot reach it. Restricted to the analysis tables the
+        graph restricts, so an export carries only the entries needed to
+        resolve its own files.
+
+        Parameters
+        ----------
+        restr_graph : RestrGraph
+            A cascaded RestrGraph object to add the registry to.
+
+        Returns
+        -------
+        restr_graph : RestrGraph
+            The updated RestrGraph
+        """
+        schemas = {
+            name.split(".")[0].strip("`")
+            for name in restr_graph.included_tables
+            if name.endswith("_nwbfile`.`analysis_nwbfile`")
+            # A node can be in the graph without contributing rows
+            and restr_graph._get_restr(name)
+        }
+
+        if not schemas:
+            return restr_graph
+
+        # Each '.' stands in for one of the backticks around the schema name.
+        # A backtick in the dump's `--where="..."` would open a bash command
+        # substitution, so bash_escape_sql strips them; a restriction holding
+        # the backticked name survives DataJoint and then matches nothing once
+        # dumped. Anchoring keeps one prefix from matching another's.
+        pattern = "|".join(f"^.{schema}." for schema in sorted(schemas))
+
+        registry = AnalysisRegistry()
+        registry_name = registry.full_table_name
+        restr_graph.graph.add_node(
+            registry_name,
+            ft=registry,
+            restr=f"full_table_name REGEXP '{pattern}'",
+        )
+        restr_graph.visited.add(registry_name)
+
+        return restr_graph
+
     def get_restr_graph(
         self, key: dict, verbose=False, cascade=True, included_nwb_files=None
     ) -> RestrGraph:
@@ -375,6 +428,9 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
             if cascade:
                 restr_graph.cascade()
+                # After the cascade: custom analysis tables arrive as parents
+                # of the logged leaves, not as leaves themselves.
+                restr_graph = self._add_registry_to_restr_graph(restr_graph)
             return restr_graph
 
         # Restrict the graph to only include entries stemming from the
@@ -411,6 +467,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         if cascade:
             restr_graph.cascade()
+            restr_graph = self._add_registry_to_restr_graph(restr_graph)
 
         return restr_graph
 
