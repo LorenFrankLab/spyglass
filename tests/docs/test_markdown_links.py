@@ -38,12 +38,7 @@ SITE_NB_RE = re.compile(
 )
 
 # Broken today, but owned elsewhere -- do not fail this suite on them.
-KNOWN_BROKEN = {
-    # `CustomAnalysisFiles.md` has never been written. The same dead path
-    # is advertised to users by `src/spyglass/utils/dj_mixin.py`; both are
-    # tracked separately from the QUICKSTART fix.
-    ("ForDevelopers/Management.md", "./CustomAnalysisFiles.md"),
-}
+KNOWN_BROKEN = set()
 
 CHECKED_SUFFIXES = (".md", ".ipynb")
 SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "//")

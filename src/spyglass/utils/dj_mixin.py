@@ -231,7 +231,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
     See Also:
         spyglass.common.custom_nwbfile for the pre-configured table.
-        docs/src/ForDevelopers/CustomAnalysisFiles.md for comprehensive guide.
+        docs/src/ForDevelopers/Classes.md for comprehensive guide.
     """
 
     def __init__(self, *args, **kwargs):

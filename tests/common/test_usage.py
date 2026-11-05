@@ -331,7 +331,7 @@ def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
     assert len(file) == 5, "Export files not captured correctly"
-    assert len(table) == 39, "Export tables not captured correctly"
+    assert len(table) == 41, "Export tables not captured correctly"
 
 
 def test_intersect_export_populate(populate_intersect_export, common):
@@ -408,3 +408,72 @@ def test_custom_analysis_in_export(gen_export_selection, populate_export):
     assert any(
         custom_abs_path in fp for fp in file_paths
     ), f"Custom file {custom_abs_path} not in export files"
+
+
+def test_registry_in_export(gen_export_selection, populate_export, common):
+    """Test that AnalysisRegistry entries are included in the Export.
+
+    Verifies:
+    - The registry appears in Export.Table
+    - Its restriction selects the export's analysis tables, and only those
+    """
+    custom_table = gen_export_selection["custom_table"]
+    export_tables, _ = populate_export
+    registry = common.common_nwbfile.AnalysisRegistry()
+
+    entry = export_tables & {"table_name": registry.full_table_name}
+    assert len(entry) == 1, "AnalysisRegistry not in Export.Table"
+
+    got = set((registry & entry.fetch1("restriction")).fetch("full_table_name"))
+    expected = {
+        common.common_nwbfile.AnalysisNwbfile().full_table_name,
+        custom_table.full_table_name,
+    }
+    assert got == expected, "Registry entries do not match export's tables"
+
+
+def test_custom_external_in_export(gen_export_selection, populate_export):
+    """Test that the custom schema's external table is in the Export.
+
+    Verifies:
+    - The external table appears in Export.Table
+    - Its restriction covers the custom analysis file
+    """
+    custom_table = gen_export_selection["custom_table"]
+    custom_file = gen_export_selection["custom_file"]
+    export_tables, _ = populate_export
+
+    ext_tbl = custom_table._ext_tbl
+    entry = export_tables & {"table_name": ext_tbl.full_table_name}
+    assert len(entry) == 1, "Custom external table not in Export.Table"
+
+    paths = (ext_tbl & entry.fetch1("restriction")).fetch("filepath")
+    assert any(
+        custom_file in path for path in paths
+    ), f"Custom file {custom_file} not in restricted external table"
+
+
+def test_export_graph_without_analysis(export_tbls):
+    """Test that graphs with no analysis tables gain no extra nodes.
+
+    Verifies:
+    - Both graph additions return the graph unchanged
+    """
+    ExportSelection, _ = export_tbls
+
+    class MockGraph:
+        """Stand-in exposing only what the graph additions read."""
+
+        included_tables = {"`common_lab`.`lab_member`"}
+
+        def _get_restr(self, table_name):
+            return "lab_member_name = 'This Person'"
+
+    graph = MockGraph()
+
+    assert (
+        ExportSelection._add_registry_to_restr_graph(graph) is graph
+    ), "Registry added to a graph with no analysis tables"
+    assert (
+        ExportSelection._add_custom_externals_to_restr_graph(graph) is graph
+    ), "External added to a graph with no analysis tables"

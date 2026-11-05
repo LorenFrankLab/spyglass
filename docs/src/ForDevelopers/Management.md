@@ -453,6 +453,6 @@ not concurrently register or mutate eligible analysis paths.
 ### Custom Tables
 
 If you've created custom `AnalysisNwbfile` tables (see
-[Custom Analysis Files](./CustomAnalysisFiles.md)), cleanup works automatically.
-No special configuration needed - just run cleanup on the common table and it
-handles all custom tables.
+[Custom Analysis File Tables](./Classes.md#custom-analysis-file-tables)),
+cleanup works automatically. Run cleanup on the common table and it handles all
+custom tables.
