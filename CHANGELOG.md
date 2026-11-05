@@ -127,6 +127,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Fix export process to include `AnalysisRegistry`, custom analysis tables, and
+    custom externals. #XXXX
 
 ### Pipelines
 
