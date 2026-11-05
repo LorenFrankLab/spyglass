@@ -344,6 +344,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         generic cascade without invoking this guard). These are intentionally
         unaffected; :meth:`audit_orphaned_lineage` detects any orphan they leave.
 
+        The delete also refuses while another table uses a curation's
+        ``SpikeSortingOutput`` entry (a ``SortedSpikesGroup``, a unit
+        annotation, waveform features). Delete those rows first.
+
         A leading positional restriction is accepted for the
         ``Table().delete(restriction)`` form.
         """

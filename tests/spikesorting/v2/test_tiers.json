@@ -116,6 +116,7 @@
     "test_analysis_selection.py": {
       "tier": "unit",
       "overrides": {
+        "test_curation_delete_refuses_while_an_analysis_group_uses_it": "stage",
         "test_nullable_annotation_criteria_freeze_the_selected_population": "stage",
         "test_select_units_for_analysis_round_trip": "stage"
       }

@@ -179,6 +179,39 @@ class ConcatMemberCuration(
         )
 
     @staticmethod
+    def _merge_referrers(merge_ids) -> dict[str, int]:
+        """Count rows outside the merge table that use these merge entries.
+
+        The foreign keys come from ``information_schema``, so a referencing
+        table counts even when its module is not imported in this process.
+        """
+        if not merge_ids:
+            return {}
+        from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+        master = SpikeSortingOutput()
+        schema, table = master.full_table_name.replace("`", "").split(".")
+        foreign_keys = master.connection.query(
+            "SELECT table_schema, table_name, column_name "
+            "FROM information_schema.key_column_usage "
+            "WHERE referenced_table_schema = %s "
+            "AND referenced_table_name = %s "
+            "AND referenced_column_name = 'merge_id'",
+            args=(schema, table),
+        ).fetchall()
+        own_parts = set(master.parts())
+        counts = {}
+        for child_schema, child_table, column in foreign_keys:
+            name = f"`{child_schema}`.`{child_table}`"
+            if name in own_parts:
+                continue
+            child = dj.FreeTable(master.connection, name)
+            n_rows = len(child & [{column: m} for m in merge_ids])
+            if n_rows:
+                counts[name] = n_rows
+        return counts
+
+    @staticmethod
     def _cleanup_orphaned_merge_masters(merge_ids) -> None:
         """Remove merge masters whose captured source parts were deleted."""
         if not merge_ids:
@@ -190,11 +223,10 @@ class ConcatMemberCuration(
             as_objects=True
         )
         if orphaned:
-            # A merge master may already feed a SortedSpikesGroup (a part table)
-            # or another downstream consumer. Delete only the referencing rows;
-            # force_masters would remove an entire group that may contain other
-            # outputs. Call DataJoint's primitive directly because Merge's
-            # ``super_delete`` intentionally re-enters cautious deletion.
+            # _delete_and_reclaim refused the delete if any other table used
+            # these masters, so nothing downstream remains. Call DataJoint's
+            # primitive directly because Merge's ``super_delete``
+            # intentionally re-enters cautious deletion.
             dj.Table.delete(
                 orphaned,
                 safemode=False,
@@ -340,10 +372,28 @@ class ConcatMemberCuration(
         -------
         object
             Whatever ``delete`` returns.
+
+        Raises
+        ------
+        ValueError
+            If another table still uses one of ``merge_ids``.
         """
         dry_run = bool(kwargs.get("dry_run", False))
         if dry_run:
             cls._delete_inventory(member_rows, context=context)
+        else:
+            # The merge masters are removed after the confirmation prompt, so
+            # rows that use them (a SortedSpikesGroup, unit annotations,
+            # waveform features) would go without the user seeing them.
+            referrers = cls._merge_referrers(merge_ids)
+            if referrers:
+                raise ValueError(
+                    f"{context}: refusing to delete. Other tables still use "
+                    "the SpikeSortingOutput entries of these curations: "
+                    f"{referrers} (rows per table). Delete those rows first "
+                    "(for example the SortedSpikesGroup that holds the "
+                    "curation), then delete the curation."
+                )
         # ``force_masters=True`` is normally how cautious deletion removes a
         # merge master through its source part. CurationV2 has nested parts,
         # though, and DataJoint 0.14 can then revisit/delete CurationV2 through

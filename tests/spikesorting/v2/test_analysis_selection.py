@@ -296,6 +296,54 @@ def test_select_units_for_analysis_round_trip(
         clear_curations_for(sorting_key)
 
 
+def test_curation_delete_refuses_while_an_analysis_group_uses_it(
+    planted_three_unit_sort, monkeypatch
+):
+    """A curation that a SortedSpikesGroup uses cannot be deleted.
+
+    The delete removes the curation's merge entry after the confirmation
+    prompt. Without the refusal, that cleanup also dropped the group's unit
+    rows, and left the group (and anything decoded from it) in place.
+    """
+    from spyglass.spikesorting.analysis.v1 import group as group_module
+    from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+    from spyglass.spikesorting.v2.analysis_selection import (
+        select_units_for_analysis,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_three_unit_sort)
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(sorting_key)
+    root = CurationV2.insert_curation(sorting_key)
+    labeled = CurationV2.insert_curation(
+        sorting_key,
+        labels={unit_ids[0]: ["accept"]},
+        parent_curation_id=root["curation_id"],
+    )
+    monkeypatch.setattr(group_module, "test_mode", False)
+    created = []
+    try:
+        receipt = select_units_for_analysis(CurationRef.from_key(labeled))
+        created.extend(g.group_key for g in receipt.groups)
+        group_key = dict(created[0])
+
+        with pytest.raises(ValueError, match="sorted_spikes_group"):
+            (CurationV2 & labeled).delete(safemode=False)
+
+        assert CurationV2 & labeled
+        assert SortedSpikesGroup.Units & group_key
+    finally:
+        for group_key in created:
+            (SortedSpikesGroup & dict(group_key)).super_delete(warn=False)
+        clear_curations_for(sorting_key)
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_nullable_annotation_criteria_freeze_the_selected_population(
