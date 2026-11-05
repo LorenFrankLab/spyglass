@@ -611,6 +611,72 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
         clean_session_groups_for_owner(owner)
 
 
+@pytest.mark.slow
+def test_concat_selection_needs_the_member_recording_for_current_inputs(
+    chronic_2_session_minirec,
+):
+    """A member recording built before a sort-group change is not used.
+
+    A reference change gives the member new recording inputs. The concat
+    selection must use the recording for the current inputs. None is populated
+    here, so the member is reported as missing: both before and after the
+    member is selected again for the new inputs (which adds a second
+    ``RecordingSelection`` row for the same logical key).
+    """
+    from spyglass.spikesorting.v2.exceptions import (
+        MissingRecordingForConcatError,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from tests.spikesorting.v2._ingest_helpers import (
+        clean_session_groups_for_owner,
+    )
+
+    sub = chronic_2_session_minirec
+    owner, name = sub["owner"], "sg_changed_member_inputs"
+    members = sub["same_day_members"]
+    SessionGroup.create_group(owner, name, members)
+    sort_group_key = {
+        "nwb_file_name": members[0]["nwb_file_name"],
+        "sort_group_id": members[0]["sort_group_id"],
+    }
+    original_mode = (SortGroupV2 & sort_group_key).fetch1("reference_mode")
+    changed_mode = "none" if original_mode != "none" else "global_median"
+    request = {
+        "session_group_owner": owner,
+        "session_group_name": name,
+        "preprocessing_params_name": "default",
+    }
+    new_selection = None
+    try:
+        SortGroupV2().update1(
+            {**sort_group_key, "reference_mode": changed_mode}
+        )
+        with pytest.raises(MissingRecordingForConcatError, match="populate"):
+            select_unmasked_concat(request)
+
+        new_selection = RecordingSelection.insert_selection(
+            {
+                **members[0],
+                "preprocessing_params_name": "default",
+                "team_name": owner,
+            }
+        )
+        assert new_selection != sub["recording_pks"][0]
+        with pytest.raises(MissingRecordingForConcatError, match="populate"):
+            select_unmasked_concat(request)
+    finally:
+        clean_session_groups_for_owner(owner)
+        if new_selection is not None:
+            (RecordingSelection & new_selection).super_delete(warn=False)
+        SortGroupV2().update1(
+            {**sort_group_key, "reference_mode": original_mode}
+        )
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_concat_selection_rejects_unknown_fields():
     """A concat selection refuses any field outside its identity, including

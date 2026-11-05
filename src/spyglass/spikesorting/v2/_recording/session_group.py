@@ -213,6 +213,7 @@ def plan_concat_selection(
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
+        resolve_recording_input_hash,
     )
     from spyglass.spikesorting.v2.session_group import (
         SessionGroup,
@@ -289,7 +290,18 @@ def plan_concat_selection(
         rec_sel_key = member_recording_selection_key(
             member, preprocessing_params_name
         )
-        rec_sel = RecordingSelection & rec_sel_key
+        # A changed sort group (reference, interpolated bad channels) adds a
+        # selection with a new input hash beside the old one; use the one
+        # built from the current inputs.
+        input_hash = resolve_recording_input_hash(
+            rec_sel_key["nwb_file_name"],
+            rec_sel_key["sort_group_id"],
+            preprocessing_params_name,
+        )
+        rec_sel = RecordingSelection & {
+            **rec_sel_key,
+            "recording_input_hash": input_hash,
+        }
         rec_pk = rec_sel.fetch1("KEY") if rec_sel else None
         content_hashes = (
             (Recording & rec_pk).fetch("content_hash")
@@ -326,7 +338,9 @@ def plan_concat_selection(
             "every member's Recording to be populated under "
             f"preprocessing_params_name={preprocessing_params_name!r} "
             f"first. Missing {len(missing)} member(s): {missing}. Run "
-            "Recording.populate(...) for each missing key, then retry."
+            "RecordingSelection.insert_selection(...) and "
+            "Recording.populate(...) for each missing key, then retry. A "
+            "member whose sort group changed needs a new Recording."
         )
 
     # Content-address the concat_recording_id from the logical identity AND

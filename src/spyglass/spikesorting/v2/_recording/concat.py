@@ -22,10 +22,10 @@ def member_recording_selection_key(
     A member contributes ``nwb_file_name`` / ``sort_group_id`` /
     ``interval_list_name`` / ``team_name``; the concat preprocessing recipe is
     shared across all members, so it is injected rather than read from the
-    member row. The five returned fields are exactly the ``RecordingSelection``
-    logical identity, so the concat selection-time precondition, the
-    materializer, and the sort-time anchor all resolve a member's cached
-    ``Recording`` through one key shape.
+    member row. The five returned fields are the ``RecordingSelection``
+    logical identity. A changed sort group can leave more than one selection
+    for this key, so a caller that needs one recording also restricts on the
+    member's current ``recording_input_hash``.
 
     Parameters
     ----------
