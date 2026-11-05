@@ -996,7 +996,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         -------
         np.ndarray
             time-dependent firing rate with shape (len(time), n_units).
-            Bins no contributing unit was observed over hold ``np.nan``, and
+            Bins that any contributing unit was not observed over hold
+            ``np.nan``, and
             smoothing is applied within each contiguous observed run, so no
             rate is carried across unobserved time or across a jump in the
             time axis of more than 1.5 sample periods.

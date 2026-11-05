@@ -1515,11 +1515,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         correctly when called as
         ``source_table.get_sorting(merge_key)``.
 
-        Like ``Sorting.get_sorting``, the SI-object path maps the stored
-        ABSOLUTE spike times back to recording frames via
-        ``np.searchsorted`` rather than SI's affine
-        ``NwbSortingExtractor``, so disjoint-interval sorts recover the
-        original frames. ``as_dataframe=True`` returns the absolute
+        Like ``Sorting.get_sorting``, the SI-object path reads the stored
+        ``spike_sample_index`` frames from the units NWB rather than using
+        SI's affine ``NwbSortingExtractor``, so disjoint-interval sorts
+        recover the original frames. ``as_dataframe=True`` returns the absolute
         seconds read straight from the curated units NWB plus the
         ``curation_label`` lists joined from ``UnitLabel``.
 

@@ -606,8 +606,10 @@ def derive_tracked_units(
     every clique would assign one unit to several biological identities. Instead
     the graph is covered greedily by maximal clique, largest first
     (deterministic tie-break by sorted members): each clique contributes only its
-    not-yet-claimed members, so a fully-connected group stays whole while
-    overlap is resolved into singletons. Among equal-size overlapping cliques the
+    not-yet-claimed members. A fully-connected group that overlaps no stronger
+    clique stays whole. A group that shares a unit with a stronger clique can
+    lose that unit and is not formed again from the units that remain, so
+    overlap can leave singletons. Among equal-size overlapping cliques the
     strongest (highest median edge probability) is assigned first, so a weaker
     identity never preempts a stronger one (mirroring UnitMatch's
     descending-probability assignment). Isolated nodes are singletons.

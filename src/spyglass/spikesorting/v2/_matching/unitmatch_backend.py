@@ -292,15 +292,14 @@ class UnitMatchBackend:
         ) = um.utils.load_good_waveforms(
             wave_paths, label_paths, param, good_units_only=True
         )
-        # load_good_waveforms silently DROPS a session whose bundle fails to
-        # load (it does not raise). If that happened, the compact session
-        # indexes below would attribute one session's units to another
-        # session's Spyglass key -- fail loudly instead.
+        # The compact session indexes below assume one loaded entry per
+        # provided session. UnitMatchPy 3.2.7 keeps an entry for every label
+        # path and raises on a bundle it cannot load, so this check guards
+        # against a library change, not a known failure.
         if len(good_units) != len(session_inputs):
             raise RuntimeError(
                 f"UnitMatch loaded {len(good_units)} session(s) but "
-                f"{len(session_inputs)} were provided; a session bundle failed "
-                "to load (UnitMatchPy drops it silently), so units cannot be "
+                f"{len(session_inputs)} were provided, so units cannot be "
                 "attributed to the correct session. Check each session bundle's "
                 "RawWaveforms/ and cluster_group.tsv."
             )

@@ -170,9 +170,11 @@ def detect_multiunit_events_in_observed_runs(
     """Detect high synchrony events within each contiguous observed run.
 
     Reproduces `ripple_detection.multiunit_HSE_detector` exactly when every
-    sample is observed. Otherwise events are extracted from each observed
-    run separately, so no event can span time the units were not observed
-    over. Runs shorter than `minimum_duration` cannot hold an event and are
+    sample is observed and the timestamps never jump by more than 1.5 sample
+    periods. Otherwise events are extracted from each observed run
+    separately, so no event can span time the units were not observed over.
+    A jump in the timestamps (for example a dropped position frame) also ends
+    a run, so an event across a jump is split in two. Runs shorter than `minimum_duration` cannot hold an event and are
     skipped at extraction, after they have contributed to the shared
     normalization. `close_event_threshold` merges events within a run and
     never across a gap: two events on either side of unobserved time stay
