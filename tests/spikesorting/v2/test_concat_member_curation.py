@@ -498,35 +498,44 @@ def test_waveform_features_use_member_recording(concat_member_curation):
         "features_param_name": params_name,
     }
     UnitWaveformFeaturesSelection.insert1(selection, skip_duplicates=True)
-    UnitWaveformFeatures.populate(selection, reserve_jobs=False)
-    assert UnitWaveformFeatures & selection
+    try:
+        UnitWaveformFeatures.populate(selection, reserve_jobs=False)
+        assert UnitWaveformFeatures & selection
 
-    spike_times, features = (UnitWaveformFeatures & selection).fetch_data()
-    direct = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
-    assert len(spike_times) == len(features) == len(direct) == 1
-    np.testing.assert_array_equal(spike_times[0], direct[0])
-    assert features[0].shape[0] == len(direct[0])
+        spike_times, features = (UnitWaveformFeatures & selection).fetch_data()
+        direct = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
+        assert len(spike_times) == len(features) == len(direct) == 1
+        np.testing.assert_array_equal(spike_times[0], direct[0])
+        assert features[0].shape[0] == len(direct[0])
 
-    # estimate_peak_time=False makes every mark the source voltage at its
-    # planted spike frame. Resolve that source independently of merge dispatch
-    # so dispatching waveforms to another member cannot produce a false pass.
-    snapshot = (
-        ConcatenatedRecordingSelection.MemberSnapshot
-        & concat_member_curation["concat_key"]
-        & {"member_index": 0}
-    ).fetch1()
-    source = Recording().get_recording(
-        {"recording_id": snapshot["recording_id"]}
-    )
-    expected_marks = np.vstack(
-        [
-            source.get_traces(
-                start_frame=frame, end_frame=frame + 1, return_in_uV=True
-            )
-            for frame in (100, 200)
-        ]
-    )
-    np.testing.assert_allclose(features[0], expected_marks, rtol=0, atol=1e-6)
+        # estimate_peak_time=False makes every mark the source voltage at its
+        # planted spike frame. Resolve that source independently of merge dispatch
+        # so dispatching waveforms to another member cannot produce a false pass.
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot
+            & concat_member_curation["concat_key"]
+            & {"member_index": 0}
+        ).fetch1()
+        source = Recording().get_recording(
+            {"recording_id": snapshot["recording_id"]}
+        )
+        expected_marks = np.vstack(
+            [
+                source.get_traces(
+                    start_frame=frame, end_frame=frame + 1, return_in_uV=True
+                )
+                for frame in (100, 200)
+            ]
+        )
+        np.testing.assert_allclose(
+            features[0], expected_marks, rtol=0, atol=1e-6
+        )
+    finally:
+        # The selection refers to the shared fixture's curation, whose delete
+        # refuses while the selection exists.
+        (UnitWaveformFeaturesSelection & selection).super_delete(
+            warn=False, safemode=False
+        )
 
 
 @pytest.mark.slow
