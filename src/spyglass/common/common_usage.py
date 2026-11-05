@@ -358,8 +358,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         The registry is keyed by other tables' names and has no foreign keys,
         so the cascade cannot reach it. Restricted to the analysis tables the
-        graph restricts, so an export carries only the entries needed to
-        resolve its own files.
+        graph restricts.
 
         Parameters
         ----------
@@ -379,11 +378,9 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         if not schemas:
             return restr_graph
 
-        # Each '.' stands in for one of the backticks around the schema name.
-        # A backtick in the dump's `--where="..."` would open a bash command
-        # substitution, so bash_escape_sql strips them; a restriction holding
-        # the backticked name survives DataJoint and then matches nothing once
-        # dumped. Anchoring keeps one prefix from matching another's.
+        # bash_escape_sql strips backticks from the dumped clause, so each '.'
+        # stands in for one around the schema name. Anchored, so one prefix
+        # does not match another's.
         pattern = "|".join(f"^.{schema}." for schema in sorted(schemas))
 
         registry = AnalysisRegistry()
@@ -403,9 +400,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """Add custom analysis external tables to a cascaded RestrGraph.
 
         Each custom AnalysisNwbfile schema keeps its own external table, which
-        is how its `analysis_file_abs_path` resolves. Common's externals are
-        added before the cascade from logged file names; custom tables are only
-        known once the cascade has run.
+        is how its `analysis_file_abs_path` resolves. Custom tables are in the
+        graph only once the cascade has run.
 
         Parameters
         ----------

@@ -435,8 +435,9 @@ def test_registry_in_export(gen_export_selection, populate_export, common):
 def test_custom_external_in_export(gen_export_selection, populate_export):
     """Test that the custom schema's external table is in the Export.
 
-    Without it, a restored export cannot resolve analysis_file_abs_path for
-    files held in a custom AnalysisNwbfile table.
+    Verifies:
+    - The external table appears in Export.Table
+    - Its restriction covers the custom analysis file
     """
     custom_table = gen_export_selection["custom_table"]
     custom_file = gen_export_selection["custom_file"]
@@ -455,8 +456,8 @@ def test_custom_external_in_export(gen_export_selection, populate_export):
 def test_export_graph_without_analysis(export_tbls):
     """Test that graphs with no analysis tables gain no extra nodes.
 
-    Both additions are no-ops, so an export touching no analysis files does
-    not drag in the registry or an external table.
+    Verifies:
+    - Both graph additions return the graph unchanged
     """
     ExportSelection, _ = export_tbls
 
