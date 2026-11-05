@@ -187,9 +187,15 @@ class ConcatMemberCuration(
         """
         if not merge_ids:
             return {}
+        from spyglass.spikesorting.analysis.v1.unit_annotation import (
+            UnitAnnotationPositionalIdMigration,
+        )
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
         master = SpikeSortingOutput()
+        # The migration marker only records that the entry uses true unit
+        # ids; it goes with the entry rather than blocking the delete.
+        cascaded = {UnitAnnotationPositionalIdMigration.full_table_name}
         schema, table = master.full_table_name.replace("`", "").split(".")
         foreign_keys = master.connection.query(
             "SELECT table_schema, table_name, column_name "
@@ -203,7 +209,7 @@ class ConcatMemberCuration(
         counts = {}
         for child_schema, child_table, column in foreign_keys:
             name = f"`{child_schema}`.`{child_table}`"
-            if name in own_parts:
+            if name in own_parts or name in cascaded:
                 continue
             child = dj.FreeTable(master.connection, name)
             n_rows = len(child & [{column: m} for m in merge_ids])
