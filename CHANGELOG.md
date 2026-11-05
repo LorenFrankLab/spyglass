@@ -92,6 +92,8 @@ binary-folder waveforms, stay readable under the new pin, including through
 These v0/v1 entry points raise `RuntimeError` under SpikeInterface 0.104 and
 must be run in the legacy environment:
 
+- v0 and v1 `SpikeSorting` populate with any sorter other than
+    `clusterless_thresholder`
 - v0 `ArtifactDetection`, `Waveforms`, `QualityMetrics` and `BurstPair` populate
 - v1 `ArtifactDetection`, `MetricCuration` and `BurstPair` populate, and
     `MetricCuration.get_waveforms` when it has to extract waveforms

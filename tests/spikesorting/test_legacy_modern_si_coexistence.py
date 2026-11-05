@@ -305,3 +305,45 @@ def test_legacy_tables_are_queryable_under_modern_si(dj_conn):
     # declaration and a fetch without touching the guarded compute path.
     assert len(SpikeSorting()) >= 0
     assert len(CuratedSpikeSorting()) >= 0
+
+
+@pytest.mark.parametrize(
+    "module_name, call",
+    [
+        (
+            "spyglass.spikesorting.v1.sorting",
+            dict(
+                key={},
+                nwb_file_name="unused.nwb",
+                artifact_removed_intervals=[],
+                sorter="mountainsort4",
+                sorter_params={},
+                recording_key={},
+            ),
+        ),
+        (
+            "spyglass.spikesorting.v0.spikesorting_sorting",
+            dict(
+                key={},
+                recording_path="unused",
+                artifact_times=[],
+                sorter="mountainsort4",
+                sorter_params={},
+            ),
+        ),
+    ],
+)
+def test_legacy_spike_sorting_names_the_legacy_environment(
+    dj_conn, module_name, call
+):
+    """v0/v1 sorting with a real sorter stops at the legacy guard.
+
+    SpikeInterface 0.101+ ``run_sorter`` rejects the ``output_folder``
+    argument these paths pass, with an error that does not say what to do.
+    """
+    import importlib
+
+    module = importlib.import_module(module_name)
+    table = module.SpikeSorting()
+    with pytest.raises(RuntimeError, match="legacy SpikeInterface 0.99"):
+        table.make_compute(**call)

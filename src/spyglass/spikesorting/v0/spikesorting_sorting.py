@@ -15,6 +15,9 @@ from tqdm import tqdm
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.settings import sorting_dir, temp_dir
 from spyglass.spikesorting import _si_compat
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v0.spikesorting_artifact import (
     ArtifactRemovedIntervalList,
 )
@@ -215,6 +218,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         self, key: dict, recording_path, artifact_times, sorter, sorter_params
     ):
         """Compute method to run spike sorting and save the results."""
+        # SpikeInterface 0.101+ run_sorter rejects the output_folder argument
+        # used below. Peak detection for clusterless_thresholder still works.
+        if sorter != "clusterless_thresholder":
+            _require_legacy_si_environment("v0 SpikeSorting.make")
         recording = _si_compat.load_extractor(recording_path)
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)

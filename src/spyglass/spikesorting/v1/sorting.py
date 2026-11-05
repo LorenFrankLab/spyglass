@@ -17,6 +17,9 @@ from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
 from spyglass.spikesorting import _si_compat
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v1.recording import (  # noqa: F401
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
@@ -286,6 +289,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         sorter_params: dict,
         recording_key: dict,
     ):
+        # SpikeInterface 0.101+ run_sorter rejects the output_folder argument
+        # used below. Peak detection for clusterless_thresholder still works.
+        if sorter != "clusterless_thresholder":
+            _require_legacy_si_environment("v1 SpikeSorting.make")
         sorting, timestamps = self._run_spike_sorter(
             recording_key=recording_key,
             artifact_removed_intervals=artifact_removed_intervals,
