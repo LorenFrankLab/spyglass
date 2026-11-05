@@ -6,8 +6,9 @@ mysql_config
 memray*
 root_*.y*ml
 
-# Claude Code planning notes (local only)
+# Local planning notes
 .claude/docs/
+spikesorting_v2_audit/
 
 # Notebooks
 *.ipynb
