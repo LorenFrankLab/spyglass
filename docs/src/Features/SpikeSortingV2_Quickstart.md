@@ -334,16 +334,18 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
 - **Tetrodes**: `franklab_tetrode_hippocampus_30khz_ms4_2026_06` (the same
     parameter rows as the probe preset; `probe_type` is informational). The
     analyzer sparsity default (radius 100 µm) is effectively dense on a tetrode.
-- **Polymer probes / drift**: sort same-day sessions together with the concat
-    presets, optionally adding `motion_mode="apply"` (EXPERIMENTAL; see
+- **Polymer probes / drift**: sort same-day sessions together with
+    `run_v2_concat_pipeline` (with a single-session preset or the experimental
+    `franklab_concat_hippocampus_30khz_ms5_2026_09`), optionally adding
+    `motion_mode="apply"` (EXPERIMENTAL; see
     [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
     — see the
     [Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb);
     `select_units_for_analysis` then returns one group per member.
-- **Clusterless decoding features**: run the `clusterless_thresholder` preset
-    and hand the root curation's `merge_id` to `UnitWaveformFeatures`; there is
-    no unit-selection step because the thresholder yields one "unit" per channel
-    group.
+- **Clusterless decoding features**: run the `franklab_clusterless_2026_06`
+    preset (sorter `clusterless_thresholder`) and hand the root curation's
+    `merge_id` to `UnitWaveformFeatures`; there is no unit-selection step
+    because the thresholder yields one "unit" per channel group.
 
 ## That's it — where to go next
 

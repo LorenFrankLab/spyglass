@@ -213,7 +213,7 @@ presets
 presets[presets["sorter_family"] == "kilosort4"]
 ```
 
-The shipped presets (all dated `_2026_06`):
+The shipped presets (dated `_2026_06`, except the concat preset):
 
 - `franklab_probe_hippocampus_30khz_ms4_2026_06` -- **default**, native
     MountainSort4 (hippocampus 600 Hz high-pass, 30 kHz), with
@@ -235,6 +235,11 @@ The shipped presets (all dated `_2026_06`):
     `ml_ms4alg` install is unnecessary. V2 handles the old `spikeextractors`
     `np.Inf` alias during sorting, and preflight imports `mountainsort4` to
     check its runtime dependencies.
+- `franklab_concat_hippocampus_30khz_ms5_2026_09` -- **experimental** same-day
+    recipe for `run_v2_concat_pipeline`: artifacts are masked on each member,
+    the members of a `SessionGroup` are concatenated into one
+    `ConcatenatedRecording`, and MountainSort5 sorts it once. Otherwise it is
+    the single-session MS5 hippocampus recipe.
 - `franklab_clusterless_2026_06` -- peak detection only (no clustering), for the
     clusterless decoding pipeline.
 - `franklab_neuropixels_ks4_2026_06` -- **experimental** Neuropixels Kilosort4
@@ -350,7 +355,7 @@ describe_units(run_summary["sorting_id"])  # per-unit sort-time snapshot
 
 `describe_run(run_summary)` renders the run as a receipt: a summary row
 (`n_units`, `root_merge_id`, `auto_labeled_merge_id`, `"root only"` /
-`"auto-curated"` status), one row per stage (status + `seconds`), and one row
+`"auto-labeled"` status), one row per stage (status + `seconds`), and one row
 per warning, so a zero-unit advisory cannot hide. It and preflight also show
 reference settings, preprocessing parameters, artifact settings, and motion
 treatment alongside the effective sorter configuration. The underlying dict
