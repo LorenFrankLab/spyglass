@@ -27,10 +27,11 @@ def initialize_v2_defaults() -> None:
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
     ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
-    ``AutoCurationRules``, the shipped ``CurationReviewProfile``, and
-    ``MotionCorrectionParameters`` (with the estimation and interpolation
-    recipes it names) -- each accepts duplicate-row noise -- so a notebook user
-    can run one helper instead of remembering the per-table calls. Idempotent.
+    ``AutoCurationRules``, the shipped ``CurationReviewProfile``,
+    ``MatcherParameters``, and ``MotionCorrectionParameters`` (with the
+    estimation and interpolation recipes it names) -- each accepts
+    duplicate-row noise -- so a notebook user can run one helper instead of
+    remembering the per-table calls. Idempotent.
 
     Examples
     --------
@@ -49,6 +50,7 @@ def initialize_v2_defaults() -> None:
         AnalyzerWaveformParameters,
         SorterParameters,
     )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
@@ -56,6 +58,7 @@ def initialize_v2_defaults() -> None:
     AnalyzerWaveformParameters.insert_default()
     QualityMetricParameters.insert_default()
     AutoCurationRules.insert_default()
+    MatcherParameters.insert_default()
     CurationReviewProfile.insert_default()
     MotionCorrectionParameters.insert_default()
     # Downstream unit-selection policies for the v2 handoff (additive rows in
