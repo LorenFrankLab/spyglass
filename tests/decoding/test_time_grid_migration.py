@@ -694,6 +694,111 @@ def test_actual_two_dimensional_ahead_behind_uses_saved_decode_rows(family):
     np.testing.assert_allclose(distance, 0.0, atol=1e-12)
 
 
+def decoded_mostly_local(results):
+    """Results with a Local state, and spatial mass only on the first bin.
+
+    The first time has no spatial mass, as for a detector starting in Local.
+    """
+    index = pd.MultiIndex.from_arrays(
+        [
+            ["Local", "Continuous", "Continuous"],
+            [np.nan, 0.0, 100.0],
+            [np.nan, 0.0, 0.0],
+        ],
+        names=["state", "x_position", "y_position"],
+    )
+    values = np.tile([0.9, 0.1, 0.0], (results.sizes["time"], 1))
+    values[0] = [1.0, 0.0, 0.0]
+    return (
+        results.drop_dims("state_bins")
+        .assign_coords(
+            xr.Coordinates.from_pandas_multiindex(index, "state_bins")
+        )
+        .assign(acausal_posterior=(("time", "state_bins"), values))
+    )
+
+
+@pytest.mark.parametrize("family", ["sorted", "clusterless"])
+def test_ahead_behind_is_measured_from_the_spatial_states(family):
+    """Local has no position: its mass must not read as one on the last bin."""
+    tracking, spikes, marks, params = fixture(family)
+    classifier, results = run_adapter(
+        family, False, tracking, spikes, marks, params, intervals=[[0, 1]]
+    )
+    classifier.environments[0].track_graph = None
+    time = tracking.index.to_numpy()
+    position = pd.DataFrame(
+        {
+            "position_x": np.zeros(len(time)),
+            "position_y": np.zeros(len(time)),
+            "head_orientation": np.zeros(len(time)),
+        },
+        index=time,
+    )
+    position.attrs.update(tracking.attrs)
+    consumer = SimpleNamespace(
+        fetch_model=lambda: classifier,
+        fetch_results=lambda: decoded_mostly_local(results),
+        fetch_position_info=lambda key: (
+            position,
+            ["position_x", "position_y"],
+        ),
+        fetch1=lambda key: {},
+        get_orientation_col=lambda data: "head_orientation",
+    )
+    filename = "sorted_spikes.py" if family == "sorted" else "clusterless.py"
+    name = (
+        "SortedSpikesDecodingV1"
+        if family == "sorted"
+        else "ClusterlessDecodingV1"
+    )
+
+    distance = source_method(filename, name, "get_ahead_behind_distance")(
+        consumer
+    )
+
+    assert np.isnan(distance[0])
+    np.testing.assert_allclose(distance[1:], 0.0, atol=1e-12)
+
+
+def test_decode_view_shows_only_the_non_local_position():
+    """A position-less state of any name, and a Local with bins, are left out."""
+    index = pd.MultiIndex.from_arrays(
+        [
+            ["Rest", "Local", "Local", "Continuous", "Continuous"],
+            [np.nan, 0.0, 100.0, 0.0, 100.0],
+        ],
+        names=["state", "position"],
+    )
+    results = xr.Dataset(
+        {
+            "acausal_posterior": (
+                ("time", "state_bins"),
+                [[0.5, 0.0, 0.4, 0.1, 0.0]],
+            )
+        },
+        coords=xr.Coordinates.from_pandas_multiindex(index, "state_bins"),
+    ).assign_coords(time=[0.0])
+    decoding_output = SimpleNamespace(
+        fetch_results=lambda key: results,
+        fetch_environments=lambda key: [SimpleNamespace()],
+        fetch_linear_position_info=lambda key: pd.DataFrame(
+            {"linear_position": [0.0]}
+        ),
+    )
+    method = source_method(
+        "../decoding_merge.py", "DecodingOutput", "create_decoding_view"
+    )
+    views = []
+    method.__globals__["create_1D_decode_view"] = lambda **kwargs: views.append(
+        kwargs
+    )
+
+    method(decoding_output, {})
+
+    np.testing.assert_allclose(views[0]["posterior"].values, [[1.0, 0.0]])
+
+
 @pytest.mark.parametrize("family", ["sorted", "clusterless"])
 def test_actual_fetch_make_and_decode_keep_fractional_boundary_anchors(family):
     """Exercise the table fetch and make preparation before real decoding."""

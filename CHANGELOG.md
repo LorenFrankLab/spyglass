@@ -47,6 +47,11 @@
         `vars()` #1618
     - `get_ahead_behind_distance` works on results stored before explicit
         decode bins by matching tracking at the stored decode times #1618
+    - `get_ahead_behind_distance` is measured from the states with a position.
+        It kept Local, whose mass unstacking puts on the last position bin, so
+        while Local dominated it measured from that bin. It is NaN at a time
+        with no spatial mass #1618
+    - `create_decoding_view` leaves out position-less states of any name #1618
     - `fetch_environments` returns the detector's fitted environments
         (`environments_`); the detector's `environments` parameter stays
         configuration #1618

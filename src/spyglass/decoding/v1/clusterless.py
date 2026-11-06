@@ -872,7 +872,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         classifier = self.fetch_model()
         results = self.fetch_results().sel(time=time_slice)
-        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+        posterior = analysis.get_position_posterior(results.acausal_posterior)
         if track_graph is None:
             track_graph = classifier.environments[0].track_graph
         distance = np.full(results.sizes["time"], np.nan)
