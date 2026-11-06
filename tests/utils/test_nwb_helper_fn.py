@@ -4,7 +4,148 @@ import numpy as np
 import pynwb
 import pytest
 
-from spyglass.utils.nwb_helper_fn import _get_epoch_groups, _get_pos_dict
+from spyglass.utils.nwb_helper_fn import (
+    _get_epoch_groups,
+    _get_pos_dict,
+    get_raw_eseries_path,
+    raw_eseries_path_and_timestamp_mode,
+)
+
+
+def _nwbfile_with_optional_lfp(with_lfp, acquisition_names=("e-series",)):
+    """NWBFile with a raw acquisition ElectricalSeries (+ optional LFP).
+
+    The raw series ``e-series`` lives under ``acquisition``; when ``with_lfp``
+    is True a second ElectricalSeries is added under
+    ``processing/ecephys/LFP``, mirroring a real raw NWB that also stores LFP.
+    """
+    nwbfile = pynwb.NWBFile(
+        session_description="d",
+        identifier="id",
+        session_start_time=datetime.datetime.now(datetime.timezone.utc),
+    )
+    dev = nwbfile.create_device(name="device")
+    grp = nwbfile.create_electrode_group(
+        name="electrodes", description="d", location="loc", device=dev
+    )
+    for i in range(4):
+        nwbfile.add_electrode(
+            id=i,
+            x=0.0,
+            y=0.0,
+            z=0.0,
+            imp=-1.0,
+            location="loc",
+            filtering="f",
+            group=grp,
+        )
+    raw_region = nwbfile.electrodes.create_region(
+        name="electrodes", region=[0, 1, 2, 3], description="d"
+    )
+    for name in acquisition_names:
+        nwbfile.add_acquisition(
+            pynwb.ecephys.ElectricalSeries(
+                name=name,
+                data=np.zeros((10, 4)),
+                timestamps=np.arange(10.0),
+                electrodes=raw_region,
+            )
+        )
+    if with_lfp:
+        # An ElectricalSeries requires its region to be named "electrodes", so
+        # the derived LFP series reuses the same region as the raw series.
+        lfp = pynwb.ecephys.LFP(
+            electrical_series=pynwb.ecephys.ElectricalSeries(
+                name="lfp-series",
+                data=np.zeros((10, 4)),
+                timestamps=np.arange(10.0),
+                electrodes=raw_region,
+            )
+        )
+        nwbfile.create_processing_module(name="ecephys", description="d").add(
+            lfp
+        )
+    return nwbfile
+
+
+@pytest.mark.parametrize("with_lfp", [False, True])
+def test_get_raw_eseries_path_selects_acquisition(tmp_path, with_lfp):
+    """Resolves the raw acquisition series even when an LFP series is present.
+
+    This is the path threaded to ``read_nwb_recording`` so spike sorting reads
+    the wideband recording. SpikeInterface >= 0.100 raises on a multi-series
+    file unless the series is named, so the LFP case is the one that checks
+    the series is selected by name.
+    """
+    path = tmp_path / "rec.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(_nwbfile_with_optional_lfp(with_lfp=with_lfp))
+    assert get_raw_eseries_path(str(path)) == "acquisition/e-series"
+
+
+def test_get_raw_eseries_path_no_acquisition_raises(tmp_path):
+    """A file with no acquisition ElectricalSeries raises a clear error."""
+    nwbfile = pynwb.NWBFile(
+        session_description="d",
+        identifier="id",
+        session_start_time=datetime.datetime.now(datetime.timezone.utc),
+    )
+    path = tmp_path / "empty.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+    with pytest.raises(ValueError, match="electrical_series_path"):
+        get_raw_eseries_path(str(path))
+
+
+def test_get_raw_eseries_path_prefers_named_series(tmp_path):
+    """An unrelated acquisition series cannot displace the named raw one."""
+    nwbfile = _nwbfile_with_optional_lfp(
+        with_lfp=False,
+        acquisition_names=("analog-series", "e-series"),
+    )
+    path = tmp_path / "named.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+
+    assert get_raw_eseries_path(str(path)) == "acquisition/e-series"
+
+
+def test_get_raw_eseries_path_ambiguous_raises(tmp_path):
+    """Multiple eligible raw names require an explicit caller selection."""
+    nwbfile = _nwbfile_with_optional_lfp(
+        with_lfp=False,
+        acquisition_names=("e-series", "ephys"),
+    )
+    path = tmp_path / "ambiguous.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+
+    with pytest.raises(ValueError) as exc_info:
+        get_raw_eseries_path(str(path))
+
+    message = str(exc_info.value)
+    assert "e-series" in message
+    assert "ephys" in message
+    assert "electrical_series_path='acquisition/<name>'" in message
+
+
+def test_get_raw_eseries_path_unnamed_raises(tmp_path):
+    """A lone acquisition series outside Raw's name set is not guessed."""
+    nwbfile = _nwbfile_with_optional_lfp(
+        with_lfp=False,
+        acquisition_names=("wideband",),
+    )
+    path = tmp_path / "unnamed.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+
+    with pytest.raises(ValueError) as exc_info:
+        get_raw_eseries_path(str(path))
+
+    message = str(exc_info.value)
+    assert "found none" in message
+    assert "wideband" in message
+    assert "electrical_series_path='acquisition/<name>'" in message
 
 
 @pytest.fixture(scope="module")
@@ -145,3 +286,26 @@ def test_get_pos_dict_with_timestamps():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_get_raw_eseries_path_selects_by_object_id(tmp_path):
+    """An object id selects that acquisition series whatever its name."""
+    nwbfile = _nwbfile_with_optional_lfp(
+        with_lfp=True, acquisition_names=("e-series", "wideband")
+    )
+    object_id = nwbfile.acquisition["wideband"].object_id
+    path = tmp_path / "by_object_id.nwb"
+    with pynwb.NWBHDF5IO(str(path), "w") as io:
+        io.write(nwbfile)
+
+    assert (
+        get_raw_eseries_path(str(path), object_id=object_id)
+        == "acquisition/wideband"
+    )
+    assert raw_eseries_path_and_timestamp_mode(
+        str(path), object_id=object_id
+    ) == ("acquisition/wideband", True)
+    # Without an object id, name-based selection is unchanged.
+    assert get_raw_eseries_path(str(path)) == "acquisition/e-series"
+    with pytest.raises(ValueError, match="object_id"):
+        get_raw_eseries_path(str(path), object_id="no-such-object-id")

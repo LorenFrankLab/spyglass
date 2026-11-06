@@ -114,9 +114,16 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         cls().insert(cls._default_contents(), skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
-        """Override insert to convert classes to dict before inserting"""
+        """Override insert to convert classes to dict before inserting.
+
+        Builds new row dicts rather than mutating ``rows`` in place so that
+        callers passing a shared/class-level list (e.g. ``cls.contents``)
+        are not left with already-converted dicts -- re-inserting such a
+        list would otherwise re-enter ``convert_classes_to_dict`` on an
+        already-dict ``decoding_params`` and raise.
+        """
         converted = []
-        for row in rows:  # build new rows: insert must not mutate the caller's
+        for row in rows:
             params = row["decoding_params"]
             if hasattr(params, "__dict__"):
                 params = vars(params)
