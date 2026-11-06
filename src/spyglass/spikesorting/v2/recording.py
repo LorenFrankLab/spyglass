@@ -1604,18 +1604,21 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         """
         import spikeinterface.preprocessing as sip
 
+        from spyglass.spikesorting.v2._recording.acquisition_spans import (
+            AcquisitionSpanRecording,
+        )
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         recording = read_stored_traces(traces)
         # The NWB reader keeps the timestamps as a lazy HDF5 dataset, and
         # DREDge maps every peak frame to time with one fancy index
         # (sortingcomponents/motion/dredge.py:227), which h5py refuses when two
-        # peaks share a frame. Load the same timestamps into memory (8 bytes
-        # per sample) so the estimate stays on the recording's real clock,
-        # acquisition gaps included.
+        # peaks share a frame. The span view reads those frames from the
+        # stored clock (acquisition gaps included) without loading the full
+        # 8-byte-per-sample time vector.
         if recording.has_time_vector():
-            recording.set_times(
-                np.asarray(recording.get_times()), with_warning=False
+            recording = AcquisitionSpanRecording(
+                recording, 0, recording.get_num_samples()
             )
         motion = sip.compute_motion(recording, preset=preset)
         max_abs_displacement_um = motion_max_abs_displacement_um(motion)
