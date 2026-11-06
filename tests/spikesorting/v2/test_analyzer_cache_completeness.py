@@ -239,7 +239,7 @@ def test_incomplete_cache_is_rejected_or_rebuilt(
     assert rebuilds == [True]
     _assert_recovered_values(repaired, original, expected)
     # A consumer previously failed here because templates were absent.
-    ensure_extensions(repaired, ["template_similarity"])
+    ensure_extensions(repaired, ["template_similarity"], peak_sign="neg")
     assert repaired.get_extension("template_similarity") is not None
     repaired_digest = _folder_digest(folder)
     reused = _load_analyzer_folder_or_rebuild(**options, rebuild=True)

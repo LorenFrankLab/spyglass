@@ -179,6 +179,12 @@ class EvaluationMetricInputs(NamedTuple):
     auto_merge_kwargs: dict
     rule_rows: list[dict]
     metric_job_kwargs: dict
+    # The sort's polarity (``resolve_peak_sign``) for polarity metrics and
+    # amplitude extensions.
+    peak_sign: str
+    # The display analyzer's noise seed, so span noise estimates draw the
+    # same samples as its ``noise_levels``.
+    noise_seed: int
     observed_presence_bin_duration_s: float = 60.0
     # Threads for the nn metrics' exact neighbor searches; ``None`` uses
     # ``resolve_search_threads()`` (see ``_core.job_config``).

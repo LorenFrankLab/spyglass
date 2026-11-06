@@ -8,8 +8,10 @@ for positive-going detections).
 
 Sorters express polarity differently: ``clusterless_thresholder`` carries
 ``peak_sign`` directly ("neg"/"pos"/"both"); MountainSort 4/5 carry
-``detect_sign`` (-1/0/1); Kilosort4 / SpykingCircus2 / Tridesclous2 / generic
-carry neither and default to "neg". Hermetic -- no DB.
+``detect_sign`` (-1/0/1); SpykingCircus2 nests ``peak_sign`` under
+``detection.method_kwargs``; Kilosort4 flips the data with ``invert_sign``
+for positive-going spikes; the generic schema carries none and defaults to
+"neg". Hermetic -- no DB.
 """
 
 from __future__ import annotations
@@ -70,6 +72,12 @@ def _pos_neg_analyzer():
         ({"detect_sign": -1}, "neg"),
         ({"detect_sign": 1}, "pos"),
         ({"detect_sign": 0}, "both"),
+        # SpykingCircus2 (SI 0.104) nests the detection polarity.
+        ({"detection": {"method_kwargs": {"peak_sign": "pos"}}}, "pos"),
+        ({"detection": {"method": "matched_filtering"}}, "neg"),
+        # Kilosort4 expects negative-going spikes; invert_sign flips the data.
+        ({"invert_sign": True}, "pos"),
+        ({"invert_sign": False}, "neg"),
         ({"detect_threshold": 100.0}, "neg"),  # no sign field -> default
         ({}, "neg"),
     ],
@@ -195,3 +203,42 @@ def test_peak_sign_persists_attributed_electrode(
         f"sorter params {sorter_params} resolve to peak_sign {peak_sign!r}, "
         f"which must attribute the unit to electrode {expected_electrode_id}"
     )
+
+
+def test_ensure_extensions_computes_amplitudes_at_the_sort_polarity():
+    """Spike amplitudes are read at the sort's polarity, not SI's ``"neg"``."""
+    from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
+
+    analyzer, _ = _pos_neg_analyzer()
+    ensure_extensions(analyzer, ["spike_amplitudes"], peak_sign="pos")
+
+    extension = analyzer.get_extension("spike_amplitudes")
+    assert extension.params["peak_sign"] == "pos"
+    assert (extension.get_data() > 0).all()
+
+
+@pytest.mark.parametrize("metric", ["snr", "sd_ratio", "nn_advanced"])
+def test_apply_metric_peak_sign_sets_every_polarity_metric(metric):
+    from spyglass.spikesorting.v2._curation.metrics import (
+        apply_metric_peak_sign,
+    )
+
+    kwargs = {metric: {"peak_sign": "neg", "other": 1}}
+    out = apply_metric_peak_sign([metric], kwargs, "pos")
+    assert out[metric] == {"peak_sign": "pos", "other": 1}
+    assert kwargs[metric]["peak_sign"] == "neg"
+
+
+def test_validator_rejects_amplitudes_at_another_polarity():
+    """A cached analyzer whose amplitudes used another polarity is invalid."""
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        analyzer_sparsity_validator,
+        ensure_extensions,
+    )
+
+    analyzer, _ = _pos_neg_analyzer()
+    ensure_extensions(analyzer, ["spike_amplitudes"], peak_sign="neg")
+
+    analyzer_sparsity_validator(lambda: {"peak_sign": "neg"})(analyzer)
+    with pytest.raises(ValueError, match="spike_amplitudes"):
+        analyzer_sparsity_validator(lambda: {"peak_sign": "pos"})(analyzer)

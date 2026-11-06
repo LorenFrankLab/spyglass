@@ -97,6 +97,7 @@ def test_hash_reads_share_cache_generation(
                 wants_pc=wants_pc,
                 observation_metrics=object(),
                 statistics_spans=[],
+                continuity_spans=None,
             )
 
     else:

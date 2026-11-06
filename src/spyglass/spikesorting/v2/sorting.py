@@ -1785,7 +1785,8 @@ class Sorting(
             display recipe.
         extension_params : dict, optional
             Per-extension parameter dictionaries forwarded to
-            :func:`ensure_extensions`.
+            :func:`ensure_extensions`. Amplitude and location extensions
+            always use the sort's polarity (``resolve_peak_sign``).
         **kwargs
             Job kwargs that override the resolved per-row defaults.
 
@@ -1803,10 +1804,14 @@ class Sorting(
             _resolved_job_kwargs,
         )
 
+        from spyglass.spikesorting.v2._core.signal_math import (
+            resolve_peak_sign,
+        )
+
         sorting_id = (self & key).fetch1("sorting_id")
-        sorter_job_kwargs = (
+        sorter_params, sorter_job_kwargs = (
             SorterParameters & (SortingSelection & key)
-        ).fetch1("job_kwargs")
+        ).fetch1("params", "job_kwargs")
         resolved = _resolved_job_kwargs(sorter_job_kwargs)
         resolved.update(kwargs)
         # Hold the per-sort lock across BOTH the load and the in-place extension
@@ -1821,6 +1826,7 @@ class Sorting(
             return ensure_extensions(
                 analyzer,
                 extensions,
+                peak_sign=resolve_peak_sign(sorter_params),
                 job_kwargs=resolved,
                 extension_params=extension_params,
             )

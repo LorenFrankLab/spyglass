@@ -40,6 +40,24 @@ STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
     "template_metrics",
 )
 
+# Extensions that read each spike at its template extremum for a
+# ``peak_sign``; SI's default ``"neg"`` misreads a positive-going sort.
+POLARITY_EXTENSIONS = ("spike_amplitudes", "spike_locations")
+
+
+def polarity_extension_params(names, peak_sign, extension_params=None):
+    """``extension_params`` with the sort's ``peak_sign`` on every polarity
+    extension in ``names``.
+
+    The sort's polarity overrides a requested ``peak_sign``: a cached
+    analyzer with another polarity fails validation and is rebuilt.
+    """
+    params = {name: dict(p) for name, p in (extension_params or {}).items()}
+    for name in POLARITY_EXTENSIONS:
+        if name in names:
+            params[name] = {**params.get(name, {}), "peak_sign": peak_sign}
+    return params
+
 
 def ensure_review_template_percentiles(analyzer) -> None:
     """Store the template percentiles the review's waveform view shades with.
@@ -81,7 +99,7 @@ class _AnalyzerSparsityInputsError(RuntimeError):
 
 
 def ensure_extensions(
-    analyzer, names, *, job_kwargs=None, extension_params=None
+    analyzer, names, *, peak_sign, job_kwargs=None, extension_params=None
 ):
     """Compute only the SortingAnalyzer extensions not already present.
 
@@ -97,6 +115,9 @@ def ensure_extensions(
         The analyzer to add extensions to (modified in place / on disk).
     names : list of str
         Extension names to ensure are present.
+    peak_sign : {"neg", "pos", "both"}
+        The sort's polarity (``resolve_peak_sign``), applied to every
+        :data:`POLARITY_EXTENSIONS` member being added.
     job_kwargs : dict, optional
         Resolved concurrency kwargs forwarded to ``analyzer.compute``.
     extension_params : dict, optional
@@ -118,7 +139,11 @@ def ensure_extensions(
     to_add = [name for name in names if not analyzer.has_extension(name)]
     if to_add:
         params = {
-            k: v for k, v in (extension_params or {}).items() if k in to_add
+            k: v
+            for k, v in polarity_extension_params(
+                to_add, peak_sign, extension_params
+            ).items()
+            if k in to_add
         }
         analyzer.compute(
             to_add, extension_params=params or None, **compute_kwargs
@@ -313,7 +338,10 @@ def analyzer_sparsity_validator(sorter_params_fn):
 
     def validate(analyzer):
         nonlocal peak_sign
-        if not analyzer.is_sparse():
+        polarity_extensions = [
+            name for name in POLARITY_EXTENSIONS if analyzer.has_extension(name)
+        ]
+        if not analyzer.is_sparse() and not polarity_extensions:
             return
         if peak_sign is None:
             try:
@@ -329,12 +357,21 @@ def analyzer_sparsity_validator(sorter_params_fn):
 
             peak_sign = resolve_peak_sign(sorter_params)
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
+            analyzer_extension_params,
             assert_analyzer_sparsity_polarity,
         )
 
         assert_analyzer_sparsity_polarity(
             analyzer, expected_peak_sign=peak_sign
         )
+        for name in polarity_extensions:
+            cached = analyzer_extension_params(analyzer, name).get("peak_sign")
+            if cached != peak_sign:
+                raise ValueError(
+                    f"Analyzer {name} polarity is incompatible with its "
+                    f"sorter: cached={cached!r}, expected={peak_sign!r}. "
+                    "Rebuild the analyzer to read spikes at their peaks."
+                )
 
     return validate
 

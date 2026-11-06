@@ -100,7 +100,17 @@ def test_metric_compute_rejects_bad_producer_index_before_integer_conversion(
         analyzer, "ensure_extensions", lambda *args, **kwargs: None
     )
     with pytest.raises(ValueError, match="unit_id"):
-        compute_metrics(object(), None, ["num_spikes"], {}, True)
+        compute_metrics(
+            object(),
+            None,
+            ["num_spikes"],
+            {},
+            True,
+            peak_sign="neg",
+            noise_seed=0,
+            statistics_spans=None,
+            continuity_spans=None,
+        )
 
 
 @pytest.mark.parametrize(

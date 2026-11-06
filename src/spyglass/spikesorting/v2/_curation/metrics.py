@@ -77,24 +77,23 @@ def _is_finite_metric_value(value) -> bool:
         return False
 
 
-def apply_snr_peak_sign(
-    metric_names, metric_kwargs: dict, sorter_params
+_POLARITY_METRICS = ("snr", "sd_ratio", "nn_advanced")
+
+
+def apply_metric_peak_sign(
+    metric_names, metric_kwargs: dict, peak_sign
 ) -> dict:
-    """Inject the sorter's resolved ``peak_sign`` into the ``snr`` metric kwargs.
+    """Set the sort's ``peak_sign`` on every requested polarity metric.
 
-    SI's SNR is measured at each template's extremum for a configured
-    ``peak_sign`` (default ``"neg"``). The v2 default metric rows hard-code
-    ``peak_sign="neg"``, so a positive/bidirectional sorter (clusterless
-    ``peak_sign="pos"/"both"``, MountainSort ``detect_sign=1/0``) would measure
-    SNR on the most-negative channel instead of its true peak. Resolve the sign
-    from the sorter params (the same ``resolve_peak_sign`` mapping that drives
-    per-unit attribution) and override it whenever ``snr`` is requested -- even
-    if it carried no kwargs yet, otherwise a ``metric_names=["snr"]`` with no
-    ``metric_kwargs["snr"]`` would silently keep the hard-coded default. Any
-    other existing ``snr`` kwargs are preserved.
-
-    For negative-default sorts the resolved sign is ``"neg"``, so the kwargs
-    are numerically unchanged; only positive/bidirectional sorters move.
+    SI reads ``snr``, ``sd_ratio`` and ``nn_advanced`` at each template's
+    extremum for a ``peak_sign`` that defaults to ``"neg"``, and the v2
+    default metric rows hard-code ``snr.peak_sign="neg"``. A
+    positive/bidirectional sorter (clusterless ``peak_sign="pos"/"both"``,
+    MountainSort ``detect_sign=1/0``) would then measure them on the
+    most-negative channel instead of its true peak. The sort's polarity
+    (``resolve_peak_sign``, which also drives per-unit attribution) overrides
+    the metric's, even when it carried no kwargs yet; its other kwargs are
+    preserved. For negative-default sorts nothing changes numerically.
 
     Returns a NEW mapping (the caller's dict is not mutated).
 
@@ -104,25 +103,63 @@ def apply_snr_peak_sign(
         Requested quality-metric names.
     metric_kwargs : dict
         Per-metric kwargs mapping (``{metric_name: {...}}``).
-    sorter_params : Mapping or None
-        The validated ``SorterParameters.params`` blob for the sort.
+    peak_sign : {"neg", "pos", "both"}
+        The sort's resolved polarity.
 
     Returns
     -------
     dict
-        ``metric_kwargs`` with ``snr.peak_sign`` set to the resolved sign when
-        ``snr`` is requested, else the input unchanged.
+        ``metric_kwargs`` with ``peak_sign`` set on each requested polarity
+        metric.
     """
-    if "snr" not in metric_names:
-        return metric_kwargs
-    # Resolve spike polarity through the shared signal helpers.
-    from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+    out = dict(metric_kwargs)
+    for name in _POLARITY_METRICS:
+        if name in metric_names:
+            out[name] = {
+                **(metric_kwargs.get(name) or {}),
+                "peak_sign": peak_sign,
+            }
+    return out
 
-    resolved = resolve_peak_sign(sorter_params)
-    return {
-        **metric_kwargs,
-        "snr": {**(metric_kwargs.get("snr") or {}), "peak_sign": resolved},
-    }
+
+def apply_metric_seed(metric_names, metric_kwargs: dict, seed) -> dict:
+    """Seed the requested random metrics a row leaves unseeded.
+
+    ``nn_advanced`` draws its spike subsample and noise cluster from
+    ``seed`` (SI default ``None``: unseeded), and ``sd_ratio`` estimates
+    noise from SI's random chunks (``random_slices_kwargs``) whenever no span
+    estimate is cached. Unseeded, a re-evaluation of the same curation gives
+    different values and possibly different labels. ``seed`` (the display
+    analyzer's noise seed) fills only what the row leaves unset; a row's own
+    seed wins. Returns a NEW mapping.
+
+    Parameters
+    ----------
+    metric_names : iterable of str
+        Requested quality-metric names.
+    metric_kwargs : dict
+        Per-metric kwargs mapping (``{metric_name: {...}}``).
+    seed : int
+        The display analyzer's noise seed.
+
+    Returns
+    -------
+    dict
+        ``metric_kwargs`` with every requested random metric seeded.
+    """
+    out = dict(metric_kwargs)
+    if "nn_advanced" in metric_names:
+        nn_kwargs = dict(metric_kwargs.get("nn_advanced") or {})
+        if nn_kwargs.get("seed") is None:
+            nn_kwargs["seed"] = seed
+        out["nn_advanced"] = nn_kwargs
+    if "sd_ratio" in metric_names:
+        sd_kwargs = dict(metric_kwargs.get("sd_ratio") or {})
+        slices = dict(sd_kwargs.get("random_slices_kwargs") or {})
+        if slices.get("seed") is None:
+            slices["seed"] = seed
+        out["sd_ratio"] = {**sd_kwargs, "random_slices_kwargs": slices}
+    return out
 
 
 def apply_label_rules(
@@ -940,7 +977,7 @@ def assert_merge_preset_metrics(auto_merge_preset, metric_names) -> None:
     Without ``snr`` in ``metric_names`` the preset's ``snr`` step fails with a
     bare ``KeyError`` after the metrics are computed. Requiring it also makes
     the step use this evaluation's sorter-signed SNR (see
-    :func:`apply_snr_peak_sign`).
+    :func:`apply_metric_peak_sign`).
 
     Raises
     ------
@@ -983,8 +1020,8 @@ def evaluate_analyzers(
     metric_inputs,
     expected_unit_ids,
     observation_metrics=None,
-    statistics_spans=None,
-    continuity_spans=None,
+    statistics_spans,
+    continuity_spans,
 ):
     """Compute metrics / labels / merge suggestions and enforce namespace.
 
@@ -1043,6 +1080,8 @@ def evaluate_analyzers(
             rule_columns=rule_columns,
             continuity_spans=continuity_spans,
             search_threads=metric_inputs.search_threads,
+            peak_sign=metric_inputs.peak_sign,
+            noise_seed=metric_inputs.noise_seed,
         )
         assert_unit_namespace(metrics_df, expected_unit_ids)
         if observation_metrics is not None:
@@ -1079,6 +1118,7 @@ def evaluate_analyzers(
             metric_inputs.auto_merge_preset,
             metric_inputs.auto_merge_kwargs,
             metric_job_kwargs,
+            peak_sign=metric_inputs.peak_sign,
         )
         assert_merge_membership(merge_groups, expected_unit_ids)
         return metrics_df, labels_by_unit, merge_groups
@@ -1180,10 +1220,13 @@ def compute_metrics(
     skip_pc_metrics,
     job_kwargs=None,
     template_metric_columns=None,
-    statistics_spans=None,
     rule_columns=frozenset(),
-    continuity_spans=None,
     search_threads=None,
+    *,
+    statistics_spans,
+    continuity_spans,
+    peak_sign,
+    noise_seed,
 ):
     """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
@@ -1225,6 +1268,11 @@ def compute_metrics(
     template metrics, such a failure raises ``ValueError`` if it hits a
     rule column and is logged otherwise (``escalate_si_metric_errors``).
     The default, empty, escalates nothing.
+
+    ``peak_sign`` is the sort's polarity; amplitude extensions computed
+    here read spikes at it (``metric_kwargs`` already carry it, see
+    :func:`apply_metric_peak_sign`). ``noise_seed`` is the display analyzer's
+    noise seed, reused for ``sd_ratio``'s span noise.
     """
     import numpy as np
     import pandas as pd
@@ -1270,6 +1318,7 @@ def compute_metrics(
             ensure_extensions(
                 display_analyzer,
                 list(_CURATION_EXTENSIONS) + extra_extensions,
+                peak_sign=peak_sign,
                 job_kwargs=job_kwargs,
             )
         if "sd_ratio" in voltage_names:
@@ -1294,7 +1343,7 @@ def compute_metrics(
                 display_analyzer.recording,
                 statistics_spans,
                 return_in_uV=display_analyzer.return_in_uV,
-                seed=(job_kwargs or {}).get("random_seed", 0),
+                seed=noise_seed,
                 method="std",
             )
             patch_sd_ratio_statistics_spans()
@@ -1359,7 +1408,12 @@ def compute_metrics(
             patch_nn_noise_overlap_sparsity,
         )
 
-        ensure_extensions(metric_analyzer, ["templates"], job_kwargs=job_kwargs)
+        ensure_extensions(
+            metric_analyzer,
+            ["templates"],
+            peak_sign=peak_sign,
+            job_kwargs=job_kwargs,
+        )
         templates_operators = list(
             metric_analyzer.get_extension("templates").params.get("operators")
             or []
@@ -1389,6 +1443,7 @@ def compute_metrics(
         ensure_extensions(
             metric_analyzer,
             ["principal_components"],
+            peak_sign=peak_sign,
             job_kwargs=job_kwargs,
             extension_params={"principal_components": _PCA_EXTENSION_PARAMS},
         )
@@ -1491,6 +1546,7 @@ def compute_metrics(
             ensure_extensions(
                 display_analyzer,
                 ["template_metrics"],
+                peak_sign=peak_sign,
                 job_kwargs=job_kwargs,
             )
 
@@ -1549,9 +1605,18 @@ def surface_template_columns(
 
 
 def compute_merge_groups(
-    analyzer, auto_merge_preset, auto_merge_kwargs, job_kwargs=None
+    analyzer,
+    auto_merge_preset,
+    auto_merge_kwargs,
+    job_kwargs=None,
+    *,
+    peak_sign,
 ):
-    """Return proposed merge groups for a preset (``[]`` for 'none')."""
+    """Return proposed merge groups for a preset (``[]`` for 'none').
+
+    ``peak_sign`` is the sort's polarity for the amplitude and location
+    extensions the preset needs.
+    """
     if auto_merge_preset == "none":
         return []
     from spikeinterface.curation import compute_merge_unit_groups
@@ -1561,7 +1626,9 @@ def compute_merge_groups(
 
     extensions = list(_CURATION_EXTENSIONS)
     extensions.extend(_AUTO_MERGE_EXTRA_EXTENSIONS.get(auto_merge_preset, ()))
-    ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
+    ensure_extensions(
+        analyzer, extensions, peak_sign=peak_sign, job_kwargs=job_kwargs
+    )
     compute_kwargs = dict(auto_merge_kwargs or {})
     compute_kwargs.update(without_random_seed(job_kwargs))
     groups = compute_merge_unit_groups(

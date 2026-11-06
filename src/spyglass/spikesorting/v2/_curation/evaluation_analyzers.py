@@ -44,7 +44,7 @@ def evaluate_cached_analyzers(
     wants_pc: bool,
     observation_metrics: pd.DataFrame,
     statistics_spans: list,
-    continuity_spans=None,
+    continuity_spans,
 ) -> tuple[pd.DataFrame, dict, list, dict]:
     """Evaluate a root / label-only curation on the sort's cached analyzers.
 
@@ -149,7 +149,7 @@ def evaluate_temporary_analyzers(
     wants_pc: bool,
     observation_metrics: pd.DataFrame,
     statistics_spans: list,
-    continuity_spans=None,
+    continuity_spans,
 ) -> tuple[pd.DataFrame, dict, list, None]:
     """Evaluate an applied-merge curation on temporary merged analyzers.
 

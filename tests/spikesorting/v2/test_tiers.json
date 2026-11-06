@@ -330,6 +330,7 @@
         "test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes": "db_unit",
         "test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface": "db_unit",
         "test_compute_metrics_sd_ratio_ignores_excluded_samples": "db_unit",
+        "test_compute_metrics_sd_ratio_noise_uses_the_analyzer_seed": "db_unit",
         "test_curation_evaluation_nwb_carries_inputs": "pipeline",
         "test_curation_evaluation_pc_eval_records_both_roles": "pipeline",
         "test_curation_evaluation_records_source_provenance": "pipeline",

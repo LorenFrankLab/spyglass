@@ -671,8 +671,12 @@ def resolve_peak_sign(params) -> str:
       (``"neg"`` / ``"pos"`` / ``"both"``).
     * MountainSort 4/5 carry ``detect_sign`` (``-1`` neg, ``1`` pos,
       ``0`` both).
-    * Kilosort4 / SpykingCircus2 / Tridesclous2 / the generic schema
-      carry neither; fall back to ``"neg"`` (SI's default).
+    * Tridesclous2 carries a top-level ``peak_sign``; SpykingCircus2 nests
+      it under ``detection.method_kwargs``.
+    * Kilosort4 detects negative-going spikes; ``invert_sign=True`` flips
+      the data for positive-going ones.
+    * The generic schema carries none of these; fall back to ``"neg"``
+      (SI's default).
 
     Parameters
     ----------
@@ -693,6 +697,16 @@ def resolve_peak_sign(params) -> str:
         return {-1: "neg", 0: "both", 1: "pos"}.get(
             int(params["detect_sign"]), "neg"
         )
+    detection = params.get("detection")
+    if isinstance(detection, Mapping):
+        method_kwargs = detection.get("method_kwargs")
+        if (
+            isinstance(method_kwargs, Mapping)
+            and method_kwargs.get("peak_sign") is not None
+        ):
+            return str(method_kwargs["peak_sign"])
+    if params.get("invert_sign"):
+        return "pos"
     return "neg"
 
 

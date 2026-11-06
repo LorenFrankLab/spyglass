@@ -1101,6 +1101,9 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
             False,
             {},
             statistics_spans=spans,
+            peak_sign="neg",
+            noise_seed=0,
+            continuity_spans=None,
         )
 
     if pc_compute_raises:
@@ -1136,7 +1139,18 @@ def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
         "nn_advanced": {"min_spikes": 1_000_000, "seed": 0},
     }
     analyzer = _small_in_memory_analyzer()
-    metrics = compute_metrics(analyzer, analyzer, names, kwargs, False, {})
+    metrics = compute_metrics(
+        analyzer,
+        analyzer,
+        names,
+        kwargs,
+        False,
+        {},
+        peak_sign="neg",
+        noise_seed=0,
+        statistics_spans=None,
+        continuity_spans=None,
+    )
     # The kwargs were applied: 2 s bins give a finite presence ratio on a
     # 10 s recording (60 s bins would not), and no unit reaches min_spikes.
     assert metrics["presence_ratio"].notna().all()
@@ -1223,6 +1237,10 @@ def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
             {},
             template_metric_columns=template_columns,
             rule_columns=rule_columns,
+            peak_sign="neg",
+            noise_seed=0,
+            statistics_spans=None,
+            continuity_spans=None,
         )
 
     with pytest.raises(ValueError) as excinfo:
@@ -1336,6 +1354,9 @@ def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
             True,
             {"random_seed": 4},
             statistics_spans=spans,
+            peak_sign="neg",
+            noise_seed=4,
+            continuity_spans=None,
         )
         results[fill] = metrics["sd_ratio"].to_numpy()
 
@@ -1404,8 +1425,40 @@ def test_compute_metrics_sd_ratio_covering_spans_is_spikeinterface(dj_conn):
             True,
             {"random_seed": 4},
             statistics_spans=spans,
+            peak_sign="neg",
+            noise_seed=4,
+            continuity_spans=None,
         )
         assert np.array_equal(metrics["sd_ratio"].to_numpy(), expected), spans
+
+
+@pytest.mark.db_unit
+def test_compute_metrics_sd_ratio_noise_uses_the_analyzer_seed(dj_conn):
+    """``sd_ratio``'s span noise samples follow the analyzer's noise seed.
+
+    The metric rows' own ``random_seed`` must not pick them: the display
+    analyzer's MAD noise is drawn with the sorter row's seed.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
+
+    def sd_ratio(metric_seed, noise_seed):
+        analyzer, spans = _sd_ratio_analyzer("zeros")
+        return compute_metrics(
+            analyzer,
+            None,
+            ["sd_ratio"],
+            {},
+            True,
+            {"random_seed": metric_seed},
+            statistics_spans=spans,
+            peak_sign="neg",
+            noise_seed=noise_seed,
+            continuity_spans=None,
+        )["sd_ratio"].to_numpy()
+
+    assert np.array_equal(sd_ratio(4, 4), sd_ratio(99, 4))
 
 
 @pytest.mark.slow
@@ -1550,6 +1603,10 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
             True,
             {},
             template_metric_columns=[],
+            peak_sign="neg",
+            noise_seed=0,
+            statistics_spans=None,
+            continuity_spans=None,
         )
         return df["snr"]
 

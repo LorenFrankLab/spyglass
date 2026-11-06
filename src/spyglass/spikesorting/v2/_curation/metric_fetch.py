@@ -17,13 +17,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2._curation.metrics import (
-    apply_snr_peak_sign,
+    apply_metric_peak_sign,
+    apply_metric_seed,
     assert_merge_preset_metrics,
 )
 from spyglass.spikesorting.v2._core.job_config import (
     _resolved_job_kwargs,
     resolve_search_threads,
 )
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.metric_curation import (
@@ -115,8 +117,14 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     metric_names = list(qm["metric_names"])
     assert_merge_preset_metrics(acr["auto_merge_preset"], metric_names)
     sorter_row, analyzer_job_kwargs = fetch_sorter_analyzer_inputs(sorting_key)
-    metric_kwargs = apply_snr_peak_sign(
-        metric_names, dict(qm["metric_kwargs"] or {}), sorter_row["params"]
+    peak_sign = resolve_peak_sign(sorter_row["params"])
+    noise_seed = analyzer_job_kwargs.get("random_seed", 0)
+    metric_kwargs = apply_metric_seed(
+        metric_names,
+        apply_metric_peak_sign(
+            metric_names, dict(qm["metric_kwargs"] or {}), peak_sign
+        ),
+        noise_seed,
     )
 
     # Recording reconstruction inputs. make_compute rebuilds the recording
@@ -239,6 +247,8 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             metric_job_kwargs=_resolved_job_kwargs(
                 qm["job_kwargs"], acr["job_kwargs"]
             ),
+            peak_sign=peak_sign,
+            noise_seed=noise_seed,
             observed_presence_bin_duration_s=qm[
                 "observed_presence_bin_duration_s"
             ],

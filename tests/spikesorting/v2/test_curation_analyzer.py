@@ -416,6 +416,7 @@ def test_evaluation_builds_temporary_analyzers_on_curated_units(
         wants_pc=wants_pc,
         observation_metrics=object(),
         statistics_spans=spans,
+        continuity_spans=None,
     )
     assert result == (metrics, labels, merges, None)
     assert len(builds) == (2 if wants_pc else 1)
@@ -495,6 +496,7 @@ def test_temporary_evaluation_unmaps_analyzers_before_cleanup(
         wants_pc=True,
         observation_metrics=object(),
         statistics_spans=None,
+        continuity_spans=None,
     )
     assert still_mapped, "the evaluation made no temporary folder"
     assert all(not paths for paths in still_mapped), still_mapped
@@ -741,11 +743,13 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # An unusual plot-only extension is computed ONCE into a disk-backed
         # derivative keyed by the exact request, never into the immutable
         # published base cache, and reused on the next identical request.
+        # The sort's polarity is part of a polarity extension's identity.
         request = {"spike_locations": {}}
+        identity = {"spike_locations": {"peak_sign": "neg"}}
         derived_folder = _curation_cache_path(merged, recipe).with_name(
             folder.name.replace(
                 folder.suffix,
-                f"_ext_{derived_extension_request_hash(request)}{folder.suffix}",
+                f"_ext_{derived_extension_request_hash(identity)}{folder.suffix}",
             )
         )
         with curation_analyzer_with_extensions(

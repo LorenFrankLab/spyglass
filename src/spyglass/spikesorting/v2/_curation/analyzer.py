@@ -43,11 +43,14 @@ from spyglass.spikesorting.v2._storage.analyzer_cache import (
     waveform_recipe_hash,
 )
 from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 from spyglass.spikesorting.v2._sorting.analyzer import (
     BASE_ANALYZER_EXTENSIONS,
+    POLARITY_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
     _AnalyzerSparsityInputsError,
     analyzer_sparsity_validator,
+    polarity_extension_params,
     resolve_display_waveform_params_name,
 )
 from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
@@ -615,6 +618,7 @@ def _build_resolved_merged_analyzer(
         ensure_extensions(
             analyzer,
             STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+            peak_sign=resolve_peak_sign(sorter_row["params"]),
             job_kwargs=job_kwargs,
         )
     return analyzer
@@ -773,6 +777,14 @@ def _resolve_curation_analyzer(
     # local (``needs_compute``) so a later, larger request never reuses a
     # smaller derivative.
     request = normalize_extension_request(extra_extensions)
+    if any(name in request for name in POLARITY_EXTENSIONS):
+        # Part of the derivative's identity, so a request without the sort's
+        # polarity cannot alias one with it.
+        request = normalize_extension_request(
+            polarity_extension_params(
+                request, resolve_peak_sign(sorter_params()), request
+            )
+        )
     if namespace == "raw":
         # Raw curations share the canonical sort analyzer. An ABSENT requested
         # extension is persisted there under the per-sort cache lock so later

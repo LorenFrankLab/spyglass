@@ -18,9 +18,11 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 from spyglass.spikesorting.v2._curation.metrics import (
     apply_label_rules,
-    apply_snr_peak_sign,
+    apply_metric_peak_sign,
+    apply_metric_seed,
     assert_merge_preset_metrics,
     assert_rule_metrics_computed,
     escalate_si_metric_errors,
@@ -345,6 +347,8 @@ def _compute_retained_spike_isi(
         True,
         statistics_spans=statistics_spans,
         continuity_spans=continuity_spans,
+        peak_sign="neg",
+        noise_seed=0,
     )
 
 
@@ -523,37 +527,43 @@ def test_rules_payloads_match_does_not_conflate_bool_and_int():
         (None, "neg"),
     ],
 )
-def test_apply_snr_peak_sign_injects_resolved_sign(sorter_params, expected):
+def test_apply_metric_peak_sign_injects_resolved_sign(sorter_params, expected):
     """When ``snr`` is requested, the sorter's resolved peak_sign is injected
     into ``metric_kwargs['snr']`` even if it carried no kwargs yet.
 
     SNR was hard-coded ``peak_sign='neg'``, so a positive/bidirectional sorter
     measured SNR on the most-negative channel instead of its true peak.
     """
-    out = apply_snr_peak_sign(["snr", "isi_violation"], {}, sorter_params)
+    out = apply_metric_peak_sign(
+        ["snr", "isi_violation"], {}, resolve_peak_sign(sorter_params)
+    )
     assert out["snr"]["peak_sign"] == expected
 
 
-def test_apply_snr_peak_sign_preserves_existing_snr_kwargs():
+def test_apply_metric_peak_sign_preserves_existing_snr_kwargs():
     """An existing snr kwarg survives; only peak_sign is overridden."""
-    out = apply_snr_peak_sign(
-        ["snr"], {"snr": {"peak_mode": "extremum"}}, {"peak_sign": "pos"}
+    out = apply_metric_peak_sign(
+        ["snr"], {"snr": {"peak_mode": "extremum"}}, "pos"
     )
     assert out["snr"] == {"peak_mode": "extremum", "peak_sign": "pos"}
 
 
-def test_apply_snr_peak_sign_noop_when_snr_not_requested():
+def test_apply_metric_peak_sign_noop_when_snr_not_requested():
     """No snr metric -> kwargs are returned untouched (no snr key added)."""
     kwargs = {"isi_violation": {"isi_threshold_ms": 2.0}}
-    out = apply_snr_peak_sign(["isi_violation"], kwargs, {"peak_sign": "pos"})
+    out = apply_metric_peak_sign(
+        ["isi_violation"], kwargs, resolve_peak_sign({"peak_sign": "pos"})
+    )
     assert "snr" not in out
     assert out == kwargs
 
 
-def test_apply_snr_peak_sign_does_not_mutate_input():
+def test_apply_metric_peak_sign_does_not_mutate_input():
     """The override returns a new mapping; the caller's dict is unchanged."""
     kwargs = {"snr": {"peak_mode": "extremum"}}
-    apply_snr_peak_sign(["snr"], kwargs, {"peak_sign": "pos"})
+    apply_metric_peak_sign(
+        ["snr"], kwargs, resolve_peak_sign({"peak_sign": "pos"})
+    )
     assert kwargs == {"snr": {"peak_mode": "extremum"}}
 
 
@@ -564,7 +574,7 @@ def test_snr_peak_sign_follows_sorter_polarity():
     The planted unit has a +50 uV peak on channel 0 and a larger -100 uV
     deflection on channel 1, so peak_sign decides which channel SNR is measured
     on. Driving SI's ``compute_quality_metrics`` with the kwargs
-    ``apply_snr_peak_sign`` produces for a ``peak_sign='pos'`` sorter must give
+    ``apply_metric_peak_sign`` produces for a ``peak_sign='pos'`` sorter must give
     the smaller (positive-peak) SNR and differ from the ``'neg'`` default,
     while a sort with no sign keeps the ``'neg'`` SNR.
     """
@@ -578,7 +588,9 @@ def test_snr_peak_sign_follows_sorter_polarity():
     analyzer.compute(["noise_levels", "spike_amplitudes"])
 
     def _snr(sorter_params):
-        kwargs = apply_snr_peak_sign(["snr"], {}, sorter_params)
+        kwargs = apply_metric_peak_sign(
+            ["snr"], {}, resolve_peak_sign(sorter_params)
+        )
         df = compute_quality_metrics(
             analyzer,
             metric_names=["snr"],
@@ -1071,3 +1083,29 @@ def test_snr_merge_presets_match_spikeinterface():
     assert _SNR_MERGE_PRESETS == {
         name for name, steps in _compute_merge_presets.items() if "snr" in steps
     }
+
+
+# ---------- random metrics are seeded like the rest of v2 -----------------
+
+
+def test_apply_metric_seed_fills_unseeded_random_metrics():
+    """``nn_advanced`` and ``sd_ratio`` draw random samples; a row that names
+    no seed gets the analyzer's, so a re-evaluation reproduces them."""
+    out = apply_metric_seed(
+        ["nn_advanced", "sd_ratio", "snr"],
+        {"nn_advanced": {"max_spikes": 500}, "snr": {"peak_sign": "neg"}},
+        7,
+    )
+    assert out["nn_advanced"] == {"max_spikes": 500, "seed": 7}
+    assert out["sd_ratio"] == {"random_slices_kwargs": {"seed": 7}}
+    assert out["snr"] == {"peak_sign": "neg"}
+
+
+def test_apply_metric_seed_keeps_a_row_seed():
+    kwargs = {
+        "nn_advanced": {"seed": 3},
+        "sd_ratio": {"random_slices_kwargs": {"seed": 4, "num_chunks": 5}},
+    }
+    out = apply_metric_seed(["nn_advanced", "sd_ratio"], kwargs, 7)
+    assert out == kwargs
+    assert apply_metric_seed(["snr"], {}, 7) == {}
