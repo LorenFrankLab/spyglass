@@ -28,6 +28,12 @@ def test_comment_intstall_regex(user_env_tbl):
     assert user_env_tbl._parse_pip_line(comment), f"Failed to parse '{comment}'"
 
 
+@pytest.mark.parametrize("line", ["torch==2.15.0+cpu", "torch==2.5.1+cu121"])
+def test_local_version_label_regex(user_env_tbl, line):
+    """Test that a PEP 440 local version label (PyTorch wheels) is parsed."""
+    assert user_env_tbl._parse_pip_line(line), f"Failed to parse '{line}'"
+
+
 def test_editable_path_regex(user_env_tbl):
     """Test that editable path is parsed correctly."""
     comment = "# (some-package==1.2.3)"
