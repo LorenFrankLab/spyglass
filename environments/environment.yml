@@ -26,11 +26,13 @@ dependencies:
   - non_local_detector==0.6.9
   - numpy>=2,<3
   - pip
+  - scipy>=1.13  # numpy>=2; SI 0.104 needs scipy>=1.13
   - position_tools
+  # - pybind11 # dlc/moseq-only
   - pydotplus
   - python>=3.10,<3.13
+  # - pytorch # dlc/moseq-only; torch>=2 is a pip dep here
   - ripple_detection
-  - scipy>=1.13  # numpy>=2; SI 0.104 needs scipy>=1.13
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
