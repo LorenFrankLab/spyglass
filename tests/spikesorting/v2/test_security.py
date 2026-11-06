@@ -2,7 +2,6 @@
 
 - artifacts are owner-write, not world-writable
 - sorter scratch is world-writable only for a container backend
-- caller-supplied NWB file names must be bare basenames
 """
 
 import os
@@ -10,59 +9,6 @@ import stat
 import uuid
 
 import pytest
-
-# --------------------------------------------------------------------------
-# Caller-supplied NWB file-name path confinement (DB-free).
-# --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "bad_name",
-    [
-        "../escape.nwb",
-        "sub/dir.nwb",
-        "/absolute/path.nwb",
-        "..",
-        ".",
-        "",
-        "a/../b.nwb",
-    ],
-)
-def test_nwb_filename_traversal_rejected(bad_name):
-    """A non-basename ``nwb_file_name`` (separator / ``..`` / absolute) is
-    rejected at the filename acceptance boundary."""
-    from spyglass.utils.nwb_helper_fn import assert_safe_nwb_file_name
-
-    with pytest.raises(ValueError, match="bare file name"):
-        assert_safe_nwb_file_name(bad_name)
-
-
-def test_nwb_filename_basename_accepted():
-    """A bare basename with dots/underscores passes."""
-    from spyglass.utils.nwb_helper_fn import assert_safe_nwb_file_name
-
-    for good in ("session1_.nwb", "mearec_smoke.nwb", "a.b.c.nwb"):
-        assert_safe_nwb_file_name(good)  # does not raise
-
-
-@pytest.mark.usefixtures("dj_conn")
-@pytest.mark.parametrize(
-    "bad_recompute_name",
-    ["../escape.nwb", "sub/dir.nwb", "/absolute/path.nwb", "a/../b.nwb"],
-)
-def test_create_rejects_unsafe_recompute_file_name(bad_recompute_name):
-    """``AnalysisNwbfile().create(recompute_file_name=...)`` confines the
-    recompute target to a bare basename, like ``nwb_file_name``.
-
-    Raises before any path resolution.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    with pytest.raises(ValueError, match="bare file name"):
-        AnalysisNwbfile().create(
-            "valid_parent_.nwb", recompute_file_name=bad_recompute_name
-        )
-
 
 # --------------------------------------------------------------------------
 # Sorter scratch permissions: container-only world-writable.

@@ -30,8 +30,6 @@ def test_decode_merge_fetch_results(
 
 
 def test_decode_merge_fetch_model(decode_merge_restr, decode_merge_key):
-    # A fresh DB holds the real decode's model; a stale local row may hold
-    # the conftest ``FakeClassifier``.
     from non_local_detector.models.base import ClusterlessDetector
 
     assert isinstance(

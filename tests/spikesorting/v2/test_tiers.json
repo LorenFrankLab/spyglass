@@ -882,7 +882,6 @@
     "test_security.py": {
       "tier": "unit",
       "overrides": {
-        "test_create_rejects_unsafe_recompute_file_name": "db_unit",
         "test_local_sorter_scratch_not_world_writable": "db_unit",
         "test_v2_artifacts_not_world_writable": "pipeline"
       }

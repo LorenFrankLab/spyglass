@@ -23,7 +23,6 @@ from spyglass.utils.dj_helper_fn import get_child_references
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
-    assert_safe_nwb_file_name,
     get_electrode_indices,
     get_nwb_file,
 )
@@ -277,9 +276,6 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        assert_safe_nwb_file_name(nwb_file_name)
-        if recompute_file_name is not None:
-            assert_safe_nwb_file_name(recompute_file_name)
         nwb_file_abspath = self._nwb_table.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(
@@ -362,15 +358,9 @@ class AnalysisMixin(BaseMixin):
         sg_version = self._spyglass_version
         env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
-        try:
-            python_env = subprocess.check_output(
-                ["conda", "env", "export"],
-                text=True,
-                stderr=subprocess.DEVNULL,
-            )
-        except (OSError, subprocess.SubprocessError) as err:
-            self._logger.warning(f"Could not capture conda environment: {err}")
-            python_env = "environment capture unavailable (conda absent)"
+        python_env = subprocess.check_output(
+            ["conda", "env", "export"], text=True
+        )
         env_info += python_env
         return env_info
 

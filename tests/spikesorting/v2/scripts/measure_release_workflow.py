@@ -140,7 +140,7 @@ def main():
     ap.add_argument("--container-name", default="spyglass-measure")
     ap.add_argument(
         "--base-dir",
-        default=str(REPO / "tests" / "_data_release_measure"),
+        default=str(REPO / "tests" / "_data" / "release_measure"),
         help="Private Spyglass base dir (must sit under a 'tests' directory).",
     )
     ap.add_argument("--out-dir", default=str(HERE))

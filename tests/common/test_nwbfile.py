@@ -1,6 +1,5 @@
 import inspect
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -125,31 +124,6 @@ def test_nwbfile_cleanup(common_nwbfile):
     common_nwbfile.Nwbfile.cleanup(delete_files=False)
     after = len(common_nwbfile.Nwbfile.fetch())
     assert before == after, "Nwbfile cleanup changed table entry count."
-
-
-@pytest.mark.parametrize(
-    "exc",
-    [
-        FileNotFoundError("conda not found"),
-        subprocess.CalledProcessError(1, ["conda"]),
-    ],
-    ids=["conda_absent", "conda_failed"],
-)
-def test_conda_export_failure_does_not_abort_write(
-    common_nwbfile, monkeypatch, exc
-):
-    """A failed ``conda env export`` records a marker instead of raising."""
-    analysis_tbl = common_nwbfile.AnalysisNwbfile()
-
-    def _boom(*args, **kwargs):
-        raise exc
-
-    monkeypatch.setattr(subprocess, "check_output", _boom)
-
-    info = analysis_tbl._logged_env_info()
-
-    assert "environment capture unavailable" in info
-    assert "spyglass=" in info
 
 
 def test_cleanup_controls_are_keyword_only(common_nwbfile):

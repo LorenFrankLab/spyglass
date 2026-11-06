@@ -249,10 +249,6 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
     a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
     deadlocks #1609
-- `Nwbfile.get_abs_path` and `AnalysisNwbfile.create` reject a file name that is
-    not a bare file name (a path separator, `..`, or an absolute path) #1609
-- Creating an analysis NWB file no longer fails where `conda` is unavailable;
-    the environment record says so instead #1609
 - Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and `cleanup`,
     `IntervalList.cleanup`) no longer raise when a child table shares a
     secondary attribute with the parent, as v2's `ConcatMemberCuration` does;

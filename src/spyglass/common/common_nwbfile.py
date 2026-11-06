@@ -23,7 +23,6 @@ from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
     _acquire_nwb_file,
-    assert_safe_nwb_file_name,
     get_electrode_indices,
     get_nwb_file,
 )
@@ -174,7 +173,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        assert_safe_nwb_file_name(nwb_file_name)
         file_path = raw_dir + "/" + nwb_file_name
         if new_file:
             return file_path
