@@ -208,6 +208,7 @@ def test_replace_still_reaches_immutable_parameter_guard():
             "MotionInterpolationParameters",
             "motion_interpolation_params_name",
         ),
+        ("unit_matching", "MatcherParameters", "matcher_params_name"),
     ],
 )
 def test_parameter_table_adapters_preserve_insert_contract(
