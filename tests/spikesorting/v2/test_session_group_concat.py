@@ -217,6 +217,54 @@ def test_assert_concat_preflight_guards_members_and_auto_curate(
         assert_concat_preflight(owner, name, bad, auto_curate=True)
 
 
+@pytest.mark.slow
+def test_assert_concat_preflight_rejects_member_with_coincident_contacts(
+    same_day_group, monkeypatch
+):
+    """A member whose contacts coincide fails concat preflight by name.
+
+    Concat members run the single-session sort-group checks, so a member the
+    recording stage could not turn into a probe is reported before any member
+    recording is built, and the message says which member it is.
+    """
+    import spyglass.spikesorting.v2._orchestration.preflight_checks as checks
+    from spyglass.spikesorting.v2._orchestration.preflight import (
+        assert_concat_preflight,
+    )
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    gk = same_day_group["group_key"]
+    last = (SessionGroup.Member & gk).fetch(
+        "member_index",
+        "nwb_file_name",
+        "sort_group_id",
+        order_by="member_index DESC",
+        limit=1,
+        as_dict=True,
+    )[0]
+    problem = "contacts coincide in every plane"
+    monkeypatch.setattr(
+        checks,
+        "sort_group_geometry_problem",
+        lambda nwb_file_name, sort_group_id: (
+            problem
+            if (nwb_file_name, int(sort_group_id))
+            == (last["nwb_file_name"], int(last["sort_group_id"]))
+            else None
+        ),
+    )
+    bundle = _PIPELINE_PRESETS["franklab_concat_hippocampus_30khz_ms5_2026_09"]
+
+    with pytest.raises(PreflightError) as raised:
+        assert_concat_preflight(
+            gk["session_group_owner"], gk["session_group_name"], bundle
+        )
+    assert f"concat member {last['member_index']}" in str(raised.value)
+    assert problem in str(raised.value)
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_create_group_rejects_missing_member_key():
     """A member dict missing a required key raises a typed error, not KeyError."""
