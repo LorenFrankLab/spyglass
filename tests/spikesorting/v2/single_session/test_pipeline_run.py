@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
-
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
-)
-
-_FIGPACK_MISSING = (
-    importlib.util.find_spec("figpack") is None
-    or importlib.util.find_spec("figpack_spike_sorting") is None
 )
 
 # ===========================================================================
@@ -1293,91 +1286,3 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
     assert err.partial_run_summary.get("sorting_id") is not None
     assert err.partial_run_summary.get("root_curation_id") is not None
     assert err.partial_run_summary.get("auto_labeled_curation_id") is None
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    _FIGPACK_MISSING, reason="optional FigPack packages not installed"
-)
-def test_run_v2_pipeline_figpack_publishes_offline_view(polymer_smoke_session):
-    """``run_v2_pipeline(build_figpack_view=True)`` publishes an offline FigPack view.
-
-    A single-session run that finds units additionally builds an offline FigPack
-    manual-curation bundle of the root curation and surfaces its local URI; the
-    FigPack stage is observable and reused on an idempotent rerun. If the local
-    bundle is cleaned out from under a reused row, the rerun rebuilds it rather
-    than returning a dead path.
-    """
-    import shutil
-    from pathlib import Path
-
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
-        polymer_smoke_session
-    )
-    run_kwargs = dict(
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name="raw data valid times",
-        team_name=team_name,
-        build_figpack_view=True,
-    )
-    summary = run_v2_pipeline(**run_kwargs)
-
-    # A populated view (not the zero-unit skip path).
-    assert summary["n_units"] >= 1
-    assert summary["figpack_status"] in {"computed", "reused"}
-    assert "figpack" in summary["stage_seconds"]
-    figpack_uri = summary["figpack_uri"]
-    assert Path(figpack_uri).exists()  # an offline bundle on disk
-
-    # Idempotent: a rerun reuses the same published view.
-    rerun = run_v2_pipeline(**run_kwargs)
-    assert rerun["figpack_uri"] == figpack_uri
-    assert rerun["figpack_status"] == "reused"
-
-    # Self-heal: if the offline bundle is purged, a rerun rebuilds it rather than
-    # reporting "reused" with a dead path.
-    shutil.rmtree(figpack_uri)
-    assert not Path(figpack_uri).exists()
-    rebuilt = run_v2_pipeline(**run_kwargs)
-    assert rebuilt["figpack_status"] == "computed"
-    assert Path(rebuilt["figpack_uri"]).exists()
-    # The rebuild is reported: draft labels in the lost page are gone.
-    assert any(
-        figpack_uri in w and "Draft labels" in w for w in rebuilt["warnings"]
-    )
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    _FIGPACK_MISSING, reason="optional FigPack packages not installed"
-)
-def test_run_v2_pipeline_figpack_zero_units_skips_view(polymer_smoke_session):
-    """``build_figpack_view=True`` on a zero-unit sort skips the view instead of failing.
-
-    A zero-unit sort has no analyzer to summarize, so the FigPack stage is
-    skipped (``figpack_status == "skipped"``, no ``figpack_uri``) and the run
-    still returns a complete, merge-keyable summary rather than raising.
-    """
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    nwb_file_name, sort_group_id, team_name = _prepare_pipeline_session(
-        polymer_smoke_session
-    )
-    # The shipped clusterless default (100 uV) finds zero peaks on the smoke
-    # fixture -- the zero-unit path, here with FigPack opted in.
-    summary = run_v2_pipeline(
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name="raw data valid times",
-        team_name=team_name,
-        pipeline_preset="franklab_clusterless_2026_06",
-        build_figpack_view=True,
-    )
-    assert summary["n_units"] == 0
-    assert summary["figpack_status"] == "skipped"
-    assert "figpack_uri" not in summary
-    # The run is still complete and merge-keyable despite the skipped view.
-    assert summary["root_merge_id"] is not None

@@ -1108,52 +1108,6 @@ def test_run_v2_pipeline_rejects_a_none_source_input():
 
 
 @pytest.mark.unit
-def test_figpack_label_options_require_the_figpack_view():
-    """Label options without ``build_figpack_view=True`` would be silently
-    ignored, so the call fails DB-free instead."""
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    with pytest.raises(PipelineInputError, match="build_figpack_view=True"):
-        run_v2_pipeline(
-            "x.nwb", 0, "i", "t", figpack_label_options=["accept", "noise"]
-        )
-
-
-@pytest.mark.unit
-def test_run_v2_pipeline_figpack_missing_packages_fails_fast(monkeypatch):
-    """build_figpack_view=True without optional packages fails fast, DB-free.
-
-    The FigPack package availability is checked before any table import, so a
-    missing install raises ``PipelineInputError`` (carrying the install hint)
-    without touching the database -- not an opaque import error surfacing only
-    after a full sort.
-    """
-    import importlib.util
-
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-    from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
-
-    real_find_spec = importlib.util.find_spec
-
-    def fake_find_spec(name, *args, **kwargs):
-        if name in ("figpack", "figpack_spike_sorting"):
-            return None
-        return real_find_spec(name, *args, **kwargs)
-
-    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
-
-    with pytest.raises(PipelineInputError, match="build_figpack_view"):
-        run_v2_pipeline(
-            nwb_file_name="x.nwb",
-            sort_group_id=0,
-            interval_list_name="i",
-            team_name="t",
-            build_figpack_view=True,
-        )
-
-
-@pytest.mark.unit
 def test_run_v2_unit_match_signature_defaults():
     """run_v2_unit_match defaults the matcher to unitmatch_default + no choices.
 

@@ -168,9 +168,8 @@ class PipelineInputError(ValueError):
     ``run_v2_pipeline_session``, ``estimate_motion`` and
     ``estimate_concat_motion`` for, e.g., an unknown ``pipeline_preset`` (the
     message lists the presets and points at ``describe_pipeline_presets()``),
-    a source input passed as ``None``, a contradictory motion request, or
-    ``figpack_label_options`` / ``build_figpack_view=True`` without what they
-    need. The message names the entry point.
+    a source input passed as ``None``, or a contradictory motion request.
+    The message names the entry point.
     """
 
 

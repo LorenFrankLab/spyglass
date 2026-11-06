@@ -662,13 +662,13 @@ jobs:
         if-no-files-found: error
     # --- FigPack curation extra lane (separate env). The curation extra
     # (figpack + figpack-spike-sorting) is kept out of the default v2 env, so
-    # the FigPack table layer AND the orchestrator figpack=True path otherwise
-    # run in NO CI environment. A separate env mirrors the matching lane above:
-    # the figpack pins are light, but isolating them keeps the default env's
-    # SpikeInterface pin uncoupled from the figpack-verified SI combo. These
-    # tests build a real v2 analyzer, so they use this job's own MySQL service
-    # (services.mysql above; --no-docker skips starting a database container)
-    # and need the smoke fixture, like the matcher lane.
+    # the FigPack table layer otherwise runs in NO CI environment. A separate
+    # env mirrors the matching lane above: the figpack pins are light, but
+    # isolating them keeps the default env's SpikeInterface pin uncoupled
+    # from the figpack-verified SI combo. These tests build a real v2
+    # analyzer, so they use this job's own MySQL service (services.mysql
+    # above; --no-docker skips starting a database container) and need the
+    # smoke fixture, like the matcher lane.
     - name: FigPack curation tests (separate env)
       # Heavy separate-env lane: its own matrix entry, so it runs beside the
       # workload shards instead of after one of them.
@@ -703,8 +703,6 @@ jobs:
           tests/spikesorting/v2/test_review_browser_journey.py \
           tests/spikesorting/v2/test_user_curation_workflow.py \
           tests/spikesorting/v2/test_epoch_unitmatch.py \
-          "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_publishes_offline_view" \
-          "tests/spikesorting/v2/single_session/test_pipeline_run.py::test_run_v2_pipeline_figpack_zero_units_skips_view" \
           tests/spikesorting/v2/test_notebook_execution.py::test_curation_notebook_runs \
           --no-docker --no-dlc -q --cov-config=tests/.coveragerc \
           --cov-report=xml:coverage-v2-curation.xml

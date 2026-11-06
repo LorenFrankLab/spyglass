@@ -159,8 +159,6 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "require_units",
         "auto_curate",
         "preflight",
-        "build_figpack_view",
-        "figpack_label_options",
         "manual_excluded_times",
         "motion_mode",
         "motion_correction_params_name",
@@ -215,14 +213,13 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_estimate",
         "motion_corrected_recording",
         "auto_curation",
-        "figpack",
     }
     # RunV2PipelineSummary is a single/concat tagged union (discriminated by
     # ``source_mode``), so pin each arm's keys rather than the alias (a union has
     # no __required_keys__). The mode-specific source keys are REQUIRED on their
     # arm -- the whole point of the union is that an illegal mix (e.g. a concat
     # summary carrying recording_id) is unrepresentable. The flag-gated
-    # auto-curation / figpack keys stay optional on both arms.
+    # auto-curation keys stay optional on both arms.
     _SUMMARY_BASE_REQUIRED = {
         "pipeline_preset",
         "scientific_config",
@@ -254,8 +251,6 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_corrected_recording_status",
         "curation_evaluation_id",
         "auto_curation_status",
-        "figpack_uri",
-        "figpack_status",
     }
     assert pipeline_types.RunV2SingleSessionSummary.__required_keys__ == (
         _SUMMARY_BASE_REQUIRED

@@ -27,9 +27,7 @@ from spyglass.spikesorting.v2._orchestration.source import (
     _validate_run_request,
 )
 from spyglass.spikesorting.v2._orchestration.stages import (
-    _assert_figpack_installed,
     _run_auto_curation_stage,
-    _run_figpack_stage,
     _run_member_curation_stage,
     _run_root_curation_stage,
     _run_sort_group_keys,
@@ -49,8 +47,6 @@ def run_v2_pipeline(
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
-    build_figpack_view: bool = False,
-    figpack_label_options: "list[str] | None" = None,
     manual_excluded_times=None,
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
@@ -146,24 +142,10 @@ def run_v2_pipeline(
         sort-group rows, the preset's parameter rows, and the sorter binary.
         Pass ``preflight=False`` to skip the check and attempt the run directly
         (e.g. to see the raw underlying error).
-    build_figpack_view
-        If True, additionally publish an offline FigPack manual-curation view of
-        the run's ROOT curation and add its local bundle URI to the summary
-        (``figpack_uri``) along with a ``figpack`` stage. Default ``False``.
-        Requires the optional FigPack packages (the ``spikesorting-v2-curation``
-        extra); ``build_figpack_view=True`` without them fails fast with
-        ``PipelineInputError`` before any populate. A zero-unit sort has no
-        analyzer to summarize, so the view is skipped (``figpack_status`` is
-        ``"skipped"`` and ``figpack_uri`` is absent) rather than failing the run.
-        Hosted upload is not offered here -- the bundle is always local.
     manual_excluded_times
         Immutable half-open [start, stop) exclusions in original session
         seconds, composed with automatic artifact detection. Manual
         exclusions also apply when the preset disables automatic detection.
-    figpack_label_options
-        Curation label palette (in display order) for the FigPack view; passed
-        through to ``FigPackCurationSelection``. ``None`` (default) uses
-        ``["accept", "mua", "noise"]``. Requires ``build_figpack_view=True``.
     motion_mode
         The motion stage, run on the sort's source (the recording under its
         artifact mask, or for ``run_v2_concat_pipeline`` the concatenation):
@@ -267,9 +249,6 @@ def run_v2_pipeline(
                 (``MotionEstimate.get_spans_without_evidence``; ``"estimate"``
                 / ``"apply"``; empty when every span has evidence). A
                 non-empty list also adds a ``warnings`` entry.
-        ``build_figpack_view=True`` adds (unless the sort found zero units):
-            ``figpack_uri``              : the published FigPack curation-view
-                URI (a local bundle path; offline only)
         Neither merge id is a filtered unit set: the auto-labeled child still
         carries every unit, labels included. Hand a curation to analysis with
         ``select_units_for_analysis(run.auto_labeled_curation, policy=...)``
@@ -310,9 +289,7 @@ def run_v2_pipeline(
     PipelineInputError
         Before any database access: if a source input is ``None``,
         ``pipeline_preset`` is not a known name, the motion request is
-        contradictory (see ``motion_mode`` and ``motion_estimate_id``),
-        ``figpack_label_options`` is given without ``build_figpack_view``, or
-        ``build_figpack_view=True`` without the FigPack packages installed.
+        contradictory (see ``motion_mode`` and ``motion_estimate_id``).
     PreflightError
         If ``preflight=True`` and a prerequisite is missing (the message
         lists every failed check and its fix). Bypass with
@@ -351,8 +328,6 @@ def run_v2_pipeline(
         require_units=require_units,
         auto_curate=auto_curate,
         preflight=preflight,
-        build_figpack_view=build_figpack_view,
-        figpack_label_options=figpack_label_options,
         manual_excluded_times=manual_excluded_times,
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
@@ -369,8 +344,6 @@ def run_v2_concat_pipeline(
     require_units: bool = False,
     auto_curate: bool = False,
     preflight: bool = True,
-    build_figpack_view: bool = False,
-    figpack_label_options: "list[str] | None" = None,
     manual_excluded_times=None,
     motion_mode: MotionMode = "off",
     motion_correction_params_name: "str | None" = None,
@@ -405,8 +378,7 @@ def run_v2_concat_pipeline(
         As in :func:`run_v2_pipeline`; the estimate must match this group's
         preprocessing recipe, members and member masks.
     pipeline_preset, curation_description, require_units, auto_curate, \
-build_figpack_view, figpack_label_options, motion_mode, \
-motion_correction_params_name
+motion_mode, motion_correction_params_name
         As in :func:`run_v2_pipeline`.
 
     Returns
@@ -433,8 +405,6 @@ ValueError
         require_units=require_units,
         auto_curate=auto_curate,
         preflight=preflight,
-        build_figpack_view=build_figpack_view,
-        figpack_label_options=figpack_label_options,
         manual_excluded_times=manual_excluded_times,
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
@@ -457,8 +427,6 @@ def _run_pipeline(
     require_units: bool,
     auto_curate: bool,
     preflight: bool,
-    build_figpack_view: bool,
-    figpack_label_options: "list[str] | None",
     manual_excluded_times,
     motion_mode: MotionMode,
     motion_correction_params_name: "str | None",
@@ -486,26 +454,11 @@ def _run_pipeline(
         motion_estimate_id=motion_estimate_id,
     )
 
-    if figpack_label_options is not None and not build_figpack_view:
-        from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
-        raise PipelineInputError(
-            f"{caller}: figpack_label_options configures the FigPack view, "
-            "which only build_figpack_view=True creates. Pass "
-            "build_figpack_view=True, or drop figpack_label_options."
-        )
-    # Fail fast (still DB-free, before the table imports) if a FigPack view was
-    # requested without the optional packages installed -- otherwise the missing
-    # install would surface only as an opaque import error after a full sort.
-    if build_figpack_view:
-        _assert_figpack_installed(caller)
-
     # Import the merge, sorting, and curation table modules after the DB-free
     # checks and before preflight, so a schema that cannot activate fails the
     # run before any compute (each stage helper imports what it uses). The
-    # auto-curation (``metric_curation``) and FigPack (``figpack_curation``)
-    # schema modules load later -- at preflight or in their own stage -- and
-    # only when those options are on.
+    # auto-curation (``metric_curation``) schema module loads later -- at
+    # preflight or in its own stage -- and only when that option is on.
     import importlib
 
     for schema_module in (
@@ -671,20 +624,6 @@ def _run_pipeline(
     if is_concat:
         _run_member_curation_stage(
             sorting_key, source.concat_key, run_summary, stage_seconds
-        )
-
-    # The FigPack view is of the ROOT curation: FigPack publishes raw-namespace
-    # curations only (an auto-curated child is in the curation_evaluation
-    # namespace).
-    if build_figpack_view:
-        _run_figpack_stage(
-            sorting_key,
-            curation_key,
-            n_units=n_units,
-            figpack_label_options=figpack_label_options,
-            run_summary=run_summary,
-            stage_seconds=stage_seconds,
-            warnings_list=warnings_list,
         )
 
     return RunResult(run_summary)

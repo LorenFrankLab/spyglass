@@ -111,29 +111,6 @@ def _populate_once(table, key) -> None:
         _populate_tolerating_concurrent_duplicate(table, key)
 
 
-def _assert_figpack_installed(caller: str) -> None:
-    """Raise ``PipelineInputError`` unless the FigPack packages are installed.
-
-    DB-free, so a run that asks for a FigPack view fails before any table
-    import.
-    """
-    import importlib.util
-
-    from spyglass.spikesorting.v2._review.annotations import (
-        FIGPACK_INSTALL_HINT,
-    )
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
-    if (
-        importlib.util.find_spec("figpack") is None
-        or importlib.util.find_spec("figpack_spike_sorting") is None
-    ):
-        raise PipelineInputError(
-            f"{caller}: build_figpack_view=True but the FigPack "
-            f"packages are not installed. {FIGPACK_INSTALL_HINT}"
-        )
-
-
 def _run_sort_group_keys(
     is_concat: bool,
     *,
@@ -606,76 +583,3 @@ def _run_member_curation_stage(
         run_summary,
     )
     run_summary["member_merge_ids"] = member_merge_ids
-
-
-def _run_figpack_stage(
-    sorting_key: dict,
-    curation_key: dict,
-    *,
-    n_units: int,
-    figpack_label_options,
-    run_summary: dict,
-    stage_seconds: dict,
-    warnings_list: list,
-) -> None:
-    """Publish an offline FigPack view of the root curation.
-
-    A zero-unit sort skips the stage with a logged warning. Otherwise
-    records ``figpack_status`` and ``figpack_uri`` in ``run_summary``.
-
-    Raises
-    ------
-    PipelineStageError
-        If the FigPack populate fails (stage ``"figpack"``).
-    """
-    from spyglass.utils import logger
-
-    if n_units == 0:
-        figpack_skip_warning = (
-            "run_v2_pipeline: build_figpack_view=True but the sort found "
-            f"zero units (sorting_id={sorting_key['sorting_id']}); "
-            "skipping the FigPack view -- there is no analyzer to summarize."
-        )
-        logger.warning(figpack_skip_warning)
-        warnings_list.append(figpack_skip_warning)
-        run_summary["figpack_status"] = "skipped"
-        stage_seconds["figpack"] = 0.0
-    else:
-        from spyglass.spikesorting.v2.figpack_curation import (
-            FigPackCuration,
-            FigPackCurationSelection,
-        )
-
-        figpack_selection = FigPackCurationSelection.insert_selection(
-            {
-                "sorting_id": sorting_key["sorting_id"],
-                "curation_id": curation_key["curation_id"],
-            },
-            label_options=figpack_label_options,
-            upload=False,
-        )
-        # The run returns figpack_uri, so a row whose local bundle was
-        # cleaned out is rebuilt rather than reported "reused" with a dead
-        # path, and one built on another machine comes with a warning.
-        stale_bundle = FigPackCuration.drop_missing_local_bundle(
-            figpack_selection
-        )
-        if stale_bundle:
-            warnings_list.append(stale_bundle)
-        bundle_present = bool(FigPackCuration & figpack_selection)
-        (
-            _,
-            run_summary["figpack_status"],
-            stage_seconds["figpack"],
-        ) = _run_stage(
-            "figpack",
-            bundle_present,
-            # Same concurrency handling as every other stage: serialize the
-            # populate on the content-addressed selection and tolerate a
-            # benign duplicate.
-            lambda: _populate_once(FigPackCuration, figpack_selection),
-            run_summary,
-        )
-        run_summary["figpack_uri"] = (
-            FigPackCuration & figpack_selection
-        ).fetch1("figpack_uri")

@@ -943,7 +943,6 @@ _RUN_STAGE_ORDER = (
     "curation",
     "auto_curation",
     "member_curation",
-    "figpack",
 )
 
 

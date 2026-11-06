@@ -4,8 +4,8 @@
 curation stages into one call so notebook users can populate an
 end-to-end single-session sort without writing the per-stage
 insert_selection / populate boilerplate. The same orchestrator also
-runs metric-driven auto-curation (``auto_curate=True``) and a publishable
-browser curation view (``build_figpack_view=True``).
+runs metric-driven auto-curation (``auto_curate=True``); browser review
+starts from the run's result (``RunResult.start_review``).
 ``run_v2_concat_pipeline`` runs the same stages on a same-day concatenated
 ``SessionGroup``; cross-session unit matching is its own helper,
 ``run_v2_unit_match``. ``estimate_motion`` / ``estimate_concat_motion`` build

@@ -49,8 +49,6 @@ class RunV2PipelineOptions(TypedDict, total=False):
     require_units: bool
     auto_curate: bool
     preflight: bool
-    build_figpack_view: bool
-    figpack_label_options: list[str] | None
     manual_excluded_times: (
         Sequence[Sequence[float]]
         | Mapping[int, Sequence[Sequence[float]]]
@@ -131,8 +129,6 @@ class PipelineStageSeconds(TypedDict):
     motion_corrected_recording: NotRequired[float]
     # Present only when ``run_v2_pipeline(auto_curate=True)``.
     auto_curation: NotRequired[float]
-    # Present only when ``run_v2_pipeline(build_figpack_view=True)``.
-    figpack: NotRequired[float]
 
 
 class _RunV2SummaryBase(TypedDict):
@@ -212,13 +208,6 @@ class _RunV2SummaryBase(TypedDict):
     # materialized child itself is the always-present ``auto_labeled_*`` pair.
     curation_evaluation_id: NotRequired[UUID]
     auto_curation_status: NotRequired[StageStatus]
-    # FigPack keys, present only when
-    # ``run_v2_pipeline(build_figpack_view=True)``: the published curation-view
-    # URI (a local bundle path offline) and its stage status. ``figpack_uri`` is
-    # absent and ``figpack_status`` is ``"skipped"`` when the sort found zero
-    # units (no analyzer to summarize).
-    figpack_uri: NotRequired[str]
-    figpack_status: NotRequired[StageStatus]
 
 
 class RunV2SingleSessionSummary(_RunV2SummaryBase):
