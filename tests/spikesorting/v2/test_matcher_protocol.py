@@ -1,9 +1,4 @@
-"""Hermetic (no-DB) tests for the cross-session matcher plugin interface.
-
-The matcher protocol + registry is pure Python with no DataJoint dependency,
-so these tests import it directly and exercise registration, lookup, the
-runtime-checkable protocol, and the bundle/pair dataclasses without a database.
-"""
+"""No-DB tests for the cross-session matcher protocol, registry, and dataclasses."""
 
 from __future__ import annotations
 
@@ -180,15 +175,13 @@ def test_register_matcher_duplicate_name_raises_unless_replace(clean_registry):
         mp.register_matcher(second, DummySchema)
     # The original backend is untouched by the rejected registration.
     assert mp.get_matcher("collide") is first
-    # Explicit opt-in replaces it.
     mp.register_matcher(second, DummySchema, replace=True)
     assert mp.get_matcher("collide") is second
 
 
 def test_registry_no_silent_reroute(clean_registry):
-    """The built-in 'unitmatch' name cannot be silently re-pointed at different
-    code: a different backend under that name raises without the explicit
-    maintenance flag, and the resolved backend stays the built-in one."""
+    """Registering a different backend as 'unitmatch' raises without
+    ``replace=True``, and the built-in stays resolved."""
     mp = clean_registry
     mp.register_default_matchers()  # ensure the built-in is present
     builtin_cls = type(mp.get_matcher("unitmatch"))
@@ -203,10 +196,8 @@ def test_registry_no_silent_reroute(clean_registry):
 
 
 def test_same_backend_reregisters_idempotently(clean_registry):
-    """Re-registering the SAME backend class is idempotent (no maintenance flag)
-    -- this is how register_default_matchers self-heals, so the built-in path no
-    longer relies on a blunt replace=True that would also mask a real collision.
-    """
+    """Re-registering the same backend class is idempotent without
+    ``replace=True``."""
     mp = clean_registry
     mp.register_default_matchers()
     builtin_cls = type(mp.get_matcher("unitmatch"))
@@ -227,10 +218,8 @@ def test_lookups_return_one_stable_builtin_instance(clean_registry):
 
 
 def test_explicit_builtin_replacement_survives_lookups(clean_registry):
-    """A deliberate replace=True swap of the built-in name is what later
-    lookups return; bootstrap fills only a MISSING name and must not raise a
-    collision against the replacement. After the registry is cleared the
-    built-in is re-installed."""
+    """Later lookups return a ``replace=True`` swap of the built-in; bootstrap
+    fills only a missing name. Clearing the registry restores the built-in."""
     mp = clean_registry
     mp.register_default_matchers()
     builtin_cls = type(mp.get_matcher("unitmatch"))
@@ -283,10 +272,8 @@ else:
 
 @pytest.mark.parametrize("flag", ["noreplace", "replace"])
 def test_builtin_replacement_rule_holds_before_backend_import(flag):
-    """Claiming a built-in name in a fresh process, BEFORE the backend module
-    was ever imported, obeys the same rule as afterwards: refused without
-    ``replace=True`` (the built-in is loaded first and stays installed),
-    honored with it."""
+    """In a fresh process, before the backend module is imported, claiming a
+    built-in name is refused without ``replace=True`` and honored with it."""
     import subprocess
     import sys
 

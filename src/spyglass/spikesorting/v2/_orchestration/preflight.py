@@ -1,19 +1,7 @@
 """Read-only configuration checks run before any pipeline populate.
 
-Holds ``preflight_v2_pipeline`` / ``preflight_v2_pipeline_session`` and
-re-exports the public names of its ``preflight_*`` siblings:
-``preflight_concat`` (the raising ``assert_concat_preflight`` a concat run
-executes), ``preflight_checks`` (the per-stage checks, and
-``assert_preset_compute_rows``, which the concat preflight shares),
-``preflight_runtime`` (sorter and container runtime probes),
-``preflight_motion`` / ``preflight_geometry`` (motion and contact-geometry
-checks), ``preflight_plan`` (the ids a run would compute or reuse),
-``preflight_scientific_setup`` (``describe_scientific_setup``) and
-``preflight_report`` (the ``Preflight*`` report types). Patch a private name in
-the module that looks it up. At import time these modules depend only on
-``_orchestration.presets``, ``_orchestration.types``, and
-``_core.recipe_catalog``; table modules are imported inside the functions that
-query them.
+Re-exports the public names of the ``preflight_*`` siblings. Patch a private
+name in the module that looks it up. Table modules are imported lazily.
 """
 
 from __future__ import annotations
@@ -93,19 +81,10 @@ def preflight_v2_pipeline(
 ) -> PreflightReport:
     """Read-only pre-populate configuration check for ``run_v2_pipeline``.
 
-    Verifies -- in ~1 s, inserting nothing and never calling ``populate``
-    -- that every prerequisite a subsequent ``run_v2_pipeline(...,
-    pipeline_preset=pipeline_preset)`` needs is in place: the session /
-    interval / team / sort-group rows exist, the pipeline preset's
-    parameter Lookup rows exist, and
-    the sorter binary is installed. Returns a structured
-    :class:`PreflightReport` instead of failing minutes into ``populate``
-    with an opaque foreign-key or SpikeInterface error.
-
-    Every check is a read-only restriction (``& {...}``) or a pure call. Most
-    checks run even after one fails, so the report lists every problem at once.
-    An unknown ``pipeline_preset`` short-circuits before any database access,
-    because the later checks need the resolved param names.
+    Checks, without inserting, that the session rows, sort group, preset
+    parameter rows, and sorter runtime are in place. Most checks run after a
+    failure so the report lists every problem; an unknown preset or invalid
+    motion request stops before any database access.
 
     Parameters
     ----------
@@ -113,36 +92,25 @@ def preflight_v2_pipeline(
         The same inputs as :func:`run_v2_pipeline`.
     auto_curate
         Match ``run_v2_pipeline(auto_curate=...)``. When True, also verify the
-        auto-curation prerequisites (the preset's ``QualityMetricParameters`` /
-        ``AutoCurationRules`` rows and the whitened metric analyzer recipe), so
-        a missing one fails preflight rather than after the upstream compute.
+        auto-curation rows and the metric analyzer recipe.
     motion_mode, motion_correction_params_name
-        Match ``run_v2_pipeline``. A contradictory pair (a recipe with
-        ``"off"``, no recipe otherwise, or an unknown mode) fails the
-        ``motion_request_valid`` check before any database access. With a
-        motion mode, a preset whose preprocessing recipe applies no temporal
-        filter fails ``motion_source_filtered``: motion is estimated on
-        filtered, unwhitened traces.
+        Match ``run_v2_pipeline``. A contradictory pair fails
+        ``motion_request_valid``; an unfiltered preprocessing recipe fails
+        ``motion_source_filtered``.
     motion_estimate_id
-        Match ``run_v2_pipeline``. Given with a mode other than ``"apply"``
-        (or not a UUID), it fails ``motion_request_valid`` before any database
-        access. Otherwise the ``motion_estimate_applicable`` check requires a
-        populated estimate of this run's recording and artifact mask made
-        with the recipe's estimation row, and ``expected_ids`` previews the
-        corrected recording and sort built on it.
+        Match ``run_v2_pipeline``. Only valid with ``"apply"``;
+        ``motion_estimate_applicable`` requires a populated estimate of this
+        run's source with the recipe's estimation row.
     sort_checks
-        If False, skip the checks only a sort needs -- the sorter row and its
-        parameters, the display analyzer recipe, the preset's sampling rate
-        and the sorter runtime or container -- for a caller that builds the
-        source without sorting it (``estimate_motion``). Default True.
+        If False, skip sort-only checks (sorter rows, display analyzer,
+        sampling rate, runtime), as ``estimate_motion`` does. Default True.
 
     Returns
     -------
     PreflightReport
         Truthy when the configuration is runnable. ``report.errors`` lists
-        each blocking problem with the action to fix it;
-        ``report.expected_ids`` holds the deterministic selection PKs the
-        run would produce (see :class:`PreflightReport`).
+        each blocking problem with its fix; ``report.expected_ids`` holds the
+        selection PKs the run would produce.
     """
     checks: list[PreflightCheck] = []
     warnings: list[str] = []
@@ -152,9 +120,7 @@ def preflight_v2_pipeline(
         checks.append(PreflightCheck(name, ok, "" if ok else fix))
         return ok
 
-    # pipeline_preset_known. Short-circuit before any DB access on failure: the
-    # remaining checks (and expected_ids) all derive from the resolved
-    # bundle's param names, which are unknown for a bogus pipeline preset.
+    # Later checks need the preset's param names.
     if pipeline_preset not in _PIPELINE_PRESETS:
         _check(
             "pipeline_preset_known",
@@ -163,8 +129,6 @@ def preflight_v2_pipeline(
         )
         return _blocked_preflight_report(pipeline_preset, checks, warnings)
     _check("pipeline_preset_known", True, "")
-    # A contradictory motion request short-circuits the same way: the motion
-    # checks below need a valid mode and recipe name, and this one is DB-free.
     motion_problem = motion_request_problem(
         motion_mode, motion_correction_params_name, motion_estimate_id
     )
@@ -188,21 +152,15 @@ def preflight_v2_pipeline(
     _check_session_rows(_check, nwb_file_name, interval_list_name, team_name)
     sort_group_exists = _check_sort_group(_check, nwb_file_name, sort_group_id)
     preprocessing_params_exist = _check_source_param_rows(_check, bundle)
-    # The sorter-only checks (the sorter row and its params, the display
-    # analyzer row, the sampling rate and the sorter execution) are skipped
-    # for a caller that builds no sort (``sort_checks=False``).
     sorter_params_exist, sorter_row = _check_sorter_param_rows(
         _check, bundle, sort_checks=sort_checks
     )
-    # What run_sorter would receive, resolved by the dispatcher's own resolver.
     effective_config = (
         resolve_preset_sort_config(bundle) if sorter_params_exist else None
     )
     display_waveform_params_name = _check_display_waveform_params(
         _check, bundle, sort_checks=sort_checks
     )
-    # Auto-curation prerequisites -- only when the caller opts into
-    # auto_curate, so a default run is unchanged.
     if auto_curate:
         _check_auto_curation_rows(_check, bundle)
     if sort_checks:
@@ -230,10 +188,7 @@ def preflight_v2_pipeline(
             sorter_row=sorter_row,
         )
 
-    # Non-blocking advisory: the "none" artifact params are a no-op
-    # pass-through (no masking). "default" performs real amplitude-threshold
-    # detection and is the legitimate built-in choice, so it is NOT warned.
-    # Manual exclusions still mask the sort, so they suppress it too.
+    # Advisory only; manual exclusions still mask the sort.
     if (
         bundle.artifact_detection_params_name in (None, "none")
         and not manual_excluded_times
@@ -243,16 +198,8 @@ def preflight_v2_pipeline(
             "no artifact masking will be applied for this run."
         )
 
-    # expected_ids: the deterministic selection PKs this run would produce, via
-    # the SAME payload builders insert_selection uses so they cannot drift.
-    # ``exists`` is a read-only & pk check. The recording_id folds in the
-    # resolved input hash (membership + reference + interpolate bad-channels)
-    # exactly as build_recording_selection_plan does, so preflight's expected id
-    # matches the id insert_selection will mint. That resolution reads the sort
-    # group and preprocessing-params rows, so the ids are only computable once
-    # those exist; when a blocking input is missing the run cannot proceed
-    # anyway, so leave expected_ids empty (as with an unknown preset) rather than
-    # raising a bare fetch1 that would mask the actionable missing-input check.
+    # Ids need the sort group and preprocessing rows; without them a fetch1
+    # would mask the actionable missing-input check.
     if not (sort_group_exists and preprocessing_params_exist):
         expected_ids = {}
     else:
@@ -314,11 +261,8 @@ def _resolve_session_sort_group_ids(
     """Validate session-runner inputs; return the target ``sort_group_id`` list.
 
     Shared by :func:`preflight_v2_pipeline_session` and
-    :func:`run_v2_pipeline_session` so their input validation -- and its
-    wording -- is identical. Unlike the single-group helpers, the session
-    helpers do **not** infer a default preset: an explicit ``pipeline_preset``
-    is required. The preset checks run before any ``SortGroupV2`` access, so an
-    unknown/missing preset is rejected DB-free.
+    :func:`run_v2_pipeline_session`. Session helpers require an explicit
+    ``pipeline_preset``, checked before any database access.
 
     Parameters
     ----------
@@ -406,12 +350,8 @@ def preflight_v2_pipeline_session(
 ) -> PreflightSessionReport:
     """Read-only preflight for every target sort group in a session.
 
-    Runs :func:`preflight_v2_pipeline` once per target ``SortGroupV2`` row and
-    aggregates the per-group reports. Read-only and cheap: it inserts nothing,
-    calls no ``populate``, and -- unlike the single-group helper -- requires an
-    explicit ``pipeline_preset`` (it infers no default). It reuses the
-    single-group checks rather than duplicating them, so the two helpers cannot
-    drift.
+    Runs :func:`preflight_v2_pipeline` per target sort group and aggregates
+    the reports. Requires an explicit ``pipeline_preset``.
 
     Parameters
     ----------
@@ -438,11 +378,8 @@ def preflight_v2_pipeline_session(
     Raises
     ------
     PipelineInputError
-        From the shared target resolver: ``pipeline_preset`` is ``None`` or
-        unknown, the session has no sort groups, or a requested
-        ``sort_group_ids`` entry is absent. This is *not* swallowed -- a
-        misconfigured request is a caller error, not a per-group preflight
-        failure.
+        If ``pipeline_preset`` is ``None`` or unknown, the session has no
+        sort groups, or a requested ``sort_group_ids`` entry is absent.
     """
     targets = _resolve_session_sort_group_ids(
         nwb_file_name=nwb_file_name,
@@ -454,8 +391,7 @@ def preflight_v2_pipeline_session(
     group_reports: list[dict[str, Any]] = []
     errors: list[str] = []
     warnings: list[str] = []
-    # Every group checks the same preset's sorter, so probe the installed
-    # sorters once for the whole session rather than once per group.
+    # Every group uses the same sorter; probe installed sorters once.
     with _installed_sorters_reused():
         for sort_group_id in targets:
             report = preflight_v2_pipeline(

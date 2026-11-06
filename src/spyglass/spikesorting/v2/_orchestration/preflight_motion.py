@@ -116,7 +116,7 @@ def resolve_motion_recipe(motion_correction_params_name: str) -> MotionRecipe:
     Raises
     ------
     ValueError
-        If the row is missing, or its estimation recipe no longer resolves
+        If the row is missing, or its estimation recipe does not resolve
         against the installed SpikeInterface.
     """
     from spyglass.spikesorting.v2._motion.estimation import (
@@ -171,9 +171,7 @@ def sorter_motion_correction_problem(
 ) -> "str | None":
     """Say why a sorter row cannot sort a motion-corrected recording.
 
-    Delegates to ``_params.sorter.reject_internal_motion_correction`` (the
-    check ``SortingSelection.insert_selection`` runs), so preflight and the
-    insert agree.
+    Uses the same check as ``SortingSelection.insert_selection``.
 
     Parameters
     ----------
@@ -255,10 +253,8 @@ def expected_source_ids(
 ) -> tuple:
     """Preview the recording and artifact-detection ids a run would mint.
 
-    Uses the same DB-free builders ``RecordingSelection.insert_selection`` and
-    ``RecordingArtifactSelection.insert_selection`` use, so the preview cannot
-    drift from the insert; only the recording's input hash is resolved from
-    the live sort-group, electrode and preprocessing rows (they must exist).
+    Uses the insert's own id builders. The sort-group, electrode and
+    preprocessing rows must exist.
 
     Parameters
     ----------
@@ -296,10 +292,6 @@ def expected_source_ids(
             nwb_file_name, sort_group_id, bundle.preprocessing_params_name
         ),
     ).recording_id
-    # A None artifact name means no artifact-detection pass: the sort's
-    # identity carries artifact_detection_id=None (matching
-    # build_sorting_selection_plan), so there is no RecordingArtifactSelection
-    # PK to expect.
     if bundle.artifact_detection_params_name is None:
         return recording_id, None
     return recording_id, deterministic_id(
@@ -322,14 +314,10 @@ def supplied_motion_estimate_problem(
 ) -> "str | None":
     """Say why a saved motion estimate cannot be applied by a run.
 
-    The estimate must be populated, estimated with the recipe's estimation
-    row, on a source whose traces have not changed since (its live
-    ``content_hash``, when the source row exists, is the one the estimate
-    was selected on), and made from the run's source: exactly its source and artifact
-    mask (``source_lineage``), or, before a concat run has built its
-    concatenation, a concatenation of the same session group under the same
-    preprocessing recipe (``concat_source``) whose frozen members are the
-    run's members, recordings and artifact detections (``concat_members``).
+    The estimate must be populated, use the recipe's estimation row, have an
+    unchanged source ``content_hash``, and match the run's source: its source
+    and mask (``source_lineage``), or for an unbuilt concat, the same group,
+    preprocessing and members (``concat_source``, ``concat_members``).
 
     Parameters
     ----------
@@ -384,9 +372,7 @@ def supplied_motion_estimate_problem(
             f"names {recipe_estimation!r}"
         )
     lineage = MotionEstimateSelection.resolve_source(key)
-    # A source recomputed since the estimate was selected no longer has the
-    # traces the estimate describes (checked while the source row exists; a
-    # run that has not built it yet is checked again when it applies it).
+    # A recomputed source's traces differ from the estimated ones.
     if _SOURCE_TABLES[lineage.kind] & lineage.key:
         try:
             _live_source_row(
@@ -443,18 +429,9 @@ def motion_geometry_problem_from_contacts(
 ) -> "str | None":
     """Say why a sort group's effective geometry cannot be motion-estimated.
 
-    Rebuilds the planar geometry the recording stage produces from the
-    registered ``Probe.Electrode`` positions (``sort_group_planar_positions``:
-    the ``tetrode_12.5`` square whenever that repair's gates pass, otherwise
-    the plane separating every contact) on a one-frame stand-in recording,
-    and runs the estimator's own
-    eligibility check
-    (``_motion.estimation.check_estimation_eligibility``: finite,
-    distinct positions, one shank, an attachable probe, a depth extent of at
-    least the detection radius, and room for the nonrigid windows). A group
-    whose geometry is incomplete or collapses without the repair is left to
-    ``sort_group_geometry_problem`` (``None`` here), so it is not reported
-    twice.
+    Runs ``check_estimation_eligibility`` on a one-frame stand-in recording
+    with the recording stage's planar geometry. Incomplete or collapsed
+    geometry returns ``None``; ``sort_group_geometry_problem`` reports it.
 
     Parameters
     ----------
@@ -519,11 +496,8 @@ def motion_geometry_problem(
 ) -> "str | None":
     """Say why a sort group cannot be motion-estimated with a recipe.
 
-    Reads the group's electrodes, registered contact positions, probe types,
-    electrode groups and shanks, then applies
-    :func:`motion_geometry_problem_from_contacts`. Evaluated on the full
-    electrode membership, like :func:`sort_group_geometry_problem`; the
-    estimator re-checks the actual recording.
+    Applies :func:`motion_geometry_problem_from_contacts` to the group's
+    registered contacts; the estimator re-checks the actual recording.
 
     Parameters
     ----------

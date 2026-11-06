@@ -1,26 +1,10 @@
 """Tests for v2 merge-id resolution by artifact detection.
 
-``SpikeSortingOutput._get_restricted_merge_ids_v2`` (and its public wrapper
-``get_spike_sorting_v2_merge_ids``) advertises ``artifact_detection_id`` as a
-restriction key, but ``artifact_detection_id`` is NOT on ``SortingSelection`` -- it
-lives on the optional ``SortingSelection.ArtifactDetectionSource`` part. Restricting
-the recording/sorter join (``sort_master``) by ``artifact_detection_id`` would
-silently drop the key (the compiled SQL is identical with and without it), so
-two sorts differing only by artifact would resolve to BOTH merge_ids.
-Resolution therefore goes through the part and intersects on
-``sorting_id`` when a UUID is requested. An absent ``artifact_detection_id`` key is a
-wildcard (no filter); an explicit ``artifact_detection_id=None`` means
-"no artifact-detection pass" and anti-joins to sorts with no
-``ArtifactDetectionSource`` row (the v2 design makes part-row presence the
-artifact-detection identity, so None is not a wildcard).
-
-It also normalizes a str/UUID ``artifact_detection_id`` to ``uuid.UUID`` (the column
-is a uuid); ``SortingSelection.insert_selection``'s idempotency dedup
-normalizes the same way.
-
-These tests build a second sort on the same recording as the package-scoped
-``populated_sorting`` (which is artifact-detection-backed) so the two differ
-only by artifact-detection state, then curate both into ``SpikeSortingOutput``.
+``artifact_detection_id`` lives on the optional
+``SortingSelection.ArtifactDetectionSource`` part, not ``SortingSelection``,
+so resolution goes through the part. An absent key is a wildcard;
+``artifact_detection_id=None`` selects sorts with no artifact detection.
+str ids are normalized to ``uuid.UUID``.
 """
 
 from __future__ import annotations
@@ -34,12 +18,10 @@ from tests.spikesorting.v2._ingest_helpers import (
 
 @pytest.fixture(scope="module")
 def two_sorts_one_recording(populated_sorting):
-    """Two curated sorts on one recording, differing only by artifact-detection state.
+    """Two curated sorts on one recording, with and without artifact detection.
 
-    ``sort_artifact`` is the package-scoped ``populated_sorting`` (an
-    ArtifactDetectionSource part row is present); ``sort_no_artifact`` is a fresh
-    selection on the same recording + sorter + params with NO artifact-detection pass.
-    Both are populated and curated into ``SpikeSortingOutput``.
+    ``sort_artifact`` is the package-scoped ``populated_sorting``;
+    ``sort_no_artifact`` has the same recording, sorter and params.
 
     Yields a dict of recording id, the artifact-detection id, both sorting
     ids, and both merge ids.
@@ -105,8 +87,8 @@ def two_sorts_one_recording(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_ids_artifact_restriction_is_exclusive(two_sorts_one_recording):
-    """Restricting by ``artifact_detection_id`` returns only the matching sort's
-    merge_id -- not both sorts on the recording."""
+    """Restricting by ``artifact_detection_id`` returns only the matching
+    sort's merge_id."""
     from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
@@ -138,15 +120,9 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
     """Two artifact-backed sorts on one recording with DIFFERENT artifact ids:
     restricting by one ``artifact_detection_id`` returns ONLY that sort.
 
-    ``CurationV2.resolve_restriction`` must translate the id to the part's
-    ``artifact_detection_merge_id`` key: restricting the
-    ``ArtifactDetectionSource`` part by ``artifact_detection_id`` (not a column
-    of that part) silently drops the key and collapses the filter to "any
-    artifact-backed sort". The base ``two_sorts_one_recording`` fixture (one
-    artifact + one no-artifact sort) would mask that because "all
-    artifact-backed" then coincides with "the one artifact"; this test adds a
-    SECOND, differently-detected artifact sort so a dropped-key restriction
-    returns two merge ids where one is required.
+    ``artifact_detection_id`` is not a column of the part, so it must be
+    translated to ``artifact_detection_merge_id``; two artifact-backed sorts
+    tell a dropped key from a working filter.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -170,8 +146,7 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
         SortingSelection & {"sorting_id": ctx["sorting_id_artifact"]}
     ).fetch1("sorter", "sorter_params_name")
 
-    # A SECOND artifact detection on the same recording, different params ->
-    # a distinct artifact_detection_id -> a second artifact-backed sort.
+    # Second artifact-backed sort on the same recording, different params.
     ArtifactDetectionParameters.insert_default()
     art2 = RecordingArtifactSelection.insert_selection(
         {
@@ -200,8 +175,6 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
             "merge_id"
         )
 
-        # Restricting by the "none" artifact must return ONLY its sort -- a
-        # dropped restriction key would also return the "default" sort.
         by_none = set(
             get_spike_sorting_v2_merge_ids(
                 {
@@ -215,7 +188,6 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
             "resolve_restriction matched a DIFFERENT artifact's sort -- the "
             "ArtifactDetectionSource restriction is keyed on the wrong column"
         )
-        # ...and restricting by "default" returns ONLY the default sort.
         by_default = set(
             get_spike_sorting_v2_merge_ids(
                 {
@@ -288,9 +260,8 @@ def test_merge_ids_artifact_detection_id_none_selects_no_artifact_sort(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_ids_no_artifact_sort_unaffected(two_sorts_one_recording):
-    """A sort with NO ArtifactDetectionSource still resolves by rec/curation keys --
-    the optional-part intersection is skipped when no artifact detection is asked
-    for, so it is not dropped."""
+    """A sort with no ArtifactDetectionSource resolves by recording/curation
+    keys when no artifact detection is requested."""
     from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
     )
@@ -310,10 +281,7 @@ def test_insert_selection_dedup_accepts_str_artifact_detection_id(
 ):
     """``insert_selection`` with a str ``artifact_detection_id`` is idempotent.
 
-    The find-existing dedup compares ``resolve_artifact_detection`` (a ``uuid.UUID``)
-    against the supplied ``artifact_detection_id``; a str would never equal the stored
-    UUID, so the second insert would miss its match and create a duplicate
-    sort. The supplied id is therefore normalized to a UUID first.
+    The dedup compares ``uuid.UUID`` values, so a str id is normalized first.
     """
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -358,9 +326,8 @@ def test_v2_merge_ids_warn_on_multi_curation_fanout(
     populated_sorting, monkeypatch
 ):
     """When a sorting has >1 CurationV2 curation and no curation_id is given,
-    get_restricted_merge_ids returns one merge_id PER curation AND warns -- so
-    a caller does not silently double-count the same units in a
-    SortedSpikesGroup / decode."""
+    get_restricted_merge_ids returns one merge_id per curation and warns
+    about double-counting units."""
     import spyglass.spikesorting.spikesorting_merge as merge_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2

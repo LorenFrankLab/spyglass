@@ -1,11 +1,7 @@
 """Producer provenance on computed v2 rows: effective seed + library versions.
 
-Provenance is SECONDARY, never identity: the seed actually used and the
-producing library/sorter versions are recorded on the computed rows, but a
-fixed input still mints the same ``sorting_id`` / ``unitmatch_id``.
-
-The ``resolve_effective_seed`` tests here are hermetic (pure helper, no DB);
-the populate-level provenance + parity tests use the DB fixtures.
+Provenance is a secondary attribute, never identity: a fixed input mints the
+same ``sorting_id`` / ``unitmatch_id``.
 """
 
 from __future__ import annotations
@@ -73,11 +69,9 @@ def test_resolve_effective_seed_ambient_seed_warns_once(
 def test_resolve_effective_seed_rejects_ambient_when_flagged(
     restore_custom_config,
 ):
-    """With ``reject_ambient_seed=True`` (the sort-identity boundary), an
-    ambient-only seed RAISES instead of warning: a Sorting must never be created
-    with a seed that is absent from its identity (``sorter_params_name``), or a
-    later ambient-seed change would silently reuse it. A per-row seed (which IS
-    part of identity) is still accepted, and no ambient seed is a no-op."""
+    """With ``reject_ambient_seed=True``, an ambient-only seed raises: a seed
+    outside ``sorter_params_name`` is not part of the Sorting's identity. A
+    per-row seed is accepted, and no ambient seed is a no-op."""
     dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"random_seed": 7}
     _warn_ambient_seed_once.cache_clear()
     with pytest.raises(ValueError, match="SorterParameters"):
@@ -95,9 +89,8 @@ def test_resolve_effective_seed_rejects_ambient_when_flagged(
 def test_resolve_effective_seed_matches_resolved_job_kwargs(
     restore_custom_config,
 ):
-    """The stored value equals what the seed sites consume: the helper bottoms
-    out on the same ``_resolved_job_kwargs`` merge the dispatch reads, so the
-    stored seed cannot drift from the used seed."""
+    """The stored seed equals the one used: both come from
+    ``_resolved_job_kwargs``."""
     dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"random_seed": 7}
     for blob in (None, {"random_seed": 3}, {"n_jobs": 2}, {"random_seed": 0}):
         assert resolve_effective_seed(blob) == int(
@@ -106,10 +99,8 @@ def test_resolve_effective_seed_matches_resolved_job_kwargs(
 
 
 def test_resolve_effective_seed_rejects_non_integer(restore_custom_config):
-    """A non-integer OR negative random_seed is rejected BEFORE compute, so the
-    stored seed can never diverge from the raw value the seed sites consume
-    (silent int()-coercion) nor defer to a later SI/NumPy RNG failure. Negative
-    mirrors the UnitMatch bundle-seed schema's seed >= 0."""
+    """A non-integer or negative random_seed is rejected before compute
+    (no int() coercion), matching the UnitMatch bundle schema's seed >= 0."""
     import numpy as np
 
     dj.config["custom"].pop("spikesorting_v2_job_kwargs", None)
@@ -128,10 +119,9 @@ def test_resolve_effective_seed_rejects_non_integer(restore_custom_config):
 
 
 def test_sorter_distribution_version_maps_known_and_none():
-    """The sorter package version is the installed distribution version for
-    sorters that ship as their own package, and ``None`` for SI-internal
-    sorters and the in-process clusterless thresholder (whose producing version
-    is ``spikeinterface_version``, recorded separately) -- never a wrong guess.
+    """The sorter version is the installed distribution version for sorters
+    with their own package, and ``None`` for SI-internal sorters and the
+    clusterless thresholder (covered by ``spikeinterface_version``).
     """
     from spyglass.spikesorting.v2._sorting.dispatch import (
         sorter_distribution_version,
@@ -251,17 +241,9 @@ def test_sorting_row_records_effective_seed_and_versions(populated_sorting):
 def test_ambient_seed_rejected_then_records_clusterless_provenance(
     restore_custom_config,
 ):
-    """A seed-dependent sort REJECTS an ambient-only ``random_seed`` at
-    populate: the clusterless smoke sort whitens (which samples random chunks
-    and is seed-dependent), so an ambient seed changes the output WITHOUT
-    changing ``sorting_id`` and must instead live in the ``SorterParameters``
-    row. (The unit-level reject is pinned by
-    ``test_resolve_effective_seed_rejects_ambient_when_flagged``; this covers the
-    integration path via ``Sorting.populate``.) With the ambient seed cleared,
-    the same sort populates and records clusterless provenance:
-    ``sorter_version`` is None (in-process, no distribution version),
-    ``spikeinterface_version`` is recorded, and the effective seed defaults to
-    0."""
+    """``Sorting.populate`` rejects an ambient-only ``random_seed`` for a
+    seed-dependent (whitening) sort. With it cleared, the sort records
+    ``sorter_version=None``, ``spikeinterface_version``, and seed 0."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sort_pk = _setup_clusterless_smoke_sort("mearec_provenance_ambient.nwb")
@@ -285,7 +267,7 @@ def test_ambient_seed_rejected_then_records_clusterless_provenance(
 
 def test_sorting_id_unchanged_after_provenance_columns():
     """The sorting_id derivation excludes the provenance columns, so a fixed
-    sorting selection identity still mints the pre-change deterministic id."""
+    selection mints a fixed id."""
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
         sorting_identity_payload,
@@ -304,10 +286,9 @@ def test_sorting_id_unchanged_after_provenance_columns():
 
 
 def test_unitmatch_id_unchanged_after_provenance_columns():
-    """The unitmatch_id derivation excludes the provenance columns -- and the
-    bundle params enter identity via matcher_params_name, NOT the
-    deterministic payload -- so a fixed selection identity (matcher params +
-    input_set_hash) always mints the same id."""
+    """The unitmatch_id derivation excludes the provenance columns, and bundle
+    params enter identity via matcher_params_name, so a fixed selection
+    (matcher params + input_set_hash) mints a fixed id."""
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
     )
@@ -324,8 +305,7 @@ def test_unitmatch_id_unchanged_after_provenance_columns():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_provenance_columns_are_secondary_not_identity():
-    """Every producer-provenance column is a SECONDARY attribute -- never in a
-    primary key -- so it can never fork a deterministic id."""
+    """Every producer-provenance column is a secondary attribute."""
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 

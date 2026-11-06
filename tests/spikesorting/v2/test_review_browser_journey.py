@@ -192,13 +192,9 @@ def test_browser_review_commit_verify_and_select(
         )
         assert len(spikes) == 1 and len(spikes[0]) > 0
 
-        # 6. Recovery: the merge was a mistake. The review it came from is
-        #    on its receipt (the merge's own parent -- here the root); undo
-        #    the proposal in the browser, save, and commit a replacement
-        #    sibling; the labels saved along with the merge are kept, the
-        #    merged branch stays as history. find() lists that review too
-        #    (a fresh start_review would begin a new review now that a
-        #    child exists).
+        # 6. Recovery: reopen the merge's review (on the root) from its
+        #    receipt, undo the merge and commit a replacement sibling. Labels
+        #    are kept; the merged branch stays as history.
         again = receipt.changes.review
         assert again.review_id == review.review_id
         assert [
@@ -248,10 +244,9 @@ def test_browser_review_commit_verify_and_select(
             replacement.curation_id
         }
 
-        # 7. A merge-only mistake on a LATER curation: recover through that
-        #    merge's own parent (the replacement, not the root) and, since
-        #    unmerging restores the parent exactly, confirm the no-change
-        #    commit.
+        # 7. A merge-only mistake on a later curation: recover through its
+        #    parent (the replacement); unmerging restores it, so commit as
+        #    no-change.
         later = replacement.start_review(profile, upload=False)
         with browser.review_page(
             later.open(open_browser=False), artifacts=tmp_path / "later"

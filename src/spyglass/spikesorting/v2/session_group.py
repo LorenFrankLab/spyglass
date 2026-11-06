@@ -1,16 +1,15 @@
 """Grouping of sessions for chronic and concatenated-recording workflows.
 
-Implements same-day chronic concatenate-and-sort: ``SessionGroup`` names a
-bundle of sorting members, and ``ConcatenatedRecording`` materializes one
-masked, unwhitened concatenated recording cache from each member's
-already-populated ``Recording`` artifact. A ``SortingSelection`` then FKs
-``ConcatenatedRecording`` (via its ``ConcatenatedRecordingSource`` part) and
-sorts the concatenation as one piece.
+``SessionGroup`` names a bundle of sorting members. ``ConcatenatedRecording``
+builds one masked, unwhitened concatenation from each member's populated
+``Recording``, which ``SortingSelection.ConcatenatedRecordingSource`` sorts as
+one piece.
 
 Tables:
-    SessionGroup (+ Member)                  -- Manual; user-facing grouping.
-    ConcatenatedRecordingSelection           -- Manual; UUID PK.
-    ConcatenatedRecording (+ MemberBoundary) -- Computed; materialized cache.
+
+- ``SessionGroup`` (+ ``Member``): Manual; user-facing grouping.
+- ``ConcatenatedRecordingSelection``: Manual; UUID PK.
+- ``ConcatenatedRecording`` (+ ``MemberBoundary``): Computed cache.
 """
 
 from __future__ import annotations
@@ -55,17 +54,10 @@ schema = dj.schema("spikesorting_v2_session_group")
 def _member_electrode_signature(member: dict) -> tuple:
     """Return a member sort group's electrode/region signature.
 
-    Fetches the sort group's electrodes (each with its owning
-    ``electrode_group_name``) and per-electrode brain region, then delegates the
-    signature shape to
-    :func:`._recording.concat.electrode_signature_from_rows`. Each electrode is
-    keyed by ``(electrode_group_name, electrode_id)`` because the ``Electrode``
-    primary key carries the group and ids can repeat across groups -- so two
-    physically distinct probes with reused ids and matching regions never
-    collapse into one electrode space. ``electrode_id`` is per-NWB but stable
-    across an animal's sessions, so two members of the same implant share a
-    signature while members on different sort groups, probes, or regions
-    diverge. An electrode without a region maps to ``None``.
+    Electrodes are keyed by ``(electrode_group_name, electrode_id)`` because
+    ids can repeat across groups. ``electrode_id`` is stable across an
+    animal's sessions, so members of the same implant share a signature. An
+    electrode without a region maps to ``None``.
     """
     from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
@@ -92,10 +84,7 @@ def _member_electrode_signature(member: dict) -> tuple:
 def distinct_recording_dates(session_start_times) -> list:
     """Distinct calendar dates of session start times, ascending.
 
-    The multi-day criterion: a set of recordings spans more than one day when
-    this returns two or more dates. ``SessionGroup.create_group`` (without
-    ``allow_multi_day``) and the UnitMatch same-day check on a concatenation
-    input both apply it.
+    Two or more dates means the recordings span multiple days.
 
     Parameters
     ----------
@@ -112,13 +101,9 @@ def distinct_recording_dates(session_start_times) -> list:
 def assert_members_share_electrode_space(members: list[dict]) -> None:
     """Reject a SessionGroup whose members map to different electrode spaces.
 
-    SI's channel-id check (and the geometry/scaling checks in
-    ``assert_concat_compatible``) compare the per-member SI recordings, but two
-    members can share a local channel layout while their sort groups reference
-    DIFFERENT physical electrodes or brain regions. The concatenated recording
-    is read in the ANCHOR member's electrode frame, so a divergent member would
-    be silently mis-attributed. Compare each member's electrode/region signature
-    against the anchor (lowest ``member_index``) and raise on a mismatch.
+    Members can share a channel layout yet reference different physical
+    electrodes or regions. The concatenation is read in the anchor (lowest
+    ``member_index``) member's electrode frame, so each member must match it.
 
     Parameters
     ----------
@@ -158,19 +143,13 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     """A named bundle of sorting members to analyze together.
 
     A member is a ``(nwb_file_name, sort_group_id, interval_list_name,
-    team_name)`` tuple, not necessarily a whole NWB file. The master PK is
-    ``(session_group_owner, session_group_name)``; ``session_group_owner``
-    is a projected ``LabTeam.team_name`` so two teams may both create a
-    group named ``"day1"`` without collision.
+    team_name)`` tuple, not necessarily a whole NWB file.
+    ``session_group_owner`` is a projected ``LabTeam.team_name`` so teams can
+    reuse group names. Same-day groups are the default; multi-day requires
+    ``allow_multi_day=True``.
 
-    Same-day groups are the default; multi-day requires
-    ``allow_multi_day=True`` (see ``create_group``).
-
-    A direct ``insert`` / ``insert1`` and an in-place ``update1`` are blocked
-    (``FactoryOnlyMaster``): a group is a provenance root that
-    ``ConcatenatedRecordingSelection`` / ``UnitMatchSelection`` reference, so it
-    must be written through :meth:`create_group` (which inserts the master + its
-    ``Member`` rows atomically after validating member dates).
+    Create groups with :meth:`create_group`; direct ``insert`` and
+    ``update1`` are blocked.
     """
 
     #: Named in ``FactoryOnlyMaster``'s reject messages.
@@ -207,24 +186,13 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     ) -> None:
         """Atomically insert the master + Member rows for a sorting group.
 
-        ``session_group_owner`` namespaces user-facing group names in shared
-        databases: two teams may both create ``"day1"`` because the master PK
-        is ``(session_group_owner, session_group_name)``.
-
         Each member dict carries ``nwb_file_name``, ``sort_group_id``,
-        ``interval_list_name`` and an optional ``team_name`` (the data-owner
-        team used to resolve that member's ``RecordingSelection``; missing
-        ``team_name`` defaults to ``session_group_owner`` for single-team
-        groups, and mixed-team collaborations override it per member). A
-        member is a sorting member tuple, not a whole-day abstraction: one
-        NWB/day may contribute several members through different intervals or
-        sort groups.
+        ``interval_list_name`` and an optional ``team_name`` (the team that
+        owns that member's ``RecordingSelection``; defaults to
+        ``session_group_owner``). One NWB may contribute several members.
 
-        Recording dates are DERIVED from each member's
-        ``Session.session_start_time``, never stored on Member rows and never
-        caller-supplied. Same-day groups are the default; members spanning two
-        or more dates require ``allow_multi_day=True``. For days/weeks-apart
-        sessions the recommended path is sort-then-match, not concatenation.
+        Recording dates come from ``Session.session_start_time``. For sessions
+        days apart, sort each and match units instead of concatenating.
 
         Parameters
         ----------
@@ -233,7 +201,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         session_group_name : str
             Group name, unique within ``session_group_owner``.
         members : list of dict
-            Member tuples (see above). Order is preserved as ``member_index``.
+            Member dicts (see above). Order sets ``member_index``.
         description : str, optional
             Free-text group description. Default ``""``.
         allow_multi_day : bool, optional
@@ -259,9 +227,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         try:
             with cls.connection.transaction:
-                # create_group IS the validation boundary (it derived + checked
-                # the member dates and shaped every Member row), so it bypasses
-                # the FactoryOnlyMaster insert guard for its validated master.
+                # Rows were validated above.
                 cls.insert1(
                     {
                         "session_group_owner": session_group_owner,
@@ -272,9 +238,6 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 )
                 cls.Member.insert(rows)
         except dj.errors.IntegrityError as exc:
-            # A member's SortGroupV2 / IntervalList / LabTeam foreign key does
-            # not exist -- translate the raw integrity error into a typed,
-            # actionable one instead of leaking the DataJoint message.
             raise SessionGroupInputError(
                 "SessionGroup.create_group: a member references a SortGroupV2, "
                 "IntervalList, or LabTeam row that does not exist. Verify each "
@@ -289,11 +252,9 @@ class ConcatenatedRecordingSelection(
 ):
     """One selection per group, recipes, and frozen member/artifact choices.
 
-    UUID-keyed so downstream FKs are single-column (mirrors the
-    single-session ``RecordingSelection`` / ``Recording`` shape). The
-    ``insert_selection`` helper enforces that every member has a populated
-    ``Recording`` row matching the requested preprocessing parameters before
-    minting the ``concat_recording_id``.
+    UUID-keyed so downstream FKs are single-column. ``insert_selection``
+    requires every member to have a populated ``Recording`` under the
+    requested preprocessing parameters.
     """
 
     definition = """
@@ -307,19 +268,13 @@ class ConcatenatedRecordingSelection(
     class MemberSnapshot(SpyglassMixinPart):
         """Frozen per-member identity captured when the concat id was minted.
 
-        ``insert_selection`` freezes each ``SessionGroup.Member``'s ordered
-        logical identity AND its resolved ``Recording`` (``recording_id`` +
-        ``recording_content_hash``) here, and folds the ordered LOGICAL set into
-        ``concat_recording_id`` via :func:`._recording.concat.member_set_hash`.
-        Member identity columns are snapshots; the selected artifact detection
-        has a foreign key so it cannot silently disappear. The identity stays
-        frozen: a later edit to ``SessionGroup.Member`` or the member's
-        ``RecordingSelection`` cannot cascade into it. Concat read /
-        materialization paths read THIS, never the live ``SessionGroup.Member``
-        set, so an old concat row stays valid after a group edit (the edit mints
-        a new ``concat_recording_id`` on re-selection); ``recording_content_hash``
-        lets materialize / rebuild detect that a frozen member's underlying
-        recording content drifted (``ConcatMemberDriftError``).
+        Holds each member's identity and resolved ``Recording``
+        (``recording_id``, ``recording_content_hash``); the ordered set is
+        hashed into ``concat_recording_id``. Concat reads use this, never the
+        live ``SessionGroup.Member`` rows, so a group edit does not affect an
+        existing concat row. ``recording_content_hash`` detects member drift
+        (``ConcatMemberDriftError``). The artifact detection is a foreign key
+        so it cannot disappear.
         """
 
         definition = """
@@ -335,10 +290,8 @@ class ConcatenatedRecordingSelection(
         -> [nullable] RecordingArtifactDetection
         """
 
-    #: The logical-identity fields (everything but the minted PK). A concat
-    #: selection combines group and recipe names with ``member_set_hash``.
-    #: The hash includes ordered members and their artifact choices, so changing
-    #: either creates a distinct selection under the same group name.
+    #: Identity fields besides ``member_set_hash``, which covers ordered
+    #: members and their artifact choices.
     _IDENTITY_FIELDS = (
         "session_group_owner",
         "session_group_name",
@@ -354,23 +307,12 @@ class ConcatenatedRecordingSelection(
     ) -> dict:
         """Find-existing-or-insert a concat selection; return a PK-only dict.
 
-        Enforces, BEFORE inserting, that every ``SessionGroup.Member`` has a
-        populated per-member ``Recording`` row under the requested
-        ``preprocessing_params_name``. This selection-time precondition is the
-        load-bearing layer that lets ``ConcatenatedRecording.make`` consume
-        cached ``Recording`` artifacts and never call ``Recording.populate``
-        inline (a DataJoint anti-pattern): a missing member surfaces here as
-        ``MissingRecordingForConcatError`` listing the offending member keys,
-        not as a confusing nested-populate failure later.
+        Every member must already have a populated ``Recording`` under
+        ``preprocessing_params_name``, so ``ConcatenatedRecording.make`` never
+        populates inline. Idempotent for the same identity and member set.
 
-        Idempotent: a repeat request for the same (group, preprocessing)
-        identity over the same frozen member set returns the existing
-        ``concat_recording_id`` rather than minting a second one.
-
-        Duplicate-key recovery has no savepoint: it relies on the deterministic
-        primary key colliding on the master insert, the transaction's first
-        statement, before any part row is written. Keep the master insert first,
-        or the recovery would leave part rows inside a caller's transaction.
+        Duplicate-key recovery has no savepoint; it relies on the master
+        insert being the transaction's first statement.
 
         Parameters
         ----------
@@ -430,11 +372,7 @@ class ConcatenatedRecordingSelection(
                 "transaction so its artifact lifecycle locks cover the commit."
             )
         try:
-            # allow_direct_insert: this helper IS the validation boundary (it
-            # has already checked every member's Recording exists, frozen the
-            # snapshot, and minted the deterministic id), so it bypasses the
-            # master insert guard. Master + snapshot land in one transaction so
-            # a concat id never exists without its frozen member set.
+            # Validated above; master and snapshot commit together.
             with artifact_lifecycle_locks(detection_ids):
                 with cls._safe_context():
                     cls.insert1(
@@ -461,16 +399,9 @@ class ConcatenatedRecordingSelection(
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        The full logical identity (group + preprocessing params) plus
-        the derived ``member_set_hash`` lives in the master's own columns, so it
-        is checked against the master alone. Restricting on ``member_set_hash``
-        too means two selections sharing a group name but over DIFFERENT frozen
-        member sets do not collide -- each resolves to its own deterministic id.
-        Any master matching this (identity, member set) whose
-        ``concat_recording_id`` is NOT the deterministic id is a raw-insert
-        bypass of the content-addressed invariant, and is rejected rather
-        than silently returned. Used by ``insert_selection`` for
-        both the pre-insert lookup and the post-duplicate-key refetch.
+        Matches on identity plus ``member_set_hash``, so selections over
+        different member sets do not collide. A match whose id is not the
+        deterministic one came from a raw insert and is rejected.
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
@@ -500,16 +431,11 @@ class ConcatenatedRecordingSelection(
 class ConcatRecordingFetched(NamedTuple):
     """DB-side inputs for ``ConcatenatedRecording.make_compute``.
 
-    Gathered with no SI/NWB I/O except the self-heal rebuild of a missing
-    member file.
-
-    ``member_plan`` is the member_index-ordered list of DeepHash-stable dicts
-    ``{"member_index" (int), "nwb_file_name" (str), "recording_pk" (dict whose
-    ``recording_id`` is the str UUID)}`` -- each member's cached ``Recording`` PK
-    resolved and existence-checked at fetch time, so a member's cache going
-    missing between stages fails in fetch rather than mid-compute.
-    ``member_traces`` holds each member's cached file, aligned with
-    ``member_plan`` and resolved (rebuilt if missing) at fetch time too.
+    ``member_plan`` is the ``member_index``-ordered plan from
+    :func:`._recording.concat_fetch.resolve_snapshot_recordings`,
+    existence-checked at fetch time.
+    ``member_traces`` holds each member's file, aligned with ``member_plan``
+    and rebuilt at fetch time if missing.
     """
 
     member_plan: list[dict]
@@ -521,9 +447,8 @@ class ConcatRecordingFetched(NamedTuple):
 class ConcatRecordingComputed(NamedTuple):
     """Compute -> insert carrier for ``ConcatenatedRecording``.
 
-    DeepHash-stable scalars plus ``member_boundaries`` -- the per-member
-    ``{"member_index" (int), "end_sample" (int)}`` rows derived from the
-    per-member sample counts (``make_insert`` adds the master PK).
+    ``member_boundaries`` holds per-member ``{"member_index" (int),
+    "end_sample" (int)}`` rows; ``make_insert`` adds the master PK.
     """
 
     analysis_file_name: str
@@ -536,14 +461,11 @@ class ConcatRecordingComputed(NamedTuple):
     anchor_nwb_file_name: str
     member_boundaries: list[dict]
     obs_intervals: object
-    # ``(n, 2)`` int64 half-open concat frame ranges that are artifact-free and
-    # never cross a member join or a member-internal timestamp gap; every
-    # estimator over the concat samples statistics only inside them.
+    # (n, 2) int64 half-open artifact-free frame ranges within one member's
+    # continuous acquisition; estimators sample only inside them.
     statistics_spans: object
-    # ``(n, 2)`` int64 half-open concat frame ranges of uninterrupted
-    # acquisition (split at every member join and member-internal gap) and
-    # ``(n,)`` float64 first / last timestamp of each on its member's own
-    # clock; the synthetic concat timeline cannot recover them.
+    # (n, 2) int64 frame ranges of uninterrupted acquisition, and (n,) float64
+    # first/last times on the member's own clock.
     continuity_spans: object
     continuity_start_s: object
     continuity_end_s: object
@@ -559,12 +481,9 @@ class ConcatenatedRecording(
 ):
     """Materialized cross-session concatenated recording cache.
 
-    Tri-part ``make`` writes a single masked, unwhitened ``ElectricalSeries``
-    spanning the ordered member recordings (no motion correction), plus the
-    cumulative per-member integer sample boundaries on the ``MemberBoundary``
-    part (consumed by ``split_sorting_by_session``). Downstream
-    ``SortingSelection`` FKs this table via its ``ConcatenatedRecordingSource``
-    part.
+    Writes one masked, unwhitened ``ElectricalSeries`` over the ordered
+    members (no motion correction), plus cumulative member sample boundaries
+    in ``MemberBoundary``.
     """
 
     definition = """
@@ -600,12 +519,7 @@ class ConcatenatedRecording(
     def _load_member_recordings(member_plan, member_traces):
         """Load each member's cached ``Recording`` from the resolved plan (SI I/O).
 
-        The compute-side half: given the fetch-resolved ``member_plan`` (see
-        :func:`._recording.concat_fetch.resolve_snapshot_recordings`) and
-        member files, read each cached ``Recording`` and collect its sample
-        count (the basis for the ``MemberBoundary`` back-mapping). Aligned element-wise in
-        ``member_index`` order. No DB access -- the files were resolved at
-        fetch time.
+        No DB access; files were resolved at fetch time.
 
         Parameters
         ----------
@@ -618,8 +532,8 @@ class ConcatenatedRecording(
         Returns
         -------
         tuple[list, list[int], list[int]]
-            ``(recordings, member_sample_counts, member_indices)`` -- aligned
-            element-wise and in ``member_index`` order.
+            ``(recordings, member_sample_counts, member_indices)`` in
+            ``member_index`` order.
         """
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
@@ -633,24 +547,14 @@ class ConcatenatedRecording(
             member_indices.append(int(plan["member_index"]))
         return recordings, member_sample_counts, member_indices
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` / ``make_compute``
-    # / ``make_insert`` keep the long SpikeInterface concat + NWB write
-    # OUTSIDE the framework's commit transaction (mirroring
-    # ``Recording`` / ``Sorting``), so no lock is held for the whole
-    # materialization.
+    # Tri-part make keeps the concat and NWB write outside the transaction.
     _parallel_make = True
 
     def make_fetch(self, key) -> ConcatRecordingFetched:
         """Read every DB input the materialization needs.
 
-        No SI / NWB I/O except the self-heal rebuild of a missing member file.
-
-        Resolves the selection row, the FROZEN member snapshot (never the live
-        ``SessionGroup.Member`` set) and each member's still-current ``Recording``
-        (raising if any is missing or its content drifted from the snapshot),
-        then each member's cached file, rebuilding a missing one through
-        ``Recording``'s own verified self-heal. Returns a DeepHash-stable
-        carrier so the framework's two-fetch integrity check does not trip.
+        Reads the frozen member snapshot and each member's ``Recording``,
+        rebuilding a missing member file. No other SI or NWB I/O.
 
         Parameters
         ----------
@@ -684,21 +588,11 @@ class ConcatenatedRecording(
     ) -> ConcatRecordingComputed:
         """Materialize the concat cache outside any DB transaction.
 
-        Reuses each member's already-populated, cached ``Recording`` artifact
-        (NEVER calls ``Recording.populate`` -- the files were resolved in
-        ``make_fetch``; the only DB access here stages the output file, see
-        :mod:`._storage.nwb`), zeros each member's selected artifact intervals,
-        stitches the members into one mono-segment recording, and writes a
-        single ``ElectricalSeries`` into a fresh ``AnalysisNwbfile``. No motion
-        correction and no whitening are applied here -- whitening stays a
-        sorter/analyzer concern, so the persisted concat recording is the
-        masked, unwhitened concatenation of the member traces. Masked samples
-        are 0 uV: members that keep a nonzero channel offset (unfiltered,
-        unreferenced sources) are concatenated and persisted as float32
-        microvolts with a unit calibration; every other member keeps its
-        stored samples and calibration (``mask_member_recordings``). The
-        cumulative per-member sample boundaries are carried to
-        ``make_insert``.
+        Zeros each member's artifact intervals, stitches the members into one
+        segment, and writes one ``ElectricalSeries``. No motion correction or
+        whitening. Masked samples are 0 uV; members with a nonzero channel
+        offset are stored as float32 microvolts, others keep their stored
+        samples and calibration (``mask_member_recordings``).
 
         Returns
         -------
@@ -740,10 +634,7 @@ class ConcatenatedRecording(
         masked_recordings, artifact_ranges = mask_member_recordings(
             recordings, [plan["valid_times"] for plan in member_plan]
         )
-        # Continuity spans (and so statistics spans) come from the members as
-        # loaded, whose persisted timestamps still carry each member's own
-        # gaps; the concatenation below replaces them with one synthetic
-        # continuous timeline.
+        # Use member timestamps; the concatenation drops their gaps.
         continuity_spans, continuity_start_s, continuity_end_s, statistics = (
             concat_span_arrays(
                 recordings, member_sample_counts, artifact_ranges
@@ -753,14 +644,10 @@ class ConcatenatedRecording(
 
         concatenated = build_concatenated_recording(recordings)
 
-        # Compute the member boundaries + recording metadata BEFORE staging the
-        # NWB, so a failure in this pure arithmetic cannot orphan a staged file.
+        # Compute before staging the NWB so a failure cannot orphan a file.
         boundaries = cumulative_member_boundaries(member_sample_counts)
         concat_n_samples = int(concatenated.get_num_samples())
-        # Member boundaries come from the per-member sample counts. Guard that
-        # the stitched recording has exactly their sum -- a mismatch (e.g. an SI
-        # concatenation change) would silently misalign the boundaries and
-        # corrupt split_sorting_by_session's back-mapping.
+        # A sample-count mismatch would misalign split_sorting_by_session.
         if boundaries and concat_n_samples != boundaries[-1]:
             raise RuntimeError(
                 "ConcatenatedRecording.make: the concatenated recording has "
@@ -776,9 +663,7 @@ class ConcatenatedRecording(
         n_channels = int(concatenated.get_num_channels())
         total_duration_s = concat_n_samples / sampling_frequency
 
-        # Anchor the analysis NWB to the FIRST member's session (deterministic
-        # parent, resolved in make_fetch); full multi-session provenance stays
-        # queryable through ConcatenatedRecordingSelection -> SessionGroup.Member.
+        # The analysis NWB's parent is the first member's session.
         provenance_tables = concat_provenance_tables(
             concat_recording_id=key["concat_recording_id"],
             preprocessing_params_name=preprocessing_params_name,
@@ -816,10 +701,7 @@ class ConcatenatedRecording(
             n_channels=n_channels,
             sampling_frequency=sampling_frequency,
             total_duration_s=total_duration_s,
-            # Exact integer concat sample count (== boundaries[-1], asserted
-            # above) -- the authoritative basis split-back checks the cumulative
-            # MemberBoundary set against, avoiding a float total_duration_s*fs
-            # round-trip.
+            # Exact integer; avoids a float total_duration_s * fs round trip.
             n_samples=concat_n_samples,
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
@@ -851,12 +733,8 @@ class ConcatenatedRecording(
     ):
         """Atomically register the staged concat artifact + boundary rows.
 
-        DataJoint's tri-part dispatch already opens the master transaction
-        around this method, so ``_safe_context()`` is a no-op here; it is
-        kept so a direct (non-populate) call still commits atomically.
-        Removing a failed attempt's staged ``ElectricalSeries`` is
-        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
-        call leaves that to its caller.
+        ``_safe_context()`` makes a direct (non-populate) call atomic. A
+        direct call must remove a failed attempt's staged file itself.
         """
         from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 
@@ -894,14 +772,8 @@ class ConcatenatedRecording(
     def get_recording(self, key) -> "si.BaseRecording":  # noqa: F821
         """Return the cached concatenated SpikeInterface recording.
 
-        Rebuilds the concat NWB artifact on demand if the file is missing
-        (mirroring ``Recording.get_recording``); the DataJoint row is never
-        deleted by this path -- the stored ``content_hash`` is the source of
-        truth for re-verification. Reads the persisted masked, unwhitened
-        ``ElectricalSeries`` through the stored
-        ``electrical_series_path`` (authoritative, not an auto-detect hint) and
-        annotates ``is_filtered=True`` so a downstream sorter does not re-filter
-        the already-filtered cache.
+        Rebuilds a missing file and verifies it against ``content_hash``.
+        Annotated ``is_filtered=True`` so sorters do not re-filter.
 
         Parameters
         ----------
@@ -921,22 +793,18 @@ class ConcatenatedRecording(
         )
 
     def _rebuild_nwb_artifact(self, key) -> None:
-        """Rebuild a missing concat artifact -- locked, atomic, content-verified.
+        """Rebuild a missing concat artifact (locked, atomic, verified).
 
-        The rebuild is :func:`._storage.rebuilds.rebuild_concat_nwb_artifact`; it
-        calls ``make_fetch`` and ``make_compute`` on this instance.
-        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on every
-        trace-artifact table, so it stays on the class.
+        :func:`._storage.rebuilds.ensure_artifact_file` calls this on every
+        trace-artifact table.
         """
         return _recording_rebuilds.rebuild_concat_nwb_artifact(self, key)
 
     def split_sorting_by_session(self, sorting, key) -> dict:
         """Back-map a concat-frame sorting into per-member local sortings.
 
-        Slices each unit's concat-frame spike train into each member's LOCAL
-        sample frame using the persisted ``MemberBoundary`` cumulative sample
-        counts, so a sort run over the concatenated recording can be split back
-        into per-session sortings. Unit ids are preserved across members.
+        Uses the ``MemberBoundary`` rows. Unit ids are preserved across
+        members.
 
         Parameters
         ----------
@@ -952,12 +820,8 @@ class ConcatenatedRecording(
         dict[tuple[str, int, str, str], si.BaseSorting]
             One ``NumpySorting`` per member, keyed by the hashable member
             identity ``(nwb_file_name, sort_group_id, interval_list_name,
-            team_name)``, with spike times in that member's local sample frame.
-            The ``sort_group_id`` and ``team_name`` are in the key (not just
-            ``(nwb_file_name, interval_list_name)``) so two members sharing an
-            NWB/interval but on distinct sort groups -- or, for a mixed-team
-            group, distinct teams -- do not collide. See
-            :func:`._recording.concat.member_split_key`.
+            team_name)``, with spike times in that member's local frames.
+            See :func:`._recording.concat.member_split_key`.
         """
         import spikeinterface as si
 
@@ -967,15 +831,10 @@ class ConcatenatedRecording(
         )
         from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
-        # Split over the FROZEN member set (the same authority make_fetch used to
-        # materialize), so a later SessionGroup.Member edit cannot misalign the
-        # back-mapping; the per-member end boundaries are the frozen
-        # MemberBoundary rows.
+        # Use the frozen members so a SessionGroup.Member edit cannot misalign.
         members = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
             as_dict=True, order_by="member_index"
         )
-        # MemberBoundary is keyed by member_index; align to the member order and
-        # require exactly one boundary per frozen member (no missing/extra).
         indices, ends = (self.MemberBoundary & key).fetch(
             "member_index", "end_sample"
         )
@@ -998,14 +857,8 @@ class ConcatenatedRecording(
             int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
             for unit_id in sorting.unit_ids
         }
-        # split_unit_spike_trains enforces strictly-increasing boundaries and
-        # per-spike conservation (every concat-frame spike lands in exactly one
-        # member). Pass the stored exact concat sample count so the final
-        # boundary is verified to cover the whole recording -- catching a
-        # truncated or over-long MemberBoundary set that the per-spike range
-        # check alone could miss (a too-long final boundary is never exceeded by
-        # an in-range spike). ``n_samples`` is the exact integer written by
-        # make_insert, not a float total_duration_s * fs round-trip.
+        # total_n_samples catches a final boundary that is too long, which
+        # in-range spikes alone cannot detect.
         n_samples = int((self & key).fetch1("n_samples"))
         per_member = split_unit_spike_trains(
             unit_trains, boundaries, total_n_samples=n_samples

@@ -1,14 +1,7 @@
 """Reads behind ``MotionEstimate.report``.
 
-:func:`motion_estimate_report` is the body of ``MotionEstimate.report``: it
-fetches one estimate's stored arrays, where a concatenation's members join
-and, given a corrected recording, its border mode and removed channels;
-:func:`read_trace_window` reads original and corrected traces over a
-window. Both hand what they read to ``_motion.report``, which summarizes and
-draws it.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+``_motion.report`` summarizes and draws what these read. DataJoint tables are
+imported inside the functions.
 """
 
 from __future__ import annotations

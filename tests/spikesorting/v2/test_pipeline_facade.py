@@ -1,10 +1,7 @@
 """Pin the public import surface of the ``pipeline`` facade.
 
-``pipeline.py`` was split into ``_pipeline_*`` submodules (presets, geometry,
-preflight, reporting, run); it re-exports every public name so notebook/user
-imports (``from spyglass.spikesorting.v2.pipeline import ...``) stay stable.
-This DB-free test fails if any public name stops resolving from the facade --
-the contract the split must preserve.
+``pipeline.py`` re-exports public names from ``_orchestration`` so
+``from spyglass.spikesorting.v2.pipeline import ...`` stays stable. DB-free.
 """
 
 from __future__ import annotations
@@ -14,9 +11,8 @@ from spyglass.spikesorting.v2._orchestration.exports import (
     PIPELINE_FACADE_EXPORTS,
 )
 
-# These required names are independent of the production export manifest.
-# Additive exports are allowed; deleting a manifest entry must not also erase
-# the test's expectation and silently shrink the public API.
+# Listed independently of the production manifest, so removing a manifest
+# entry cannot silently shrink the public API.
 _ROOT_REEXPORTS = frozenset(
     [
         "run_v2_pipeline",
@@ -116,16 +112,11 @@ def test_pipeline_facade_reexports_public_api():
     assert not missing, f"pipeline facade no longer exports: {missing}"
 
 
-# The primary orchestration entrypoints a first-time user reaches for. These
-# must also import from the PACKAGE ROOT (``spyglass.spikesorting.v2``), where
-# ``initialize_v2_defaults`` already lives, so the natural
-# ``from spyglass.spikesorting.v2 import run_v2_pipeline`` does not raise.
 def test_package_root_reexports_primary_entrypoints():
     """The main entrypoints resolve from ``spyglass.spikesorting.v2`` itself.
 
-    ``initialize_v2_defaults`` is on the package root, so a newcomer who then
-    types ``from spyglass.spikesorting.v2 import run_v2_pipeline`` should not
-    hit an ImportError over an import-path split.
+    ``from spyglass.spikesorting.v2 import run_v2_pipeline`` works like
+    ``initialize_v2_defaults``.
     """
     import importlib
 
@@ -135,7 +126,6 @@ def test_package_root_reexports_primary_entrypoints():
     missing = [name for name in _ROOT_REEXPORTS if not hasattr(v2, name)]
     assert not missing, f"package root no longer re-exports: {missing}"
 
-    # The re-exports are the real functions, not shadow definitions.
     assert (
         v2.run_v2_pipeline
         is __import__(
@@ -157,10 +147,7 @@ def test_package_root_reexports_are_discoverable():
 
 
 def test_pipeline_facade_is_a_thin_reexport():
-    """The facade defines no implementation itself -- it only re-exports.
-
-    Guards against code creeping back into the facade: every public name it
-    exposes must be defined in a ``_pipeline_*`` submodule, not in
+    """Every public name in the facade is defined in a submodule, not in
     ``pipeline.py``.
     """
     import spyglass.spikesorting.v2.pipeline as pl

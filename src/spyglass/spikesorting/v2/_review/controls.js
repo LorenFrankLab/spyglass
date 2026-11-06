@@ -29,10 +29,8 @@ window.figpack_p1.registerFPViewComponent({
     const state = () => annotations.stateRef.current;
     const payload = () => JSON.stringify({annotations: state().annotations});
     if (local && firstMount) {
-      // FigPack tracks the baseline of its own toolbar saves, but extensions
-      // have no "mark saved" action. Use this control's acknowledged PUT as
-      // the local unload baseline, so a saved draft does not trigger a false
-      // unsaved-edits warning. Hosted figures retain the upstream handler.
+      // Extensions cannot mark FigPack saves, so this control's acknowledged
+      // PUT is the unload baseline; otherwise saved drafts warn as unsaved.
       window.addEventListener("beforeunload", event => {
         if (!session.loaded) return;
         event.stopImmediatePropagation();
@@ -102,8 +100,7 @@ window.figpack_p1.registerFPViewComponent({
       session.error = error.message;
       session.render();
     };
-    // A running operation's status line: the current step and, from the
-    // server's own clock, how long the operation has been running.
+    // Current step plus elapsed time from the server's clock.
     const statusText = operation => {
       const elapsed = operation.status === "running" && Number.isFinite(operation.elapsed_s) ?
         ` (${Math.floor(operation.elapsed_s / 60)} min ${operation.elapsed_s % 60} s elapsed)` : "";

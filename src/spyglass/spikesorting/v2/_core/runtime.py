@@ -183,9 +183,7 @@ def _platform_identity():
     }
 
 
-# The device inventory is fixed for the process lifetime, and each
-# ``nvidia-smi`` call costs ~0.1 s per receipt. Callers get a deep copy via
-# ``_normalized``, so the cached dict is never mutated.
+# Fixed per process; ``nvidia-smi`` costs ~0.1 s. Callers get a copy.
 @functools.cache
 def _gpu_inventory():
     executable = shutil.which("nvidia-smi")

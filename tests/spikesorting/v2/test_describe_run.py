@@ -1,10 +1,7 @@
-"""DB-free unit tests for the ``describe_run`` receipt and ``CurationLabel``.
+"""DB-free tests for the ``describe_run`` receipt and ``CurationLabel``.
 
-``describe_run`` is a pure transform over the dict / list that
-``run_v2_pipeline`` and ``run_v2_pipeline_session`` return, so it needs no
-DataJoint connection. These tests pin the receipt's row schema -- the property
-that makes a zero-unit sort or a failed group a first-class row instead of a
-value buried in a nested dict.
+Pins the receipt's row schema, where a zero-unit sort or failed group is its
+own row.
 """
 
 from __future__ import annotations
@@ -63,8 +60,7 @@ def test_describe_run_single_columns_and_rows():
     summary = frame.iloc[0]
     assert summary["n_units"] == 3
     assert summary["root_merge_id"] == "root-merge-1"
-    # A root-only run has no analysis-ready id, and the status says so plainly
-    # (so a user can't mistake the root for the downstream-science handle).
+    # A root-only run has no analysis-ready id, and the status says so.
     assert summary["auto_labeled_merge_id"] is None
     assert summary["status"] == "root only"
     assert summary["seconds"] == pytest.approx(3.5)  # 1 + 2 + 0 + 0.5
@@ -120,10 +116,8 @@ def _unit_match_summary():
 
 
 def test_describe_run_unit_match_summary_not_labeled_root_only():
-    # run_v2_unit_match summaries flow through describe_run too, but have no
-    # auto_labeled_merge_id. The "root only" / "auto-labeled" status is a
-    # run_v2_pipeline concept -- a UnitMatch receipt must NOT be mislabeled
-    # "root only"; its summary status stays blank.
+    # "root only" / "auto-labeled" is a run_v2_pipeline status; a UnitMatch
+    # receipt's status stays blank.
     frame = describe_run(_unit_match_summary())
     summary = frame.iloc[0]
     assert summary["row_type"] == "summary"
@@ -266,8 +260,7 @@ def test_describe_run_rejects_unexpected_type():
 
 
 def test_describe_run_rejects_list_entry_without_outcome():
-    # A raw run summary wrapped in a list (no 'outcome' key) must not be
-    # silently counted as an ok group -- that would inflate the ok tally.
+    # A raw run summary wrapped in a list (no 'outcome' key) is not an ok group.
     with pytest.raises(ValueError, match="outcome"):
         describe_run([_run_summary()])
 
@@ -288,10 +281,9 @@ def test_curation_label_export_and_order():
 def test_describe_run_renders_sorter_config_rows():
     """The receipt shows what the sort executed, from ``sorter_config``.
 
-    One ``config`` row per effective setting -- the SI kwargs, whiten routing,
-    seed, job kwargs and backend the run resolved once via
-    ``resolve_sort_config`` -- so a user reads the effective configuration
-    off the receipt instead of re-deriving it from parameter rows.
+    One ``config`` row per effective setting resolved by
+    ``resolve_sort_config``: SI kwargs, whiten routing, seed, job kwargs and
+    backend.
     """
     summary = _run_summary()
     summary["sorter_config"] = {

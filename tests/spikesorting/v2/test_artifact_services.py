@@ -1,14 +1,7 @@
-"""Tests for the ``_artifact_intervals`` artifact detect / scan / row helpers.
+"""Tests for the artifact detection, scan and interval-row helpers.
 
-Covers the pure detection functions (``scan_artifact_frames`` /
-``detect_artifacts``), the interval-row builders
-(``build_artifact_interval_rows`` / ``build_artifact_interval_part_rows``),
-and the validation-order pin on ``read_artifact_removed_intervals``.
-
-Most tests here are DB-free (numpy / SpikeInterface only). The single
-exception is the ``read_artifact_removed_intervals`` validation-order pin,
-which must import the ``artifact`` schema module and therefore needs the DB
-session (``dj_conn`` fixture).
+DB-free except the ``read_artifact_removed_intervals`` test, which imports
+the ``artifact`` schema module.
 """
 
 from __future__ import annotations
@@ -193,13 +186,7 @@ def test_build_artifact_interval_part_rows_owns_interval_rows():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_read_artifact_removed_intervals_missing_artifact_detection_id_raises_value_error():
-    """Missing ``artifact_detection_id`` raises a clear ValueError before routing.
-
-    The guard runs BEFORE the key is routed by ``artifact_detection_id`` to
-    ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, so a key
-    with no ``artifact_detection_id`` surfaces this targeted message rather than
-    a missing-id routing failure.
-    """
+    """Missing ``artifact_detection_id`` raises a clear ValueError before routing."""
     from spyglass.spikesorting.v2._artifacts.readers import (
         read_artifact_removed_intervals,
     )

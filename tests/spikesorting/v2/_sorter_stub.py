@@ -1,16 +1,10 @@
 """Substitute the spike sorter that ``Sorting.populate`` runs.
 
-Many v2 tests need a populated ``Sorting`` row with known units (a planted
-merge group, a spike at an interval boundary, a sort that yields no units)
-or need to observe exactly what the sorter receives. They get there by
-replacing the one step of ``Sorting``'s compute path that calls into the
-sorter, and keep the rest of the real compute/NWB/insert path.
-
-Every test that substitutes the sorter goes through :func:`plant_sorter` and
-:func:`active_sorter` rather than patching ``Sorting`` itself, so the
-substitution names the private dispatch method only in this module.
-``test_sorting_dispatch.py`` calls that method directly, because it tests the
-dispatch itself.
+Replaces only the sorter step of ``Sorting``'s compute path, keeping the
+real compute/NWB/insert path, so tests get known units or can observe what
+the sorter receives. Tests use :func:`plant_sorter` and :func:`active_sorter`
+so the private dispatch method is named only here (and in
+``test_sorting_dispatch.py``, which tests the dispatch itself).
 
 The stand-in is called exactly as the real sorter step is, with every
 argument passed by keyword::
@@ -39,11 +33,8 @@ def plant_sorter(
 ) -> None:
     """Make ``Sorting.populate`` call ``run_sorter`` instead of the sorter.
 
-    The stand-in is installed on the ``Sorting`` class as a static method
-    through ``monkeypatch``, so it is undone with ``monkeypatch`` -- at the
-    end of the test for the ``monkeypatch`` fixture, on leaving
-    ``monkeypatch.context()``, or on ``MonkeyPatch.undo()`` for a
-    ``pytest.MonkeyPatch()`` created inside a wider-scoped fixture.
+    Installed as a static method on ``Sorting`` through ``monkeypatch``, so
+    it is undone when ``monkeypatch`` is.
 
     Parameters
     ----------

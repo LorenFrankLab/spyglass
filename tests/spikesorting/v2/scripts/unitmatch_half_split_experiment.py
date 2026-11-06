@@ -378,8 +378,7 @@ def all_zero_halves(session_dir) -> dict[str, list[int]]:
 def _session_index_from_switch(session_switch, n) -> np.ndarray:
     """Stacked-index -> session index (0 = A, 1 = B for a two-session match).
 
-    Exactly the construction ``UnitMatchBackend._pairs_from_matrix`` uses
-    (``spyglass/spikesorting/v2/_unitmatch_backend.py:568-570``) to turn
+    The construction ``UnitMatchBackend._pairs_from_matrix`` uses to turn
     ``session_switch`` (the stacked boundary between sessions) into a
     per-row session index.
     """
@@ -392,31 +391,21 @@ def true_pair_directed_probs(
 ):
     """The two directed probabilities of one unit's same-id cross-session pair.
 
-    ``prob_matrix`` is UnitMatch's full ``(n, n)`` naive-Bayes probability
-    array, built the same way ``UnitMatchBackend.match`` builds it
-    (``_unitmatch_backend.py:522-524``: ``probability[:,
-    1].reshape(n_units, n_units)``). ``original_ids`` stacks each session's
-    kept unit ids in the same order UnitMatch loaded them
-    (``_unitmatch_backend.py:501-502``: ``clus_info["original_ids"] =
-    np.concatenate(good_units)``); ``session_switch`` marks the stacked
-    boundary between sessions, converted to a per-row session index the same
-    way ``_pairs_from_matrix`` does it (``_unitmatch_backend.py:568-570``).
-    Session 0 is session A, session 1 is session B (the order
-    ``UnitMatchBackend.match`` receives ``session_inputs``). Looking a unit up
-    by a boolean mask on its id (not by position) is what makes this correct
-    for sparse or reordered ids: a unit excluded from one session, or ranked
-    differently among kept units between sessions, still resolves to the
-    right stacked index.
+    ``prob_matrix`` is UnitMatch's ``(n, n)`` naive-Bayes probability array,
+    reshaped as ``UnitMatchBackend.match`` does. ``original_ids`` stacks each
+    session's kept unit ids in UnitMatch's load order; ``session_switch``
+    marks the stacked boundary (session 0 is A, session 1 is B). Units are
+    looked up by id, not position, so sparse or reordered ids resolve
+    correctly.
 
     Returns
     -------
     (float, float) or None
         ``(p(A_u -> B_u), p(B_u -> A_u))``, i.e. ``(prob_matrix[i, j],
         prob_matrix[j, i])`` for the stacked indices ``i``/``j`` of
-        ``unit_id`` in session 0 / session 1 -- the same two directed values
-        ``UnitMatchBackend._pairs_from_matrix`` requires both above threshold
-        to emit a pair. ``None`` if ``unit_id`` is missing from either
-        session (excluded from that session's bundle).
+        ``unit_id`` in session 0 / session 1; ``_pairs_from_matrix`` emits a
+        pair when both exceed the threshold. ``None`` if ``unit_id`` is
+        missing from either session's bundle.
 
     Examples
     --------
@@ -426,11 +415,8 @@ def true_pair_directed_probs(
     >>> true_pair_directed_probs(pm, [0, 2, 3], [5, 9, 5], 9) is None
     True
     """
-    # ``original_ids`` may be a column vector (UnitMatchPy's per-session
-    # ``good_units`` entries are ``(n_i, 1)``, so ``np.concatenate`` stacks
-    # them into ``(n, 1)``, not ``(n,)``); flatten before comparing against
-    # the 1D ``session_ids`` so the two boolean masks combine element-wise
-    # instead of broadcasting into an (n, n) array.
+    # ``original_ids`` may be ``(n, 1)`` (UnitMatchPy's ``good_units``);
+    # flatten so the masks combine element-wise instead of broadcasting.
     original_ids = np.asarray(original_ids).reshape(-1)
     n = original_ids.shape[0]
     session_ids = _session_index_from_switch(session_switch, n)
@@ -447,21 +433,10 @@ def match_sessions(
 ) -> tuple[list[list], dict | None, dict[int, list[float]]]:
     """Run ``UnitMatchBackend.match`` on two session bundles (A first).
 
-    Also records the fitted prior UnitMatch passes to its naive-Bayes step:
-    the backend builds ``priors = (1 - p, p)`` with
-    ``p = n_expected_matches / n_units ** 2``, where ``n_expected_matches`` is
-    fitted by ``overlord.extract_metric_scores``. The recorder wraps
-    ``bayes_functions.apply_naive_bayes`` for the duration of the call, and
-    from the SAME wrapped call also captures the full probability matrix
-    (reshaped exactly as ``UnitMatchBackend.match`` does it) so every
-    requested unit's true cross-session pair directed probabilities
-    (:func:`true_pair_directed_probs`) can be recovered without changing
-    production code. That lookup also needs the stacked-index ->
-    (session, unit id) mapping, which is not returned by ``match()``; a
-    second wrap of ``UnitMatchPy.utils.load_good_waveforms`` (the call inside
-    ``UnitMatchBackend.match`` that produces ``session_switch`` and
-    ``good_units``) records those. Both wraps only observe values the real
-    call already computes; neither changes what UnitMatch does.
+    Wraps ``bayes_functions.apply_naive_bayes`` to record the fitted prior
+    (``p = n_expected_matches / n_units ** 2``) and the probability matrix,
+    and ``UnitMatchPy.utils.load_good_waveforms`` to record
+    ``session_switch`` and ``good_units``. The wraps only observe values.
 
     Returns
     -------
@@ -554,12 +529,8 @@ def assert_true_pair_probs_consistent(
     UnitMatch emits a true (same-id) cross-session pair ``(u, u)`` in
     ``pairs`` iff BOTH its directed probabilities clear ``match_threshold``
     (``UnitMatchBackend._pairs_from_matrix``), i.e. iff
-    ``min(p_ab, p_ba) > match_threshold``. Comparing the two independently
-    derived sets -- one from the captured probability matrix, one from
-    UnitMatch's own emitted pairs -- catches a capture bug (wrong indices, a
-    stale wrap, ...) at the point of use rather than trusting the capture
-    silently. Raises ``RuntimeError`` naming the seed/scenario/condition and
-    the exact symmetric difference on any mismatch.
+    ``min(p_ab, p_ba) > match_threshold``. Raises ``RuntimeError`` naming the
+    seed/scenario/condition and the symmetric difference on any mismatch.
     """
     passed_true_pairs = {int(a) for a, b, _ in pairs if int(a) == int(b)}
     probability_true_pairs = {
@@ -604,9 +575,7 @@ def score_pairs(passing_pairs, unit_ids, drift_out_units) -> dict[str, list]:
         ``healthy_true`` (i, i) with i not in S, ``healthy_false`` (i, j),
         i != j both not in S, ``drift_out_false`` (i, j), i != j both in S,
         and ``mixed_false`` (i, j), i != j with exactly one of i, j in S
-        (both orders) -- a false cross-session pair between a drift-out unit
-        and a healthy unit. ``mixed_false`` is printed as a diagnostic only;
-        no gate is defined on it.
+        (both orders; diagnostic only, not gated).
 
     Examples
     --------
@@ -804,9 +773,8 @@ def paired_true_pair_probs(
 ) -> tuple[list[tuple[int, float, float]], int]:
     """Non-S ``(unit, q_control, q_scenario)`` triples paired against control.
 
-    ``q_u = min(p(A_u -> B_u), p(B_u -> A_u))`` -- the same min
-    ``UnitMatchBackend._pairs_from_matrix`` uses to decide whether to emit a
-    pair.
+    ``q_u = min(p(A_u -> B_u), p(B_u -> A_u))``, the value
+    ``UnitMatchBackend._pairs_from_matrix`` thresholds.
 
     Returns
     -------
@@ -816,10 +784,8 @@ def paired_true_pair_probs(
         both sessions' bundle for both runs).
     n_unpaired : int
         The number of ``record``'s non-S units dropped because a probability
-        is missing on either side (excluded from a bundle in that run, or
-        the whole run's probability capture never ran) -- symmetric: a unit
-        missing from the control side or from the scenario side is dropped
-        and counted the same way.
+        is missing on either side (excluded from a bundle, or the capture
+        never ran).
     """
     s = set(int(u) for u in record["seed_drift_out_units"])
     non_s = [u for u in record["unit_ids"] if u not in s]
@@ -838,14 +804,9 @@ def paired_true_pair_probs(
 def _capture_missing(record) -> bool:
     """A run had non-S units to capture but ``true_pair_probs`` is empty.
 
-    A proxy for "the probability-matrix capture never ran for this run" --
-    either ``UnitMatchBackend.match`` returned early (fewer than two
-    sessions, or zero good units) or the capture wraps in
-    :func:`match_sessions` never observed a naive-Bayes call. Every non-S
-    unit of a run like this is already counted in
-    :func:`paired_true_pair_probs`'s ``n_unpaired``; this flags WHY, so a
-    wholesale capture failure is not silently indistinguishable from
-    ordinary per-unit bundle exclusions (a unit with too few sampled spikes).
+    A proxy for "the probability capture never ran" (``match`` returned
+    early, or no naive-Bayes call was observed). Distinguishes a wholesale
+    capture failure from per-unit bundle exclusions in ``n_unpaired``.
     """
     return bool(record["unit_ids"]) and not record.get("true_pair_probs")
 
@@ -855,7 +816,7 @@ def pooled_true_pair_prob_drop(records, scenario, condition) -> dict | None:
 
     Pools every non-S unit paired (present in both the scenario run and that
     seed's control run) over every seed of ``scenario`` x ``condition`` that
-    has a control run -- ONE mean over all pooled units, not a mean of
+    has a control run: one mean over all pooled units, not a mean of
     per-seed means. Returns ``None`` if there is no run of ``scenario`` x
     ``condition``, any such seed lacks a control run, or no unit is ever
     paired.
@@ -959,15 +920,8 @@ def _gate_float(name, scenario, value, threshold, comparison, detail) -> Gate:
 def _as_diagnostic(gate: Gate) -> Gate:
     """Relabel a computed count-based :class:`Gate` as a printed diagnostic.
 
-    Used by the S x S false-pair rate (unstable under UnitMatch's per-run
-    calibration), the count-based healthy recall drop and its excess over
-    ``time_half`` (sensitive to threshold flips; the template bit-identity and
-    mean-probability gates measure the same effect robustly -- see
-    :func:`evaluate_gates`) and the S x non-S false-pair rate increase (no
-    fixed limit; reported against the healthy false-pair limit for scale).
-    Each keeps its computed value/detail for display, but
-    :attr:`Gate.passed` is forced to ``None`` -- none of them are part of
-    acceptance.
+    Keeps the computed value for display and sets :attr:`Gate.passed` to
+    ``None``. See :func:`evaluate_gates` for which metrics are diagnostics.
     """
     return Gate(
         f"{gate.name} (diagnostic, not gated)",
@@ -1002,23 +956,16 @@ def evaluate_gates(records, condition: str = GATED_CONDITION) -> list[Gate]:
       seeds).
     - Healthy false-pair rate increase (paired against control) <= 0.005.
 
-    The S x S false-pair rate among drift-out units, the count-based
-    healthy recall drop (a paired count of healthy true pairs passing
-    before/after) and its excess over ``time_half`` are still computed and
-    returned, labelled "(diagnostic, not gated)" -- :attr:`Gate.passed` is
-    always ``None`` for them; they are printed for context only. The S x S
-    rate is a diagnostic because UnitMatch's per-run, data-driven match
-    threshold is unstable when a session has few units: a near-tie in the
-    threshold search can flip on a single redrawn template and admit a burst
-    of false pairs, independent of how the cross-validation halves are
-    constructed.
+    Diagnostics, returned with ``passed=None``:
 
-    "S x non-S false-pair rate increase" is also computed and returned as a
-    diagnostic, never gated: the healthy false-pair rate increase only
-    counts non-S x non-S pairs, so it is blind to a false pair between a
-    drift-out unit and a healthy one. This diagnostic covers that gap the
-    same way -- paired against the same seed's control, over both (S, non-S)
-    orders.
+    - S x S false-pair rate: UnitMatch's per-run match threshold is unstable
+      with few units, so one redrawn template can admit a burst of false
+      pairs.
+    - Count-based healthy recall drop and its excess over ``time_half``:
+      sensitive to threshold flips; the bit-identity and mean-probability
+      gates measure the same effect.
+    - S x non-S false-pair rate increase, paired against control: covers
+      pairs the healthy false-pair gate does not count.
 
     The drift-out recall, S x S rate, both count-based recall drops, the
     healthy false-pair rate increase and the S x non-S diagnostic are
@@ -1290,17 +1237,10 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
     For every seed with both a ``scenario`` and that seed's ``control`` run of
     ``condition``, compares each non-S unit's two saved raw-waveform halves
     (``RawWaveforms/Unit{id}_*.npy[..., 0]`` and ``[..., 1]``), session by
-    session. A unit present in one bundle but excluded from the other (fewer
-    than two sampled spikes in one run but not the other) counts as NOT
-    identical for both of that session's halves -- it is not skipped: a
-    unit's bundle presence itself changing between the scenario and control
-    run is exactly the kind of drift-out-induced difference this check (and
-    the healthy template bit-identity gate built on it) exists to catch. This
-    quantifies how much of the paired healthy comparison (recall drop,
-    true-pair probability drop, false-pair rate increase) reflects an
-    S-unit effect versus resampling noise from SpikeInterface's shared
-    per-analyzer RNG, which can perturb a non-S unit's randomly chosen spike
-    subset merely because another unit's available spike count changed.
+    session. A unit present in only one bundle counts as not identical for
+    both halves. Separates an S-unit effect from resampling noise: SI's
+    shared per-analyzer RNG can change a non-S unit's spike subset when
+    another unit's spike count changes.
 
     Returns
     -------
@@ -1329,10 +1269,7 @@ def non_s_bit_identical_halves(records, condition) -> dict[str, list[int]]:
                 ctrl_waves = _unit_waveform_paths(ctrl["bundle_dirs"][label])
                 for uid in non_s:
                     if uid not in scen_waves or uid not in ctrl_waves:
-                        # Present on one side only: both halves count as NOT
-                        # identical (the templates cannot be compared, and a
-                        # unit whose bundle presence changed is itself a
-                        # difference), rather than being skipped.
+                        # Present on one side only: both halves differ.
                         n_total += 2
                         continue
                     scen_wave = np.load(scen_waves[uid])
@@ -1360,11 +1297,8 @@ def _fmt_prior(fitted) -> str:
 def format_gate_line(g: Gate) -> str:
     """Render one ``Gate`` as a single printed line.
 
-    A diagnostic (``passed is None``) never prints ``value <= threshold`` --
-    that reads as an asserted comparison result, which it is not. It prints
-    the value next to the limit it is reported against instead, e.g.
-    ``0.0200 (limit 0.015, not gated)``. A gated ``Gate`` keeps the original
-    ``value <= threshold`` form, since that comparison was actually made.
+    A gated ``Gate`` prints ``value <= threshold``; a diagnostic prints
+    e.g. ``0.0200 (limit 0.015, not gated)``.
     """
     verdict = {True: "PASS", False: "FAIL", None: "N/A"}[g.passed]
     if g.passed is None:

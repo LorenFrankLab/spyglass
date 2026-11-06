@@ -1,18 +1,8 @@
-"""Unit tests for the pure ``resolve_restriction`` source-routing classifier.
+"""Tests for ``_curation_routing.classify_and_normalize_restriction``, the
+DB-free half of ``CurationV2.resolve_restriction``.
 
-``CurationV2.resolve_restriction`` delegates its pure half to
-``_curation_routing.classify_and_normalize_restriction``: validate the
-restriction keys, map the ``artifact_detection_{uuid}`` interval-name
-convention back to ``artifact_detection_id``, normalize that id to a UUID, and
-split the keys into the per-source restriction dicts the join assembly
-consumes. These tests drive the classifier directly -- no DataJoint, no DB --
-so the routing branches (unknown-key strict/lenient, source classification,
-artifact-id normalization + unresolved-name warning, anti-join vs. wildcard)
-are pinned cheaply.
-
-``_curation_routing`` imports only stdlib + the DB-free ``_artifact_naming``
-parser, so this file needs no database fixture; the import-boundary contract is
-enforced separately by ``test_service_import_contracts``.
+It validates keys, maps ``artifact_detection_{uuid}`` interval names to a UUID
+``artifact_detection_id``, and splits keys into per-source restrictions.
 """
 
 from __future__ import annotations
@@ -84,10 +74,8 @@ def test_classify_routes_concat_only_keys():
 
 
 def test_classify_preproc_is_cross_source_shared_key():
-    """``preprocessing_params_name`` lives on both RecordingSelection and
-    ConcatenatedRecordingSelection, so it classifies as a shared (cross-source)
-    restriction -- not recording-only -- and triggers no contradiction, letting
-    a broad preproc query reach both source families."""
+    """``preprocessing_params_name`` is a shared (cross-source) restriction,
+    since both selection tables carry it; no contradiction is raised."""
     plan = _classify({"preprocessing_params_name": "default"})
     assert plan.shared_restriction == {"preprocessing_params_name": "default"}
     assert plan.rec_restriction == {}
@@ -96,8 +84,7 @@ def test_classify_preproc_is_cross_source_shared_key():
 
 def test_classify_accepts_concat_recording_id_with_preproc():
     """``{concat_recording_id, preprocessing_params_name}`` is a valid concat
-    restriction (the recipe is on ConcatenatedRecordingSelection), NOT a
-    contradiction -- the concat key routes, the shared preproc filters it."""
+    restriction, not a contradiction."""
     plan = _classify(
         {"concat_recording_id": "c", "preprocessing_params_name": "default"}
     )
@@ -149,8 +136,8 @@ def test_classify_normalizes_artifact_id_and_warning():
     }
     assert plan.artifact_detection_id is NO_ARTIFACT_RESTRICTION
 
-    # 4. An explicit artifact_detection_id=None is preserved as the anti-join
-    #    signal -- distinct from the wildcard sentinel.
+    # 4. An explicit artifact_detection_id=None is kept as the anti-join
+    #    signal, distinct from the wildcard sentinel.
     plan = _classify({"artifact_detection_id": None})
     assert plan.artifact_detection_id is None
     assert plan.sort_restriction == {}
@@ -193,8 +180,8 @@ def test_classify_leaves_interval_name_as_recording_key_when_not_restricting():
 
 def test_classify_does_not_emit_include_exclude_directive():
     """The plan carries only normalized restrictions + an artifact id + a
-    motion-correction id + a warning flag -- no invented exclude/include
-    vocabulary."""
+    motion-correction id + a warning flag, with no exclude/include
+    directive."""
     plan = _classify({"sorting_id": "s"})
     assert set(plan._fields) == {
         "rec_restriction",

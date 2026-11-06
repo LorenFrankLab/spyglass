@@ -1,26 +1,14 @@
 """The union of artifact-detection sources a sort can mask against.
 
-``ArtifactDetectionOutput`` is a Spyglass merge table over the two
-artifact-detection result tables a sort may mask against -- a single-session
-``RecordingArtifactDetection`` or a cross-recording
-``SharedGroupArtifactDetection`` -- so ``SortingSelection.ArtifactDetectionSource``
-carries one foreign key to the merge instead of a pair of mutually-exclusive
-source part tables. Like ``LFPOutput`` / ``PositionOutput`` it is an
-*input-union* merge (a detection is registered here, after it is populated,
-before a ``SortingSelection`` can reference it), not a terminal one like
-``SpikeSortingOutput``.
+``ArtifactDetectionOutput`` is a merge table over ``RecordingArtifactDetection``
+(one recording) and ``SharedGroupArtifactDetection`` (a group of recordings),
+so a selection carries one foreign key instead of two exclusive part tables.
+Like ``LFPOutput``, it is an input-union merge: each result table registers
+itself here when populated, and the sorting stage reads it back.
 
-Detection results live in the two source-specific result tables above, not
-in one ``dj.Computed`` ``ArtifactDetection`` table; the ``*Output`` suffix
-(vs a bare ``*Detection``) matches ``SpikeSortingOutput`` / ``PositionOutput`` /
-``LFPOutput``. It stays internal: each result table registers itself here at
-materialization (producer-owned) and the sorting stage reads it back;
-artifact-removed intervals remain reachable through the per-source result
-tables' ``get_artifact_removed_intervals``.
-
-:func:`artifact_lifecycle_locks` is the lock a detection delete and every
-selection that links a detection share, and
-:func:`insert_artifact_bound_selection` is the selection insert that links one.
+- :func:`artifact_lifecycle_locks`: the lock shared by a detection delete and
+  every selection that links a detection.
+- :func:`insert_artifact_bound_selection`: the selection insert that links one.
 """
 
 from __future__ import annotations
@@ -39,40 +27,25 @@ from spyglass.utils import SpyglassMixin, _Merge
 
 schema = dj.schema("spikesorting_v2_artifact_output")
 
-# The merge parts are named ``RecordingSource`` / ``SharedGroupSource`` (NOT the
-# source tables' full ``*ArtifactDetection`` names) so the derived part-table +
-# FK identifier stays under MySQL's 64-char limit for the long
-# ``shared_group_artifact_detection`` source; the two tokens
-# (``recording_source`` / ``shared_group_source``) are substrings of neither
-# sibling's table name, so ``_Merge``'s source-name-to-part matching stays
-# unambiguous.
+# Short part names keep the part-table FK identifier under MySQL's 64-char
+# limit and stay unambiguous for _Merge's source-name-to-part matching.
 
 
 @schema
 class ArtifactDetectionOutput(_Merge, SpyglassMixin):
     """Merge table of the populated artifact detections a sort can mask against.
 
-    Each master row is one registered detection: ``merge_id`` is a uuid that
-    ``_merge_insert`` hashes from the source key and ``source``, and ``source``
-    names the one part table that holds the detection's
-    ``artifact_detection_id``:
+    Each master row is one registered detection. ``source`` names the part
+    that holds its ``artifact_detection_id``:
 
-    - ``RecordingSource`` -> ``RecordingArtifactDetection`` (one recording);
-    - ``SharedGroupSource`` -> ``SharedGroupArtifactDetection`` (one detection
-      shared across a group of recordings).
+    - ``RecordingSource``: ``RecordingArtifactDetection`` (one recording).
+    - ``SharedGroupSource``: ``SharedGroupArtifactDetection`` (a group of
+      recordings).
 
-    A detection registers itself here, via :meth:`insert_detection`, in the
-    same transaction that materializes its result row; the sort and
-    motion-estimate selection inserts register a populated but unregistered
-    detection the same idempotent way. Downstream selections reference a
-    detection by this table's ``merge_id`` projected as
-    ``artifact_detection_merge_id``:
-    ``SortingSelection.ArtifactDetectionSource`` (the optional artifact mask
-    of a sort) and
-    ``MotionEstimateSelection.ArtifactDetectionSource`` (the optional artifact
-    mask of a single-recording motion estimate). Use :meth:`get_merge_id` to
-    go from a detection to its ``merge_id`` and
-    :meth:`resolve_artifact_detection_id` to go back.
+    Detections register via :meth:`insert_detection` when populated.
+    ``SortingSelection`` and ``MotionEstimateSelection`` reference ``merge_id``
+    as ``artifact_detection_merge_id``. :meth:`get_merge_id` and
+    :meth:`resolve_artifact_detection_id` convert between the two ids.
     """
 
     definition = """
@@ -113,22 +86,12 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         ------
         KeyError
             If ``detection_key`` is not a populated
-            ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``
-            (registration into the merge follows populate).
-
-        Notes
-        -----
-        ``_merge_insert`` registers the key under the source part whose
-        parent table holds the id (the id is content-addressed over its
-        source, so exactly one does) and skips a part that already holds it,
-        so a re-register is a no-op.
+            ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``.
         """
         try:
             cls()._merge_insert([detection_key], skip_duplicates=True)
         except ValueError as exc:
-            # Only _merge_insert's "no source table holds the id" error means
-            # not populated; any other ValueError (e.g. an ambiguous entry)
-            # propagates unchanged.
+            # Only "no source table holds the id" means not populated.
             if not str(exc).startswith(
                 "Non-existing entry in any of the parent tables"
             ):
@@ -156,23 +119,15 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         Raises
         ------
         KeyError
-            If the detection is not registered in the merge (zero rows) -- the
-            "not registered" signal a caller may catch to mean "no existing
-            selection".
+            If the detection is not registered in the merge.
         SchemaBypassError
-            If more than one row exists for the id in a part -- a corrupt
-            duplicate registration (``merge_id`` is a deterministic hash of the
-            source key, so >1 is only reachable via a raw insert bypassing
-            ``insert_detection``). Raised DISTINCTLY from the not-registered
-            ``KeyError`` so a caller's ``except KeyError`` cannot silently
-            swallow the corruption.
+            If the id has more than one row across the parts, a corrupt
+            duplicate from a raw insert. Distinct from ``KeyError`` so an
+            ``except KeyError`` cannot swallow it.
         """
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
-        # Fail closed: scan BOTH source parts, not just the first. A well-formed
-        # id lives in exactly one; a raw double-insert that registers the same
-        # content-addressed id in both parts is corruption that must be surfaced,
-        # not silently resolved to whichever part is scanned first.
+        # Scan both parts so a cross-part duplicate raises.
         matches: list = []
         for part_name in ("RecordingSource", "SharedGroupSource"):
             part = getattr(cls, part_name)
@@ -204,11 +159,8 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
     def resolve_artifact_detection_id(cls, merge_id):
         """Return the per-source ``artifact_detection_id`` behind a merge id.
 
-        The merge_id is exposed only at the ``SortingSelection`` boundary; the
-        artifact-id-of-record (folded into ``sorting_id`` and naming the
-        ``artifact_detection_{id}`` IntervalList) stays the per-source
-        ``artifact_detection_id``. This accessor reads it back through the
-        stored ``source`` part.
+        ``sorting_id`` and the ``artifact_detection_{id}`` IntervalList use the
+        per-source id, not the merge id.
 
         Parameters
         ----------
@@ -230,12 +182,9 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
 def artifact_lifecycle_locks(detection_ids: Iterable) -> Iterator[None]:
     """Hold the lifecycle lock of every artifact detection in ``detection_ids``.
 
-    The detection ``delete`` and every selection insert that links a detection
-    take the same fail-closed advisory lock, keyed on
-    ``ArtifactDetectionOutput`` + ``artifact_detection_id``, so a delete
-    cannot cascade through a link that is being committed. The locks are
-    taken in ascending id order, so two callers locking overlapping sets
-    cannot deadlock.
+    A detection ``delete`` and every selection insert that links a detection
+    take this lock, so a delete cannot cascade through a link being
+    committed. Locks are taken in ascending id order to avoid deadlock.
 
     Parameters
     ----------
@@ -275,15 +224,13 @@ def insert_artifact_bound_selection(
 ) -> dict:
     """Insert a selection that may link an artifact detection, atomically.
 
-    The shared insert of ``SortingSelection`` and ``MotionEstimateSelection``.
-    An artifact-bound selection must own its transaction: the lock that
-    serializes it against the detection's deletion is released when this
-    returns, before a caller's transaction would commit. The detection's
-    merge id is resolved (registering a populated but unregistered
-    detection) before the transaction, so the transaction holds no merge
-    insert and a deterministic-id duplicate collides on the master insert,
-    its first statement, with nothing to roll back. A duplicate refetches
-    the winner.
+    Shared by ``SortingSelection`` and ``MotionEstimateSelection``.
+
+    - Owns its transaction: the lock against the detection's delete is
+      released on return, before a caller's transaction would commit.
+    - Resolves (and if needed registers) the merge id before the transaction,
+      so a duplicate collides on the master insert with nothing to roll back.
+    - A duplicate refetches the existing selection.
 
     Parameters
     ----------

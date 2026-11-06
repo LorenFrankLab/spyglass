@@ -98,11 +98,7 @@ def _preflight_expected_ids(
             "exists": bool(SortingSelection & {"sorting_id": sorting_id}),
             "computed_exists": bool(Sorting & {"sorting_id": sorting_id}),
         }
-    # Per stage, ``exists`` is whether the SELECTION row exists (the run
-    # would reuse this PK) and ``computed_exists`` whether the COMPUTED
-    # output row exists (the populate already ran -- a reused, near-zero-cost
-    # stage). Distinguishing them tells a caller what work the run would
-    # actually do: a selection can exist with its output not yet populated.
+    # ``exists``: selection row exists; ``computed_exists``: output row exists.
     return {
         "recording_id": {
             "id": recording_id,
@@ -177,13 +173,9 @@ def _expected_motion_ids(
 ) -> dict:
     """Preview the motion selection ids a single-recording run would mint.
 
-    The estimate id folds in the source recording's ``content_hash``, so it
-    (and the corrected id and an ``"apply"`` sort id built on it) is known
-    only once the ``Recording`` is computed; until then the entries carry
-    ``id=None`` and a ``pending`` reason instead of a guess. A supplied
-    ``motion_estimate_id`` (the saved estimate an ``"apply"`` run reuses) is
-    known up front. Uses the DB-free derivations the selection inserts use,
-    so a preview cannot drift from the insert.
+    The estimate id includes the recording's ``content_hash``, so until the
+    ``Recording`` is computed the entries carry ``id=None`` and a
+    ``pending`` reason. A supplied ``motion_estimate_id`` is known up front.
 
     Returns
     -------
@@ -266,10 +258,7 @@ def _resource_notes(
 ) -> list[str]:
     """Known allocations / scratch / worker settings, from tracked recipes.
 
-    Pre-sort the unit count is unknown, so the waveform bound is stated per
-    unit; multiply by the expected unit count for the buffer size. Channels
-    per unit are bounded by the sort group's channel count (radius / best
-    channels sparsity reduces it; dense uses all).
+    The waveform bound is per unit, since the unit count is unknown pre-sort.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_cache_root,

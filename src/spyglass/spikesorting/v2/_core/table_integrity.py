@@ -15,19 +15,10 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
 def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
     """Peel leading restriction positionals off a ``delete`` arg tuple.
 
-    DataJoint's ``delete`` takes no positional restrictions; Spyglass's
-    cautious-delete layer reads the first positional as the truthy
-    ``force_permission`` and would then cascade-delete EVERY row of the
-    unrestricted instance. The v2 table ``delete`` overrides
-    (``Sorting``, guarding a 5-50 GB per-row analyzer folder; the
-    ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``, guarding
-    owned ``IntervalList`` rows + the merge registration) defend against the
-    easy-to-mistype
-    ``Table().delete(restriction)`` form by peeling every leading
-    ``dict`` / ``list`` / ``str`` positional into a restriction list and
-    re-dispatching ``(self & r1 & r2 & ...).delete(*rest)``.
-
-    This is the pure half of that guard: it does not touch the DB.
+    Spyglass's cautious delete reads a first positional as the truthy
+    ``force_permission``, so ``Table().delete(restriction)`` would delete
+    every row. v2 ``delete`` overrides peel leading ``dict`` / ``list`` /
+    ``str`` positionals into restrictions instead.
 
     Parameters
     ----------
@@ -53,9 +44,8 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
 def restrict_by_leading_args(table, args: tuple) -> tuple[object | None, tuple]:
     """Apply a ``delete`` call's leading restriction positionals to ``table``.
 
-    The table-side half of :func:`split_leading_restrictions`: a ``delete``
-    override re-dispatches ``restricted.delete(*remaining)`` when ``restricted``
-    is not ``None``, and otherwise runs its own delete on ``table``.
+    A ``delete`` override re-dispatches ``restricted.delete(*remaining)`` when
+    ``restricted`` is not ``None``.
 
     Parameters
     ----------
@@ -84,9 +74,8 @@ def restrict_by_leading_args(table, args: tuple) -> tuple[object | None, tuple]:
 def single_source_part(table, key: dict) -> tuple[str, dict]:
     """Return the one XOR source part row of a selection master.
 
-    Backs ``resolve_source`` on ``SortingSelection`` and
-    ``MotionEstimateSelection``, whose masters each carry exactly one
-    ``RecordingSource`` or ``ConcatenatedRecordingSource`` part row.
+    For masters with exactly one ``RecordingSource`` or
+    ``ConcatenatedRecordingSource`` part row.
 
     Parameters
     ----------
@@ -162,18 +151,9 @@ def optional_part_value(table, key: dict, part, column: str):
 class _IdentityMasterGuard:
     """Reject a direct ``insert`` / in-place ``update1`` of an identity master.
 
-    The shared body of :class:`SelectionMasterInsertGuard` and
-    :class:`FactoryOnlyMaster`, which differ only in their rejection text:
-    each subclass implements :meth:`_direct_insert_reason` and
-    :meth:`_update1_create_hint`. Both are methods, not class attributes,
-    because the text names the concrete table or its factory call.
-
-    The ``insert`` signature mirrors ``dj.Table.insert`` so positional
-    ``replace`` / ``skip_duplicates`` keep working; only
-    ``allow_direct_insert`` is keyword-only (it cannot accidentally bind a
-    positional flag). DataJoint forwards ``insert1``'s ``**kwargs`` to
-    ``insert``, so an ``insert1(row, allow_direct_insert=True)`` reaches this
-    override too.
+    Subclasses supply the rejection text. ``insert`` mirrors
+    ``dj.Table.insert``'s positional order; ``insert1`` forwards its kwargs
+    here.
     """
 
     def _direct_insert_reason(self) -> str:
@@ -238,12 +218,7 @@ class _IdentityMasterGuard:
     def update1(self, row, *, allow_master_mutation=False):
         """Reject an in-place row mutation unless ``allow_master_mutation``.
 
-        A master's identity-bearing columns feed the deterministic ids (or
-        are the provenance roots) that live dependents reference, so editing
-        them in place retargets those references -- the symmetric hazard to a
-        direct insert. ``update1`` is the only standard in-place mutation
-        path, so guard it the same way :class:`ImmutableParamsLookup` guards
-        the param Lookups.
+        Editing identity-bearing columns in place retargets live dependents.
 
         Parameters
         ----------
@@ -276,30 +251,10 @@ class _IdentityMasterGuard:
 class SelectionMasterInsertGuard(_IdentityMasterGuard):
     """Reject a direct ``insert`` into a deterministic-id selection master.
 
-    The v2 deterministic-id selection masters (``RecordingSelection`` /
-    ``RecordingArtifactSelection`` / ``SharedGroupArtifactSelection`` /
-    ``SortingSelection``) derive their primary key from the selection's FULL
-    logical identity, and ``insert_selection`` is the only entry point that
-    holds that full payload: it computes the deterministic PK, pre-checks the
-    lookup-row FKs, and inserts the row(s). Only ``SortingSelection`` is
-    part-bearing -- its optional ``ArtifactDetectionSource`` pass genuinely
-    CANNOT be verified from the master row alone (it lives in a part table). The
-    two artifact selections carry their source as a REQUIRED FK on the
-    master (structural exactly-one-source), and ``RecordingSelection`` has no
-    source part either; routing all of them through the same boundary keeps one
-    consistent create path.
-
-    This guard is a guard-RAIL, not the integrity boundary: it rejects the
-    easy mistake (calling ``insert`` / ``insert1`` instead of
-    ``insert_selection``) early and loudly. The actual integrity enforcement
-    is downstream -- the deterministic-PK uniqueness + the
-    ``SchemaBypassError`` / ``DuplicateSelectionError`` checks that detect a
-    bypassed or orphaned master. ``allow_direct_insert=True`` is the escape
-    hatch for a deliberate maintenance or test bypass -- the SAME keyword
-    DataJoint uses to override its own auto-populated-table insert guard
-    (note: on a ``dj.Manual`` table that keyword is otherwise inert, so it
-    is repurposed here). ``insert_selection`` itself passes
-    ``allow_direct_insert=True`` for its already-validated master insert.
+    Only ``insert_selection`` holds the full logical identity the primary key
+    is derived from. This catches the easy mistake early; integrity is
+    enforced by PK uniqueness and the bypass checks. ``insert_selection``
+    passes ``allow_direct_insert=True`` itself.
     """
 
     def _direct_insert_reason(self) -> str:
@@ -320,27 +275,12 @@ class SelectionMasterInsertGuard(_IdentityMasterGuard):
 class FactoryOnlyMaster(_IdentityMasterGuard):
     """Reject direct ``insert`` / ``update1`` of a factory-constructed master.
 
-    ``CurationV2`` (`curation.py`) and ``SessionGroup`` (`session_group.py`)
-    are not selection masters, but they are identity / provenance roots that
-    downstream rows reference. A direct ``insert`` skips the atomic master +
-    part construction the factory classmethod performs (the analysis-file row
-    and ``Unit`` / ``UnitLabel`` parts for ``CurationV2``; the ``Member`` rows
-    for ``SessionGroup``), and an in-place ``update1`` retargets what existing
-    dependents point at. Both are blocked unless an explicit bypass keyword is
-    passed; the factory classmethods (``CurationV2.insert_curation`` /
-    ``SessionGroup.create_group``) pass ``allow_direct_insert=True`` for their
-    already-validated master insert.
-
-    Shares :class:`SelectionMasterInsertGuard`'s ``insert`` /
-    ``update1`` guards (``allow_direct_insert`` / ``allow_master_mutation``),
-    with factory-specific messages: the mixin must precede
-    ``SpyglassMixin`` / ``dj.Manual`` in the MRO so its overrides take
-    precedence. Subclasses set :attr:`_factory_create_call` to the factory the
-    error message points to.
+    A direct insert skips the factory's atomic master + part construction.
+    Must precede ``SpyglassMixin`` / ``dj.Manual`` in the MRO. Subclasses set
+    :attr:`_factory_create_call`.
     """
 
-    #: The factory call named in the rejection messages (e.g.
-    #: ``"CurationV2.insert_curation()"``). Subclasses override.
+    #: e.g. ``"CurationV2.insert_curation()"``.
     _factory_create_call: str = "its factory classmethod"
 
     def _direct_insert_reason(self) -> str:
@@ -357,28 +297,10 @@ class FactoryOnlyMaster(_IdentityMasterGuard):
 class ImmutableParamsLookup:
     """Reject in-place mutation of a content-addressed parameter Lookup row.
 
-    The v2 parameter Lookups
-    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
-    ``SorterParameters`` / ``AnalyzerWaveformParameters`` /
-    ``MatcherParameters``) are keyed by a
-    human-chosen NAME, and that name -- not the parameter content -- is what
-    flows into the deterministic ``recording_id`` / ``artifact_detection_id``
-    / ``sorting_id`` / ``concat_recording_id`` / ``unitmatch_id`` of every
-    downstream selection. The ``insert`` overrides already reject a SECOND
-    name for identical content (``reject_duplicate_parameter_content``)
-    because that forks provenance; the symmetric hazard is editing a row's
-    blob IN PLACE under the SAME name, which silently re-defines what every
-    already-minted id means. DataJoint offers two standard in-place mutation
-    paths -- ``update1`` and ``insert(..., replace=True)`` -- so both are
-    guarded here: a backend/parameter change requires a NEW named row, not an
-    in-place edit or overwrite.
-
-    ``allow_param_mutation=True`` is the escape hatch for a deliberate
-    maintenance or test edit of ``update1`` (mirroring ``allow_direct_insert``
-    on :class:`SelectionMasterInsertGuard`) of a row known to have no live
-    downstream references; ``insert(..., replace=True)`` has no such escape
-    hatch. The mixin must precede ``SpyglassMixin`` / ``dj.Lookup`` in the
-    MRO so its ``update1`` / ``insert`` take precedence.
+    Downstream ids hash the row name, not its content, so editing content in
+    place silently redefines existing ids. Guards ``update1`` and
+    ``insert(..., replace=True)``. Must precede ``SpyglassMixin`` /
+    ``dj.Lookup`` in the MRO.
     """
 
     def update1(self, row, *, allow_param_mutation=False):
@@ -415,26 +337,8 @@ class ImmutableParamsLookup:
     def insert(self, rows, replace=False, *args, **kwargs):
         """Reject ``replace=True``; otherwise forward to the next ``insert``.
 
-        DataJoint's ``insert(..., replace=True)`` overwrites a row's content
-        in place under its EXISTING primary key (SQL ``REPLACE``) -- the same
-        identity-forking hazard ``update1`` above guards against, reachable
-        through a different DataJoint entry point. Unlike ``update1``, there
-        is no escape hatch here: a deliberate content change still needs a
-        NEW named row, not an in-place overwrite of one every downstream
-        selection may already reference.
-
-        Every subclass whose own ``insert`` override forwards ``**kwargs`` to
-        ``super().insert(...)`` reaches this check; a subclass that never
-        calls ``super().insert`` at all (``AutoCurationRules`` /
-        ``AutoCurationRules.Rule`` reject direct inserts unconditionally) or
-        that guards ``replace`` itself before calling ``super()``
-        (``UnitAnnotationDefinition``, ``CurationReviewProfile``) is already
-        covered without reaching here.
-
-        ``replace`` takes DataJoint's own position (second), so a positional
-        ``insert(rows, True)`` is rejected like ``replace=True`` on a subclass
-        without an ``insert`` override (e.g. ``MotionCorrectionParameters``).
-        Subclass overrides forward only ``rows`` and keyword arguments here.
+        No escape hatch: a content change needs a new named row. ``replace``
+        keeps DataJoint's second position so ``insert(rows, True)`` is caught.
 
         Parameters
         ----------
@@ -443,8 +347,9 @@ class ImmutableParamsLookup:
         replace : bool, optional
             Must be ``False`` (the default); ``True`` raises.
         *args
-            DataJoint's later positional flags (``skip_duplicates``, ...),
-            forwarded after ``replace`` so they keep their positions.
+            DataJoint's later positional flags, forwarded in position.
+        **kwargs
+            Forwarded to ``super().insert``.
 
         Raises
         ------
@@ -481,11 +386,9 @@ def _insert_parameter_rows(
 ):
     """Validate a parameter batch, reject duplicate content, then insert once.
 
-    ``insert_rows`` is the table override's bound ``super().insert`` so the
-    immutable-parameter guard and DataJoint insertion flags remain in its MRO.
-    Ordinary parameter tables supply ``schema_for`` and an optional row hook.
-    Sorter/matcher tables may instead supply ``validate_rows(rows, names)`` to
-    retain their specialized batch validation and error ordering.
+    ``insert_rows`` is the override's bound ``super().insert``, so the MRO
+    guards still apply. Pass ``schema_for`` (and optionally ``per_row_hook``),
+    or ``validate_rows(rows, names)`` for custom batch validation.
     """
     if validate_rows is None:
         validated = validate_lookup_rows(

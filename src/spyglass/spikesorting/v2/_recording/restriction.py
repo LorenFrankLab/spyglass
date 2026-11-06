@@ -1,22 +1,8 @@
 """Time/channel restriction + truncation-guard arithmetic behind ``Recording``.
 
-These functions slice the raw recording in channels
-(``select_sort_group_channels``, run before any temporal preprocessing) and in
-time (``restrict_recording``, run after it) for
-``Recording.make_compute`` (and the rebuild path), and resolve the
-intended-vs-requested save durations and the sample-grid tolerance that the
-``make_insert`` truncation / over-request guards compare against. The table
-threads already-fetched DB state in (the tri-part
-``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute), so the restriction hot path here is DB-free.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: all SpikeInterface / numpy / spyglass dependencies are
-imported lazily inside the functions. ``restrict_recording`` touches the DB at
-CALL time via its lazy ``Interval`` import (which opens a DB connection on
-import). ``select_sort_group_channels`` reads the raw NWB at the path its
-caller resolved. The duration arithmetic
-(``truncation_tolerance``, ``compute_recording_save_expectation``) is pure.
+``select_sort_group_channels`` runs before temporal preprocessing and
+``restrict_recording`` after it. DB-free at import; ``restrict_recording``
+opens a DB connection at call time via its lazy ``Interval`` import.
 """
 
 from __future__ import annotations
@@ -32,19 +18,9 @@ def truncation_tolerance(
 ) -> float:
     """Compute the sample-grid tolerance for the truncation guard.
 
-    ``expected_saved_total`` is a continuous interval-length sum while
-    the saved duration is the sample-snapped span of the time-stripped
-    concat. Each consolidated interval's ``[start, end]`` is snapped to
-    the raw sample grid INDEPENDENTLY, so the per-boundary quantization
-    error (up to ~1 sample per interval) accumulates with the interval
-    count; the ``+1.5`` then covers the ``(N-1)/fs`` concat off-by-one.
-
-    A fixed ``1.5 / fs`` slack would false-positive on legitimate
-    disjoint multi-epoch sorts -- numerically ~13% of single-interval
-    and ~40% of 20-interval requests -- and the guard would then
-    delete the just-written file. Scaling by interval count drops that
-    to 0% while still catching genuine packet loss / interval
-    misalignment, which drops far more than ``n + 1.5`` samples.
+    Each interval is snapped to the sample grid independently, so error
+    grows by up to one sample per interval; ``+1.5`` covers the concat
+    off-by-one. A fixed ``1.5 / fs`` would flag ~13-40% of valid requests.
 
     Parameters
     ----------
@@ -68,22 +44,16 @@ class RecordingSaveExpectation(NamedTuple):
     Attributes
     ----------
     expected_saved_total : float
-        Seconds the sort intervals cover AFTER intersecting with the raw valid
-        times and dropping sub-``min_segment_length`` slivers -- the same
-        filtering ``restrict_recording`` applies, so it matches what is actually
-        written. The ``make_insert`` truncation guard compares the saved
-        duration against this (not the raw request) so intentionally-dropped
-        slivers are not mis-flagged as truncation.
+        Seconds covered after intersecting with raw valid times and dropping
+        sub-``min_segment_length`` slivers, matching what is written.
     n_intended_intervals : int
-        Number of consolidated intended intervals; the truncation tolerance
-        scales with this (per-boundary sample-grid error accumulates).
+        Number of consolidated intended intervals.
     requested_saved_total : float
         Seconds the sort intervals request AFTER ``min_segment_length``
         filtering but WITHOUT clipping to raw coverage.
     over_request : float
         ``requested_saved_total - expected_saved_total``: the span requested
-        past the raw recording's coverage. A positive value is the clip
-        ``make_compute`` surfaces as a warning.
+        past raw coverage.
     """
 
     expected_saved_total: float
@@ -95,15 +65,9 @@ class RecordingSaveExpectation(NamedTuple):
 class _LazyTimestamps:
     """Shared base for the lazy, array-like timestamp vectors.
 
-    Subclasses set ``shape``/``dtype`` and define ``__getitem__``; they expose
-    only the small NumPy-like surface the NWB timestamp iterator and
-    ``Recording._compute_recording_artifact`` need: ``shape``, ``len()``,
-    integer indexing, and slice indexing. Slices allocate only the requested
-    chunk, so a 12-hour rate-based recording does not need a full ``float64``
-    timestamp vector in RAM before the streaming write. ``_spyglass_lazy_
-    timestamps`` is the duck-type marker the write path checks (the timestamps
-    chunk iterator and ``_get_recording_timestamps``) to pass the object through
-    untouched instead of forcing it through ``np.asarray``.
+    Supports ``shape``, ``len()``, integer and slice indexing; slices
+    allocate only the requested chunk. The write path checks
+    ``_spyglass_lazy_timestamps`` to avoid ``np.asarray``.
     """
 
     _spyglass_lazy_timestamps = True
@@ -113,8 +77,7 @@ class _LazyTimestamps:
         return self.shape[0]
 
     def __array__(self, dtype=None, copy=None):
-        # SI's ``get_times`` calls ``np.asarray(time_vector)``; without this
-        # numpy would read the vector one ``__getitem__`` call per sample.
+        # Otherwise np.asarray reads one __getitem__ call per sample.
         values = self[:]
         return values if dtype is None else values.astype(dtype, copy=False)
 
@@ -292,12 +255,8 @@ def _consolidate_regular_intervals(
     def _snap_to_grid(frames, atol: float = 1e-6):
         """Snap frame coordinates within ``atol`` of an integer onto it.
 
-        ``atol`` is a float-error tolerance, NOT a behavioral knob: 1e-6
-        frames is < 1 ns at 30 kHz, far below any real sample spacing, so it
-        only absorbs the round-off in ``(time - t_start) * fs`` for a boundary
-        that sits exactly on a sample line. Without it, ``ceil``/``floor``
-        drop the edge sample and disagree with the searchsorted
-        ``frames_for_times`` path used for explicit timestamps.
+        Absorbs round-off for a boundary on a sample line, so ``ceil``/
+        ``floor`` agree with ``frames_for_times``.
         """
         rounded = np.round(frames)
         return np.where(np.abs(frames - rounded) <= atol, rounded, frames)
@@ -337,10 +296,7 @@ def intended_save_intervals(
 ) -> np.ndarray:
     """Intersect the sort interval with the raw valid times, dropping slivers.
 
-    The one definition of the intervals a ``Recording`` is built from, shared
-    by ``restrict_recording`` (which slices them) and ``Recording.make_compute``
-    (which feeds them to the truncation guard), so the guard's expectation
-    always matches what was sliced.
+    Shared by slicing and the truncation guard so the two always agree.
 
     Parameters
     ----------
@@ -355,7 +311,6 @@ def intended_save_intervals(
     np.ndarray
         Intersected intervals, shape ``(n_intervals, 2)`` in seconds.
     """
-    # ``Interval`` opens a DB connection on import, so import it lazily.
     from spyglass.common.common_interval import Interval
 
     return (
@@ -370,20 +325,8 @@ def compute_recording_save_expectation(
 ) -> RecordingSaveExpectation:
     """Resolve the intended/requested save durations for a sort interval.
 
-    Pure (DB-free) duration arithmetic for the ``make_insert`` truncation and
-    over-request guards. The caller passes ``intended_intervals`` -- the result
-    of :func:`intended_save_intervals`, the SAME filtering
-    ``restrict_recording`` applies to build the recording -- so ``Interval``
-    (which opens a DB connection on import) stays out of this helper and it
-    has no DB dependency.
-
-    ``expected_saved_total`` sums those intended intervals; ``requested_saved_
-    total`` sums the raw request after ``min_segment_length`` filtering but
-    WITHOUT the raw clip. A positive ``over_request`` is exactly the span a sort
-    interval asked for past the raw recording's coverage. Inter-segment gaps and
-    sub-``min_segment_length`` slivers cancel out (excluded from both sides), so
-    ``over_request`` fires only on a genuine request-past-coverage, not on
-    intentional drops.
+    DB-free. Gaps and slivers are excluded from both totals, so
+    ``over_request`` is positive only for a request past raw coverage.
 
     Parameters
     ----------
@@ -464,9 +407,8 @@ def restrict_recording_times(recording, valid_times):
                 for start, stop in zip(starts.tolist(), stops.tolist())
                 if start < stop
             )
-        # SI's frame_slice eagerly slices an explicit HDF5 time vector. Slice
-        # traces on a lightweight relative clock; the lazy override above is
-        # the authoritative original clock passed to the streaming NWB writer.
+        # SI's frame_slice eagerly slices an explicit HDF5 time vector; the
+        # lazy timestamps carry the original clock instead.
         frame_source = segment
         if not regular:
             frame_source = segment.select_channels(segment.channel_ids)
@@ -511,30 +453,12 @@ def restrict_recording(
 ):
     """Slice the SI recording in time.
 
-    Channel selection is a separate step
-    (:func:`select_sort_group_channels`) that runs BEFORE any temporal
-    preprocessing, so the bandpass filter sees the continuous source; this
-    function then restricts that filtered recording in time.
-
     Returns ``(recording, timestamps_override, n_selected_intervals)``:
 
-    - ``recording`` is the time-restricted SI recording. A single
-      selected interval yields a ``frame_slice``; several yield
-      ``concatenate_recordings(sliced)``.
-    - ``timestamps_override`` is the persisted wall-clock timestamp
-      vector -- lazy affine values for regular clocks, bounded source reads
-      for explicit clocks, and lazy concatenation for disjoint intervals.
-      It carries the wall-clock gaps (for the concat) that SI's
-      ``frame_slice`` /
-      ``concatenate_recordings(ignore_times=True)`` drop from
-      ``recording.get_times()``. The caller passes it to
-      ``write_nwb_artifact`` as ``timestamps_override=``.
-    - ``n_selected_intervals`` is the number of consolidated
-      intervals (1 ==> single contiguous ``frame_slice``; >1 ==>
-      gap-spanning concat). The caller derives the saved
-      start/end/duration from the override only when this is 1, so
-      the multi-interval gap envelope never feeds the truncation
-      guard (which needs the gap-excluded span).
+    - ``recording``: one ``frame_slice``, or a concatenation of several.
+    - ``timestamps_override``: lazy wall-clock timestamps, including the
+      gaps SI drops; pass to ``write_nwb_artifact``.
+    - ``n_selected_intervals``: number of consolidated intervals.
 
     Parameters
     ----------
@@ -549,26 +473,15 @@ def restrict_recording(
         message raised when the intersection is empty.
     sort_valid_times, raw_valid_times
         ``(n, 2)`` ndarrays of [start, end] seconds for the sort
-        interval and the raw-data valid times. Fetched by
-        ``make_fetch`` so the tri-part compute step does no DB
-        I/O.
+        interval and the raw-data valid times.
     min_segment_length : float, optional
         Drop intersected sub-intervals shorter than this many seconds
         before slicing. Default ``1.0``.
     """
-    # When the requested sort interval is disjoint (e.g., a
-    # run+sleep+run epoch group), frame-slice each chunk
-    # separately and concatenate; a single ``frame_slice`` on the
-    # outer envelope silently sorts the inter-chunk gaps too.
     valid_times = intended_save_intervals(
         sort_valid_times, raw_valid_times, min_segment_length
     )  # (n, 2) ndarray, seconds
     if len(valid_times) == 0:
-        # After the min_segment_length filter the intersection may
-        # be empty -- e.g. a noisy session where every chunk is
-        # shorter than the threshold. Raise here instead of
-        # crashing downstream on ``_consolidate_regular_intervals``
-        # index access.
         raise ValueError(
             f"Recording.make: interval list {interval_list_name!r} "
             f"for {nwb_file_name!r} has zero intersection with raw "
@@ -597,9 +510,8 @@ def select_sort_group_channels(
     channels. Time is untouched; call before any temporal preprocessing so
     filters see the continuous source.
 
-    Uses ``ChannelSliceRecording`` directly because SI 0.104 dropped the
-    ``recording.channel_slice(...)`` method; the constructor accepts the same
-    kwargs.
+    SI 0.104 has no ``recording.channel_slice``, so this uses
+    ``ChannelSliceRecording``.
 
     Parameters
     ----------
@@ -642,12 +554,6 @@ def select_sort_group_channels(
     assert_reference_not_member(
         reference_mode, reference_electrode_id, sort_group_channel_ids
     )
-    # Base slice = the sort group's declared members. Add the ``specific``
-    # reference (sliced in only for subtraction, dropped after referencing) and,
-    # on the ``interpolate`` path, the group's interior curated-bad channels so
-    # they are present to be filled. ``remove`` adds no curated-bad channel,
-    # so the slice is exactly the members (already sorted in ``make_fetch``;
-    # ``sorted(set(...))`` preserves that order/dedup).
     extra: list[int] = []
     if reference_mode == "specific":
         extra.append(int(reference_electrode_id))

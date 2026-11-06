@@ -1,11 +1,4 @@
-"""Pydantic schema-default pins for sorter and preprocessing params.
-
-Pure-schema (no DB) regression guards for intentional v2 design choices: MS4
-frequency-band and ``detect_threshold`` defaults, clusterless ``peak_sign`` /
-stale-field / production-uV-threshold rules, the common-reference operator
-knob, and the ``CurationSource`` enum membership. A future refactor "fixing"
-these as drift would silently regress to v1 behavior without these pins.
-"""
+"""DB-free pins for intentional v2 sorter and preprocessing schema defaults."""
 
 from __future__ import annotations
 
@@ -17,9 +10,7 @@ from spyglass.spikesorting.v2._params.sorter import MountainSort4Schema
 def test_ms4_schema_freq_band_defaults():
     """MS4 schema ships ``freq_min=600`` / ``freq_max=6000``.
 
-    These match v1's tetrode preset; the docstring records the choice but no
-    test pinned it. A drift back to SI's bare MS4 defaults (no band) would
-    silently change the filtered band the sorter sees.
+    These match v1's tetrode preset.
     """
     schema = MountainSort4Schema()
     assert schema.freq_min == 600.0
@@ -81,11 +72,7 @@ def test_common_reference_params_operator_knob():
 
 
 def test_curation_source_enum_members():
-    """``CurationSource`` carries all insert-time provenance values.
-
-    Pinning these members guards against a refactor dropping them, which would
-    make a valid curation_source raise at the insert boundary.
-    """
+    """``CurationSource`` carries all insert-time provenance values."""
     from spyglass.spikesorting.v2._core.enums import CurationSource
 
     for value in (
@@ -100,11 +87,8 @@ def test_curation_source_enum_members():
 
 
 def test_clusterless_schema_default_is_production_uv():
-    """The clusterless schema's bare default is the production/real-data
-    threshold (100 uV under the default 'uv' unit), and a microvolt-scale
-    threshold explicitly left in MAD units is rejected.
-    The OLD default ``(detect_threshold=100, threshold_unit='mad')`` was a
-    100x-MAD threshold that silently detected almost nothing.
+    """The clusterless default threshold is 100 uV ('uv' unit), and a
+    microvolt-scale threshold left in MAD units is rejected.
     """
     import pydantic
 
@@ -131,8 +115,7 @@ def test_clusterless_schema_default_is_production_uv():
     )
     assert mad.threshold_unit == "mad" and mad.detect_threshold == 5.0
 
-    # An explicit noise_levels override bypasses the guard even in MAD mode
-    # (the documented advanced-override path is deliberately untouched).
+    # An explicit noise_levels override bypasses the guard even in MAD mode.
     override = ClusterlessThresholderSchema(
         detect_threshold=100.0, threshold_unit="mad", noise_levels=[2.0]
     )
@@ -157,11 +140,8 @@ def _ms5_wrapper_defaults() -> dict:
 def test_ms5_schema_covers_wrapper():
     """Every pinned-wrapper MS5 key is a schema field or a managed key.
 
-    A wrapper key that is neither would be a scientific knob users cannot
-    set (e.g. ``scheme2_training_duration_sec`` /
-    ``scheme3_block_duration_sec`` / the PCA and mask-radius fields, were
-    the schema to omit them); a
-    schema field the wrapper does not accept would fail at sort time.
+    Otherwise a wrapper knob would be unsettable, or a schema field would fail
+    at sort time.
     """
     from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
 

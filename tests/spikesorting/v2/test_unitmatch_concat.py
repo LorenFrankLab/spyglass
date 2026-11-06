@@ -1,17 +1,9 @@
 """UnitMatch over explicit matching inputs: single-recording and daily concat sorts.
 
-A matching input is one complete, independently curated sort -- of a single
-recording or of a same-day concatenation. These tests drive the real
-DataJoint tables over planted minirec sorts (``daily_concat_match_inputs``):
-the frozen ``Input`` / ``InputRecording`` rows must reproduce the upstream
-concatenation provenance exactly, the selection must refuse inputs that reuse
-raw samples or span days before any bundle is extracted, and a run must keep
-its frozen inputs and order when the group, the session times, a curation or
-a source changes underneath it. The last test runs two days of the same
-planted neurons (``planted_matching_days``) through the whole workflow --
-masks, concatenation, motion correction, sorting, curation and the real
-UnitMatchPy backend -- back to each original recording's spike times and
-regions.
+A matching input is one curated sort of a single recording or of a same-day
+concatenation. Frozen ``Input`` / ``InputRecording`` rows reproduce upstream
+provenance, and a run keeps its frozen inputs and order when upstream rows
+change.
 """
 
 from __future__ import annotations
@@ -443,7 +435,7 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
             finally:
                 _drop(pk)
 
-            # A forged concat input whose member rows no longer match the
+            # A forged concat input whose member rows do not match the
             # concatenation is refused the same way.
             pk = UnitMatchSelection.insert_inputs(
                 [cur["concat_day1"], cur["single_b"]],
@@ -508,7 +500,7 @@ def test_matching_snapshot_survives_live_group_changes(
     daily_concat_match_inputs,
 ):
     """After selection the run keeps its inputs, order and times when the
-    group changes, and refuses -- rather than re-points or re-orders -- when
+    group changes, and refuses (rather than re-pointing or re-ordering) when
     a session's start time changes, a curation is recreated or a source
     changes."""
     from spyglass.common import Session
@@ -604,9 +596,8 @@ def test_matching_snapshot_survives_live_group_changes(
         assert _input_rows(pk) == frozen_inputs
         assert _plan_identity() == baseline
 
-        # A session start moved two days later (a would then follow b) no
-        # longer equals its frozen time: the run is refused, and the frozen
-        # rows keep their order and times.
+        # A session start moved two days later differs from its frozen time:
+        # the run is refused, and the frozen rows keep their order and times.
         later = (Session & {"nwb_file_name": nwb["a"]}).fetch1(
             "session_start_time"
         ) + dt.timedelta(days=2)
@@ -788,8 +779,8 @@ def test_concat_inputs_match_and_track_in_chronological_order(
         )
         return []
 
-    # later_first: the matcher emits (day 2 unit, day 1 unit) with day 2 --
-    # the second input fed -- as side a; orientation must flip it.
+    # later_first: the matcher emits day 2 (the second input) as side a;
+    # orientation must flip it.
     saved = install_fixture_pairer(
         monkeypatch,
         matcher_name="daily_concat_pairer",
@@ -1010,7 +1001,7 @@ def test_frozen_frames_and_order_are_verified_at_make(
     shortened[0, 1] -= 1.0
     try:
         with _no_bundle_extraction(monkeypatch):
-            # An edited frozen interval no longer realizes the stored hash.
+            # An edited frozen interval does not realize the stored hash.
             with _raw_update(
                 UnitMatchSelection.InputRecording,
                 recording_1,
@@ -1032,8 +1023,8 @@ def test_frozen_frames_and_order_are_verified_at_make(
             ):
                 _refused("input_start_time")
 
-            # Input 0 moved after input 1 (start time kept consistent): the
-            # numbering no longer follows the frozen chronology.
+            # Input 0 moved after input 1: the numbering contradicts the
+            # frozen chronology.
             later = frozen_1["session_start_time"] + dt.timedelta(hours=1)
             with (
                 _raw_update(
@@ -1105,10 +1096,9 @@ def test_frozen_frames_and_order_are_verified_at_make(
             ]
             _refused("session_start_time")
 
-            # A multi-day concatenation (b and c) frozen with same-day
-            # session times -- session c sat on b's day while the inputs were
-            # selected -- passes every check on frozen values; the live
-            # session times refuse it.
+            # A multi-day concatenation (b and c) frozen with same-day session
+            # times passes every check on frozen values; the live session
+            # times refuse it.
             _drop(pk)
             nwb = daily_concat_match_inputs["nwb_file_names"]
             b_start = (Session & {"nwb_file_name": nwb["b"]}).fetch1(
@@ -3082,14 +3072,11 @@ def test_tracked_units_map_to_original_member_times_and_regions(
 def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
     daily_concat_match_inputs, member_time_sorts, monkeypatch
 ):
-    """One check refuses a concatenation member Recording whose content no
-    longer matches the hash its concatenation froze -- at selection, at
-    make and in the tracked-unit readers -- and the readers refuse a
-    single recording's changed content or a recreated curation. A member
-    Recording replaced by another persisted recording gets new timestamps
-    under the frozen recording id; before any change, and again once it is
-    restored, the member spike times are the planted frames on the member's
-    own clock."""
+    """A concatenation member Recording whose content differs from the hash
+    its concatenation froze is refused at selection, at make and in the
+    tracked-unit readers; the readers also refuse a single recording's changed
+    content or a recreated curation. Unchanged or restored, the member spike
+    times are the planted frames on the member's own clock."""
     from spyglass.spikesorting.v2._storage.units_nwb import recording_timestamps
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
@@ -3260,16 +3247,9 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
 #: member, MS5 (stood in for by the planted sorter), no sorter motion step.
 _WORKFLOW_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
 _WORKFLOW_MOTION_RECIPE = "dredge_fast_v1"
-#: The recovery floor: the benchmark's two-day recall gate (0.78,
-#: ``scripts/unitmatch_daily_concat_benchmark.py``) applied to the 22 neurons
-#: planted on both days, rounded up -- at least 18. The benchmark's probe
-#: layout differs (16 contacts in two columns at 20 um pitch; here one column
-#: of 32 contacts at 26 um), so this is a carried-over number, not a property
-#: measured on this geometry, and it was chosen independently of the DB-free
-#: trials that chose the scenario (see the test docstring); in those trials the
-#: drift-free ceiling of this design (day 1 replaced by its static twin) was
-#: 19 of 22. A pass does not show that motion-corrected daily matching
-#: recovers 78 % of neurons in general.
+#: Recall floor carried over from the two-day gate of
+#: ``scripts/unitmatch_daily_concat_benchmark.py`` (a different probe layout):
+#: at least 18 of the 22 neurons planted on both days.
 _WORKFLOW_RECALL_FLOOR = 0.78
 
 
@@ -3712,29 +3692,10 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
     - both inputs were read from their corrected sorting-input traces;
     - re-reading through fresh tables and the run's NWB gives the same.
 
-    What a pass shows, and what it does not: the scenario is co-registered
-    by construction. Day 1's 16 s drift period was chosen so that its
-    corrected position averages to day 2's, because per-day motion
-    correction registers each day to its own mean position, not across
-    days. In DB-free trials of this design (production bundle, UnitMatchPy
-    backend and tracked-unit graph, on these seeds), a rigid offset between
-    the days of 3 / 6 / 12 um recovered 22 / 12 / 1 of 24 neurons, and one
-    drift period per session (corrected days about 12 um apart) recovered 6
-    of 24. The scenario -- unit count, spacing, distractor clearance, drift
-    period -- was chosen from those trials; the floor was not, and it carries
-    over the benchmark's recall from a different probe layout
-    (``_WORKFLOW_RECALL_FLOOR``). So a pass shows the workflow's
-    plumbing and identities on days whose corrected positions agree; it
-    does not show that motion-corrected daily matching recovers at least
-    78 % of neurons across days that moved relative to each other.
-
-    The same chain with ``motion_mode="off"`` is a control: its structure,
-    times, counts, regions and provenance are asserted the same way, and so
-    are the identity properties the planted design implies with or without
-    drift: no tracked unit mixes two neurons and each one-day distractor
-    stays a singleton. Its recovery is printed, not asserted: uncorrected, day 1's
-    planted drift moves every unit by up to 25 um within the day. Both runs
-    print their per-neuron records before any recovery assertion.
+    The days are co-registered by construction, so a pass shows plumbing and
+    identities, not cross-day recall under relative motion. The
+    ``motion_mode="off"`` control asserts the same except recovery, which is
+    printed.
     """
     from spyglass.spikesorting.v2.pipeline import (
         estimate_concat_motion,

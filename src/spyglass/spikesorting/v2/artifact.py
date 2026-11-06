@@ -1,34 +1,19 @@
 """Artifact detection over a preprocessed Recording.
 
-Tables (one result table per source kind; unified downstream by the
+Tables (one result table per source kind, unified by the
 ``ArtifactDetectionOutput`` merge in ``artifact_output.py``):
-    ArtifactDetectionParameters       -- threshold detection parameters.
-    SharedArtifactGroup (+ Member)    -- opt-in cross-recording detection (#928).
-    RecordingArtifactSelection        -- single-recording request (Recording FK).
-    SharedGroupArtifactSelection      -- cross-recording request (+ member_set_hash).
-    RecordingArtifactDetection        -- single-recording result; writes IntervalList.
-        .RemovedInterval              -- relational owner of each written row.
-    SharedGroupArtifactDetection      -- cross-recording result; one row per member.
-        .RemovedInterval              -- relational owner of each written row.
 
-The recording source is a required FK on each selection master, so
-"exactly one source" is STRUCTURAL (a row cannot exist with zero or two
-sources) rather than a runtime-asserted XOR.
+- ``ArtifactDetectionParameters``: threshold detection parameters
+- ``SharedArtifactGroup`` (+ ``Member``): opt-in cross-recording detection
+- ``RecordingArtifactSelection``: single-recording request
+- ``SharedGroupArtifactSelection``: cross-recording request
+- ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``: results;
+  each ``RemovedInterval`` part owns the ``IntervalList`` rows it writes
 
-Artifact-removed valid times live in ``common.IntervalList`` (the
-UUID-suffixed name prevents collision with human-authored session intervals,
-and downstream IntervalList-querying code consumes them through the standard
-interface); each detection's ``RemovedInterval`` part table owns its generated
-rows relationally so generic IntervalList cleanup treats them as live children,
-not orphans.
-
-``ArtifactDetectionParameters.insert1`` Pydantic-validates the ``params`` blob.
-Each detection's ``make`` runs threshold detection and writes the
-artifact-removed ``IntervalList`` rows, ``get_artifact_removed_intervals`` reads
-them back, ``delete`` removes them, and ``SharedArtifactGroup.insert_group``
-declares a cross-recording detection bundle. The source-agnostic machinery (the
-scan, the IntervalList write, the read-back, the delete cleanup) lives on the
-shared ``_ArtifactDetectionMixin`` both result tables inherit.
+Each selection master has a required source FK, so a selection has exactly
+one source. Artifact-removed valid times are stored in ``IntervalList``; the
+``RemovedInterval`` parts keep generic ``IntervalList`` cleanup from treating
+them as orphans. Shared machinery lives on ``_ArtifactDetectionMixin``.
 """
 
 from __future__ import annotations
@@ -40,9 +25,6 @@ import numpy as np
 
 from spyglass.common import IntervalList, Session  # noqa: F401
 
-# Artifact-removed interval construction + IntervalList persistence live in a
-# DB-free service module so the artifact-detection tables stay thin
-# orchestrators.
 from spyglass.spikesorting.v2._artifacts.intervals import (
     build_artifact_interval_part_rows,
     build_artifact_interval_rows,
@@ -77,11 +59,8 @@ schema = dj.schema("spikesorting_v2_artifact")
 class ArtifactComputed(NamedTuple):
     """Outputs of the artifact-detection tables' ``make_compute``.
 
-    ``per_member_nwb_files`` is a tuple of distinct
-    ``nwb_file_name`` strings the ``make_insert`` step must write
-    one ``IntervalList`` row per. For the single-recording path it
-    is ``(nwb_file_name,)`` of length 1; for the shared-group path
-    it is the distinct set across the member recordings.
+    ``per_member_nwb_files`` lists the distinct ``nwb_file_name`` values that
+    ``make_insert`` writes one ``IntervalList`` row for.
     """
 
     valid_times: np.ndarray
@@ -95,26 +74,22 @@ class ArtifactDetectionParameters(
 ):
     """Validated artifact-detection parameter blob.
 
-    The ``params`` blob is validated by
-    :class:`ArtifactDetectionParamsSchema`. ``insert_default`` ships four rows:
-    ``"none"`` (detect=False, skip artifact scanning), ``"default"`` (the 500 uV
-    schema default: amplitude threshold + proportion-above-thresh), and the two
-    production Frank-lab recipes ``"franklab_100uv_p07_2026_06"`` (100 uV, 0.7
-    proportion) and ``"franklab_50uv_p07_2026_06"`` (50 uV, 0.7). A preset that
-    omits ``artifact_detection_params_name`` runs no detection at all (no
-    ``ArtifactDetectionSource`` row on a standalone sort, or all-null member
-    detections on a concat selection). For a concat run this detector runs
-    independently on each member before concatenation.
+    ``params`` is validated by :class:`ArtifactDetectionParamsSchema`.
+    ``insert_default`` ships:
 
-    ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob that
-    governs the chunked detection scan
-    (:func:`._artifacts.intervals.scan_artifact_frames`). It is merged over the
-    SI-global and ``dj.config['custom']
-    ['spikesorting_v2_job_kwargs']`` defaults by ``_resolved_job_kwargs``. The
-    memory-relevant key is the chunk size -- ``chunk_duration`` (e.g. ``"1s"``,
-    the default), ``chunk_size`` (frames), or ``chunk_memory`` -- which bounds
-    peak working set at ``~4 × chunk_frames × n_channels × 4 bytes``. ``n_jobs``
-    controls the worker-pool size (default 1, serial in-process).
+    - ``"none"``: no scan
+    - ``"default"``: 500 uV amplitude threshold
+    - ``"franklab_100uv_p07_2026_06"``: 100 uV, proportion 0.7
+    - ``"franklab_50uv_p07_2026_06"``: 50 uV, proportion 0.7
+
+    For a concat run, detection runs on each member before concatenation.
+
+    ``job_kwargs`` (optional) sets SpikeInterface job kwargs for the chunked
+    scan, merged over the SI-global and
+    ``dj.config['custom']['spikesorting_v2_job_kwargs']`` defaults. The chunk
+    size (``chunk_duration``, default ``"1s"``; ``chunk_size``; or
+    ``chunk_memory``) bounds peak memory at about
+    ``4 × chunk_frames × n_channels × 4 bytes``. ``n_jobs`` defaults to 1.
     """
 
     definition = f"""
@@ -125,10 +100,6 @@ class ArtifactDetectionParameters(
     job_kwargs=null: blob  # SI job-kwargs for chunked scan; see docstring
     """
 
-    # Row-level ``params_schema_version`` matches the inner
-    # ``ArtifactDetectionParamsSchema.schema_version``.
-    # The shipped rows are defined in
-    # ``_core.recipe_catalog.artifact_default_contents`` (single source).
     _DEFAULT_CONTENTS: tuple = artifact_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
@@ -138,9 +109,6 @@ class ArtifactDetectionParameters(
         guard (a second name for an existing blob); see
         ``reject_duplicate_parameter_content``.
         """
-        # Validate every row (incl. ``insert_default``'s positional
-        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
-        # validation or the params_schema_version drift check.
         _insert_parameter_rows(
             self,
             rows,
@@ -162,16 +130,10 @@ class ArtifactDetectionParameters(
 class SharedArtifactGroup(SpyglassMixin, dj.Manual):
     """Named bundle of Recording rows that share an artifact-detection pass.
 
-    Addresses Spyglass issue #928 (behavioral artifacts visible on every
-    probe -- chewing, licking, head-bumps). Per-recording artifact
-    detection misses these because each sort group is processed
-    independently. ``SharedArtifactGroup`` lets users declare a set of
-    Recording rows from the same session whose artifact intervals should
-    be unioned; one detection pass over the union of channels produces a
-    shared set of valid times applied to every member.
-
-    All members must belong to one session (enforced by the master row's
-    Session FK and re-checked by ``insert_group``).
+    For behavioral artifacts seen on every probe (chewing, licking, head
+    bumps), which per-sort-group detection can miss. One detection pass over
+    the union of the members' channels yields valid times shared by every
+    member. All members must belong to one session.
     """
 
     definition = """
@@ -190,37 +152,24 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_group(cls, name: str, members: list[dict]) -> None:
-        """Insert master + Member rows; validate session consistency.
-
-        A ``SharedArtifactGroup`` is a named bundle of populated
-        ``Recording`` rows whose artifact-detection pass should run
-        ONCE over the union of channels. The matching
-        ``SharedGroupArtifactDetection.make_compute`` unions the channels
-        across all members, runs the same threshold scan as the
-        single-recording path, and ``make_insert`` writes one
-        ``IntervalList`` row per member ``nwb_file_name`` so each
-        member session sees the artifact times in its own namespace.
+        """Insert master + Member rows after checking members share a time axis.
 
         Parameters
         ----------
-        name
-            Group name (PK on the master). Must be unique within the
-            installation.
-        members
-            List of dicts identifying member recordings. Each dict
-            must contain at least ``recording_id`` (other fields are
-            ignored so the caller can pass arbitrary upstream rows
-            / PKs).
+        name : str
+            Group name (master PK).
+        members : list of dict
+            Member recordings; each must contain ``recording_id``. Other
+            fields are ignored.
 
         Raises
         ------
         ValueError
-            If ``members`` is empty, if any member ``recording_id``
-            is not a populated ``Recording``, or if members span
-            more than one session. The shared-group detection
-            requires all members to share a time axis -- mixing
-            sessions makes the artifact-removed valid times
-            undefined.
+            If ``members`` is empty, a ``recording_id`` is not a populated
+            ``Recording``, or members differ in session, sampling frequency,
+            dtype or timestamps.
+        RuntimeError
+            If a member recording cannot be loaded.
         """
         from spyglass.spikesorting.v2._artifacts.shared_group import (
             validate_shared_artifact_group_members,
@@ -245,15 +194,8 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 )
             member_recording_ids.append(m["recording_id"])
 
-        # Time-axis compatibility check. ``RecordingSelection`` is
-        # keyed by (nwb_file_name, sort_group_id, interval_list_name,
-        # preprocessing_params_name, team_name); same NWB does NOT imply
-        # same time axis. ``si.aggregate_channels`` requires every
-        # member to share ``n_samples``, ``sampling_frequency``, and
-        # dtype, otherwise the union construction crashes deep inside
-        # SI with an opaque "shape mismatch" error at populate time.
-        # Catch the invariant at insert time so the user gets a
-        # clear diagnostic before populate.
+        # ``si.aggregate_channels`` needs equal n_samples, fs and dtype; check
+        # here for a clear error instead of an opaque one at populate.
         per_member_recording_rows = (
             Recording & [{"recording_id": rid} for rid in member_recording_ids]
         ).fetch("recording_id", "sampling_frequency", as_dict=True)
@@ -266,11 +208,9 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             "interval_list_name",
             as_dict=True,
         )
-        # Index by recording_id so we can compose the two relations.
         rec_by_id = {
             str(r["recording_id"]): r for r in per_member_recording_rows
         }
-        # All recording_ids must reference populated Recording rows.
         missing = [
             rid for rid in member_recording_ids if str(rid) not in rec_by_id
         ]
@@ -284,10 +224,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             str(r["recording_id"]): r for r in per_member_selection_rows
         }
 
-        # Cheap pre-load consistency: one session AND one sampling frequency
-        # (SI's ``aggregate_channels`` requires identical fs). Validated BEFORE
-        # loading any member's (5-50 GB) recording for the exact-timestamp check
-        # below, so a misconfigured group is rejected without the load cost.
+        # Cheap session/fs checks before loading multi-GB recordings.
         nwb_file_name = validate_shared_artifact_group_members(
             [
                 {
@@ -300,14 +237,8 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             ]
         )
 
-        # Exact time-axis check. Equal sample counts alone are not enough:
-        # two interval selections from the same session can have the same
-        # length, sampling frequency, and dtype while starting at different
-        # wall-clock times. ``si.aggregate_channels`` stacks by frame index,
-        # so the full timestamp vector must match exactly for every member.
-        # Load each member's preprocessed recording through ``Recording.
-        # get_recording`` (the same path ``make_compute`` uses) and require
-        # EXACT ``get_num_samples()``, ``get_dtype()``, and timestamps.
+        # ``aggregate_channels`` stacks by frame index, so timestamps must
+        # match exactly; equal lengths can still start at different times.
         member_dtypes: set[str] = set()
         reference_fingerprint = None
         reference_rid = None
@@ -323,8 +254,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                     "every member recording to be readable."
                 ) from exc
             n_samples = int(rec_obj.get_num_samples())
-            # Internal consistency without materializing: the lazy time_vector's
-            # length (h5py shape[0], no data read) must match get_num_samples().
+            # len() of the lazy h5py time vector reads no data.
             explicit_time_vector = rec_obj.get_time_info(segment_index=0).get(
                 "time_vector"
             )
@@ -340,12 +270,8 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                     "is internally inconsistent and cannot be used for a "
                     "shared artifact group."
                 )
-            # Time-alignment check via a chunked SHA-256 fingerprint of the
-            # timestamp vector rather than holding two full ~824 MB float64
-            # vectors for an ``np.array_equal``. ``timestamp_fingerprint``
-            # streams the vector in ~1 s slices (bounded peak memory) and
-            # prefixes n_samples, so a length difference also yields differing
-            # fingerprints and is caught here as a timestamp mismatch.
+            # Streamed fingerprint (includes n_samples) avoids holding two
+            # full float64 timestamp vectors in memory.
             fingerprint = timestamp_fingerprint(rec_obj)
             if reference_fingerprint is None:
                 reference_fingerprint = fingerprint
@@ -397,19 +323,10 @@ def _insert_artifact_selection(
 ) -> dict:
     """Idempotently insert one artifact-detection selection row.
 
-    Shared body for ``RecordingArtifactSelection.insert_selection`` and
-    ``SharedGroupArtifactSelection.insert_selection``. Derives the
-    content-addressed ``artifact_detection_id`` from the same
-    ``artifact_detection_identity_payload`` + ``deterministic_id`` -- so the id
-    is content-addressed purely by params + source (keeping artifact-backed
-    ``sorting_id`` parity and the ``artifact_detection_{id}`` IntervalList name
-    stable) -- validates any caller-supplied id, ensures the params row exists,
-    and inserts the single selection row.
-
-    Because the recording source is a required FK on the master row (not an
-    XOR part table), a selection cannot exist with zero or two sources: orphan
-    and ambiguous source states are structurally unrepresentable, so this
-    insert only handles the concurrent duplicate-id race.
+    Shared body of both ``insert_selection`` methods. The
+    ``artifact_detection_id`` is content-addressed over params, source and
+    manual exclusions. Validates any caller-supplied id, ensures the params
+    row exists, and handles a concurrent duplicate-id race.
 
     Parameters
     ----------
@@ -425,6 +342,9 @@ def _insert_artifact_selection(
     supplied_id : optional
         A caller-supplied ``artifact_detection_id`` to validate against the
         derived one, or ``None``.
+    manual_excluded_times : array-like, optional
+        ``[start, stop)`` session-second intervals to exclude; part of the
+        identity.
     extra_row : dict
         Source-specific columns to add to the inserted row (the source FK,
         plus ``member_set_hash`` for the shared-group table).
@@ -432,7 +352,7 @@ def _insert_artifact_selection(
     Returns
     -------
     dict
-        ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
+        ``{"artifact_detection_id": ...}``, the content-addressed PK.
     """
     from spyglass.spikesorting.v2._core.selection_identity import (
         artifact_detection_identity_payload,
@@ -479,8 +399,7 @@ def _insert_artifact_selection(
             # allow_direct_insert: insert_selection IS the validation boundary.
             selection_cls.insert1(row, allow_direct_insert=True)
     except dj.errors.DuplicateError:
-        # A concurrent caller won the deterministic-id race; its row is the
-        # same content-addressed selection, so return the shared PK.
+        # A concurrent caller inserted the same content-addressed row.
         logger.debug(
             "%s.insert_selection: lost deterministic-id race on %s; "
             "returning the existing row.",
@@ -494,12 +413,7 @@ def _insert_artifact_selection(
 class RecordingArtifactSelection(
     SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
 ):
-    """Single-recording artifact-detection request.
-
-    The recording source is a required FK on the master row, so "exactly one
-    recording source" is structural (a row cannot exist with zero or two
-    sources) rather than a runtime-asserted invariant.
-    """
+    """Single-recording artifact-detection request."""
 
     definition = """
     artifact_detection_id: uuid
@@ -523,7 +437,7 @@ class RecordingArtifactSelection(
         Returns
         -------
         dict
-            ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
+            ``{"artifact_detection_id": ...}``, the content-addressed PK.
         """
         recording_id = key["recording_id"]
         return _insert_artifact_selection(
@@ -544,12 +458,9 @@ class SharedGroupArtifactSelection(
 ):
     """Cross-recording (shared-group) artifact-detection request.
 
-    ``member_set_hash`` snapshots the group's sorted (order-independent)
-    member ``recording_id`` set at selection time;
-    ``SharedGroupArtifactDetection.make_fetch`` re-derives it from the current
-    members and rejects a drift (the identity is ``{params, group}`` only, so
-    a live member edit could otherwise change the scanned set under a fixed
-    ``artifact_detection_id``).
+    ``member_set_hash`` snapshots the member ``recording_id`` set, which is
+    not part of the identity. ``SharedGroupArtifactDetection.make_fetch``
+    rejects a changed member set.
     """
 
     definition = """
@@ -565,9 +476,7 @@ class SharedGroupArtifactSelection(
     def insert_selection(cls, key: dict) -> dict:
         """Idempotently register a shared-group artifact selection.
 
-        Snapshots the group's CURRENT member set onto ``member_set_hash`` so a
-        later ``SharedArtifactGroup.Member`` edit cannot silently change the
-        scanned set under this fixed ``artifact_detection_id``.
+        Snapshots the group's current member set onto ``member_set_hash``.
 
         Parameters
         ----------
@@ -579,7 +488,7 @@ class SharedGroupArtifactSelection(
         Returns
         -------
         dict
-            ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
+            ``{"artifact_detection_id": ...}``, the content-addressed PK.
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             shared_group_member_set_hash,
@@ -609,10 +518,7 @@ class SharedGroupArtifactSelection(
 class RecordingArtifactFetched(NamedTuple):
     """DB-side inputs for :meth:`RecordingArtifactDetection.make_fetch`.
 
-    The single-recording source is structural, so the fetched shape carries
-    just the resolved ``recording_id`` + its parent ``nwb_file_name`` (no
-    source-kind branch, no member tuples), and the recording's cached
-    artifact resolved (and rebuilt if missing) for ``make_compute`` to read.
+    ``traces`` is the recording's cached artifact, rebuilt if missing.
     """
 
     validated: ArtifactDetectionParamsSchema
@@ -626,11 +532,9 @@ class RecordingArtifactFetched(NamedTuple):
 class SharedGroupArtifactFetched(NamedTuple):
     """DB-side inputs for :meth:`SharedGroupArtifactDetection.make_fetch`.
 
-    The per-member fields are ordered tuples (length n_members) so
-    ``make_compute`` can union their channels without further DB I/O;
-    ``member_traces`` holds each member's cached artifact, resolved (and
-    rebuilt if missing) here. ``nwb_file_name`` is the common parent session
-    (``insert_group`` validated single-session).
+    Per-member fields are tuples of length n_members. ``member_traces``
+    holds each member's cached artifact, rebuilt if missing.
+    ``nwb_file_name`` is the common session.
     """
 
     validated: ArtifactDetectionParamsSchema
@@ -646,24 +550,13 @@ class SharedGroupArtifactFetched(NamedTuple):
 class _ArtifactDetectionMixin:
     """Shared source-agnostic detection machinery for both result tables.
 
-    ``RecordingArtifactDetection`` and ``SharedGroupArtifactDetection`` differ
-    only in how ``make_fetch`` / ``make_compute`` resolve and LOAD their source
-    (a single cached recording vs the channel-union of a shared group's
-    members). Everything downstream of the loaded recording -- the chunked
-    threshold scan, the ``IntervalList`` write + ownership part rows, the
-    read-back, and the delete-time cleanup -- is identical, so it lives here
-    and both tables inherit it. The scan itself is the source-agnostic helper
-    both ``make_compute``s funnel through (:meth:`_run_artifact_scan`).
-
-    ``_single_source`` records whether the table owns exactly one
-    ``IntervalList`` row (recording source) so
-    :meth:`get_artifact_removed_intervals` can return a bare array for the
-    single-recording case while the shared-group case always returns the
-    per-member dict.
+    The tables differ only in how they load their source. The scan,
+    ``IntervalList`` write, read-back and delete cleanup live here.
+    ``_single_source`` means one owned ``IntervalList`` row, so
+    :meth:`get_artifact_removed_intervals` returns a bare array.
     """
 
-    # Tri-part dispatch moves the long-running detection loop OUTSIDE the
-    # framework transaction (background: DataJoint #1170 / Spyglass #1030).
+    # Tri-part make: the long detection scan runs outside the transaction.
     _parallel_make = True
     _single_source: bool = True
 
@@ -677,10 +570,8 @@ class _ArtifactDetectionMixin:
     ):
         """Resolve job kwargs and scan a loaded recording for artifacts.
 
-        The source-agnostic detection helper both ``make_compute``s call once
-        their (single or unioned) recording is loaded: merges the per-row
-        ``job_kwargs`` over the SI-global and DataJoint-config defaults, then
-        runs the chunked threshold scan.
+        Merges the per-row ``job_kwargs`` over the defaults, runs the chunked
+        threshold scan, then applies manual exclusions.
 
         Parameters
         ----------
@@ -692,6 +583,9 @@ class _ArtifactDetectionMixin:
             Per-row SI job-kwargs blob.
         context : str
             Diagnostic suffix identifying the selection for empty-scan logs.
+        manual_excluded_times : array-like, optional
+            ``[start, stop)`` session-second intervals to remove from the
+            result.
 
         Returns
         -------
@@ -724,14 +618,9 @@ class _ArtifactDetectionMixin:
     ):
         """Write the artifact ``IntervalList`` + master + part rows atomically.
 
-        Source-agnostic: writes ONE ``IntervalList`` row per distinct member
-        ``nwb_file_name`` (one row for the single-recording path), registers
-        the master row, and records ownership through
-        ``RemovedInterval`` so generic ``IntervalList`` cleanup treats
-        the generated intervals as live children. The inner
-        ``_safe_context()`` is a no-op under the framework transaction the
-        tri-part dispatch already opened; kept so an out-of-populate caller
-        still gets atomic registration.
+        Writes one ``IntervalList`` row per distinct member
+        ``nwb_file_name``, the master row, the ``RemovedInterval`` ownership
+        rows, and the ``ArtifactDetectionOutput`` registration.
 
         Parameters
         ----------
@@ -758,23 +647,14 @@ class _ArtifactDetectionMixin:
             IntervalList.insert(interval_rows)
             self.insert1(key)
             self.RemovedInterval.insert(part_rows)
-            # Producer-owned registration: a materialized detection registers
-            # itself into the ArtifactDetectionOutput merge as an available
-            # source, so a later SortingSelection just resolves its merge id and
-            # never has to register (no merge insert inside the sorting
-            # transaction). Idempotent + inside this atomic block, so a detection
-            # is registered iff it is materialized.
+            # Registered iff materialized, so sorting never inserts the merge.
             ArtifactDetectionOutput.insert_detection(detection_key)
 
     def get_artifact_removed_intervals(self, key, as_dict=False):
         """Return the artifact-removed ``valid_times`` for ``key``.
 
-        Reads the detection row's OWN ``RemovedInterval`` part rows.
-        A single-recording source (``_single_source``) owns exactly one row,
-        returned as a plain ``(n_intervals, 2)`` array (or a one-key dict with
-        ``as_dict=True``); a shared-group source returns the
-        ``{nwb_file_name: array}`` dict (values equal across members -- the
-        scan ran ONCE over the unioned channels).
+        A single-recording source returns an ``(n_intervals, 2)`` array; a
+        shared group returns ``{nwb_file_name: array}`` with equal values.
 
         Parameters
         ----------
@@ -831,35 +711,20 @@ class _ArtifactDetectionMixin:
         return merge_id, n + n_concat
 
     def delete(self, *args, safemode=None, _cascade_sorts=False, **kwargs):
-        """Delete detection rows, their ``ArtifactDetectionOutput`` registration,
-        and their owned ``IntervalList`` rows -- coordinated with the merge.
+        """Delete detections, their merge registration and owned intervals.
 
-        Deletion is REFUSED (``ValueError``) when a detection is referenced by a
-        ``SortingSelection``, a ``MotionEstimateSelection`` or a frozen
-        ``ConcatenatedRecordingSelection`` member. Delete those selections and their outputs first, or use
-        :meth:`cascade_delete` to remove them too. A per-detection advisory lock
-        (the same one ``SortingSelection.insert_selection`` takes when it links
-        an artifact) serializes delete-vs-select on a detection, so a CONCURRENT
-        ``insert_selection`` cannot slip a new referrer between the check and the
-        cascade -- it either commits first (and is refused) or blocks until the
-        detection is gone (and fails on the FK). The lock is FAIL-CLOSED: a lock
-        it cannot take within the short lifecycle timeout aborts the delete with
-        ``AdvisoryLockError`` rather than proceeding unserialized. The per-
-        detection locks are taken in a deterministic (``artifact_detection_id``-
-        sorted) order, so two overlapping bulk deletes acquire them in the same
-        order and cannot deadlock.
+        Refused when a ``SortingSelection``, ``MotionEstimateSelection`` or
+        ``ConcatenatedRecordingSelection`` member references a detection;
+        delete those first or use :meth:`cascade_delete`. Owned
+        ``IntervalList`` rows are removed for detections actually deleted.
+        A leading positional restriction is accepted.
 
-        For an unreferenced detection, the cautious cascade (which sets
-        ``force_masters`` on modern DataJoint) removes the detection together
-        with its ``ArtifactDetectionOutput`` source part + merge master -- gated
-        by ``safemode``, so a cancelled delete leaves both in place (no orphaned
-        merge row). In ``cascade`` mode the same cascade continues on through
-        ``SortingSelection.ArtifactDetectionSource`` to the dependent sorts.
-        DataJoint does not cascade through ``interval_list_name``-keyed
-        dependencies, so the owned artifact ``IntervalList`` rows are collected
-        up front and dropped for masters the cascade actually removed. A leading
-        positional restriction is accepted for the easy-to-mistype
-        ``Table().delete(restriction)`` form.
+        Raises
+        ------
+        ValueError
+            If a detection is referenced and ``_cascade_sorts`` is False.
+        AdvisoryLockError
+            If a per-detection lifecycle lock cannot be taken in time.
         """
         restricted, args = restrict_by_leading_args(self, args)
         if restricted is not None:
@@ -877,24 +742,10 @@ class _ArtifactDetectionMixin:
         detection_cls = type(self)
         rows = self.fetch(as_dict=True)
 
-        # Serialize delete-vs-insert_selection on each detection with the same
-        # advisory lock insert_selection takes when it links an artifact, keyed
-        # on ArtifactDetectionOutput + artifact_detection_id so both sides derive
-        # the same lock name. This closes the check-then-cascade race: a
-        # concurrent insert_selection linking one of these detections either runs
-        # fully BEFORE the referrer check (so it is seen and refused) or fully
-        # AFTER the cascade (so it fails on the deleted merge FK), never in
-        # between where the force_masters cascade would silently drop its sort.
-        # FAIL-CLOSED: required_advisory_lock RAISES AdvisoryLockError if it
-        # cannot take the lock within the lifecycle timeout, so a delete never
-        # proceeds unserialized (any locks already taken are released). The
-        # locks are taken in id order, so two overlapping bulk deletes cannot
-        # deadlock (A->B vs B->A).
+        # Same lock as insert_selection; closes the check-then-cascade race.
         with artifact_lifecycle_locks(
             row["artifact_detection_id"] for row in rows
         ):
-            # Count standalone and concat dependencies under the lifecycle
-            # lock so a concurrent selection cannot slip past this check.
             if not _cascade_sorts:
                 referenced = [
                     str(row["artifact_detection_id"])
@@ -920,11 +771,7 @@ class _ArtifactDetectionMixin:
                 for row in rows
             ]
 
-            # The cautious cascade (force_masters on modern DataJoint) walks
-            # detection -> ArtifactDetectionOutput source part -> merge master
-            # (and, when cascading, on to the dependent sorts), so the merge
-            # registration is removed WITH the detection -- atomically and
-            # safemode-gated.
+            # force_masters cascade removes the merge registration too.
             if safemode is None:
                 super().delete(*args, **kwargs)
             else:
@@ -942,11 +789,9 @@ class _ArtifactDetectionMixin:
     def cascade_delete(self, *args, safemode=None, **kwargs):
         """Delete these detections and their dependent sorts and concats.
 
-        The explicit force path for :meth:`delete`'s refuse-if-referenced
-        default: removes dependent ``ConcatenatedRecordingSelection``,
-        ``SortingSelection`` and ``MotionEstimateSelection`` rows and their
-        downstream outputs, including per-member curations, as well as the
-        artifact merge registration.
+        Removes dependent ``ConcatenatedRecordingSelection``,
+        ``SortingSelection`` and ``MotionEstimateSelection`` rows, their
+        downstream outputs, and the merge registration.
         """
         return self.delete(
             *args, safemode=safemode, _cascade_sorts=True, **kwargs
@@ -959,14 +804,8 @@ class RecordingArtifactDetection(
 ):
     """Artifact-removed valid times for a single ``Recording``.
 
-    The recording source is structural (the selection master carries a
-    required ``Recording`` FK), so ``make_fetch`` resolves it directly without
-    a source-kind branch. Writes exactly one ``IntervalList`` row keyed by the
-    recording's parent ``nwb_file_name``.
-
-    Detection always reads the original, uncorrected ``Recording``: motion
-    estimation and correction are downstream of the selected mask, so a
-    motion-corrected recording is never an artifact-detection input.
+    Writes one ``IntervalList`` row. Always reads the uncorrected
+    ``Recording``; motion correction is downstream of the mask.
     """
 
     definition = """
@@ -978,9 +817,7 @@ class RecordingArtifactDetection(
     class RemovedInterval(SpyglassMixinPart):
         """Generated artifact-removed ``IntervalList`` row (relational owner).
 
-        Named ``RemovedInterval`` (not ``ArtifactRemovedInterval``) so the
-        derived part-table + FK identifier stays under MySQL's 64-char limit
-        for the long ``shared_group_artifact_detection`` sibling master.
+        Short name keeps the sibling's identifiers under MySQL's 64 chars.
         """
 
         definition = """
@@ -991,8 +828,7 @@ class RecordingArtifactDetection(
     def make_fetch(self, key):
         """Read the params blob, resolved recording, and parent session.
 
-        Also resolves the recording's cached artifact, rebuilding a missing
-        file through ``Recording``'s own verified self-heal.
+        A missing cached artifact is rebuilt through ``Recording``.
 
         Returns
         -------
@@ -1003,9 +839,6 @@ class RecordingArtifactDetection(
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        # The three tables share only FK-derived attributes
-        # (artifact_detection_params_name, recording_id), so one join reads
-        # every selection-side input.
         (
             params_blob,
             artifact_job_kwargs,
@@ -1078,11 +911,9 @@ class SharedGroupArtifactDetection(
 ):
     """Artifact-removed valid times for a ``SharedArtifactGroup``.
 
-    ``make_fetch`` re-derives the group's member set and rejects a
-    drift from the ``member_set_hash`` frozen on the selection (the identity is
-    ``{params, group}`` only). ``make_compute`` unions the members' channels
-    (``si.aggregate_channels``) and scans ONCE; ``make_insert`` writes the same
-    ``valid_times`` into every distinct member session's ``IntervalList``.
+    ``make_fetch`` rejects a member set that differs from
+    ``member_set_hash``. ``make_compute`` scans the members' unioned channels
+    once; ``make_insert`` writes the result for every member session.
     """
 
     definition = """
@@ -1094,9 +925,7 @@ class SharedGroupArtifactDetection(
     class RemovedInterval(SpyglassMixinPart):
         """Generated artifact-removed ``IntervalList`` row (relational owner).
 
-        Named ``RemovedInterval`` (not ``ArtifactRemovedInterval``) so the
-        derived part-table + FK identifier stays under MySQL's 64-char limit
-        for this long ``shared_group_artifact_detection`` master.
+        Short name keeps identifiers under MySQL's 64-char limit.
         """
 
         definition = """
@@ -1107,8 +936,7 @@ class SharedGroupArtifactDetection(
     def make_fetch(self, key):
         """Read params, resolve members, and reject a member-set drift.
 
-        Also resolves each member's cached artifact, rebuilding a missing
-        file through ``Recording``'s own verified self-heal.
+        Missing cached artifacts are rebuilt through ``Recording``.
 
         Returns
         -------
@@ -1121,9 +949,7 @@ class SharedGroupArtifactDetection(
         Raises
         ------
         SharedArtifactGroupMemberDriftError
-            If the live member set differs from the ``member_set_hash`` frozen
-            on the selection (scanning it would silently change the result
-            under a fixed ``artifact_detection_id``).
+            If the live member set differs from ``member_set_hash``.
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             shared_group_member_set_hash,
@@ -1150,9 +976,7 @@ class SharedGroupArtifactDetection(
         )
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
 
-        # Members ordered by recording_id so the tuple shape is DeepHash-stable
-        # across the two make_fetch calls; the per-member nwb_file_name is
-        # bulk-fetched through the join.
+        # Ordered so both make_fetch calls DeepHash equal.
         members = (
             SharedArtifactGroup.Member * RecordingSelection
             & {"shared_artifact_group_name": group_name}
@@ -1169,11 +993,6 @@ class SharedGroupArtifactDetection(
                 "rejected the empty case."
             )
         member_recording_ids = tuple(str(m["recording_id"]) for m in members)
-        # Reject a member-set drift: the artifact_detection_id was minted for
-        # the set frozen on member_set_hash. Hashing the set just resolved
-        # (rather than re-querying) yields the same digest insert_selection
-        # minted (the helper sorts; every member has a RecordingSelection so
-        # the join is total).
         current_hash = shared_group_member_set_hash(member_recording_ids)
         if current_hash != frozen_hash:
             raise SharedArtifactGroupMemberDriftError(
@@ -1215,7 +1034,7 @@ class SharedGroupArtifactDetection(
         member_traces,
         manual_excluded_times=None,
     ) -> ArtifactComputed:
-        """Union the members' channels and scan the union ONCE; no DB access.
+        """Union the members' channels and scan once; no DB access.
 
         Returns
         -------
@@ -1236,10 +1055,7 @@ class SharedGroupArtifactDetection(
         per_member_recordings = [
             read_stored_traces(traces) for traces in member_traces
         ]
-        # aggregate_channels column-stacks along the channel axis. insert_group
-        # enforces session + n_samples + fs + dtype + timestamp equality, but a
-        # direct SharedGroupArtifactSelection insert can bypass that, so
-        # re-assert the invariants over the loaded recordings here.
+        # Re-check insert_group's invariants; a direct insert can bypass it.
         from spyglass.spikesorting.v2._artifacts.shared_group import (
             assert_shared_group_recordings_aggregatable,
         )
@@ -1260,8 +1076,6 @@ class SharedGroupArtifactDetection(
                 f"shared_artifact_group={shared_artifact_group_name}"
             ),
         )
-        # One IntervalList row per distinct member nwb_file_name (single-session
-        # today, so length 1, but keep the tuple shape for a future relaxation).
         per_member_nwb_files = tuple(dict.fromkeys(member_nwb_file_names))
         return ArtifactComputed(
             valid_times=valid_times,
@@ -1275,10 +1089,9 @@ def assert_artifact_detection_covers_recording(
 ) -> None:
     """Ensure an artifact detection may mask a given ``Recording``.
 
-    A single-recording detection may mask only that exact ``recording_id``; a
-    shared-group detection may mask any member recording of its group. This
-    keeps the masks of one recording in a session from being applied to
-    another. The detection must be populated.
+    A single-recording detection may mask only its ``recording_id``; a
+    shared-group detection may mask any member. The detection must be
+    populated.
 
     Parameters
     ----------
@@ -1301,10 +1114,7 @@ def assert_artifact_detection_covers_recording(
 
     artifact_detection_key = {"artifact_detection_id": artifact_detection_id}
     target_recording_id = str(recording_id)
-    # Route by which result table content-addresses the id (it lives
-    # in exactly one). Require the detection POPULATED: a detection must be
-    # materialized before it can be linked (it registers itself into
-    # ArtifactDetectionOutput at materialization).
+    # Only populated detections are registered in ArtifactDetectionOutput.
     if RecordingArtifactDetection & artifact_detection_key:
         artifact_recording_id = str(
             (RecordingArtifactSelection & artifact_detection_key).fetch1(
@@ -1347,10 +1157,8 @@ def assert_artifact_detection_covers_recording(
     )
 
 
-# Declare the ArtifactDetectionOutput merge with this module. Detection
-# make_insert writes its merge row inside the populate transaction, where
-# DataJoint cannot create a table. This import is last because
-# artifact_output imports the detection tables above.
+# Declare the merge table now; make_insert cannot create it mid-transaction.
+# Last because artifact_output imports the tables above.
 from spyglass.spikesorting.v2 import (  # noqa: E402, F401
     artifact_output as _artifact_output,
 )

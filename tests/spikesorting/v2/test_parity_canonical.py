@@ -1,12 +1,8 @@
 """Unit tests for ``_parity_canonical`` invariant-fingerprint helpers.
 
-The helpers normalize v1 and v2 spike-sorting param payloads into a
-common canonical form so the v1↔v2 parity test can assert "same
-SI-effective inputs" without tripping on schema-only divergences
-(legacy keys v1 carries, ``schema_version`` v2 stamps, nested-vs-flat
-shape differences). Tested in isolation -- no DataJoint, no Spyglass
-imports -- so a schema regression surfaces here before the slower
-integration suite runs.
+The helpers reduce v1 and v2 param payloads to a canonical form, ignoring
+schema-only differences (v1 legacy keys, ``schema_version``, nesting). No
+DataJoint or Spyglass imports.
 """
 
 from __future__ import annotations
@@ -127,7 +123,7 @@ def test_assert_equal_none_compared_strictly():
 
 
 # ---------------------------------------------------------------------------
-# canonical_sorter -- clusterless_thresholder
+# canonical_sorter: clusterless_thresholder
 # ---------------------------------------------------------------------------
 
 
@@ -166,11 +162,7 @@ def test_canonical_sorter_clusterless_v1_and_v2_match():
 def test_canonical_sorter_clusterless_noise_levels_none_equals_absent():
     """``noise_levels=None`` means "auto-estimate"; absent means the same.
 
-    The Pydantic-schema default for ``noise_levels`` is ``None``
-    (auto-estimate, so a MAD-multiplier threshold is not read as raw uV,
-    which inflates the smoke fixture's detection count ~1,400x); the v1 row
-    omits the field entirely. Canonical form treats them as
-    equivalent so the fingerprint check matches the two rows.
+    v2 defaults to ``None``; the v1 row omits the field.
     """
     with_none = {**SMOKE_CLUSTERLESS_PARAMS, "noise_levels": None}
     without = dict(SMOKE_CLUSTERLESS_PARAMS)
@@ -182,8 +174,7 @@ def test_canonical_sorter_clusterless_noise_levels_none_equals_absent():
 def test_canonical_sorter_clusterless_explicit_noise_levels_preserved():
     """A non-None ``noise_levels`` is a real config choice and stays.
 
-    Numpy arrays normalize to the ``_array_meta`` sidecar form so
-    the fingerprint round-trips through JSON.
+    Arrays normalize to the JSON-safe ``_array_meta`` form.
     """
     params = {
         **SMOKE_CLUSTERLESS_PARAMS,
@@ -198,7 +189,7 @@ def test_canonical_sorter_clusterless_explicit_noise_levels_preserved():
 
 
 # ---------------------------------------------------------------------------
-# canonical_sorter -- mountainsort4
+# canonical_sorter: mountainsort4
 # ---------------------------------------------------------------------------
 
 
@@ -216,9 +207,7 @@ MS4_DEFAULT_PARAMS = {
 
 
 def test_canonical_sorter_ms4_strips_outputs_if_present():
-    """Mirror clusterless: v1 ``SpikeSorterParameters`` may also carry
-    ``outputs`` for MS4 rows. Drop on both sides to keep the canonical
-    fingerprint stable."""
+    """v1 MS4 rows may carry ``outputs``; it is dropped on both sides."""
     v1_params = {**MS4_DEFAULT_PARAMS, "outputs": "sorting"}
     v2_params = dict(MS4_DEFAULT_PARAMS)
     assert canonical_sorter("mountainsort4", v1_params) == canonical_sorter(
@@ -227,11 +216,7 @@ def test_canonical_sorter_ms4_strips_outputs_if_present():
 
 
 def test_canonical_sorter_unknown_sorter_keeps_payload_normalized():
-    """Defensive: unknown sorters get pure normalization, no key drops.
-
-    Lets the helper degrade gracefully when a future sorter is added
-    to the parity matrix before the canonical rules are extended.
-    """
+    """Unknown sorters get pure normalization, no key drops."""
     payload = {"foo": np.float64(1.5), "bar": (1, 2)}
     out = canonical_sorter("kilosort4", payload)
     assert out == {"foo": 1.5, "bar": [1, 2]}
@@ -245,9 +230,8 @@ def test_canonical_sorter_unknown_sorter_keeps_payload_normalized():
 def test_canonical_preproc_v1_flat_matches_v2_nested_when_equivalent():
     """v1 ships ``"default"`` flat; v2 ships ``"default"`` nested.
 
-    Both encode the same SI-effective preprocessing (300-6000 Hz bandpass +
-    common reference median, 1s min segment length). The canonical
-    form must collapse them to identical dicts.
+    Both mean 300-6000 Hz bandpass, median reference and 1 s minimum
+    segment, so they canonicalize identically.
     """
     v1_flat = {
         "frequency_min": 300,
@@ -288,8 +272,7 @@ def test_canonical_preproc_freq_min_mismatch_diverges():
 
 
 def test_canonical_preproc_reference_operator_carries_through():
-    """v2-only ``operator="average"`` is NOT a silent equivalence -- it
-    must surface as a canonical divergence so the parity test fails."""
+    """v2-only ``operator="average"`` canonicalizes differently from v1."""
     v1_flat = {
         "frequency_min": 300,
         "frequency_max": 6000,
@@ -313,10 +296,8 @@ def test_canonical_preproc_reference_operator_carries_through():
 
 
 def test_canonical_artifact_strips_v1_job_kwargs():
-    """``chunk_duration``, ``n_jobs``, ``progress_bar`` are runtime
-    concurrency knobs that v1 stamped into the params blob (now
-    factored out to the v2 ``job_kwargs`` row). They are not
-    scientific params and must be stripped before comparison."""
+    """Runtime knobs v1 keeps in the params blob (``chunk_duration``,
+    ``n_jobs``, ``progress_bar``) are stripped."""
     v1_with_job_kwargs = {
         "zscore_thresh": None,
         "amplitude_thresh_uV": 500,
@@ -336,9 +317,7 @@ def test_canonical_artifact_strips_v1_job_kwargs():
         "join_window_ms": 1.0,
         "min_length_s": 1.0,
     }
-    # v1 lacks the v2-only ``join_window_ms`` and ``min_length_s``;
-    # canonical_artifact treats absent as the v2 default so the two
-    # sides agree on the "v1 default + v2 schema defaults" reading.
+    # v1 lacks join_window_ms and min_length_s; absent means the v2 default.
     assert canonical_artifact(v1_with_job_kwargs) == canonical_artifact(
         v2_clean
     )
@@ -403,8 +382,7 @@ def test_json_roundtrip_preserves_canonical_sorter_form():
         "random_chunk_kwargs": {},
     }
     canonical = canonical_sorter("clusterless_thresholder", v1_params)
-    # JSON serializes + deserializes; both sides of the parity check
-    # would write/read the metadata via JSON.
+    # Both sides of the parity check exchange metadata as JSON.
     roundtripped = json.loads(json.dumps(canonical, sort_keys=True))
     assert_canonical_dict_equal(canonical, roundtripped)
 

@@ -1,16 +1,6 @@
-"""DB inputs for a ``Sorting`` populate.
+"""DB inputs for a ``Sorting`` populate (``Sorting.make_fetch``).
 
-:func:`fetch_sorting_inputs` is the body of ``Sorting.make_fetch``. It resolves
-the sort's source and its anchor recording (the sort's own recording, or the
-first frozen member of a concatenation), the sorter and display-analyzer
-recipes, the execution backend, the per-unit electrode metadata, a
-motion-corrected recording's provenance, and the effective traces file
-(rebuilt here if missing). :func:`resolve_sort_anchor` is the one place that
-decides which recording a sort anchors to; :func:`resolve_anchor_nwb_file_name`
-is the body of the public ``Sorting.resolve_anchor_nwb_file_name``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -31,9 +21,8 @@ if TYPE_CHECKING:
 def fetch_sorter_analyzer_inputs(key) -> tuple[dict, dict]:
     """Resolve the sorter row and execution kwargs before an analyzer build.
 
-    Rebuild and recompute adapters use this same database boundary as populate
-    callers: the computation function receives complete inputs and never
-    consults tables or ambient configuration itself.
+    Shared by populate, rebuild and recompute, so the computation never
+    reads tables or ambient configuration.
     """
     from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
     from spyglass.spikesorting.v2.sorting import (
@@ -72,17 +61,8 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     source = SortingSelection.resolve_source(key)
 
     sel_row = (SortingSelection & key).fetch1()
-    # The artifact-detection pass lives on the zero-or-one
-    # ``ArtifactDetectionSource`` part, not a nullable
-    # ``artifact_detection_id`` FK on the master, so ``sel_row`` does not
-    # carry an ``artifact_detection_id`` key. Resolve it once here and stash it
-    # on ``sel_row`` so the
-    # downstream readers (obs_intervals derivation below,
-    # make_compute's artifact-mask gate, rebuild_analyzer_folder)
-    # see the artifact-detection id without re-querying. Without this the
-    # ``sel_row.get("artifact_detection_id")`` reads would always be None
-    # and every artifact-backed sort would silently skip artifact masking.
-    # (Concat member masks are already materialized, so this is None there.)
+    # Lives on a part table, but downstream readers expect it on sel_row;
+    # without it every artifact-backed sort would silently skip masking.
     sel_row["artifact_detection_id"] = (
         SortingSelection.resolve_artifact_detection(key)
     )
@@ -98,14 +78,7 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         source.kind == "concatenated_recording"
         and sel_row.get("artifact_detection_id") is not None
     ):
-        # Concat artifacts are masked before concatenation and carry
-        # their own member detection provenance and kept intervals.
-        # ``insert_selection`` rejects a concat source carrying an
-        # artifact_detection_id, but a direct insert of a
-        # ConcatenatedRecordingSource + ArtifactDetectionSource pair can
-        # bypass that. Re-assert here (the compute boundary) so the sort is
-        # never run UNMASKED while a stray ArtifactDetectionSource row claims
-        # an artifact pass -- raise rather than silently dropping the mask.
+        # Only a direct insert can reach this; concat members carry their masks.
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         raise SchemaBypassError(
@@ -120,28 +93,14 @@ def fetch_sorting_inputs(key) -> SortingFetched:
             "ArtifactDetectionSource row."
         )
 
-    # The anchor recording / nwb file / preprocessing recipe. Valid
-    # observation times are resolved separately from this metadata anchor.
     anchor = resolve_sort_anchor(source)
     recording_id = anchor.recording_id
     nwb_file_name = anchor.nwb_file_name
     preprocessing_params_name = anchor.preprocessing_params_name
     if source.kind == "recording":
-        # Pre-fetch the observation-interval window so
-        # ``write_sorting_units_nwb`` can write ``obs_intervals=`` on every
-        # ``add_unit`` call.
-        # Downstream firing-rate computations need the artifact-removed
-        # valid_times to know which segments of the recording the sort
-        # actually observed -- without it the units NWB looks like the unit
-        # was observed across the full session even where the artifact mask
-        # blanked the signal. When ``artifact_detection_id`` is unset,
-        # make_compute derives the retained recording intervals, preserving
-        # gaps between disjoint source intervals.
+        # Firing rates need the artifact-removed observation intervals.
+        # Without a detection, make_compute derives them from the recording.
         if sel_row.get("artifact_detection_id") is not None:
-            # Route through the strict ownership helper instead of
-            # fetching the IntervalList directly by reconstructed name, and
-            # raise clearly if this recording's intervals are absent rather
-            # than feeding a dict to the mask.
             from spyglass.spikesorting.v2._artifacts.readers import (
                 read_recording_artifact_valid_times,
             )
@@ -163,13 +122,8 @@ def fetch_sorting_inputs(key) -> SortingFetched:
             ConcatenatedRecording & source.key
         ).fetch1("obs_intervals", "statistics_spans")
 
-    # Resolve the DISPLAY analyzer recipe from the source preprocessing
-    # recipe (region) -- hippocampus -> the 0.5/0.5 row, cortex -> the
-    # 1.0/2.0 row, any other recipe -> the wider cortex fallback. The
-    # concat source resolves the SAME recipe from its single shared
-    # preprocessing recipe. Resolve the upstream params blob HERE;
-    # make_compute builds with it and make_insert persists the name so every
-    # later rebuild reads it back deterministically.
+    # Display recipe follows the preprocessing region; the name is persisted
+    # so rebuilds read it back.
     display_waveform_params_name, _ = waveform_params_for_preprocessing(
         preprocessing_params_name
     )
@@ -177,8 +131,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         display_waveform_params_name
     )
 
-    # Resolve + validate the sorter execution backend (local vs container)
-    # here. make_compute passes the resolved dict to the sorter dispatch.
     from spyglass.spikesorting.v2._params.sorter import (
         validate_execution_params,
     )
@@ -191,17 +143,14 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         fetch_unit_electrode_metadata(anchor.sort_group_id, nwb_file_name)
     )
 
-    # Resolved after the concat schema-bypass check above, which must fire
-    # before any source-row fetch.
+    # After the concat schema-bypass check, which must fire first.
     traces = SortingSelection.resolve_effective_source(key).traces
     motion_correction_provenance = source_n_samples = None
     if traces.kind == "motion_corrected_recording":
         motion_correction_provenance, source_n_samples = (
             fetch_motion_correction(traces.key, sorter_row, source)
         )
-    # Last, so a fetch that raises never rebuilds a file. A missing traces
-    # file is rebuilt here, so the second fetch finds it and resolves the
-    # same path.
+    # Last, so a fetch that raises never rebuilds a file.
     traces_abs_path = SortingSelection.ensure_effective_traces(traces)
 
     return SortingFetched(
@@ -228,9 +177,8 @@ def fetch_sorting_inputs(key) -> SortingFetched:
 def fetch_motion_correction(corrected_key, sorter_row, source):
     """DB inputs of a sort that reads a motion-corrected recording.
 
-    Re-checks that the sorter does not correct motion itself (the params
-    row or SpikeInterface's defaults may differ from when the selection
-    was inserted).
+    Re-checks that the sorter does not correct motion itself, since its
+    params or SpikeInterface defaults may have changed since selection.
 
     Parameters
     ----------
@@ -287,18 +235,10 @@ def fetch_motion_correction(corrected_key, sorter_row, source):
 
 
 def fetch_unit_electrode_metadata(sort_group_id, nwb_file_name):
-    """DB reads for the per-unit Electrode FK + brain region (fetch stage).
+    """DB reads for the per-unit Electrode FK and brain region.
 
-    Resolved once here so ``make_compute`` performs no DB writes while
-    building the ``Sorting.Unit`` rows (and matching NWB unit columns).
-    Upstream inputs are resolved in ``make_fetch``; the only DB reads
-    left in ``make_compute`` stage the units NWB (see
-    :mod:`._storage.nwb`). ``electrode_by_id`` comes from the unjoined
-    ``SortGroupElectrode`` so it stays complete (the row-construction key set
-    is unchanged); ``region_by_electrode`` is a best-effort
-    ``electrode_id -> brain region`` map (an electrode without a region
-    simply has no entry). Anchored to ``sort_group_id`` / ``nwb_file_name``
-    of the sort's anchor (its own recording, or the first concat member).
+    ``electrode_by_id`` comes from the unjoined ``SortGroupElectrode`` so it
+    is complete; ``region_by_electrode`` omits electrodes without a region.
     """
     from spyglass.spikesorting.v2._recording.unit_metadata import (
         sort_group_electrode_regions,
@@ -328,10 +268,9 @@ def fetch_unit_electrode_metadata(sort_group_id, nwb_file_name):
 class SortAnchor(NamedTuple):
     """The recording a sort anchors its session-level metadata to.
 
-    A single-recording sort anchors to its own recording; a concat sort
-    anchors to the FIRST frozen member. The anchor is the analysis-NWB parent
-    and the per-unit ``Electrode`` FK source; ``preprocessing_params_name`` is
-    the source's preprocessing recipe (a concat's single shared one).
+    A single-recording sort anchors to its own recording; a concat sort to
+    its first frozen member. The anchor is the analysis-NWB parent and the
+    per-unit ``Electrode`` FK source.
     """
 
     recording_id: uuid.UUID
@@ -343,14 +282,8 @@ class SortAnchor(NamedTuple):
 def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
     """Resolve a sort source to its anchor recording.
 
-    A single-recording sort anchors to its own ``RecordingSelection`` row. A
-    concat sort anchors to the FIRST frozen member (by ``member_index``) of
-    ``ConcatenatedRecordingSelection.MemberSnapshot`` -- never the live
-    ``SessionGroup.Member`` set, so a later group edit cannot re-point an
-    existing concat sort's anchor. The snapshot froze the member's resolved
-    ``recording_id`` when the concat id was minted, so no
-    ``RecordingSelection`` join is needed; the full multi-session provenance
-    stays queryable through ``MemberSnapshot``.
+    A concat sort reads the frozen ``MemberSnapshot``, never the live
+    ``SessionGroup.Member`` set, so a group edit cannot re-point it.
 
     Parameters
     ----------
@@ -410,8 +343,7 @@ def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
 def resolve_anchor_nwb_file_name(key) -> str:
     """Return the analysis-NWB parent ``nwb_file_name`` for a sort.
 
-    The ``nwb_file_name`` of :func:`resolve_sort_anchor` -- the deterministic
-    parent the per-unit Electrode FK and the curated/analyzer NWBs all use.
+    The ``nwb_file_name`` of :func:`resolve_sort_anchor`.
 
     Parameters
     ----------

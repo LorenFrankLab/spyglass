@@ -203,23 +203,15 @@ def _recording_candidates(selection_rows):
 def describe_epochs(nwb_file_name: str, sort_group_id: int | None = None):
     """List exact epoch/interval choices and existing recording-cache readiness.
 
-    TaskEpoch-linked intervals are tagged ``kind='task_epoch'`` with their
-    original task key and label. Other IntervalList rows remain visible as
-    ``kind='interval_list'`` so files without task metadata can still be used.
-    ``interval_key`` can be copied directly into an explicit recording request.
+    - ``kind``: ``'task_epoch'`` for TaskEpoch-linked intervals, else
+      ``'interval_list'``.
+    - ``interval_key``: usable directly in a recording request.
+    - Bounds and times are in acquisition seconds; ``duration_s`` excludes
+      gaps. Empty, missing, or malformed lists carry status/error fields.
+    - ``recording_keys``: selected v2 recordings for the interval;
+      ``ready_recording_keys`` also have a computed row and local file.
 
-    Bounds and start/stop times use original acquisition seconds, not a
-    recording-relative or concatenated timeline. ``duration_s`` sums the
-    disjoint bounds and excludes gaps. Empty, missing, and malformed interval
-    lists carry explicit status/error fields.
-
-    ``recording_keys`` lists all selected v2 recording candidates for the
-    interval (optionally restricted to ``sort_group_id``); nested ``recordings``
-    includes preprocessing/team identifiers and computed/cache status.
-    ``ready_recording_keys`` means the computed row and registered local file
-    are present. Matching preflight separately validates content, coverage,
-    geometry, and eligibility. This helper never seeds defaults, inserts rows,
-    downloads files, rebuilds caches, or extracts data.
+    Read-only: never inserts, downloads, or rebuilds.
     """
     selected_sort_group = (
         lossless_int(sort_group_id, "sort_group_id")

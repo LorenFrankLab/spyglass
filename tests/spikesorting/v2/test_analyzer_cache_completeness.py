@@ -86,10 +86,8 @@ def _assert_recovered_values(analyzer, source, expected):
         for key, value in arrays.items():
             np.testing.assert_array_equal(actual[key], value)
 
-    # Independent waveform and template oracle: slice the effective source
-    # traces at the known spike frames, without using SI's waveform/template
-    # readers to derive the expected values. Metric traces already include
-    # whitening; display traces include the non-uniform electrode gains.
+    # Oracle independent of SI's readers: slice source traces at the known
+    # spike frames. Metric traces are whitened; display traces carry gains.
     traces = source.recording.get_traces(return_in_uV=source.return_in_uV)
     for unit_index, (unit_id, frames) in enumerate(_SPIKE_FRAMES.items()):
         channels = (
@@ -238,7 +236,7 @@ def test_incomplete_cache_is_rejected_or_rebuilt(
     repaired = _load_analyzer_folder_or_rebuild(**options, rebuild=True)
     assert rebuilds == [True]
     _assert_recovered_values(repaired, original, expected)
-    # A consumer previously failed here because templates were absent.
+    # template_similarity needs templates restored.
     ensure_extensions(repaired, ["template_similarity"], peak_sign="neg")
     assert repaired.get_extension("template_similarity") is not None
     repaired_digest = _folder_digest(folder)

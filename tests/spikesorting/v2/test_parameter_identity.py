@@ -1,12 +1,7 @@
 """DB-free tests for parameter-content fingerprints (``_parameter_identity``).
 
-The fingerprint identifies a parameter-Lookup row by its *content* (table,
-sorter context, schema version, validated ``params`` blob, and
-``job_kwargs``) with the row NAME excluded -- so two rows with identical
-content under different names share a fingerprint. That is the signal the
-duplicate-content guard and ``describe_parameter_rows`` rely on.
-
-These tests are pure-stdlib and must not need a database.
+The fingerprint covers table, sorter, schema version, ``params`` and
+``job_kwargs``, but not the row name.
 """
 
 from __future__ import annotations
@@ -59,8 +54,7 @@ def test_fingerprint_changes_with_params():
 def test_fingerprint_includes_sorter_context():
     """Same params under different sorters -> different fingerprint.
 
-    SorterParameters duplicate detection is scoped per sorter, so the sorter
-    must be part of the content identity.
+    Duplicate detection is scoped per sorter.
     """
     params = {"detect_threshold": 3.0}
     fp_ms4 = parameter_fingerprint(
@@ -152,13 +146,8 @@ def test_short_fingerprint_is_a_prefix():
 def test_shipped_recipe_fingerprints_are_locked():
     """The June 2026 production recipes have frozen content fingerprints.
 
-    Pinning the fingerprint of each dated recipe (computed DB-free from the
-    independent ``_recipe_constants`` literals) makes an in-place edit to a
-    shipped recipe fail loudly: a recipe change must ship under a NEW dated
-    name so a name-derived selection id stays reproducible, never mutate an
-    existing one. The parity tests separately tie these constants to the
-    shipped ``_DEFAULT_CONTENTS`` blobs, so the pair locks both the canonical
-    recipe and the rows that ship it.
+    A recipe change must ship under a new dated name so name-derived
+    selection ids stay reproducible.
     """
     from tests.spikesorting.v2 import _recipe_constants as rc
 
@@ -206,14 +195,6 @@ def test_shipped_recipe_fingerprints_are_locked():
             "mountainsort4",
         ),
     ]
-    # These frozen digests were regenerated when the canonical form gained
-    # numeric normalization (int-valued floats collapse to ints so 9 and 9.0
-    # fingerprint alike) + ``allow_nan=False``. The lock still serves its
-    # purpose: an in-place edit to a shipped recipe changes the recipe content
-    # and so the digest, failing here. The preprocessing digests were
-    # regenerated once more when schema_version 4 removed the inert
-    # recording-stage ``whiten`` field (no recording cache ever applied it, so
-    # the recipes' effective science is unchanged and the dated names stay).
     expected = {
         rc.FRANKLAB_HIPPOCAMPUS_2026_06: "a23acc3c06a9",
         rc.FRANKLAB_CORTEX_2026_06: "2872d9dcb497",
@@ -238,12 +219,7 @@ def test_shipped_recipe_fingerprints_are_locked():
 def test_int_and_float_param_values_share_a_fingerprint():
     """``9`` and ``9.0`` must produce the same content fingerprint.
 
-    The ``extra="allow"`` sorter schemas (Kilosort4, SpykingCircus2,
-    Tridesclous2, generic) pass user keys through uncoerced, so a blob may
-    carry ``60000`` under one name and ``60000.0`` under another for identical
-    science. A plain ``json.dumps`` renders those differently and forks the
-    fingerprint, defeating the duplicate-content guard. The canonical form
-    normalizes int-valued floats so the guard still fires.
+    ``extra="allow"`` sorter schemas pass user keys through uncoerced.
     """
     common = dict(params_schema_version=1, job_kwargs=None, sorter="kilosort4")
     fp_int = parameter_fingerprint(
@@ -272,8 +248,7 @@ def test_numeric_normalization_is_recursive():
 
 
 def test_bool_is_not_collapsed_to_int_in_fingerprint():
-    """``True`` and ``1`` stay distinct -- different JSON types, different
-    intent (a boolean toggle is not the integer 1)."""
+    """``True`` and ``1`` fingerprint differently."""
     common = dict(params_schema_version=1, job_kwargs=None, sorter="kilosort4")
     fp_true = parameter_fingerprint(
         "SorterParameters", params={"flag": True}, **common
@@ -301,9 +276,7 @@ def test_nan_or_inf_param_is_rejected_not_silently_encoded():
 
 
 # ---------------------------------------------------------------------------
-# QualityMetricParameters duplicate-content guard (pure -- it spreads content
-# across several columns instead of one ``params`` blob, so it has its own
-# guard rather than reusing ``reject_duplicate_parameter_content``).
+# QualityMetricParameters duplicate-content guard (content spans columns).
 # ---------------------------------------------------------------------------
 
 
@@ -452,9 +425,7 @@ def test_reject_stale_quality_metric_defaults_ignores_other_names():
 
 
 # ---------------------------------------------------------------------------
-# Duplicate-content guard + describe_parameter_rows (DB-backed). Each imports
-# the v2 schema modules lazily and takes ``dj_conn`` so the schema's
-# ``dj.schema(...)`` import has a live connection.
+# Duplicate-content guard + describe_parameter_rows (DB-backed).
 # ---------------------------------------------------------------------------
 
 
@@ -470,8 +441,7 @@ def test_quality_metric_insert_rejects_duplicate_content(dj_conn):
         QualityMetricParameters,
     )
 
-    # insert_default ships franklab_default and neuropixels_default with
-    # identical content -- it must NOT raise (opts out of the guard).
+    # franklab_default and neuropixels_default share content on purpose.
     QualityMetricParameters.insert_default()
     shipped = (
         QualityMetricParameters & {"metric_params_name": "minimal"}
@@ -503,15 +473,8 @@ def test_qmp_duplicate_content_detected_after_double_column(dj_conn):
     single precision still fingerprints identically once fetched back, so a
     second name for the same content is caught.
 
-    The QMP fingerprint hashes the stored value directly (not a tolerant
-    comparison). A single-precision column rounds any value that needs more
-    than about 7 significant decimal digits, so a value like ``1 / 3``
-    (``0.3333333333333333``) is stored as the nearest float32 and read back
-    as ``0.3333333432674408`` -- no longer bit-equal to a freshly validated
-    exact ``1 / 3``, so the fingerprint of the stored row no longer matches
-    an identical value re-entered under a new name and this guard misses the
-    duplicate. A ``double`` column stores ``1 / 3`` exactly, so the two
-    fingerprints match and the duplicate is caught.
+    The fingerprint hashes the stored value exactly; a float32 column
+    would read ``1 / 3`` back as ``0.3333333432674408`` and miss the match.
     """
     from spyglass.spikesorting.v2.exceptions import (
         DuplicateParameterContentError,
@@ -563,9 +526,8 @@ def test_insert_default_is_idempotent(dj_conn):
 
 @pytest.mark.database
 def test_insert_default_raises_on_stale_same_name_row(dj_conn):
-    """A stored ``franklab_default`` whose content has drifted from the
-    shipped default blocks ``insert_default`` instead of being silently kept
-    under ``skip_duplicates=True``."""
+    """A stored ``franklab_default`` whose content differs from the shipped
+    default makes ``insert_default`` raise."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2.exceptions import (
@@ -725,10 +687,8 @@ def test_sorter_duplicate_rejected_scoped_by_sorter(dj_conn):
 
 @pytest.mark.database
 def test_params_lookup_rejects_replace(dj_conn):
-    """``insert(..., replace=True)`` and ``insert1(..., replace=True)`` raise
-    on every ``ImmutableParamsLookup`` subclass, not just QMP -- the mixin
-    covers every params Lookup that forwards kwargs through ``super().insert``.
-    The stored row is unchanged afterwards.
+    """``insert``/``insert1`` with ``replace=True`` raise on every
+    ``ImmutableParamsLookup`` subclass; the stored row is unchanged.
     """
     import datajoint as dj
 
@@ -763,10 +723,8 @@ def test_params_lookup_rejects_replace(dj_conn):
 def test_params_lookup_rejects_positional_replace(dj_conn):
     """A positional ``replace`` is rejected like ``replace=True``.
 
-    ``MotionCorrectionParameters`` has no ``insert`` override, so the
-    second positional argument of its ``insert`` is DataJoint's ``replace``.
-    Passing it positionally must not overwrite the stored row. DataJoint's
-    later positional flags keep their meaning (``skip_duplicates`` third).
+    Uses ``MotionCorrectionParameters``, which has no ``insert`` override.
+    Later positional flags keep their meaning.
     """
     import datajoint as dj
 
@@ -862,10 +820,7 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
 def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     """The report lists every parameter Lookup ``initialize_v2_defaults`` seeds.
 
-    Pins the report against operational drift: it must cover all TEN seeded
-    parameter tables, not just the three preset-referenced ones. The
-    downstream / cross-session / motion tables carry blank preset-fold columns
-    but still appear so a user can audit every row they can populate.
+    All ten seeded tables appear, including those no preset references.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2._orchestration.reporting import (
@@ -889,11 +844,8 @@ def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
 
 
 def test_describe_parameter_rows_marks_dynamic_default_shipped(dj_conn):
-    """Dynamic-default tables resolve is_shipped_default from their code-built
-    defaults (QualityMetricParameters._default_rows /
-    AutoCurationRules._default_payloads), not only static _DEFAULT_CONTENTS. So a
-    shipped 'franklab' row reports is_shipped_default=True and does NOT get the
-    false 'non-catalog row using the franklab name' warning.
+    """Tables with code-built defaults report shipped 'franklab' rows as
+    ``is_shipped_default=True``, with no 'non-catalog row' warning.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2._orchestration.reporting import (
@@ -910,8 +862,6 @@ def test_describe_parameter_rows_marks_dynamic_default_shipped(dj_conn):
     assert bool(row.iloc[0]["is_shipped_default"]) is True
     assert "non-catalog" not in (row.iloc[0]["name_warnings"] or "")
 
-    # MatcherParameters seeds its default inline in insert_default(); the
-    # extracted _default_rows() lets _shipped_names mark it shipped too.
     matcher = df[
         (df["table"] == "MatcherParameters")
         & (df["parameter_name"] == "unitmatch_default")
@@ -1027,10 +977,7 @@ def test_rule_missing_policy_persists_and_changes_identity(dj_conn):
 def test_within_batch_duplicate_content_rejected(dj_conn):
     """Two same-content/different-name rows in ONE insert() call collide.
 
-    Distinct from the incoming-vs-stored path: the guard also tracks the
-    fingerprints accumulated WITHIN the batch, so a single bulk insert of two
-    identical-content rows under different names is rejected even when neither
-    row exists in the table yet.
+    Rejected even when neither row is stored yet.
     """
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
@@ -1040,8 +987,7 @@ def test_within_batch_duplicate_content_rejected(dj_conn):
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
-    # Content that matches no shipped row (freq_min=777), so the only possible
-    # collision is between the two batch rows themselves.
+    # freq_min=777 matches no shipped row.
     blob = PreprocessingParamsSchema.model_validate(
         {"bandpass_filter": {"freq_min": 777.0, "freq_max": 6000.0}}
     ).model_dump()
@@ -1068,11 +1014,7 @@ def test_within_batch_duplicate_content_rejected(dj_conn):
 def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
     """A duplicate that OMITS params_schema_version is still caught.
 
-    Preproc / Artifact dict inserts may omit the ``params_schema_version``
-    column (the DataJoint column default fills it). The guard then resolves the
-    version from the validated blob's inner ``schema_version``, so the
-    fingerprint still matches the stored row and the duplicate is rejected --
-    exercising the column-omitted fallback that a KeyError would otherwise hit.
+    The guard reads the version from the blob's ``schema_version``.
     """
     from spyglass.spikesorting.v2.exceptions import (
         DuplicateParameterContentError,
@@ -1107,14 +1049,8 @@ _VALIDATED_LOOKUP_SCHEMAS = [
 
 @pytest.mark.parametrize("module_name, schema_name", _VALIDATED_LOOKUP_SCHEMAS)
 def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
-    """``validate_lookup_rows`` backfills the outer ``params_schema_version``
-    from the validated blob for EVERY Lookup that routes through it (Preprocessing
-    / Artifact / Sorter / Waveform / Matcher), not just the DataJoint
-    column default. A row that omits the column and carries an explicit inner
-    ``schema_version`` lands tagged with the blob's version, never a default that
-    silently disagrees. A validator that does not backfill leaves the
-    omitted column absent from the returned row, and this test fails. Each
-    schema accepts only its current version, so that is the blob's version.
+    """``validate_lookup_rows`` fills an omitted ``params_schema_version``
+    from the blob for every Lookup that uses it.
     """
     import importlib
 
@@ -1140,9 +1076,8 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
 
 
 def test_outer_version_drift_still_trips_after_backfill():
-    """The backfill fills only an ABSENT column; an EXPLICIT outer
-    ``params_schema_version`` that disagrees with the blob still raises -- the
-    drift check is not papered over."""
+    """An explicit ``params_schema_version`` that disagrees with the blob
+    still raises."""
     from spyglass.spikesorting.v2._core.lookup_validation import (
         validate_lookup_rows,
     )

@@ -1,10 +1,6 @@
-"""Integration tests for the FigPack curation tables (require the curation extra).
+"""Integration tests for the FigPack curation tables.
 
-Exercises ``FigPackCuration`` end to end against a real populated v2
-``SortingAnalyzer``: building the curation view (offline bundle), idempotency,
-the edited-curation round trip through ``annotations.json``, and the hosted-upload
-credential gate. Skipped unless the ``spikesorting-v2-curation`` extra (``figpack``
-+ ``figpack_spike_sorting``) is installed.
+Skipped unless the ``spikesorting-v2-curation`` extra is installed.
 """
 
 from __future__ import annotations
@@ -242,12 +238,9 @@ def test_changed_second_fetch_leaves_bundles_untouched(
 ):
     """A view populate DataJoint refuses after compute leaves no bundle.
 
-    The offline bundle is saved in ``make_compute``, outside the insert
-    transaction. When the in-transaction ``make_fetch`` differs, DataJoint
-    raises before ``make_insert`` runs: the staged bundle must be removed and
-    whatever already sits at the durable path (here a stand-in for a
-    concurrent committed bundle) must be left alone. A later populate
-    replaces it.
+    The bundle is saved in ``make_compute``, outside the transaction. If
+    DataJoint refuses before ``make_insert``, the staged bundle is removed and
+    the durable path (a concurrent committed bundle) is left alone.
     """
     from datajoint.errors import DataJointError
 

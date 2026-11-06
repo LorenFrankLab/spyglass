@@ -1,14 +1,10 @@
-"""Artifact-mask input validation + artifact valid-times output structure.
+"""Artifact-mask input validation and artifact valid-times structure.
 
-Locks two contracts a silent error would corrupt:
-* ``apply_artifact_mask`` REJECTS malformed valid_times (empty,
-  wrong-shape, end<start, unsorted/overlapping) instead of under-masking;
-* ``detect_artifacts`` returns valid_times that are
-  start-sorted, non-overlapping, within the recording bounds, >= min_length_s,
-  exclude the detected artifact, and never span an inter-chunk wall-clock gap
-  (the disjoint case also proves a chunk-boundary artifact IS masked -- an
-  artifact ending on a chunk's final sample cannot collapse to a single
-  unmasked sample because removal_window_ms>0 widens every artifact).
+- ``apply_artifact_mask`` rejects malformed valid_times instead of
+  under-masking.
+- ``detect_artifacts`` returns sorted, disjoint, in-bounds valid_times of at
+  least ``min_length_s`` that exclude artifacts and never span a wall-clock
+  gap.
 """
 
 from __future__ import annotations
@@ -112,20 +108,16 @@ def test_apply_artifact_mask_rejects_unsorted_or_overlapping(valid_times):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_apply_artifact_mask_zeros_complement_frames():
-    """The mask zeros exactly the complement of ``valid_times`` (the artifact
-    frames) and leaves the kept frames untouched. Pins the masking semantics so
-    the interval-native silence_periods path zeros the same samples a
-    per-frame remove_artifacts pass would."""
+    """The mask zeros exactly the complement of ``valid_times`` and leaves
+    the kept frames untouched."""
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
 
     fs = 30000.0
     rec = _rec(np.ones((10, 2), dtype="float32"), fs=fs)
-    # Keep [0, 3/fs) and [6/fs, end] -> the artifact complement is frames 3,4,5.
-    # The second interval's end must stay within the recording envelope
-    # (last sample at 9/fs, +/- one sample-period of tolerance = 10/fs); an
-    # out-of-envelope end is rejected by apply_artifact_mask's boundary guard.
+    # Keep [0, 3/fs) and [6/fs, end] -> artifact frames 3,4,5. The end must
+    # stay within one sample of the last sample (9/fs) or the guard rejects it.
     valid_times = np.array([[0.0, 3.0 / fs], [6.0 / fs, 10.0 / fs]])
     out = apply_artifact_mask(rec, valid_times).get_traces()
     assert np.all(out[3:6] == 0.0), "artifact (complement) frames not zeroed"
@@ -194,9 +186,7 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
     times = np.concatenate([t_a, t_b])
     n = times.size
     traces = np.zeros((n, 4), dtype="float32")
-    # Artifact on the LAST 10 frames of chunk A (ends exactly on the chunk's
-    # final sample -- the chunk-boundary edge). With removal_window_ms>0 it is
-    # widened to the left, so it stays multi-sample and is masked correctly.
+    # Artifact on chunk A's last 10 frames; removal_window_ms widens it left.
     traces[per_chunk - 10 : per_chunk, :] = 5000.0
     rec = _rec(traces, fs=fs, times=times)
     params = _artifact_params()
@@ -226,10 +216,8 @@ def test_detect_artifacts_disjoint_masks_chunk_boundary_artifact():
 def _removed_intervals(valid_times, t0, t_end):
     """Complement of ``valid_times`` within ``[t0, t_end]``.
 
-    The removed (artifact) intervals, as an ``(n, 2)`` array -- exactly what
-    ``apply_artifact_mask`` excises before a sort. ``valid_times`` is
-    assumed start-sorted and disjoint (the detector's contract, checked
-    separately by ``_assert_valid_times_well_formed``).
+    Returns the removed intervals as an ``(n, 2)`` array. ``valid_times``
+    must be start-sorted and disjoint.
     """
     removed = []
     cursor = t0
@@ -247,12 +235,7 @@ def test_detect_artifacts_recovers_planted_interval_times():
     """Two artifacts planted at KNOWN times and a KNOWN amplitude are recovered
     as two removed intervals, each tightly bracketing its planted epoch.
 
-    The interval-recovery counterpart to the frame-level gain tests
-    (``test_gain_conversion_*`` in this module): it pins detected-vs-planted at
-    the *seconds*
-    level, so a regression in the removal-window expansion, the join logic, or
-    the valid_times complement that mislocates, splits, merges, or over-/under-
-    removes an artifact is caught -- not just "populate did not crash".
+    Checks removal-window expansion, joining and the complement in seconds.
     """
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
@@ -260,9 +243,8 @@ def test_detect_artifacts_recovers_planted_interval_times():
     n, n_ch = 150000, 4  # 5.0 s
     removal_window_ms = 1.0
     traces = np.zeros((n, n_ch), dtype="float32")
-    # Two 10-frame artifacts ~2 s apart (>> the join window) at a known
-    # amplitude (5000 uV >> the 1000 uV threshold, so every channel is
-    # flagged). Inclusive frame spans [a0, a1].
+    # Two 10-frame artifacts ~2 s apart (>> join window), 5000 uV on every
+    # channel. Inclusive frame spans [a0, a1].
     planted_frames = [(45000, 45009), (105000, 105009)]  # ~1.5 s and ~3.5 s
     for a0, a1 in planted_frames:
         traces[a0 : a1 + 1, :] = 5000.0
@@ -282,23 +264,18 @@ def test_detect_artifacts_recovers_planted_interval_times():
         "artifacts must not be merged into one nor split into more"
     )
 
-    # Each removed interval brackets its planted epoch, widened by ~half the
-    # removal window on each side (the documented expansion). Expressed in
-    # physical units (seconds) from the planted frames and the param -- NOT by
-    # re-running the detector's frame math -- so the assertion is independent
-    # of the implementation under test.
+    # Expected bounds from the planted frames and the param, not the
+    # detector's frame math: half a removal window on each side.
     half_window_s = removal_window_ms * 1e-3 / 2.0
     sample = 1.0 / fs
     tol = 3 * sample  # grid snapping + the half-open [start, end) +1 sample
     for (a0, a1), (rem_start, rem_end) in zip(planted_frames, removed):
         planted_start, planted_end = times[a0], times[a1]
-        # The entire planted artifact is inside the removed interval.
         assert rem_start <= planted_start and rem_end >= planted_end, (
             f"planted [{planted_start:.5f}, {planted_end:.5f}] not contained "
             f"in removed [{rem_start:.5f}, {rem_end:.5f}]"
         )
-        # ...and the removal is TIGHT (half a window each side), not a giant
-        # over-removed chunk -- localization is correct.
+        # Tight: not over-removed.
         assert rem_start == pytest.approx(
             planted_start - half_window_s, abs=tol
         )
@@ -311,15 +288,12 @@ def test_detect_artifacts_recovers_planted_interval_times():
 
 
 def test_detect_artifacts_warns_when_min_length_drops_all_valid_time(caplog):
-    """A short recording whose only valid slivers fall below ``min_length_s``
-    returns empty ``valid_times`` -- but must WARN at detection time (mirroring
-    the zero-artifacts warning), so the operator sees the cause here rather
-    than three stages later as an ``EmptyArtifactValidTimesError`` at sort
-    time."""
+    """When ``min_length_s`` drops every valid sliver, detection returns
+    empty ``valid_times`` and warns, rather than failing later at sort time."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     fs = 30000.0
-    n, n_ch = 15000, 2  # 0.5 s -- every kept sliver is < min_length_s=1.0
+    n, n_ch = 15000, 2  # 0.5 s: every kept sliver is < min_length_s=1.0
     traces = np.zeros((n, n_ch), dtype="float32")
     traces[n // 2, :] = 5000.0  # one artifact frame, both channels
     rec = _rec(traces, fs=fs)
@@ -366,9 +340,8 @@ def test_detect_artifacts_keeps_short_chunk_no_artifact_touched():
 
 
 def test_detect_artifacts_raises_on_single_channel_zscore_only():
-    """The z-score is computed ACROSS channels within a frame; on a 1-channel
-    group it is identically zero, so a z-score-only config would silently
-    detect nothing. Raise instead of returning a misleadingly-clean window."""
+    """A z-score-only config raises on one channel, where the across-channel
+    z-score is identically zero."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         InsufficientZScoreChannelsError,
@@ -381,11 +354,8 @@ def test_detect_artifacts_raises_on_single_channel_zscore_only():
 
 
 def test_detect_artifacts_raises_on_two_channel_zscore_only():
-    """The across-channel z-score is also degenerate on TWO channels: for any
-    two distinct values it is identically +/-1 regardless of amplitude, so a
-    z-score-only config on a stereotrode flags every frame (threshold < 1) or
-    none (threshold > 1) -- never amplitude-sensitively. Raise, same as the
-    single-channel case."""
+    """A z-score-only config raises on two channels, where the
+    across-channel z-score is always +/-1."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         InsufficientZScoreChannelsError,
@@ -412,10 +382,8 @@ def test_detect_artifacts_warns_zscore_inert_on_single_channel(caplog):
 
 
 def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
-    """On a 2-channel (stereotrode) group, ``proportion_above_threshold=0.7``
-    rounds up via ``ceil`` to requiring BOTH channels -- silently stricter
-    than the nominal 70%. Warn so the operator sees the realized
-    requirement."""
+    """On two channels, ``proportion_above_threshold=0.7`` rounds up to both
+    channels; a warning states the realized requirement."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _rec(np.zeros((3000, 2), dtype="float32"))
@@ -431,9 +399,7 @@ def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
 
 
 def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
-    """On a tetrode (4 ch), ``0.7`` -> ``ceil(2.8)=3`` of 4 -- a genuine
-    majority, not silently promoted to all-channels -- so no 'rounds up'
-    warning fires."""
+    """On a tetrode, ``0.7`` -> 3 of 4 channels, so no 'rounds up' warning."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec = _rec(np.zeros((3000, 4), dtype="float32"))
@@ -446,17 +412,14 @@ def test_detect_artifacts_no_proportion_warning_on_tetrode(caplog):
 
 
 def test_detect_artifacts_raises_when_most_frames_flagged():
-    """A misconfigured (too-loose) detector that flags more than half the
-    recording raises ``ArtifactFractionExceededError`` BEFORE materializing a
-    per-frame index for every flagged sample (and the slow per-frame join) --
-    instead of allocating an O(n_samples) array on a pathological config."""
+    """A detector that flags more than half the recording raises
+    ``ArtifactFractionExceededError`` before building a per-frame index."""
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
     from spyglass.spikesorting.v2.exceptions import (
         ArtifactFractionExceededError,
     )
 
-    # Every sample sits far above a 1 uV amplitude threshold on both channels,
-    # so the detector flags all 2000 frames (> 50% of the recording).
+    # Every frame exceeds 1 uV on both channels.
     rec = _rec(np.full((2000, 2), 1000.0, dtype="float32"))
     params = _artifact_params(
         amplitude_threshold_uv=1.0, proportion_above_threshold=1.0
@@ -467,9 +430,8 @@ def test_detect_artifacts_raises_when_most_frames_flagged():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
-    """A ``valid_times`` keeping only a sliver makes the artifact complement
-    span most of the recording; the mask raises ``ArtifactFractionExceededError``
-    BEFORE expanding the complement to a per-frame index array."""
+    """A ``valid_times`` keeping only a sliver raises
+    ``ArtifactFractionExceededError`` before expanding the complement."""
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
@@ -478,8 +440,7 @@ def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
     )
 
     rec = _rec(np.zeros((3000, 2), dtype="float32"))  # 0.1 s @ 30 kHz
-    # Keep only the first ~1 ms; the complement (~99%) would expand to ~2970
-    # artifact frames (> 50% of 3000).
+    # Keep only the first ~1 ms (~99% complement).
     valid_times = np.array([[0.0, 0.001]])
     with pytest.raises(ArtifactFractionExceededError, match="%"):
         apply_artifact_mask(rec, valid_times)
@@ -487,42 +448,18 @@ def test_apply_artifact_mask_raises_when_valid_times_keep_almost_nothing():
 
 # --------------------------------------------------------------------------- #
 # Chunked artifact detection + the artifact-mask complement walker.
-#
-# Covers the chunked ``scan_artifact_frames`` (frame-identical to a
-# whole-recording in-memory reference, job_kwargs propagation, default chunking,
-# multiprocess worker path, bounded peak memory) and ``apply_artifact_mask``
-# input strictness (empty / unsorted valid_times raise; full coverage
-# short-circuits).
 # --------------------------------------------------------------------------- #
 
 
 def _in_memory_artifact_frames_reference(recording, validated):
     """Whole-recording, in-memory artifact-frame scan (test-only oracle).
 
-    Applies the same per-frame detection math as the production scan, but to
-    one full-recording ``get_traces`` load instead of a chunked
-    ``ChunkRecordingExecutor`` pass. It exists ONLY in the test suite as the
-    equivalence oracle: the chunked scan must produce frame-identical output
-    to this reference on the same recording. Production has no in-memory
-    path to fall back to.
-
-    Returns the ascending ndarray of flagged frame indices (the
-    ``frames_above`` array the interval-building code consumes).
+    Same per-frame math as the chunked production scan over one full
+    ``get_traces`` load. Returns ascending flagged frame indices.
     """
     traces = recording.get_traces(return_in_uV=False)
-    # Matches production's own return_in_uV=True affine transform
-    # unconditionally: gain AND offset, both cast to float32 before the
-    # multiply-add (spikeinterface/core/baserecording.py:375-380 in
-    # spyglass_spikesorting_v2's installed SI 0.104.3; see also
-    # ``_artifact_compute.py``'s ``get_traces(..., return_in_uV=True)`` call,
-    # which is what this oracle stands in for). This does NOT branch on
-    # ``recording.has_scaleable_traces()``: that branch exists in
-    # SpikeInterface only as a fallback for a float recording that never had
-    # gain/offset properties set at all, which is not what production reads
-    # (Spyglass recordings come from ``se.read_nwb_recording``, whose NWB
-    # reader always sets both), and ``_synthetic_artifact_recording``
-    # always sets both too, so ``has_scaleable_traces()`` is always True
-    # here.
+    # SI's return_in_uV=True transform: float32 gain and offset. No
+    # has_scaleable_traces() branch; both are always set here and in NWB reads.
     gains = recording.get_channel_gains().astype(np.float32)
     offsets = recording.get_channel_offsets().astype(np.float32)
     traces_uv = traces.astype(np.float32) * gains[None, :] + offsets[None, :]
@@ -556,21 +493,13 @@ def _in_memory_artifact_frames_reference(recording, validated):
     return (channel_hit.sum(axis=1) >= n_required).nonzero()[0]
 
 
-# Heterogeneous per-channel offsets (channels 0, 2 and 4 only) for the
-# gain-AND-offset case below. Channel 3 -- the single-channel z-score
-# burst's own channel -- is deliberately left at offset 0, so that window's
-# outcome depends on the OTHER three channels' constant +1000 uV offset
-# combining with channel 3's own burst, not on channel 3's offset.
+# Offsets on channels 0, 2 and 4 only; channel 3 (the z-score burst's
+# channel) stays at 0 so its window depends on the others' offsets.
 _ARTIFACT_CHANNEL_OFFSETS_UV = [1000.0, 0.0, 1000.0, 0.0, 1000.0, 0.0, 0.0, 0.0]
 
-# A single true outlier channel among N can reach a population (ddof=0)
-# cross-channel |z| of at most sqrt(N - 1) (here sqrt(7) ~= 2.6458): the
-# other N-1 channels' own |z| settles near 1/sqrt(N-1) ~= 0.378. A threshold
-# below sqrt(N-1) -- but comfortably above what the OTHER planted burst
-# (the all-channel amplitude burst, which is not common-mode once
-# heterogeneous gain is applied) reaches, empirically ~1.91 -- lets the
-# single-channel bursts trip the z-score branch without the all-channel
-# burst doing so too.
+# One outlier among N channels reaches at most |z| = sqrt(N - 1) ~= 2.65.
+# The threshold sits below that and above the all-channel burst's ~1.91, so
+# only the single-channel bursts trip z.
 _ARTIFACT_ZSCORE_THRESHOLD = 2.2
 
 
@@ -579,27 +508,15 @@ _ARTIFACT_ZSCORE_THRESHOLD = 2.2
     "proportion_above_threshold",
     [
         (50.0, None, None, 0.5),  # amplitude-only branch
-        # z-score-only branch: proportion 0.125 -> n_required=1, so the
-        # single true outlier channel (the 60_000:60_120 and 75_000:75_050
-        # bursts) alone can flag a frame; at proportion 0.5 (n_required=4)
-        # a single outlier can never flag anything (see _ARTIFACT_ZSCORE
-        # _THRESHOLD), so this branch would flag nothing.
+        # z-score-only: proportion 0.125 -> n_required=1, so one outlier
+        # channel can flag a frame.
         (None, _ARTIFACT_ZSCORE_THRESHOLD, None, 0.125),
-        # OR-combined branch: proportion 0.125 -> n_required=1, and a
-        # z-score threshold below sqrt(n_channels - 1) so the z branch can
-        # fire at all. The 75_000:75_050 single-channel burst (45 µV, below
-        # the 50 µV amplitude threshold) trips z but not amplitude, so every
-        # one of its frames is flagged here and none is flagged by the
-        # amplitude-only branch at the same proportion; an implementation
-        # that ignored z whenever amplitude is set would drop them. (At
-        # n_required=1 the z branch also flags baseline-noise frames whose
-        # single most deviant channel crosses the threshold.)
+        # OR-combined: the 75_000:75_050 burst (45 µV) trips z but not
+        # amplitude, so ignoring z when amplitude is set would drop it.
         (50.0, _ARTIFACT_ZSCORE_THRESHOLD, None, 0.125),
         (50.0, None, _ARTIFACT_CHANNEL_OFFSETS_UV, 0.5),  # amplitude+offsets
-        # amplitude + gain: proportion 0.125 -> n_required=1, so channel 3's
-        # own correctness at the 75_000:75_050 burst (45 µV, below the 50
-        # µV threshold) directly decides that window -- a dropped/wrong gain
-        # there flips it to a false positive (180 raw > 50).
+        # amplitude + gain: a wrong gain on channel 3 flags 75_000:75_050
+        # (180 raw > 50).
         (50.0, None, None, 0.125),
     ],
 )
@@ -610,23 +527,9 @@ def test_chunked_artifact_matches_in_memory_reference(
     channel_offsets_uv,
     proportion_above_threshold,
 ):
-    """The chunked ``scan_artifact_frames`` produces frame-identical
-    output to the whole-recording in-memory reference, and is invariant to
-    chunk boundaries.
-
-    The production scan reads the recording in per-chunk
-    ``ChunkRecordingExecutor`` passes (instead of one full-recording
-    ``get_traces`` call) to bound peak memory; that is correct only if the
-    flagged frame set equals the whole-recording scan's. The per-frame
-    across-channel z-score depends solely on that frame's columns, so chunk
-    boundaries (which split the time axis) cannot change which frames are
-    flagged -- this test pins that property across the amplitude-only,
-    z-score-only and OR-combined branches (the OR case flags frames that each
-    threshold alone misses, so it fails if either threshold is ignored when both
-    are set), plus a case with heterogeneous non-zero channel offsets and a case
-    that discriminates gain (production reads ``return_in_uV=True``, i.e. gain
-    AND offset; see ``_artifact_compute.py:121-130`` and
-    ``_in_memory_artifact_frames_reference`` above).
+    """The chunked ``scan_artifact_frames`` matches the in-memory reference
+    frame for frame, independent of chunk boundaries, for amplitude, z-score,
+    OR-combined, offset and gain cases.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -662,9 +565,7 @@ def test_chunked_artifact_matches_in_memory_reference(
         rec, validated, job_kwargs={"n_jobs": 1, "chunk_size": 90_000}
     )
 
-    # scan returns run RANGES; expand them to the per-frame set the reference
-    # holds. Equivalence is "the runs cover exactly the flagged frames", across
-    # chunk seams (chunked) and as a single chunk (single).
+    # scan returns run ranges; expand them to per-frame sets.
     assert np.array_equal(_expand_runs(chunked), reference), (
         "Chunked artifact runs diverge from the in-memory reference; "
         "chunking changed which frames are flagged."
@@ -682,13 +583,8 @@ def _expand_runs(runs):
 
 
 def test_scan_artifact_frames_returns_bounded_runs(dj_conn):
-    """``scan_artifact_frames`` returns run-length ranges, not one index per
-    flagged frame, so a "large but under the 50% guard" case (a
-    heavily-but-contiguously flagged recording) stays O(n_runs) in memory
-    instead of O(n_bad_frames). Here 40% of the recording is flagged in one
-    contiguous block -> a couple of per-chunk runs (the cross-chunk join happens
-    in detect_artifacts), and expanding them recovers exactly the flagged
-    frames."""
+    """``scan_artifact_frames`` returns run ranges, not one index per flagged
+    frame, so memory is O(n_runs)."""
     from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
@@ -702,20 +598,14 @@ def test_scan_artifact_frames_returns_bounded_runs(dj_conn):
     runs = scan_artifact_frames(
         rec, validated, job_kwargs={"n_jobs": 1, "chunk_duration": "0.05s"}
     )
-    # (n_runs, 2) ranges, NOT a 2000-long per-frame array.
     assert runs.ndim == 2 and runs.shape[1] == 2
-    # 2000 contiguous flagged frames across ~2 chunks -> a couple of runs.
     assert runs.shape[0] <= 5
-    # The runs cover exactly the flagged frames (0..1999).
     assert np.array_equal(_expand_runs(runs), np.arange(2000))
 
 
 def test_split_runs_at_gaps_splits_only_inside_runs():
-    """A fixed-size chunk can straddle a wall-clock gap, so a flagged run may
-    span one. ``_split_runs_at_gaps`` splits a run at a gap STRICTLY inside it,
-    leaves a gap at the trailing edge and a gap between runs alone, and is a
-    no-op when there are no gaps -- so the joined spans match a per-frame
-    gap-aware join."""
+    """``_split_runs_at_gaps`` splits a run only at a gap strictly inside it
+    and is a no-op without gaps."""
     from spyglass.spikesorting.v2._artifacts.intervals import (
         _split_runs_at_gaps,
     )
@@ -729,20 +619,13 @@ def test_split_runs_at_gaps_splits_only_inside_runs():
         [16, 20],
         [30, 35],
     ]
-    # No gaps -> unchanged.
     assert np.array_equal(
         _split_runs_at_gaps(runs, np.array([], dtype=np.int64)), runs
     )
 
 
 def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
-    """Per-row ``job_kwargs`` reach ``ChunkRecordingExecutor``.
-
-    The chunked scan wires the stored ``job_kwargs`` blob through
-    ``_resolved_job_kwargs`` into the executor. This test patches the executor
-    constructor and asserts an ``n_jobs=2`` override (a recognized SI job key)
-    is observed.
-    """
+    """Per-row ``job_kwargs`` reach ``ChunkRecordingExecutor``."""
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
@@ -774,16 +657,11 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
             super().__init__(*args, **kwargs)
 
         def run(self, *args, **kwargs):
-            # The test asserts the constructor received the row's
-            # job_kwargs; it does not need the worker pool to execute (an
-            # in-memory NumpyRecording cannot round-trip through
-            # ``to_dict()``/``load_extractor`` for a real multi-process pool).
+            # Only the constructor kwargs matter; a NumpyRecording cannot
+            # go to a real process pool.
             return []
 
-    # ``scan_artifact_frames`` (in ``_artifact_intervals``) lazy-imports
-    # ``ChunkRecordingExecutor`` from its SI source at call time, so patch the
-    # source module -- the ``from spikeinterface.core.job_tools import
-    # ChunkRecordingExecutor`` inside the scan binds this spy at call time.
+    # The scan imports ChunkRecordingExecutor at call time; patch the source.
     monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
     scan_artifact_frames(
@@ -801,11 +679,8 @@ def test_artifact_job_kwargs_propagate_to_executor(dj_conn, monkeypatch):
 def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
     """With NO job_kwargs the scan still chunks (chunk_duration='1s').
 
-    ChunkRecordingExecutor with no chunk-size key processes the whole
-    recording in a single chunk -- the exact full-traces memory profile the
-    restoration removed. Any direct ``detect_artifacts`` caller (not just the
-    production ``make_compute`` path that merges SI's global job kwargs) must
-    still be bounded, so ``scan_artifact_frames`` defaults to a 1 s chunk.
+    Without a chunk-size key ``ChunkRecordingExecutor`` reads the whole
+    recording at once, so direct callers must still get bounded memory.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -837,13 +712,9 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
             seen["chunk_size"] = kwargs.get("chunk_size")
             super().__init__(*args, **kwargs)
 
-    # ``scan_artifact_frames`` (in ``_artifact_intervals``) lazy-imports
-    # ``ChunkRecordingExecutor`` from its SI source at call time, so patch the
-    # source module -- the ``from spikeinterface.core.job_tools import
-    # ChunkRecordingExecutor`` inside the scan binds this spy at call time.
+    # The scan imports ChunkRecordingExecutor at call time; patch the source.
     monkeypatch.setattr(jt, "ChunkRecordingExecutor", _SpyExecutor)
 
-    # No job_kwargs at all -- the bare default path.
     scan_artifact_frames(rec, validated)
     assert seen["chunk_duration"] == "1s", (
         "default scan did not chunk: ChunkRecordingExecutor got "
@@ -857,15 +728,8 @@ def test_artifact_scan_chunked_by_default(dj_conn, monkeypatch):
 def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
     """The n_jobs>1 worker path actually EXECUTES and matches n_jobs=1.
 
-    For n_jobs>1 the recording is passed to each worker as a ``to_dict()`` blob
-    and re-hydrated inside ``_init_artifact_worker``. SI 0.104 renamed SI
-    0.99's ``si.load_extractor`` (used by v1) to ``si.load``, so a worker
-    calling the 0.99 name would ``AttributeError``. The propagation
-    test only inspects constructor kwargs and returns before workers run, so it
-    cannot catch this. This test runs the multiprocess path end-to-end on a
-    serializable (saved-to-disk binary) recording and asserts the flagged
-    frames equal the n_jobs=1 result -- proving the worker rehydrates and the
-    chunked output is worker-count-invariant.
+    Workers rehydrate the recording from ``to_dict()`` with SI 0.104's
+    ``si.load``.
     """
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -875,9 +739,7 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
         scan_artifact_frames,
     )
 
-    # _synthetic_artifact_recording is an in-memory NumpyRecording (not
-    # dict-serializable); save it to a binary folder so to_dict()/si.load()
-    # round-trips, the way a real cached preprocessed Recording does.
+    # Save to disk: a NumpyRecording is not dict-serializable.
     saved = _synthetic_artifact_recording().save(folder=tmp_path / "rec")
     validated = ArtifactDetectionParamsSchema(
         detect=True,
@@ -895,7 +757,7 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
     multi = scan_artifact_frames(
         saved, validated, job_kwargs={"n_jobs": 2, "chunk_duration": "0.5s"}
     )
-    # The planted bursts must actually be detected, else "equal" is vacuous.
+    # Non-vacuous: the bursts are detected.
     assert len(single) > 0
     assert np.array_equal(single, multi), (
         "n_jobs=2 worker path produced different frames than n_jobs=1 (or "
@@ -910,13 +772,8 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(
     """Peak memory of the chunked scan is bounded by chunk size, not by
     the full recording length.
 
-    Builds a 5-minute, 32-channel recording (~1.15 GB if materialized in
-    float32 once; ~4.6 GB at the in-memory path's ~4× working-set factor) and
-    scans it with a 1-second chunk. Peak *additional* allocation measured by
-    ``tracemalloc`` must stay far below the full-recording working set -- it is
-    bounded by ``~4 × chunk_frames × n_channels × 4 bytes`` plus the flagged
-    frame-index arrays. Asserts the peak stays under a generous 256 MB ceiling
-    that the full-recording load would blow through.
+    A 5-minute, 32-channel recording (~4.6 GB working set in memory),
+    scanned in 1 s chunks, must peak under 256 MB in ``tracemalloc``.
     """
     import tracemalloc
 
@@ -983,12 +840,8 @@ def test_artifact_detection_peak_memory_bounded_by_chunk_size(
 def test_apply_artifact_mask_empty_valid_times_raises():
     """Empty valid_times raises instead of silently zeroing all.
 
-    When the artifact pass keeps zero seconds, the complement walker
-    would mask the WHOLE recording to zeros and the sort would run over
-    all-zeros, emitting a misleading "zero units" result. Instead it raises
-    ``EmptyArtifactValidTimesError`` naming the ``artifact_detection_id`` and
-    ``recording_id`` so the user re-runs detection or overrides the
-    selection -- a loud failure, not a silent blanked recording.
+    ``EmptyArtifactValidTimesError`` names the ``artifact_detection_id``
+    and ``recording_id``.
     """
     import numpy as np_mod
     import spikeinterface.core as sc
@@ -1013,7 +866,7 @@ def test_apply_artifact_mask_empty_valid_times_raises():
     msg = str(excinfo.value)
     assert "art-123" in msg and "rec-456" in msg
 
-    # The recording is NOT zeroed -- the raise happens before any masking.
+    # Raised before any masking.
     assert not np_mod.array_equal(
         rec.get_traces(), np_mod.zeros_like(rec.get_traces())
     )
@@ -1023,10 +876,7 @@ def test_apply_artifact_mask_empty_valid_times_raises():
 def test_apply_artifact_mask_unsorted_valid_times_raises():
     """Unsorted / overlapping valid_times is rejected (strict input).
 
-    The complement walker assumes monotonic, disjoint intervals; an
-    unsorted or overlapping list would silently under-mask (leave
-    artifact frames in the recording). This chooses strict input +
-    a clear raise rather than silently sorting/merging.
+    Otherwise the complement walker would silently under-mask.
     """
     import numpy as np_mod
     import spikeinterface.core as sc
@@ -1045,7 +895,6 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
     # Sorted by start but overlapping.
     with pytest.raises(ValueError, match="non-overlapping"):
         apply_artifact_mask(rec, np_mod.array([[0.1, 0.5], [0.3, 0.8]]))
-    # A single well-formed interval still masks normally (no raise).
     masked = apply_artifact_mask(rec, np_mod.array([[0.1, 0.9]]))
     assert masked.get_num_samples() == rec.get_num_samples()
 
@@ -1054,11 +903,6 @@ def test_apply_artifact_mask_unsorted_valid_times_raises():
 def test_apply_artifact_mask_full_coverage_short_circuits():
     """When ``valid_times`` covers the whole recording, the mask is a
     no-op and the original recording object is returned unmodified.
-
-    ``frame_ranges`` ends up empty (no artifact gaps), so ``_apply_artifact_
-    mask`` returns ``recording`` itself -- no ``remove_artifacts`` wrapper.
-    The contrast call (valid_times dropping the second half) returns a
-    DIFFERENT object, proving the short-circuit is meaningful.
     """
     import numpy as np
     import spikeinterface as si
@@ -1079,26 +923,15 @@ def test_apply_artifact_mask_full_coverage_short_circuits():
         "recording (no remove_artifacts wrapper)"
     )
 
-    # Contrast: dropping the second half leaves an artifact gap -> a wrapped
-    # recording, not the original object.
+    # Contrast: an artifact gap returns a wrapped recording.
     partial = np.asarray([[ts[0], ts[len(ts) // 2]]])
     out_partial = apply_artifact_mask(rec, partial)
     assert out_partial is not rec
 
 
 # --------------------------------------------------------------------------- #
-# Gain-aware µV artifact detection (hermetic absolute-outcome).
-#
-# ``_artifacts.compute._compute_artifact_chunk`` scales raw counts to microvolts with
-# the recording's stored per-channel gains (``traces_uv = traces * gains``)
-# before comparing against ``amplitude_threshold_uv``. Every other direct
-# artifact test uses ``gain = 1.0``, where counts and µV are numerically
-# identical, so the conversion itself is never exercised. These tests plant a
-# peak at a KNOWN non-unity gain and assert the absolute detect / no-detect
-# outcome at thresholds that straddle the converted value -- a result that
-# only holds if the gain is actually applied. They request ``dj_conn`` because
-# importing ``artifact`` declares its ``@schema`` tables (a live connection),
-# even though the detection math is pure / synthetic; they are not ``slow``.
+# Gain-aware µV artifact detection: peaks at a non-unity gain, thresholds that
+# straddle the converted value.
 # --------------------------------------------------------------------------- #
 
 
@@ -1122,9 +955,7 @@ def _planted_recording(gain=0.195, n_ch=4, n_frames=200):
 def _flagged_frames(rec, n_frames, amplitude_threshold_uv):
     """Run the amplitude-only chunk detector over the whole recording.
 
-    ``proportion_above_threshold = 1.0`` requires every channel to exceed the
-    threshold; ``zscore_threshold = None`` disables the z-score detector so the
-    outcome is governed purely by the µV amplitude comparison.
+    Every channel must exceed the threshold; z-score is off.
     """
     from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
@@ -1143,8 +974,7 @@ def _flagged_frames(rec, n_frames, amplitude_threshold_uv):
         end_frame=n_frames,
         worker_ctx=ctx,
     )
-    # The worker returns (start, end_inclusive) runs; expand to the per-frame
-    # set these gain-conversion tests assert on.
+    # Expand (start, end_inclusive) runs to frames.
     return _expand_runs(runs)
 
 
@@ -1161,12 +991,8 @@ def test_gain_conversion_detects_peak_above_uv_threshold():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_gain_conversion_no_detect_when_uv_below_threshold():
-    """Threshold 700 µV: NOTHING is flagged -- proves the gain is applied.
-
-    The peak is 3000 counts -> 585 µV < 700, so no frame is flagged. If the
-    conversion were skipped (counts compared directly), 3000 > 700 would
-    wrongly flag frame 50. The empty result is the gain-correctness signal.
-    """
+    """Threshold 700 µV: nothing is flagged (585 µV after gain, 3000 counts
+    before)."""
     rec, n = _planted_recording(gain=0.195)
     flagged = _flagged_frames(rec, n, amplitude_threshold_uv=700.0)
     assert flagged.tolist() == [], (
@@ -1184,10 +1010,7 @@ def test_gain_conversion_low_threshold_flags_both_peaks():
 
 
 # --------------------------------------------------------------------------- #
-# Non-finite (NaN/Inf) traces fail loudly instead of silently reporting
-# "no artifacts". A NaN compares False against every threshold, so a
-# corrupted chunk would otherwise vanish into an empty result; the
-# finiteness check runs unconditionally before any threshold comparison.
+# Non-finite traces raise; a NaN compares False against every threshold.
 # --------------------------------------------------------------------------- #
 
 
@@ -1222,9 +1045,7 @@ def test_compute_artifact_chunk_raises_on_single_nan_sample():
 
 
 def test_compute_artifact_chunk_raises_on_all_nan_chunk():
-    """An all-NaN chunk (e.g. a corrupted segment) raises with the full
-    per-channel non-finite count for every channel, not a silent
-    all-quiet chunk."""
+    """An all-NaN chunk raises with every channel's non-finite count."""
     from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
@@ -1249,8 +1070,7 @@ def test_compute_artifact_chunk_raises_on_all_nan_chunk():
 
 
 def test_compute_artifact_chunk_finite_recording_unaffected():
-    """A fully-finite chunk is unaffected by the new guard (the guard is a
-    pure addition, not a behavior change on well-formed data)."""
+    """A fully-finite chunk is unaffected by the finiteness check."""
     from spyglass.spikesorting.v2._artifacts.compute import (
         _compute_artifact_chunk,
         _init_artifact_worker,
@@ -1272,10 +1092,8 @@ def test_compute_artifact_chunk_finite_recording_unaffected():
 
 
 def test_scan_artifact_frames_raises_on_nan_at_n_jobs_1():
-    """The finiteness ``ValueError`` (naming the frame range) reaches the
-    caller through ``scan_artifact_frames`` at ``n_jobs=1`` -- the
-    single-process path, where the live recording object is passed
-    straight to the worker (no pickling)."""
+    """The finiteness ``ValueError`` reaches the caller through
+    ``scan_artifact_frames`` at ``n_jobs=1``."""
     from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
@@ -1296,21 +1114,8 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_1():
 def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
     tmp_path,
 ):
-    """The same ``ValueError`` reaches the caller under a REAL multi-process
-    ``ChunkRecordingExecutor`` pool (``n_jobs=2``, ``pool_engine='process'``)
-    -- a propagation path otherwise verified only by reading
-    SpikeInterface's source.
-
-    SpikeInterface's ``process_function_wrapper``
-    (``spikeinterface/core/job_tools.py``) calls the worker function
-    directly with no ``try``/``except`` around it, so a worker exception
-    propagates through ``ProcessPoolExecutor.map`` like any other -- pickled
-    across the process boundary and re-raised in the parent when the result
-    iterator is consumed. ``ValueError`` (a builtin with only a string
-    ``args``) round-trips through pickling losslessly, so its message
-    survives. This test proves that end-to-end on a real process pool
-    rather than only reading the source.
-    """
+    """The same ``ValueError`` and message reach the caller from a real
+    ``n_jobs=2`` process pool."""
     from spyglass.spikesorting.v2._artifacts.intervals import (
         scan_artifact_frames,
     )
@@ -1318,8 +1123,7 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
     traces = np.zeros((3000, 2), dtype="float32")
     traces[1500, 0] = np.nan
     rec = _rec(traces)
-    # Save to a binary folder so to_dict()/si.load() round-trips through the
-    # worker processes (an in-memory NumpyRecording is not dict-serializable).
+    # Save to disk: a NumpyRecording is not dict-serializable.
     saved = rec.save(folder=tmp_path / "rec")
     validated = _artifact_params(amplitude_threshold_uv=1000.0)
     with pytest.raises(ValueError, match=r"non-finite"):
@@ -1335,25 +1139,16 @@ def test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool(
 
 
 # --------------------------------------------------------------------------- #
-# The timestamp helpers stay LAZY on an explicit (h5py-backed) recording.
-#
-# ``Recording.get_recording`` loads the cached preprocessed NWB with
-# ``load_time_vector=True`` -- the timestamps are a lazy h5py object until a
-# consumer forces them. ``recording.get_times()`` would materialize (and cache)
-# the whole float64 vector (8 bytes/sample, ~824 MB for 1 h @ 30 kHz), so
-# ``base_intervals_and_gaps`` / ``timestamp_fingerprint`` read it in ~1 s slices
-# via ``sample_index_to_time`` instead. This guards that
-# they never trigger the full materialization -- if a future SpikeInterface made
-# ``sample_index_to_time`` eager, this fails loudly instead of silently
-# regressing peak memory.
+# Timestamp helpers read h5py-backed timestamps in slices, never the full
+# float64 vector ``get_times()`` caches (~824 MB for 1 h @ 30 kHz).
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.slow
 def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
     """The chunked timestamp helpers peak far below ``get_times()`` on an
-    explicit (h5py-backed) recording -- they never materialize the full
-    ``n_samples`` float64 vector."""
+    h5py-backed recording; they never materialize the full timestamp
+    vector."""
     import gc
     import tracemalloc
     from datetime import datetime, timezone
@@ -1369,7 +1164,7 @@ def test_timestamp_helpers_peak_memory_bounded_vs_get_times(tmp_path):
     )
 
     fs = 30000.0
-    n = 4_000_000  # 32 MB float64 timestamp vector -- clear materialize signal
+    n = 4_000_000  # 32 MB float64 timestamp vector
     path = tmp_path / "lazy_rec.nwb"
     nwbf = pynwb.NWBFile("d", "id", datetime(2020, 1, 1, tzinfo=timezone.utc))
     dev = nwbf.create_device("probe")

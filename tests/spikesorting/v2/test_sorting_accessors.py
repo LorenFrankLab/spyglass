@@ -1,12 +1,4 @@
-"""Sorting accessors, source dispatch, and selection diagnostics.
-
-Covers concat-source rows being included in ``Sorting.key_source`` (the
-antijoin is gone now that the concat path is wired), concat-backed
-``get_unit_brain_regions`` (raise vs anchor-member DataFrame), the
-missing-SorterParameters and cross-recording-artifact diagnostics on
-``insert_selection``, zero-unit / DataFrame ``get_sorting``, and the
-peak-channel-not-in-sort-group guard in ``_populate_unit_part``.
-"""
+"""Sorting accessors, source dispatch, and selection diagnostics."""
 
 from __future__ import annotations
 
@@ -83,16 +75,7 @@ def _drop_fake_recording(recording_id):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_key_source_includes_concat_rows():
-    """Concat-source selections ARE part of ``Sorting.key_source``.
-
-    The concat populate path is wired (``ConcatenatedRecording.make`` +
-    ``Sorting.make`` concat dispatch), so ``key_source`` does not antijoin out
-    ``ConcatenatedRecordingSource`` rows -- a concat selection is handed to
-    ``populate()`` like any other. A planted concat
-    selection suffices to pin that it is NOT antijoined out; the full concat
-    sort populate is covered by the chronic smoke in
-    ``tests/spikesorting/v2/test_session_group_concat.py``.
-    """
+    """Concat-source selections are part of ``Sorting.key_source``."""
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -147,14 +130,11 @@ def test_sorting_get_unit_brain_regions_concat_raises_without_anchor():
 def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
     populated_sorting,
 ):
-    """``allow_anchor_member=True`` returns the
-    ``unit_brain_region_df`` DataFrame labeled ``anchor_member``.
+    """``allow_anchor_member=True`` returns a DataFrame whose rows carry
+    ``region_resolution == 'anchor_member'``.
 
-    The return is the DataFrame (NOT a ``SourceResolution`` dataclass --
-    that type lives inside ``make_fetch`` dispatch, not on this accessor).
-    Non-vacuous: one ``Sorting.Unit`` row is planted (copied from the
-    populated fixture so its Electrode FK resolves through BrainRegion), so
-    the frame has a real row carrying ``region_resolution == 'anchor_member'``.
+    One ``Sorting.Unit`` row, copied from the populated fixture, is planted
+    so the frame is non-empty.
     """
     import datetime as dt
     import uuid
@@ -238,12 +218,8 @@ def test_sorting_selection_missing_sorter_params_diagnostic():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
-    """A sort cannot link an artifact detected on another recording.
-
-    Both recordings are in the same session, so an interval lookup by
-    ``nwb_file_name`` + artifact interval name alone could succeed and apply
-    the wrong artifact mask. ``insert_selection`` must reject the mismatch before
-    writing ``SortingSelection.ArtifactDetectionSource``.
+    """``insert_selection`` rejects an artifact detected on another recording
+    of the same session, before writing any source row.
     """
     import uuid
 
@@ -294,9 +270,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
                     "artifact_detection_id": artifact_detection_id,
                 }
             )
-        # insert_selection rejected before eager-registering the artifact into
-        # the ArtifactDetectionOutput merge, so no ArtifactDetectionSource row
-        # (which carries the merge id) can reference it.
+        # Rejected before registering the artifact in ArtifactDetectionOutput.
         from spyglass.spikesorting.v2.artifact_output import (
             ArtifactDetectionOutput,
         )
@@ -339,13 +313,8 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
-    """A zero-unit sort returns an empty single-segment ``NumpySorting``.
-
-    The zero-unit branch short-circuits before any NWB read and returns an
-    empty ``NumpySorting`` at the recording's sampling frequency (reading an
-    empty units table would otherwise fail). Built on the fixture's real
-    recording (the branch still reads ``sampling_frequency`` from it) via a
-    planted zero-unit Sorting row.
+    """A zero-unit sort returns an empty single-segment ``NumpySorting`` at
+    the recording's sampling frequency, without reading the units NWB.
     """
     import datetime as dt
     import uuid
@@ -410,19 +379,14 @@ def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_get_sorting_dataframe_casts_unit_ids_to_python_int(populated_sorting):
-    """``get_sorting(as_dataframe=True)`` indexes by Python ``int``.
-
-    v2 writes integer unit_ids; the DataFrame path casts ``int(uid)`` so the
-    index matches v1's ``nwb.units.to_dataframe()`` shape. Non-vacuous: the
-    SI sorting object (a ``NumpySorting``) yields numpy integers, so the cast
-    genuinely changes the type.
+    """``get_sorting(as_dataframe=True)`` indexes by Python ``int``, matching
+    v1's ``nwb.units.to_dataframe()``.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
 
     raw = Sorting().get_sorting(populated_sorting)
     assert len(raw.unit_ids) >= 1, "fixture sort must have units"
-    # The SI sorting object's unit_ids are numpy integers -- the cast is not
-    # a no-op.
+    # SI unit_ids are numpy integers, so the cast is not a no-op.
     assert all(
         isinstance(uid, np.integer) for uid in raw.unit_ids
     ), "precondition: NumpySorting yields numpy unit_ids"
@@ -437,13 +401,8 @@ def test_get_sorting_dataframe_casts_unit_ids_to_python_int(populated_sorting):
 def test_populate_unit_part_peak_channel_not_in_sort_group(
     populated_sorting, monkeypatch
 ):
-    """A peak channel absent from the sort group raises RuntimeError.
-
-    ``build_unit_rows_from_analyzer`` resolves each unit's peak channel to a
-    ``SortGroupV2.SortGroupElectrode`` row; a channel id outside the group
-    is a recording/sort-group mismatch and must fail loudly. We monkeypatch
-    the extremum-channel lookup to return an out-of-group id and call the
-    helper with the fixture's real analyzer.
+    """A peak channel absent from the sort group raises RuntimeError in
+    ``build_unit_rows_from_analyzer``.
     """
     from spikeinterface.core import template_tools
 
@@ -467,9 +426,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     nwb_file_name, recording_sort_group_id = (
         RecordingSelection & {"recording_id": recording_id}
     ).fetch1("nwb_file_name", "sort_group_id")
-    # The transient analyzer folder build_unit_rows_from_analyzer loads
-    # (built by the populate that created populated_sorting; resolved from
-    # sorting_id).
+    # The analyzer folder built by populated_sorting's populate.
     analyzer_folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
     sorting = Sorting().get_sorting(populated_sorting)
 
@@ -477,13 +434,8 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     original_extremum_channel = template_tools.get_template_extremum_channel
 
     def _bad_peak_channels(analyzer, **kwargs):
-        # ``build_unit_rows_from_analyzer`` resolves peak channels with
-        # ``outputs="id"`` (and a configured ``peak_sign``);
-        # ``get_template_extremum_amplitude``
-        # calls this internally with ``peak_sign``/``mode`` but NOT
-        # ``outputs="id"``. Both carry ``peak_sign``, so discriminate on
-        # ``outputs`` -- only the unit-attribution call returns the planted
-        # out-of-group channel; delegate the amplitude path to the real fn.
+        # Only the ``outputs="id"`` (peak-channel) call returns the planted
+        # channel; ``get_template_extremum_amplitude`` calls this without it.
         if kwargs.get("outputs") != "id":
             return original_extremum_channel(analyzer, **kwargs)
         return {uid: bad_channel for uid in sorting.unit_ids}
@@ -492,9 +444,6 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
         template_tools, "get_template_extremum_channel", _bad_peak_channels
     )
 
-    # The per-unit row construction (peak attribution + channel-mismatch guard)
-    # is ``_sorting_units.build_unit_rows_from_analyzer`` (run once in
-    # make_compute); the Electrode FK / sort group are resolved at fetch time.
     sort_group_id, electrode_by_id, _region = fetch_unit_electrode_metadata(
         recording_sort_group_id, nwb_file_name
     )

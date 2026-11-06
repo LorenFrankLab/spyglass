@@ -1,9 +1,8 @@
 """Security / trust-model hardening for the v2 pipeline.
 
-Defense-in-depth under the trusted-compute-operator model: artifacts default to
-owner-write (not world-writable), the sorter scratch is only world-writable for
-a container backend (the UID-mismatch case), and caller-supplied NWB file names
-are confined to a bare basename before being joined onto a managed directory.
+- artifacts are owner-write, not world-writable
+- sorter scratch is world-writable only for a container backend
+- caller-supplied NWB file names must be bare basenames
 """
 
 import os
@@ -39,8 +38,7 @@ def test_nwb_filename_traversal_rejected(bad_name):
 
 
 def test_nwb_filename_basename_accepted():
-    """A legitimate bare basename (incl. one with dots/underscores) passes --
-    the guard must not over-reject."""
+    """A bare basename with dots/underscores passes."""
     from spyglass.utils.nwb_helper_fn import assert_safe_nwb_file_name
 
     for good in ("session1_.nwb", "mearec_smoke.nwb", "a.b.c.nwb"):
@@ -54,12 +52,9 @@ def test_nwb_filename_basename_accepted():
 )
 def test_create_rejects_unsafe_recompute_file_name(bad_recompute_name):
     """``AnalysisNwbfile().create(recompute_file_name=...)`` confines the
-    recompute target to a bare basename too -- not just ``nwb_file_name``.
+    recompute target to a bare basename, like ``nwb_file_name``.
 
-    The recompute/rebuild path threads a caller- or row-supplied name straight
-    into the analysis path builder; without the same guard a separator / ``..``
-    / absolute path would escape the managed analysis directory. Must raise at
-    the acceptance boundary, before any path resolution.
+    Raises before any path resolution.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
@@ -133,10 +128,8 @@ def test_all_v2_writers_restrict_permission():
     """Every ``AnalysisNwbfile().create(...)`` in the v2 package passes
     ``restrict_permission=True``.
 
-    ``AnalysisNwbfile.create`` defaults to world-writable ``0o666``; a v2 writer
-    that forgets the flag silently ships a world-writable artifact. This static
-    guard covers all writers (Recording / Sorting units / CurationEvaluation /
-    UnitMatch) -- present and future -- without populating each artifact type.
+    ``AnalysisNwbfile.create`` defaults to ``0o666``. A static check covers
+    current and future writers.
     """
     import ast
     from pathlib import Path
@@ -191,8 +184,7 @@ def test_v2_artifacts_not_world_writable(populated_sorting):
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # SortingSelection is source-polymorphic: recording_id lives on the
-    # RecordingSource part, not the master.
+    # recording_id lives on the RecordingSource part.
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]

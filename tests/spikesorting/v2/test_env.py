@@ -1,16 +1,9 @@
-"""Isolated test-environment bootstrap for standalone modern-spike-sorting scripts.
+"""Isolated test-environment bootstrap for standalone v2 scripts.
 
-The pytest suite isolates the database and analysis directories through
-``tests/conftest.py``: it launches a Docker MySQL server, writes a local
-DataJoint config, sets ``database.prefix = "pytests"``, and redirects
-``SPYGLASS_BASE_DIR`` to a temporary directory. Standalone scripts -- fixture
-generation and v1 baseline capture -- do not inherit that fixture setup, so they
-must call :func:`bootstrap_v2_test_environment` before importing Spyglass or
-touching the database.
-
-The bootstrap is deliberately strict: it refuses to run against a production-like
-database prefix or a base directory that looks like shared lab storage, so a
-script can never write to (or clean up) production by accident.
+Standalone scripts (fixture generation, v1 baseline capture) do not get the
+pytest isolation from ``tests/conftest.py``, so they call
+:func:`bootstrap_v2_test_environment` before importing Spyglass. It refuses
+production-like prefixes and shared-storage base directories.
 """
 
 from __future__ import annotations
@@ -23,8 +16,7 @@ from pathlib import Path
 
 import datajoint as dj
 
-# Substrings that indicate shared lab storage rather than a test directory.
-# A resolved base directory containing any of these is rejected outright.
+# A base directory containing any of these is shared lab storage.
 _SHARED_STORAGE_MARKERS = ("stelmo",)
 
 # A database prefix is accepted only if it is exactly this or starts with
@@ -125,9 +117,8 @@ def _assert_safe_prefix(database_prefix: str) -> str:
 def _docker_test_server_credentials() -> dict:
     """Start or reuse the Docker MySQL test server and return its credentials.
 
-    Mirrors the server the pytest suite uses (``tests/container.py``). The
-    server is reused if already running and is left running on exit so a script
-    run can be followed by ``pytest`` without a restart.
+    Same server as the pytest suite (``tests/container.py``); left running on
+    exit.
     """
     repo_root = _repo_root()
     if str(repo_root) not in sys.path:
@@ -148,10 +139,9 @@ def bootstrap_v2_test_environment(
 ) -> None:
     """Prepare an isolated database + directory environment for v2 scripts.
 
-    Call this once, before importing any Spyglass module that reads config.
-    It validates the requested base directory and database prefix, scrubs
-    Spyglass directory environment variables that might point at shared
-    storage, loads DataJoint credentials, and pins the schema prefix.
+    Call once, before importing Spyglass. Validates the base directory and
+    prefix, clears Spyglass directory env vars, loads DataJoint credentials
+    and pins the schema prefix.
 
     Parameters
     ----------
@@ -189,8 +179,7 @@ def bootstrap_v2_test_environment(
 
     resolved_base.mkdir(parents=True, exist_ok=True)
 
-    # Scrub any exported Spyglass directory variables (including a production
-    # SPYGLASS_BASE_DIR) so settings.py resolves directories from our base dir.
+    # Exported directory variables could point at production storage.
     for var in [
         name
         for name in os.environ
@@ -211,8 +200,7 @@ def bootstrap_v2_test_environment(
 
     dj.config["database.prefix"] = prefix
 
-    # Reset directory overrides from any globally saved config so DataJoint and
-    # the env-var fallback both resolve to our base dir (see issue #1573).
+    # A globally saved config may carry directory overrides.
     custom = dj.config.setdefault("custom", {})
     for key in ("dlc_dirs", "moseq_dirs", "kachery_dirs"):
         custom.pop(key, None)

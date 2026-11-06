@@ -1,19 +1,6 @@
-"""Numerical correctness of ``_get_peak_amplitude`` (clusterless features).
+"""Numerical correctness of ``spyglass.utils.waveforms._get_peak_amplitude``.
 
-``spyglass.utils.waveforms._get_peak_amplitude`` extracts the per-spike,
-per-channel amplitude that clusterless decoding consumes. The existing
-clusterless feature tests check shape / 1:1 alignment / sign of the
-extracted feature, but never a specific value, and they only ever run the
-``estimate_peak_time=False`` (center-sample) path -- the
-``estimate_peak_time=True`` branch (argmin/argmax over the across-channel
-reduction to find each spike's peak time, then the mode across spikes), which
-holds the only nontrivial numerical logic, is uncovered.
-
-These are hermetic unit tests: a tiny stub supplies a known waveform array
-as the *input*, and the assertions pin the *output* of the function under
-test. Expected values are derived by independent array indexing (a known,
-hand-placed peak), never by calling ``_get_peak_amplitude`` itself, so the
-checks are not tautological. No database or SpikeInterface objects needed.
+Expected values come from hand-placed peaks in a stub waveform array.
 """
 
 from __future__ import annotations
@@ -30,10 +17,7 @@ _CENTER = _N_TIME // 2  # 2
 class _StubWaveformExtractor:
     """Minimal stand-in exposing ``get_waveforms(unit_idx)`` and ``nbefore``.
 
-    ``_get_peak_amplitude`` reads exactly those two; the stub returns
-    a fixed ``(n_spikes, n_time, n_channels)`` array so the test controls
-    the input and asserts the function's computation on it. This is a test
-    double for the input, not a mock whose behavior is under test.
+    Returns a fixed ``(n_spikes, n_time, n_channels)`` array.
     """
 
     nbefore = _CENTER  # symmetric window: spike at the center sample
@@ -61,7 +45,7 @@ def test_center_sample_returned_when_not_estimating_peak_time():
 
     np.testing.assert_array_equal(out, waveforms[:, _CENTER])
     assert out.shape == (_N_SPIKES, _N_CHANNELS)
-    # Not an edge sample -- guards an off-by-n_time-index regression.
+    # Not the edge sample.
     assert not np.array_equal(out, waveforms[:, 0])
 
 
@@ -80,8 +64,7 @@ def test_negative_peak_time_is_found_off_center():
 
     np.testing.assert_array_equal(out, waveforms[:, 1])
     assert out[0, 2] == -100.0
-    # Distinct from the center slice (all zeros) -> proves the True branch
-    # found the real peak time rather than defaulting to the center.
+    # Not the (all-zero) center slice.
     assert not np.array_equal(out, waveforms[:, _CENTER])
 
 
@@ -119,12 +102,7 @@ def test_both_peak_sign_uses_absolute_magnitude():
 
 def test_peak_time_uses_mode_across_spikes():
     """A single shared peak-time index (the mode across spikes) is applied to
-    every spike, so a spike whose own peak is elsewhere is sampled at the
-    shared index.
-
-    Pins the documented behavior: ``_get_peak_amplitude`` collapses per-spike
-    peak indices to their mode, then slices all spikes at that one index.
-    """
+    every spike, so a spike whose own peak is elsewhere is sampled there."""
     waveforms = np.zeros((_N_SPIKES, _N_TIME, _N_CHANNELS))
     # spikes 0,1 peak at t=1; spike 2 peaks at t=3 -> mode is t=1.
     waveforms[0, 1, 0] = -100.0
@@ -139,8 +117,7 @@ def test_peak_time_uses_mode_across_spikes():
     )
 
     np.testing.assert_array_equal(out, waveforms[:, 1])
-    # Spike 2's true peak (t=3) is missed because the shared mode index (t=1)
-    # is used for all spikes -> its sampled value is 0.
+    # Spike 2 is sampled at the shared t=1, missing its own peak.
     assert out[2, 0] == 0.0
 
 
@@ -161,10 +138,8 @@ def test_one_row_per_spike(estimate_peak_time):
 
 
 def test_spike_sample_follows_nbefore_for_asymmetric_window():
-    """The mark is read at the extractor's ``nbefore`` -- the spike-aligned
-    sample -- not at ``n_time // 2``, which is only the spike for a symmetric
-    window. With ``ms_before=0.3, ms_after=0.7`` the midpoint is well after
-    the trough, so a real peak reads as a near-zero mark."""
+    """The mark is read at the extractor's ``nbefore``, not ``n_time // 2``,
+    which matches only for a symmetric window."""
     waveforms = np.zeros((_N_SPIKES, _N_TIME, _N_CHANNELS))
     waveforms[:, 1, :] = -100.0  # the trough sits at sample 1 == nbefore
 

@@ -1,9 +1,7 @@
 """Sorting wire-contracts and table-shape invariants.
 
-Covers the typed ``NonIntegerUnitIDError`` on a non-integer unit_id, the
-``Sorting`` master not declaring an ``analyzer_folder`` column, and the
-positional NamedTuple-to-signature contracts (``SortingComputed`` vs
-``make_insert``; ``RecordingArtifactResult`` vs ``RecordingComputed``).
+Tri-part NamedTuples are splatted positionally, so their field order must
+match the ``make_*`` signatures; a mismatch of str-typed slots would not raise.
 """
 
 from __future__ import annotations
@@ -12,32 +10,25 @@ import pytest
 
 
 def test_to_int_unit_id_raises_typed_error_on_non_integer():
-    """A sorter unit_id that does not convert to int raises the typed
-    ``NonIntegerUnitIDError`` (a ValueError subclass), naming the offending id
-    and the remap guidance -- not a bare ``int()`` ValueError or a silent
-    coercion.
+    """A non-integer sorter unit_id raises ``NonIntegerUnitIDError`` (a
+    ValueError subclass) naming the id and the remap guidance.
     """
     from spyglass.spikesorting.v2._sorting.units import _to_int_unit_id
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
 
-    # Convertible ids pass through.
     assert _to_int_unit_id(3) == 3
     assert _to_int_unit_id("5") == 5
 
-    # A non-convertible label raises the TYPED error, naming the bad id.
     with pytest.raises(NonIntegerUnitIDError, match="noise_3"):
         _to_int_unit_id("noise_3")
 
-    # It remains a ValueError subclass so existing ``except ValueError``
-    # handlers still catch it.
     assert issubclass(NonIntegerUnitIDError, ValueError)
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_master_has_no_analyzer_folder_column():
-    """The ``Sorting`` master does not declare an ``analyzer_folder``
-    column (the analyzer cache path is computed from ``sorting_id``, not
-    persisted); ``n_units`` is still a column."""
+    """The ``Sorting`` master has no ``analyzer_folder`` column (the path
+    derives from ``sorting_id``); ``n_units`` is a column."""
     from spyglass.spikesorting.v2.sorting import Sorting
 
     attrs = Sorting.heading.attributes
@@ -47,13 +38,7 @@ def test_sorting_master_has_no_analyzer_folder_column():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_computed_matches_make_insert_signature():
-    """The tri-part dispatch unpacks ``SortingComputed`` POSITIONALLY into
-    ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
-    contract. Pin that it matches ``make_insert``'s parameter order -- a
-    reorder would silently mis-bind the several str-adjacent slots
-    (analysis_file_name / units_object_id / nwb_file_name)
-    without a TypeError.
-    """
+    """``SortingComputed`` field order matches ``make_insert``."""
     import inspect
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingComputed
@@ -66,12 +51,7 @@ def test_sorting_computed_matches_make_insert_signature():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_fetched_matches_make_compute_signature():
-    """The tri-part dispatch splats ``SortingFetched`` POSITIONALLY into
-    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
-    contract. ``execution_params`` was appended to both ``SortingFetched`` and
-    ``make_compute`` -- a misalignment would silently mis-bind the str-adjacent
-    slots (nwb_file_name / display_waveform_params_name) without a TypeError.
-    """
+    """``SortingFetched`` field order matches ``make_compute``."""
     import inspect
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingFetched
@@ -83,14 +63,8 @@ def test_sorting_fetched_matches_make_compute_signature():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_curation_evaluation_tuples_match_make_signatures():
-    """CurationEvaluation's tri-part NamedTuples are POSITIONAL wire contracts.
-
-    The dispatch splats ``make_fetch`` -> ``make_compute(key, *fetched)`` and
-    ``make_compute`` -> ``make_insert(key, *computed)`` positionally, so the
-    field order of ``CurationEvaluationFetched`` / ``CurationEvaluationComputed``
-    must match the corresponding parameter order. The fetched carrier groups
-    recording, sorting, analyzer, and metric inputs into named records; only
-    those four records cross the positional dispatch boundary.
+    """CurationEvaluation's Fetched/Computed field orders match
+    ``make_compute``/``make_insert``; the fetched carrier is four records.
     """
     import inspect
 
@@ -115,13 +89,7 @@ def test_curation_evaluation_tuples_match_make_signatures():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_recording_fetched_matches_make_compute_signature():
-    """The tri-part dispatch splats ``RecordingFetched`` POSITIONALLY into
-    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
-    contract. ``raw_object_id`` was appended to both ``RecordingFetched`` and
-    ``make_compute`` -- a misalignment would silently mis-bind the str-adjacent
-    slots (e.g. ``raw_object_id`` / ``raw_path``) without a
-    TypeError.
-    """
+    """``RecordingFetched`` field order matches ``make_compute``."""
     import inspect
 
     from spyglass.spikesorting.v2.recording import Recording, RecordingFetched
@@ -132,15 +100,8 @@ def test_recording_fetched_matches_make_compute_signature():
 
 
 def test_recording_artifact_result_field_contract():
-    """``_compute_recording_artifact`` returns a typed ``RecordingArtifactResult``
-    (NamedTuple) rather than a bare 8-tuple, so ``make_compute`` and
-    ``_rebuild_nwb_artifact`` read its fields by name instead of by position.
-
-    Pin the field set in order, AND pin that it equals ``RecordingComputed``'s
-    first eight fields. ``make_compute`` transfers them by name into the tri-part
-    contract NamedTuple, so the prefix-equality keeps that mapping order-safe and
-    guarantees a future positional ``RecordingComputed(*artifact, ...)`` splat
-    would still bind correctly; a reorder/rename in either type fails here.
+    """``RecordingArtifactResult`` fields equal ``RecordingComputed``'s
+    first eight, in order.
     """
     from spyglass.spikesorting.v2._recording.types import (
         RecordingArtifactResult,
@@ -165,10 +126,8 @@ def test_recording_artifact_result_field_contract():
 def test_sorting_make_fetch_heals_the_traces_file_idempotently(
     populated_sorting,
 ):
-    """``make_fetch`` resolves the sort's traces file and rebuilds it when it
-    is missing, returning the same carrier as before the file was removed --
-    so DataJoint's second fetch (inside the insert transaction) matches the
-    first, and ``make_compute`` reads a file that exists."""
+    """``make_fetch`` rebuilds a missing traces file and returns the same
+    carrier, so DataJoint's second fetch matches the first."""
     from pathlib import Path
 
     from spyglass.spikesorting.v2.sorting import Sorting

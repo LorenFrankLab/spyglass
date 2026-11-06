@@ -1,24 +1,7 @@
 """Matching-input resolution and checks behind ``UnitMatchSelection``.
 
-:func:`insert_inputs` is the body of ``UnitMatchSelection.insert_inputs``: it
-validates the requested curations, resolves each input's pinned generation,
-source and constituent recordings (:func:`_resolve_match_input`), numbers the
-inputs chronologically, freezes their recordings' frames and kept intervals,
-and inserts the master with its ``Input`` / ``InputRecording`` parts in one
-transaction. It returns an existing selection when one matches
-(:func:`find_existing_pk`, the body behind the patched
-``UnitMatchSelection._find_existing_pk``, which it calls through the class).
-``table_cls`` is ``UnitMatchSelection``.
-
-``UnitMatch.make_fetch`` and the ``TrackedUnit`` readers re-run the same input
-checks on the frozen rows and compare them with a fresh resolution
-(:func:`_snapshot_mismatches`); ``make_fetch`` also re-checks the session start
-times (:func:`_session_start_mismatches`).
-``UnitMatchSelection.insert_selection`` validates its per-member choices with
-:func:`normalize_curation_choices` and :func:`_validate_member_curations`.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+``UnitMatch.make_fetch`` and the ``TrackedUnit`` readers re-run these checks
+on the frozen rows. DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -33,10 +16,8 @@ from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 def _warn_clusterless_match_once(sorting_id: str) -> None:
     """Warn once per clusterless sort that cross-session matching is degenerate.
 
-    A clusterless sort's single "unit" is a threshold-crossing event stream, not
-    a sorted neuron, so tracking it across sessions has no biological meaning.
-    Deduped per ``sorting_id`` so a repeated selection does not spam the log;
-    ``cache_clear()`` resets it (used by the tests).
+    Its units are threshold-crossing events, not sorted neurons.
+    ``cache_clear()`` resets the per-``sorting_id`` dedupe.
     """
     from spyglass.utils import logger
 
@@ -62,15 +43,11 @@ def insert_inputs(
 ) -> dict:
     """Find-existing-or-insert a match over explicit inputs; return its key.
 
-    The body of ``UnitMatchSelection.insert_inputs`` (see its docstring for
-    the inputs, ordering and errors). ``table_cls`` is the
-    ``UnitMatchSelection`` class; ``_find_existing_pk``, the electrode-space
-    warning and the backend geometry preflight are called on it.
+    The body of ``UnitMatchSelection.insert_inputs`` (see its docstring).
+    ``table_cls`` is ``UnitMatchSelection``.
 
-    Duplicate-key recovery has no savepoint: it relies on the deterministic
-    primary key colliding on the master insert, the transaction's first
-    statement, before any part row is written. Keep the master insert first,
-    or the recovery would leave part rows inside a caller's transaction.
+    Duplicate-key recovery has no savepoint, so the master insert must stay
+    the transaction's first statement.
     """
     import datajoint as dj
 
@@ -113,10 +90,7 @@ def insert_inputs(
     if existing is not None:
         return existing
 
-    # Honor unit semantics: warn (don't block -- the cheap clusterless
-    # thresholder is a valid sort) when an input's units are threshold
-    # crossings rather than sorted neurons, since matching them across
-    # sessions is biologically degenerate.
+    # Warn, not block: a clusterless sort is valid, just degenerate to match.
     for item in ordered:
         if (
             CurationV2.get_unit_semantics({"sorting_id": item["sorting_id"]})
@@ -124,12 +98,7 @@ def insert_inputs(
         ):
             _warn_clusterless_match_once(str(item["sorting_id"]))
 
-    # Preflight NOW, at selection time, before UnitMatch.make's expensive
-    # dense bundle extraction: warn if inputs map to different electrode
-    # identities (advisory -- group names / ids are not lab-stable), and
-    # let the selected backend enforce its own geometry requirements. Only
-    # on the new-insert path (an idempotent re-call of an already-validated
-    # selection skips the I/O).
+    # Preflight before UnitMatch.make's expensive bundle extraction.
     choices_by_input = {
         item["input_index"]: (item["sorting_id"], item["curation_id"])
         for item in ordered
@@ -145,9 +114,7 @@ def insert_inputs(
         master_row.update(group_key)
     try:
         with table_cls._safe_context():
-            # allow_direct_insert: this helper IS the validation boundary
-            # (it has validated the inputs and minted the deterministic
-            # id), so it bypasses the master insert guard.
+            # This helper is the validation boundary.
             table_cls().insert1(master_row, allow_direct_insert=True)
             table_cls.Input.insert(
                 [{**row, "unitmatch_id": unitmatch_id} for row in input_rows]
@@ -159,8 +126,7 @@ def insert_inputs(
                 ]
             )
     except dj.errors.DuplicateError:
-        # Lost a concurrent race on the same deterministic unitmatch_id;
-        # refetch and return the winner's row.
+        # Lost a concurrent race on the deterministic unitmatch_id.
         existing = table_cls._find_existing_pk(identity, unitmatch_id)
         if existing is not None:
             return existing
@@ -180,7 +146,6 @@ def prepare_match_inputs(
     """Resolve and validate a matching request without inserting selection rows.
 
     Planning disables reconstruction; execution can rebuild missing artifacts.
-    The returned primitive snapshots are the inputs used to mint the selection.
     """
     from spyglass.spikesorting.v2._matching.graph import (
         chronological_input_order,
@@ -241,9 +206,7 @@ def prepare_match_inputs(
             recording["session_start_time"] for recording in item["recordings"]
         )
     for item in resolved:
-        # A single recording's frames and kept intervals come from its
-        # persisted traces; they are frozen and hashed like a
-        # concatenation member's.
+        # A single recording's frames and kept intervals need its traces.
         _add_single_recording_frames(item, allow_rebuild=allow_rebuild)
         enrich_recording_source_coverage(
             item["recordings"], allow_rebuild=allow_rebuild
@@ -303,10 +266,7 @@ def prepare_match_inputs(
 def assert_matching_policy_excludes_mua(snapshot) -> None:
     """Refuse a unit-selection policy that can admit multi-unit activity.
 
-    Matching tracks single units across sessions; a ``mua`` unit has no
-    identity to track. Every policy matching uses must therefore deny
-    ``mua`` (``v2_accepted_single_units`` for reviewed curations,
-    ``v2_unflagged_single_units`` for automatic-only output).
+    A ``mua`` unit has no single-neuron identity to track.
 
     Raises
     ------
@@ -418,18 +378,9 @@ def find_existing_pk(
 ) -> dict | None:
     """Return the canonical PK for this selection identity, or None.
 
-    The full logical identity (matcher + ``input_set_hash``) lives in the
-    master's own columns. A master matching the identity whose
-    ``unitmatch_id`` is NOT the deterministic id is a raw-insert bypass and
-    is rejected. When the deterministic master DOES exist, its ``Input`` /
-    ``InputRecording`` parts are verified to be well formed and to realize
-    the identity's ``input_set_hash``: a forged master can carry the right
-    id with missing / stale / orphaned parts, and that must be rejected
-    HERE rather than returning a "valid" PK that only ``make_fetch`` later
-    rejects.
-
-    Used by ``insert_inputs`` for both the pre-insert lookup and the
-    post-duplicate-key refetch.
+    Raises ``SchemaBypassError`` for a master with a non-deterministic
+    ``unitmatch_id``, or for a deterministic master whose parts are
+    malformed or do not realize its ``input_set_hash``.
     """
     from spyglass.spikesorting.v2._matching.graph import (
         frozen_order_errors,
@@ -532,8 +483,7 @@ def _input_label(sorting_id, curation_id) -> str:
 def _normalize_input_curations(curations) -> list[tuple]:
     """``[{sorting_id, curation_id}, ...]`` -> ``[(uuid.UUID, int), ...]``.
 
-    Caller-supplied curation ids go through the lossless integer rule (a
-    fractional or boolean id is rejected, not truncated).
+    A fractional or boolean curation id is rejected, not truncated.
     """
     return [
         (
@@ -594,9 +544,7 @@ def _check_input_curation(sorting_id, curation_id, exc_class) -> None:
             f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
             "pins a curation that does not exist."
         )
-    # Matching UNMERGED units across sessions is unambiguously wrong -- a
-    # curation created with apply_merge=False (proposed merges recorded but
-    # not applied) would feed oversplit units into the matcher.
+    # Unapplied merges would feed oversplit units to the matcher.
     if CurationV2.has_unapplied_proposed_merges(key):
         raise exc_class(
             f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
@@ -618,18 +566,10 @@ def _resolve_match_input(
 ) -> dict:
     """Resolve one matching input's pinned generation, source and recordings.
 
-    Database reads only (no trace file is opened and ``Session`` is not
-    read). A single-recording sort resolves to its one ``Recording``. A
-    concatenation sort resolves to its frozen members
-    (``ConcatenatedRecordingSelection.MemberSnapshot``) in member order;
-    each member must still resolve to a ``Recording`` with the content hash
-    the concatenation froze
-    (:func:`._recording.concat_fetch.resolve_snapshot_recordings`), and carries
-    its frames in the concatenation (``ConcatenatedRecording.MemberBoundary``:
-    the cumulative exclusive ``end_sample``, a member starting where the
-    previous one ended) and its kept intervals on its own clock
-    (``member_valid_times``). A single recording's frames and kept intervals
-    need its persisted traces and are added by
+    Database reads only; no trace file or ``Session`` is read. A
+    concatenation sort resolves to its frozen members in member order, each
+    with its frames in the concatenation and kept intervals on its own
+    clock. A single recording's frames are added later by
     :func:`_add_single_recording_frames`.
 
     Parameters
@@ -724,13 +664,8 @@ def _resolve_match_input(
                 f"{source_id} of input {_input_label(sorting_id, curation_id)} "
                 "has MemberBoundary rows that do not match its frozen members."
             )
-        # Every member Recording must still exist with the content hash its
-        # MemberSnapshot froze -- the check ConcatenatedRecording.make_fetch
-        # and ConcatMemberCuration.make run. So a member's content hash below
-        # (the snapshot value) is also its live Recording's, for selection,
-        # UnitMatch.make and the TrackedUnit readers (which read each member
-        # Recording's timestamps) alike; a member repopulated with other
-        # content after the concatenation was built is refused here.
+        # Members must still match their frozen content hash, so the
+        # snapshot hash below is also the live Recording's.
         try:
             resolve_snapshot_recordings(snapshot)
         except (ConcatMemberDriftError, MissingRecordingForConcatError) as exc:
@@ -794,11 +729,7 @@ def _session_start_times(nwb_file_names) -> dict:
 def _session_start_mismatches(recording_rows, live_start_times) -> list[str]:
     """Describe frozen session start times that differ from ``Session``.
 
-    Compares each ``UnitMatchSelection.InputRecording`` row's frozen
-    ``session_start_time`` with the live ``Session.session_start_time`` of
-    its ``nwb_file_name`` (both read as UTC). An input's
-    ``input_start_time`` is checked separately to be the earliest of its
-    frozen session times, so it is covered too.
+    Both are read as UTC.
 
     Parameters
     ----------
@@ -870,11 +801,9 @@ def _add_single_recording_frames(item, *, allow_rebuild=True) -> None:
 def _recording_valid_times(traces, nwb_file_name, artifact_detection_id):
     """Kept intervals of a single recording on its own clock, in seconds.
 
-    The same intervals the sort records as its observation times
-    (``Sorting.make_fetch`` / ``_storage.units_nwb``): the artifact-removed valid
-    times when the sort pins an artifact detection, else the recorded chunks
-    of the persisted traces (gaps between disjoint intervals kept) -- the
-    rule ``ConcatenatedRecording`` uses for ``member_valid_times``.
+    The sort's observation times: artifact-removed valid times when the
+    sort pins an artifact detection, else the recorded chunks of the traces.
+    Same rule as ``ConcatenatedRecording.member_valid_times``.
 
     Parameters
     ----------
@@ -1012,9 +941,7 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
         Its frozen ``InputRecording`` rows in ``recording_index`` order.
     live : dict
         :func:`_resolve_match_input` for the same curation now. Frames and
-        kept intervals are compared for every recording that carries them
-        (concatenation members always; a single recording once
-        :func:`_add_single_recording_frames` has read its traces).
+        kept intervals are compared only where present.
 
     Returns
     -------
@@ -1084,8 +1011,7 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
 def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
     """``{member_index: {sorting_id, curation_id}}`` -> ``{int: (sid, int)}``.
 
-    Caller-supplied ids go through the lossless integer rule (a fractional
-    or boolean member index / curation id is rejected, not truncated).
+    A fractional or boolean id is rejected, not truncated.
     """
     return {
         lossless_int(idx, "member_index"): (
@@ -1097,12 +1023,11 @@ def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
 
 
 def _validate_member_curations(members, choices_by_member) -> None:
-    """Validate per-member curation coverage + ownership for a group.
+    """Validate per-member curation coverage and ownership for a group.
 
-    Raises ``ValueError`` when the choices do not exactly cover the group's
-    members, when a chosen curation does not exist, or when a chosen curation
-    is not a sort of the member's own recording (another member's sort, or a
-    concatenation sort -- pass those to ``insert_inputs``).
+    Raises ``ValueError`` when the choices do not exactly cover the members,
+    a curation does not exist, or a curation is not a sort of the member's
+    own recording.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import RecordingSelection

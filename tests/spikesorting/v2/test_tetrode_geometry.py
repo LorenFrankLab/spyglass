@@ -1,9 +1,8 @@
 """Tetrode-geometry gate negative cases.
 
-``maybe_apply_tetrode_geometry`` only rewrites a sort group's probe
-to the 12.5 µm tetrode square when the group is unambiguously a single
-``tetrode_12.5`` with four channels in one electrode group. These pin that the
-gate no-ops (and logs the failing condition) for every disqualifying setup.
+``maybe_apply_tetrode_geometry`` rewrites the probe to the 12.5 µm tetrode
+square only for a single ``tetrode_12.5`` with four channels in one electrode
+group; otherwise it no-ops and logs the failing condition.
 """
 
 from __future__ import annotations
@@ -14,14 +13,9 @@ import numpy as np
 def _assert_tetrode_gate_noop(
     caplog, probe_types, electrode_group_names, channel_ids, reason_substr
 ):
-    """Call ``maybe_apply_tetrode_geometry`` with a failing-gate setup and
-    assert (a) the recording geometry is untouched and (b) an INFO log names
-    the condition that failed.
+    """Assert the gate leaves the default linear probe untouched and logs the
+    failed condition at INFO."""
 
-    The synthetic recording carries SI's default linear probe (contacts at
-    y=0,20,40,...); the tetrode patch would replace it with a 12.5 µm square,
-    so an unchanged ``get_channel_locations()`` proves the gate no-opped.
-    """
     import logging
 
     import spikeinterface as si

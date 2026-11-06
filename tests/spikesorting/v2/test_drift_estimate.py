@@ -1,21 +1,6 @@
 """Tests for the DriftEstimate drift/motion QC table.
 
-Integration tier (DB + SpikeInterface, slow): drives ``DriftEstimate`` over a
-real materialized ``Recording`` (the package-scoped ``populated_sorting``
-fixture's recording) and checks the four contract properties:
-
-- populate writes exactly one QC row (finite ``max_abs_displacement_um >= 0``,
-  ``n_temporal_bins >= 1``, non-empty ``motion`` blob);
-- the estimate is **not applied** -- the upstream ``Recording``'s
-  ``content_hash`` and the bytes from ``get_recording`` are unchanged after
-  populate (QC is read-only w.r.t. the recording);
-- ``get_motion`` round-trips the stored displacement / bins;
-- ``DriftEstimate`` is **on demand** -- zero rows for a fully populated
-  ``Recording`` until ``.populate()`` is called.
-
-The motion estimate uses the module default preset (``dredge_fast``), which
-routes through SpikeInterface's dredge estimator (needs torch -- a
-``spikesorting-v2`` dependency).
+The default ``dredge_fast`` preset needs torch.
 """
 
 from __future__ import annotations
@@ -41,8 +26,8 @@ def _clear_drift(key: dict) -> None:
 
 @pytest.fixture(scope="module")
 def drift_recording_key(populated_sorting):
-    """The ``Recording`` PK for the shared smoke-fixture sort; cleaned of any
-    leftover ``DriftEstimate`` rows on entry and exit."""
+    """The ``Recording`` PK for the shared smoke-fixture sort, with
+    ``DriftEstimate`` rows cleared on entry and exit."""
     key = _recording_key(populated_sorting)
     _clear_drift(key)
     yield key
@@ -52,8 +37,8 @@ def drift_recording_key(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_drift_estimate_on_demand_only(drift_recording_key):
-    """A fully populated ``Recording`` has ZERO ``DriftEstimate`` rows until
-    ``.populate()`` is called (it does not auto-populate with ``Recording``)."""
+    """A populated ``Recording`` has no ``DriftEstimate`` rows until
+    ``.populate()`` is called."""
     from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
 
     key = drift_recording_key
@@ -74,9 +59,7 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
     from spyglass.spikesorting.v2.recording import DriftEstimate
 
     key = drift_recording_key
-    # No pre-clear: populate is idempotent (DataJoint skips present keys), and
-    # the PK is recording_id only (one row per recording), so re-running is a
-    # no-op that leaves the single row intact.
+    # No pre-clear needed: one row per recording, and populate skips it.
     DriftEstimate.populate(key, reserve_jobs=False)
 
     rows = (DriftEstimate & key).fetch(as_dict=True)
@@ -96,16 +79,11 @@ def test_drift_estimate_populate_writes_qc_row(drift_recording_key):
     assert len(disp) >= 1
     flat = np.concatenate([np.asarray(d).ravel() for d in disp])
     assert flat.size > 0 and np.all(np.isfinite(flat))
-    # The stored summary is consistent with the stored blob.
     assert np.isclose(max_abs, float(np.max(np.abs(flat))))
 
-    # Shape contract: each segment's displacement is 2-D
-    # (n_temporal_bins, n_spatial_bins); spatial_bins_um is a single 1-D array
-    # of window centers; and the stored n_temporal_bins column equals the
-    # blob's total temporal-bin count. The fixture is drift-free (max_abs ~ 0),
-    # so this structural check -- not a value check -- is what proves the blob
-    # is a real compute_motion output (a flattened/transposed field would fail
-    # here even though the numbers are finite).
+    # The fixture is drift-free, so check shapes rather than values:
+    # displacement is (n_temporal_bins, n_spatial_bins) per segment and
+    # spatial_bins_um is 1-D.
     tbins = motion["temporal_bins_s"]
     sbins = np.asarray(motion["spatial_bins_um"])
     assert len(tbins) == len(disp)
@@ -152,9 +130,8 @@ def test_drift_estimate_fetch_pins_recording_and_compute_needs_no_db(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_drift_estimate_not_applied(drift_recording_key):
-    """Estimating drift does NOT modify the recording: the upstream
-    ``Recording``'s ``content_hash`` and the bytes from ``get_recording`` are
-    identical before and after ``DriftEstimate.populate`` (QC is read-only)."""
+    """``DriftEstimate.populate`` leaves the ``Recording`` content_hash and
+    ``get_recording`` bytes unchanged."""
     from spyglass.spikesorting.v2.recording import DriftEstimate, Recording
 
     key = drift_recording_key
@@ -203,7 +180,7 @@ def test_drift_estimate_get_motion_round_trips(drift_recording_key):
         np.asarray(motion.spatial_bins_um),
         np.asarray(blob["spatial_bins_um"]),
     )
-    # The rehydrated displacement is finite (a usable QC object, not a stub).
+    # The rehydrated displacement is finite.
     flat = np.concatenate([np.asarray(d).ravel() for d in motion.displacement])
     assert np.all(np.isfinite(flat))
 
@@ -211,11 +188,8 @@ def test_drift_estimate_get_motion_round_trips(drift_recording_key):
 def test_drift_estimate_survives_peaks_sharing_a_frame(
     dj_conn, tmp_path, monkeypatch
 ):
-    """Two peaks on one frame over an HDF5-backed time vector (as the v2 NWB
-    reader returns it) can fail inside DREDge's fancy-indexed time lookup
-    (``dredge.py:227``). The estimate must complete and stay on the
-    recording's real clock: its bins span the 30 s acquisition gap uncapped.
-    """
+    """Two peaks on one frame over an HDF5-backed time vector do not break
+    DREDge's fancy-indexed time lookup, and bins span the real 30 s gap."""
     from spikeinterface.preprocessing.motion import motion_options_preset
     from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 

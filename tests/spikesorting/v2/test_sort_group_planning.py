@@ -1,24 +1,8 @@
-"""Unit tests for the pure SortGroupV2 planning helpers.
+"""DB-free tests for the SortGroupV2 planning helpers.
 
-``SortGroupV2.set_group_by_shank`` /
-``set_group_by_electrode_table_column`` are thin orchestrators over three
-pure helpers (no DataJoint queries / no ``dj.schema`` activation)
-extracted for testability:
-
-* ``_plan_sort_groups_by_shank`` / ``_plan_sort_groups_by_column`` --
-  enumerate groupings and resolve each group's reference, returning
-  ``(proposed, skipped)``.
-* ``_build_sort_group_rows`` -- materialize resolved plans into the
-  master + part row lists the transaction inserts.
-
-These tests drive those helpers directly with fabricated NumPy structured
-arrays (mimicking ``Electrode().fetch()``) -- no database fixture, no
-``populate``, no queries. They import the DB-free ``_sort_group_planning``
-module (NOT a ``@schema`` module), so they need no ``dj.schema``
-activation or DB connection and run in well under a second. (Importing
-them still pulls DataJoint / SpikeInterface via the spyglass package
-``__init__`` -- "no DB" here means no connection / activation, not "no
-DataJoint installed".)
+Drives ``_plan_sort_groups_by_shank``, ``_plan_sort_groups_by_column`` and
+``_build_sort_group_rows`` with structured arrays mimicking
+``Electrode().fetch()``.
 """
 
 from __future__ import annotations
@@ -237,7 +221,7 @@ def test_plan_by_shank_specific_reference_member_raises():
 
 
 def test_plan_by_shank_no_groups_survive_raises():
-    """All-unitrode input produces no sort groups -> ValueError."""
+    """All-unitrode input produces no sort groups and raises ValueError."""
     electrodes = _electrodes([_shank("0", 0, 1), _shank("1", 0, 2)])
     with pytest.raises(ValueError, match="no sort groups produced"):
         _plan_sort_groups_by_shank(
@@ -355,7 +339,7 @@ def test_plan_by_column_unitrode_skip_leaves_id_gap():
 
 
 def test_plan_by_column_no_groups_survive_raises():
-    """All-unitrode column groups produce nothing -> ValueError."""
+    """All-unitrode column groups produce nothing and raise ValueError."""
     electrodes = _electrodes([_shank("0", 0, 1)])
     with pytest.raises(ValueError, match="no sort groups"):
         _plan_sort_groups_by_column(

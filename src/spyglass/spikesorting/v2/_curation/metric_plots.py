@@ -1,13 +1,4 @@
-"""DB-free plotting + analyzer-extraction helpers for analyzer curation.
-
-The ``@schema`` ``CurationEvaluation`` methods delegate here so the rendering /
-SortingAnalyzer-reading logic stays importable and unit-testable without a
-DataJoint connection. ``plot_units_qc_figure`` takes plain data (a metrics
-DataFrame + unit locations) and returns the matplotlib axes it drew into; the
-burst helpers read a SortingAnalyzer's waveforms / template_similarity /
-unit_locations extensions, compute correlograms on the fly at the requested
-window/bin, and reuse the shared ``utils_burst`` renderers.
-"""
+"""DB-free plotting and analyzer-extraction helpers for ``CurationEvaluation``."""
 
 from __future__ import annotations
 
@@ -39,11 +30,7 @@ def _flatten_axes(axes):
 def draw_metric_histogram(ax, values, *, title, ylabel="count"):
     """Draw one metric's histogram on ``ax``, dropping non-finite values.
 
-    The float-coerced ``values`` have their non-finite entries (the ``None``
-    sanitized non-finite readback) dropped before histogramming, with the dropped
-    count annotated in the corner. Shared by the population QC overview
-    (``plot_units_qc_figure``) and the routed-metric plot
-    (``plot_metrics_figure``) so a per-metric panel renders identically in both.
+    The dropped count is annotated in the corner.
     """
     finite = values[np.isfinite(values)]
     n_dropped = len(values) - len(finite)
@@ -253,8 +240,7 @@ def plot_units_qc_figure(
     scatter_ax.set_ylabel("depth (um)")
     scatter_ax.set_title(f"unit depth colored by {color_metric}")
 
-    # Only tidy a figure we created; when the caller injects axes they own the
-    # layout (tight_layout would fight a constrained_layout / mosaic host).
+    # Caller-supplied axes own their layout.
     if axes is None:
         fig.tight_layout()
     return {**hist_axes, "scatter": scatter_ax}
@@ -265,12 +251,8 @@ def correlograms_from_analyzer(
 ):
     """Return ``(ccgs, bins, unit_ids)`` computed fresh at the given window/bin.
 
-    Computes correlograms directly from the sorting with the REQUESTED
-    ``window_ms`` / ``bin_ms`` rather than reusing the stored ``correlograms``
-    extension -- curation computes that extension with SI's 50 / 1 ms default
-    for the merge engine, so reusing it would silently ignore the window/bin
-    asked for here. A fresh compute on the sorting does not overwrite the stored
-    extension. Indexed by the analyzer's unit-id order.
+    The stored ``correlograms`` extension uses SI's 50 / 1 ms default, so it
+    is not reused or overwritten. Indexed by the analyzer's unit-id order.
     """
     from spikeinterface.postprocessing import compute_correlograms
 
@@ -283,9 +265,8 @@ def correlograms_from_analyzer(
 def _plot_correlogram_grid(ccgs, bins, panels, *, n_cols, panel_size):
     """Render a grid of correlogram bar plots.
 
-    ``panels`` is a list of ``(row_index, col_index, title)`` -- ``ccgs[row,
-    col, :]`` is the histogram for each cell. Shared by the autocorrelogram
-    (i==j) and cross-correlogram (pair) views.
+    ``panels`` is a list of ``(row_index, col_index, title)``; each cell
+    plots ``ccgs[row, col, :]``.
     """
     import matplotlib.pyplot as plt
 
@@ -324,9 +305,7 @@ def plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=None):
 def plot_pair_correlograms_figure(ccgs, bins, ids, pairs):
     """Render cross-correlograms for unit pairs (indexed by unit id, not 1-based).
 
-    This is the v2 port of ``utils_burst.plot_burst_xcorrel`` which assumed
-    1-based contiguous unit ids; v2 sorts can have arbitrary unit ids, so the
-    pair is mapped through the analyzer's unit-id order.
+    Unit ids may be arbitrary, so pairs map through the analyzer's order.
     """
     index_of = {unit_id: i for i, unit_id in enumerate(ids)}
     panels = [(index_of[a], index_of[b], f"{a} x {b}") for a, b in pairs]
@@ -338,25 +317,11 @@ def plot_pair_correlograms_figure(ccgs, bins, ids, pairs):
 def peak_amplitudes_from_analyzer(analyzer):
     """Return ``(peak_amps, peak_times)`` per unit from the waveforms ext.
 
-    ``peak_amps[unit_id]`` is ``(n_spikes, n_channels)`` sampled at the
-    waveform PEAK -- the ``nbefore`` alignment sample (the trough), NOT the
-    array center. The analyzer's asymmetric window (``ms_before=1.0`` !=
-    ``ms_after=2.0``) places the peak off the geometric center, so the center
-    sample reads ~0.5 ms into the repolarization tail rather than the peak.
-    ``peak_times[unit_id]`` is the spike times of THOSE SAME spikes, in
-    seconds on the recording-relative timeline (sample index / fs) the review
-    views use, so acquisition gaps are not shown.
-    The ``waveforms`` extension holds only the ``random_spikes`` subset (capped
-    at ``max_spikes_per_unit``), so the times are taken from that subset, not
-    the full train -- otherwise the amplitude/time arrays mismatch for any unit
-    with more spikes than the cap and ``plot_peak_over_time`` misaligns. The
-    subset is read via the ``random_spikes`` extension, which is sorted by
-    sample index in the same order as ``get_waveforms_one_unit``. Amplitudes are
-    returned **dense** (all probe channels, global index) so the burst-pair
-    plots -- which overlay two units channel-by-channel -- compare the SAME
-    physical contact across units; a sparse analyzer gives each unit its own
-    channel subset, so local-index overlay would mismatch contacts. Used by the
-    burst-pair inspection plots.
+    - ``peak_amps[unit_id]``: ``(n_spikes, n_channels)`` at the ``nbefore``
+      alignment sample, not the array center (the window is asymmetric).
+      Dense, so burst-pair overlays compare the same contact across units.
+    - ``peak_times[unit_id]``: seconds (sample index / fs) of the same
+      ``random_spikes`` subset the waveforms hold, not the full train.
     """
     waveforms = analyzer.get_extension("waveforms")
     nbefore = waveforms.nbefore
@@ -387,37 +352,17 @@ def burst_pair_metrics_from_analyzer(
 ):
     """Per-pair burst-merge diagnostics computed on the fly (nothing stored).
 
-    Returns one dict per ordered unit pair with the four legs of the v1
-    BurstPair merge test, read from the analyzer's extensions (computing
-    ``templates`` / ``template_similarity`` / ``unit_locations`` on the fly if
-    absent, and correlograms fresh at the requested window/bin):
+    One dict per ordered pair (default: all; explicit pairs are validated):
 
-    - ``wf_similarity`` -- SI's cosine ``template_similarity`` (not v1's flat
-      Pearson, which mishandles per-unit sparsity). Note this is an INDEPENDENT
-      corroboration, not a reproduction of the merge engine's metric: the
-      ``similarity_correlograms`` auto-merge preset compares templates with
-      ``l1`` (its ``similarity_method`` default), while this reports cosine.
-    - ``isi_violation`` -- refractory-violation fraction of the train a
-      committed merge would store: cross-unit detections within 0.4 ms count
-      once, and intervals are measured on the recording's clock, never across
-      a ``continuity_spans`` join (a concat source's member and acquisition
-      joins), matching stored unit QC (violating intervals / (spikes - 1)).
-      This pure helper defaults to 2 ms; the evaluation API supplies its
-      recipe's window and its source's continuity spans.
-    - ``xcorrel_asymm`` -- cross-correlogram left/right asymmetry (burst
-      parent/child signature; directional, so computed per ordered pair).
-    - ``unit_distance`` -- euclidean distance between ``unit_locations`` (the
-      spatial leg v1 lacked; two cells can share a shape at different depths).
+    - ``wf_similarity``: SI's cosine ``template_similarity``; the auto-merge
+      preset uses ``l1``, so this corroborates rather than reproduces it.
+    - ``isi_violation``: violation fraction of the merged train (0.4 ms
+      dedup), never across a ``continuity_spans`` join.
+    - ``xcorrel_asymm``: directional cross-correlogram asymmetry.
+    - ``unit_distance``: euclidean distance between ``unit_locations``.
 
-    ``pairs`` defaults to all ordered pairs; an explicit list is validated
-    against the analyzer's unit ids.
-
-    All four legs are template- or spike-time-derived, so callers pass the
-    UNWHITENED display analyzer (whitening distorts ``template_similarity`` and
-    the ``unit_locations`` positions): ``CurationEvaluation`` loads it via
-    ``_analyzer_for``, the same display analyzer the merge engine runs on. The
-    diagnostic is an independent corroboration of those suggestions (it differs
-    in similarity metric, see above), not a reproduction of them.
+    Pass the unwhitened display analyzer; whitening distorts similarity and
+    locations.
     """
     from itertools import permutations
 
@@ -453,9 +398,8 @@ def burst_pair_metrics_from_analyzer(
     ccgs, bins, _ = correlograms_from_analyzer(
         analyzer, window_ms=window_ms, bin_ms=bin_ms
     )
-    # calculate_ca splits on ``bins < 0`` / ``bins > 0``. Right edges would
-    # put the innermost negative bin on edge 0 and drop it, biasing every
-    # asymmetry positive; centers are never zero for an even bin count.
+    # calculate_ca splits on sign; right edges would drop the innermost
+    # negative bin and bias asymmetry positive.
     bin_centers = (bins[:-1] + bins[1:]) / 2.0
     spike_frames = {
         u: np.asarray(analyzer.sorting.get_unit_spike_train(u), dtype=np.int64)
@@ -467,8 +411,7 @@ def burst_pair_metrics_from_analyzer(
     }
     boundaries = isi_continuity_boundaries(analyzer, continuity_spans)
 
-    # The merged train, and so its ISI-violation fraction, does not depend on
-    # pair order; compute it once per unordered pair.
+    # Order-independent, so once per unordered pair.
     isi_violation_by_pair: dict[frozenset, float] = {}
     rows = []
     for u1, u2 in pairs:
@@ -515,11 +458,8 @@ BURST_PAIR_METRIC_COLUMNS = (
 def burst_pair_metrics_frame(analyzer, pairs=None, **kwargs):
     """Burst-pair diagnostics as a ``(unit1, unit2)``-indexed DataFrame.
 
-    The queryable form of :func:`burst_pair_metrics_from_analyzer` -- the v2
-    counterpart to fetching v1's ``BurstPair.BurstPairUnit`` part table as a
-    frame. Ordered pairs stay distinct on the index because ``xcorrel_asymm``
-    is directional. ``pairs`` and the correlogram keyword arguments are passed
-    through unchanged; with ``pairs=None`` every ordered pair is present.
+    Wraps :func:`burst_pair_metrics_from_analyzer`; ordered pairs stay
+    distinct because ``xcorrel_asymm`` is directional.
 
     Returns
     -------

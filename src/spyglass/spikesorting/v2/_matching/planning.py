@@ -1,24 +1,10 @@
 """DB-free curation-choice planning for cross-session unit matching.
 
-``run_v2_unit_match`` requires every matching input to pin exactly one
-committed curation, so a match never silently depends on an implicit "latest"
-curation. Hand-building those pins is error-prone, so this module turns the
-per-candidate curation lists into pins via a named, intent-declaring curation
-strategy and returns a plan (with warnings / errors) to inspect BEFORE the
-expensive match:
+Turns already-fetched curation lists into one pinned curation per matching
+input via a named curation strategy, returning a reviewable plan:
 
-- :func:`build_unit_match_plan` -- one pin per ``SessionGroup`` member (the
-  structured form ``describe_unit_match_choices`` tabulates), returning a
-  :class:`UnitMatchPlan`;
-- :func:`build_unit_match_input_plan` -- one pin per named sort (a sort of a
-  single recording or of a same-day concatenation), returning a
-  :class:`UnitMatchInputPlan` with one row per matching input.
-
-This module is deliberately DB-free: it operates on already-fetched curation
-lists, so the curation-strategy logic is unit-tested without a database. The
-DataJoint plumbing (fetching the candidates, running the plan) lives in
-the matching orchestration module. The low-level ``UnitMatchSelection`` stays explicit and
-pinned; this module is only the layer that assembles the pins.
+- :func:`build_unit_match_plan`: one pin per ``SessionGroup`` member.
+- :func:`build_unit_match_input_plan`: one pin per named sort.
 """
 
 from __future__ import annotations
@@ -37,9 +23,7 @@ if TYPE_CHECKING:
         UnitMatchPreflightReport,
     )
 
-# Every curation strategy is an explicit declaration of intent; there is
-# deliberately no default (an implicit "latest" is exactly what pinning
-# exists to prevent).
+# No default: an implicit "latest" is what pinning exists to prevent.
 STRATEGIES: tuple[str, ...] = (
     "final_curated",
     "auto_curated",
@@ -50,8 +34,6 @@ STRATEGIES: tuple[str, ...] = (
 _ROOT_PARENT = -1
 _AUTO_SOURCE = "curation_evaluation"
 
-# Column order for the ``describe_unit_match_choices`` DataFrame view: the member
-# identity first, then the per-choice curation fields.
 _MEMBER_COLUMNS = (
     "member_index",
     "nwb_file_name",
@@ -67,8 +49,6 @@ _CHOICE_COLUMNS = (
     "curation_source",
     "description",
 )
-# Column order for ``UnitMatchInputPlan.as_dataframe``: the sort and its
-# constituent recordings (in recording order), then the pin.
 _INPUT_PLAN_COLUMNS = (
     "sorting_id",
     "source_kind",
@@ -139,11 +119,8 @@ def _plan_summary(plan) -> str:
 def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
     """Flatten per-member curation choices to one row per (member, choice).
 
-    The human-facing view behind ``describe_unit_match_choices``: each pinnable
-    curation becomes a row carrying the member identity plus the choice fields.
-    A member with no sort yet still appears as a single row with null curation
-    columns, so it stays visible as "sort me first" rather than vanishing.
-    DB-free; ``pandas`` is imported lazily to keep this module import-light.
+    The view behind ``describe_unit_match_choices``. A member with no sort
+    yet appears as one row with null curation columns.
     """
     import pandas as pd
 
@@ -159,10 +136,7 @@ def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
         else:
             rows.append({**member_id, **{c: None for c in _CHOICE_COLUMNS}})
     df = pd.DataFrame(rows, columns=list(_MEMBER_COLUMNS + _CHOICE_COLUMNS))
-    # Keep the id columns as nullable ``Int64`` so a sortless member's ``None``
-    # placeholder row does not upcast valid ids to float (a curation_id would
-    # otherwise display / copy as ``0.0`` instead of ``0`` -- the exact
-    # copy-paste footgun this table exists to prevent).
+    # Nullable Int64 so a sortless member's None row does not upcast ids to float.
     for col in (
         "member_index",
         "sort_group_id",
@@ -177,19 +151,13 @@ def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
 class UnitMatchPlan:
     """A reviewable plan pinning one curation per SessionGroup member.
 
-    ``curation_choices`` maps each member index to ``sorting_id``,
-    ``curation_id`` and ``curation_uuid``. The UUID pins the reviewed
-    generation, so deleting and recreating a numeric curation ID invalidates
-    the plan. ``run_v2_unit_match`` consumes these pins. ``errors`` (blocking)
-    is non-empty when
-    the curation strategy could not pin exactly one curation for some member;
-    ``ok`` is then ``False`` and running the plan raises. ``warnings`` are
-    advisory (e.g. the ``root`` curation strategy pins uncurated curations).
-    ``as_dataframe()`` renders one row per member for review.
-    Public planners also freeze ``unit_selections`` and attach a read-only
-    ``preflight`` report plus ``input_set_hash``. The table exposes policy,
-    included IDs, excluded reasons, and original recording source coverage;
-    the runner revalidates those inputs before inserting a selection.
+    - ``curation_choices`` maps member index to ``sorting_id``,
+      ``curation_id`` and ``curation_uuid``; the UUID invalidates the plan
+      if a curation ID is deleted and recreated.
+    - ``errors`` block the run (``ok`` is ``False``); ``warnings`` are
+      advisory.
+    - Public planners also freeze ``unit_selections`` and attach
+      ``preflight`` and ``input_set_hash``; the runner revalidates them.
     """
 
     session_group_owner: str
@@ -251,21 +219,11 @@ class UnitMatchPlan:
 class UnitMatchInputPlan:
     """A reviewable plan pinning one curation per named sort for matching.
 
-    Each named sort -- of a single recording or of a same-day concatenation
-    -- is one matching input. ``curations`` is the list of pinned
-    ``{"sorting_id", "curation_id", "curation_uuid"}`` in the order the sorts
-    were named; the UUID pins the reviewed generation, even if the numeric
-    curation ID is later reused.
-    ``run_v2_unit_match`` passes it to ``UnitMatchSelection.insert_inputs``,
-    which numbers the inputs chronologically. ``errors`` (blocking) is
-    non-empty when the curation strategy could not pin exactly one curation
-    for some sort; ``ok`` is then ``False`` and running the plan raises.
-    ``warnings`` are advisory. Public planners additionally freeze named unit
-    populations and validate sources/frames, overlap, geometry, and backend
-    prerequisites; these findings also contribute to ``errors``. The
-    ``as_dataframe()`` table uses canonical chronological ``input_index`` order
-    after preflight, while ``curations`` and ``unit_selections`` stay aligned in
-    the supplied order. Pure curation-choice builders retain the named order.
+    - ``curations`` lists the pins in the order the sorts were named.
+    - ``errors`` block the run (``ok`` is ``False``), including preflight
+      findings; ``warnings`` are advisory.
+    - After preflight, ``as_dataframe()`` uses chronological ``input_index``
+      order; ``curations`` and ``unit_selections`` keep the named order.
     """
 
     matcher_params_name: str
@@ -328,9 +286,8 @@ def _reviewed_pin(row) -> tuple[str, int, str]:
 def unit_match_plan_structure_errors(plan) -> list[str]:
     """Check original requested inputs and mutable review rows before DB work.
 
-    Strategy resolution errors are distinct from historical resource findings:
-    restoring a missing cache can fix the latter, while choosing a previously
-    unresolved curation requires a rebuilt, reviewed set of generation pins.
+    An unresolved curation needs a rebuilt plan; a missing cache can be
+    restored instead.
     """
     errors = list(plan.curation_resolution_errors)
     declared = bool(errors)
@@ -380,9 +337,8 @@ def unit_match_plan_structure_errors(plan) -> list[str]:
 def _leaf_keys(choices: list[dict]) -> set[tuple]:
     """``(sorting_id, curation_id)`` of curations that are no other's parent.
 
-    A leaf is a terminal curation in its sort's lineage -- nothing was curated
-    from it. Computed within each sort (a ``parent_curation_id`` is only unique
-    within a ``sorting_id``).
+    Computed per sort: ``parent_curation_id`` is unique only within a
+    ``sorting_id``.
     """
     parent_keys = {(c["sorting_id"], c["parent_curation_id"]) for c in choices}
     return {
@@ -606,10 +562,7 @@ def _check_strategy_arguments(
             f"{caller}: unknown curation_strategy "
             f"{curation_strategy!r}; choose one of {STRATEGIES}."
         )
-    # manual_curation_choices is only consulted by curation_strategy='manual';
-    # passing it with an automatic curation strategy would silently do nothing
-    # (the planner picks), so reject it up front rather than let it look
-    # intentional.
+    # Otherwise it would be silently ignored.
     if manual_curation_choices is not None and curation_strategy != "manual":
         raise ValueError(
             f"{caller}: manual_curation_choices is only used by "
@@ -629,32 +582,27 @@ def build_unit_match_plan(
 ) -> UnitMatchPlan:
     """Assemble a pinned :class:`UnitMatchPlan` from per-member curation lists.
 
-    ``members`` is the structured per-member choices (one entry per member:
-    ``member_index`` / ``nwb_file_name`` / ``choices`` list of ``{sorting_id,
-    curation_id, curation_uuid, parent_curation_id, curation_source,
-    description}``) --
-    ``describe_unit_match_choices`` tabulates the same data. DB-free.
-    ``curation_strategy`` is REQUIRED:
+    ``members`` has one entry per member: ``member_index``,
+    ``nwb_file_name`` and ``choices`` (``{sorting_id, curation_id,
+    curation_uuid, parent_curation_id, curation_source, description}``).
+    ``curation_strategy`` is required:
 
-    - ``final_curated`` -- the member's single terminal curated (non-root)
-      curation; errors if a member has zero or more than one.
-    - ``auto_curated`` -- the member's auto-curated child
-      (``curation_source='curation_evaluation'``); errors on zero / multiple.
-    - ``root`` -- the member's root curation, with a loud advisory (uncurated).
-    - ``manual`` -- pins ``manual_curation_choices[member_index]`` per member,
-      validated against the member's committed curations.
+    - ``final_curated``: the single terminal non-root curation.
+    - ``auto_curated``: the single ``curation_source='curation_evaluation'``
+      curation.
+    - ``root``: the root curation, with an uncurated warning.
+    - ``manual``: ``manual_curation_choices[member_index]``, validated
+      against the member's committed curations.
 
-    A member the curation strategy cannot resolve to exactly one curation becomes a
-    blocking ``error`` (``plan.ok is False``); other members still resolve, so
-    ``plan.as_dataframe()`` shows the whole picture at once.
+    A member without exactly one candidate becomes a blocking error; other
+    members still resolve.
     """
     _check_strategy_arguments(
         "build_unit_match_plan", curation_strategy, manual_curation_choices
     )
 
     if manual_curation_choices is not None:
-        # Keys go through the same lossless rule as the ids: True / 1.0 hash
-        # equal to 1 and would otherwise silently select member 1.
+        # True and 1.0 hash equal to 1 and would select member 1.
         manual_curation_choices = {
             lossless_int(key, "manual_curation_choices member index"): value
             for key, value in manual_curation_choices.items()
@@ -682,9 +630,7 @@ def build_unit_match_plan(
             }
         )
 
-    # Manual coverage is EXACT: a manual_curation_choices entry for a member
-    # index that is not in the group (stale / mistyped) is silently unused
-    # above, so flag it as a blocking error rather than let the plan look ok.
+    # An entry for a non-member index would otherwise be silently unused.
     if curation_strategy == "manual" and manual_curation_choices:
         member_indexes = {m["member_index"] for m in members}
         extra = sorted(set(manual_curation_choices) - member_indexes)
@@ -718,29 +664,14 @@ def build_unit_match_input_plan(
 ) -> UnitMatchInputPlan:
     """Assemble a pinned :class:`UnitMatchInputPlan` from per-sort curations.
 
-    Each entry of ``sorts`` is one matching input: a sort of a single
-    recording or of a same-day concatenation, as ``{sorting_id,
-    source_kind, source_id, nwb_file_names, interval_list_names, choices}``
-    where ``nwb_file_names`` / ``interval_list_names`` list the sort's
-    constituent recordings in recording order and ``choices`` is the sort's
-    committed curations (``{sorting_id, curation_id, curation_uuid,
-    parent_curation_id, curation_source, description}``). DB-free.
-    ``curation_strategy`` is
-    REQUIRED and resolves exactly as in :func:`build_unit_match_plan`, within
-    each sort's own curations:
-
-    - ``final_curated`` -- the sort's single terminal curated (non-root)
-      curation; errors on zero or several.
-    - ``auto_curated`` -- the sort's auto-curated child
-      (``curation_source='curation_evaluation'``); errors on zero / several.
-    - ``root`` -- the sort's root curation, with a loud advisory (uncurated).
-    - ``manual`` -- pins ``manual_curation_choices[sorting_id]`` (a
-      ``curation_id``) per sort, validated against the sort's committed
-      curations; an entry for a sort that is not named is a blocking error.
-
-    A sort the strategy cannot resolve to exactly one curation becomes a
-    blocking ``error`` (``plan.ok is False``); the other sorts still resolve,
-    so ``plan.as_dataframe()`` shows every input at once.
+    Each entry of ``sorts`` is one matching input: ``{sorting_id,
+    source_kind, source_id, nwb_file_names, interval_list_names, choices}``,
+    with recordings in recording order and ``choices`` as in
+    :func:`build_unit_match_plan`. ``curation_strategy`` resolves as in
+    :func:`build_unit_match_plan`, except ``manual`` reads
+    ``manual_curation_choices[sorting_id]`` (a ``curation_id``). A sort
+    without exactly one candidate becomes a blocking error; other sorts
+    still resolve.
 
     Raises
     ------
@@ -822,8 +753,7 @@ def build_unit_match_input_plan(
             }
         )
 
-    # Manual coverage is EXACT: an entry for a sort that was not named
-    # (stale / mistyped) would be silently unused, so it blocks the plan.
+    # An entry for an unnamed sort would otherwise be silently unused.
     if manual:
         extra = sorted(set(manual) - set(sorting_ids))
         if extra:

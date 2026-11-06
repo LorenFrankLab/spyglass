@@ -1,22 +1,15 @@
 """Capture a v1 spike-sorting baseline on a real lab dataset.
 
-Runs the v1 pipeline -- recording materialization, artifact detection,
-``clusterless_thresholder`` sort, ``CurationV1`` -- against a real NWB file and
-writes small artifacts that v1 ↔ v2 parity tests will compare the modern (v2)
-pipeline output against.
+Runs v1 recording, artifact detection, sorting and ``CurationV1`` on a real
+NWB file and writes the artifacts the v1/v2 parity tests compare against.
 
-Must be invoked under the **v1 (SpikeInterface 0.99) runtime environment**, not
-the v2 SI 0.104 environment, because v1's sort runs through
-``si.extract_waveforms`` and related pre-0.101 APIs.
-
-The script always targets the isolated Docker test database via
-``bootstrap_v2_test_environment``; it writes only under a temporary
-``SPYGLASS_BASE_DIR`` and on a ``pytests``-prefixed schema. Any production
-metadata lookup (for example to locate the source NWB) is read-only and
-requires ``SPYGLASS_ALLOW_PRODUCTION_SMOKE=1``.
-
-Skipped with a clear message if no NWB path is supplied via ``--nwb-file`` or
-the ``SPIKESORTING_V2_REAL_NWB_PATH`` environment variable.
+- Run under the v1 (SpikeInterface 0.99) environment: v1 uses
+  ``si.extract_waveforms`` and other pre-0.101 APIs.
+- Writes only to the Docker test database (``pytests`` prefix) and a temporary
+  ``SPYGLASS_BASE_DIR``. Read-only production lookups require
+  ``SPYGLASS_ALLOW_PRODUCTION_SMOKE=1``.
+- Skips if no NWB path is given via ``--nwb-file`` or
+  ``SPIKESORTING_V2_REAL_NWB_PATH``.
 
 Usage
 -----
@@ -69,40 +62,25 @@ def _ensure_sort_group(
 ) -> None:
     """Make sure the sort-group layout exists for this NWB.
 
-    For the default ``reference_mode="none"`` the call is idempotent:
-    ``SortGroup.set_group_by_shank`` is a no-op when rows already exist.
+    ``reference_mode``:
 
-    ``reference_mode`` selects the v1 referencing for the captured baseline:
-    ``"none"`` (the order-invariant default used by the parity matrix) leaves
-    v1's config-derived references alone, while ``"global_median"`` forces a
-    common-median reference on every electrode group (v1's ``-2`` sentinel via
-    the ``references`` dict). The global-median baseline is v1's REFERENCE-
-    FIRST output; v2 filters before referencing, so its global-median result
-    intentionally diverges from this baseline.
-
-    The ``"global_median"`` path must DROP any existing sort groups first:
-    v1's ``set_group_by_shank`` early-returns under ``test_mode`` (the
-    standalone capture bootstrap sets ``custom.test_mode=True``) when rows
-    already exist, so on a reused capture DB the new ``references`` mapping
-    would be silently ignored and the baseline would carry the prior (likely
-    no-reference) sentinel. After rebuilding, the captured group's
-    ``sort_reference_electrode_id`` is asserted to be ``-2`` so a stale or
-    mis-configured group fails loud rather than producing a baseline that is
-    not actually global-median.
+    - ``"none"`` (parity-matrix default): keeps v1's config-derived
+      references; idempotent.
+    - ``"global_median"``: common-median reference (v1's ``-2`` sentinel) on
+      every electrode group. Drops existing sort groups first, since
+      ``set_group_by_shank`` returns early under ``test_mode`` when rows
+      exist. v1 references before filtering and v2 after, so v2's
+      global-median result is expected to differ from this baseline.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v1 import SortGroup
 
     if reference_mode == "global_median":
-        # Force a clean rebuild so test_mode's "rows exist -> return" cannot
-        # leave a stale (e.g. no-reference) group in place. The cascade clears
-        # this session's downstream v1 recording/sorting/curation rows too,
-        # which is what we want before re-materializing under a new reference.
+        # Cascade also clears this session's downstream v1 rows.
         existing = SortGroup & {"nwb_file_name": nwb_file_name}
         if existing:
             existing.delete(safemode=False)
-        # v1 stores -2 as the global-median sentinel; map every electrode
-        # group to it so the whole session is common-median referenced.
+        # -2 is v1's global-median sentinel.
         e_groups = {
             str(g)
             for g in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
@@ -126,10 +104,6 @@ def _ensure_sort_group(
             "exists for this NWB."
         )
     if reference_mode == "global_median":
-        # Defense-in-depth: confirm the captured group is actually
-        # global-median referenced (-2) and not a stale config-derived group
-        # that survived test_mode's early return -- otherwise the "global
-        # median" baseline would silently be something else.
         ref_id = int(group_row.fetch1("sort_reference_electrode_id"))
         if ref_id != -2:
             raise RuntimeError(
@@ -144,11 +118,8 @@ def _ensure_sort_group(
 def _ensure_lab_team(team_name: str) -> None:
     """Insert ``LabTeam(team_name)`` if missing under the active schema.
 
-    Each ``--database-prefix`` runs against a freshly-bootstrapped
-    DataJoint schema, so ``LabTeam`` is empty unless we insert here.
-    ``SpikeSortingRecordingSelection`` FKs ``team_name`` to
-    ``common_lab.lab_team(team_name)``, so the insert MUST happen
-    before ``_populate_recording``.
+    A fresh ``--database-prefix`` schema has an empty ``LabTeam``; must run
+    before ``_populate_recording``, whose selection references it.
     """
     from spyglass.common.common_lab import LabTeam
 
@@ -201,12 +172,9 @@ def _populate_artifact_detection(
     ----------
     artifact_param_name : str, optional
         Existing ``ArtifactDetectionParameters`` row name. Defaults to
-        ``"default"`` (v1: 3000 µV threshold). For the polymer parity
-        matrix pass ``"none"`` so the artifact stage is a typed
-        no-detect on both pipelines; v1's ``"default"`` and v2's
-        ``"default"`` rows ship different amplitude thresholds
-        (v1 ``amplitude_thresh_uV=3000`` vs v2
-        ``amplitude_threshold_uv=500``), which would otherwise FAIL the
+        ``"default"`` (v1: 3000 µV threshold). The polymer parity matrix
+        passes ``"none"``: v1 and v2 ``"default"`` rows use different
+        thresholds (3000 vs 500 µV) and would fail the
         ``canonical_artifact_params`` fingerprint check.
     """
     from spyglass.spikesorting.v1 import (
@@ -239,11 +207,8 @@ def _populate_sorting(
     ----------
     sorter_param_name : str, optional
         Name of an existing ``SpikeSorterParameters`` row to use.
-        Defaults to ``"default_clusterless"`` (100 uV threshold, the
-        Frank-lab production value). For synthetic fixtures whose
-        template amplitudes never reach 100 uV (e.g. the MEArec
-        smoke fixture), the caller must pre-insert a lower-
-        threshold row and pass its name here.
+        Defaults to ``"default_clusterless"`` (100 uV threshold). Synthetic
+        fixtures below 100 uV need a pre-inserted lower-threshold row.
     sorter : str, optional
         SI sorter dispatch name. Defaults to
         ``"clusterless_thresholder"``. ``"mountainsort4"`` requires
@@ -309,19 +274,9 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
     )
 
     sorting = CurationV1.get_sorting(curation_key)
-    # ``SpikeSortingRecording.get_recording(curation_key)`` calls
-    # ``(cls & curation_key).fetch1(...)``. DataJoint's ``&`` does NOT
-    # auto-restrict via FK chain across distant tables -- the curation
-    # key has ``sorting_id``/``curation_id`` but no ``recording_id``,
-    # and ``SpikeSortingRecording`` has no ``sorting_id`` column, so
-    # the restriction is vacuous and fetch1 raises whenever the shared
-    # ``spikesorting_v1_recording`` schema accumulates >1 row (which
-    # happens immediately on the second capture against the shared
-    # schema, see ``capture_polymer_clusterless.sh`` concurrency note).
-    # Resolve recording_id explicitly via SpikeSortingSelection (which
-    # IS keyed by sorting_id and carries the recording_id FK in its
-    # secondary attributes) and pass the recording_id PK to
-    # ``get_recording``.
+    # The curation key has no recording_id, so restricting
+    # SpikeSortingRecording by it is vacuous and fetch1 fails once the shared
+    # v1 schema has >1 row. Resolve recording_id via SpikeSortingSelection.
     recording_id = (
         SpikeSortingSelection & {"sorting_id": curation_key["sorting_id"]}
     ).fetch1("recording_id")
@@ -340,17 +295,9 @@ def _read_spike_times(curation_key: dict) -> tuple[dict, float]:
 def _capture_metric_curation(curation_pk: dict):
     """Run v1 ``MetricCuration`` and return a per-unit metrics DataFrame.
 
-    Captures the metrics v1 actually computes and that the v1<->v2 parity test
-    compares -- ``snr``, ``isi_violation``, ``num_spikes`` -- under a
-    parity-focused ``MetricParameters`` row. The ISI threshold is pinned to
-    ``2.0 ms`` to match the v2 ``franklab_default`` metric kwargs, so the
-    bounded ``count/(n-1)`` fraction is computed on the same window on both
-    sides. (``firing_rate`` is intentionally omitted: v1 does not compute it,
-    and ``num_spikes / duration`` would be redundant with the exact
-    ``num_spikes`` parity check.)
-
-    Must run under the v1 (SpikeInterface 0.99) runtime -- v1 MetricCuration
-    extracts waveforms via the pre-0.101 ``extract_waveforms`` API.
+    Captures ``snr``, ``isi_violation`` and ``num_spikes``, with the ISI
+    threshold at 2.0 ms to match v2 ``franklab_default``. ``firing_rate`` is
+    omitted: v1 does not compute it. Requires the v1 (SI 0.99) runtime.
 
     Returns
     -------
@@ -404,16 +351,9 @@ def _capture_metric_curation(curation_pk: dict):
 def _capture_source_provenance() -> dict:
     """Record the v1-spyglass source location + commit + harness commit.
 
-    The capture script runs from the v2 checkout's repo root (master does
-    not carry the v2 test tree). The actual ``spyglass`` that imports is
-    whichever ``site-packages`` Spyglass is dev-installed against in the
-    ``spyglass-v1-parity`` conda env. Stamping
-    (a) the resolved spyglass source path and (b) the git HEAD sha of
-    BOTH that path AND the test-harness checkout into baseline metadata
-    so reviewers can verify which sources the capture actually used.
-
-    No-op if either source isn't a git checkout (returns ``None`` for
-    those fields rather than crashing).
+    The script runs from the v2 checkout, but imports whichever ``spyglass``
+    is installed in the v1 parity env, so both commits are recorded. Fields
+    are ``None`` for a source that is not a git checkout.
     """
     import subprocess
 
@@ -463,14 +403,10 @@ def _compute_invariant_fingerprints(
 ) -> dict:
     """Compute the seven invariant fingerprints for v1↔v2 parity verification.
 
-    The fingerprints encode the inputs that v1 and v2 MUST agree on
-    for a parity comparison to be meaningful (same NWB bytes, same
-    sort-group electrodes, same bad-channel mask, same effective
-    preproc / artifact / sorter kwargs, same artifact-removed
-    valid times). The v2 parity test reconstructs its own state and
-    asserts each fingerprint matches before comparing spike times; a
-    mismatch on any fingerprint fails the parity test up front rather
-    than letting a divergent input masquerade as a spike-time mismatch.
+    The inputs v1 and v2 must share for parity (NWB bytes, sort-group
+    electrodes, bad channels, preprocessing/artifact/sorter kwargs,
+    artifact-removed valid times). The parity test checks them before
+    comparing spike times.
     """
     import numpy as np
 
@@ -482,8 +418,7 @@ def _compute_invariant_fingerprints(
         SpikeSortingPreprocessingParameters,
     )
 
-    # Lazy import: ``_parity_canonical`` lives next to this module so the
-    # capture script remains self-contained on the v1 worktree after sync.
+    # Sibling module, so the script stays self-contained on the v1 worktree.
     from tests.spikesorting.v2._parity_canonical import (
         _normalize,
         canonical_artifact,
@@ -504,8 +439,7 @@ def _compute_invariant_fingerprints(
         ).fetch("electrode_id")
     )
 
-    # JSON has no native int-key support; serialize with stringified keys
-    # and let the v2 reader re-canonicalize via ``{int(k): v for k, v in ...}``.
+    # JSON keys are strings; the v2 reader converts them back to int.
     bad_channel_by_electrode_id = {
         str(int(row["electrode_id"])): bool(row["bad_channel"] == "True")
         for row in (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
@@ -527,14 +461,9 @@ def _compute_invariant_fingerprints(
         ).fetch1("artifact_params")
     )
 
-    # v1's ``ArtifactDetection`` writes the artifact-removed times to
-    # ``IntervalList`` keyed by ``interval_list_name=str(artifact_id)``
-    # (``src/spyglass/spikesorting/v1/artifact.py:200``). Stored as the
-    # canonical (shape-aware) array rather than a sha256 hash so the
-    # v2-side fingerprint check survives bit-level float drift between
-    # the two pipelines while still catching n-interval or
-    # duration-level divergences. ``assert_canonical_dict_equal``
-    # compares element-wise with ``math.isclose(rel_tol=1e-9)``.
+    # v1 stores artifact-removed times under interval_list_name=artifact_id.
+    # Kept as an array, not a hash, so the check tolerates float drift
+    # (``assert_canonical_dict_equal`` uses rel_tol=1e-9).
     valid_times_raw = (
         IntervalList
         & {
@@ -542,19 +471,8 @@ def _compute_invariant_fingerprints(
             "interval_list_name": str(artifact_id),
         }
     ).fetch1("valid_times")
-    # v1 stores ``valid_times`` as a 1D ``[start, end]`` for a single
-    # interval and 2D ``[[start, end], ...]`` for multiple intervals.
-    # v2 always stores 2D. Canonicalize both sides to ``(n_intervals,
-    # 2)`` so the fingerprint comparison is shape-agnostic.
-    #
-    # Round to nearest millisecond before fingerprinting. At 32 kHz
-    # one sample is 31.25 µs, and v1 ends its last interval at
-    # ``(n_samples - 1) / fs`` while v2 ends at ``n_samples / fs`` --
-    # a 1-sample boundary convention difference (~31 µs on the END
-    # only). 1 ms rounding absorbs that off-by-one without hiding
-    # multi-sample (>1 ms ⇒ >32 samples at 32 kHz) divergences. For
-    # higher sample rates the rounding is correspondingly tighter
-    # in samples (e.g. 1 ms = 30 samples at 30 kHz).
+    # v1 stores one interval as 1D; reshape to (n_intervals, 2).
+    # Round to 1 ms: v1 ends at (n_samples - 1) / fs, v2 at n_samples / fs.
     valid_times = np.round(
         np.ascontiguousarray(valid_times_raw, dtype="<f8").reshape(-1, 2),
         decimals=3,
@@ -634,11 +552,8 @@ def run_baseline_capture(
     sorter : str, optional
         SI sorter name. Defaults to ``"clusterless_thresholder"``;
         pass ``"mountainsort4"`` to capture an MS4 baseline. The
-        MS4 path additionally enforces the aggregate-validation
-        gate (n_units >= 2 AND median_firing_rate > 0) before
-        writing the baseline -- a one-unit MS4 baseline is
-        inherently degenerate for the
-        ``n_units ± band, median_fr ± band`` parity contract.
+        MS4 path refuses to write a baseline unless n_units >= 2 and
+        median_firing_rate > 0.
 
     Returns
     -------
@@ -669,11 +584,7 @@ def run_baseline_capture(
 
     spike_times, sampling_frequency = _read_spike_times(curation_pk)
 
-    # Refuse to write an uninformative baseline. A zero-unit or
-    # all-empty-units bundle cannot serve as a v2 parity reference
-    # (the parity test rejects it downstream, but failing here
-    # avoids committing a useless artifact and gives the operator
-    # an immediate signal that the sort parameters need tuning).
+    # A zero-unit baseline is useless as a parity reference.
     if not spike_times:
         raise RuntimeError(
             "baseline_capture: v1 sort produced zero units on "
@@ -698,13 +609,8 @@ def run_baseline_capture(
         default=0.0,
     )
 
-    # MS4 aggregate-validation gate. The MS4 parity contract is
-    # ``n_units ± band`` + ``median_firing_rate ± band``; both
-    # metrics are degenerate / undefined when fewer than 2 units
-    # are produced (median over one value is the value itself, no
-    # variance signal). Refuse to write the baseline so the
-    # operator either tunes ``detect_threshold`` or adds the case
-    # to ``EXPECTED_DEGENERATE_CASES`` with evidence.
+    # MS4 parity compares n_units and median firing rate, which are
+    # degenerate with fewer than 2 units.
     if sorter == "mountainsort4":
         median_fr = 0.0
         if spike_times and duration_s > 0:
@@ -764,10 +670,7 @@ def run_baseline_capture(
     }
     spikes_path, meta_path = _write_artifacts(output_dir, spike_times, metadata)
 
-    # v1 MetricCuration metrics baseline for the v1<->v2 parity test. The pickle
-    # carries the per-unit metrics DataFrame plus the sort identity the
-    # SI-0.104 parity test replays (it re-ingests the NWB from
-    # SPIKESORTING_V2_REAL_NWB_PATH and re-runs the v2 pipeline on this group).
+    # Per-unit v1 metrics plus the sort identity the v2 parity test replays.
     metrics_frame = _capture_metric_curation(curation_pk)
     metric_path = output_dir / "baseline_metric_curation.pkl"
     with open(metric_path, "wb") as handle:
@@ -904,20 +807,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
     """Refresh the smoke-fixture ``clusterless_thresholder`` row.
 
-    Frank-lab's 100 uV default rejects every peak the synthetic
-    MEArec smoke fixture produces (its templates max out around a
-    few uV); without a calibrated row the v1 sort produces zero
-    units and the curation step crashes on the empty units table.
-    A 5 uV threshold reliably surfaces planted peaks while staying
-    above the simulator's noise floor.
-
-    Always deletes any existing row with the same name before
-    inserting -- a stale row from an earlier capture (possibly
-    written with different ``noise_levels`` / ``detect_threshold``
-    semantics under a prior schema) would silently be reused and
-    flip the v1 baseline's contract without the caller knowing.
-    The v2 parity test does the same delete-then-insert dance for
-    the same reason.
+    The 100 uV default finds no peaks in the MEArec smoke fixture (templates
+    of a few uV), so this row uses the smoke threshold. An existing row with a
+    different payload is replaced.
     """
     from spyglass.spikesorting.v1 import SpikeSorterParameters
     from tests.spikesorting.v2._smoke_constants import (
@@ -928,31 +820,16 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
         "sorter": "clusterless_thresholder",
         "sorter_param_name": sorter_param_name,
     }
-    # ``noise_levels`` intentionally omitted so SI 0.99 computes it
-    # from the recording itself; passing a Python list fails inside
-    # SI's ``detect_peaks`` with ``can't multiply sequence by
-    # non-int of type 'float'``. v1's ``SpikeSorterParameters``
-    # schema also expects the legacy ``outputs`` / ``random_chunk_kwargs``
-    # keys that v2's pydantic-validated schema drops; supply them
-    # here only. v2's ``threshold_unit`` is not a SpikeInterface 0.99
-    # ``detect_peaks`` argument: v1's threshold is always a MAD multiplier,
-    # so the v1 row omits it (``_compute_invariant_fingerprints`` restores it
-    # for parity).
+    # - noise_levels omitted: SI 0.99 detect_peaks fails on a list.
+    # - v1 needs outputs/random_chunk_kwargs, which v2 drops.
+    # - threshold_unit is not an SI 0.99 arg; v1 is always MAD.
     v1_payload = dict(SMOKE_CLUSTERLESS_PARAMS)
     threshold_unit = v1_payload.pop("threshold_unit")
     assert threshold_unit == "mad", threshold_unit
     v1_payload.update({"outputs": "sorting", "random_chunk_kwargs": {}})
 
-    # v1 ``SpikeSorterParameters`` lives in a schema that does NOT honor
-    # ``dj.config["database.prefix"]`` (verified empirically: schema name
-    # remains ``spikesorting_v1_sorting`` regardless of prefix), so
-    # parallel captures share this table. The row name is the same
-    # across all sessions, but the params blob might drift if an
-    # earlier capture wrote a stale schema. Two-step refresh:
-    # (1) if an existing row's payload mismatches, delete it; otherwise
-    # leave it intact so concurrent sessions don't race delete↔insert.
-    # (2) insert with ``skip_duplicates=True`` so a concurrent session
-    # that already inserted the row is a no-op, not an error.
+    # The v1 schema ignores database.prefix, so parallel captures share this
+    # table: delete only a mismatched row, and skip duplicates on insert.
     existing = (SpikeSorterParameters & key).fetch("sorter_params", limit=1)
     if len(existing) > 0 and existing[0] != v1_payload:
         (SpikeSorterParameters & key).delete(safemode=False)
@@ -965,18 +842,9 @@ def _ensure_smoke_sorter_param_row(sorter_param_name: str) -> None:
 def _ensure_ms4_param_row(sorter_param_name: str) -> None:
     """Refresh the polymer-60s MountainSort4 ``SpikeSorterParameters`` row.
 
-    The Frank-lab v1 defaults
-    (``franklab_tetrode_hippocampus_30KHz`` / ``franklab_probe_ctx_30KHz``)
-    are tetrode-tuned (4 channels per group, varying freq ranges).
-    The polymer 60s parity matrix sorts on 32-channel polymer shanks at
-    32 kHz, so it owns its own row named ``ms4_60s_polymer``
-    (set in :data:`tests.spikesorting.v2._smoke_constants.MS4_60S_POLYMER_PARAM_NAME`).
-
-    Race-safety: identical to :func:`_ensure_smoke_sorter_param_row`.
-    Only delete when an existing row's payload mismatches; insert with
-    ``skip_duplicates=True`` so a concurrent / earlier capture's row
-    is a no-op, not an error. v1 ``SpikeSorterParameters`` is in a
-    schema that does NOT honor ``dj.config["database.prefix"]``.
+    The v1 defaults are tetrode-tuned; the polymer matrix sorts 32-channel
+    shanks, so it owns ``ms4_60s_polymer``. Race handling matches
+    :func:`_ensure_smoke_sorter_param_row`.
     """
     from spyglass.spikesorting.v1 import SpikeSorterParameters
     from tests.spikesorting.v2._smoke_constants import (
@@ -1026,14 +894,12 @@ def main(argv: list[str] | None = None) -> int:
         allow_production_smoke=allow_production_smoke,
     )
 
-    # Pre-insert the sorter-specific row if the caller asked for a
-    # name other than each sorter's shipped default; the test runner
-    # expects the row to exist before run_baseline_capture references it.
+    # Non-default parameter names must exist before run_baseline_capture.
     if args.sorter == "clusterless_thresholder":
         if args.sorter_param_name != "default_clusterless":
             _ensure_smoke_sorter_param_row(args.sorter_param_name)
     elif args.sorter == "mountainsort4":
-        # Owned end-to-end by the parity tests -- no derive-from-default.
+        # Owned by the parity tests, not derived from a default.
         _ensure_ms4_param_row(args.sorter_param_name)
 
     run_baseline_capture(

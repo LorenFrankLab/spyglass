@@ -1,26 +1,17 @@
-"""Canonicalization helpers for v1↔v2 parity invariant fingerprints.
+"""Canonicalize v1 and v2 sort inputs for the v1/v2 parity fingerprint.
 
-The v1↔v2 parity test
+Used by
 :func:`tests.spikesorting.v2.single_session.test_ground_truth_parity.test_v2_real_data_v1_parity`
-fingerprints the inputs to the sort (NWB hash, sort-group electrodes,
-preprocessing params, artifact params, sorter params, valid-times
-hash) so a divergence at the input layer surfaces *before* the
-spike-time output comparison runs. The helpers in this module
-normalize either v1's flat-dict / legacy-keys schema or v2's
-Pydantic-validated nested schema into a single canonical dict so the
-fingerprint check is a pure value comparison.
+so an input-layer divergence surfaces before the spike-time comparison.
 
 JSON serialization rules:
 
-* numpy scalars cast to Python scalars before serialization;
+* numpy scalars cast to Python scalars;
 * numpy arrays serialize as
-  ``{"_array_data": list, "_array_meta": {"dtype": str, "shape": list}}``
-  so dtype + shape survive JSON;
-* tuples normalize to lists (JSON has no tuple);
-* int-keyed dicts (e.g. ``bad_channel_by_electrode_id``) round-trip
-  through stringified keys and are reconstructed on read -- handled
-  by the caller, NOT here, since the choice of which dicts are
-  int-keyed is a caller-side contract.
+  ``{"_array_data": list, "_array_meta": {"dtype": str, "shape": list}}``;
+* tuples normalize to lists;
+* int-keyed dicts (e.g. ``bad_channel_by_electrode_id``) are rebuilt by
+  the caller, which owns which dicts are int-keyed.
 """
 
 from __future__ import annotations
@@ -38,10 +29,7 @@ import numpy as np
 def _normalize(value: Any) -> Any:
     """Recursively normalize a parameter value for JSON-stable comparison.
 
-    Numpy scalars cast to Python scalars, numpy arrays serialize with
-    explicit dtype + shape metadata, tuples flatten to lists, and
-    dicts / lists recurse. Plain Python scalars, strings, ``None``,
-    and booleans pass through unchanged.
+    See the module docstring for the rules; other scalars pass through.
     """
     if isinstance(value, np.ndarray):
         return {
@@ -81,16 +69,10 @@ def assert_canonical_dict_equal(
 ) -> None:
     """Assert two canonical structures are equal with a path-tagged diff.
 
-    Floats compare via :func:`math.isclose` (``rel_tol=1e-9``,
-    ``abs_tol=0.0``) so JSON round-trip precision drift does not
-    trip the fingerprint check. Type mismatches, missing keys, and
-    elementwise list disagreements raise :class:`AssertionError`
-    with a path like ``root.canonical_preproc.freq_min`` or
-    ``root.electrode_ids[3]`` so the failing field is obvious.
-
-    The helper is symmetric in ``left`` / ``right`` -- if either
-    side has a key the other lacks, the missing-key path is named
-    in the message.
+    Floats compare via :func:`math.isclose` (``rel_tol=1e-9``) to absorb
+    JSON round-trip drift. Mismatches raise :class:`AssertionError` naming
+    the path, e.g. ``root.electrode_ids[3]``. Symmetric in ``left`` /
+    ``right``.
 
     Parameters
     ----------
@@ -193,12 +175,7 @@ def assert_canonical_dict_equal(
 # ---------------------------------------------------------------------------
 
 
-# Schema-only keys that v1's ``SpikeSorterParameters`` blob carries
-# but never reach the SI sorter call. Dropping them on both sides
-# keeps the fingerprint stable across the v1 / v2 schema asymmetry.
-#
-# ``schema_version`` is stamped by v2's Pydantic schema and absent
-# from v1; strip on both sides regardless of sorter.
+# Keys that never reach the SI sorter call; dropped on both sides.
 _SCHEMA_ONLY_SORTER_KEYS: frozenset[str] = frozenset({"schema_version"})
 
 _LEGACY_SORTER_KEYS: dict[str, frozenset[str]] = {
@@ -210,16 +187,10 @@ _LEGACY_SORTER_KEYS: dict[str, frozenset[str]] = {
 def canonical_sorter(sorter: str, params: dict) -> dict:
     """Return the canonical fingerprint dict for a sorter's params.
 
-    Strips schema-only / legacy keys that v1 stamps but SI never
-    receives, then normalizes the remaining values. For
-    ``clusterless_thresholder``, ``noise_levels=None`` is treated as
-    "field absent" so an explicit ``None`` (v2 Pydantic default) and
-    an omitted key (v1 production row) canonicalize identically --
-    both mean "let SI auto-estimate per-channel MAD."
-
-    Unknown sorters get pure normalization with no key drops, so a
-    future sorter added to the parity matrix degrades gracefully
-    until the canonical rules are extended.
+    Drops keys SI never receives, then normalizes. For
+    ``clusterless_thresholder``, ``noise_levels=None`` (v2 default) and
+    an omitted key (v1 row) both mean SI auto-estimates per-channel MAD,
+    so they canonicalize identically. Unknown sorters are only normalized.
     """
     drop = (
         _LEGACY_SORTER_KEYS.get(sorter, frozenset()) | _SCHEMA_ONLY_SORTER_KEYS
@@ -239,24 +210,17 @@ def canonical_sorter(sorter: str, params: dict) -> dict:
 def canonical_preproc(params: dict) -> dict:
     """Extract the SI-effective preprocessing kwargs from v1 or v2 params.
 
-    v1's ``SpikeSortingPreprocessingParameters`` row is a flat dict
-    keyed ``frequency_min`` / ``frequency_max`` / ``min_segment_length``;
-    v2's :class:`PreprocessingParamsSchema` is a nested Pydantic dump
-    with ``bandpass_filter`` / ``common_reference`` sub-blocks plus a
-    ``schema_version`` stamp. Both encode an effective
-    "bandpass + common-reference + min-segment" preprocessing
-    pipeline; the canonical form is the four fields that actually
-    reach SI:
+    v1 rows are flat (``frequency_min`` / ``frequency_max`` /
+    ``min_segment_length``); v2 rows are nested
+    (``bandpass_filter`` / ``common_reference``). The canonical form is
+    the four fields that reach SI:
 
     * ``freq_min``, ``freq_max`` (Hz),
     * ``reference_operator`` (``"median"`` or ``"average"``),
     * ``min_segment_length`` (s).
 
-    v1's ``seed`` and ``margin_ms`` are dropped (v2 hardcodes both
-    in the runtime path, so they are schema-only on v1). v2's
-    ``schema_version`` and ``whiten`` block are dropped (v2 defers
-    whitening to the sorter; the field is forward-compat
-    scaffolding, see ``v2/_params/preprocessing.py``).
+    Dropped: v1 ``seed`` / ``margin_ms`` (v2 hardcodes both) and v2
+    ``schema_version`` / ``whiten`` (v2 whitens in the sorter).
     """
     p = _normalize(params)
     if "bandpass_filter" in p or "schema_version" in p:
@@ -282,19 +246,15 @@ def canonical_preproc(params: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-# v1's artifact-params blob carried concurrency knobs that v2
-# factored out into a separate ``job_kwargs`` row; they never affect
-# the scientific output of artifact detection.
+# v1 concurrency knobs; v2 keeps them in ``job_kwargs``. No scientific effect.
 _V1_JOB_KWARG_KEYS = frozenset({"chunk_duration", "n_jobs", "progress_bar"})
 
 
 def _derive_detect(params: dict) -> bool:
     """Return effective ``detect`` from v1's "absent ⇒ inferred" semantics.
 
-    v1 had no ``detect`` field; the runtime path inspected whether
-    both threshold fields were ``None`` (the ``"none"`` preset) and
-    disabled detection in that case. v2 promoted the inference to
-    an explicit boolean.
+    v1 has no ``detect`` field; detection is off when both thresholds
+    are ``None``.
     """
     if "detect" in params:
         return bool(params["detect"])
@@ -317,9 +277,8 @@ def _artifact_param(params: dict, new_name: str, v1_name: str, default=None):
 def canonical_artifact(params: dict) -> dict:
     """Extract the SI-effective artifact-detection kwargs from v1 or v2 params.
 
-    Strips v1's runtime concurrency knobs (``chunk_duration``,
-    ``n_jobs``, ``progress_bar``) and v2's ``schema_version`` stamp,
-    then fills the v2 schema defaults (``join_window_ms=1.0``,
+    Strips v1 concurrency knobs and v2's ``schema_version``, then fills
+    the v2 schema defaults (``join_window_ms=1.0``,
     ``min_length_s=1.0``, ``proportion_above_threshold=1.0``,
     ``removal_window_ms=1.0``) when v1's row omits the field. The
     canonical form is the eight scientific fields that reach SI:
@@ -332,11 +291,8 @@ def canonical_artifact(params: dict) -> dict:
     * ``join_window_ms``, ``min_length_s`` (v2-only fields; v1
       rows are read with the v2 defaults applied).
 
-    Filling v2 defaults on the v1 side is the "v1's absent fields
-    silently followed the v2 schema defaults" reading -- it is the
-    only reading under which a v1 default row and a v2 default row
-    fingerprint identically. A v1 row with an explicit field
-    diverging from the v2 default surfaces as a canonical mismatch.
+    Filling v2 defaults on the v1 side makes default rows fingerprint
+    identically; an explicit v1 value that differs is a mismatch.
     """
     p = _normalize(params)
     amplitude_threshold_uv = _artifact_param(

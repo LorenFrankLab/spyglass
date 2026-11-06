@@ -1,10 +1,9 @@
-"""Tests for v2 recompute verification + safe storage reclamation.
+"""Tests for v2 recompute verification and storage reclamation.
 
-DB-free tests cover the content-comparison logic; slow/integration tests
-populate the recompute trios on the shared MEArec smoke sort and exercise the
-current-environment delete gate (matched=1 deletes; matched=0 refuses;
-stale-env raises StaleEnvMatchedError; force_stale_env overrides). All
-destructive paths run under the pytest temp SPYGLASS_BASE_DIR.
+- DB-free: content comparison and env-compatibility logic.
+- Integration: the delete gate (matched=1 deletes, matched=0 refuses,
+  stale-env raises unless ``force_stale_env``), under a temp
+  SPYGLASS_BASE_DIR.
 """
 
 from __future__ import annotations
@@ -116,10 +115,9 @@ class _FakeAnalyzer:
 
 
 def test_analyzer_seed_modes_classifies_seed_provenance():
-    """Each present base extension is mapped to its effective seed: a top-level
-    ``seed`` (random_spikes), a seed nested under ``random_slices_kwargs``
-    (noise_levels), or ``"unseeded"`` when no seed is present -- so the manifest
-    never silently implies a pinned seed for an extension that has none."""
+    """Each present base extension maps to its effective seed: top-level
+    ``seed`` (random_spikes), ``random_slices_kwargs`` seed (noise_levels), or
+    ``"unseeded"``."""
     from spyglass.spikesorting.v2._storage.recompute import analyzer_seed_modes
 
     analyzer = _FakeAnalyzer(
@@ -176,11 +174,8 @@ def test_analyzer_inventory_detects_rebuilt_storage():
 def test_reclaimed_analyzer_folder_is_not_a_changed_generation():
     """An absent folder freed on purpose must not read as a new generation.
 
-    ``delete_files`` frees a verified analyzer and records ``deleted=1``. Its
-    inventory still describes the bytes that were verified, and the reclamation
-    audit hangs off it, so refreshing (which invalidates the inventory and
-    cascades the audit away) would erase the record and re-plan a rebuild. An
-    absent folder with NO reclamation is still a real disappearance.
+    Refreshing a ``deleted=1`` row would cascade its reclamation audit away. An
+    absent folder with no reclamation is still a real disappearance.
     """
     from spyglass.spikesorting.v2._storage.recompute import (
         analyzer_inventory_refresh_needed,
@@ -192,8 +187,7 @@ def test_reclaimed_analyzer_folder_is_not_a_changed_generation():
     }
     assert not analyzer_inventory_refresh_needed(manifest, None, reclaimed=True)
     assert analyzer_inventory_refresh_needed(manifest, None, reclaimed=False)
-    # A reclaimed row whose folder came BACK with different bytes still needs
-    # the refresh -- the audit no longer describes what is on disk.
+    # A reclaimed folder that came back with different bytes is refreshed.
     assert analyzer_inventory_refresh_needed(
         manifest, "rebuilt", reclaimed=True
     )
@@ -219,10 +213,8 @@ class _HashFakeAnalyzer:
 
 
 def test_analyzer_role_hashes_covers_display_and_metric():
-    """The source-provenance manifest covers EVERY canonical analyzer consumed:
-    the display analyzer always, and the metric analyzer when one was built
-    (PC/NN evaluations). Without the metric entry a PC evaluation could drift
-    through the metric analyzer undetected."""
+    """The source-provenance manifest covers the display analyzer always and
+    the metric analyzer when one was built (PC/NN evaluations)."""
     import numpy as np
 
     from spyglass.spikesorting.v2._storage.recompute import (
@@ -332,9 +324,8 @@ def test_env_matches_none_or_empty_deps_is_incompatible():
 
 
 def test_env_matches_ignores_namespaces_absent_from_env():
-    """An extension embedded in the file but not registered in the live env
-    (extensions register lazily) is NOT compared -- it never spuriously fails
-    the gate, mirroring v1's lenient comparison."""
+    """An extension in the file but not registered in the live env (they
+    register lazily) is not compared, as in v1."""
     from spyglass.spikesorting.v2._storage.recompute import env_matches
 
     env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
@@ -365,10 +356,8 @@ def test_recompute_attempt_all_rejects_negative_rounding(dj_conn):
     """``SortingAnalyzerRecomputeSelection.attempt_all`` rejects a negative
     rounding before touching the DB.
 
-    ``rounding`` is an ``np.round`` precision; a negative value would silently
-    produce a misleading extension-data comparison. (The recording recompute
-    has no ``rounding`` knob -- its identity is the fixed-precision content
-    fingerprint -- so only the analyzer selection is checked here.)
+    ``rounding`` is an ``np.round`` precision. The recording recompute has no
+    ``rounding`` knob.
     """
     from spyglass.spikesorting.v2 import recompute as rc
 
@@ -381,8 +370,7 @@ def test_recording_missing_probe_info_detects_absence(dj_conn):
     """The proactive probe check reports a structural impossibility when no
     ``Electrode * Probe`` rows exist for a file (probe metadata never ingested).
 
-    Uses a file name with no ingested probe so the join is genuinely empty --
-    the same condition a probe-stripped session would produce.
+    Uses a file name with no ingested probe.
     """
     from spyglass.spikesorting.v2.recompute import (
         _recording_missing_probe_info,
@@ -415,12 +403,8 @@ def _assert_temp_base_dir():
 def clean_recompute(populated_sorting):
     """Clear all recompute state for the shared sort before AND after a test.
 
-    The package-scoped ``populated_sorting`` is reused across recompute tests;
-    leftover Versions/Selection/Recompute rows (some planted directly) make a
-    sibling test's ``fetch1`` ambiguous. A cautious cascading delete on the top
-    of each recompute trio (the ``*Versions`` tables) removes its Selection,
-    Recompute, and diff part rows in dependency order, so each integration test
-    starts from a known-empty slate regardless of order -- no manual ordering.
+    The package-scoped sort is shared, so leftover rows would make ``fetch1``
+    ambiguous. Deleting from each ``*Versions`` table cascades its trio.
     """
     from spyglass.common.common_user import UserEnvironment
     from spyglass.spikesorting.v2 import recompute as rc
@@ -528,11 +512,9 @@ def test_remove_matched_drops_redundant_failed_cross_env_selection(
     """remove_matched must delete a redundant selection even when it carries a
     FAILED (matched=0) recompute child from another env.
 
-    A selection attempted in env A that failed, while the same artifact matched
-    in env B, is redundant (the artifact is verified elsewhere) but DOES have a
-    dependent recompute row -- so a raw ``delete_quick`` hits the
-    Recompute->Selection foreign key and raises ``IntegrityError``. Cautious
-    ``delete`` cascades the failed child instead.
+    A failed env-A selection for an artifact matched in env B is redundant but
+    has a recompute child, so it needs a cascading delete, not
+    ``delete_quick``.
     """
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
@@ -695,12 +677,13 @@ def test_sorting_analyzer_recompute_fetch_resolves_inputs_and_compute_needs_no_d
 def test_analyzer_manifest_records_noise_levels_seed(
     populated_sorting, clean_recompute
 ):
-    """The analyzer manifest records each base extension's seed mode. Every
-    STOCHASTIC base extension is seed-pinned (random_spikes AND noise_levels each
-    record a seed); the deterministic templates / waveforms carry no seed and are
-    reported "unseeded". noise_levels joins the recompute content set. The
-    content-addressed analyzer_hash is derived from the extension content hashes
-    ONLY, so the seed-mode provenance does not shift the recompute identity."""
+    """The analyzer manifest records each base extension's seed mode.
+
+    - random_spikes and noise_levels record a seed; templates and waveforms are
+      "unseeded".
+    - noise_levels is in the recompute content set.
+    - analyzer_hash derives from extension content hashes only.
+    """
     from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
 
@@ -708,15 +691,13 @@ def test_analyzer_manifest_records_noise_levels_seed(
     row = (SortingAnalyzerVersions & populated_sorting).fetch1()
     manifest = row["analyzer_manifest"]
     seed_modes = manifest["base_extension_seed_modes"]
-    # noise_levels is now seed-pinned (via random_slices_kwargs), recording its
-    # effective seed (0), not "unseeded".
+    # noise_levels is seed-pinned via random_slices_kwargs (seed 0).
     assert seed_modes["noise_levels"] == 0
     assert seed_modes["random_spikes"] != "unseeded"
     assert len(manifest["storage_fingerprint"]) == 64
-    # ...and it now joins the recompute content set.
+    # noise_levels is in the recompute content set.
     assert "noise_levels" in manifest["extension_content_hashes"]
-    # analyzer_hash is the combined hash of the extension CONTENT hashes only --
-    # the seed modes are secondary provenance, not identity.
+    # analyzer_hash combines the extension content hashes only.
     assert row["analyzer_hash"] == combined_hash(
         manifest["extension_content_hashes"]
     )
@@ -793,9 +774,8 @@ def test_sorting_analyzer_versions_compute_zero_unit_and_missing(
 
 @pytest.fixture
 def display_analyzer_folder(populated_sorting):
-    """Resolve (building if needed) the sort's display analyzer folder, and
-    restore it after the test -- the package-scoped sort's regeneratable cache
-    is shared, so a test that deletes the folder must rebuild it on teardown."""
+    """Resolve (building if needed) the sort's display analyzer folder and
+    rebuild it on teardown (the package-scoped cache is shared)."""
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -815,8 +795,7 @@ def test_get_analyzer_no_rebuild_raises_on_missing_folder(
     display_analyzer_folder,
 ):
     """``get_analyzer(rebuild=False)`` raises ``AnalyzerFolderMissingError`` for
-    a missing folder and does NOT recreate it -- the audit must observe the
-    missing state, not silently rebuild. ``rebuild=True`` still self-heals."""
+    a missing folder without recreating it; ``rebuild=True`` rebuilds."""
     import shutil
 
     from spyglass.spikesorting.v2.exceptions import (
@@ -839,9 +818,9 @@ def test_get_analyzer_no_rebuild_raises_on_missing_folder(
 def test_sorting_analyzer_versions_records_missing_without_rebuild(
     display_analyzer_folder, clean_recompute
 ):
-    """The inventory records an explicit missing state (and does NOT rebuild)
-    when a units-bearing sort's analyzer folder is absent -- so an audit can
-    tell a reclaimed/missing analyzer from a legitimately zero-unit one."""
+    """The inventory records an explicit missing state, without rebuilding,
+    when a units-bearing sort's analyzer folder is absent (distinct from a
+    zero-unit sort)."""
     import shutil
 
     from spyglass.spikesorting.v2.recompute import (
@@ -856,7 +835,7 @@ def test_sorting_analyzer_versions_records_missing_without_rebuild(
         SortingAnalyzerVersions & sort_key & {"waveform_params_name": recipe}
     ).fetch1()
     assert row["analyzer_hash"] == _MISSING_HASH
-    assert not row["analyzer_manifest"]  # {} / None -- no hashed content
+    assert not row["analyzer_manifest"]  # {} / None: no hashed content
     assert not folder.exists()  # the inventory did NOT rebuild
 
 
@@ -867,12 +846,8 @@ def test_attempt_all_preserves_reclaimed_analyzer_audit(
 ):
     """A deliberately reclaimed analyzer keeps its ``deleted=1`` audit row.
 
-    ``delete_files`` frees a verified analyzer folder and records the
-    reclamation as ``deleted=1``; the folder is regeneratable on demand. Re-
-    planning attempts must not read that absent folder as a CHANGED generation
-    -- invalidating the inventory cascades the audit away, so the folder later
-    re-reports as an unexpected DB-side orphan and a multi-GB rebuild is
-    re-planned against ``_MISSING_HASH``.
+    Re-planning must not read the absent folder as a changed generation, which
+    would cascade the audit away and re-plan a rebuild.
     """
     import shutil
 
@@ -910,9 +885,8 @@ def test_attempt_all_preserves_reclaimed_analyzer_audit(
 def test_sorting_analyzer_recompute_missing_is_unmatched(
     display_analyzer_folder, clean_recompute
 ):
-    """A missing stored analyzer yields matched=0 (cannot verify reproducibility
-    against an absent original) instead of a rebuild-vs-rebuild tautological
-    match that would authorize deleting a freshly-rebuilt folder."""
+    """A missing stored analyzer yields matched=0, not a rebuild-vs-rebuild
+    match."""
     import shutil
 
     from spyglass.spikesorting.v2.recompute import (
@@ -946,11 +920,9 @@ def test_sorting_analyzer_recompute_missing_is_unmatched(
 def test_recompute_metric_verify_independent_of_display_cache(
     display_analyzer_folder,
 ):
-    """Verifying a metric analyzer reconstructs sorting+recording from CANONICAL
-    sources (units NWB + recording), so the audit neither depends on nor rebuilds
-    the display analyzer cache. With the display folder reclaimed (recording
-    intact), the metric verify still produces a real, matched comparison and
-    leaves the display folder absent."""
+    """Verifying a metric analyzer reads the units NWB and recording, not the
+    display analyzer: with the display folder reclaimed, it still matches and
+    leaves that folder absent."""
     import shutil
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
@@ -999,9 +971,8 @@ def test_file_tracking_excludes_v2_deleted_files(
 ):
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 
-    The file-tracking ``deleted`` set (used to skip intentionally-removed
-    files) must include v2 ``RecordingArtifactRecompute`` rows with deleted=1,
-    via the ``_get_v2_deleted_files`` companion hook.
+    The file-tracking ``deleted`` set includes v2 ``RecordingArtifactRecompute``
+    rows with deleted=1 via ``_get_v2_deleted_files``.
     """
     _assert_temp_base_dir()
     from spyglass.common.common_file_tracking import AnalysisFileIssues
@@ -1086,12 +1057,10 @@ def test_recording_recompute_mismatch_records_hash_rows(
 def test_recording_recompute_regen_failure_records_matched_zero(
     populated_sorting, clean_recompute, monkeypatch
 ):
-    """A regeneration failure is ENCODED as matched=0, not raised.
+    """A regeneration failure is recorded as matched=0, not raised.
 
-    The tri-part ``_recompute_compute`` catches a regen exception and returns the
-    'error' outcome so ``populate`` still records the QC result (a retryable
-    matched=0 row), instead of the populate aborting. This locks the refactor's
-    central invariant shared by both recompute tables.
+    ``_recompute_compute`` returns an 'error' outcome so ``populate`` records a
+    retryable matched=0 row.
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2 import recompute as rc
@@ -1165,8 +1134,8 @@ def test_recording_recompute_fetch_resolves_inputs_and_compute_only_stages(
 def test_recording_recompute_fetch_failure_records_matched_zero(
     populated_sorting, clean_recompute, monkeypatch
 ):
-    """An input ``make_fetch`` cannot resolve is still a recorded matched=0
-    outcome carrying the failure's message, as when compute resolved it."""
+    """An input ``make_fetch`` cannot resolve is recorded as matched=0 with the
+    failure's message."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2 import recompute as rc
     from spyglass.spikesorting.v2.recording import Recording
@@ -1237,9 +1206,7 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
     """A matched current-env artifact is refused when its authorizing row's
     created_at is unknown (NULL) or newer than the age floor.
 
-    The destructive gate exists to never reclaim a too-recent / unknown-age
-    artifact; every other delete test passes ``days_since_creation=0`` (cutoff
-    == now), which always satisfies the gate, leaving this refuse branch dead.
+    Other delete tests pass ``days_since_creation=0``, which always passes.
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -1291,10 +1258,11 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
-    """The full reclamation round-trip (gates the delete_files re-enable):
+    """The full recording reclamation round-trip.
+
     populate -> recompute matched -> delete_files removes the file ->
-    get_recording rebuilds + reconciles -> traces equal pre-delete -> the
-    recompute rows are cleared back to deleted=0 by the rebuild.
+    get_recording rebuilds -> traces equal pre-delete -> recompute rows reset
+    to deleted=0.
     """
     _assert_temp_base_dir()
     from pathlib import Path
@@ -1368,13 +1336,11 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
 def test_recompute_authority_anchors_on_content_hash(
     populated_sorting, clean_recompute
 ):
-    """``matched`` anchors on ``combined_hash(fresh) == Recording.content_hash``
-    -- NOT on current-vs-fresh.
+    """``matched`` means ``combined_hash(fresh) == Recording.content_hash``,
+    not current == fresh.
 
-    A file that is self-consistent with its own fresh rebuild (current == fresh)
-    but whose row ``content_hash`` has drifted is NOT matched / deletable; the
-    old current-vs-fresh authority would have wrongly matched it. Restoring the
-    true ``content_hash`` makes it matched again.
+    A file consistent with its fresh rebuild but with a drifted row
+    ``content_hash`` is not matched; restoring the true hash matches again.
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -1422,9 +1388,7 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 ):
     """An analyzer content mismatch yields matched=0 + a Hash diff row.
 
-    Mirrors the recording-trio mismatch test for the SortingAnalyzer trio,
-    whose distinct make()/hash path was only covered on the happy (matched=1)
-    side. A matched=0 analyzer is never deletable.
+    A matched=0 analyzer is never deletable.
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2 import recompute as rc
@@ -1466,8 +1430,7 @@ def test_sorting_analyzer_recompute_mismatch_records_hash_rows(
 def test_analyzer_recompute_round_trip(
     populated_sorting, clean_recompute, tmp_path
 ):
-    """The full analyzer reclamation round-trip -- the ``dry_run=False`` analog
-    of ``test_delete_files_round_trip`` (recording).
+    """The full analyzer reclamation round-trip with ``dry_run=False``.
 
     populate -> recompute matched -> ``delete_files`` removes the ``.analyzer``
     folder + sets ``deleted=1`` -> ``get_analyzer`` rebuilds it from the
@@ -1493,10 +1456,7 @@ def test_analyzer_recompute_round_trip(
         rc.SortingAnalyzerRecompute & populated_sorting & "matched=1"
     ), "a fresh analyzer rebuild must reproduce the hashes -> matched=1"
 
-    # The analyzer ``created_at`` is populate time, so the age gate (correctly)
-    # protects a freshly built folder; a real reclamation runs days later.
-    # Backfill ``created_at`` to the past so the round-trip exercises the
-    # ``dry_run=False`` reclamation without waiting.
+    # Backfill ``created_at`` so the age gate allows a fresh folder.
     import datetime as dt
 
     old = dt.datetime(2000, 1, 1)
@@ -1557,9 +1517,8 @@ def test_recording_recompute_mixed_env_deletes(
 ):
     """An artifact with BOTH a current-env and a stale-env match still deletes.
 
-    The artifact-level gate must authorize on the current-env match and not
-    false-raise on the co-present stale-env row. get_disk_space reports the
-    matched (reclaimable) artifact.
+    The current-env match authorizes it despite the stale-env row.
+    get_disk_space reports the artifact once.
     """
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
@@ -1579,9 +1538,8 @@ def test_recording_recompute_mixed_env_deletes(
     # no-double-count check below).
     space_single = RecordingArtifactRecompute().get_disk_space(rec_key)
 
-    # Plant a co-present stale-env matched row for the SAME artifact, with an
-    # UNKNOWN (NULL) created_at -- under per-row age-gating this would have
-    # blocked the artifact; it must not, because the current-env row authorizes.
+    # Plant a stale-env matched row for the same artifact with NULL created_at;
+    # only the current-env row is age-gated.
     stale_env = "planted_stale_env_00"
     UserEnvironment().insert1(
         {
@@ -1624,11 +1582,8 @@ def test_write_path_persists_nondegenerate_geometry(populated_sorting):
     """A populated ``Recording``'s persisted electrodes region carries real,
     non-degenerate probe geometry.
 
-    Guards the write path directly: the DB-free fingerprint fixtures write
-    geometry themselves, so they cannot catch a regression where
-    ``write_nwb_artifact`` stopped persisting real ``rel_x``/``rel_y`` (the
-    geometry component would silently collapse to a constant). This reads the
-    on-disk artifact independently of the production fingerprint code.
+    Reads the on-disk artifact directly; the DB-free fingerprint fixtures
+    write their own geometry, so they do not cover ``write_nwb_artifact``.
     """
     _assert_temp_base_dir()
     import numpy as np
@@ -1668,10 +1623,8 @@ def test_attempt_all_skips_incompatible_env(populated_sorting, clean_recompute):
     """``attempt_all`` plans only env-compatible artifacts by default;
     ``force_attempt=True`` overrides the gate.
 
-    The artifact was written in THIS environment, so its inventoried
-    ``nwb_deps`` match and it is planned. Drift the inventory to an
-    incompatible namespace version and the default gate skips it -- only
-    ``force_attempt`` plans it.
+    An artifact written in this env is planned; with an incompatible
+    inventoried namespace version only ``force_attempt`` plans it.
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
@@ -1789,8 +1742,7 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
     rec_key = _recording_key(populated_sorting)
     nwb_file_name = (RecordingSelection & rec_key).fetch1("nwb_file_name")
 
-    # Healthy recording: probe info present -> not flagged (real query, not a
-    # tautology -- a wrong/empty probe query would flag it).
+    # Healthy recording: probe info present -> not flagged.
     assert _recording_missing_probe_info(nwb_file_name) is False
     assert RecordingArtifactRecomputeSelection._check_xfail(rec_key) == (
         False,
@@ -1841,9 +1793,7 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
     )
     assert check(rec_key) == (True, "nwb_spec_incompatible")
 
-    # attempt_all records the reason on the freshly-planned current-env
-    # selection (a structural xfail is scheduled-but-flagged, not silently
-    # dropped).
+    # attempt_all plans the selection and records the xfail reason on it.
     RecordingArtifactRecompute.update1(
         {
             **stale_sel,
@@ -1863,9 +1813,8 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
 def test_negative_days_rejected(dj_conn):
     """``delete_files`` rejects a negative ``days_since_creation``.
 
-    A negative value moves the age floor into the future, so every artifact --
-    including ones created seconds ago -- would read as old enough to delete.
-    The guard runs at the public entry point, before any DB/filesystem work.
+    A negative value would make every artifact old enough to delete. Checked
+    before any DB or filesystem work.
     """
     from spyglass.spikesorting.v2 import recompute as rc
 

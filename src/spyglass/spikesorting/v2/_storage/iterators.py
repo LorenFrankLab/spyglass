@@ -1,18 +1,8 @@
 """Chunked HDF5 writers for the preprocessed Recording artifact.
 
-Used by ``Recording._write_nwb_artifact`` to stream the
-``(n_samples, n_channels)`` trace array and the ``(n_samples,)``
-timestamps vector into the ``AnalysisNwbfile`` via HDMF's
-``GenericDataChunkIterator``. Without these iterators, 30 kHz x 128 ch
-x 1 h recordings (~110 GB float64) would have to materialize in RAM
-before the NWB write, which OOMs on any lab workstation.
-
-The trace iterator reads ``(n_samples, n_channels)`` slices via the
-recording's ``get_traces(...)``, using the SpikeInterface 0.104
-``return_in_uV`` kwarg.
-
-The timestamps iterator slices a 1D ``timestamps`` vector directly, so a
-lazy timestamp vector materializes only the chunk HDMF requests.
+Streams traces ``(n_samples, n_channels)`` and timestamps ``(n_samples,)``
+into the NWB file so long recordings (~110 GB float64 for 1 h of 128 ch at
+30 kHz) never materialize in RAM.
 """
 
 from __future__ import annotations
@@ -32,12 +22,9 @@ def _all_channel_chunk_shape(
 ) -> tuple[int, int]:
     """Chunk shape ``(n_frames, n_channels)`` of ~``_DEFAULT_CHUNK_BYTES``.
 
-    SpikeInterface reads short full-channel windows (~1 s per chunk of a
-    job). HDMF's default chunk keeps the array's aspect ratio -- for a long
-    32-channel recording ~37 s of ONE channel -- so each such read touches
-    every channel's chunk, and through h5py's default 8 MiB chunk cache a
-    20 min pass took ~8 min. Holding every channel in each chunk makes a
-    window one contiguous read.
+    SpikeInterface reads short all-channel windows. HDMF's default
+    aspect-ratio chunks hold long spans of one channel, so each window would
+    touch every channel's chunk.
     """
     frames = int(_DEFAULT_CHUNK_BYTES // (n_channels * itemsize))
     return (max(1, min(frames, n_samples)), n_channels)
@@ -47,10 +34,7 @@ class SpikeInterfaceRecordingDataChunkIterator(GenericDataChunkIterator):
     """HDMF chunked iterator over a SpikeInterface ``BaseRecording``.
 
     Reads ``(n_samples, n_channels)`` slices via the recording's
-    ``get_traces(...)`` so the NWB writer can stream the dataset
-    without materializing the full array. A ``buffer_gb=5`` default
-    balances RAM against write throughput; smaller buffers trade RAM
-    for write throughput.
+    ``get_traces(...)``.
     """
 
     def __init__(
@@ -190,10 +174,7 @@ class TimestampsDataChunkIterator(GenericDataChunkIterator):
         )
 
     def _get_data(self, selection: Tuple[slice]) -> Iterable:
-        # ``_get_maxshape`` is a 1-tuple, so HDMF passes a 1-tuple
-        # ``(slice,)``. The slice of the 1-D vector is already 1-D; do not
-        # ``np.squeeze`` it, which would collapse a length-1 final chunk
-        # (``n_samples % buffer == 1``) to a 0-d scalar.
+        # Do not squeeze: a length-1 final chunk would become 0-d.
         return np.asarray(self._timestamps[selection[0]], dtype=np.float64)
 
     def _get_dtype(self):

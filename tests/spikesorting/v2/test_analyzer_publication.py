@@ -333,10 +333,9 @@ def test_copy_keeps_the_analyzers_sampling_frequency(tmp_path):
     """A copied analyzer reports exactly its source's sampling frequency.
 
     v2 reads traces at a rate estimated from the timestamps (e.g.
-    30000.000000000182 Hz) while the stored units say 30000.0; the analyzer
-    keeps the recording's rate. A copy rebuilt from the units' provenance
-    reverted to 30000.0, so durations and firing rates on the copy differed
-    from the source in the last bits.
+    30000.000000000182 Hz) while the stored units say 30000.0. A copy must
+    keep the recording's rate, not the units' rate, or durations and firing
+    rates differ from the source in the last bits.
     """
     import numpy as np
     import spikeinterface as si

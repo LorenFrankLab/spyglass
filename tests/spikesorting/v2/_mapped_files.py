@@ -1,11 +1,8 @@
 """Check that no file in a temporary directory is memory-mapped at cleanup.
 
-On NFS, removing a file that a process still maps leaves a ``.nfsXXXX``
-placeholder in its directory, so ``TemporaryDirectory`` cleanup fails with
-``OSError: [Errno 39] Directory not empty``. Local file systems remove such
-files without error, so the failure does not show on a laptop or in CI.
-These helpers make the condition visible on any Linux host: they read
-``/proc/self/maps`` when the directory is cleaned up.
+On NFS a still-mapped file leaves a ``.nfsXXXX`` placeholder and cleanup
+fails with ``Errno 39``; local file systems hide this. Reading
+``/proc/self/maps`` at cleanup exposes it on any Linux host.
 """
 
 from __future__ import annotations

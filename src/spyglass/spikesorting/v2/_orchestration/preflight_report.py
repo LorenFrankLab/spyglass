@@ -20,11 +20,7 @@ class PreflightCheck:
 class PreflightReport:
     """Result of ``preflight_v2_pipeline``: a pre-populate config check.
 
-    Truthy when the configuration is runnable (``ok is True``), so a
-    notebook can ``if not preflight_v2_pipeline(...): ...``. ``errors``
-    lists each blocking problem with its fix; ``warnings`` holds
-    non-blocking advisories; ``expected_ids`` carries the deterministic
-    selection PKs the run would produce.
+    Truthy when the configuration is runnable (``ok is True``).
 
     Attributes
     ----------
@@ -38,42 +34,23 @@ class PreflightReport:
     resolved_pipeline_preset
         The pipeline-preset name that was checked.
     expected_ids
-        The selection PKs a subsequent ``run_v2_pipeline`` would produce, each
-        annotated with whether its SELECTION row and its COMPUTED output row
-        already exist, e.g. ``{"recording_id": {"id": UUID(...),
-        "exists": False, "computed_exists": False}, ...}``. ``exists`` is the
-        selection ``& pk`` restriction (the run would reuse this PK);
-        ``computed_exists`` is the computed-table ``& pk`` restriction (the
-        populate already ran, so that stage would be a near-zero-cost reuse) --
-        distinguishing them shows what work the run would actually do. IDs are
-        computed DB-free via ``deterministic_id``. Empty when the preset is
-        unknown (the param names needed to derive the IDs are then unavailable).
-        For an ``ok`` report each ``id`` equals the PK ``run_v2_pipeline``
-        returns. ``curation_id`` is intentionally excluded: it is assigned by
-        ``CurationV2.insert_curation``, not content-addressed. With a motion
-        mode, ``motion_estimate_id`` (and for ``"apply"``
-        ``motion_corrected_recording_id``) entries precede ``sorting_id``;
-        the estimate id includes the recording's content hash, so before the
-        recording is computed those entries -- and an ``"apply"`` run's
-        ``sorting_id`` -- have ``id=None`` and a ``pending`` reason.
+        The selection PKs ``run_v2_pipeline`` would produce, e.g.
+        ``{"recording_id": {"id": UUID(...), "exists": False,
+        "computed_exists": False}, ...}``. ``exists`` means the selection row
+        exists; ``computed_exists`` means the output row exists. Empty when
+        the preset is unknown. Excludes ``curation_id``, which is not
+        content-addressed. Motion entries, and an ``"apply"`` run's
+        ``sorting_id``, have ``id=None`` and a ``pending`` reason until the
+        recording is computed.
     checks
-        Per-check detail; every check runs (the report is complete, not
-        first-failure-only).
+        Per-check detail.
     resource_notes
-        Known large allocations and scratch requirements the run implies,
-        stated from the tracked recipes (no unit count is known before
-        sorting): the per-unit waveform buffer upper bound of the display
-        analyzer (``max_spikes_per_unit`` x window x channels x 4 bytes), the
-        analyzer cache and sorter scratch locations, and the effective worker /
-        chunk settings. Informational; never a blocking check.
+        Informational: per-unit display waveform bound, cache and scratch
+        locations, and worker / chunk settings.
     effective_config
-        What the sort stage would actually execute, as
-        ``EffectiveSortConfig.as_dict()`` (sorter, the kwargs handed to
-        SpikeInterface, external-whiten routing, seed, resolved job kwargs,
-        execution backend). Resolved by the SAME ``resolve_sort_config`` the
-        dispatcher runs, from the preset's ``SorterParameters`` row and the
-        ambient job-kwargs layer at preflight time. ``None`` when that row is
-        missing (``sorter_params_exist`` then reports the fix).
+        What the sort stage would execute, as
+        ``EffectiveSortConfig.as_dict()``, resolved by the dispatcher's own
+        ``resolve_sort_config``. ``None`` when the sorter row is missing.
     """
 
     warnings: list[str]
@@ -118,9 +95,7 @@ class PreflightReport:
 class PreflightSessionReport:
     """Result of ``preflight_v2_pipeline_session``: a whole-session check.
 
-    Aggregates a per-sort-group :class:`PreflightReport` into one object.
-    Truthy when *every* target group is runnable (``ok is True``), so a
-    notebook can ``if not preflight_v2_pipeline_session(...): ...``.
+    Truthy when every target group is runnable.
 
     Attributes
     ----------
@@ -137,10 +112,8 @@ class PreflightSessionReport:
     group_reports
         One plain-dict entry per target sort group, with keys
         ``sort_group_id``, ``ok``, ``errors``, ``warnings``, ``expected_ids``,
-        ``checks``, ``effective_config``, and ``resource_notes`` (from the
-        underlying :class:`PreflightReport`).
-        ``pandas`` is intentionally not imported here; wrap with
-        ``pd.DataFrame(report.group_reports)`` in a notebook when useful.
+        ``checks``, ``effective_config``, ``resource_notes``, and
+        ``scientific_config``.
     """
 
     ok: bool

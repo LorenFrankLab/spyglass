@@ -415,11 +415,8 @@ def test_from_dataframe_adopts_duplicate_winner_and_propagates_other_failures(
 ):
     """Only a duplicate-key race is recovered by adopting the winner.
 
-    A concurrent caller landing the same content-addressed set between the
-    reuse check and the insert surfaces as ``DuplicateError``; the factory
-    then returns the winner (after the provenance / stored-value checks). Any
-    other insert failure propagates unchanged, rolls the transaction back
-    (no master row is left behind) and triggers no extra recovery query.
+    Any other insert failure propagates, rolls back and runs no recovery
+    query.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -452,9 +449,7 @@ def test_from_dataframe_adopts_duplicate_winner_and_propagates_other_failures(
             root, definition, frame, **kwargs
         )
 
-        # Simulate the race: the pre-insert reuse check sees nothing (as if
-        # the winner landed a moment later), so the insert collides on the
-        # content-addressed PK and the factory adopts the winner.
+        # The reuse check misses, so the insert collides with the winner.
         real_reuse = CurationUnitAnnotationSet._reuse_existing.__func__
         calls: list[str] = []
 
@@ -477,8 +472,6 @@ def test_from_dataframe_adopts_duplicate_winner_and_propagates_other_failures(
         assert len(CurationUnitAnnotationSet & root.as_key()) == 1
         monkeypatch.undo()
 
-        # An unrelated failure inside the transaction propagates as-is, leaves
-        # no master row, and does not run the recovery query.
         calls.clear()
         monkeypatch.setattr(
             CurationUnitAnnotationSet,

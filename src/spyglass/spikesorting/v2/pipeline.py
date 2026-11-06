@@ -1,37 +1,23 @@
-"""Convenience orchestration across the spike sorting tables.
+"""Orchestration entrypoints across the spike sorting tables.
 
-``run_v2_pipeline`` chains the recording -> artifact -> sort ->
-curation stages into one call so notebook users can populate an
-end-to-end single-session sort without writing the per-stage
-insert_selection / populate boilerplate. The same orchestrator also
-runs metric-driven auto-curation (``auto_curate=True``); browser review
-starts from the run's result (``RunResult.start_review``).
-``run_v2_concat_pipeline`` runs the same stages on a same-day concatenated
-``SessionGroup``; cross-session unit matching is its own helper,
-``run_v2_unit_match``. ``estimate_motion`` / ``estimate_concat_motion`` build
-the same source and save only its motion estimate, for inspection before a
-run with ``motion_mode="apply", motion_estimate_id=...``.
+- ``run_v2_pipeline``: recording -> artifact -> sort -> curation for one
+  session, with optional metric auto-curation (``auto_curate=True``). Browser
+  review starts from ``RunResult.start_review``.
+- ``run_v2_concat_pipeline``: the same stages on a same-day ``SessionGroup``.
+- ``run_v2_unit_match``: cross-session unit matching.
+- ``estimate_motion`` / ``estimate_concat_motion``: save only the motion
+  estimate, for inspection before a run with
+  ``motion_mode="apply", motion_estimate_id=...``.
 
-Pipeline presets are Pydantic-validated bundles of Lookup-row names; the
-orchestrator looks them up at first call. The shipped presets are the dated
-franklab production recipes -- the MountainSort4 family by target region
-(hippocampus 600 Hz / cortex 300 Hz high-pass) and sampling rate, a
-MountainSort5 preset, and a clusterless preset. The ``run_v2_pipeline``
-default is the native MountainSort4 hippocampus production recipe
-``franklab_probe_hippocampus_30khz_ms4_2026_06``, included in the v2 extra
-and runnable under the v2 ``numpy>=2`` baseline. Call ``describe_pipeline_presets()``
-for the catalog and ``list_pipeline_presets()`` for the names.
+Presets are Pydantic-validated bundles of Lookup-row names. The default is
+``franklab_probe_hippocampus_30khz_ms4_2026_06``; see
+``describe_pipeline_presets()`` and ``list_pipeline_presets()``.
 
-The orchestrator is idempotent: re-running with the same inputs finds
-existing rows via the insert_selection helpers and returns the same
-run summary (with the same root_merge_id) without inserting duplicates.
+Re-running with the same inputs inserts nothing and returns the same summary
+(same ``root_merge_id``).
 
-This module is a thin facade: the implementation lives in the
-``_orchestration`` package, with short module names such as ``run``,
-``session``, ``motion``, ``matching``, ``source``, and ``stages``. It also holds
-presets, geometry, preflight, and reporting.
-Every public name is re-exported here, so notebook and user code imports from
-one path (``from spyglass.spikesorting.v2.pipeline import ...``).
+This module re-exports the public names from ``_orchestration`` so user code
+imports from one path.
 """
 
 from __future__ import annotations

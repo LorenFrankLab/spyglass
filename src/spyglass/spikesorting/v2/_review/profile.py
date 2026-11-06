@@ -1,13 +1,8 @@
 """Normalization for persisted curation review profiles.
 
-The DataJoint table lives in :mod:`review_profile`; this module owns the
-canonical semantic payload and hash without importing DataJoint or the optional
-FigPack runtime.  It deliberately reuses the existing FigPack configuration
-helpers so profile and figure configuration cannot drift on list semantics.
-The displayable metric columns come from SpikeInterface's quality-metric
-metadata (``_curation.metrics.si_quality_metric_output_columns``), so checking
-a profile's displayed properties against its metric recipe imports
-SpikeInterface.
+Owns the canonical payload and hash without DataJoint or FigPack. Reuses the
+FigPack configuration helpers so list semantics cannot drift. Checking
+displayed properties imports SpikeInterface.
 """
 
 from __future__ import annotations
@@ -52,8 +47,7 @@ def profile_display_property_vocabulary(
             si_quality_metric_output_columns(metric_name) or (metric_name,)
         )
     columns.extend(metric_row.get("template_metric_columns") or [])
-    # Preserve recipe order while protecting against a future overlap between
-    # metric and template output names.
+    # Keep recipe order; dedupe overlapping metric and template names.
     return tuple(dict.fromkeys(str(column) for column in columns))
 
 
@@ -96,8 +90,8 @@ def normalize_review_profile(
 ) -> dict:
     """Validate one profile input and return its canonical stored row.
 
-    Delivery and review-instance values are rejected as unknown fields.  Only
-    the immutable scientific/display configuration participates in the hash.
+    Delivery and review-instance values are rejected as unknown fields. Only
+    the scientific and display configuration is hashed.
     """
     if not isinstance(row, Mapping):
         raise TypeError(
@@ -145,9 +139,6 @@ def normalize_review_profile(
     displayed = normalize_displayed_unit_properties(
         row["displayed_unit_properties"]
     )
-    # Persist an explicit ordered list. ``None`` is useful for a one-off
-    # FigPack selection, but a named review profile must state its display
-    # contract so its hash cannot inherit changing backend defaults.
     if displayed is None:
         raise ValueError(
             "CurationReviewProfile displayed_unit_properties must be an "
@@ -198,30 +189,24 @@ REVIEW_DISPLAY_OPTIONS_VERSION = 2
 class ReviewDisplayOptions:
     """Browser payload budget for one FigPack review (display-only).
 
-    These settings bound what the bundle CONTAINS; they never touch the
-    scientific evaluation (metrics, waveform subsample, merge suggestions all
-    come from the persisted ``CurationEvaluation`` / analyzer recipes).
+    Bounds what the bundle contains; never affects the scientific evaluation.
 
     Attributes
     ----------
     max_raster_spikes_per_unit
         Per-unit raster cap, sampled evenly across the full spike train.
     max_amplitudes_per_unit
-        Per-unit cap on spike-amplitude points in the amplitude view. Points
-        are drawn uniformly at random from the unit's whole spike train (so a
-        long recording is sampled across its full duration, not truncated to
-        its start), seeded by ``amplitude_sampling_seed`` so a rebuilt bundle
-        shows the same points. ``None`` removes the fixed cap; the duration
-        budget still applies unless its rate is also ``None``.
+        Per-unit amplitude-point cap, sampled at random across the whole
+        train. ``None`` leaves only the duration budget.
+    raster_max_firing_rate, amplitude_max_firing_rate
+        Duration budget rate (points/s per unit); ``None`` disables it.
     max_initial_points
-        Total points per time-based view before deferring that view to explicit
-        selected-unit inspection. This controls initial payload, not sampling.
+        Total points per time-based view before deferring it to
+        selected-unit inspection. Controls payload, not sampling.
     amplitude_sampling_seed
         Seed for the amplitude subsample.
     min_similarity_for_correlograms
-        SpikeInterface's cross-correlogram pair filter: only unit pairs whose
-        template similarity reaches this value get a cross-correlogram, which
-        bounds the pair-heavy part of the bundle.
+        Minimum template similarity for a pair's cross-correlogram.
     version
         Payload version, persisted with the review configuration.
     """

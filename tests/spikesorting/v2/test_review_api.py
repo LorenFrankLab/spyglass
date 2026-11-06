@@ -169,9 +169,8 @@ def _change_set(**overrides):
 
 
 def test_change_set_summary_and_changed_units_are_derived_from_fields():
-    """The compact summary / table replace the nested dataclass dump: label
-    additions/removals, proposed merges, counts, conflicts and siblings, all
-    from the preview's own fields (no database)."""
+    """The compact summary and table show label additions/removals, proposed
+    merges, counts, conflicts and siblings from the preview (no database)."""
     changes = _change_set()
     assert changes.has_changes
     table = changes.changed_units().set_index("unit_id")

@@ -1,9 +1,5 @@
-"""Tests for the ``_signal_math`` pure scientific helpers.
-
-Covers the boundary invariant guards (positive sampling frequency,
-monotonic timestamps) wired into the frame-mapping functions
-(``frames_for_times`` / ``base_intervals_and_gaps``).
-All pure numpy -- no DB, no NWB IO.
+"""Tests for the ``_signal_math`` helpers: input guards and frame mapping
+(no DB, no NWB IO).
 """
 
 from __future__ import annotations
@@ -12,9 +8,8 @@ import pytest
 
 
 def test_assert_positive_sampling_frequency_rejects_nonpositive_or_nonfinite():
-    """A finite positive fs passes (and is returned as float); 0 / negative /
-    NaN / inf raise -- a bad fs silently yields an inf/NaN sample period and
-    mis-maps every frame."""
+    """A finite positive fs passes (returned as float); 0, negative, NaN and
+    inf raise."""
     from spyglass.spikesorting.v2._core.signal_math import (
         assert_positive_sampling_frequency,
     )
@@ -27,8 +22,7 @@ def test_assert_positive_sampling_frequency_rejects_nonpositive_or_nonfinite():
 
 def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
     """A non-decreasing vector (duplicates allowed) and a single sample pass;
-    an empty vector or a backward step raise -- searchsorted-based frame
-    mapping would otherwise silently mis-slice the recording."""
+    an empty vector or a backward step raise."""
     import numpy as np
 
     from spyglass.spikesorting.v2._core.signal_math import (
@@ -41,9 +35,7 @@ def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
         assert_monotonic_timestamps(np.array([]), context="ctx: ")
     with pytest.raises(ValueError, match="monotonic"):
         assert_monotonic_timestamps(np.array([0.0, 2.0, 1.0]), context="ctx: ")
-    # A NaN must NOT slip through: ``np.diff`` across NaN is NaN and
-    # ``NaN < 0`` is False, so a NaN-masked vector would otherwise pass the
-    # backward-step check yet mis-slice via searchsorted (NaN sorts as +inf).
+    # NaN must raise: ``NaN < 0`` is False, so a diff check alone passes it.
     with pytest.raises(ValueError, match="non-finite"):
         assert_monotonic_timestamps(
             np.array([0.0, 1.0, np.nan, 0.5, 2.0]), context="ctx: "
@@ -51,13 +43,9 @@ def test_assert_monotonic_timestamps_rejects_empty_and_backward_steps():
 
 
 def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
-    """The per-frame artifact set must not exceed a sane fraction of the
-    recording. A fraction at/under the bound is a no-op; more than the bound
-    raises ``ArtifactFractionExceededError`` -- a misconfigured (too-loose)
-    threshold or a near-empty ``valid_times`` would otherwise materialize an
-    int64 frame index per artifact sample (O(n_samples), hundreds of MB to GB
-    on a long many-channel recording) and a correspondingly slow per-frame pass.
-    ``n_samples == 0`` forms no fraction, so it is a no-op."""
+    """An artifact fraction over the bound raises
+    ``ArtifactFractionExceededError``; at or under it, or with
+    ``n_samples == 0``, it is a no-op."""
     from spyglass.spikesorting.v2._core.signal_math import (
         _MAX_ARTIFACT_FRAME_FRACTION,
         assert_artifact_frame_fraction,
@@ -79,14 +67,8 @@ def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
 
 
 # --------------------------------------------------------------------------- #
-# Chunked / affine timestamp helpers: output-identical to the full-vector path.
-#
-# ``frames_for_times`` / ``base_intervals_and_gaps`` / ``timestamp_fingerprint``
-# read the recording timestamps lazily via ``sample_index_to_time`` instead of
-# materializing ``get_times()``. These pin that the outputs are IDENTICAL to the
-# full-vector references for rate-based and explicit (contiguous and disjoint)
-# recordings -- so a future SpikeInterface change to ``sample_index_to_time``
-# semantics fails CI loudly rather than silently shifting frames.
+# Lazy timestamp helpers (via ``sample_index_to_time``) match the full
+# ``get_times()`` vector for rate-based and explicit recordings.
 # --------------------------------------------------------------------------- #
 FS = 30000.0
 
@@ -134,8 +116,7 @@ def _recording_for_kind(kind, n, fs=FS):
 @pytest.mark.parametrize("kind", ["rate", "contiguous", "disjoint"])
 def test_frames_for_times_matches_full_vector_searchsorted(kind):
     """``frames_for_times`` == ``searchsorted(get_times(), t, "left")`` exactly,
-    including at exact grid points, +/- 1 ns, out-of-range, and disjoint-gap
-    times -- the property the artifact-mask complement walk depends on."""
+    including at grid points, +/- 1 ns, out of range and in gaps."""
     import numpy as np
 
     from spyglass.spikesorting.v2._core.signal_math import frames_for_times
@@ -148,9 +129,7 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
             full[[0, 1, n // 3, n // 2, n - 2, n - 1]],
             full[[0, n // 2, n - 1]] + 1e-9,
             full[[0, n // 2, n - 1]] - 1e-9,
-            # midway between the last pre-gap and first post-gap sample: for the
-            # disjoint recording this lands INSIDE the dead wall-clock gap (the
-            # most disjoint-specific binary-search query); harmless for the others.
+            # Midway across the gap: inside it for the disjoint recording.
             [(full[n // 3 - 1] + full[n // 3]) / 2.0],
             [full[0] - 1.0, full[-1] + 1.0],
         ]
@@ -163,9 +142,7 @@ def test_frames_for_times_matches_full_vector_searchsorted(kind):
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_frames_for_times_rejects_non_finite(bad):
-    """A NaN/Inf query time raises (searchsorted would map NaN to +inf
-    and silently mis-map). Out-of-range FINITE times still clamp -- that
-    searchsorted contract is pinned by the matches_full_vector test above."""
+    """A NaN/Inf query time raises; finite out-of-range times clamp."""
     import numpy as np
 
     from spyglass.spikesorting.v2._core.signal_math import frames_for_times
@@ -202,13 +179,8 @@ def test_base_intervals_and_gaps_matches_full_vector(kind):
 
 
 def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
-    """A wall-clock gap landing exactly on a scan-chunk seam exercises the
-    cross-chunk-boundary branch of ``base_intervals_and_gaps`` (the
-    ``float(times[0]) - prev_time`` check that emits ``gap_after = start_frame -
-    1``), which interior-gap recordings never hit. The chunked scan steps in
-    ``round(fs)``-frame chunks, so a gap at frame ``chunk_size - 1`` straddles
-    two scan chunks. Compared against the exact full-vector reference, plus one
-    interior gap so both gap branches run in one recording."""
+    """A gap on a scan-chunk seam and one inside a chunk both match the
+    full-vector reference. The scan steps in ``round(fs)``-frame chunks."""
     import numpy as np
 
     from spyglass.spikesorting.v2._core.signal_math import (
@@ -238,8 +210,7 @@ def test_base_intervals_and_gaps_gap_at_scan_chunk_boundary():
 
 
 def test_base_intervals_and_gaps_rejects_nonpositive_fs():
-    """A zero/negative sampling frequency makes the gap threshold ``1.5/fs``
-    infinite/negative, silently collapsing or exploding the chunk split."""
+    """A zero or negative sampling frequency raises."""
     import numpy as np
 
     from spyglass.spikesorting.v2._core.signal_math import (
@@ -252,9 +223,8 @@ def test_base_intervals_and_gaps_rejects_nonpositive_fs():
 
 
 def test_timestamp_fingerprint_matches_array_equal_semantics():
-    """Equal timestamps -> equal digest; any byte difference (a tiny shift OR a
-    different length) -> different digest -- the bounded-memory replacement for
-    ``np.array_equal`` over two full vectors in the shared-artifact-group check.
+    """Equal timestamps give equal digests; a tiny shift or a different
+    length gives a different digest, as ``np.array_equal`` would.
     """
     import numpy as np
 
@@ -276,10 +246,7 @@ def test_timestamp_fingerprint_matches_array_equal_semantics():
         _explicit_recording(ts.copy()).get_times(),
     )
 
-    # Rate-based agreement: the fingerprint also runs on a rate-based recording
-    # (affine sample_index_to_time, no explicit time_vector) and agrees with an
-    # explicit recording carrying its exact times -- so a rate-based member
-    # cannot spuriously mismatch a byte-identical explicit one.
+    # A rate-based recording matches an explicit one with the same times.
     rate_rec = _rate_based_recording(n)
     assert timestamp_fingerprint(rate_rec) == timestamp_fingerprint(
         _explicit_recording(rate_rec.get_times())

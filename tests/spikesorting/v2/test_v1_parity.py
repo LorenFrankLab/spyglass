@@ -1,14 +1,7 @@
-"""v1-parity validation.
+"""v2 matches v1's contract where it could silently diverge.
 
-Tests in this module verify that v2 behavior matches v1's documented
-contract on points where a v2 implementation could silently diverge. Each
-test is short, focused, and either pure-Python or DB-tier without
-populate -- the heavier integration / regression tests live in
-the ``single_session/`` suite.
-
-Where a test pins down a specific v1↔v2 parity point, the docstring
-cites the v1 source line so a reader can confirm v2 does not drift away
-from v1's intent without justification.
+Pure-Python or DB-tier without populate; integration tests live in
+``single_session/``.
 """
 
 from __future__ import annotations
@@ -29,10 +22,7 @@ from spyglass.spikesorting.v2._params.sorter import (
     Kilosort4Schema,
 )
 
-# Most tests below import from v2 runtime modules whose ``dj.schema``
-# activations require a live Docker MySQL connection. The
-# ``dj_conn`` fixture (from the project conftest) starts the
-# container once per session.
+# v2 schema modules connect on import.
 pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
@@ -42,9 +32,8 @@ pytestmark = pytest.mark.usefixtures("dj_conn")
 def test_artifact_defaults_match_v1_effective_threshold():
     """``amplitude_threshold_uv=500.0`` µV; ``proportion_above_threshold=1.0``.
 
-    The amplitude default is the v1-effective Frank-lab Intan
-    threshold in µV (v1's 3000 nominal == ~585 µV on 0.195 µV/count Intan
-    probes). proportion=1.0 keeps v1's "all channels must exceed" rule.
+    v1's nominal 3000 is ~585 µV on 0.195 µV/count Intan probes;
+    proportion 1.0 keeps v1's "all channels must exceed" rule.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -56,7 +45,7 @@ def test_artifact_defaults_match_v1_effective_threshold():
 
 
 def test_common_reference_field_removed_from_schema():
-    """The dead ``reference`` field is gone; ``operator`` stays."""
+    """``common_reference`` has ``operator`` and no ``reference`` field."""
     assert "reference" not in CommonReferenceParams.model_fields
     assert "operator" in CommonReferenceParams.model_fields
     from pydantic import ValidationError
@@ -75,7 +64,6 @@ def test_default_has_no_recording_stage_whiten():
         PreprocessingParameters,
     )
 
-    # Locate the default row in _DEFAULT_CONTENTS.
     contents = {
         name: params
         for (
@@ -92,10 +80,7 @@ def test_default_has_no_recording_stage_whiten():
 def test_phase_shift_preset_neuropixels_on_franklab_off():
     """Phase-shift ships ON in ``default_neuropixels``, OFF in ``default``.
 
-    The franklab headline default stays a no-op (``phase_shift is None``);
-    the blessed Neuropixels recipe enables it (``margin_ms == 100.0``) on top
-    of the same 300-6000 Hz bandpass, so the two presets differ ONLY by the
-    phase-shift step.
+    The two presets differ only by the phase-shift step.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -111,10 +96,8 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
         ) in PreprocessingParameters._DEFAULT_CONTENTS
     }
 
-    # franklab: phase-shift OFF.
     assert contents["default"]["phase_shift"] is None
 
-    # neuropixels: phase-shift ON (margin 100 ms) + the same bandpass.
     np_params = contents["default_neuropixels"]
     assert np_params["phase_shift"] == {"margin_ms": 100.0}
     assert np_params["bandpass_filter"] == {
@@ -122,7 +105,6 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
         "freq_max": 6000.0,
     }
 
-    # The two presets differ ONLY by the phase-shift step.
     assert {k: v for k, v in np_params.items() if k != "phase_shift"} == {
         k: v for k, v in contents["default"].items() if k != "phase_shift"
     }
@@ -159,32 +141,12 @@ def test_kilosort4_schema_accepts_extra_kwargs_v1_parity():
 
 
 def test_optional_matching_extra_resolution():
-    """``spikesorting-v2-matching`` extra resolves cleanly with the
-    v2 NumPy + Python pins and a ``UnitMatchPy`` import does not
-    fail loudly on the ``_tkinter`` import path that older
-    versions trip on.
+    """The ``spikesorting-v2-matching`` extra installs without breaking
+    the v2 pins.
 
-    The extra ships ``UnitMatchPy>=3.2.6,<3.2.8`` + ``mat73``. The
-    test:
-
-    1. If the extra is NOT installed (the default test
-       environment), skip cleanly so this test acts as
-       documentation rather than a hard requirement -- it
-       activates only when a user installs ``pip install
-       "spyglass-neuro[spikesorting-v2-matching]"``.
-    2. If installed, verify:
-       a. ``mat73`` imports.
-       b. ``UnitMatchPy`` imports OR raises a *clear* import
-          error citing ``_tkinter`` (the known ``UnitMatchPy``
-          GUI dependency that broke on minimal Python builds);
-          a bare ``ImportError`` without ``_tkinter`` in the
-          message is the actual regression we guard against.
-       c. NumPy version remains in the v2-supported range
-          (``>=2.0``). The extra is pinned to UnitMatchPy 3.2.7
-          (declares ``numpy<3,>=2``); 3.2.8+ reactively flipped to
-          ``numpy<2`` (upstream #134), which would force a
-          downgrade. The resolver-evidence contract requires the
-          pin to stay on a numpy>=2-compatible release.
+    Skips when the extra is absent. Otherwise ``mat73`` imports,
+    ``UnitMatchPy`` imports or raises an error naming ``_tkinter``, and
+    NumPy stays >= 2 (UnitMatchPy 3.2.8+ requires ``numpy<2``).
     """
     import importlib
     import importlib.util
@@ -198,13 +160,7 @@ def test_optional_matching_extra_resolution():
     )
 
     if matching_required:
-        # In CI's dedicated matching-extra job (which sets
-        # ``SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1`` AFTER
-        # running ``uv pip install ...[spikesorting-v2-matching]``)
-        # the extra contract is BOTH ``mat73`` AND ``UnitMatchPy``.
-        # An or-gate (passing on mat73 alone) would silently let a
-        # broken UnitMatchPy declaration through whenever mat73
-        # happens to resolve.
+        # The matching CI job requires both packages.
         missing = []
         if not mat73_available:
             missing.append("mat73")
@@ -219,12 +175,6 @@ def test_optional_matching_extra_resolution():
                 "preceding ``uv pip install`` step's log."
             )
     elif not (mat73_available and unitmatch_available):
-        # Default env: the extra is not installed and we don't
-        # require it. Skip cleanly so the test acts as
-        # documentation. (Use AND here too -- if only one of the
-        # two is importable in the default env, that's an unusual
-        # state worth noting but not a CI failure outside the
-        # dedicated job.)
         pytest.skip(
             "spikesorting-v2-matching extra is not fully installed "
             "in this environment (mat73="
@@ -233,15 +183,9 @@ def test_optional_matching_extra_resolution():
             "``pip install spyglass-neuro[spikesorting-v2-matching]``."
         )
 
-    # mat73 is the small ScilabHDF5 .mat reader; failure here would
-    # be a packaging regression on the extra itself.
     import mat73  # noqa: F401
 
-    # UnitMatchPy: a clean import IS the desired contract. If it
-    # raises, the error message MUST cite ``_tkinter`` (the known
-    # GUI-import dependency) so a user can diagnose; a bare
-    # ``ImportError`` without a clue is the failure mode we guard
-    # against.
+    # An import error must name ``_tkinter`` so users can diagnose it.
     try:
         importlib.import_module("UnitMatchPy")
     except ImportError as exc:
@@ -253,8 +197,6 @@ def test_optional_matching_extra_resolution():
             "or surface the ``_tkinter`` dependency clearly."
         )
 
-    # NumPy compatibility: the v2 supported pin is ``>=2.0``. A
-    # matching-extra install MUST NOT have forced a downgrade.
     np_major = int(np.__version__.split(".")[0])
     assert np_major >= 2, (
         f"NumPy {np.__version__} is below the v2-supported >=2.0 "
@@ -265,25 +207,17 @@ def test_optional_matching_extra_resolution():
 
 
 def test_ms4_default_row_only_inserted_when_ms4_installed():
-    """MS4 runtime guard: the local default rows insert iff MS4 is installed.
+    """Local MS4 default rows insert only if MS4 is installed.
 
-    ``_DEFAULT_CONTENTS`` keeps the full catalog (MS4 rows included) for
-    introspection, but ``insert_default`` gates each local SI sorter row on
-    ``spikeinterface.sorters.installed_sorters()`` via
-    ``_gated_default_rows``. On a platform without MS4 (the v2 SI-0.104
-    test image) the local MS4 rows are routed to "skipped"; on a platform
-    with MS4 they are routed to "insertable". The containerized MS4 row
-    always inserts, since its runtime ships in the image. Without the gate,
-    a v2 user who inserts an uninstalled sorter's local default row and then
-    populates ``Sorting`` hits an unhelpful SI "sorter not registered" error.
+    ``_DEFAULT_CONTENTS`` keeps every row; ``_gated_default_rows`` checks
+    ``installed_sorters()``. The containerized MS4 row always inserts.
     """
     import spikeinterface.sorters as sis
 
     from spyglass.spikesorting.v2._sorting.dispatch import is_container_backend
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    # Assert the gating DECISION (independent of the live table state,
-    # which other tests may have populated), per (sorter, params name) row.
+    # The gating decision, independent of live table state.
     insertable, skipped = SorterParameters._gated_default_rows()
     insertable_rows = {row[:2] for row in insertable}
     skipped_rows = {row[:2] for row in skipped}
@@ -297,8 +231,6 @@ def test_ms4_default_row_only_inserted_when_ms4_installed():
     assert clusterless and clusterless <= insertable_rows
     assert not clusterless & skipped_rows
 
-    # The catalog always advertises MS4 (introspection), regardless of
-    # install status, as local rows plus a containerized one.
     ms4_rows = [
         row
         for row in SorterParameters._DEFAULT_CONTENTS
@@ -322,10 +254,9 @@ def test_ms4_default_row_only_inserted_when_ms4_installed():
 
 
 def test_clusterless_schema_documents_dead_fields_or_drops_them():
-    """Dead ``outputs`` / ``random_chunk_kwargs`` fields are gone."""
+    """The clusterless schema has no ``outputs`` / ``random_chunk_kwargs``."""
     fields = ClusterlessThresholderSchema.model_fields
-    # ``noise_levels`` STAYS (the runtime forwards it to detect_peaks);
-    # the other two are gone.
+    # ``noise_levels`` is forwarded to detect_peaks.
     assert "noise_levels" in fields
     assert "outputs" not in fields
     assert "random_chunk_kwargs" not in fields
@@ -341,11 +272,7 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
 ):
     """The notebook helper resolves a restriction to its v2 merge_id(s).
 
-    Behavioral replacement for the prior signature-only check: a root
-    curation registers a ``SpikeSortingOutput.CurationV2`` merge row, and
-    the helper must return that merge_id for a restriction on the sorting
-    -- with ``as_dict`` toggling between a list of UUIDs and a list of
-    ``{"merge_id": ...}`` dicts (the v1-parity / enhancement contract).
+    ``as_dict`` toggles between UUIDs and ``{"merge_id": ...}`` dicts.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -353,8 +280,7 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
         get_spike_sorting_v2_merge_ids,
     )
 
-    # Clear any prior curation (master-before-part) then mint a root,
-    # which registers exactly one v2 merge row for this sorting.
+    # A fresh root registers exactly one v2 merge row.
     curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
     if curation_keys:
         for mid in (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
@@ -384,27 +310,14 @@ def test_get_spike_sorting_v2_merge_ids_resolves_restriction(
 def test_no_phase_label_leakage_in_runtime_code():
     """Zero plan-phase / review-code identifier hits in v2 artifacts.
 
-    Shipped runtime code AND user-facing docs must not reference
-    internal plan-process identifiers:
-      - plan-phase / plan-task labels (``Phase N``, ``phase-N``, ``Task N``)
-      - review/audit codes (``A4``, ``R5``, ``C3``, ``N19``, ``B3`` ...) --
-        a single uppercase letter from the review namespaces followed by a
-        number.
-      - hyphenated codes (``OP-3``): two or more uppercase letters, a hyphen,
-        and a number.
-    The scan covers the v2 runtime source, the user-facing v2 guides, tutorial
-    scripts, and the CHANGELOG (phase/task only there -- the audit-code regex
-    would false-positive on unrelated historical release entries). Tests and
-    fixture machinery are not scanned: test-local labels such as unit names
-    (``A1``, ``B2``) would false-positive, so only shipped runtime and
-    user-facing surfaces are scanned.
+    Forbidden: ``Phase N`` / ``Task N`` labels, single-letter review codes
+    (``A4``, ``N19``) and hyphenated codes (``OP-3``). Scans v2 source, v2
+    guides, tutorial scripts, and the CHANGELOG (phase/task only). Tests
+    are not scanned (unit names like ``A1``).
     """
     import re
 
-    # parents[3] = repo root (parents[2] is ``tests/``, NOT ``tests/src/``).
-    # A wrong index resolves to a nonexistent ``tests/src/...`` path, so
-    # ``rglob`` would walk zero files and the test would pass silently;
-    # verify the resolved roots exist before scanning.
+    # A wrong parents index would scan nothing; roots are checked below.
     repo_root = Path(__file__).resolve().parents[3]
     v2_src = repo_root / "src" / "spyglass" / "spikesorting" / "v2"
     user_docs = (
@@ -438,11 +351,7 @@ def test_no_phase_label_leakage_in_runtime_code():
     # ``Phase``/``Task`` + a number (any sub-label like ``1b``) or the
     # plan-directory form ``phase-3``; case-insensitive.
     phase_re = re.compile(r"\b(?:phase|task)[\s-]+\d", re.IGNORECASE)
-    # Review/audit codes: one uppercase letter from the review namespaces
-    # (A/B/C/D/N/Q/R/T) + 1-2 digits, as a standalone token. Narrow on
-    # purpose so it does not match sorter names (``MS5``, ``KS4``) or
-    # version tokens (``V1``). If a legitimate token ever trips this,
-    # reword it -- a review code in shipped code/docs is the thing we forbid.
+    # Narrow letter set so ``MS5``, ``KS4`` and ``V1`` do not match.
     audit_re = re.compile(r"\b[ABCDNQRT]\d{1,2}\b")
     hyphen_re = re.compile(r"\b[A-Z]{2,}-\d{1,2}\b")
     offenders: list[str] = []
@@ -496,17 +405,11 @@ def test_merge_dispatch_raises_on_unknown_restriction_keys():
 
 
 def test_merge_dispatch_lenient_on_non_v2_keys_in_default_path(dj_conn):
-    """The v2 resolver is lenient in the multi-source DEFAULT path: a key it
-    doesn't recognize yields no v2 rows instead of raising. So when
-    ``get_restricted_merge_ids`` auto-defaults its sources, a key handled by
-    v1 (which the dispatcher runs first) does not trip the v2 branch's
-    'unknown key' ValueError. The strict raise is preserved for a deliberate
-    v2 query (sources=['v2'] / a direct strict resolve).
+    """In the multi-source default path an unknown key yields no v2 rows,
+    so a v1-only key does not raise; an explicit v2 query still raises.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
-    # Lenient (what the auto-default dispatch passes to the v2 branch):
-    # no raise, no v2 rows (an empty fetch result).
     assert (
         len(
             SpikeSortingOutput()._get_restricted_merge_ids_v2(
@@ -515,7 +418,6 @@ def test_merge_dispatch_lenient_on_non_v2_keys_in_default_path(dj_conn):
         )
         == 0
     )
-    # Strict (an explicit v2 query) still raises on the unknown key.
     with pytest.raises(ValueError, match="bogus_field"):
         SpikeSortingOutput()._get_restricted_merge_ids_v2(
             {"nwb_file_name": "x.nwb", "bogus_field": "y"}, strict=True
@@ -525,27 +427,17 @@ def test_merge_dispatch_lenient_on_non_v2_keys_in_default_path(dj_conn):
 def test_get_restricted_merge_ids_default_sources_includes_v2():
     """When ``sources`` is unspecified, v2 is among the resolved sources.
 
-    The ``sources`` parameter default is ``None`` (resolved at call time
-    to the available sources via ``_available_merge_sources``) rather
-    than a mutable ``["v0", "v1", "v2"]`` literal. That avoids the
-    mutable-default-argument antipattern and avoids forcing ``"v2"`` in
-    v0/v1-only deployments where the v2 module never imported. The
-    behavior that matters -- a caller who omits ``sources`` sees v2 rows
-    when v2 is importable -- is what this test pins, rather than the
-    signature literal.
+    The default is ``None``, resolved at call time so v0/v1-only
+    deployments do not require v2.
     """
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
         _available_merge_sources,
     )
 
-    # The signature default is intentionally None (runtime-resolved),
-    # NOT a mutable list literal.
     sig = inspect.signature(SpikeSortingOutput.get_restricted_merge_ids)
     assert sig.parameters["sources"].default is None
 
-    # In an environment where the v2 module imported, the resolved
-    # default sources include v2 (and always v0 + v1).
     resolved = _available_merge_sources()
     assert "v0" in resolved
     assert "v1" in resolved
@@ -622,15 +514,7 @@ def test_make_compute_is_pure():
 
 
 def test_make_compute_purity_guard_actually_catches_regressions():
-    """Tripwire: the widened AST guard catches local-alias regressions.
-
-    Builds a synthetic source string with each of the regression
-    patterns the widened guard is supposed to flag, runs the same
-    AST walk against it, and asserts each pattern fires the
-    pytest.fail. Without this meta-test, a future "simplification"
-    that narrows the guard would silently leave production
-    refactors un-guarded.
-    """
+    """The AST purity guard flags each planted DB-write pattern."""
     REGRESSION_SAMPLES = {
         "self.insert1": "def make_compute(self, key):\n    self.insert1({'x': 1})\n",
         "IntervalList.insert1 direct": (
@@ -679,26 +563,13 @@ def test_make_compute_purity_guard_actually_catches_regressions():
 
 
 def test_curation_v2_nwb_write_outside_transaction():
-    """CurationV2 stages the curated-units NWB OUTSIDE / BEFORE the txn.
+    """CurationV2 stages the curated-units NWB before and outside the
+    transaction, keeping the transaction short.
 
-    Manual-table insert_curation has no framework transaction; the heavy
-    NWB write must happen OUTSIDE the explicit ``_safe_context()``
-    block to keep the inner transaction short. ``insert_curation`` is a
-    thin orchestrator that delegates staging to
-    ``_stage_curation_artifact`` and the atomic inserts to
-    ``_insert_curation_rows_transaction``; this test pins the invariant
-    across those helpers:
-
-      * ``_insert_curation_rows_transaction`` opens the
-        ``_safe_context()`` block and performs NO NWB-write /
-        ``AnalysisNwbfile().create`` / ``NWBHDF5IO`` call inside it.
-      * ``_stage_curation_artifact`` performs the NWB staging call.
-      * ``insert_curation`` calls staging BEFORE the transaction helper.
-
-    Strategy: walk the AST of each method. The transaction-block scan and
-    the forbidden-call check run on ``_insert_curation_rows_transaction``;
-    the staging-call check runs on ``_stage_curation_artifact``; the
-    ordering check runs on ``insert_curation``.
+    * ``_insert_curation_rows_transaction`` makes no NWB-write call inside
+      ``_safe_context()``.
+    * ``_stage_curation_artifact`` performs the NWB staging call.
+    * ``insert_curation`` stages before calling the transaction helper.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -709,9 +580,7 @@ def test_curation_v2_nwb_write_outside_transaction():
         if not isinstance(node, ast.Call):
             return None
         func = node.func
-        # Direct staging call: ``write_curated_units_nwb(...)`` (the
-        # DB-free service function ``_stage_curation_artifact`` calls
-        # directly), or an attribute form ``x.write_curated_units_nwb(...)``.
+        # Bare or attribute ``write_curated_units_nwb(...)``.
         if isinstance(func, ast.Name) and func.id in NWB_WRITE_NAMES:
             return func.id
         if isinstance(func, ast.Attribute) and func.attr in NWB_WRITE_NAMES:

@@ -1,11 +1,6 @@
-"""DB-free unit tests for the NWB provenance scratch helper.
+"""DB-free tests for ``spyglass.spikesorting.v2._storage.provenance``.
 
-These exercise the pure (de)serialization in
-``spyglass.spikesorting.v2._storage.provenance`` -- the ``key``/``value_json``
-scalar provenance container and the typed long-table container -- with no
-DataJoint server and no SpikeInterface analyzer. The helper writes into and
-reads back from a real (tiny) NWB file on disk, so the round-trip assertions
-prove the values survive an HDF5 write, not just an in-memory build.
+Round-trips the scalar and long-table containers through a real NWB file.
 """
 
 from __future__ import annotations
@@ -102,10 +97,8 @@ def test_scalar_provenance_round_trips_mixed_types(tmp_path):
 def test_scalar_provenance_coerces_datajoint_types(tmp_path):
     """Numpy + UUID (DataJoint-deserialized types) serialize + read back.
 
-    Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
-    rule thresholds, hash manifests, row ids), which deserialize as numpy
-    scalars/arrays and ``uuid.UUID``; plain ``json.dumps`` cannot encode those,
-    so the helper coerces them (UUIDs to their canonical string form).
+    Values fetched from DataJoint arrive as numpy types and ``uuid.UUID``,
+    which plain ``json.dumps`` cannot encode.
     """
     import uuid
 

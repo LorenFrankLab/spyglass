@@ -1,8 +1,6 @@
 """Estimate and apply motion for a v2 pipeline source.
 
-``estimate_motion`` builds the same recording and artifact source as sorting,
-then saves its estimate without running the sorter. Sorting delegates its
-motion estimate and correction stages to the same helpers."""
+Sorting runs its motion stages through the same helpers."""
 
 from __future__ import annotations
 
@@ -38,9 +36,8 @@ def _run_motion_estimate(
 ) -> dict:
     """Select and populate the motion estimate of a run's source.
 
-    Records the estimate id, its resolved SpikeInterface preset, its status
-    and seconds, and its continuity spans without evidence (a non-empty list
-    also appends a logged warning) in ``run_summary`` / ``stage_seconds``.
+    Records the estimate id, preset, status, seconds, and spans without
+    evidence (warned when non-empty) in ``run_summary`` / ``stage_seconds``.
 
     Parameters
     ----------
@@ -53,10 +50,8 @@ def _run_motion_estimate(
     warnings_list : list
         The run's warnings (appended to).
     motion_estimate_id : uuid.UUID or str, optional
-        A saved estimate to reuse instead of selecting one: it must be a
-        populated estimate of ``source`` made with the recipe's estimation
-        row (:func:`supplied_motion_estimate_problem`), and it is never
-        recomputed (the stage is ``"reused"``).
+        A populated estimate of ``source`` with the recipe's estimation row
+        to reuse; never recomputed.
 
     Returns
     -------
@@ -98,8 +93,6 @@ def _run_motion_estimate(
                 source["artifact_detection_id"],
             )
 
-        # Checked against the source this run built (for a concat, its member
-        # masks too), then read back without any populate.
         def _estimate() -> str:
             problem = supplied_motion_estimate_problem(
                 motion_estimate_id, motion_recipe, source_lineage=lineage
@@ -110,9 +103,7 @@ def _run_motion_estimate(
 
         exists = True
     else:
-        # The selection insert runs inside ``_run_stage`` too, so a refused
-        # selection (e.g. a source whose content hash drifted) is a
-        # PipelineStageError with the partial summary like a failed populate.
+        # Inside ``_run_stage`` so a refused selection is a PipelineStageError.
         estimate_key, _, _ = _run_stage(
             "motion_estimate",
             False,
@@ -127,8 +118,6 @@ def _run_motion_estimate(
             run_summary,
         )
 
-        # The stage's work populates AND reads back its row, so a row that is
-        # missing afterwards is a stage failure with the partial summary.
         def _estimate() -> str:
             _populate_once(MotionEstimate, estimate_key)
             return _preset()
@@ -141,8 +130,7 @@ def _run_motion_estimate(
         stage_seconds["motion_estimate"],
     ) = _run_stage("motion_estimate", exists, _estimate, run_summary)
     run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
-    # Surfaced, not refused: dropped-frame gaps can leave spans too short to
-    # hold a peak, and the estimate there is the temporal prior alone.
+    # Warn, not refuse: dropped-frame gaps can leave spans with no peak.
     empty_spans = MotionEstimate().get_spans_without_evidence(estimate_key)
     run_summary["motion_spans_without_evidence"] = empty_spans
     if empty_spans:
@@ -254,13 +242,8 @@ def estimate_motion(
 ) -> "EstimateMotionReceipt":
     """Save the motion estimate of one sort group's source, without sorting.
 
-    Builds the source exactly as ``run_v2_pipeline`` does with the same
-    arguments -- the recording and its artifact detection -- and saves
-    its ``MotionEstimate`` with the estimation row of
-    ``motion_correction_params_name``. Nothing is sorted or curated. Inspect
-    the estimate (``MotionEstimate().get_motion`` /
-    ``get_displacement_on_source_clock`` / ``get_spans_without_evidence``),
-    then sort the recording corrected with exactly that estimate::
+    Builds the source as ``run_v2_pipeline`` does and saves its
+    ``MotionEstimate``. Inspect it, then sort with exactly that estimate::
 
         receipt = estimate_motion(..., motion_correction_params_name=name)
         run_v2_pipeline(
@@ -270,13 +253,9 @@ def estimate_motion(
             motion_estimate_id=receipt["motion_estimate_id"],
         )
 
-    Idempotent: the estimate id is content-addressed (source, its content,
-    mask, estimation row and resolved configuration), so a second call, or a
-    ``run_v2_pipeline`` run in ``"estimate"`` / ``"apply"`` mode on the same
-    source and recipe, reuses it.
+    Idempotent: the estimate id is content-addressed.
 
-    Experimental: no motion recipe is validated for a probe. Inspect the
-    saved estimate rather than trusting a corrected sort's improvement.
+    Experimental: no motion recipe is validated for a probe.
 
     Parameters
     ----------
@@ -286,12 +265,8 @@ def estimate_motion(
         The preset whose preprocessing and artifact rows build the source; use
         the preset of the run that will apply the estimate.
     preflight
-        If True (default), run ``run_v2_pipeline``'s read-only preflight for
-        ``motion_mode="estimate"`` first, without its sorter-only checks: the
-        source prerequisites, the preset's preprocessing and artifact rows,
-        the recipe, a filtering preprocessing recipe and a geometry the
-        estimation recipe supports. The preset's sorter need not be available
-        here (the run that applies the estimate checks it). A failure raises
+        If True (default), run the read-only preflight for
+        ``motion_mode="estimate"`` without sorter checks. A failure raises
         ``PreflightError``.
     manual_excluded_times
         Manual exclusions, as in :func:`run_v2_pipeline`; they are part of
@@ -304,11 +279,9 @@ def estimate_motion(
     Returns
     -------
     EstimateMotionReceipt
-        ``motion_estimate_id``, the resolved SpikeInterface estimation preset,
-        the continuity spans without evidence, ``motion_diagnostics`` (peaks
-        detected and kept, largest absolute displacement in um, number of
-        temporal bins), the source-stage ids and statuses, ``stage_seconds``
-        and ``warnings`` (a span without evidence adds one).
+        ``motion_estimate_id``, the estimation preset, spans without
+        evidence, ``motion_diagnostics``, source-stage ids and statuses,
+        ``stage_seconds``, and ``warnings``.
 
     Raises
     ------
@@ -348,10 +321,7 @@ def estimate_concat_motion(
 ) -> "EstimateMotionReceipt":
     """Save the motion estimate of a session group's concatenation.
 
-    Builds the source exactly as ``run_v2_concat_pipeline`` does with the same
-    arguments -- the member recordings, member artifact masks and their
-    concatenation -- and saves its ``MotionEstimate``, as
-    :func:`estimate_motion` does for one sort group. Apply it with
+    Concat counterpart of :func:`estimate_motion`. Apply it with
     ``run_v2_concat_pipeline(..., motion_mode="apply",
     motion_estimate_id=receipt["motion_estimate_id"])``.
 

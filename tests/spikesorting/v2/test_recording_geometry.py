@@ -1,15 +1,8 @@
 """Plane selection and uniqueness checks for raw electrode geometry.
 
-Real Frank-lab tetrode files store contacts in the x-z plane (``rel_y`` is 0
-for every contact, ``rel_z`` is +-6.25 um). SpikeInterface projects 3D channel
-locations onto x-y whenever it builds a probe
-(``create_dummy_probe_from_locations(axes="xy")``), which collapses such a
-tetrode onto two coincident positions and fails at analyzer build with
-"Contact positions must be unique within a probe".
-
-These are DB-free unit tests of the three helpers that pick the plane keeping
-every contact distinct, write it back as 2D channel locations, and assert the
-effective geometry is usable.
+Frank-lab tetrode files store contacts in the x-z plane (``rel_y`` is 0).
+SpikeInterface projects 3D locations onto x-y when it builds a probe, which
+collapses such a tetrode onto two positions. No DB.
 """
 
 from __future__ import annotations
@@ -31,8 +24,7 @@ pytestmark = pytest.mark.unit
 def xz_tetrode_locations():
     """A real-file tetrode: four contacts in the x-z plane, ``rel_y`` all 0.
 
-    The x-y projection SpikeInterface would take has only two distinct
-    positions, so this array discriminates a plane chooser from a no-op.
+    Its x-y projection has only two distinct positions.
     """
     return np.array(
         [
@@ -46,7 +38,7 @@ def xz_tetrode_locations():
 
 @pytest.fixture
 def xy_square_locations():
-    """A planar x-y tetrode square (``rel_z`` all 0) -- x-y must win."""
+    """A planar x-y tetrode square (``rel_z`` all 0); x-y must win."""
     return np.array(
         [
             [0.0, 0.0, 0.0],
@@ -93,12 +85,8 @@ def all_zero_locations():
 def _probeless_recording(num_channels: int):
     """Build a synthetic recording with no probe attached.
 
-    ``si.generate_recording`` attaches a dummy linear probe, so its
-    ``contact_vector`` property shadows ``location`` in
-    ``get_channel_locations`` and blocks ``set_channel_locations``. The helpers
-    under test run on the recording read from the NWB file, which carries
-    locations only (``NwbRecordingExtractor`` calls ``set_channel_locations``),
-    so the probe is removed here to match.
+    Recordings read from NWB carry locations only; a probe would shadow
+    ``location`` and block ``set_channel_locations``.
     """
     import spikeinterface as si
 
@@ -145,10 +133,7 @@ def test_classify_missing_geometry(
 ):
     """One predicate decides how much of a group's geometry is missing.
 
-    Preflight and the recording stage have to agree on this, or a group
-    clears preflight (which maps a wholly unpositioned group onto the
-    all-zero legacy geometry the ``tetrode_12.5`` repair rescues) and then
-    fails minutes later at make.
+    Shared by preflight and the recording stage so they agree.
     """
     assert classify_missing_geometry(xz_tetrode_locations) == "none"
     assert classify_missing_geometry(all_zero_locations) == "none"
@@ -161,8 +146,8 @@ def test_classify_missing_geometry(
     assert classify_missing_geometry(partial_row) == "partial"
     assert classify_missing_geometry(nan_locations) == "partial"
 
-    # The case the two gates disagreed on: finite x and y, NaN z. Every ROW
-    # is incomplete, but the group is not unpositioned.
+    # Finite x and y, NaN z: every row is incomplete, but the group is not
+    # unpositioned.
     nan_z = np.array(xz_tetrode_locations)
     nan_z[:, 2] = np.nan
     assert classify_missing_geometry(nan_z) == "partial"
@@ -183,8 +168,7 @@ def test_normalize_rejects_a_wholly_non_finite_coordinate(
 ):
     """Finite x/y with a NaN z is a defect, not an unpositioned group.
 
-    ``not np.isfinite(positions).any()`` -- "no coordinate at all is finite"
-    -- is the only shape of missing geometry the tetrode repair rescues.
+    Only a set with no finite coordinate is repaired as a tetrode.
     """
     recording = _probeless_recording(4)
     nan_z = np.array(xz_tetrode_locations)
@@ -217,11 +201,8 @@ def test_normalize_rejects_non_finite_locations(nan_locations):
 def test_normalize_treats_all_non_finite_locations_as_absent():
     """A group with NO usable coordinates is passed through, not rejected.
 
-    ``sort_group_geometry_problem`` maps an all-unpositioned group onto the
-    all-zero legacy geometry so the ``tetrode_12.5`` repair can rescue it, and
-    lets the run start. Raising here would fail that same group at make, after
-    preflight cleared it. Partial non-finite rows still raise (above): there
-    the repair does not apply and the missing contacts are a real defect.
+    Preflight passes such a group to the ``tetrode_12.5`` repair. Partial
+    non-finite rows still raise.
     """
     recording = _probeless_recording(4)
     all_nan = np.full((4, 3), np.nan)
@@ -258,14 +239,9 @@ def test_normalize_on_channel_subset(xz_tetrode_locations):
 def test_normalize_uses_only_the_retained_contacts(xz_tetrode_locations):
     """The plane is chosen from the contacts that stay in the sort surface.
 
-    A ``specific`` reference is sliced in for subtraction and dropped
-    afterwards, and ``Probe.Electrode`` ``rel_*`` are per probe TYPE -- so a
-    reference contact on a second, identical probe carries the SAME raw
-    coordinates as one of the members. No plane separates the five sliced
-    rows, while the four retained ones separate in x-z. Choosing the plane
-    over the sliced set therefore leaves a perfectly good sort group 3D, and
-    ``assert_unique_contact_positions`` rejects it after the reference is
-    dropped.
+    ``rel_*`` are per probe type, so a ``specific`` reference on a second
+    identical probe can share a member's coordinates. The four retained rows
+    separate in x-z; the five sliced rows do not.
     """
     locations = np.vstack([xz_tetrode_locations, xz_tetrode_locations[:1]])
 
@@ -292,8 +268,7 @@ def test_normalize_uses_only_the_retained_contacts(xz_tetrode_locations):
         len(np.unique(projected[:4], axis=0)) == 4
     ), "the four retained contacts must be distinct in the chosen plane"
 
-    # The reference is dropped by the referencing step; what is left must pass
-    # the recording stage's own gate.
+    # After the reference is dropped, the rest passes the recording gate.
     assert_unique_contact_positions(result.remove_channels(channel_ids[4:]))
 
 
@@ -302,10 +277,8 @@ def test_normalize_still_requires_every_sliced_contact_to_be_placeable(
 ):
     """Only the PLANE is scoped to the retained contacts, not finiteness.
 
-    The reference keeps its coordinates until it is dropped, and the
-    ``interpolate`` path builds SpikeInterface's kriging weights from every
-    channel's location -- so a NULL ``rel_*`` on the reference would spread
-    NaN into the filled channels rather than being harmlessly ignored.
+    ``interpolate`` builds kriging weights from every channel, so a NULL
+    ``rel_*`` on the reference would spread NaN.
     """
     locations = np.vstack([xz_tetrode_locations, [[np.nan, np.nan, np.nan]]])
     recording = _probeless_recording(5)
@@ -319,13 +292,8 @@ def test_normalize_still_requires_every_sliced_contact_to_be_placeable(
 def test_normalize_screens_a_positioned_reference_beside_unpositioned_members():
     """Unpositioned members plus a positioned reference is still a defect.
 
-    "The group carries no geometry" is the ONE shape of missing geometry that
-    is passed through for the ``tetrode_12.5`` repair, and it is a statement
-    about the whole sliced set -- the repair spreads the group onto a square
-    it computes itself, so a reference sitting at a real coordinate beside
-    members that have none is a half-populated probe, not the legacy case.
-    Classifying only the retained rows would return the recording still 3D,
-    with NaN locations, and let it run.
+    The ``tetrode_12.5`` pass-through applies only when the whole sliced set
+    has no geometry.
     """
     locations = np.full((5, 3), np.nan)
     locations[4] = [10.0, 20.0, 30.0]
@@ -368,7 +336,7 @@ def test_normalize_leaves_2d_and_missing_locations_alone():
 
 
 def test_normalize_refuses_when_probe_attached(xz_tetrode_locations):
-    """A probe already makes the geometry read-only -- fail, don't skip."""
+    """A probe makes the geometry read-only, so this raises, not skips."""
     recording = _probeless_recording(4)
     recording.set_channel_locations(xz_tetrode_locations)
     recording.set_dummy_probe_from_locations(xz_tetrode_locations, axes="xz")
@@ -402,11 +370,8 @@ def test_assert_unique_contact_positions_requires_all_distinct():
 def test_assert_unique_contact_positions_refuses_3d_locations():
     """Still-3D locations fail at the gate, not later inside the writer.
 
-    ``select_sort_group_channels`` keeps a ``specific`` reference channel
-    through plane selection and ``apply_spatial_preprocessing`` drops it
-    afterwards, so a group can reach this point with its 3D locations intact
-    and an x-y projection that happens to be distinct. The writer refuses that
-    recording -- but only after the whole compute has run.
+    A group can arrive 3D with a distinct x-y projection; the writer would
+    refuse it only after the compute.
     """
     recording = _probeless_recording(4)
     # x-y alone separates these four, so the coincidence check would pass.
@@ -427,9 +392,7 @@ def test_assert_unique_contact_positions_refuses_3d_locations():
     assert "2D plane" in message
     assert "Probe.Electrode" in message
 
-    # The analyzer path deliberately loads 3D artifacts (the writer persists
-    # rel_z, so ``NwbRecordingExtractor`` rebuilds a 3D ``location``) and
-    # projects them with ``probe.to_2d()``; it opts out of the 2D requirement.
+    # The analyzer path loads 3D artifacts and projects them itself.
     assert assert_unique_contact_positions(recording, require_2d=False) is None
 
 
@@ -446,10 +409,7 @@ def test_assert_unique_contact_positions_without_any_geometry():
 def test_tetrode_repair_applies_gates():
     """Each gate of the legacy ``tetrode_12.5`` repair, one at a time.
 
-    ``maybe_apply_tetrode_geometry`` needs a recording and logs its verdict;
-    preflight needs the same verdict from probe metadata alone. Both now ask
-    this predicate, so its four gates are pinned here: one all-true case, and
-    one case per gate that flips it to False with everything else held.
+    Shared by ``maybe_apply_tetrode_geometry`` and preflight.
     """
     from spyglass.spikesorting.v2._recording.geometry import (
         tetrode_repair_applies,
@@ -479,8 +439,7 @@ def test_tetrode_repair_applies_gates():
     # Gate 3: not exactly four channels (the square has four corners).
     assert tetrode_repair_applies(tetrode, one_group, 3) is False
     assert tetrode_repair_applies(("tetrode_12.5",) * 5, ("0",) * 5, 5) is False
-    # Gate 4: four tetrode channels, but drawn from two electrode groups --
-    # they are not one physical tetrode.
+    # Gate 4: four tetrode channels from two electrode groups.
     assert tetrode_repair_applies(tetrode, ("0", "0", "1", "1"), 4) is False
     # An empty group must answer False, not raise on the empty probe set.
     assert tetrode_repair_applies((), (), 0) is False

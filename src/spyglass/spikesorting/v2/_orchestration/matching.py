@@ -1,7 +1,4 @@
-"""Plan, inspect, and run cross-session unit matching.
-
-Owns curation-choice discovery and plan/run orchestration. Matcher computation
-and tracked-unit derivation remain in their domain table and pure helpers."""
+"""Plan, inspect, and run cross-session unit matching."""
 
 from __future__ import annotations
 
@@ -44,37 +41,19 @@ def run_v2_unit_match(
 ) -> RunV2UnitMatchSummary:
     """Match units across matching inputs in one call, then track them.
 
-    A matching input is one curated sort, of a single recording or of a
-    same-day concatenation. Four call forms:
+    A matching input is one curated sort of a recording or a same-day
+    concatenation. Call forms:
 
-    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchPlan` from
-      :func:`plan_v2_unit_match` (the recommended plan-then-run path for a
-      ``SessionGroup``; the plan already pinned one curation per member via a
-      curation strategy).
-    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchInputPlan` from
-      :func:`plan_v2_unit_match_from_curations`, using exact reviewed curation
-      handles and frozen named unit populations (the recommended review path).
-    - ``run_v2_unit_match(plan)`` with a :class:`UnitMatchInputPlan` from
-      :func:`plan_v2_unit_match_from_sorts` (named sorts, no group; the plan
-      pinned one curation per sort). The pinned curations go to
-      ``UnitMatchSelection.insert_inputs``.
+    - ``run_v2_unit_match(plan)`` with a plan from :func:`plan_v2_unit_match`,
+      :func:`plan_v2_unit_match_from_curations`, or
+      :func:`plan_v2_unit_match_from_sorts` (recommended).
     - ``run_v2_unit_match(session_group_owner=..., session_group_name=...,
-      matcher_params_name=..., curation_choices={...})`` -- the explicit
-      group form, for power users.
+      curation_choices={...})``: the explicit group form.
 
-    A plan that could not pin every curation (``plan.ok is False``) raises
-    here. Chains the cross-session unit-matching stages into one call: the
-    selection (``UnitMatchSelection.insert_selection`` for a group,
-    ``insert_inputs`` for named sorts) -> ``UnitMatch`` (pairwise matches) ->
-    ``TrackedUnit`` (biological-unit identity across sessions). Idempotent:
-    re-running with the same inputs reuses the existing rows.
-
-    In the explicit form ``curation_choices`` is REQUIRED -- this helper never
-    auto-picks a "latest" curation (which would make the match irreproducible
-    the moment a source session gains a new curation). Build it from
-    :func:`describe_unit_match_choices`, or use the plan form (recommended):
-    :func:`plan_v2_unit_match` pins the curations for you by a named curation
-    strategy and returns the ``UnitMatchPlan`` you pass here.
+    Runs selection, ``UnitMatch`` (pairwise matches), then ``TrackedUnit``
+    (identity across sessions). Idempotent. The explicit form requires
+    ``curation_choices`` because an implicit "latest" curation is not
+    reproducible; build it from :func:`describe_unit_match_choices`.
 
     Parameters
     ----------
@@ -89,8 +68,8 @@ def run_v2_unit_match(
         ``UnitMatchPy`` backend; ``MatcherParameters.insert_default()`` seeds it).
         The same row supplies ``TrackedUnit``'s threshold / budget.
     curation_choices : dict
-        ``{member_index: {"sorting_id": ..., "curation_id": ...}}`` -- exactly
-        one committed curation pinned per member. ``None`` (the default) raises.
+        ``{member_index: {"sorting_id": ..., "curation_id": ...}}``, one
+        committed curation per member. Required in the explicit form.
     unit_policy : str, optional
         Explicit form only: the named unit eligibility policy frozen for each
         member; it must exclude ``mua``. Default ``None`` uses
@@ -101,17 +80,11 @@ def run_v2_unit_match(
     Returns
     -------
     RunV2UnitMatchSummary
-        ``session_group_owner`` / ``session_group_name`` (the group matched;
-        ``None`` for a plan of named sorts) / ``matcher_params_name``,
-        the ``unit_match_id`` selection PK, ``inputs`` (one
-        :class:`UnitMatchInputSummary` per matching input, in chronological
-        ``input_index`` order, read from the frozen selection), ``n_pairs`` (pairwise matches) and
-        ``n_tracked_units`` (cross-session biological units), the per-stage
-        ``unit_match_status`` / ``tracked_unit_status`` (``"computed"`` /
-        ``"reused"`` -- stems match the ``stage_seconds`` keys so ``describe_run``
-        fills the receipt), ``stage_seconds`` (keys ``unit_match`` /
-        ``tracked_unit``), and ``warnings`` (advisory notes, e.g. an
-        electrode-space divergence across members; also logged).
+        Group identity (``None`` for named sorts), ``matcher_params_name``,
+        ``unit_match_id``, ``inputs`` (one :class:`UnitMatchInputSummary` per
+        input, in ``input_index`` order), ``n_pairs``, ``n_tracked_units``,
+        per-stage status (``"computed"`` / ``"reused"``), ``stage_seconds``,
+        and advisory ``warnings``.
 
     Raises
     ------
@@ -129,21 +102,14 @@ def run_v2_unit_match(
         raw samples (``OverlappingMatchInputError``), a multi-day concatenation input,
         or a channel-geometry mismatch across inputs.
     PreflightError
-        A planned input's generation, frozen unit population, source/frame
-        coverage, geometry, or matcher availability changed or is unavailable.
-        Raised before any rows or caches are written. Rebuild and review the
-        plan after addressing the findings.
+        A planned input's generation, frozen unit population, coverage,
+        geometry, or matcher availability changed. Raised before any write.
     PipelineStageError
         If ``UnitMatch`` / ``TrackedUnit`` populate fails (names the stage,
-        carries the partial summary). The plan preflight reports a missing
-        optional backend before these stages run.
+        carries the partial summary).
     """
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Accept a plan (from plan_v2_unit_match or plan_v2_unit_match_from_sorts)
-    # OR the explicit keyword form. Unwrap a plan into the explicit inputs; a
-    # plan that could not pin every curation (not ok) raises here rather than
-    # running a partial match.
     input_curations = None
     input_unit_selections = None
     expected_input_set_hash = None
@@ -156,9 +122,7 @@ def run_v2_unit_match(
                 "plan_v2_unit_match_from_sorts, or omit plan and pass "
                 "session_group_owner= and session_group_name=."
             )
-        # A plan already carries the group + matcher + choices, so the explicit
-        # args must not ALSO be given -- otherwise one would be silently
-        # overridden. (matcher_params_name at its default is treated as unset.)
+        # matcher_params_name at its default counts as unset.
         if (
             session_group_owner is not None
             or session_group_name is not None
@@ -201,9 +165,6 @@ def run_v2_unit_match(
             "from plan_v2_unit_match)."
         )
 
-    # curation_choices is REQUIRED and explicit: an implicit "latest curation"
-    # lookup would make the match irreproducible the moment a source session
-    # gains a new curation. Validate DB-free, before any table import.
     if input_curations is None and curation_choices is None:
         raise PipelineInputError(
             "run_v2_unit_match requires either a UnitMatchPlan (from "
@@ -261,9 +222,7 @@ def run_v2_unit_match(
             if (warning := unlabeled_units_warning(selection.snapshot()))
         ]
 
-    # Partial receipt accumulated for error reporting: _run_stage snapshots
-    # it into PipelineStageError.partial_run_summary when a stage fails. The
-    # complete RunV2UnitMatchSummary is assembled explicitly at the end.
+    # Partial receipt for PipelineStageError.partial_run_summary.
     run_summary: dict[str, Any] = {
         "session_group_owner": session_group_owner,
         "session_group_name": session_group_name,
@@ -271,10 +230,7 @@ def run_v2_unit_match(
     }
     stage_seconds: dict[str, float] = {}
 
-    # The selection pins one curation per input and validates the inputs /
-    # geometry BEFORE any populate (for a group, insert_selection also checks
-    # coverage and per-member ownership), so a bad pin raises here, not deep
-    # in the matcher.
+    # Validates inputs and geometry before any populate.
     if input_curations is not None:
         selection = UnitMatchSelection.insert_inputs(
             input_curations,
@@ -291,14 +247,10 @@ def run_v2_unit_match(
             unit_selections=input_unit_selections,
             expected_input_set_hash=expected_input_set_hash,
         )
-    # Public orchestration receipts use the clearer ``unit_match_id`` spelling;
-    # the DataJoint table PK remains ``unitmatch_id`` for schema stability.
+    # Receipts spell it ``unit_match_id``; the table PK is ``unitmatch_id``.
     run_summary["unit_match_id"] = selection["unitmatch_id"]
 
-    # Surface the advisory electrode-space divergence in the receipt (it is also
-    # logged inside insert_selection / make_fetch). Recomputed here from the
-    # selection's pinned inputs so the summary carries it even on a reused
-    # selection.
+    # Recomputed so a reused selection still reports the divergence.
     warnings: list[str] = list(preflight_warnings)
     divergent = UnitMatchSelection._divergent_electrode_space_members(
         UnitMatchSelection.pinned_curations(selection)
@@ -307,11 +259,9 @@ def run_v2_unit_match(
         warnings.append(
             UnitMatchSelection._divergent_electrode_space_message(divergent)
         )
-    # Record now (not after the stages) so a PipelineStageError snapshot from a
-    # failing stage still carries the advisory -- it is known pre-stage.
+    # Set before the stages so a failure snapshot carries it.
     run_summary["warnings"] = warnings
 
-    # Pairwise cross-session match.
     (
         _,
         run_summary["unit_match_status"],
@@ -325,9 +275,7 @@ def run_v2_unit_match(
     run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
     run_summary["inputs"] = _unit_match_input_summaries(selection)
 
-    # Biological-unit identity across sessions, derived from the pair graph with
-    # the same matcher params. Its own stage so a tracked-unit failure (e.g. the
-    # strict-node budget) is reported distinctly from the match itself.
+    # Separate stage so a tracked-unit failure (e.g. node budget) is distinct.
     (
         _,
         run_summary["tracked_unit_status"],
@@ -363,10 +311,7 @@ def _unit_match_input_summaries(
 ) -> tuple[UnitMatchInputSummary, ...]:
     """The receipt's per-input records for one populated match run.
 
-    Everything comes from the frozen selection parts through the database
-    form of ``UnitMatch.get_input_provenance`` (which derives
-    ``waveform_traces`` from the frozen ``motion_corrected_recording_id``),
-    so building the receipt never opens the run's analysis NWB.
+    Reads the frozen selection parts only; never opens the analysis NWB.
     """
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
@@ -406,11 +351,8 @@ def plan_v2_unit_match(
 ) -> "UnitMatchPlan":
     """Build a reviewable plan pinning one curation per member for matching.
 
-    The recommended plan-then-run entry point for cross-session matching: it
-    lists each member's committed curations (via
-    :func:`describe_unit_match_choices`) and applies the named
-    ``curation_strategy`` to pin exactly one per member, returning a
-    ``UnitMatchPlan`` you inspect BEFORE the expensive match::
+    Applies ``curation_strategy`` to each member's committed curations;
+    inspect the plan before the expensive match::
 
         plan = plan_v2_unit_match(
             owner, name, curation_strategy="final_curated"
@@ -423,17 +365,13 @@ def plan_v2_unit_match(
     session_group_owner, session_group_name : str
         Identify the ``SessionGroup`` whose members are matched.
     curation_strategy : str
-        REQUIRED (no default -- your declaration of intent, so a match never
-        silently pins a "latest" curation):
+        Required, so a match never silently pins a "latest" curation:
 
-        - ``"final_curated"`` -- each member's single terminal curated
-          (non-root) curation; a member with zero or several is a plan error.
-        - ``"auto_curated"`` -- each member's auto-curated child (sort members
-          with ``run_v2_pipeline(auto_curate=True)`` first).
-        - ``"root"`` -- each member's root curation (UNCURATED; warns loudly).
-        - ``"manual"`` -- pin ``manual_curation_choices`` explicitly (required
-          with this curation strategy), validated against each member's committed
-          curations.
+        - ``"final_curated"``: each member's single terminal non-root
+          curation; zero or several is a plan error.
+        - ``"auto_curated"``: each member's auto-curated child.
+        - ``"root"``: each member's root curation (uncurated; warns).
+        - ``"manual"``: pin ``manual_curation_choices``.
     matcher_params_name : str, optional
         ``MatcherParameters`` row carried onto the plan (default
         ``"unitmatch_default"``).
@@ -481,9 +419,8 @@ def plan_v2_unit_match_from_sorts(
 ) -> "UnitMatchInputPlan":
     """Build a reviewable plan pinning one curation per named sort.
 
-    The group-less counterpart of :func:`plan_v2_unit_match`: each named
-    sort -- of a single recording or of a same-day concatenation -- is one
-    matching input, so daily concatenation sorts can be matched directly::
+    Group-less counterpart of :func:`plan_v2_unit_match`; each sort (of a
+    recording or a same-day concatenation) is one matching input::
 
         plan = plan_v2_unit_match_from_sorts(
             [day1_sorting_id, day2_sorting_id],
@@ -492,23 +429,16 @@ def plan_v2_unit_match_from_sorts(
         display(plan.as_dataframe())   # one row per matching input
         summary = run_v2_unit_match(plan)
 
-    The plan lists each sort's committed curations and applies
-    ``curation_strategy`` within them, freezes named unit eligibility, and
-    checks source/frame coverage, original-sample overlap, chronological
-    ordering, channel geometry, and matcher availability without rebuilding
-    assets or writing rows. Disjoint epochs in one NWB can be matched; repeated
-    original samples cannot. Inspect ``plan.summary()`` and
-    ``plan.preflight.as_dataframe()`` before ``run_v2_unit_match(plan)``.
+    The read-only preflight checks coverage, sample overlap, ordering,
+    geometry, and matcher availability. Disjoint epochs in one NWB can be
+    matched; repeated original samples cannot.
 
     Parameters
     ----------
     sorting_ids : sequence of str or uuid.UUID
         The ``sorting_id`` of each sort to match, each named once.
     curation_strategy : str
-        REQUIRED; the same strategies as :func:`plan_v2_unit_match`, applied
-        to each sort's own curations: ``"final_curated"``,
-        ``"auto_curated"``, ``"root"`` (UNCURATED; warns loudly) or
-        ``"manual"``.
+        Required; as in :func:`plan_v2_unit_match`, per sort.
     matcher_params_name : str, optional
         ``MatcherParameters`` row carried onto the plan (default
         ``"unitmatch_default"``).
@@ -557,31 +487,17 @@ def plan_v2_unit_match_from_curations(
 ) -> UnitMatchInputPlan:
     """Plan matching directly from the exact curations a reviewer selected.
 
-    Each curation pins its immutable generation. The same named eligibility
-    policy used by downstream analysis freezes included units, excluded-unit
-    reasons, committed labels, and policy provenance. Without supplied
-    snapshots, omitted ``unit_policy`` (``None``) defaults to
-    ``'v2_accepted_single_units'``, requiring ``accept`` and excluding MUA and
-    flagged units; auto-only workflows must explicitly choose
-    ``unit_policy='v2_unflagged_single_units'``. A policy that does not
-    exclude ``mua`` is refused: matching tracks single units.
+    Each curation pins its immutable generation, and a named eligibility
+    policy freezes the included units.
 
-    Read ``plan.summary()`` and ``plan.as_dataframe()`` before running. The
-    read-only preflight checks source/frame coverage, physical overlap,
-    chronological ordering, channel geometry, and backend availability. Missing
-    assets are reported without rebuilding caches, extracting waveforms, seeding
-    defaults, or writing rows. ``run_v2_unit_match(plan)`` revalidates the frozen
-    selection and source identity before any write.
+    - ``unit_policy``: default ``'v2_accepted_single_units'``; auto-only
+      workflows choose ``'v2_unflagged_single_units'``. Must exclude ``mua``.
+    - ``unit_selections``: optional, one :class:`UnitSelectionSnapshot` per
+      curation, each pinning that curation. Their policies apply when
+      ``unit_policy`` is omitted; an explicit ``unit_policy`` must match.
 
-    ``unit_selections`` optionally supplies exactly one typed
-    :class:`UnitSelectionSnapshot` per curation, as returned by
-    ``resolve_unit_selection`` with explicit evaluation criteria or annotation
-    sets. Each must pin the corresponding curation generation. These reviewed
-    snapshots carry their own policies when ``unit_policy`` is omitted. An
-    explicit ``unit_policy`` must match every supplied snapshot's policy;
-    conflicting policies raise before preflight. Their exact eligibility is
-    revalidated and displayed per input. Plain dictionaries are not accepted
-    here.
+    The preflight is read-only; ``run_v2_unit_match(plan)`` revalidates before
+    any write.
     """
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.analysis_selection import (
@@ -630,8 +546,7 @@ def plan_v2_unit_match_from_curations(
         )
     elif unit_policy is None:
         unit_policy = "v2_accepted_single_units"
-    # Read-only preflight verifies the generation. Copy the immutable pin here
-    # so a stale ref becomes a reviewable finding rather than repinning it.
+    # Copy the pin so a stale ref becomes a preflight finding, not a repin.
     pins = [
         {
             "sorting_id": str(ref.sorting_id),
@@ -743,13 +658,8 @@ def _preflight_match_plan(plan, *, unit_policy: str):
 def _unit_match_sort_choices(sorting_ids) -> list[dict]:
     """Each named sort's source, constituent recordings and curations.
 
-    The DB-fetching core of :func:`plan_v2_unit_match_from_sorts`. For each
-    sort, in the order named: its ``SortingSelection`` source kind and id,
-    the ``nwb_file_name`` / ``interval_list_name`` of its constituent
-    recordings in recording order (the recording itself, or the
-    concatenation's frozen members), and every committed ``CurationV2`` row
-    of the sort. The curations are not pre-filtered for match-validity;
-    ``UnitMatchSelection.insert_inputs`` is the validation boundary.
+    In the order named. Curations are not filtered for match validity;
+    ``UnitMatchSelection.insert_inputs`` validates.
 
     Raises
     ------
@@ -825,18 +735,10 @@ def _unit_match_member_choices(
 ) -> "list[UnitMatchMemberChoices]":
     """Structured per-member curation choices (the DB-fetching core).
 
-    Backs both :func:`describe_unit_match_choices` (the DataFrame view) and
-    :func:`plan_v2_unit_match`. For each member (ordered by ``member_index``) it walks
-    the member's recordings -> sortings -> committed ``CurationV2`` rows and
-    returns every curation you may pin, so you never hand-query the join or rely
-    on an implicit "latest". Pick one entry per member and build
-    ``curation_choices = {member_index: {"sorting_id": ..., "curation_id": ...}}``.
-
-    A member with no sort/curation yet returns an empty ``choices`` list (sort it
-    first). The returned curations are not pre-filtered for match-validity;
-    ``run_v2_unit_match`` / ``UnitMatchSelection.insert_selection`` is the
-    validation boundary (it rejects e.g. a preview curation or a wrong-member
-    pin).
+    Backs :func:`describe_unit_match_choices` and :func:`plan_v2_unit_match`.
+    A member with no sort yet has empty ``choices``. Curations are not
+    filtered for match validity; ``UnitMatchSelection.insert_selection``
+    validates.
 
     Parameters
     ----------
@@ -885,14 +787,7 @@ def _unit_match_member_choices(
             "interval_list_name": member["interval_list_name"],
             "team_name": member["team_name"],
         }
-        # Match the member's recordings on the FULL member identity, INCLUDING
-        # team_name. UnitMatchSelection's ownership validator compares the whole
-        # (nwb_file_name, sort_group_id, interval_list_name, team_name) tuple, so
-        # a curation sorted under a different team tag would be rejected at run
-        # time -- surfacing it here would offer an un-pickable choice. One
-        # relational read: every single-session sort of any of the member's
-        # recordings, then that sort set's curations (empty when the member
-        # has no recording or no sort yet).
+        # Include team_name: the ownership validator rejects other teams' sorts.
         member_sortings = SortingSelection.RecordingSource * (
             RecordingSelection & member_id
         )
@@ -922,20 +817,10 @@ def describe_unit_match_choices(
 ) -> "pd.DataFrame":
     """Table of the curations you can pin per SessionGroup member.
 
-    Read-only discovery helper (the ``describe_*`` family -- returns a
-    ``DataFrame``). One row per (member, pinnable curation): the member identity
-    (``member_index`` / ``nwb_file_name`` / ``sort_group_id`` /
-    ``interval_list_name`` / ``team_name``) plus the curation fields
-    (``sorting_id`` / ``curation_id`` / ``parent_curation_id`` /
-    ``curation_source`` / ``description``; ``parent_curation_id == -1`` marks a
-    root). A member with no sort/curation yet still appears as one row with null
-    curation columns, so it is visibly "sort me first".
-
-    Pick one curation per member and pass its ``{sorting_id, curation_id}`` as
-    ``run_v2_unit_match``'s ``curation_choices``; or, recommended, declare intent
-    with :func:`plan_v2_unit_match` and inspect the resulting plan first. The
-    returned curations are not pre-filtered for match-validity;
-    ``UnitMatchSelection.insert_selection`` is the validation boundary.
+    One row per (member, curation); ``parent_curation_id == -1`` marks a root.
+    A member with no sort yet appears with null curation columns. Pass one
+    ``{sorting_id, curation_id}`` per member as ``curation_choices``, or use
+    :func:`plan_v2_unit_match`. Read-only.
 
     Raises
     ------

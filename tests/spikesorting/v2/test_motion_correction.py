@@ -1119,7 +1119,7 @@ def test_stale_corrected_selection_is_refused_at_compute(
     discontinuous_sources, monkeypatch
 ):
     """A selection made under another SpikeInterface version, or whose
-    interpolation recipe now resolves differently, is refused at compute and
+    interpolation recipe resolves differently at compute, is refused and
     leaves no row."""
     import spikeinterface
 
@@ -2552,8 +2552,8 @@ def test_motion_stage_failure_stops_before_sorting(
     drift_recording, monkeypatch, failing_stage, target, offset_s
 ):
     """An estimation or application failure fails its own stage: no estimate
-    or corrected row is written for it, and no sort is selected or run --
-    the run never falls back to the uncorrected source."""
+    or corrected row is written for it, and no sort is selected or run. The
+    run never falls back to the uncorrected source."""
     from spyglass.spikesorting.v2._motion import estimation as _motion
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -2592,9 +2592,8 @@ def test_motion_stage_failure_stops_before_sorting(
 def test_motion_selection_failure_is_a_stage_error(
     drift_recording, monkeypatch
 ):
-    """A refused motion selection insert fails its stage like a failed
-    populate -- a ``PipelineStageError`` carrying the partial run summary,
-    not a bare error -- and nothing is estimated or sorted."""
+    """A refused motion selection insert raises a ``PipelineStageError`` with
+    the partial run summary, and nothing is estimated or sorted."""
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.motion import MotionEstimateSelection
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -2787,9 +2786,9 @@ def test_a_supplied_estimate_that_does_not_match_fails_before_sorting(
 ):
     """A supplied estimate of another recording, of the run's recording under
     another mask, made with an estimation row other than the recipe's, or of
-    a recording for a concat run, is refused -- by preflight, or with
-    ``preflight=False`` by the ``motion_estimate`` stage -- naming both
-    values, before anything is corrected or sorted."""
+    a recording for a concat run, is refused before anything is corrected or
+    sorted, naming both values. Preflight refuses it, or with
+    ``preflight=False`` the ``motion_estimate`` stage does."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         PipelineStageError,
@@ -3591,10 +3590,10 @@ def test_concat_preflight_refuses_unsupported_motion(
     case,
     message,
 ):
-    """The concat preflight applies the same motion checks -- a sorter row
-    that corrects motion itself under ``apply``, a recipe with no row, a
-    member whose geometry the recipe cannot estimate on -- and fails before
-    any member, concat, motion or sort row is built."""
+    """The concat preflight refuses a sorter row that corrects motion itself
+    under ``apply``, a recipe with no row, and a member whose geometry the
+    recipe cannot estimate on, before any member, concat, motion or sort row
+    is built."""
     from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.pipeline import (
         run_v2_concat_pipeline,

@@ -1,13 +1,9 @@
 """Fetch canonical MEArec ground-truth fixtures from remote storage.
 
-Step 2 of the fixture strategy (see ``README.md``). The MEArec fixtures are
-biophysical-simulation output and are **not byte-reproducible across OS/arch**
-(see the ``pytest-v2`` CI comments in ``.github/workflows/test-conda.yml`` and
-``fixtures_manifest.json``), so regenerating them on every CI run is both slow
-and impossible to hash-gate reliably. Instead the canonical NWBs are generated
-once (``generate_mearec.py``), uploaded, and *downloaded* on demand here.
-Because the downloaded bytes are fixed, ``nwb_sha256`` from
-``fixtures_manifest.json`` becomes a real integrity gate again.
+MEArec output is not byte-reproducible across OS/arch, so the canonical NWBs
+are generated once (``generate_mearec.py``), uploaded, and downloaded here.
+Fixed bytes let ``nwb_sha256`` in ``fixtures_manifest.json`` gate integrity.
+See ``README.md``.
 
 Usage
 -----
@@ -16,16 +12,15 @@ As a library (e.g. from ``conftest.py``)::
     from tests.spikesorting.v2.fixtures._fetch import ensure_fixture
     path = ensure_fixture("mearec_polymer_smoke")   # verifies cached or downloaded bytes
 
-As a CLI (e.g. in CI -- exits non-zero if a requested fixture can't be
-produced)::
+As a CLI (exits non-zero if a requested fixture can't be produced)::
 
     python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
 
 Configuring URLs
 ----------------
-Each value is a Box **direct-download** URL -- *not* the ``/s/<token>`` web
-share link, which returns an HTML preview page rather than the file. The shared
-file must be set to "people with the link" with download allowed.
+Each value is a Box **direct-download** URL, not the ``/s/<token>`` share
+link (which returns an HTML preview). The shared file must allow download by
+"people with the link".
 
 Given a Box share link ``https://ucsf.box.com/s/<token>``, the direct-download
 URL is::
@@ -33,9 +28,8 @@ URL is::
     https://ucsf.box.com/index.php?rm=box_download_shared_file&shared_name=<token>&file_id=f_<file-id>
 
 where ``<file-id>`` is the numeric Box file id (on the file's info panel, or in
-the share page's HTML). ``urllib`` follows Box's 302 to the actual file. Leave
-an entry as ``None`` to keep the generate-or-skip behaviour for that fixture
-(tests skip when it is absent and no URL is set).
+the share page's HTML). Leave an entry as ``None`` for generate-or-skip
+(tests skip when the fixture is absent and no URL is set).
 """
 
 from __future__ import annotations
@@ -49,19 +43,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Transient-download retry policy (network blips / 5xx). A hash mismatch is
-# retried too (covers a corrupt transfer) but ultimately fails loudly; a 4xx
-# (bad/rotated link) fails fast with no retry.
+# Retry network blips, 5xx and hash mismatches; 4xx fails fast.
 _RETRIES = 3
 _BACKOFF_S = 2
 
 _THIS_DIR = Path(__file__).resolve().parent
 _MANIFEST = _THIS_DIR / "fixtures_manifest.json"
 
-# Box direct-download URLs (see module docstring for how to derive one from a
-# ``/s/<token>`` share link). ``mearec_polymer_smoke`` is the only fixture the
-# per-PR CI job consumes; the rest are used by the nightly/manual job and local
-# full runs -- fill them in as their share links are added.
+# Box direct-download URLs (see module docstring).
 FIXTURE_URLS: dict[str, str | None] = {
     "mearec_polymer_smoke": (  # per-PR fixture
         "https://ucsf.box.com/index.php?rm=box_download_shared_file"
@@ -88,10 +77,7 @@ FIXTURE_URLS: dict[str, str | None] = {
         "&shared_name=5i8e4dvjx2x1i4twc0rw09cj8dv6cjh3"
         "&file_id=f_2275379903075"
     ),
-    # Cross-session matcher gate pair (generate-or-skip until uploaded). The
-    # AUC gate references both stems by path and skips when either is absent.
-    # Not hosted yet: the nightly / manual CI step for that gate requires both,
-    # so it fails naming them until these URLs are set (see README.md).
+    # Cross-session matcher AUC gate pair; not hosted (see README.md).
     "mearec_polymer_128ch_2sessions_s1": None,  # nightly / manual
     "mearec_polymer_128ch_2sessions_s2": None,  # nightly / manual
 }
@@ -144,8 +130,7 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
     required : bool, optional
         When True, raise :class:`FixtureFetchError` if the fixture is absent and
         cannot be downloaded (no URL configured). When False (default), return
-        ``None`` instead so callers can ``pytest.skip`` -- matching the
-        pre-step-2 generate-or-skip behaviour.
+        ``None`` so callers can ``pytest.skip``.
 
     Returns
     -------
@@ -198,9 +183,7 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
             if expected:
                 actual = _sha256(tmp)
                 if actual != expected:
-                    # Not silently tolerated: a mismatch means a corrupt
-                    # transfer or a rotated/stale artifact. Retry (transient
-                    # corruption) but never fall back to anything.
+                    # Corrupt or stale download: retry, never fall back.
                     raise FixtureFetchError(
                         f"{name}: downloaded nwb_sha256 {actual} != manifest "
                         f"{expected}. Corrupt download, or the manifest/URL is "
@@ -211,16 +194,16 @@ def ensure_fixture(name: str, *, required: bool = False) -> Path | None:
         except urllib.error.HTTPError as exc:
             tmp.unlink(missing_ok=True)
             if 400 <= exc.code < 500:
-                # Permanent: bad/rotated link or sharing disabled -- fail fast.
+                # Bad/rotated link or sharing disabled: fail fast.
                 raise FixtureFetchError(
                     f"{name}: HTTP {exc.code} for its Box URL (permanent). "
                     "Check the share is 'people with the link' + download "
                     "allowed, and that the link in _fetch.py is current."
                 ) from exc
-            last_err = exc  # 5xx -- retry
+            last_err = exc  # 5xx: retry
         except (urllib.error.URLError, TimeoutError, FixtureFetchError) as exc:
             tmp.unlink(missing_ok=True)
-            last_err = exc  # network blip or hash mismatch -- retry
+            last_err = exc  # network blip or hash mismatch: retry
         if attempt < _RETRIES:
             time.sleep(_BACKOFF_S * attempt)
 

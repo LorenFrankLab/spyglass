@@ -1,4 +1,4 @@
-"""CurationV2 merge-group tests (canonical IDs, lazy-vs-applied merges) for the v2 single-session pipeline."""
+"""CurationV2 merge-group tests: canonical ids and lazy vs applied merges."""
 
 from __future__ import annotations
 
@@ -16,22 +16,11 @@ from tests.spikesorting.v2.single_session._helpers import (
 def test_curation_v2_insert_with_merge_groups_apply_merges(
     polymer_60s_session,
 ):
-    """``CurationV2.insert_curation`` with ``merge_groups`` +
-    ``apply_merge=True`` writes a curated NWB whose merged-unit id is a
-    fresh ``max(source unit_ids) + 1`` (v1 parity, ``v1/curation.py:361``)
-    and whose merged spike train is the sorted union of its contributors.
-    Surviving source units are written first; merged ids are appended.
+    """Applied merges get a fresh ``max(source unit_ids) + 1`` id (v1
+    parity) whose train is the deduplicated union of its contributors;
+    surviving units come first, merged ids last.
 
-    Exercises ``build_curated_unit_rows`` with a non-empty merge
-    list (amplitude-inheritance: kept unit gets electrode/amplitude
-    from the highest-amplitude contributor) AND
-    ``write_curated_units_nwb`` with ``apply_merge=True``
-    (concatenated + sorted spike trains).
-
-    Uses the 60s polymer fixture rather than the smoke fixture
-    because MS5 finds only 1 unit on the 4s smoke recording -- too
-    few to test merging. The 60s recording yields ~26 units (one
-    sort group, all 4 shanks aggregated through the same flow).
+    Uses the 60s fixture: MS5 finds only 1 unit on the smoke recording.
     """
     import numpy as np
 
@@ -52,10 +41,6 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         SortingSelection,
     )
 
-    # Set up the v2 chain on the 60s session, one sort group, so
-    # MS5 finds enough units to merge. This is heavier than the
-    # smoke-fixture setup but unavoidable to exercise this path
-    # without injecting synthetic Sorting.Unit rows.
     _clean_session_v2(polymer_60s_session)
     initialize_v2_defaults()
     LabTeam.insert1(
@@ -104,29 +89,16 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "on this fixture; a regression upstream would surface here.)"
     )
 
-    # Merge the first two units.
     head, absorbed = units[0], units[1]
     merge_groups = [[head, absorbed]]
-    # v1 parity (``v1/curation.py:361``): merged-unit id is
-    # ``max(source unit_ids) + 1``; compute it ahead so the next insert
-    # can label it (``v1/curation.py:391``: labels applied AFTER merge
-    # against final unit_ids).
+    # Computed ahead so the insert can label it; labels apply to final ids.
     merged_id = max(units) + 1
 
-    # A child curation composes from its PARENT's committed state, so the
-    # applied-merge curation and the preview below both branch off a plain
-    # ROOT (whose unit set IS the raw sort) -- the raw merge_groups
-    # [head, absorbed] are valid in the root's namespace. A child of the
-    # MERGED curation could not reference the absorbed ids (they no longer
-    # exist in the merged parent's unit set); that is the parent-state
-    # composition contract.
+    # Both curations branch off a plain root so the raw ids are valid
+    # merge inputs; a child of the merged curation cannot see absorbed ids.
     root_pk = CurationV2.insert_curation(sorting_key=sort_pk)
 
-    # v1 parity (``v1/curation.py:391``): labels on the FRESH merged id
-    # (max+1) attach to the merged unit; labels on absorbed contributors
-    # are silently dropped (v1 writes labels by iterating final
-    # unit_ids and never visits absorbed ones -- a warning is logged
-    # for informativeness but the insert succeeds).
+    # v1 parity: labels on absorbed contributors are dropped with a warning.
     pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
         labels={merged_id: ["mua"], absorbed: ["noise"]},
@@ -139,9 +111,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         (int(r["unit_id"]), r["curation_label"])
         for r in (CurationV2.UnitLabel & pk).fetch(as_dict=True)
     }
-    # Label on the fresh merged id survives.
     assert (merged_id, "mua") in label_pairs, label_pairs
-    # Label on the absorbed contributor is silently dropped (v1 parity).
     assert absorbed not in {uid for uid, _ in label_pairs}, label_pairs
 
     curated_unit_ids = set(
@@ -154,13 +124,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "replaces both head and absorbed)."
     )
 
-    # The merged unit's spike train in the curated NWB is the
-    # contributors' union with SI's 0.4 ms membership-aware cross-unit
-    # duplicate removal: a sub-0.4 ms pair from DIFFERENT contributors is
-    # one physical spike double-detected (a neuron's refractory period
-    # forbids genuine sub-0.4 ms firing), so it is dropped. v1's lazy
-    # get_merged_sorting did this; v2 applies it to the apply_merge=True
-    # stored train too; SpikeInterface's dedup is the reference.
+    # Stored train = union minus cross-contributor pairs < 0.4 ms (one
+    # spike detected twice); SI's MergeUnitsSorting dedup is the reference.
     from spikeinterface.curation.mergeunitssorting import (
         get_non_duplicated_events,
     )
@@ -176,8 +141,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     expected_merged = get_non_duplicated_events(
         [src_head.astype(float), src_absorbed.astype(float)], 0.4e-3
     )
-    # The 60s fixture's two merged units share at least one cross-unit
-    # double-detection, so dedup is genuinely exercised end-to-end.
+    # The fixture's merged pair has at least one double-detection.
     assert len(expected_merged) < len(raw_concat), (
         "fixture precondition: merged contributors should share a "
         "sub-0.4 ms cross-unit double-detection so dedup fires "
@@ -196,8 +160,6 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     )
     np.testing.assert_array_equal(merged_times, expected_merged)
 
-    # n_spikes on CurationV2.Unit for the merged id matches its train
-    # (end-to-end half of the n_spikes invariant under v1 parity).
     merged_row = (CurationV2.Unit & pk & {"unit_id": merged_id}).fetch1()
     assert merged_row["n_spikes"] == len(expected_merged), (
         f"CurationV2.Unit.n_spikes for merged_id={merged_id} = "
@@ -205,11 +167,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
     )
     assert merged_row["n_spikes"] == len(merged_times)
 
-    # v1-parity unit ORDER: surviving source units first (in original
-    # source order), then the appended merged id last. Matches v1's
-    # pop-then-append pattern AND SI's lazy MergeUnitsSorting (originals
-    # retained + merged appended), so unit-array consumers comparing
-    # applied vs preview/lazy paths see the same per-unit order.
+    # Survivors in source order, merged id last (matches v1 and SI's lazy
+    # MergeUnitsSorting).
     expected_order = [u for u in units if u not in (head, absorbed)] + [
         merged_id
     ]
@@ -219,12 +178,8 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "(surviving source units first, merged_id appended last)."
     )
 
-    # --- v1-parity PREVIEW half (apply_merge=False), reusing the sort.
-    # A preview curation keeps EVERY original unit (the contributor is
-    # NOT dropped) + the contributor's label, and records the proposed
-    # merge in MergeGroup; get_merged_sorting applies it lazily. Branched
-    # off the SAME plain root as the applied-merge curation (its namespace
-    # is the raw sort), so [head, absorbed] are valid inputs.
+    # Preview (apply_merge=False): keeps every unit and label; the merge
+    # lives in MergeGroup and get_merged_sorting applies it lazily.
     preview_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
         labels={absorbed: ["mua"]},
@@ -240,22 +195,15 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         f"apply_merge=False preview unit ids = {sorted(preview_unit_ids)}; "
         f"expected ALL {sorted(units)} (contributor preserved, v1 parity)."
     )
-    # The contributor's label survives (it would vanish if the unit were
-    # dropped from the preview).
     preview_labels = {
         (int(r["unit_id"]), r["curation_label"])
         for r in (CurationV2.UnitLabel & preview_pk).fetch(as_dict=True)
     }
     assert (absorbed, "mua") in preview_labels, preview_labels
-    # The preview sorting still has the contributor as its own unit.
     preview_sorting = CurationV2().get_sorting(preview_pk)
     assert absorbed in set(int(u) for u in preview_sorting.get_unit_ids())
-    # Symmetric MergeGroup provenance: every CurationV2.Unit row has at
-    # least one MergeGroup row keyed by its OWN unit_id, so
-    # ``Unit * MergeGroup`` on ``unit_id`` does not silently drop the
-    # absorbed contributors. The proposed merge stays: (head,head),
-    # (head,absorbed); the absorbed contributor also carries
-    # (absorbed,absorbed) as a 1-element self-entry.
+    # Every Unit row has a MergeGroup self-entry, so ``Unit * MergeGroup``
+    # keeps absorbed contributors.
     mg_unit_ids = {
         int(r["unit_id"])
         for r in (CurationV2.MergeGroup & preview_pk).fetch(as_dict=True)
@@ -264,11 +212,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         "Every CurationV2.Unit row should have >=1 MergeGroup row keyed "
         f"by its own unit_id; missing {sorted(preview_unit_ids - mg_unit_ids)}."
     )
-    # get_merged_sorting applies the proposed merge lazily AND, like v1's
-    # lazy path (SI default delta_time_ms=0.4), removes cross-unit
-    # double-detections. So two units collapse to one and the total spike
-    # count drops by exactly the number of duplicates the apply_merge=True
-    # path removed for the same [head, absorbed] group (n_duplicates).
+    # Lazy merge dedups like the applied path (SI delta_time_ms=0.4).
     merged_lazy = CurationV2().get_merged_sorting(preview_pk)
     assert merged_lazy.get_num_units() == len(units) - 1
     preview_total = sum(
@@ -285,10 +229,7 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
         preview_total,
         n_duplicates,
     )
-    # Frame-level equality (not just counts): the lazy preview's merged
-    # train must equal the apply_merge=True stored train sample-for-sample
-    # -- both ids are ``max(units) + 1`` (= merged_id). A count-only check
-    # would pass even if the two paths binned spikes to different frames.
+    # Frame-level equality; counts alone miss frame-binning differences.
     lazy_merged_frames = np.sort(
         np.asarray(merged_lazy.get_unit_spike_train(unit_id=merged_id))
     )
@@ -301,17 +242,11 @@ def test_curation_v2_insert_with_merge_groups_apply_merges(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
-    """Lazy ``get_merged_sorting`` preview == ``apply_merge=True`` stored
-    train, frame-for-frame, on a CONTIGUOUS and a DISJOINT 2-unit sort.
+    """Lazy and applied merges give the same hand-computed frames on a
+    contiguous and a disjoint sort.
 
-    A planted 2-unit sorter gives deterministic, known spike frames so the
-    merged train is computed by hand. Two contributor spikes 1 frame apart
-    WITHIN a chunk (cross-unit) are a coincident double-detection -> the
-    0.4 ms dedup drops one; two spikes 1 frame apart ACROSS the wall-clock
-    gap are seconds apart in real time -> NOT deduped (the gap-correctness
-    the absolute-time dedup guarantees). The disjoint applied-merge path is
-    otherwise untested. Both the lazy and the stored paths must produce the
-    same frames, and that frame set must equal the hand-computed merge.
+    Frame-adjacent spikes within a chunk are deduped; frame-adjacent spikes
+    across a wall-clock gap are not.
     """
     import uuid
 
@@ -499,19 +434,11 @@ def test_lazy_vs_applied_merge_frames_equal(polymer_smoke_session, monkeypatch):
 
 
 def test_curation_n_spikes_matches_apply_merge(dj_conn):
-    """``build_curated_unit_rows`` writes the v1-parity unit set +
+    """``build_curated_unit_rows`` writes the v1-parity unit set and
     ``n_spikes`` for each ``apply_merge`` mode.
 
-    ``apply_merge=True`` collapses a merge group to a fresh
-    ``max(source unit_ids) + 1`` id (v1 parity, ``v1/curation.py:361``)
-    carrying the summed contributor train; BOTH the head and the
-    absorbed contributors are dropped. ``apply_merge=False`` is a
-    v1-style preview (``v1/curation.py:359``): every original unit passes
-    through 1:1 with its own ``n_spikes`` and the proposed merge lives in
-    MergeGroup for lazy application, so the contributor is preserved --
-    not silently dropped. Synthetic ``Sorting.Unit`` rows isolate the row
-    logic (the ``apply_merge=True`` end-to-end half is covered by
-    ``test_curation_v2_insert_with_merge_groups_apply_merges``).
+    ``apply_merge=True`` replaces the group with a fresh ``max + 1`` id
+    carrying the summed train; ``apply_merge=False`` keeps every unit.
     """
     from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
@@ -544,15 +471,8 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
     merged = n_spikes_by_unit(apply_merge=True)
     preview = n_spikes_by_unit(apply_merge=False)
 
-    # apply_merge=True (v1 parity, ``v1/curation.py:361``): the merge
-    # group [0, 1] collapses to a fresh id ``max(0,1,2) + 1 = 3``
-    # carrying the summed train (140); BOTH the head (0) AND the absorbed
-    # (1) are gone. Unit 2 (non-merged) passes through.
+    # [0, 1] -> fresh id 3 with 140 spikes; unit 2 passes through.
     assert merged == {3: 140, 2: 7}, merged
-    # apply_merge=False (v1 preview parity): EVERY original unit is
-    # present with its OWN count -- both the head (0) and the contributor
-    # (1) are preserved as standalone units; the proposed merge lives in
-    # MergeGroup.
     assert preview == {0: 100, 1: 40, 2: 7}, preview
 
 
@@ -560,14 +480,7 @@ def test_curation_n_spikes_matches_apply_merge(dj_conn):
 @pytest.mark.integration
 def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
     """A direct ``CurationV2.MergeGroup`` insert with a contributor that is
-    not a real ``Sorting.Unit`` row raises ``IntegrityError``.
-
-    ``contributor_unit_id`` is a FK to ``Sorting.Unit``:
-    ``insert_curation`` validates contributors in Python, but the schema
-    must also reject a bogus contributor on a direct part-table insert that
-    bypasses the helper -- otherwise merge provenance can be silently
-    corrupted. The shared ``sorting_id`` means the FK also enforces that the
-    contributor belongs to THIS sort.
+    not a ``Sorting.Unit`` of this sort raises ``IntegrityError``.
     """
     from datajoint.errors import IntegrityError
 
@@ -592,19 +505,9 @@ def test_merge_group_contributor_fk_rejects_unknown_unit(populated_sorting):
 
 
 def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
-    """``build_curated_unit_rows`` assigns fresh merged ids in ascending
-    MIN-CONTRIBUTOR order, INDEPENDENT of user-input group order. For
-    user input ``[[2, 3], [0, 1]]`` the smallest-min group ``[0, 1]`` gets
-    the first new id ``max(source unit_ids) + 1``, and ``[2, 3]`` gets the
-    next one. This matches the lazy ``get_merged_sorting`` preview path
-    (which numbers merges by ascending kept-uid), so apply_merge=True and an
-    apply_merge=False preview assign the SAME id to the SAME content group.
-
-    v2 deliberately departs here from v1's user-iteration-order labels
-    (``v1/curation.py:359``): the merged-unit id is an arbitrary fresh
-    label, so only which group gets ``max+1`` changes for reordered input
-    -- spike content and unit count are identical -- and matching the
-    applied and lazy paths is the more important contract.
+    """``build_curated_unit_rows`` numbers fresh merged ids by ascending
+    min contributor, independent of input group order, matching the lazy
+    ``get_merged_sorting`` path. Unlike v1, which uses input order.
     """
     from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
@@ -627,9 +530,7 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
         _unit(3, 40, 25.0),
         _unit(4, 50, 20.0),
     ]
-    # User input: bigger-min group FIRST. Canonical assignment IGNORES
-    # this order and numbers by ascending min(group), so ``[0, 1]`` (min 0)
-    # gets the first new id even though the user listed ``[2, 3]`` first.
+    # Bigger-min group listed first.
     merge_groups = [[2, 3], [0, 1]]
 
     rows, kept = build_curated_unit_rows(
@@ -640,19 +541,13 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
         apply_merge=True,
     )
     n_spikes_by_unit = {r["unit_id"]: r["n_spikes"] for r in rows}
-    # max(0..4) + 1 = 5 -> smallest-min group [0, 1] gets new_id 5 carrying
-    # summed n_spikes 30; group [2, 3] gets new_id 6 with n_spikes 70.
-    # Non-merged unit 4 passes through with own count.
+    # [0, 1] -> 5, [2, 3] -> 6; unit 4 passes through.
     assert n_spikes_by_unit == {4: 50, 5: 30, 6: 70}, n_spikes_by_unit
 
-    # kept_to_contributors keys: surviving source units FIRST (in source
-    # order), then merged ids appended in ascending-min order.
     assert list(kept.keys()) == [4, 5, 6], list(kept.keys())
     assert kept[5] == [0, 1] and kept[6] == [2, 3], kept
 
-    # apply_merge=False with the same input: heads are min(group) for
-    # each multi-group, so kept_to_contributors keys (after sort + sym
-    # aug) are deterministic regardless of input order.
+    # Preview heads are min(group) regardless of input order.
     rows_preview, kept_preview = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
@@ -661,24 +556,15 @@ def test_curation_two_merge_groups_assign_ids_in_canonical_min_order(dj_conn):
         apply_merge=False,
     )
     preview_unit_ids = {r["unit_id"] for r in rows_preview}
-    # Every original unit present (v1 preview parity).
     assert preview_unit_ids == {0, 1, 2, 3, 4}, preview_unit_ids
-    # Heads are min(group) -- 0 for [0, 1], 2 for [2, 3] -- so a join on
-    # MergeGroup.unit_id retrieves the proposed merges from the smallest
-    # contributor regardless of how the user listed the group.
     assert 0 in kept_preview and kept_preview[0] == [0, 1]
     assert 2 in kept_preview and kept_preview[2] == [2, 3]
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_merged_unit_inherits_max_amplitude_contributor_electrode():
-    """A merged unit inherits the electrode + amplitude of its
-    HIGHEST-amplitude contributor (not the head/min). Brain region is
-    reached through the unit's Electrode FK, so this electrode inheritance
-    IS the region attribution -- a ``max -> min`` regression would silently
-    mis-attribute every merged unit's brain region while n_spikes / id
-    assertions still pass. Deterministic via
-    ``build_curated_unit_rows`` (no populate).
+    """A merged unit inherits the electrode and amplitude of its
+    highest-amplitude contributor, which sets its brain region.
     """
     from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
@@ -694,9 +580,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
             "electrode_id": electrode_id,
         }
 
-    # Unit 0: LOWER amplitude on electrode 10 (and it is the min/head of the
-    # group). Unit 1: HIGHER amplitude on electrode 20. The merge must
-    # inherit unit 1's electrode + amplitude, NOT the head's.
+    # Head (unit 0) has the lower amplitude.
     sorting_units = [
         _unit(0, 100, 30.0, 10),
         _unit(1, 50, 80.0, 20),
@@ -715,9 +599,7 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
     assert merged["peak_amplitude_uv"] == 80.0
     assert merged["n_spikes"] == 150  # summed train
 
-    # Reverse the amplitudes (now the HEAD/min unit dominates) -> the merged
-    # unit must follow the amplitude, landing on the head's electrode. This
-    # pins that inheritance tracks amplitude, not group position.
+    # Reversed amplitudes: inheritance follows amplitude, not position.
     sorting_units_rev = [
         _unit(0, 100, 90.0, 10),
         _unit(1, 50, 25.0, 20),
@@ -738,12 +620,8 @@ def test_merged_unit_inherits_max_amplitude_contributor_electrode():
 def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     polymer_smoke_session, monkeypatch
 ):
-    """For TWO merge groups listed OUT of min-contributor order, the
-    apply_merge=True stored sorting and the apply_merge=False lazy
-    ``get_merged_sorting`` assign the SAME fresh id to the SAME content
-    group, frame-for-frame. Existing tests cover the single-group case and
-    the ``build_curated_unit_rows`` id assignment; this pins the >=2-group
-    lazy ``get_unit_contributor_groups`` order_by path.
+    """With two merge groups listed out of min order, applied and lazy
+    merges assign the same fresh id to the same frames.
     """
     import uuid
 
@@ -777,8 +655,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # Four planted units with well-separated frames (no coincidences -> no
-    # cross-unit dedup), so each merged train is just the sorted union.
+    # Well-separated frames, so no dedup.
     planted = {
         0: np.array([100, 700]),
         1: np.array([300, 900]),
@@ -860,7 +737,6 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     assert int((Sorting & sort_pk).fetch1("n_units")) == 4
 
     root_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
-    # Groups listed OUT of min order ([2,3] before [0,1]).
     oo_groups = [[2, 3], [0, 1]]
     applied_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
@@ -883,9 +759,7 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
     def _frames(sorting, uid):
         return np.sort(np.asarray(sorting.get_unit_spike_train(unit_id=uid)))
 
-    # Canonical-min id assignment, regardless of input order: [0,1] (min 0)
-    # -> max(0..3)+1 = 4, [2,3] (min 2) -> 5. Same fresh id -> same content
-    # group on BOTH the applied and lazy paths.
+    # [0, 1] -> 4, [2, 3] -> 5 on both paths.
     expected = {
         4: np.sort(np.concatenate([planted[0], planted[1]])),
         5: np.sort(np.concatenate([planted[2], planted[3]])),
@@ -908,13 +782,8 @@ def test_applied_and_lazy_merge_ids_match_for_out_of_order_groups(
 def test_v2_sorting_nwb_excludes_parent_units(
     dj_conn, tmp_path, monkeypatch, smoke_nwb
 ):
-    """The v2 Sorting analysis NWB contains ONLY the v2 sorted units, never
-    the raw NWB's parent ``/units`` table. Plant a non-empty
-    ``/units`` on a copy of the fixture, run Recording->Artifact->Sorting with
-    a planted 2-unit sorter, then assert the analysis NWB's unit ids equal
-    exactly ``Sorting.Unit`` and contain NONE of the planted parent ids.
-    All MEArec fixtures keep the parent ``/units``
-    empty, so this is the only exercise of the parent-units strip invariant.
+    """The Sorting analysis NWB holds only the v2 units, never the raw
+    NWB's ``/units``. MEArec fixtures have empty ``/units``, so one is planted.
     """
 
     import numpy as np
@@ -940,8 +809,6 @@ def test_v2_sorting_nwb_excludes_parent_units(
     if not fixture.exists():
         pytest.skip("smoke fixture not found")
 
-    # Plant a non-empty /units table (parent ids 100/101/102) on a copy via
-    # the pynwb modify-and-export pattern.
     parent_ids = [100, 101, 102]
     planted = tmp_path / "planted_units_src.nwb"
     with pynwb.NWBHDF5IO(str(fixture), mode="r") as read_io:
@@ -968,8 +835,7 @@ def test_v2_sorting_nwb_excludes_parent_units(
         sorted((SortGroupV2 & session).fetch("sort_group_id"))[0]
     )
 
-    # Planted 2-unit sorter -> v2 unit ids {0, 1}, disjoint from the parent
-    # ids {100, 101, 102} so any leak is unambiguous.
+    # v2 ids {0, 1} are disjoint from the parent ids.
     def _planted_two_unit_sorter(
         sorter,
         sorter_params,
@@ -1026,8 +892,6 @@ def test_v2_sorting_nwb_excludes_parent_units(
             set() if anwb.units is None else {int(u) for u in anwb.units.id[:]}
         )
 
-    # The analysis NWB units are EXACTLY the v2 sort, and none of the planted
-    # parent ids leaked through ``AnalysisNwbfile().create``.
     assert nwb_unit_ids == v2_unit_ids
     assert not (
         set(parent_ids) & nwb_unit_ids
@@ -1037,17 +901,8 @@ def test_v2_sorting_nwb_excludes_parent_units(
 
 
 def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
-    """Applied-path fresh merged ids are numbered in ascending
-    min-contributor order, INDEPENDENT of user-input group order, so they
-    match the lazy ``get_merged_sorting`` preview path (which numbers merges
-    in ``get_unit_contributor_groups`` / ascending-kept-uid order). This is what makes
-    ``apply_merge=True`` and an ``apply_merge=False`` preview assign the SAME
-    fresh id to the SAME content group -- the preview==apply contract.
-
-    The merged-unit integer id is an arbitrary fresh ``max(unit_ids)+1``
-    label; canonicalizing its assignment order (rather than following v1's
-    user-iteration order) changes only which group gets ``max+1`` for
-    reordered input, never spike content or unit count.
+    """Applied-path merged ids follow ascending min contributor,
+    independent of input group order, matching the lazy preview.
     """
     from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
@@ -1064,8 +919,6 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
         }
 
     sorting_units = [_unit(i, 10 * (i + 1), 50.0 - i) for i in range(5)]
-    # User lists the bigger-min group FIRST; canonical assignment ignores
-    # this order and numbers by ascending min(group).
     _, kept = build_curated_unit_rows(
         sorting_id="s",
         sorting_units=sorting_units,
@@ -1073,8 +926,7 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
         curation_id=0,
         apply_merge=True,
     )
-    # max(0..4) + 1 = 5. Smallest-min group [0, 1] (min 0) -> 5; next
-    # group [3, 4] (min 3) -> 6 -- regardless of the [[3, 4], [0, 1]] order.
+    # [0, 1] -> 5, [3, 4] -> 6.
     assert kept[5] == [0, 1], kept
     assert kept[6] == [3, 4], kept
 
@@ -1089,22 +941,18 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
         pytest.param(
             [0, 1], [[0, 1], []], "fewer than 2", id="trailing-empty-group"
         ),
-        # Intra-group duplicates: list-length check alone would miss
-        # ``[0, 0]`` (would silently double-count contributor 0).
+        # Intra-group duplicates would double-count contributor 0.
         pytest.param(
             [0, 1], [[0, 0]], "duplicate members", id="duplicate-pair"
         ),
         pytest.param(
             [0, 1], [[0, 0, 1]], "duplicate members", id="duplicate-in-triple"
         ),
-        # Zero-unit sort with non-empty merge_groups: the validation
-        # runs before the empty-by-id early return, so the id check
-        # fires.
+        # Zero-unit sort: validation runs before the empty early return.
         pytest.param(
             [], [[0, 1]], "not in Sorting.Unit", id="zero-unit-unknown-ids"
         ),
-        # Empty/singleton groups on a zero-unit sort still raise their
-        # shape error before the id check is reached.
+        # Shape errors fire before the id check.
         pytest.param([], [[]], "fewer than 2", id="zero-unit-empty-group"),
         pytest.param([], [[0]], "fewer than 2", id="zero-unit-singleton-group"),
     ],
@@ -1112,11 +960,8 @@ def test_curation_merge_ids_assigned_in_canonical_min_order(dj_conn):
 def test_curation_rejects_invalid_merge_groups(
     unit_ids, merge_groups, match, apply_merge, dj_conn
 ):
-    """All merge-group validation runs BEFORE any early return -- a
-    zero-unit sort with non-empty merge_groups, intra-group duplicates,
-    and references to nonexistent unit_ids all raise rather than
-    silently no-op or fall through to staging that would double-count
-    contributors. Covers the empty/singleton shape contract too.
+    """Invalid merge groups raise before any early return, including on a
+    zero-unit sort.
     """
     from spyglass.spikesorting.v2._curation.transforms import (
         build_curated_unit_rows,
@@ -1144,22 +989,16 @@ def test_curation_rejects_invalid_merge_groups(
 
 
 def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
-    """SI 0.104's ``MergeUnitsSorting`` collapses exact same-sample
-    spikes from different merged units UNLESS ``delta_time_ms=None``.
-
-    ``delta_time_ms=0`` is NOT a "no duplicate check" knob -- SI still
-    drops contributors that fired on the same sample frame. Only
-    ``delta_time_ms=None`` disables the check entirely, which is the v1
-    ``np.concatenate`` semantic ``get_merged_sorting`` needs. Probe-test
-    that locks the SI contract our code depends on; if SI changes its
-    handling of ``delta_time_ms=0`` (or ``None``), this fails loudly.
+    """SI 0.104's ``MergeUnitsSorting`` drops same-sample spikes from
+    different units even at ``delta_time_ms=0``; only ``None`` disables
+    the duplicate check.
     """
     import numpy as np
     import spikeinterface as si
     import spikeinterface.curation as sc
 
     ns = si.NumpySorting.from_unit_dict(
-        # Two contributors share sample 10 -- the exact-coincident case.
+        # Two contributors share sample 10.
         {0: np.array([10]), 1: np.array([10])},
         sampling_frequency=30000.0,
     )
@@ -1197,14 +1036,8 @@ def test_si_merge_units_drops_same_sample_unless_delta_is_none(dj_conn):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merges_applied_records_user_intent(populated_sorting):
-    """``merges_applied`` stores ``apply_merge`` verbatim.
-
-    An earlier v2 implementation shipped ``merges_applied =
-    bool(apply_merge and merge_groups)`` -- a caller passing
-    ``apply_merge=True, merge_groups=None`` got ``False``
-    (effective state). v1's semantic at ``v1/curation.py:123``
-    stores ``apply_merge`` verbatim (user intent); v2 matches v1
-    here and this test pins the contract.
+    """``merges_applied`` stores ``apply_merge`` verbatim, even with no
+    merge groups (v1 parity).
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1225,13 +1058,8 @@ def test_merges_applied_records_user_intent(populated_sorting):
 def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
     """A unit appearing in two merge groups raises.
 
-    A unit can belong to at most one merge group; an overlap is a user error
-    the validator rejects (the overlap check runs against ``Sorting.Unit``
-    BEFORE any NWB staging). The MEArec smoke sort yields a single unit, so a
-    second ``Sorting.Unit`` row is planted (electrode FK copied from the real
-    unit) purely to satisfy the membership check -- the raise fires during
-    validation, before any spike train is read, and the planted row is removed
-    in the finally.
+    The smoke sort has one unit, so a second ``Sorting.Unit`` row is
+    planted; validation raises before any spike train is read.
     """
     import datajoint as dj
 
@@ -1244,10 +1072,7 @@ def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
     ]
     real_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
     u0 = int(real_unit["unit_id"])
-    # ``max(existing) + 1`` guarantees a non-colliding planted id even if the
-    # sorter ever returns contiguous unit ids -- ``u0 + 1`` would duplicate an
-    # existing Sorting.Unit row and fail the insert before the overlap
-    # validator (the actual unit under test) ever runs.
+    # ``u0 + 1`` could collide with an existing unit id.
     u1 = max(existing) + 1
     planted = {**real_unit, "unit_id": u1}
     conn = dj.conn()
@@ -1272,9 +1097,7 @@ def test_insert_curation_rejects_merge_group_overlap(populated_sorting):
 def test_insert_curation_rejects_singleton_merge_group(populated_sorting):
     """A singleton merge group is rejected upstream (layered defense).
 
-    A single-unit "merge group" is a likely typo (v1 silently renamed it);
-    v2 raises at the >=2-members gate before ``next_merged_id`` is reached, so
-    the singleton never produces a spurious fresh id.
+    It raises before ``next_merged_id``, so no spurious fresh id is made.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -1294,10 +1117,6 @@ def test_get_merged_sorting_returns_base_when_no_merges(
 ):
     """``get_merged_sorting`` returns the base sorting unchanged when no
     merge group has more than one contributor.
-
-    The fixture's root curation has no merges, so the lazy-merge path
-    short-circuits and the returned sorting carries exactly the base
-    unit_ids.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1313,20 +1132,15 @@ def test_get_merged_sorting_returns_base_when_merges_applied(
     """``get_merged_sorting`` returns the base verbatim when
     ``merges_applied`` is set (the base is already merged at insert).
 
-    The MEArec smoke sort has a single unit, so a real 2-unit merge cannot be
-    built; the short-circuit is keyed solely on the ``merges_applied`` flag,
-    so we flip it on the root curation and assert the accessor returns the
-    base sorting without attempting any lazy re-merge over absorbed
-    contributors. (Function-scoped fixture; the flag flip dies with it.)
+    The smoke sort has one unit, so the flag is flipped on the root
+    curation of a function-scoped fixture.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     key = populated_sorting_with_curation
-    # Deliberate maintenance edit of a root curation's flag with no live
-    # dependents -> the explicit escape hatch past the FactoryOnlyMaster guard.
+    # Root has no dependents, so bypassing the FactoryOnlyMaster guard is safe.
     CurationV2.update1({**key, "merges_applied": 1}, allow_master_mutation=True)
 
     base = CurationV2().get_sorting(key)
     merged = CurationV2().get_merged_sorting(key)
-    # merges_applied short-circuit: identical unit set, no re-merge attempt.
     assert list(merged.unit_ids) == list(base.unit_ids)

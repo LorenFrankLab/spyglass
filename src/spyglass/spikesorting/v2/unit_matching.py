@@ -1,42 +1,24 @@
 """Cross-session unit tracking via a pluggable matcher backend.
 
-Sort each session independently, then match units across sessions to recover the
-same biological unit recorded on different days. Four tables:
+Sort each session independently, then match units across sessions.
 
 ``MatcherParameters`` (Lookup)
-    A named, registry-validated matcher configuration. ``insert1`` rejects an
-    unregistered ``matcher`` name (``UnknownMatcherError``) and Pydantic-validates
-    ``params`` against that matcher's schema -- a typo is caught at insert, not
-    hours later in ``UnitMatch.populate``.
+    Named matcher configuration; ``matcher`` and ``params`` are validated
+    against the matcher registry at insert.
 
 ``UnitMatchSelection`` (+ ``Input`` / ``InputRecording`` parts)
-    One row per (matcher params, explicit set of matching inputs). A matching
-    input is one curated sort of a single recording or of a same-day
-    concatenation; the user pins its exact ``(sorting_id, curation_id)`` --
-    there is no implicit "latest curation" lookup, so a match run is
-    reproducible. ``insert_inputs`` freezes each input's curation generation,
-    source and constituent original recordings, numbers the inputs
-    chronologically, and stores a deterministic hash of the frozen inputs so a
-    repeat call is idempotent. ``insert_selection`` resolves one curation per
-    ``SessionGroup`` member into inputs.
+    Matcher params plus an explicit set of matching inputs, each a pinned
+    ``(sorting_id, curation_id)`` of a single recording or same-day
+    concatenation. Inputs are frozen and numbered chronologically.
 
 ``UnitMatch`` (+ ``Pair`` / ``MatchableUnit`` / ``RecordingSpikeCount`` parts)
-    ``make()`` re-validates the frozen inputs, extracts a wrapper-owned
-    waveform bundle per input, dispatches the chosen matcher in chronological
-    input order, and writes the canonicalized pairs (one ``Pair`` row per
-    match), the frozen matchable-unit universe, each matchable unit's spike
-    count in every constituent recording, and an exportable NWB pairs table.
+    Runs the matcher in chronological input order and stores the pairs, the
+    frozen matchable-unit universe, per-recording spike counts, and an NWB
+    pairs table.
 
 ``TrackedUnit`` (+ ``Member`` part)
-    ``make()`` derives biological-unit identities from the ``Pair`` graph: a
-    strict partition of the curated-unit universe via a greedy maximal-clique
-    cover (one identity per unit), with a bounded node budget.
-    ``get_unit_brain_regions`` resolves each member unit's brain region in
-    every original recording of its input, from that recording's own session,
-    and ``get_member_spike_times`` returns its spike times on each original
-    recording's clock. Both first re-run ``UnitMatch.make``'s input check and
-    refuse an input whose pinned curation or source recordings differ from
-    the frozen rows.
+    Biological-unit identities from a greedy maximal-clique cover of the
+    ``Pair`` graph, with per-recording brain regions and spike times.
 """
 
 from __future__ import annotations
@@ -81,52 +63,35 @@ schema = dj.schema("spikesorting_v2_unit_matching")
 class UnitMatchFetched(NamedTuple):
     """Validated inputs for ``UnitMatch.make_compute``.
 
-    Fetch checks persisted source timestamps and may rebuild missing traces
-    for multi-input execution. Read-only planning uses the preflight instead.
+    ``input_plan`` is the chronological list of per-input DeepHash-stable
+    dicts built from the frozen ``Input`` / ``InputRecording`` rows:
 
-    ``input_plan`` is the ``input_index``-ordered (chronological) list of
-    per-input DeepHash-stable dicts built from the selection's FROZEN
-    ``Input`` / ``InputRecording`` rows, plus the correctness-sensitive DB
-    state resolved at fetch time: ``{"input_index", "sorting_id" (str),
-    "curation_id", "curation_uuid" (str), "source_kind", "source_id" (str),
-    "input_start_time" (canonical UTC ISO 8601 str), "recordings" (one dict
-    per constituent recording: ``recording_index``, ``nwb_file_name``,
-    ``sort_group_id``, ``interval_list_name``, ``recording_id`` (str),
-    ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
-    ``start_sample``, ``end_sample``, ``valid_times`` (nested list),
-    ``source_coverage`` (dict)), "selection_snapshot" (dict),
-    "matchable_unit_ids" (the frozen selected list[int]), "waveform_traces" (str),
-    "motion_corrected_recording_id" (str or None), "units" (StoredUnits),
-    "sorting_input" (CanonicalRecording), "statistics_spans" (list of
-    ``[start, end]`` sort frames)}``; the last two are present only for two
-    or more inputs (a single input extracts no bundle). ``units`` is present
-    for every input: compute counts each matchable unit's spikes per
-    constituent recording from it (for a single input it is resolved
-    without reading or rebuilding the traces file).
-    Threading ``matchable_unit_ids`` here -- rather than re-querying in
-    compute -- keeps a curation relabel between stages from changing which
-    units match; the times are the frozen ones, never re-read from
-    ``Session``. ``waveform_traces`` names the trace artifact the input's
-    bundle is extracted from
-    (:func:`._matching.fetch._member_waveform_traces`); ``sorting_input``
-    locates that artifact with the artifact valid times the sorter's mask
-    was built from, and ``units`` the curated units NWB, so compute opens
-    the traces the sorter read without the DB
-    (:func:`._matching.fetch._member_match_files`). ``statistics_spans``
-    are the sort's persisted statistics spans, which bound every sampled
-    waveform window.
-    ``sorting_id`` is a str, but
-    ``sorting_input`` keeps the fetched keys' ``uuid.UUID`` values, which
-    DataJoint's DeepHash hashes by value, so both fetches still agree.
+    - ``input_index``, ``sorting_id`` (str), ``curation_id``,
+      ``curation_uuid`` (str), ``source_kind``, ``source_id`` (str),
+      ``input_start_time`` (UTC ISO 8601 str)
+    - ``recordings``: one dict per constituent recording with
+      ``recording_index``, ``nwb_file_name``, ``sort_group_id``,
+      ``interval_list_name``, ``recording_id`` (str),
+      ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
+      ``start_sample``, ``end_sample``, ``valid_times`` (nested list),
+      ``source_coverage`` (dict)
+    - ``selection_snapshot`` (dict), ``matchable_unit_ids`` (frozen
+      list[int]), ``waveform_traces`` (str),
+      ``motion_corrected_recording_id`` (str or None)
+    - ``units`` (StoredUnits): curated units NWB, for every input
+    - ``sorting_input`` (CanonicalRecording) and ``statistics_spans``
+      (list of ``[start, end]`` sort frames): only for two or more inputs
+
+    ``matchable_unit_ids`` is carried, not re-queried, so a relabel between
+    stages cannot change which units match. ``sorting_input`` keeps
+    ``uuid.UUID`` values; DeepHash hashes them by value.
     """
 
     matcher_name: str
     params: dict
     job_kwargs: dict
     input_plan: list[dict]
-    # Selection provenance re-emitted into the artifact NWB (not used in
-    # compute): the SessionGroup the inputs were discovered from (None for an
-    # explicit-input selection) and the matcher recipe.
+    # Provenance for the NWB only; group fields are None for explicit inputs.
     session_group_owner: str | None
     session_group_name: str | None
     matcher_params_name: str
@@ -135,8 +100,7 @@ class UnitMatchFetched(NamedTuple):
 class UnitMatchComputed(NamedTuple):
     """Compute -> insert carrier (DeepHash-stable scalars only).
 
-    The pair rows themselves are read back from the staged NWB in
-    ``make_insert`` rather than carried here, mirroring ``CurationEvaluation``.
+    ``make_insert`` reads the pair rows back from the staged NWB.
     """
 
     analysis_file_name: str
@@ -144,18 +108,13 @@ class UnitMatchComputed(NamedTuple):
     n_pairs: int
     matcher_runtime_s: float
     anchor_nwb_file_name: str
-    # The FROZEN matchable universe (per-input ``{"input_index", "sorting_id"
-    # (str), "curation_id", "unit_id"}`` dicts), snapshotted from ``input_plan``
-    # so ``make_insert`` writes ``UnitMatch.MatchableUnit`` and ``TrackedUnit``
-    # reads the exact node universe the matcher saw, not current labels.
+    # Frozen ``{"input_index", "sorting_id", "curation_id", "unit_id"}`` rows
+    # for ``UnitMatch.MatchableUnit``.
     matchable_units: list[dict]
-    # Per-(input, recording, matchable unit) spike counts (``{"input_index",
-    # "recording_index", "unit_id", "n_spikes"}`` dicts) for
+    # ``{"input_index", "recording_index", "unit_id", "n_spikes"}`` rows for
     # ``UnitMatch.RecordingSpikeCount``.
     recording_spike_counts: list[dict]
-    # Producer provenance (secondary, never identity): SI version at match time,
-    # the resolved backend's module path and package version, and both
-    # producers' qualified names, versions and optional asset fingerprints.
+    # Producer provenance; secondary, not identity.
     spikeinterface_version: str
     matcher_backend: str
     matcher_backend_version: str | None
@@ -182,12 +141,10 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Validate the matcher name + params against the registry, then insert.
 
-        Layer-1 defense against matcher-name typos: an unknown ``matcher`` string
-        could otherwise sit in the database until ``UnitMatch.populate()`` fails.
-        The same registry dispatches the per-matcher Pydantic schema for ``params``
-        validation (so a typo is caught at insert), and the outer/inner
-        ``params_schema_version`` drift + duplicate-content guards mirror the
-        other v2 parameter Lookups.
+        Raises ``UnknownMatcherError`` for an unregistered ``matcher`` and
+        validates ``params`` with that matcher's Pydantic schema. Schema
+        version and duplicate-content checks match the other v2 parameter
+        Lookups.
         """
         from spyglass.spikesorting.v2.matcher_protocol import (
             _get_matcher_schema,
@@ -209,9 +166,8 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 schema_for=schema_for,
                 table_name="MatcherParameters",
             )
-            # Validate the whole batch before checking job seeds, preserving
-            # the registry/schema errors' precedence over this extra policy.
-            # The waveform-bundle params seed is the sole authoritative seed.
+            # Runs after batch validation so registry/schema errors take
+            # precedence. ``params["seed"]`` is the only seed.
             for row in validated:
                 job_kwargs = row.get("job_kwargs")
                 if job_kwargs and "random_seed" in job_kwargs:
@@ -238,10 +194,8 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def _default_rows(cls) -> list[dict]:
         """The shipped default matcher-parameter row(s).
 
-        Exposed as a classmethod (not inlined in ``insert_default``) so the
-        operational reporting (``describe_parameter_rows`` ->
-        ``_shipped_names``) can discover the shipped names the same way it does
-        for the other dynamic-default Lookups. Pure: builds dicts only.
+        Separate from ``insert_default`` so ``describe_parameter_rows`` can
+        discover the shipped names.
         """
         from spyglass.spikesorting.v2._params.matcher import (
             UnitMatchParamsSchema,
@@ -267,22 +221,16 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (matcher params, explicit ordered set of matching inputs).
 
-    A matching input is one complete, independently curated sort: a sort of a
-    single recording or of a same-day concatenation. Each ``Input`` part pins
-    the exact ``(sorting_id, curation_id)`` and its ``curation_uuid``
-    generation -- there is no implicit "latest curation" lookup, so a match
-    run is reproducible -- together with the sort's source and the
-    constituent original recordings (``InputRecording``), frozen when the
-    selection is made. Inputs are numbered in chronological order
-    (``input_index``), and every later step (matcher feed order, pair
-    orientation) reads only these frozen rows. The master stores a
-    deterministic hash of the frozen inputs so ``insert_inputs`` is
-    idempotent. ``session_group_owner`` / ``session_group_name`` record the
-    ``SessionGroup`` the inputs were discovered from (``insert_selection``).
-    They are provenance only: not identity, and not a foreign key, so
-    deleting or editing a group never deletes or changes a match run. Two
-    groups resolving to the same inputs share one selection, which keeps
-    the group recorded first.
+    A matching input is one curated sort of a single recording or same-day
+    concatenation. Each ``Input`` pins ``(sorting_id, curation_id)`` and its
+    ``curation_uuid``, with the source and constituent recordings
+    (``InputRecording``) frozen at selection time. Inputs are numbered
+    chronologically (``input_index``); later steps read only these frozen
+    rows. ``input_set_hash`` makes ``insert_inputs`` idempotent.
+
+    ``session_group_owner`` / ``session_group_name`` are provenance only (not
+    identity, not a foreign key). Two groups resolving to the same inputs
+    share one selection, which keeps the group recorded first.
     """
 
     definition = """
@@ -347,22 +295,13 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict:
         """Find-existing-or-insert a match over explicit inputs; return its key.
 
-        Each input is one curated sort, either of a single recording or of a
-        same-day concatenation, given in any order. Before any row is written
-        the inputs are validated: at least one input, one curation per
-        sorting, every curation exists and has no unapplied proposed merges,
-        inputs do not reuse original acquisition samples (different epochs
-        in one NWB are supported), and a
-        concatenation input lies within one day. The inputs are then ordered
-        chronologically (earliest session start of each input, ties broken by
-        source epoch time, then ``sorting_id`` / ``curation_id``) and numbered ``input_index``
-        ``0..n-1``; each input's source and constituent recordings are
-        frozen. The selection id is deterministic over the matcher params and
-        the hash of the frozen inputs, so listing the same inputs in another
-        order returns the same selection. A new selection also runs the
-        electrode-space warning and the selected backend's optional geometry
-        preflight. UnitMatch requires identical channel geometry; other
-        backends own their geometry requirements.
+        Inputs (in any order) are validated before any write, then ordered by
+        earliest session start (ties: source epoch time, ``sorting_id``,
+        ``curation_id``) and numbered ``input_index`` ``0..n-1``. The
+        selection id is deterministic over the matcher params and the frozen
+        inputs, so input order does not matter. A new selection also runs the
+        electrode-space warning and the backend's optional geometry preflight
+        (UnitMatch requires identical channel geometry).
 
         Parameters
         ----------
@@ -373,10 +312,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         matcher_params_name : str
             The ``MatcherParameters`` row to use.
         session_group : tuple of (str, str), optional
-            ``(session_group_owner, session_group_name)`` the inputs were
-            discovered from, recorded on a new selection as provenance only
-            (a selection found for the same inputs keeps what it recorded).
-            Default ``None``.
+            ``(session_group_owner, session_group_name)`` recorded on a new
+            selection as provenance. Default ``None``.
         unit_selections : sequence, optional
             Frozen snapshots from ``resolve_unit_selection``, one per input.
             Without them, ``unit_policy`` is resolved once and frozen. Every
@@ -438,15 +375,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict:
         """Match one curation per ``SessionGroup`` member; return the key.
 
-        Discovery adapter over :meth:`insert_inputs` for a group whose members
-        are single recordings. ``curation_choices`` maps each member's
-        ``member_index`` to an explicit ``{"sorting_id": ..., "curation_id":
-        ...}`` key. Every member must have exactly one choice (missing / extra
-        raise), and each chosen curation must be a sort of that member's
-        recording -- a curation from member B is never accepted for member A
-        just because it satisfies the independent FK. The resolved curations
-        are then matched as explicit inputs with the group recorded as
-        provenance; later edits to the group do not change the selection.
+        Wraps :meth:`insert_inputs` for a group of single recordings. Every
+        member needs exactly one choice, and each chosen curation must be a
+        sort of that member's recording. The group is recorded as provenance
+        only.
 
         Parameters
         ----------
@@ -485,8 +417,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "SessionGroup.create_group()."
             )
         choices_by_member = normalize_curation_choices(curation_choices)
-        # Coverage + per-member ownership BEFORE any input is resolved (a
-        # wrong-member choice raises here, before any row is minted).
+        # Check coverage and member ownership before any row is written.
         _validate_member_curations(members, choices_by_member)
         return cls.insert_inputs(
             [
@@ -542,15 +473,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def _member_channel_positions(cls, curation_key, *, allow_rebuild=True):
         """Channel positions for one pinned input's curated recording.
 
-        Loads the curated recording (the same object ``UnitMatch.make`` extracts
-        bundles from) and returns its ``get_channel_locations()`` array. For a
-        sort of a motion-corrected recording that is the corrected recording's
-        effective geometry, without any channels ``remove_channels`` dropped;
-        for a concatenation it is the concatenation's own geometry. This
-        accessor never pads, reorders or trims positions; the backend owns
-        any comparison or remapping policy. A
-        thin seam so the geometry preflight is unit-testable by patching this
-        rather than building a full SpikeInterface recording.
+        Returns ``get_channel_locations()`` of the recording
+        ``UnitMatch.make`` extracts bundles from (motion-corrected or
+        concatenated geometry where applicable), unmodified. Tests patch this.
         """
         if allow_rebuild:
             return CurationV2.get_sorting_input_recording(
@@ -592,12 +517,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> None:
         """Run the selected backend's optional geometry preflight.
 
-        Only a backend with ``validate_geometry`` loads the pinned inputs'
-        effective channel positions. The backend owns its geometry policy;
-        UnitMatch rejects differing shapes or positions before extraction.
-        ``choices_by_input`` maps a label (the ``input_index``) to
-        ``(sorting_id, curation_id)``. A single input skips (nothing to
-        compare against).
+        Skipped for a single input or a backend without
+        ``validate_geometry``. ``choices_by_input`` maps ``input_index`` to
+        ``(sorting_id, curation_id)``.
         """
         if len(choices_by_input) < 2:
             return
@@ -627,13 +549,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def _member_electrode_signature(cls, sorting_id):
         """Electrode/region signature for one input's sort group.
 
-        Resolves the input's first constituent recording's ``(nwb_file_name,
-        sort_group_id)`` -- the recording itself, or a concatenation's first
-        member (members share electrode ids and regions, which the
-        concatenation enforces) -- and returns the same
-        ``(electrode_group_name, electrode_id, region)`` signature the concat
-        path uses, so two physically distinct probes never collapse to one
-        electrode space even when their channel geometry coincides.
+        Uses the input's first constituent recording (concat members share
+        electrodes) and returns the ``(electrode_group_name, electrode_id,
+        region)`` signature the concat path uses.
         """
         from spyglass.spikesorting.v2._sorting.fetch import resolve_sort_anchor
         from spyglass.spikesorting.v2.session_group import (
@@ -655,13 +573,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def _divergent_electrode_space_members(cls, choices_by_input) -> list:
         """Input labels whose electrode signature diverges from the first.
 
-        Compares electrode IDENTITY (group + ids + regions) -- the lab-dependent
-        signal channel geometry can't catch -- via
-        :func:`._matching.graph.divergent_electrode_space_members`. The caller
-        WARNS rather than blocks (see :meth:`_warn_on_divergent_electrode_space`)
-        because electrode-group names / ids come from each NWB's
-        ``ElectrodeGroup`` and are not guaranteed stable across labs' ingestion.
-        ``choices_by_input`` maps a label (the ``input_index``) to
+        Compares electrode identity (group, ids, regions), which channel
+        geometry cannot catch. ``choices_by_input`` maps ``input_index`` to
         ``(sorting_id, curation_id)``; fewer than two inputs return ``[]``.
         """
         if len(choices_by_input) < 2:
@@ -678,11 +591,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
     @staticmethod
     def _divergent_electrode_space_message(divergent) -> str:
-        """The advisory message for a divergent-electrode-space result.
-
-        Shared by the log warning and the ``run_v2_unit_match`` receipt so both
-        carry identical text.
-        """
+        """Advisory text shared by the log warning and the receipt."""
         return (
             f"matching input(s) {divergent} map to a different electrode space "
             "(electrode group / ids / regions) than the first input, though "
@@ -696,11 +605,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 
     @classmethod
     def _warn_on_divergent_electrode_space(cls, choices_by_input) -> None:
-        """Log a WARNING (don't block) when inputs differ in electrode space.
+        """Warn when inputs differ in electrode space.
 
-        The hard checks (geometry, same-session) live elsewhere; this signal is
-        advisory because electrode-group names / ids are not lab-stable.
-        ``run_v2_unit_match`` also surfaces it in the receipt's ``warnings``.
+        Advisory only: electrode-group names and ids are not stable across
+        labs' NWB ingestion.
         """
         divergent = cls._divergent_electrode_space_members(choices_by_input)
         if divergent:
@@ -715,9 +623,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict | None:
         """Return the canonical PK for this selection identity, or None.
 
-        See :func:`._matching.inputs.find_existing_pk`. Tests patch it, so
-        it stays on the class and ``insert_inputs`` calls it through the
-        class.
+        See :func:`._matching.inputs.find_existing_pk`. Kept on the class
+        because tests patch it.
         """
         return _unit_match_inputs.find_existing_pk(
             cls, identity, deterministic_unitmatch_id
@@ -728,14 +635,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Pairwise unit matches across a selection's matching inputs.
 
-    ``make()`` re-validates the frozen inputs (so a direct-insert bypass of
-    ``UnitMatchSelection.insert_inputs``, a recreated curation, or changed
-    source content cannot match the wrong units), extracts a wrapper-owned
-    waveform bundle per input, feeds the matcher in ``input_index``
-    (chronological) order, and writes the canonicalized pairs. The
-    AnalysisNwbfile parent is the first input's first recording's NWB;
-    complete provenance stays queryable through ``UnitMatchSelection.Input``
-    and ``UnitMatchSelection.InputRecording``.
+    ``make()`` re-validates the frozen inputs, extracts a waveform bundle per
+    input, runs the matcher in ``input_index`` order, and writes the
+    canonicalized pairs. The AnalysisNwbfile parent is the first input's
+    first recording's NWB.
     """
 
     definition = """
@@ -754,14 +657,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     class Pair(SpyglassMixinPart):
         """Per-pair match record.
 
-        Each side is a *projected* FK into ``CurationV2.Unit`` so DataJoint
-        guarantees referential integrity: a pair cannot reference a unit absent
-        from the pinned curation. The ``session_a_*`` / ``session_b_*`` sides
-        are two matching inputs (side a has the lower ``input_index``).
-        UnitMatch operates on the curated, matchable unit set of the curations
-        pinned by ``UnitMatchSelection.Input``, not the raw Sorting units. ``drift_estimate_um`` / ``fdr_estimate`` have no per-pair
-        backend source (drift is applied internally per session-pair; FDR is a
-        session-level diagnostic) and stay NULL (unknown).
+        Each side is a projected FK into ``CurationV2.Unit``; side a has the
+        lower ``input_index``. ``drift_estimate_um`` / ``fdr_estimate`` have
+        no per-pair backend source and stay NULL.
         """
 
         definition = """
@@ -778,17 +676,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         def insert(self, rows, **kwargs):
             """Validate every pair against the selection's pinned inputs.
 
-            The ``Pair`` FKs guarantee each endpoint exists in SOME ``CurationV2``,
-            not in THIS selection's pinned ``UnitMatchSelection.Input`` curations. The canonical
-            ``UnitMatch.make_insert`` path is safe because
-            ``canonicalize_match_pairs`` orients + dedupes within the pinned,
-            matchable set; a raw / maintenance ``insert`` bypasses that, so
-            re-validate here. Positional rows are normalized to dicts (and
-            validated) too, so a raw positional insert cannot slip past the guard.
-            For each row: both endpoints must be a pinned input curation, the
-            two endpoints must be different curations (a unit cannot match itself
-            across sessions), the undirected edge must be new (no reversed / duplicate),
-            and ``match_probability`` must be in ``[0, 1]``.
+            The FKs only guarantee each endpoint exists in some ``CurationV2``.
+            Positional rows are normalized to dicts. Each row must have:
+
+            - both endpoints in pinned input curations
+            - endpoints in different curations
+            - a new undirected edge (no reversed or duplicate pair)
+            - ``match_probability`` in ``[0, 1]``
+
+            Raises
+            ------
+            UnitMatchPairIntegrityError
+                If any row fails a check.
             """
             from collections.abc import Mapping
 
@@ -800,9 +699,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 rows = [rows]
             attr_names = self.heading.names
             normalized = [_insert_row_to_dict(row, attr_names) for row in rows]
-            # Per-unitmatch_id caches: the pinned input-curation set and the
-            # undirected edges already present (DB) plus those validated earlier
-            # in this batch, so a multi-pair insert does not re-query per row.
+            # Per-unitmatch_id caches so a batch does not re-query per row.
             pinned_cache: dict = {}
             seen_edges: dict = {}
             for row in normalized:
@@ -919,16 +816,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             return existing
 
     class MatchableUnit(SpyglassMixinPart):
-        """The FROZEN matchable-unit universe this match ran over.
+        """The frozen matchable-unit universe this match ran over.
 
-        Snapshots, per matching input, the ``(sorting_id, curation_id, unit_id)`` triples
-        included in the selection's frozen population snapshot -- the exact
-        node universe the matcher saw. ``TrackedUnit.make`` reads this instead of
-        re-deriving it from CURRENT curation labels, so a relabel between
-        ``UnitMatch`` and ``TrackedUnit`` populate cannot silently drop a
-        singleton (a unit the matcher saw but emitted no ``Pair`` for) from the
-        tracked-unit graph. A plain snapshot (not FK'd) by design: the value
-        records what was matched, not a live reference.
+        ``TrackedUnit.make`` reads this rather than current labels, so a
+        relabel cannot drop an unpaired unit. Not FK'd: a snapshot, not a live
+        reference.
         """
 
         definition = """
@@ -940,18 +832,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
 
     class RecordingSpikeCount(SpyglassMixinPart):
-        """FROZEN per-recording spike counts of every matchable unit.
+        """Frozen per-recording spike counts of every matchable unit.
 
-        One row per (matching input, constituent recording, matchable unit):
-        the number of the unit's spikes whose sort frame lies in the
-        recording's frozen ``[start_sample, end_sample)`` span
-        (``UnitMatchSelection.InputRecording``). A single-recording input
-        has one row per unit (its total); a concatenation input's parent
-        unit has one row per member, zero where it did not fire, and the
-        counts over an input's recordings sum to the unit's total. Covers
-        units left out of the matcher's bundle too. ``TrackedUnit`` counts
-        a session as detected only where a member unit has spikes. A plain
-        snapshot (not FK'd), like ``MatchableUnit``.
+        One row per (input, constituent recording, unit): spikes whose sort
+        frame lies in the recording's ``[start_sample, end_sample)``. Counts
+        over an input's recordings sum to the unit's total. Not FK'd.
         """
 
         definition = """
@@ -963,46 +848,24 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         n_spikes: int     # spikes of the unit whose sort frame lies in this recording's frame span
         """
 
-    # Tri-part make so the heavy curation reads, dense bundle extraction,
-    # matcher execution, and NWB write run OUTSIDE the DB transaction (mirroring
-    # Recording / Sorting / CurationEvaluation). Only the row inserts run inside
-    # the framework-provided transaction.
+    # Tri-part make: heavy work runs outside the DB transaction.
     _parallel_make = True
 
     def make_fetch(self, key) -> UnitMatchFetched:
-        """Fetch + re-validate the frozen inputs (DB reads + checks only).
+        """Fetch and re-validate the frozen inputs (DB reads and checks only).
 
-        Re-runs the selection checks on the RAW ``Input`` / ``InputRecording``
-        rows before any matcher input is extracted, since a direct insert can
-        bypass ``insert_inputs``: the parts are well formed, each pinned
-        curation exists and carries no unapplied proposed merges (checked
-        before the population snapshots, which cannot be valid for such a
-        curation), there is at least one input, no sorting is pinned twice,
-        no concatenation input
-        spans two days and no inputs reuse original raw samples (on the frozen
-        source coverage), each ``input_start_time`` is its earliest frozen
-        session start and ``input_index`` follows their chronological order,
-        and the stored ``input_set_hash`` is the hash of the parts. Then, per
-        input, the pinned curation must still exist with the pinned
-        ``curation_uuid`` (a recreated curation raises rather than silently
-        re-pointing), and its live source
-        must still match the frozen recordings (source, ``recording_id``,
-        content hash, concatenation membership, frames and kept intervals; a
-        concatenation member's ``Recording`` must still carry the content
-        hash its concatenation froze;
-        a single recording's frames and kept intervals are re-read from its
-        traces when bundles will be extracted, i.e. for two or more inputs),
-        and each frozen ``session_start_time`` must still equal its live
-        ``Session.session_start_time``.
+        Re-runs the selection checks on the raw parts, since a direct insert
+        can bypass ``insert_inputs``. See ``UnitMatchSelectionIntegrityError``
+        for the full list. Only frozen values order the inputs; ``Session`` is
+        read only to refuse drifted start times. Missing traces files are
+        rebuilt here for multi-input runs.
 
-        Only frozen values order and describe the inputs: ``Session`` is read
-        only to refuse a run whose frozen session times differ from it (it
-        never re-orders the inputs), and the ``SessionGroup`` the inputs were
-        discovered from is not consulted. Each input's traces file is rebuilt
-        here if missing, and its path, the artifact valid times of the sort's
-        mask (when applied at load) and the sort's statistics spans are
-        carried to compute, together with its curated units NWB (resolved for
-        every input, including a single one, whose traces file is not read).
+        Raises
+        ------
+        UnitMatchSelectionIntegrityError
+            If a frozen input no longer holds.
+        OverlappingMatchInputError
+            If inputs reuse original raw samples.
         """
         return _unit_match_fetch.fetch_unit_match_inputs(key)
 
@@ -1019,15 +882,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> UnitMatchComputed:
         """Extract bundles, run the matcher, and stage the pairs NWB.
 
-        All heavy SI / UnitMatch / NWB work happens here, outside the DB
-        transaction. A single-input selection writes an empty pairs table
-        without calling the matcher backend. Every input's matchable units
-        are counted per constituent recording from its curated units file
-        (:func:`._matching.compute._input_recording_spike_counts`). The
-        anchor AnalysisNwbfile parent is the first input's first recording's
-        NWB (``input_plan`` is ``input_index``-ordered).
-        Reads only the input files ``make_fetch`` resolved; the one DB access
-        left is staging the pairs NWB (see :mod:`._storage.nwb`).
+        A single input writes an empty pairs table without calling the
+        backend. Reads only files ``make_fetch`` resolved; the only DB access
+        is staging the pairs NWB.
         """
         import spikeinterface as si
 
@@ -1048,9 +905,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             read_stored_units,
         )
 
-        # Producer provenance, resolved from the registry entry that runs, so
-        # the row records which backend code produced it. Secondary, not
-        # identity.
+        # Provenance from the registry entry that actually runs.
         backend = get_matcher(matcher_name)
         spikeinterface_version = si.__version__
         matcher_backend = type(backend).__module__
@@ -1067,10 +922,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         matcher_backend_version = producer_provenance["backend"]["version"]
 
         anchor_nwb_file_name = input_plan[0]["recordings"][0]["nwb_file_name"]
-        # Snapshot the frozen matchable universe from input_plan (resolved +
-        # validated in make_fetch) so make_insert persists exactly the node set
-        # handed to the matcher path, including units a bundle leaves out
-        # (they get no pairs and become unmatched tracked units).
+        # Includes units a bundle leaves out; they become unmatched tracked
+        # units.
         matchable_units = [
             {
                 "input_index": int(plan["input_index"]),
@@ -1081,8 +934,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             for plan in input_plan
             for unit_id in plan["matchable_unit_ids"]
         ]
-        # Each input's curated units are read once, for both its spike
-        # counts and its bundle.
+        # Read once for both spike counts and bundles.
         sortings = {
             plan["input_index"]: read_stored_units(plan["units"])
             for plan in input_plan
@@ -1111,8 +963,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ) as analysis_file_name:
             abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             if len(input_plan) < 2:
-                # A single input: no cross-session pairs, no matcher or
-                # bundle extraction (needs no matcher backend).
                 logger.warning(
                     "UnitMatch.make: selection "
                     f"{key['unitmatch_id']} ({anchor_nwb_file_name}) has a "
@@ -1162,16 +1012,11 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         matcher_backend_version,
         matcher_provenance,
     ) -> None:
-        """Register the analysis file + insert the master, Pair, and frozen
-        ``MatchableUnit`` / ``RecordingSpikeCount`` rows.
+        """Register the analysis file and insert the master and part rows.
 
-        Runs inside the framework's tri-part insert transaction. The Pair rows
-        are read back from the staged NWB (the canonical written pairs) rather
-        than threaded through the compute carrier, mirroring ``CurationEvaluation``;
-        ``matchable_units`` is the frozen node universe snapshot carried from
-        ``make_compute``. Removing a failed attempt's staged file is
-        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
-        call leaves that to its caller.
+        Pair rows are read back from the staged NWB. On failure,
+        ``populate()`` removes the staged file; a direct call leaves that to
+        its caller.
         """
         from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
         from spyglass.spikesorting.v2._matching.provenance import (
@@ -1181,9 +1026,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         validate_matcher_provenance(matcher_provenance)
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        # Use an explicit raise (not assert -- assert is stripped under
-        # ``python -O``): the NWB table is the source of the Pair rows, so its
-        # length must agree with the computed n_pairs.
         pairs = read_pairs(abs_path, pairs_object_id)
         if len(pairs) != n_pairs:
             raise RuntimeError(
@@ -1191,9 +1033,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 f"{len(pairs)} pairs but the computed n_pairs is {n_pairs}; "
                 "the pairs table is inconsistent."
             )
-        # _safe_context() keeps the registration + master + Pair inserts
-        # atomic even on a direct (non-populate) call; under tri-part populate
-        # the framework transaction is already open and this is a no-op.
+        # Atomic on a direct call; no-op inside populate's transaction.
         with self._safe_context():
             AnalysisNwbfile().add(anchor_nwb_file_name, analysis_file_name)
             self.insert1(
@@ -1209,14 +1049,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "matcher_provenance": matcher_provenance,
                 }
             )
-            # ``read_pairs`` returns exactly the Pair part columns
-            # (pair_index + the two projected unit FKs + probability/drift/
-            # fdr) and ``key`` adds only the master PK, so splatting both is
-            # the full Pair row -- no second hand-maintained column list to
-            # drift from the NWB writer/reader.
+            # ``read_pairs`` returns exactly the Pair columns besides the PK.
             self.Pair.insert([{**key, **pair} for pair in pairs])
-            # Persist the frozen matchable universe so TrackedUnit reads the
-            # exact node set the matcher saw, not current curation labels.
             self.MatchableUnit.insert(
                 [{**key, **unit} for unit in matchable_units]
             )
@@ -1239,13 +1073,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> "tuple[pd.DataFrame, pd.DataFrame]":
         """Per-input and per-recording provenance of one match run.
 
-        Reads the frozen ``UnitMatchSelection.Input`` /
-        ``UnitMatchSelection.InputRecording`` rows, or with
-        ``from_nwb=True`` the same provenance from the run's analysis NWB
-        (the inputs and input-recordings tables ``make_compute`` writes), so
-        a run is described without the ``SessionGroup`` it may have been
-        discovered from. Both forms share their columns and value types,
-        so the two can be compared directly.
+        Reads the frozen ``UnitMatchSelection.Input`` / ``InputRecording``
+        rows, or with ``from_nwb=True`` the run's analysis NWB. Both forms
+        share columns and value types.
 
         Parameters
         ----------
@@ -1278,12 +1108,9 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Notes
         -----
-        The database has no column for the traces kind: a sort reads the
-        ``MotionCorrectedRecording`` it selected, else its own source
-        (``SortingSelection.resolve_effective_source``), and ``UnitMatch.make``
-        refuses a run whose live correction differs from the frozen
-        ``motion_corrected_recording_id``, so ``waveform_traces`` follows from
-        that id. The NWB form reads the kind the run recorded.
+        The database form derives ``waveform_traces`` from
+        ``motion_corrected_recording_id``; the NWB form reads the recorded
+        kind.
         """
         return _unit_match_readers.get_input_provenance(
             self, key, from_nwb=from_nwb
@@ -1294,23 +1121,15 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 class TrackedUnit(SpyglassMixin, dj.Computed):
     """Biological-unit-level identity across sessions.
 
-    One row per inferred biological unit; the ``Member`` part lists the
-    per-input ``(sorting_id, curation_id, unit_id)`` tuples that compose it.
-    ``make()`` seeds a graph from the complete curated-unit universe (so a unit
-    the matcher emitted no pair for still surfaces as a singleton), keeps edges
-    above ``tracked_unit_threshold``, and partitions the units into strict
-    groups via a greedy maximal-clique cover (each unit belongs to exactly one
-    tracked unit; the strongest overlapping clique wins). Exceeding
-    ``max_strict_nodes`` raises ``TrackedUnitBudgetExceededError``.
+    One row per inferred biological unit; ``Member`` lists its curated
+    units. ``make()`` seeds a graph from all matchable units (unpaired units
+    become singletons), keeps edges above ``tracked_unit_threshold``, and
+    partitions units by a greedy maximal-clique cover (strongest clique
+    wins). Exceeding ``max_strict_nodes`` raises
+    ``TrackedUnitBudgetExceededError``.
 
-    A member unit of a concatenation input covers several original
-    recordings. ``n_sessions_detected`` counts the distinct original
-    sessions (``nwb_file_name``) in which at least one member unit has
-    spikes, from the frozen ``UnitMatch.RecordingSpikeCount`` rows: two
-    intervals of one nwb count once, and a recording where a member has no
-    spikes does not count. ``n_matching_inputs`` counts the distinct inputs
-    among the members. For single-recording inputs whose units all have
-    spikes the two are equal.
+    ``n_sessions_detected`` counts distinct ``nwb_file_name`` values where a
+    member unit has spikes. ``n_matching_inputs`` counts distinct inputs.
     """
 
     definition = """
@@ -1334,17 +1153,9 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Derive tracked units from the pairwise ``UnitMatch.Pair`` graph.
 
-        ``node_universe`` is read from the FROZEN ``UnitMatch.MatchableUnit``
-        snapshot -- the exact matchable set ``UnitMatch.make_fetch`` resolved --
-        NOT re-derived from current curation labels. So a relabel between
-        ``UnitMatch`` and ``TrackedUnit`` populate cannot silently drop a
-        singleton (a unit the matcher saw but emitted no ``Pair`` for) from the
-        tracked-unit graph. ``derive_tracked_units`` still fails loudly if a
-        ``Pair`` edge endpoint is absent from the (frozen) universe -- a genuine
-        UnitMatch/MatchableUnit inconsistency that should never occur, since both
-        are written together in ``make_insert``. Detected sessions come from
-        the frozen ``UnitMatch.RecordingSpikeCount`` rows
-        (:func:`._matching.readers._node_detections`).
+        Nodes come from the frozen ``UnitMatch.MatchableUnit`` rows and
+        detected sessions from ``UnitMatch.RecordingSpikeCount``. Raises if a
+        ``Pair`` endpoint is missing from the universe.
         """
         master_rows, member_rows = _unit_match_readers.tracked_unit_rows(key)
 
@@ -1355,22 +1166,12 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     def get_unit_brain_regions(self, tracked_unit_key) -> "pd.DataFrame":
         """Brain regions of tracked units' member units, per original recording.
 
-        A member unit of a concatenation input covers every constituent
-        recording of its input. Each recording's region is resolved from that
-        recording's own session: the member unit's electrode
-        (``electrode_group_name``, ``electrode_id`` of its ``CurationV2.Unit``)
-        within the recording's sort group (``SortGroupV2.SortGroupElectrode``
-        of its ``nwb_file_name`` and ``sort_group_id``) ``-> Electrode ->
-        BrainRegion``, never copied from the concatenation's anchor member.
-        Recordings, dates and spike counts are the frozen
-        ``UnitMatchSelection.InputRecording`` and
-        ``UnitMatch.RecordingSpikeCount`` rows. The unit's electrode and
-        each sort group are read live, so before reading an input the
-        pinned curation and the input's source recordings are compared with
-        the frozen rows
-        (:func:`._matching.readers._assert_run_input_unchanged`); the
-        region itself is read live by design, so a corrected ``Electrode``
-        region shows.
+        Each recording's region is resolved from its own session (unit
+        electrode -> ``SortGroupV2.SortGroupElectrode`` -> ``Electrode`` ->
+        ``BrainRegion``), not from a concatenation's anchor member.
+        Recordings, dates and spike counts come from frozen rows. Regions are
+        read live, so a corrected ``Electrode`` region shows; each input is
+        first checked against its frozen rows.
 
         Parameters
         ----------
@@ -1409,23 +1210,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     def get_member_spike_times(self, tracked_unit_key) -> "pd.DataFrame":
         """Tracked units' member spike times on each original recording's clock.
 
-        A member unit of a single-recording input has the spike times its
-        curation's units NWB stores, which are on that recording's clock. A
-        member unit of a concatenation input is a parent unit on the
-        synthetic concatenation timeline: its spike frames (the units NWB
-        ``spike_sample_index`` column) are split by the frozen
-        ``[start_sample, end_sample)`` spans of the input's recordings
-        (``UnitMatchSelection.InputRecording``) and each member-local frame
-        is mapped onto that member ``Recording``'s timestamps -- the rule
-        ``ConcatMemberCuration`` applies, without needing its rows. Gaps
-        between and inside members are kept, and a member the unit did not
-        fire in gets an empty array. The times are read from live data (the
-        curation's units NWB and each member ``Recording``), so before an
-        input is read its pinned curation and source recordings are compared
-        with the frozen rows
-        (:func:`._matching.readers._assert_run_input_unchanged`): a
-        recording replaced after the run would otherwise shift the returned
-        times.
+        Concatenation spike frames are split by the frozen
+        ``[start_sample, end_sample)`` spans and mapped onto each member
+        ``Recording``'s timestamps, as ``ConcatMemberCuration`` does. A member
+        the unit did not fire in gets an empty array. Times are read from live
+        data, so each input is first checked against its frozen rows.
 
         Parameters
         ----------

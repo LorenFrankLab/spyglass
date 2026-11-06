@@ -1,9 +1,7 @@
 """Pure signal / frame / interval math for the spike sorting tables.
 
-Timestamp <-> frame conversion, interval consolidation, and the
-absolute-time merge dedup used by the recording, artifact, sorting, and
-curation stages. These functions are pure (NumPy + ``logger`` only, no
-DataJoint / SpikeInterface table access).
+Timestamp/frame conversion and interval helpers shared by the v2 stages. No
+DataJoint access.
 """
 
 from __future__ import annotations
@@ -17,11 +15,8 @@ def assert_freq_max_below_nyquist(
 ) -> None:
     """Raise if a bandpass ``freq_max`` is at or above the Nyquist (fs/2).
 
-    SciPy's filter design requires ``freq_max < fs/2``; a value at or above it
-    fails opaquely deep inside the design call, far from the misconfiguration.
-    Checking here -- where ``fs`` is known but the Pydantic schema is not --
-    gives an actionable message. ``context`` is prepended to name the call site
-    (e.g. ``"apply_temporal_preprocessing: "``).
+    SciPy otherwise fails opaquely inside filter design. ``context`` prefixes
+    the message.
     """
     nyquist = sampling_frequency / 2.0
     if freq_max >= nyquist:
@@ -38,10 +33,8 @@ def assert_positive_sampling_frequency(
 ) -> float:
     """Return ``sampling_frequency`` as a float, or raise if not finite and > 0.
 
-    Frame <-> time conversion divides by the sampling frequency (or by the
-    sample period ``1/fs``), so a zero, negative, NaN, or infinite value
-    silently yields an infinite / NaN sample period and mis-maps every frame
-    instead of failing. ``context`` is prepended to name the call site.
+    A bad value would silently mis-map every frame. ``context`` prefixes the
+    message.
     """
     import numpy as np
 
@@ -55,14 +48,10 @@ def assert_positive_sampling_frequency(
 
 
 def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
-    """Raise if ``timestamps`` is empty or steps backward.
+    """Raise if ``timestamps`` is empty, non-finite, or steps backward.
 
-    ``searchsorted``-based frame mapping and the first/last-sample reads
-    assume a non-empty, monotonically non-decreasing wall-clock vector; an out-of-order
-    or empty vector silently mis-slices the recording rather than failing.
-    Equal consecutive timestamps are allowed (``searchsorted`` handles
-    duplicates); only a strictly backward step is rejected. ``context`` is
-    prepended to name the call site.
+    ``searchsorted`` frame mapping would otherwise silently mis-slice. Equal
+    consecutive timestamps are allowed. ``context`` prefixes the message.
     """
     import numpy as np
 
@@ -70,10 +59,7 @@ def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
     if ts.size == 0:
         raise ValueError(f"{context}timestamp vector is empty.")
     if not np.all(np.isfinite(ts)):
-        # ``np.diff`` across a NaN is NaN and ``NaN < 0`` is False, so the
-        # backward-step check below silently passes a NaN-containing (and
-        # NaN-masked out-of-order) vector -- yet ``searchsorted`` sorts NaN as
-        # +inf and mis-brackets every spike after it. Reject non-finite first.
+        # The backward-step check below would pass NaN (NaN < 0 is False).
         raise ValueError(
             f"{context}timestamps contain non-finite values (NaN/inf); "
             "searchsorted-based frame mapping would silently mis-slice the "
@@ -93,22 +79,11 @@ _MAX_ARTIFACT_FRAME_FRACTION = 0.5
 def assert_artifact_frame_fraction(
     n_artifact_frames, n_samples, *, context: str = ""
 ) -> None:
-    """Raise if the per-frame artifact set exceeds a sane fraction of the
-    recording.
+    """Raise if artifact frames exceed ``_MAX_ARTIFACT_FRAME_FRACTION``.
 
-    Both the detection scan (``scan_artifact_frames``: frames flagged above
-    threshold) and the sort-time mask (``apply_artifact_mask``: the complement
-    of the kept ``valid_times``) materialize one int64 frame index per artifact
-    sample. Under a misconfigured (too-loose) threshold, or a ``valid_times``
-    that keeps almost nothing, that array is O(n_samples) -- hundreds of MB to
-    GB on a long, many-channel recording -- and the subsequent per-frame pass is
-    correspondingly slow. Past ``_MAX_ARTIFACT_FRAME_FRACTION`` (half the
-    recording) this is a misconfiguration, not artifact removal: fail fast with
-    the realized fraction rather than allocating the array. ``context`` names the
-    call site so the message points at the right knob.
-
-    ``n_samples <= 0`` forms no fraction and is a no-op -- the callers guard the
-    empty-recording / zero-artifact cases separately.
+    Past half the recording this is a misconfigured detector, and the per-frame
+    index array would cost O(n_samples) memory. No-op when ``n_samples <= 0``.
+    ``context`` prefixes the message.
     """
     if n_samples <= 0:
         return
@@ -138,33 +113,16 @@ def _get_recording_timestamps(
 ):
     """Return the absolute-time vector for a SpikeInterface recording.
 
-    Two responsibilities:
-
-    1. **Multi-segment NWB support.** SpikeInterface's
-       ``recording.get_times()`` only returns the active-segment
-       times; a multi-segment NWB (epoch-stitched recordings) would
-       silently report just segment 0. This helper concatenates the
-       per-segment timestamps into one ``(total_frames,)`` array so
-       downstream code sees the whole-session timeline.
-
-    2. **Caller-supplied persisted-timestamps override.** The make
-       path persists the source's actual wall-clock timestamps (which
-       SI's ``frame_slice`` / ``concatenate_recordings`` drop);
-       ``_restrict_recording`` derives that vector and threads it back
-       here so the saved start/end and the NWB write use the persisted
-       times. ``override`` is that hook: when not ``None``, return it
-       verbatim. Helpers called outside the make path (e.g.
-       ``get_recording``) leave ``override=None`` and get the
-       segment-aware ``get_times()`` concatenation.
+    Concatenates all segments (``get_times()`` returns only one). Returns
+    ``override`` verbatim when given, since SI's ``frame_slice`` and
+    ``concatenate_recordings`` drop the source's wall-clock timestamps.
 
     Parameters
     ----------
     recording : si.BaseRecording
         Source recording whose timestamps are needed.
     override : array-like, optional
-        Pre-computed persisted timestamps to return verbatim. Callers
-        that have the persisted timestamp vector pass it here so this
-        helper does not re-derive it from the recording.
+        Persisted timestamps to return verbatim.
 
     Returns
     -------
@@ -204,12 +162,10 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
         ``False`` (default): a base interval's ``stop`` is an exclusive
         bound. A removal starting at ``stop`` does not touch the interval,
         and only pieces of positive length are kept.
-        ``True``: ``stop`` is the time of the interval's last sample. A
-        removal starting exactly at ``stop`` removes that sample, so the
-        piece before it ends at ``np.nextafter(stop, -np.inf)`` -- the
-        predecessor float keeps it distinguishable from a kept inclusive
-        endpoint -- and a zero-length final piece ``(stop, stop)`` (the
-        lone last sample) is kept.
+        ``True``: ``stop`` is the last sample's time. A removal starting at
+        ``stop`` ends the prior piece at ``np.nextafter(stop, -np.inf)`` so it
+        is not read as a kept endpoint, and a zero-length final piece
+        ``(stop, stop)`` is kept.
 
     Returns
     -------
@@ -219,8 +175,7 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
     import numpy as np
 
     removed = list(removed)
-    # Running max of the removal stops: every row before the first index
-    # whose running max passes a base start ends at or before that start.
+    # Running max of removal stops lets searchsorted skip finished rows.
     reach = np.maximum.accumulate(
         np.asarray(removed, dtype=float).reshape(-1, 2)[:, 1]
     )
@@ -235,8 +190,6 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
             if cut_stop <= cursor or cut_stop <= cut_start:
                 continue  # already removed, or zero length
             if cursor < cut_start:
-                # cut_start == stop only with inclusive_stop: end the piece at
-                # the predecessor float so it is not read as a kept endpoint.
                 end = (
                     np.nextafter(cut_start, -np.inf)
                     if cut_start == stop
@@ -252,14 +205,8 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
 def intersect_interval_sets(interval_sets):
     """Intersect a list of ``(n, 2)`` sorted, non-overlapping interval arrays.
 
-    Returns the ``(m, 2)`` float array of time spans contained in EVERY input
-    set -- the conservative observation window for a merged unit whose
-    contributors have differing ``obs_intervals``. Each input is a
-    ``(n, 2)`` ``[start, end]`` array assumed sorted by start and disjoint (the
-    sort-time writer's ``obs_intervals`` shape). An empty input list returns an
-    empty ``(0, 2)`` array; a single set returns itself. Identical inputs (the
-    common single-sort case, where every unit shares one window) return that
-    shared window unchanged.
+    Returns the ``(m, 2)`` spans in every set: the observation window of a
+    merged unit. ``None`` entries are skipped; no sets gives ``(0, 2)``.
     """
     import numpy as np
 
@@ -283,10 +230,8 @@ def intersect_interval_sets(interval_sets):
 def frames_with_window_in_one_span(frames, spans, *, n_before, n_after):
     """Say which frames have their whole waveform window inside one span.
 
-    A frame ``s`` reads ``[s - n_before, s + n_after)`` (SpikeInterface's
-    waveform window). It is kept when the span holding ``s`` also holds that
-    whole window, so no kept waveform reads across a join, an acquisition gap
-    or an artifact exclusion, or past the recording's ends.
+    A frame ``s`` reads ``[s - n_before, s + n_after)``, so a kept waveform
+    never crosses a join, gap, artifact exclusion, or recording end.
 
     Parameters
     ----------
@@ -332,56 +277,22 @@ def frames_with_window_in_one_span(frames, spans, *, n_before, n_after):
     return kept
 
 
-# Coincidence window (ms) for cross-unit duplicate-spike removal when
-# merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default.
-# A neuron's refractory period (~1-2 ms) means a genuine spike train never
-# has a sub-0.4 ms pair,
-# so this only removes double-detections of one physical event shared
-# across merged contributors. Lives in this pure layer so the ``curation``
-# schema module and ``_storage.units_nwb`` (which holds the dedup it
-# parameterizes) both import it without ``units_nwb`` reaching back into the
-# schema module.
+# Duplicate-spike window (ms) when merging units; SpikeInterface's
+# ``MergeUnitsSorting`` default. Well under a refractory period.
 _MERGE_DEDUP_DELTA_MS = 0.4
 
 
 # --------------------------------------------------------------------------- #
-# Chunked / affine timestamp helpers (no full-vector materialization).
-#
-# A persisted v2 recording loads its timestamps as a LAZY vector
-# (``read_recording_nwb`` retains the h5py-backed pynwb
-# ``timestamps`` object; a saved recording mmaps it). SpikeInterface's
-# ``recording.get_times()`` calls ``np.asarray(time_vector)`` -- it materializes
-# the whole ``n_samples``-length float64 vector (~824 MB for 1 h @ 30 kHz, 8
-# bytes/sample) AND caches it back on the segment. ``sample_index_to_time``
-# instead indexes ``time_vector[frames]`` (a lazy h5py/mmap slice read) or, for
-# a rate-based recording, computes ``frames / fs + t_start`` -- so these helpers
-# map frames<->time and find gaps with peak memory bounded by the query/chunk
-# size, not by ``n_samples``. ``sample_index_to_time(i)`` is bit-identical to
-# ``get_times()[i]`` in both timestamp modes (pinned by the equivalence tests in
-# ``tests/spikesorting/v2/test_signal_math.py``), so the outputs match the
-# full-vector path exactly.
-#
-# MAINTAINER NOTE (SpikeInterface version): the pinned spikeinterface==0.104.3
-# (see pyproject.toml -- pinned for sorter param schemas, unrelated to
-# timestamps) exposes NO frame-bounded ``get_times``: calling
-# ``recording.get_times(start_frame=..., end_frame=...)`` raises TypeError, and
-# the bounds-less ``get_times()`` materializes (and caches) the whole vector.
-# Random access uses sample_index_to_time; contiguous scans slice the public
-# get_time_info()["time_vector"] dataset directly. Both preserve exact explicit
-# timestamps while avoiding get_times() and HDF5 point-indexing overhead.
+# Bounded-memory timestamp helpers. SI's ``get_times()`` materializes and
+# caches the full float64 vector (~824 MB per hour at 30 kHz); these read
+# only the frames they need and match ``get_times()`` exactly.
 
 
 def _segment_times_at(recording, frames, *, segment_index=0):
     """Absolute times (s) for arbitrary ``frames`` without materializing.
 
-    Maps each frame index to its wall-clock time via
-    ``recording.sample_index_to_time`` -- a lazy h5py/mmap slice read for an
-    explicit ``time_vector`` or the affine ``frames / fs + t_start`` for a
-    rate-based recording -- so the full 8-byte-per-sample vector is never built
-    or cached. Fancy-indexing an h5py ``time_vector`` requires strictly
-    increasing indices, but ``frames`` may be unsorted with duplicates (binary
-    -search midpoints), so the read is done on the sorted unique indices and
-    scattered back to the caller's order and shape.
+    h5py fancy indexing needs strictly increasing indices, so this reads the
+    sorted unique frames and scatters back to the caller's order.
 
     Parameters
     ----------
@@ -427,20 +338,9 @@ def _segment_times_slice(recording, start, stop, *, segment_index=0):
 def frames_for_times(recording, times_s, *, side="left"):
     """Bounded-memory equivalent of ``searchsorted(get_times(), t, side)``.
 
-    With ``side="left"``, returns the smallest frame ``i`` in
-    ``[0, n_samples]`` with ``get_times()[i] >= times_s[k]`` -- exactly
-    ``numpy.searchsorted(recording.get_times(), times_s, side="left")``, the
-    half-open frame mapping the artifact-mask complement walk needs. With
-    ``side="right"``, returns the first frame strictly after the query time.
-    Computed by a vectorized binary search over ``sample_index_to_time`` so peak memory is
-    bounded by the query count, not ``n_samples``. Because
-    ``sample_index_to_time(i)`` is bit-identical to ``get_times()[i]`` for both
-    rate-based and explicit recordings, the result is identical to the
-    full-vector searchsorted.
-
-    Assumes monotonically non-decreasing timestamps (the persisted-recording
-    invariant); binary search over a non-monotonic vector mis-maps silently,
-    exactly as ``searchsorted`` would.
+    A vectorized binary search, so memory scales with the query count.
+    Out-of-range finite times clamp to ``[0, n_samples]``. Assumes
+    non-decreasing timestamps.
 
     Parameters
     ----------
@@ -462,11 +362,7 @@ def frames_for_times(recording, times_s, *, side="left"):
     if side not in {"left", "right"}:
         raise ValueError("side must be 'left' or 'right'.")
     times = np.atleast_1d(np.asarray(times_s, dtype=np.float64))
-    # Reject non-finite query times. searchsorted sorts NaN as +inf, so
-    # a NaN/Inf query silently maps to frame n (or 0) instead of failing. Note
-    # this guards ONLY finiteness: out-of-range *finite* times intentionally
-    # clamp to [0, n] (the searchsorted contract the artifact-mask complement
-    # walk depends on, pinned by test_frames_for_times_matches_full_vector_*).
+    # NaN would silently map to frame n, as searchsorted sorts it as +inf.
     if not np.all(np.isfinite(times)):
         raise ValueError(
             "frames_for_times: query times contain non-finite (NaN/Inf) "
@@ -478,8 +374,6 @@ def frames_for_times(recording, times_s, *, side="left"):
     hi = np.full(times.shape, n, dtype=np.int64)
     if n == 0:
         return lo
-    # ~ceil(log2(n)) iterations. ``mid`` is clipped to a valid frame for the
-    # read; converged (lo == hi) entries are not updated.
     while True:
         active = lo < hi
         if not bool(active.any()):
@@ -500,10 +394,8 @@ def frames_for_times(recording, times_s, *, side="left"):
 class BaseIntervalsAndGaps(NamedTuple):
     """Return of :func:`base_intervals_and_gaps`.
 
-    ``base_intervals`` are ``[start, end]`` second pairs (one per recorded
-    chunk); ``gap_after`` are int64 FRAME indices of inter-chunk wall-clock
-    discontinuities. Naming the two fields makes their differing units (seconds
-    vs frame indices) explicit at the call site.
+    ``base_intervals`` are ``[start, end]`` seconds; ``gap_after`` are int64
+    frame indices.
     """
 
     base_intervals: list
@@ -513,23 +405,8 @@ class BaseIntervalsAndGaps(NamedTuple):
 def base_intervals_and_gaps(recording, fs=None):
     """Recorded chunks (seconds) and inter-chunk gap frame indices, chunked.
 
-    Streams the timeline in contiguous ~1 s slices (bounded
-    peak memory, no ``get_times()`` materialization) to derive the same gap
-    structure the full-vector path computes from ``get_times()``. Returns:
-
-    * ``base_intervals`` -- one ``[start, end]`` (inclusive first/last sample
-      times, seconds) per recorded chunk, split wherever consecutive
-      ``get_times()`` differ by more than ``1.5 / fs``. A contiguous
-      recording yields a single ``[t0, t_end]``.
-    * ``gap_after`` -- int64 frame indices ``i`` where
-      ``get_times()[i + 1] - get_times()[i] > 1.5 / fs`` (a wall-clock
-      discontinuity from disjoint sort intervals); identical to
-      ``np.flatnonzero(np.diff(recording.get_times()) > 1.5 / fs)``. Empty for a
-      contiguous or rate-based recording.
-
-    Monotonicity is validated per chunk and across chunk boundaries (the
-    ``searchsorted``-based consumers assume it), preserving the full-vector
-    path's ``assert_monotonic_timestamps`` guard at bounded memory.
+    Streams the timeline in ~1 s slices and validates monotonicity. A gap is a
+    step greater than ``1.5 / fs``.
 
     Parameters
     ----------
@@ -541,7 +418,10 @@ def base_intervals_and_gaps(recording, fs=None):
     Returns
     -------
     BaseIntervalsAndGaps
-        Named ``(base_intervals, gap_after)``; unpacks like a plain tuple.
+        - ``base_intervals``: inclusive ``[start, end]`` seconds per
+          contiguous chunk.
+        - ``gap_after``: frames ``i`` where a gap follows ``i``; equals
+          ``np.flatnonzero(np.diff(get_times()) > 1.5 / fs)``.
     """
     import numpy as np
 
@@ -555,8 +435,7 @@ def base_intervals_and_gaps(recording, fs=None):
         return BaseIntervalsAndGaps([], np.empty(0, dtype=np.int64))
 
     if not recording.has_time_vector(segment_index=0):
-        # Rate-based recording: uniform timestamps, no wall-clock gaps. Map the
-        # two endpoints affinely instead of scanning n_samples frames.
+        # Rate-based recordings have no gaps.
         endpoints = _segment_times_at(
             recording,
             np.array([0, n_samples - 1], dtype=np.int64),
@@ -592,8 +471,7 @@ def base_intervals_and_gaps(recording, fs=None):
                     "silently mis-slice the recording)."
                 )
             if float(times[0]) - prev_time > 1.5 * sample_period:
-                # Wall-clock gap at the chunk boundary: between global frame
-                # (start_frame - 1) and start_frame.
+                # Gap at the chunk boundary.
                 intervals.append([float(current_start), float(prev_time)])
                 gap_after.append(start_frame - 1)
                 current_start = float(times[0])
@@ -613,20 +491,8 @@ def base_intervals_and_gaps(recording, fs=None):
 def timestamp_fingerprint(recording):
     """SHA-256 over the recording's timestamp vector, computed chunked.
 
-    A content fingerprint for the ``(n_samples,)`` float64 timestamp vector that
-    two recordings share iff their timestamps are byte-for-byte equal -- the
-    bounded-memory replacement for ``np.array_equal`` over two full vectors when
-    checking that shared-artifact-group members are time-aligned. Reads the
-    vector in contiguous ~1 s slices (never the full
-    ``get_times()`` materialization) and folds each slice's float64 bytes into
-    the digest, prefixed by ``n_samples`` so different-length vectors cannot
-    collide.
-
-    The digest uses native byte order (``np.int64``/``float64`` ``tobytes``) and
-    is only ever compared in-process against another fingerprint computed the
-    same way (the shared-artifact-group member check); it is never persisted or
-    compared across hosts, so endianness is not a concern. Do not store it for a
-    later cross-host comparison without normalizing byte order.
+    Equal iff the timestamps are byte-identical. Uses native byte order, so do
+    not persist it or compare across hosts.
 
     Parameters
     ----------
@@ -662,27 +528,17 @@ def timestamp_fingerprint(recording):
 def resolve_peak_sign(params) -> str:
     """Map a validated sorter params blob to a SpikeInterface ``peak_sign``.
 
-    Used by ``Sorting._populate_unit_part`` so per-unit peak channel and
-    amplitude attribution honor the sorter's configured detection polarity
-    instead of hardcoding ``"neg"`` (SpikeInterface's default). Sorters
-    express polarity differently:
-
-    * ``clusterless_thresholder`` carries ``peak_sign`` directly
-      (``"neg"`` / ``"pos"`` / ``"both"``).
-    * MountainSort 4/5 carry ``detect_sign`` (``-1`` neg, ``1`` pos,
-      ``0`` both).
-    * Tridesclous2 carries a top-level ``peak_sign``; SpykingCircus2 nests
-      it under ``detection.method_kwargs``.
-    * Kilosort4 detects negative-going spikes; ``invert_sign=True`` flips
-      the data for positive-going ones.
-    * The generic schema carries none of these; fall back to ``"neg"``
-      (SI's default).
+    - ``peak_sign``: clusterless thresholder, Tridesclous2.
+    - ``detect_sign`` (-1/0/1): MountainSort 4/5.
+    - ``detection.method_kwargs.peak_sign``: SpykingCircus2.
+    - ``invert_sign``: Kilosort4.
+    - otherwise ``"neg"`` (SI's default).
 
     Parameters
     ----------
     params : Mapping or None
-        The validated ``SorterParameters.params`` blob. A non-mapping /
-        ``None`` returns ``"neg"`` rather than raising.
+        The validated ``SorterParameters.params`` blob. A non-mapping
+        returns ``"neg"``.
 
     Returns
     -------
@@ -715,26 +571,20 @@ def _assert_noise_levels_length(
 ) -> None:
     """Reject an explicit ``noise_levels`` of an unusable length.
 
-    The clusterless-thresholder broadcasts a singleton ``noise_levels``
-    to ``n_channels`` and otherwise indexes it per channel
-    (``noise_levels[chan]``). An explicit array whose length is neither
-    1 (broadcast) nor ``n_channels`` would either silently truncate the
-    channel set or raise an opaque ``IndexError`` deep inside SI's
-    ``detect_peaks``. ``None`` is valid (SI estimates per-channel MAD).
+    Length must be 1 (broadcast) or ``n_channels``; otherwise SI's
+    ``detect_peaks`` silently truncates or raises an opaque ``IndexError``.
 
     Parameters
     ----------
     noise_levels : list[float] | None
-        The resolved noise levels (explicit user value or the
-        ``[1.0]`` raw-uV broadcast). ``None`` short-circuits to valid.
+        The resolved noise levels. ``None`` is valid (SI estimates MAD).
     n_channels : int
         Number of channels on the recording the detector runs over.
 
     Raises
     ------
     ValueError
-        If ``noise_levels`` is non-``None`` and ``len(noise_levels)`` is
-        neither 1 nor ``n_channels``.
+        If ``noise_levels`` is a string, a scalar, or of the wrong length.
     """
     if noise_levels is None:
         return

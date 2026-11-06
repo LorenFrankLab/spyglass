@@ -1,9 +1,9 @@
 """Typed, immutable unit annotations for exact v2 curation namespaces.
 
-These tables annotate ``CurationV2.Unit`` rows, unlike the downstream v1
-``UnitAnnotation`` table, which annotates units exposed through the merge
-table.  Annotation values are computed properties, not curation labels, and
-never participate in curation identity or ``merge_id`` construction.
+These tables annotate ``CurationV2.Unit`` rows, unlike the v1
+``UnitAnnotation`` table, which annotates units through the merge table.
+Values are computed properties, not curation labels, and never affect
+curation identity or ``merge_id``.
 """
 
 from __future__ import annotations
@@ -392,10 +392,8 @@ class CurationUnitAnnotationSet(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 if value_rows:
                     cls.Value.insert(value_rows, allow_direct_insert=True)
         except dj.errors.DuplicateError:
-            # A concurrent caller inserted the same content-addressed set
-            # between the reuse check above and this insert: adopt the
-            # winner (after the same provenance / stored-value checks).
-            # Any other failure propagates; the transaction rolled back.
+            # A concurrent caller inserted the same set; adopt it after the
+            # same provenance and stored-value checks.
             existing = cls._reuse_existing(
                 key,
                 producer=producer,

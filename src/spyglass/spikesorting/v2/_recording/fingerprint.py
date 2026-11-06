@@ -1,57 +1,9 @@
 """Content fingerprint for the v2 preprocessed recording cache.
 
-The *content fingerprint* is the recording's scientific identity: a
-representation-blind hash of what the persisted ``ElectricalSeries`` actually
-contains -- traces, timestamps, probe geometry, and the scaling metadata needed
-to interpret them. It is reproducible by construction (a content-identical but
-byte-different rebuild hashes equal), so one value can drive recompute
-``matched``, delete authority, and rebuild reconciliation alike -- unlike the
-whole-file ``NwbfileHasher`` digest, which folds volatile per-object ids and
-file-creation timestamps into the hash and so can never confirm a rebuild.
-
-DESIGN NOTES.
-
-- **Readback from disk, never caller-supplied.** Every component is read from
-  the persisted file at the *known* absolute path -- including
-  ``conversion``/``offset``/``filtering``/dtype/shape. Nothing is passed in but
-  the two rounding constants, so a write/scaling bug surfaces in the hash rather
-  than being masked by a stale caller argument.
-
-- **Bypass the DataJoint ``~external`` checksum on readback.** The helper opens
-  the absolute path directly via SpikeInterface / pynwb. It is NEVER resolved
-  through ``AnalysisNwbfile.get_abs_path``, whose checksum-validating fallback
-  would re-raise against the *stale* checksum (a byte-different but
-  content-identical rebuild never matches it) before a single byte could be
-  read.
-
-- **Geometry from the persisted electrodes region, not ``get_channel_locations``.**
-  The persisted ``ElectricalSeries.electrodes`` region is the stable on-disk
-  contract; ``get_channel_locations`` is an SI readback surface whose field set
-  can shift across versions. The SI surface is used only as a parity check in
-  the tests, never as the canonical source.
-
-- **Lineage is deliberately NOT hashed.** The raw ``source_object_id`` the
-  recording was built from is provenance, not content -- two byte-identical
-  recordings are the same recording regardless of where they came from. The
-  ``traces`` component already differs whenever the raw source series differs
-  (different data), and for the fingerprint's jobs (rebuild reconcile, recompute
-  match, delete authority -- all same-``recording_id``, same-lineage) the source
-  id is invariant. ``content_hash`` is never a key (only ever compared within a
-  single ``recording_id``), so a cross-recording collision would be harmless
-  anyway. Self-describing source provenance, if wanted, belongs in a separate
-  provenance workstream -- not folded into a content hash.
-
-- **Rounding is contract.** ``TRACE_ROUNDING`` (µV, below the ephys noise floor)
-  and ``TIMESTAMP_ROUNDING`` (seconds, sub-sample) are kept as separate named
-  constants. Round-then-hash is deliberate: a false *match* (different
-  recordings hash equal) is the dangerous direction and is vanishingly unlikely
-  for continuous ephys at this precision; a false *mismatch* (a ULP on a
-  rounding boundary) merely skips reclamation and is never unsafe.
-
-DB-LIGHT AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: numpy / pynwb / SpikeInterface / filelock and the
-``_storage.recompute`` helpers are imported lazily inside the functions, so both
-``recording.py`` and ``recompute.py`` import it without a cycle.
+A representation-blind hash of the persisted ``ElectricalSeries`` (traces,
+timestamps, geometry, scaling metadata), so a content-identical rebuild hashes
+equal. Design notes are in the developer docs. Imports are lazy, so
+``recording.py`` and ``recompute.py`` both import it without a cycle.
 """
 
 from __future__ import annotations
@@ -59,23 +11,15 @@ from __future__ import annotations
 TRACE_ROUNDING = 4  # µV; well below the ephys noise floor
 TIMESTAMP_ROUNDING = 9  # seconds; sub-sample, absorbs float64 ULP noise
 
-#: Canonical component keys of a recording content fingerprint (a fixed set).
-#: ``combined_hash`` of the component dict is the scalar ``content_hash`` stored
-#: on the row, so a producer that silently dropped or renamed a component would
-#: yield a stable-but-wrong scalar that never matches the stored hash (a silent
-#: reclamation stall). The producer asserts its output matches this set so such
-#: a key-set drift fails loudly at construction instead.
+#: Fixed component keys; ``combined_hash`` of them is the row's ``content_hash``.
 FINGERPRINT_COMPONENTS = ("traces", "timestamps", "geometry", "metadata")
 
 
 def geometry_component_hash(coords) -> str:
     """Hash a ``(n_channels, n_coords)`` probe-geometry array.
 
-    Little-endian float64 contiguous bytes, prefixed with the shape so a
-    transpose / channel-count change cannot collide. Shared by the fingerprint
-    (persisted-region source) and the geometry-parity test
-    (``get_channel_locations`` source), so equal geometry from either source
-    hashes equal.
+    Prefixed with the shape so a transpose or channel-count change cannot
+    collide.
     """
     import hashlib
 
@@ -104,10 +48,8 @@ def recording_content_fingerprint(
 ) -> dict[str, str]:
     """Return the component-hash dict identifying a persisted recording.
 
-    Opens ``analysis_abs_path`` DIRECTLY (never ``AnalysisNwbfile.get_abs_path``,
-    which validates the stale ``~external`` checksum). Every field is read from
-    the persisted ``ElectricalSeries``, rounded to ``TRACE_ROUNDING`` (µV) and
-    ``TIMESTAMP_ROUNDING`` (s) decimals.
+    Opens the path directly, not via ``AnalysisNwbfile.get_abs_path``, whose
+    checksum check fails on a byte-different rebuild.
 
     Parameters
     ----------
@@ -122,8 +64,6 @@ def recording_content_fingerprint(
     -------
     dict[str, str]
         ``{"traces", "timestamps", "geometry", "metadata"}`` component hashes.
-        The scalar row identity is ``combined_hash`` of this dict; the named
-        components let a recompute diff report which axis drifted.
     """
     import hashlib
 
@@ -142,15 +82,11 @@ def recording_content_fingerprint(
     analysis_abs_path = str(analysis_abs_path)
     series_name = electrical_series_path.rsplit("/", 1)[-1]
 
-    # --- traces / timestamps / scaling+shape metadata via SpikeInterface ---
     recording = read_recording_nwb(
         analysis_abs_path,
         electrical_series_path=electrical_series_path,
     )
-    # Fail closed on a degenerate readback (zero segments / zero frames): an
-    # empty trace loop would hash to a content-free constant, so two distinct
-    # broken/truncated readbacks would report "no drift" on a component that was
-    # never actually read. Refuse rather than fingerprint partial data.
+    # An empty readback would hash to a content-free constant.
     n_segments = recording.get_num_segments()
     if n_segments == 0 or any(
         recording.get_num_frames(segment_index=s) == 0
@@ -170,8 +106,7 @@ def recording_content_fingerprint(
     for segment in range(recording.get_num_segments()):
         digest = hashlib.md5()
         n_frames = recording.get_num_frames(segment_index=segment)
-        # Feed the same rounded, little-endian bytes as the former whole-vector
-        # hash, in bounded chunks so existing content fingerprints stay valid.
+        # Chunked; the digest equals hashing the whole vector at once.
         for start in range(0, n_frames, 300_000):
             times = np.round(
                 _segment_times_slice(
@@ -199,7 +134,6 @@ def recording_content_fingerprint(
         "electrical_series_path": electrical_series_path,
     }
 
-    # --- geometry + conversion/offset/filtering via the persisted series ---
     with pynwb.NWBHDF5IO(
         analysis_abs_path, mode="r", load_namespaces=True
     ) as io:
@@ -210,9 +144,7 @@ def recording_content_fingerprint(
         coord_cols = [
             c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames
         ]
-        # One read per column, not per (row, column) h5py element. With no
-        # coordinate columns each row stays an empty list, so
-        # geometry_component_hash raises its "no probe geometry" error.
+        # One read per column, not per h5py element.
         columns = [
             np.asarray(table[col].data[:], dtype=np.float64)
             for col in coord_cols
@@ -237,9 +169,6 @@ def recording_content_fingerprint(
         "geometry": geometry_hash,
         "metadata": combined_hash(metadata),
     }
-    # Guard the identity contract: the scalar content_hash is combined_hash of
-    # this dict, so a dropped/renamed component would silently change it. Fail
-    # loudly here rather than store a stable-but-wrong hash.
     assert set(components) == set(FINGERPRINT_COMPONENTS), (
         "recording_content_fingerprint produced an unexpected component set: "
         f"{sorted(components)} != {sorted(FINGERPRINT_COMPONENTS)}"

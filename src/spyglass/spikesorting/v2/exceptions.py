@@ -1,9 +1,8 @@
 """v2-specific exception classes.
 
-Every named v2 invariant gets a dedicated exception class so callers can
-catch the specific failure mode rather than parsing a bare ``ValueError``
-/ ``RuntimeError`` message. Each message names the failed invariant and
-the next action the user can take.
+Each named v2 invariant has its own exception class so callers can catch a
+specific failure instead of parsing a ``ValueError`` / ``RuntimeError``
+message. Each message names the failed invariant and the next action.
 """
 
 from __future__ import annotations
@@ -12,152 +11,117 @@ from __future__ import annotations
 class DuplicateSelectionError(ValueError):
     """Raise when ``insert_selection()`` finds duplicate identity rows.
 
-    ``insert_selection()`` finds more than one row for the same logical
-    identity. Message names the table, the logical identity fields, and
-    contains "duplicate selection rows".
+    Message names the table and the logical identity fields, and contains
+    "duplicate selection rows".
     """
 
 
 class DuplicateParameterContentError(ValueError):
     """Raise when a parameter row duplicates existing content under a new name.
 
-    A validated ``PreprocessingParameters`` / ``ArtifactDetectionParameters``
-    / ``SorterParameters`` insert carries a ``params`` blob whose content
-    fingerprint (name excluded; ``SorterParameters`` scoped per sorter)
-    already exists under a different row name. A second name for identical
-    content forks provenance -- two ``recording_id`` / ``sorting_id`` families
-    for the same science -- so it is rejected by default. Message names the
-    incoming name, the existing name, and the shared fingerprint. Pass
-    ``allow_duplicate_params=True`` to opt in (the row then shows a
-    ``duplicate_of`` in ``describe_parameter_rows()``).
+    Applies to ``PreprocessingParameters``, ``ArtifactDetectionParameters`` and
+    ``SorterParameters`` (scoped per sorter). A second name for identical
+    content would split provenance into two ``recording_id`` / ``sorting_id``
+    families. Message names the incoming name, the existing name, and the
+    shared fingerprint. Pass ``allow_duplicate_params=True`` to opt in; the
+    row then shows ``duplicate_of`` in ``describe_parameter_rows()``.
     """
 
 
 class SchemaBypassError(RuntimeError):
     """Raise when a source-part master row lacks exactly one source part.
 
-    A source-part master row has zero or multiple source part rows at
-    populate time. Message names the table, the PK, "expected exactly one
-    source", and points the caller at ``insert_selection()``.
+    Message names the table, the PK, "expected exactly one source", and
+    points the caller at ``insert_selection()``.
     """
 
 
 class RecordingTruncatedError(RuntimeError):
     """Raise when a saved ``Recording`` does not cover the requested range.
 
-    Saved ``Recording`` timestamp range does not cover the requested
-    ``IntervalList.valid_times`` range. Message names the requested
-    interval, the saved interval, the missing seconds, and the source
-    NWB so the caller can spot upstream truncation without diffing
-    timestamps manually.
+    The saved timestamps do not cover ``IntervalList.valid_times``. Message
+    names the requested interval, the saved interval, the missing seconds,
+    and the source NWB.
     """
 
 
 class EmptyArtifactValidTimesError(RuntimeError):
     """Raise when artifact detection keeps zero seconds of the recording.
 
-    ``apply_artifact_mask`` received an empty ``valid_times`` array --
-    the artifact-detection pass kept zero seconds of the recording.
-    Masking would zero the entire recording and the sort would run over
-    all-zeros, emitting a misleading "zero units" result. Message names the
-    ``artifact_detection_id`` and ``recording_id`` and points the caller at
-    re-running ``RecordingArtifactDetection`` with looser thresholds or
-    overriding the artifact selection.
+    ``apply_artifact_mask`` received empty ``valid_times``; masking would
+    zero the whole recording and yield a misleading zero-unit sort. Message
+    names the ``artifact_detection_id`` and ``recording_id`` and suggests
+    looser thresholds or overriding the artifact selection.
     """
 
 
 class ArtifactFractionExceededError(RuntimeError):
-    """Raise when the per-frame artifact set would exceed a sane fraction of
-    the recording.
+    """Raise when artifact frames exceed ``_MAX_ARTIFACT_FRAME_FRACTION``.
 
-    Both the detection scan (``scan_artifact_frames``: frames flagged above
-    threshold) and the sort-time mask (``apply_artifact_mask``: the complement
-    of the kept ``valid_times``) materialize one int64 frame index per artifact
-    sample. Under a misconfigured (too-loose) threshold, or a ``valid_times``
-    that keeps almost nothing, that array is O(n_samples) -- hundreds of MB to
-    GB on a long, many-channel recording -- and the subsequent per-frame pass is
-    correspondingly slow. Past ``_MAX_ARTIFACT_FRAME_FRACTION`` of the recording
-    this is not artifact removal but a misconfiguration: it fails fast here with
-    the realized fraction rather than allocating the array (and, downstream, an
-    all-near-zero recording the sorter would choke on or that
-    ``EmptyArtifactValidTimesError`` would reject three stages later). Message
-    names the realized fraction and points the caller at the detection
-    thresholds / ``removal_window_ms`` / the ``valid_times`` override.
+    ``scan_artifact_frames`` and ``apply_artifact_mask`` allocate one int64
+    index per artifact frame, so a too-loose threshold or near-empty
+    ``valid_times`` is a misconfiguration that would cost GBs. Message names
+    the realized fraction and points at the detection thresholds,
+    ``removal_window_ms`` and the ``valid_times`` override.
     """
 
 
 class InsufficientZScoreChannelsError(ValueError):
-    """Raise when z-score artifact detection has too few channels to be useful.
+    """Raise when ``zscore_threshold`` is the only detector on <3 channels.
 
-    The artifact-detection z-score detector standardizes ACROSS channels
-    within each frame, so it is amplitude-sensitive only with >= 3 channels:
-    on 1 channel it is identically zero, and on 2 channels it is a constant
-    +/-1 for any two distinct values (independent of amplitude). Raised when
-    ``zscore_threshold`` is the only detector on a <3-channel recording (a
-    guaranteed no-op or amplitude-blind detector). Message names the channel
-    count and points the caller at ``amplitude_threshold_uv`` for 1-2 channel
-    groups. When ``amplitude_threshold_uv`` is also set the z-score is merely
-    inert (the amplitude detector still fires), so that case warns instead of
-    raising.
+    The z-score is computed across channels per frame: identically zero on
+    1 channel and a constant +/-1 on 2. Message names the channel count and
+    points at ``amplitude_threshold_uv``. If ``amplitude_threshold_uv`` is
+    also set, a warning is issued instead.
     """
 
 
 class NonIntegerUnitIDError(ValueError):
     """Raise when a sorting returns unit IDs that are not integers.
 
-    SpikeInterface sorting returns non-integer unit IDs that cannot
-    be written to ``Sorting.Unit.unit_id``. Message names the offending
-    IDs and instructs the caller to remap before insertion.
+    ``Sorting.Unit.unit_id`` requires integers. Message names the offending
+    IDs and asks the caller to remap before insertion.
     """
 
 
 class SessionGroupDateError(ValueError):
     """Raise on a bad recording date in ``SessionGroup.create_group()``.
 
-    ``SessionGroup.create_group()`` receives caller-supplied
-    ``recording_date``, or members span multiple dates without
-    ``allow_multi_day=True``. Message clarifies that dates are derived
-    from ``Session.session_start_time``; multi-day groups list the
-    distinct dates and point at sort-then-match (UnitMatch) as the
-    recommended cross-day workflow.
+    Raised for a caller-supplied ``recording_date`` or for members spanning
+    several dates without ``allow_multi_day=True``. Dates come from
+    ``Session.session_start_time``. For multi-day groups the message lists
+    the dates and recommends sort-then-match (UnitMatch).
     """
 
 
 class SessionGroupInputError(ValueError):
     """Raise on malformed input to ``SessionGroup.create_group()``.
 
-    Covers a member dict missing a required key (``nwb_file_name`` /
-    ``sort_group_id`` / ``interval_list_name``), a member referencing a session
-    that is not ingested, an empty / duplicate member set, or a member whose
-    ``SortGroupV2`` / ``IntervalList`` / ``LabTeam`` foreign key does not exist
-    -- surfaced as a clear, typed error instead of a bare ``KeyError``,
-    ``fetch1`` failure, or DataJoint integrity error. A ``ValueError`` subclass
-    so existing ``except ValueError`` callers still catch it.
+    Covers a member missing ``nwb_file_name`` / ``sort_group_id`` /
+    ``interval_list_name``, a session that is not ingested, an empty or
+    duplicate member set, and a missing ``SortGroupV2`` / ``IntervalList`` /
+    ``LabTeam`` row.
     """
 
 
 class ConcatBrainRegionAmbiguousError(RuntimeError):
     """Raise on ambiguous brain regions for concat-backed data.
 
-    ``Sorting.get_unit_brain_regions()`` or
-    ``CurationV2.get_unit_brain_regions()`` is called on concat-backed
-    data without ``allow_anchor_member=True``. Message explains the
-    anchor-member ambiguity and points the caller at
-    ``allow_anchor_member=True`` for anchor-only regions, or at matching the
-    curation with UnitMatch and calling
-    ``TrackedUnit.get_unit_brain_regions``, which resolves each unit's region
-    in every member recording from that member's own session.
+    Raised by ``Sorting.get_unit_brain_regions()`` and
+    ``CurationV2.get_unit_brain_regions()`` without
+    ``allow_anchor_member=True``. Message points at that flag for
+    anchor-only regions, or at UnitMatch and
+    ``TrackedUnit.get_unit_brain_regions`` for per-member regions.
     """
 
 
 class MissingRecordingForConcatError(RuntimeError):
     """Raise when a concat member has no populated ``Recording`` row.
 
-    ``ConcatenatedRecordingSelection.insert_selection()`` or
-    ``ConcatenatedRecording.make()`` cannot find a populated per-member
-    ``Recording`` row with the shared ``preprocessing_params_name``. Message
-    lists the missing member keys and instructs the caller to populate
-    ``Recording`` for those members first.
+    Raised by ``ConcatenatedRecordingSelection.insert_selection()`` and
+    ``ConcatenatedRecording.make()`` when a member lacks a ``Recording`` with
+    the shared ``preprocessing_params_name``. Message lists the missing
+    members.
     """
 
 
@@ -166,19 +130,16 @@ class PipelineInputError(ValueError):
 
     Raised by ``run_v2_pipeline``, ``run_v2_concat_pipeline``,
     ``run_v2_pipeline_session``, ``estimate_motion`` and
-    ``estimate_concat_motion`` for, e.g., an unknown ``pipeline_preset`` (the
-    message lists the presets and points at ``describe_pipeline_presets()``),
-    a source input passed as ``None``, or a contradictory motion request.
-    The message names the entry point.
+    ``estimate_concat_motion`` for, e.g., an unknown ``pipeline_preset`` (see
+    ``describe_pipeline_presets()``), a ``None`` source input, or a
+    contradictory motion request. Message names the entry point.
     """
 
 
 class PreflightError(ValueError):
     """Raise when a preflight check blocks ``run_v2_pipeline``.
 
-    ``run_v2_pipeline(..., preflight=True)`` found a blocking
-    configuration problem before any populate. Message lists each failed
-    check and the action to fix it. Bypass with ``preflight=False`` to
+    Message lists each failed check and its fix. Pass ``preflight=False`` to
     attempt the run anyway.
     """
 
@@ -186,14 +147,9 @@ class PreflightError(ValueError):
 class PipelineStageError(RuntimeError):
     """A run_v2_pipeline stage failed during populate/insert.
 
-    Names the failing stage and carries the partial run summary of stages
-    that completed before the failure, so callers can resume/inspect without
-    re-deriving intermediate PKs. The original exception is chained
-    (``raise PipelineStageError(...) from exc``) so the underlying traceback
-    is preserved; its class name is also recorded in ``original_type`` and
-    surfaced in this error's message, so the failing stage's ORIGINAL error
-    type survives even where only ``str(exc)`` is kept (the run summary's
-    ``error`` field) and ``__cause__`` is not inspected.
+    Carries the failing ``stage`` and the ``partial_run_summary`` of stages
+    that completed. The original exception is chained as ``__cause__``; its
+    class name is stored in ``original_type`` and included in the message.
     """
 
     def __init__(
@@ -206,8 +162,7 @@ class PipelineStageError(RuntimeError):
     ):
         self.stage = stage
         self.partial_run_summary = partial_run_summary
-        # Class name of the wrapped exception (e.g. ``"RuntimeError"``);
-        # ``None`` when constructed directly without a cause.
+        # None when constructed without a cause.
         self.original_type = original_type
         super().__init__(
             f"run_v2_pipeline: stage {stage!r} failed"
@@ -220,171 +175,131 @@ class PipelineStageError(RuntimeError):
 class ZeroUnitSortError(RuntimeError):
     """Raise when a sort finds zero units and ``require_units=True``.
 
-    A sort produced zero units and the caller opted into treating
-    that as an error (``run_v2_pipeline(..., require_units=True)``). Zero
-    units is a legitimate result on a quiet shank, so it is graceful by
-    default: ``run_v2_pipeline`` writes an EMPTY (but real) curation +
-    merge row and returns a full run summary with real ``curation_id`` /
-    ``merge_id`` and ``n_units=0`` (plus a warning). This is raised only
-    when the caller requires units. Message names the recording/sort and
-    suggests checking ``detect_threshold`` / the artifact mask.
+    By default a zero-unit sort is a valid result: ``run_v2_pipeline`` writes
+    an empty curation and merge row and warns. Message names the
+    recording/sort and suggests checking ``detect_threshold`` and the
+    artifact mask.
     """
 
 
 class ZeroUnitAnalyzerError(RuntimeError):
     """Raise when ``get_analyzer()`` is called on a zero-unit sort.
 
-    ``Sorting.get_analyzer()`` was called on a sort with zero units.
-    SpikeInterface cannot build a ``SortingAnalyzer`` over zero units
-    (``estimate_sparsity`` -> ``np.concatenate([])``), so no analyzer
-    folder was ever written. Raised instead of loading a phantom folder.
-    Message names the sort and points the caller at the zero-unit
-    result. Use ``get_sorting()`` (returns an empty sorting) if only the
-    unit list is needed.
+    SpikeInterface cannot build a ``SortingAnalyzer`` over zero units, so no
+    analyzer folder exists. Use ``get_sorting()`` for the (empty) unit list.
     """
 
 
 class CurationNotFoundError(LookupError):
     """Raise when a curation handle no longer names the same row generation.
 
-    ``CurationRef`` carries both the ergonomic numeric key and the immutable
-    ``curation_uuid``.  This error covers a deleted row and a numeric id that
-    was later reused for a different curation generation.
+    Covers a deleted row and a numeric ``curation_id`` reused for a different
+    ``curation_uuid``.
     """
 
 
 class UnsupportedMetricValueError(ValueError):
     """Raise when a metric write receives a non-scalar or non-numeric cell.
 
-    Quality-metric NWB columns are scalar numeric values.  Rejecting shape or
-    dtype drift keeps an unsupported SpikeInterface result from being silently
-    converted to NaN and changing downstream auto-curation decisions.
+    Prevents silent NaN conversion that would change auto-curation decisions.
     """
 
 
 class FigPackUploadError(RuntimeError):
     """Raise when a FigPack hosted upload is requested without credentials.
 
-    ``FigPackCuration`` was asked to publish a hosted figpack.org figure
-    (``upload=True``) but no FigPack API key is configured and the figure is not
-    ``ephemeral``. Message points the caller at setting the API key, using
-    ``ephemeral=True`` for a temporary figure, or ``upload=False`` to save a
-    seeded local bundle.
+    Raised for ``upload=True`` with no FigPack API key and not ``ephemeral``.
+    Message suggests setting the API key, ``ephemeral=True``, or
+    ``upload=False`` for a local bundle.
     """
 
 
 class FigPackIdentityError(ValueError):
     """Raise when a FigPack figure cannot prove its curation identity.
 
-    Verified imports require the embedded sorting id, immutable curation UUID,
-    informational curation id, and content-addressed FigPack configuration hash.
-    A missing or mismatched value is refused instead of trusting a caller's
-    reusable numeric curation key.
+    Verified imports require the embedded sorting id, curation UUID,
+    curation id, and FigPack configuration hash to be present and match.
     """
 
 
 class ReviewChangedSincePreviewError(RuntimeError):
     """Raise when a review figure changes after its import preview.
 
-    ``CurationChangeSet.commit`` re-reads the annotations immediately before
-    writing.  A different logical payload must be previewed again so the
-    committed child is always the exact change set the researcher inspected.
+    ``CurationChangeSet.commit`` re-reads the annotations before writing so
+    the committed child matches the previewed change set.
     """
 
 
 class UnresolvedMergeLabelConflictError(ValueError):
     """Raise when merged contributors have incompatible unresolved labels.
 
-    No contributor wins implicitly.  The caller must provide an explicit label
-    tuple for every predicted merged unit listed by the exception message.
+    Provide an explicit label tuple for each merged unit listed in the
+    message.
     """
 
 
 class FigPackDisplayedUnitPropertyError(ValueError):
     """Raise when requested FigPack unit-table columns cannot be rendered.
 
-    ``FigPackCuration`` passes ``displayed_unit_properties`` to SpikeInterface's
-    FigPack summary view. SpikeInterface warns and silently drops unavailable
-    properties; Spyglass treats an explicit request as a contract and raises
-    this error instead. ``None`` still delegates to SpikeInterface defaults.
+    SpikeInterface silently drops unavailable ``displayed_unit_properties``;
+    an explicit request raises this instead. ``None`` uses SpikeInterface
+    defaults.
     """
 
 
 class FigPackRetrievalError(RuntimeError):
     """Raise when a figure's ``annotations.json`` cannot be retrieved/parsed.
 
-    ``FigPackCuration.fetch_curation_from_uri`` fails CLOSED: only a genuine
-    404 / missing local file means "pristine, no edits" (``({}, [])``). An
-    unreachable host, refused connection, non-404 HTTP error, or malformed JSON
-    raises this instead of silently looking like no edits (which could commit an
-    empty child curation over a real one).
+    Only a 404 or missing local file means "no edits". Network errors,
+    non-404 HTTP errors and malformed JSON raise, so an empty child curation
+    is never committed over real edits.
     """
 
 
 class AnalyzerFolderMissingError(RuntimeError):
     """Raise when a no-rebuild analyzer load finds the folder absent.
 
-    ``Sorting.get_analyzer(..., rebuild=False)`` was asked to load a
-    units-bearing sort's analyzer folder, but the folder is gone on disk
-    (regeneratable scratch removed out of band, or reclaimed). The default
-    ``rebuild=True`` path self-heals by rebuilding it; the no-rebuild path exists
-    for the recompute AUDIT, which must OBSERVE the missing state rather than
-    silently rebuild-then-hash (which would inventory a reconstructed artifact as
-    if it were present and let the deletion gate compare a rebuild to itself).
-    Message names the sort and the recipe. Distinct from
-    ``ZeroUnitAnalyzerError``: that sort legitimately has no analyzer (zero
-    units), whereas this one should have one but the folder is absent.
+    Raised by ``Sorting.get_analyzer(..., rebuild=False)``, which the
+    recompute audit uses to observe a missing folder instead of rebuilding
+    it. Message names the sort and the recipe. Unlike
+    ``ZeroUnitAnalyzerError``, this sort should have an analyzer.
     """
 
 
 class AnalyzerFolderInvalidError(AnalyzerFolderMissingError):
     """Raise when an existing analyzer folder cannot be loaded.
 
-    ``Sorting.get_analyzer(..., rebuild=False)`` found a directory at the
-    computed cache path, but SpikeInterface could not load it as a valid
-    ``SortingAnalyzer``. This usually means a killed build, partial cleanup, or
-    out-of-band corruption left a half-written analyzer folder. It subclasses
-    ``AnalyzerFolderMissingError`` so no-rebuild audit paths can treat invalid
-    regeneratable scratch the same as absent scratch, while preserving a more
-    precise diagnostic for callers and logs.
+    Usually a partial folder from a killed build or out-of-band corruption.
+    Subclasses ``AnalyzerFolderMissingError`` so audit paths treat it as
+    absent.
     """
 
 
 class UnsupportedDirectInsertError(RuntimeError):
     """Raise on a direct insert into a structured Lookup with part rows.
 
-    A structured Lookup whose validity depends on ordered part rows
-    (e.g. ``AutoCurationRules`` + ``AutoCurationRules.Rule``) was inserted
-    through an unsupported direct master or part insert path that bypasses
-    whole-payload validation. Message names the table, the unsupported
-    insert path, and the supported helper (``insert_rules(row, rule_rows)``)
-    that validates the master row and its rule rows together.
+    Applies to tables such as ``AutoCurationRules`` whose validity depends on
+    ordered part rows. Message names the table, the rejected insert path, and
+    the supported helper (``insert_rules(row, rule_rows)``).
     """
 
 
 class StaleEnvMatchedError(RuntimeError):
     """Raise when recompute deletion has no current-environment match.
 
-    A recompute ``delete_files()`` gate found ``matched=1`` rows only in
-    non-current ``UserEnvironment`` rows (e.g. a verification that
-    succeeded under an older SpikeInterface pin). A stale-env match is not
-    evidence that the *current* environment can regenerate the artifact, so
-    deletion is refused. Message names the current ``env_id``, the stale
-    ``env_id``(s) that did match, and instructs the caller to rerun the
-    recompute under the current environment or pass ``force_stale_env=True``
-    with an audit justification.
+    ``delete_files()`` found ``matched=1`` only under non-current
+    ``UserEnvironment`` rows, which does not show the current environment
+    can regenerate the artifact. Message names the current and stale
+    ``env_id`` values; rerun the recompute or pass ``force_stale_env=True``.
     """
 
 
 class UnknownMatcherError(ValueError):
     """Raise when a matcher-parameters row names an unregistered matcher.
 
-    ``MatcherParameters.insert1()`` (and any registry lookup) received a
-    ``matcher`` string that is not in the cross-session matcher registry.
-    An unknown matcher would otherwise sit in the database until
-    ``UnitMatch.populate()`` failed hours later, so it is rejected at insert
-    time. Message names the unknown matcher, the registered matcher names,
-    and points the caller at ``register_matcher()``.
+    Raised at ``MatcherParameters.insert1()`` and registry lookup so the
+    error surfaces before ``UnitMatch.populate()``. Message lists the
+    registered matchers and points at ``register_matcher()``.
     """
 
 
@@ -399,160 +314,104 @@ class OverlappingMatchInputError(ValueError):
 class UnitMatchSelectionIntegrityError(RuntimeError):
     """Raise when a match selection's frozen inputs no longer hold.
 
-    ``UnitMatch.make()`` re-validates the ``UnitMatchSelection.Input`` /
-    ``InputRecording`` rows before any bundle is extracted and raises this
-    when any check fails: the parts are well formed and realize the stored
-    ``input_set_hash``; there is at least one input, no sorting is pinned
-    twice and no concatenation
-    input spans two days; the frozen start times and input numbering agree;
-    each pinned ``CurationV2`` still exists with the pinned
-    ``curation_uuid`` and no unapplied proposed merges; each input's live
-    source still matches its frozen recordings (source, ``recording_id``,
-    content hash, concatenation membership, frames and kept intervals),
-    with every concatenation member ``Recording`` still carrying the content
-    hash its concatenation froze; and each frozen session start time equals
-    its live ``Session`` row. (Inputs reusing original source samples raise
-    ``OverlappingMatchInputError`` instead.) ``TrackedUnit.get_member_spike_times``
-    and ``TrackedUnit.get_unit_brain_regions`` run the curation and source
-    part of that check before reading an input of a finished run and raise
-    this too. When a concatenation member ``Recording`` changed or is gone,
-    the ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError`` is
-    chained as ``__cause__``. The message names the offending input.
+    ``UnitMatch.make()`` re-validates ``UnitMatchSelection.Input`` /
+    ``InputRecording`` before extraction:
+
+    - parts are well formed and realize ``input_set_hash``
+    - at least one input, no sorting pinned twice, no multi-day concat input
+    - frozen start times and input numbering agree
+    - each pinned ``CurationV2`` exists with its ``curation_uuid`` and has no
+      unapplied proposed merges
+    - each live source matches its frozen recordings, including concat
+      member content hashes
+    - each frozen session start time equals the live ``Session`` row
+
+    ``TrackedUnit.get_member_spike_times`` and
+    ``TrackedUnit.get_unit_brain_regions`` run the curation and source checks.
+    A ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError`` is
+    chained as ``__cause__``. Overlapping inputs raise
+    ``OverlappingMatchInputError`` instead.
     """
 
 
 class SharedArtifactGroupMemberDriftError(RuntimeError):
     """Raise when a shared artifact group's member set changed under a fixed id.
 
-    The shared-group ``artifact_detection_id`` identity is ``{params,
-    group_name}`` only, but ``SharedGroupArtifactDetection`` scans the LIVE
-    ``SharedArtifactGroup.Member`` set. ``insert_selection`` snapshots the sorted
-    (order-independent) member ``recording_id`` set as
-    ``SharedGroupArtifactSelection.member_set_hash``; ``make_fetch`` re-derives
-    it from the current members and raises this when they disagree -- a member
-    was added or removed after the selection was created, so the scanned set no
-    longer matches what the id was minted for.
-    The ``artifact_detection_id`` identity is params + group name only (the
-    member set is a snapshot, not identity), so ``insert_selection`` returns this
-    same id with its stale snapshot; recovery is to DELETE this selection and
-    re-run ``insert_selection`` (which re-snapshots the current members), or to
-    restore the group's members -- not to silently scan a different set.
+    The ``artifact_detection_id`` covers params and group name only; the
+    member set is snapshotted as ``member_set_hash``. ``make_fetch`` raises
+    when the live members differ. Delete the selection and re-run
+    ``insert_selection``, or restore the group's members.
     """
 
 
 class UnitMatchPairIntegrityError(RuntimeError):
     """Raise when a ``UnitMatch.Pair`` row is outside the pinned curation universe.
 
-    ``Pair`` FKs each endpoint to ``CurationV2.Unit`` GLOBALLY, so the schema
-    only guarantees the unit exists in SOME curation -- not in the pinned
-    ``UnitMatchSelection.Input`` curations for this run. The canonical
-    ``make_insert`` path is safe because ``canonicalize_match_pairs`` orients and
-    dedupes within the pinned, matchable set, but a raw / maintenance
-    ``Pair.insert`` bypasses that. The validated ``Pair.insert`` override raises
-    this when an endpoint's ``(sorting_id, curation_id)`` is not a pinned input
-    curation, when both endpoints pin the same curation (a unit cannot match
-    itself across sessions), when a reversed/duplicate undirected edge is re-inserted,
-    or when ``match_probability`` is outside ``[0, 1]``.
+    ``Pair`` endpoints reference ``CurationV2.Unit`` globally, so the
+    ``Pair.insert`` override validates that each endpoint is a pinned input
+    curation, both endpoints differ in curation, the undirected edge is new,
+    and ``match_probability`` is in ``[0, 1]``.
     """
 
 
 class TrackedUnitBudgetExceededError(RuntimeError):
     """Raise when the strict tracked-unit graph exceeds its node budget.
 
-    ``TrackedUnit.make()`` seeds a graph from the full curated-unit universe
-    and derives maximal cliques in strict mode. If the graph exceeds
-    ``MatcherParameters.params["max_strict_nodes"]`` the clique search is
-    refused before exponential blow-up. Message names the node count, the
-    configured cap, and instructs the caller to shrink the session group or
-    raise the cap intentionally.
+    Strict-mode clique search is refused above
+    ``MatcherParameters.params["max_strict_nodes"]``. Message names the node
+    count and cap; shrink the session group or raise the cap.
     """
 
 
 class ConcatMemberDriftError(RuntimeError):
     """Raise when a frozen concat member's recording content no longer matches.
 
-    ``ConcatenatedRecordingSelection.insert_selection`` freezes each member's
-    ordered logical identity AND its ``Recording.content_hash`` into a
-    ``MemberSnapshot`` part, and folds the ordered LOGICAL member set into
-    ``concat_recording_id`` (so a different member set is a different concat).
-    ``ConcatenatedRecording.make_fetch`` (materialize / rebuild) reads the frozen
-    snapshot -- never the live ``SessionGroup.Member`` set -- and re-checks each
-    member's current ``Recording`` against it. This is raised specifically when a
-    frozen member's ``Recording`` still exists but its current ``content_hash``
-    DIVERGES from the frozen one: the concatenation would be built from different
-    underlying data than the ``concat_recording_id`` was minted for. (A frozen
-    member whose ``Recording`` row is GONE raises
-    ``MissingRecordingForConcatError`` instead -- absence vs. divergence are
-    distinct.) Editing ``SessionGroup.Member`` does NOT raise this (old concat
-    rows read their frozen snapshot); only the underlying member recording
-    content changing does. Message names the ``member_index`` / ``recording_id``
-    and the stored-vs-current ``content_hash``, and points the caller at
-    re-running ``insert_selection`` (which re-snapshots and mints a new
-    ``concat_recording_id`` for the changed inputs) or restoring the member
-    recording.
+    ``ConcatenatedRecording.make_fetch`` checks each member's current
+    ``Recording.content_hash`` against the ``MemberSnapshot`` frozen by
+    ``insert_selection``. A missing ``Recording`` raises
+    ``MissingRecordingForConcatError`` instead; editing ``SessionGroup.Member``
+    does not raise. Message names the ``member_index`` / ``recording_id`` and
+    both hashes. Re-run ``insert_selection`` or restore the member recording.
     """
 
 
 class ConcatSplitError(RuntimeError):
     """Raise when splitting a concat sorting back to members would drop spikes.
 
-    ``ConcatenatedRecording.split_sorting_by_session`` (and the pure
-    ``split_unit_spike_trains``) back-map a concat-frame sorting into each
-    member's local sample frame using the per-member boundaries. The boundaries
-    must be one strictly-increasing value per member partitioning ``[0, total)``,
-    and every input spike frame must land in exactly one member. This is raised
-    when the boundaries are not strictly increasing, do not cover the recording
-    (a final boundary short of the concat sample count), or when an input spike
-    frame falls outside ``[0, final_boundary)`` -- which a plain slice would
-    silently drop. Message names the offending boundary / spike count so the caller can
-    see the conservation violation rather than getting a silently truncated split.
+    Raised by ``ConcatenatedRecording.split_sorting_by_session`` and
+    ``split_unit_spike_trains`` when the member boundaries are not strictly
+    increasing, do not reach the concat sample count, or a spike frame falls
+    outside ``[0, final_boundary)``. Message names the offending boundary or
+    spike count.
     """
 
 
 class RecordingContentDriftError(RuntimeError):
     """Raise when a recording rebuild diverges from its stored ``content_hash``.
 
-    ``Recording._rebuild_nwb_artifact`` regenerates the preprocessed artifact to
-    a temp file and fingerprints it; if that fingerprint does not match the
-    ``Recording`` row's stored ``content_hash`` the rebuild is refused -- the
-    canonical slot is never written and the drifted bytes are never served. A
-    mismatch means the current environment no longer reproduces the recording
-    the row identifies (e.g. a SpikeInterface/BLAS upgrade, an edited raw NWB, or
-    changed upstream construction inputs). Message names the
-    ``analysis_file_name`` and lists the recovery options: restore a backup of
-    the artifact, rerun the recompute under the original environment, or delete
-    and repopulate the ``Recording`` row (and its downstream).
+    ``Recording._rebuild_nwb_artifact`` never writes or serves drifted bytes.
+    Typical causes: a SpikeInterface/BLAS upgrade, an edited raw NWB, or
+    changed upstream inputs. Message names the ``analysis_file_name`` and the
+    recovery options.
     """
 
 
 class RecordingInputDriftError(RuntimeError):
     """Raise when a recording's resolved construction inputs drifted post-select.
 
-    ``recording_id`` is content-addressed over the FK set PLUS
-    ``recording_input_hash`` -- the sort group's electrode membership, reference,
-    and (on the ``interpolate`` path) the resolved interior bad-channel set.
-    ``insert_selection`` snapshots that hash onto ``RecordingSelection``;
-    ``make_fetch`` re-derives it from the LIVE inputs and raises this when they
-    disagree -- an electrode was added/removed from the sort group, the reference
-    changed, or a channel was (un)flagged bad AFTER the selection was created, so
-    the recording ``make`` would build content that no longer matches the id it
-    was minted for. Because the inputs are IDENTITY (folded into ``recording_id``,
-    not merely snapshotted), recovery is to re-run ``insert_selection`` for the
-    current inputs -- which mints a NEW ``recording_id`` for the changed set --
-    or to restore the sort group's membership / bad-channel flags, not to
-    silently build a drifted recording under the old id.
+    ``recording_id`` includes ``recording_input_hash`` (electrodes, reference,
+    and on the ``interpolate`` path the interior bad channels).
+    ``make_fetch`` raises when the live inputs no longer match. Re-run
+    ``insert_selection`` to mint a new ``recording_id``, or restore the inputs.
     """
 
 
 class MissingDisplayExtensionError(RuntimeError):
-    """A richer SI widget needs display-safe analyzer extensions not present.
+    """A SpikeInterface widget needs analyzer extensions that are not computed.
 
-    Raised by the read-only default visualization path so a notebook user gets
-    an actionable message (the exact ``add_extensions`` call, or the
-    ``compute_missing=True`` opt-in) instead of a deep SpikeInterface
-    ``check_extensions`` failure. The absent extensions are also exposed on the
-    ``missing`` attribute so a caller can act on them programmatically without
-    parsing the message string.
+    The message gives the ``add_extensions`` call or the
+    ``compute_missing=True`` opt-in. The absent extensions are listed in the
+    ``missing`` attribute.
     """
 
     def __init__(self, message: str, *, missing=None):

@@ -1,15 +1,8 @@
 """Tests for automated bad-channel detection.
 
-Two tiers:
-
-- **Unit (no DB):** the pure ``detect_bad_channels`` wrapper, exercised both
-  with real SpikeInterface (a synthesized dead channel) and via monkeypatch
-  (override forwarding / ``None`` dropping / method pinning).
-- **Integration (DB):** the ``suggest_bad_channels`` suggest-then-confirm helper
-  against the ingested MEArec polymer smoke fixture. The persist paths and the
-  per-shank scope are pinned with a monkeypatched detector so they are
-  deterministic; one read-only test runs the real detector end-to-end. Every
-  test that mutates ``Electrode.bad_channel`` restores it on teardown.
+- Unit (no DB): the ``detect_bad_channels`` wrapper.
+- Integration (DB): ``suggest_bad_channels`` on the MEArec polymer smoke
+  fixture, mostly with a monkeypatched detector for determinism.
 """
 
 from __future__ import annotations
@@ -68,7 +61,6 @@ def test_detect_bad_channels_flags_dead_channel():
     assert 3 in bad
     assert result["labels"][3] == "dead"
     assert result["labels"][0] == "good"
-    # The per-channel label map covers every channel.
     assert {int(c) for c in result["labels"]} == {
         int(c) for c in flat_f.get_channel_ids()
     }
@@ -383,7 +375,6 @@ def test_detection_runs_per_shank(badchan_session, monkeypatch):
 
     nwb = badchan_session["nwb_file_name"]
 
-    # Expected partition: the channel set of each (electrode group, shank).
     expected: dict = {}
     for r in (Electrode & {"nwb_file_name": nwb}).fetch(
         "electrode_group_name", "probe_shank", "electrode_id", as_dict=True
@@ -406,7 +397,7 @@ def test_detection_runs_per_shank(badchan_session, monkeypatch):
 
     assert reviewed_report == []
     assert len(seen) == len(expected)  # one detection call per shank
-    # Each call's channel set is exactly one shank's electrodes -- no mixing.
+    # Each call's channel set is exactly one shank's electrodes.
     assert sorted(seen, key=sorted) == sorted(expected.values(), key=sorted)
 
 
@@ -423,9 +414,8 @@ def test_suggest_forwards_detection_params(badchan_session, monkeypatch):
 
     nwb = badchan_session["nwb_file_name"]
     captured: list[dict] = []
-    # This fixture's known raw acquisition is rate-based. Build the signal
-    # reference independently of suggest_bad_channels, using a non-default
-    # high-pass so ignoring the requested bandpass cannot pass unnoticed.
+    # Independent reference with a non-default high-pass, so an ignored
+    # bandpass is caught.
     raw = se.read_nwb_recording(
         Nwbfile.get_abs_path(nwb),
         electrical_series_path="acquisition/e-series",

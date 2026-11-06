@@ -1,14 +1,8 @@
 """Every analyzer rebuild of a masked sort reuses the sort's statistics spans.
 
-A sort's ``noise_levels`` are estimated only from its persisted statistics
-spans (artifact-free frames). Every later builder -- the ``get_analyzer``
-self-heal, ``CurationEvaluation`` (cached fast path and merged temp
-analyzers), the merged-curation analyzer, and the recompute audit --
-reconstructs the masked recording and must pass those same spans, or it
-reproduces SpikeInterface's estimate over the zero-filled mask instead. The
-display ``noise_levels`` depend only on the recording, the spans, and the
-seed, not on the units, so every rebuild must match the sort-time value
-exactly.
+Rebuilds (``get_analyzer`` self-heal, ``CurationEvaluation``, merged-curation
+analyzers, the recompute audit) must reproduce the sort-time
+``noise_levels`` exactly; without the spans SI estimates over the zeroed mask.
 """
 
 from __future__ import annotations

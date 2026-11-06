@@ -1,24 +1,11 @@
 """Validated parameter schemas for analyzer-driven quality-metric curation.
 
-Two structured parameter tables back analyzer curation:
+- ``QualityMetricParamsSchema``: which SI quality metrics to compute, their
+  kwargs, and whether PCA metrics are skipped.
+- ``AutoCurationRulesSchema``: an auto-merge preset plus ordered threshold
+  rules that map a metric column to a unit label.
 
-``QualityMetricParameters``
-    which SpikeInterface quality metrics to compute, the per-metric kwargs
-    passed to ``compute_quality_metrics(..., metric_params=...)``, and whether
-    PCA-based metrics are skipped. ``QualityMetricParamsSchema`` validates that
-    payload, including checking every requested metric name against the
-    installed SpikeInterface's exported metric list.
-
-``AutoCurationRules`` (+ its ``Rule`` part table)
-    an auto-merge preset plus ordered threshold rules that turn a metric
-    column into a unit label. ``AutoCurationRulesSchema`` validates the whole
-    master-plus-rules payload before either table is written.
-
-Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``) do
-NOT live on these schemas. They are stored on the per-row ``job_kwargs`` blob
-column and resolved at populate time by ``_resolved_job_kwargs``
-(SpikeInterface globals, then
-``dj.config['custom']['spikesorting_v2_job_kwargs']``, then the row's blob).
+Concurrency settings live in each row's ``job_kwargs`` blob.
 """
 
 from __future__ import annotations
@@ -37,21 +24,13 @@ from pydantic import (
 QUALITY_METRIC_SCHEMA_VERSION = 2
 AUTO_CURATION_RULES_SCHEMA_VERSION = 1
 
-# Comparison operators a threshold rule may use. Mirrors the ``operator`` enum
-# on ``AutoCurationRules.Rule`` so the Pydantic guard and the table column
-# agree on the allowed set.
+# Must match the ``operator`` enum on ``AutoCurationRules.Rule``.
 RuleOperator = Literal["<", "<=", ">", ">=", "==", "!="]
 
-# Spyglass policy for a non-finite value in a metric column referenced by a
-# rule. This is deliberately distinct from SpikeInterface's ``nan_policy``:
-# ``error`` is Spyglass fail-fast behavior.
+# Spyglass policy for a non-finite rule metric; not SI's ``nan_policy``.
 MissingMetricPolicy = Literal["error", "fail", "pass"]
 
-# Auto-merge presets. The first five are SpikeInterface 0.104.3's
-# ``compute_merge_unit_groups`` presets (verified against the installed
-# source);
-# ``"none"`` is the Spyglass-level "skip auto-merge" sentinel, not an SI
-# preset.
+# SI 0.104.3 ``compute_merge_unit_groups`` presets plus ``"none"`` (skip).
 AutoMergePreset = Literal[
     "similarity_correlograms",
     "temporal_splits",
@@ -61,44 +40,18 @@ AutoMergePreset = Literal[
     "none",
 ]
 
-# The two output columns of the 0.104 ``nn_advanced`` PCA metric. Requesting
-# either as a metric *name* raises in SI 0.104; we surface a targeted hint.
+# Output columns of SI 0.104's ``nn_advanced``; invalid as metric names.
 _RENAMED_NN_METRICS = {"nn_isolation", "nn_noise_overlap"}
 
-# Default surfaced waveform-shape column -- a single conservative scalar shape
-# column used downstream for cell typing (firing rate is already a quality
-# metric; this adds spike width). It is a SpikeInterface OUTPUT COLUMN name, NOT
-# a metric name: ``trough_half_width`` is one of the two columns SI's
-# ``half_width`` metric emits, so selecting columns directly avoids the
-# name->column ambiguity (``half_width`` -> ``trough_half_width`` +
-# ``peak_half_width``).
-#
-# ``trough_half_width`` is trough-local: its half-amplitude crossings sit a few
-# samples either side of the trough, so it stays inside even the deliberately
-# narrow hippocampus display window (``ms_before=ms_after=0.5``) and still
-# separates fast-spiking interneurons (narrow) from pyramidal cells (wide).
-#
-# ``peak_to_trough_duration`` and the slope columns are discoverable but
-# deliberately OPT-IN, not shipped defaults: each depends on the post-trough
-# repolarization peak (SI's ``recovery_slope`` uses a 0.7 ms post-peak window;
-# ``peak_to_trough_duration`` measures to ``peak_after``), which on the 0.5 ms
-# hippocampus post-window saturates at the waveform's edge-exclusion boundary --
-# the metric stops discriminating cells. The literature trough-to-peak is
-# ~0.5-0.8 ms for pyramidal cells (the discriminating end), past the 0.5 ms
-# window, so this is not merely a fixture artifact. They become reliable on the
-# wider cortex/fallback window (1.0/2.0); a user who wants them adds them
-# explicitly to ``template_metric_columns``.
+# SI output column (not metric) names. Trough-local, so it fits the 0.5 ms
+# hippocampus window; SpikeSortingV2Architecture.md explains the opt-in columns.
 DEFAULT_TEMPLATE_METRIC_COLUMNS = [
     "trough_half_width",
 ]
 
 
 def _available_quality_metric_names() -> list[str]:
-    """Return the installed SpikeInterface's exported quality-metric names.
-
-    Imported lazily so this module stays importable without paying the
-    SpikeInterface import cost until a metric name is actually validated.
-    """
+    """Return the installed SpikeInterface's exported quality-metric names."""
     from spikeinterface.metrics.quality import get_quality_metric_list
 
     return list(get_quality_metric_list())
@@ -106,16 +59,9 @@ def _available_quality_metric_names() -> list[str]:
 
 @lru_cache(maxsize=1)
 def _available_pca_metric_names() -> tuple[str, ...]:
-    """Return the installed SI's PCA-based (``principal_components``) metrics.
+    """Return the installed SI's PCA-based metrics (need the whitened analyzer).
 
-    These (``d_prime``, ``mahalanobis``, ``nearest_neighbor``, ``nn_advanced``,
-    ``silhouette`` in SI 0.104) are the only metrics that need the whitened
-    metric analyzer; ``skip_pc_metrics=False`` is meaningful only if at least
-    one is requested. Read from SI, not hardcoded, like the full list above.
-    The PCA set is invariant for the pinned SI version, so it is cached (the
-    insert-time validator and the runtime routing both call it); a tuple is
-    returned because ``lru_cache`` results must not be mutated -- callers wrap
-    it in a ``set``.
+    Returns a tuple because cached results must not be mutated.
     """
     from spikeinterface.metrics.quality import get_quality_pca_metric_list
 
@@ -127,21 +73,10 @@ def required_extensions_for_metrics(
 ) -> list[str]:
     """Extensions the requested metrics need that are not already present.
 
-    Reads each metric's ``depend_on`` from SpikeInterface's quality-metric
-    registry (not a hardcoded map), so a metric whose dependency is outside the
-    pipeline's default ensured set -- e.g. ``drift`` needs ``spike_locations`` --
-    has that dependency computed rather than silently skipped by SI (SI's
-    ``compute_quality_metrics`` warns-and-skips a metric whose extension is
-    absent, leaving the column silently missing). ``"a|b"`` is an either-or
-    dependency: satisfied if any option is already present, otherwise the first
-    option is requested (so ``amplitude_cutoff``'s
-    ``"spike_amplitudes|amplitude_scalings"`` adds nothing when
-    ``spike_amplitudes`` is already ensured, rather than spuriously computing
-    ``amplitude_scalings``).
-
-    Callers pass only the VOLTAGE metric names (PCA metrics route to the whitened
-    analyzer separately), so every returned extension is display-safe.
-    Order-preserving and idempotent against ``present_extensions``.
+    SI silently skips a metric whose extension is absent, so dependencies are
+    read from SI's ``depend_on``. An either-or ``"a|b"`` dependency is met by
+    any present option, else the first is requested. Callers pass only voltage
+    (non-PCA) metric names. Order-preserving.
     """
     from spikeinterface.metrics.quality.quality_metrics import (
         ComputeQualityMetrics,
@@ -160,18 +95,10 @@ def required_extensions_for_metrics(
 
 
 def _available_template_metric_columns() -> list[str]:
-    """Installed SI's single-channel template-metric output COLUMNS (lazy).
+    """Installed SI's single-channel template-metric output column names.
 
-    These are output *column* names (``trough_half_width``,
-    ``peak_to_trough_duration``, ...), the same vocabulary ``get_metrics``
-    returns -- NOT metric names. A metric name is not its column: SI's
-    ``half_width`` metric emits TWO columns, ``trough_half_width`` and
-    ``peak_half_width``, so ``template_metric_columns`` is validated against
-    this set (selecting by column is what-you-configure-is-what-you-get).
-    Restricting to the single-channel set also keeps the surfaced columns
-    scalar (the multi-channel columns -- ``velocity_above`` etc. -- are
-    excluded). Imported lazily so the module stays importable without paying
-    the SpikeInterface import cost until a column is validated.
+    Column names, not metric names (``half_width`` emits two columns).
+    Single-channel only so surfaced columns stay scalar.
     """
     from spikeinterface.metrics import (
         ComputeTemplateMetrics,
@@ -188,19 +115,14 @@ def _available_template_metric_columns() -> list[str]:
 class QualityMetricParamsSchema(BaseModel):
     """Validated schema for a ``QualityMetricParameters`` row.
 
-    ``metric_names`` lists the SpikeInterface metric *names* to compute (e.g.
-    ``snr``, ``isi_violation``, ``firing_rate``, ``nn_advanced``). Each name is
-    validated against the installed SI's ``get_quality_metric_list()`` so a
-    typo or a 0.99-era name fails at insert, not at populate. ``metric_kwargs``
-    is the per-metric kwargs dict passed straight through to
-    ``compute_quality_metrics(..., metric_params=...)``. ``skip_pc_metrics``
-    defaults to ``True`` (PCA metrics off) -- a row feeding an ``nn_advanced``
-    rule must set it ``False`` and request ``nn_advanced`` explicitly.
+    - ``metric_names``: SI metric names, validated against the installed SI.
+    - ``metric_kwargs``: per-metric kwargs for ``compute_quality_metrics``.
+    - ``skip_pc_metrics``: must be ``False`` exactly when a PCA metric such as
+      ``nn_advanced`` is requested.
+    - ``template_metric_columns``: SI waveform-shape output columns surfaced
+      for cell typing; not thresholded.
 
-    Note ``nn_advanced`` produces *columns* named ``nn_isolation`` and
-    ``nn_noise_overlap``; the rule that reads those columns lives in
-    ``AutoCurationRules.Rule`` and references the column name, not the metric
-    name (see ``AutoCurationRulesSchema``).
+    Rules threshold output columns (``nn_noise_overlap``), not metric names.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -213,9 +135,6 @@ class QualityMetricParamsSchema(BaseModel):
     observed_presence_bin_duration_s: float = Field(
         default=60.0, gt=0, allow_inf_nan=False
     )
-    # SI template (waveform-shape) output COLUMNS surfaced in the metric table
-    # for downstream cell typing. Exposed, not thresholded (the pipeline ships
-    # no cell-type cutoffs). An empty list surfaces no shape columns.
     template_metric_columns: list[str] = Field(
         default_factory=lambda: list(DEFAULT_TEMPLATE_METRIC_COLUMNS)
     )
@@ -245,10 +164,6 @@ class QualityMetricParamsSchema(BaseModel):
     @field_validator("template_metric_columns")
     @classmethod
     def _check_template_metric_columns(cls, cols: list[str]) -> list[str]:
-        # Validate against the installed SI's single-channel output COLUMNS so a
-        # typo -- or a metric *name* (e.g. ``half_width``) passed where a column
-        # is expected -- fails at insert, not at populate. An empty list is
-        # valid (surfaces no shape columns).
         available = _available_template_metric_columns()
         unknown = sorted(c for c in cols if c not in available)
         if unknown:
@@ -262,14 +177,11 @@ class QualityMetricParamsSchema(BaseModel):
 
     @model_validator(mode="after")
     def _check_pc_metrics_consistent(self) -> "QualityMetricParamsSchema":
-        # Keep the skip_pc_metrics flag consistent with the requested metrics:
-        # metric_names should name metrics this row actually computes. Also keep
-        # skip_pc_metrics=False as an EXACT signal that a metric analyzer exists,
-        # which recompute / orphan gating rely on.
+        # Recompute / orphan gating treat skip_pc_metrics=False as proof a
+        # metric analyzer exists.
         pca = set(_available_pca_metric_names())
         requested_pca = set(self.metric_names) & pca
         if not self.skip_pc_metrics and not requested_pca:
-            # Build the whitened analyzer but compute no PC metric on it.
             raise ValueError(
                 "skip_pc_metrics=False but metric_names requests no PCA "
                 f"metric (one of {sorted(pca)}). Either request a PCA "
@@ -278,8 +190,6 @@ class QualityMetricParamsSchema(BaseModel):
                 "analyzer and is a contradiction."
             )
         if self.skip_pc_metrics and requested_pca:
-            # PCA metrics require the metric analyzer. Silently dropping them
-            # would make the DB row overstate what was actually computed.
             raise ValueError(
                 "skip_pc_metrics=True but metric_names requests PCA metric(s) "
                 f"{sorted(requested_pca)}, which would be skipped. Set "
@@ -292,9 +202,7 @@ class QualityMetricParamsSchema(BaseModel):
     def _check_kwargs_target_requested_metrics(
         self,
     ) -> "QualityMetricParamsSchema":
-        # Per-metric kwargs only apply to a metric that is actually computed;
-        # a key absent from metric_names is a silent no-op (usually a typo),
-        # so reject it at insert rather than discarding it at populate time.
+        # A kwargs key for an unrequested metric is a silent no-op (a typo).
         orphan = sorted(set(self.metric_kwargs) - set(self.metric_names))
         if orphan:
             raise ValueError(
@@ -309,27 +217,22 @@ class QualityMetricParamsSchema(BaseModel):
 class AutoCurationRuleSchema(BaseModel):
     """Validated schema for a single ``AutoCurationRules.Rule`` row.
 
-    A rule reads one metric *column* (``metric_name``) from the computed
-    quality-metrics table, applies ``operator`` against ``threshold``, and
-    emits ``label`` for every unit that matches. ``metric_name`` is a free
-    string (not validated against the metric-name list) because a rule may
-    target a column the metric name does not equal -- e.g. the
-    ``nn_noise_overlap`` column produced by the ``nn_advanced`` metric. A rule
-    that references a column absent from the computed metrics raises a clear
-    error at populate time, not here. ``missing_policy`` records Spyglass's
-    handling for a unit SpikeInterface cannot assess for this metric (see
-    ``expected_missing_units`` in ``_curation.metrics`` for the registered
-    columns and conditions): ``error`` raises; ``fail`` applies the label; and
-    ``pass`` leaves the unit unlabelled by this rule. It does not cover any
-    other non-finite value: a NaN for a unit that meets the metric's
-    conditions, any NaN in a column with no registered conditions (template,
-    custom and ``observed_*`` columns), and a SpikeInterface error in the
-    metric all abort the evaluation regardless of the policy. ``pass`` is the
-    right choice whenever the metric has a validity floor (``nn_advanced``'s
-    ``min_spikes``, say), where NaN means "not assessable" rather than
-    "wrong"; ``pass`` and ``fail`` both warn if the metric is missing for EVERY
-    unit, since the rule then made no real comparison. These names do not
-    inherit SpikeInterface ``nan_policy`` semantics.
+    A rule applies ``operator`` / ``threshold`` to one metric *column*
+    (``metric_name``) and emits ``label`` for matching units. ``metric_name``
+    is free text because a column can differ from its metric name
+    (``nn_noise_overlap`` from ``nn_advanced``); a missing column raises at
+    populate.
+
+    ``missing_policy`` covers only units SI cannot assess (see
+    ``expected_missing_units`` in ``_curation.metrics``):
+
+    - ``error``: raise.
+    - ``fail``: apply the label.
+    - ``pass``: leave the unit unlabelled; right for metrics with a validity
+      floor such as ``nn_advanced``'s ``min_spikes``.
+
+    Any other NaN or SI error aborts regardless of policy. ``pass`` and
+    ``fail`` warn when the metric is missing for every unit.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -345,11 +248,8 @@ class AutoCurationRuleSchema(BaseModel):
 class AutoCurationRulesSchema(BaseModel):
     """Validated schema for an ``AutoCurationRules`` master + its rule rows.
 
-    The full ``{auto_merge_preset, auto_merge_kwargs, rules}`` payload is
-    validated together so a master row never lands without its rule rows being
-    checked. ``auto_merge_preset`` is one of SI 0.104's
-    ``compute_merge_unit_groups`` presets or the ``"none"`` sentinel;
-    ``rules`` is an ordered list whose ``rule_index`` values must be unique.
+    Master and rules validate together so a master never lands with unchecked
+    rules. ``rule_index`` values must be unique.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -378,12 +278,8 @@ class AutoCurationRulesSchema(BaseModel):
 def prepare_quality_metric_row(row: dict) -> dict:
     """Validate one ``QualityMetricParameters`` insert input into its stored row.
 
-    Single source of the insert-input -> stored-column mapping, shared by
-    ``QualityMetricParameters.insert`` and the default-catalog audit so a new
-    validated field or default is filled identically on both paths.
-    Optional schema fields are forwarded only when the row sets them, so an
-    omitting row picks up the schema default (e.g. the conservative,
-    window-safe ``trough_half_width`` shape column).
+    Shared by ``QualityMetricParameters.insert`` and the default-catalog audit.
+    Unset optional fields take the schema default.
 
     Parameters
     ----------
@@ -431,8 +327,6 @@ def prepare_auto_curation_rules(
 ) -> tuple[dict, list[dict]]:
     """Validate an ``AutoCurationRules`` master + rule inputs into stored rows.
 
-    The complete ``{auto_merge_preset, auto_merge_kwargs, rules}`` payload is
-    validated together (a master never lands without its rules being checked).
     Shared by ``AutoCurationRules.insert_rules`` and the default-catalog audit.
 
     Parameters

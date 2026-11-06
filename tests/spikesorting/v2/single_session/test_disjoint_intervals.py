@@ -17,29 +17,10 @@ def test_boundary_spike_round_trip_does_not_raise(
 ):
     """A spike at the recording's final sample survives the v2 NWB round-trip.
 
-    Regression guard for the final-sample boundary. ``write_sorting_units_nwb``
-    stores ``timestamps[sample_index]`` as the absolute spike time;
-    ``get_sorting`` reads it back by mapping absolute time -> frame with
-    ``np.searchsorted`` (``_spike_times_to_frames``), which clips any
-    spike that floating-point-rounds to ``n_samples`` (one past the end)
-    -- the v1 ``spike_times_to_valid_samples`` clip, now folded in. This
-    test pins that a spike at ``n_samples - 1`` survives both read paths
-    without raising.
-
-    Construction strategy
-    ---------------------
-    The shipped sorters do not deterministically produce a boundary
-    spike, so ``plant_sorter`` substitutes a sorter that returns a
-    hand-built ``NumpySorting`` with one unit whose spike train
-    includes ``n_samples - 1`` and one earlier in-bounds spike. The
-    rest of ``Sorting.make`` runs normally:
-    ``remove_excess_spikes`` should keep both samples
-    (``n_samples - 1 < n_samples``), ``write_sorting_units_nwb`` writes
-    ``timestamps[sample_index]`` as the absolute time, and
-    ``Sorting().get_sorting`` reads back via the searchsorted map.
-    The round-trip is also exercised through
-    ``CurationV2.insert_curation`` + ``CurationV2.get_sorting`` so
-    both production read paths are covered.
+    ``get_sorting`` maps absolute spike times to frames with
+    ``np.searchsorted``, clipping a spike that rounds to ``n_samples``. A
+    planted spike at ``n_samples - 1`` must survive both
+    ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` without raising.
     """
     import numpy as np
 
@@ -103,9 +84,6 @@ def test_boundary_spike_round_trip_does_not_raise(
     )
     (Sorting & sort_pk).super_delete(warn=False)
 
-    # Plant a sorter that deterministically returns a
-    # ``NumpySorting`` with a spike at exactly ``n_samples - 1`` on
-    # the artifact-masked recording.
     def _boundary_run_sorter(
         sorter,
         sorter_params,
@@ -119,10 +97,7 @@ def test_boundary_spike_round_trip_does_not_raise(
         import spikeinterface as si
 
         n_samples = int(recording.get_num_samples())
-        # Place one spike near the start and one at the very last
-        # sample. The boundary one is what tests SI's read-side
-        # bounds check; the earlier one keeps the unit "real" so
-        # downstream analyzer math doesn't degenerate.
+        # The early spike keeps analyzer math from degenerating.
         samples = np.array([100, n_samples - 1], dtype=np.int64)
         labels = np.zeros(samples.size, dtype=np.int32)
         return si.NumpySorting.from_samples_and_labels(
@@ -140,9 +115,7 @@ def test_boundary_spike_round_trip_does_not_raise(
         "write_sorting_units_nwb rather than at read time."
     )
 
-    # First read path: Sorting.get_sorting -> searchsorted frame map
-    # must build without raising. Unit set must include the one we
-    # planted.
+    # Read path 1: Sorting.get_sorting.
     sorting_obj = Sorting().get_sorting(sort_pk)
     assert 0 in sorting_obj.get_unit_ids(), (
         "Boundary-spike sorting did not survive Sorting.get_sorting "
@@ -154,11 +127,7 @@ def test_boundary_spike_round_trip_does_not_raise(
         sorting_obj.get_unit_spike_train(unit_id=0), expected_frames
     )
 
-    # Second read path: CurationV2 + CurationV2.get_sorting. The
-    # curated NWB write goes through a different code path than
-    # write_sorting_units_nwb but reads back via the same
-    # searchsorted frame map. Pass labels={} so insert_curation
-    # accepts the call on the strict signature.
+    # Read path 2: the curated NWB write, read back by CurationV2.get_sorting.
     curation_pk = CurationV2.insert_curation(
         sorting_key=sort_pk,
         labels={},
@@ -182,21 +151,11 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
 ):
     """``get_sorting`` recovers original frames across a wall-clock gap.
 
-    Builds a Recording over two DISJOINT sort intervals -- so the
-    persisted timeline is gap-preserving (non-uniform) -- and
-    uses ``plant_sorter`` to plant a spike near the start
-    (chunk 1) and one near the end (chunk 2, after the gap). Both
-    ``Sorting.get_sorting`` and ``CurationV2.get_sorting`` must read the
-    planted FRAME indices back exactly.
-
-    An affine readback of the stored absolute spike times (as
-    ``NwbSortingExtractor`` does: ``round((t - t_start) * fs)``) shifts
-    every frame after the gap by ``gap * fs`` (here landing past the
-    gap-excluded sample count). v1 and v2 map back with
-    ``np.searchsorted`` against the actual recording timestamps, which
-    recovers the original frame. The spike-TIME surfaces round-trip
-    correctly either way; only the FRAME indices expose an affine
-    readback, so this test asserts on frames.
+    Spikes planted before and after the gap of a two-interval Recording must
+    read back at the same frames through ``Sorting.get_sorting`` and
+    ``CurationV2.get_sorting``. An affine readback
+    (``round((t - t_start) * fs)``) would shift post-gap frames by
+    ``gap * fs``; spike times round-trip either way, so this asserts on frames.
     """
     import uuid
 
@@ -300,10 +259,7 @@ def test_get_sorting_recovers_frames_across_disjoint_gap(
         samples = np.array([100, n_samples - 100], dtype=np.int64)
         rec_times = np.asarray(recording.get_times())
         planted["samples"] = samples
-        # The affine inverse of the post-gap frame's absolute time; if
-        # this still equals the original frame the gap is too small to
-        # expose an affine readback, so the assertion below would be
-        # vacuous.
+        # Must differ from the true frame, or the assertion below is vacuous.
         planted["affine_post_gap"] = int(
             round(
                 (rec_times[samples[1]] - rec_times[0])
@@ -359,13 +315,8 @@ def test_obs_intervals_no_artifact_respects_disjoint_gap(
 ):
     """No-artifact obs_intervals split at the gap on a disjoint recording.
 
-    When a sort has NO artifact pass (``artifact_detection_id`` is None),
-    ``write_sorting_units_nwb`` falls back to the recording's recorded window(s)
-    for each unit's ``obs_intervals``. On a DISJOINT recording that must
-    be one interval per recorded chunk, NOT a single envelope spanning the
-    wall-clock gap (which would inflate the observation duration /
-    firing-rate window). The artifact-backed path was already gap-split;
-    this pins the no-ArtifactDetectionSource fallback.
+    Without an artifact pass, each unit's ``obs_intervals`` is one interval
+    per recorded chunk, not one envelope spanning the wall-clock gap.
     """
     import uuid
 
@@ -489,14 +440,10 @@ def test_reloaded_two_interval_artifact_exposes_gap(
     """The reloaded two-interval recording exposes its selection join, and the
     sort persists statistics spans that never cross it.
 
-    The recording is selected over two disjoint intervals, so its persisted
-    timestamps jump at the join. ``boundary_spans_from_timestamps`` on the
-    reloaded artifact must split exactly there (frame count of the first
-    interval at the fixture's sampling rate). A manual artifact exclusion at
-    the start of the first interval is masked, and the persisted spans must
-    be: the rest of the first interval, then the whole second interval -- the
-    join is a boundary even though nothing is masked around it. The sorter
-    receives those same spans.
+    ``boundary_spans_from_timestamps`` splits exactly at the join. With a
+    manual exclusion at the start of the first interval, the persisted spans
+    (also passed to the sorter) are the rest of the first interval, then the
+    whole second interval.
     """
     import uuid
 
@@ -644,12 +591,9 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
 ):
     """Lazy get_merged_sorting must not drop a cross-gap boundary pair.
 
-    On a DISJOINT recording the units NWB frames are contiguous across the
-    excluded wall-clock gap, so two merged contributors firing at chunk 1's
-    last frame and chunk 2's first frame are frame-ADJACENT but ~0.5 s apart
-    in real time. A frame-space 0.4 ms dedup (SI's MergeUnitsSorting) would
-    wrongly drop one; the abs-time dedup keeps both (and matches the
-    apply_merge=True stored train).
+    Spikes at chunk 1's last frame and chunk 2's first frame are
+    frame-adjacent but ~0.5 s apart. Dedup is in absolute time, so both
+    survive (a frame-space dedup like SI's MergeUnitsSorting drops one).
     """
     import uuid
 
@@ -779,23 +723,10 @@ def test_get_merged_sorting_keeps_cross_gap_pair(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
-    """``Recording.make`` honors disjoint sort intervals.
+    """``Recording.make`` excludes the gap between disjoint sort intervals.
 
-    Without the per-interval ``frame_slice`` + ``concatenate_recordings``
-    pattern (``restrict_recording_times``), ``Recording.make`` took
-    ``(times[0][0], times[-1][-1])`` -- the outer envelope, silently
-    including inter-interval gaps.
-    This test writes a synthetic IntervalList row whose
-    ``valid_times`` has two disjoint chunks with a deliberate gap,
-    populates Recording, then re-reads the written
-    ``ElectricalSeries.timestamps`` and asserts:
-
-    1. The written timestamps span is SHORTER than the gap-inclusive
-       envelope (the gap was actually excluded).
-    2. No written timestamp falls inside the gap.
-
-    Without the consolidate-and-concatenate pattern, both
-    assertions fail (the gap is included).
+    The written timestamps are shorter than the gap-inclusive envelope and
+    none fall inside the gap.
     """
     import uuid
 
@@ -833,15 +764,9 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
     ).fetch1("valid_times")
     t0 = float(raw_times[0][0])
     t_end = float(raw_times[-1][-1])
-    # Build two disjoint sub-intervals inside the raw window with
-    # a deliberate gap. min_segment_length default is 1.0 s, so
-    # each chunk must be >= 1s for the helper not to drop them.
     total = t_end - t0
-    # min_segment_length default is 1.0 s; intersect's per-chunk
-    # length must be strictly > 1.0 s to survive (floating-point
-    # boundaries on a 1.0 s-exact chunk are sometimes dropped).
-    # Use 1.2 s chunks separated by 0.5 s gap, total 2.9 s --
-    # fits in the 4 s smoke fixture.
+    # Chunks must exceed the 1.0 s min_segment_length (an exact 1.0 s chunk
+    # can drop on float boundaries): 1.2 s chunks, 0.5 s gap, 2.9 s total.
     assert total >= 2.9, (
         f"Smoke fixture is too short ({total}s) for the disjoint "
         "test; need at least 2.9s."
@@ -884,10 +809,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
         series = nwbf.acquisition[series_name]
         written_times = np.asarray(series.timestamps[:])
 
-    # The written length should be approximately
-    # (chunk1 duration + chunk2 duration) * fs, not the full
-    # envelope. Allow 5% slack for fs jitter and boundary
-    # rounding.
+    # Expect (chunk1 + chunk2 duration) * fs, within 5% for boundary rounding.
     fs = float(row["sampling_frequency"])
     expected_n = int(((chunk1_end - t0) + (chunk2_end - gap_end)) * fs)
     assert 0.95 * expected_n <= len(written_times) <= 1.05 * expected_n, (
@@ -895,8 +817,7 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
         f"from expected ~{expected_n} (sum of disjoint chunks). "
         "Disjoint-interval concat regression."
     )
-    # No written timestamp falls inside the gap (chunk1_end,
-    # gap_end). Allow tiny boundary slack via 1.5 / fs.
+    # No written timestamp falls inside the gap, with 1.5 / fs slack.
     tol = 1.5 / fs
     in_gap = (written_times > chunk1_end + tol) & (
         written_times < gap_end - tol
@@ -912,18 +833,11 @@ def test_disjoint_sort_intervals_concatenated(polymer_smoke_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
-    """End-to-end: artifact-removed valid_times never span a gap.
+    """Artifact-removed valid_times never span a gap.
 
-    Builds a disjoint Recording (two chunks separated by a wall-clock
-    gap), runs ``RecordingArtifactDetection`` with the ``none`` preset
-    (detect=False), and asserts the persisted artifact ``IntervalList``
-    valid_times split at the gap rather than returning one envelope
-    spanning it. Subtracting/returning over a single
-    ``[timestamps[0], timestamps[-1]]`` envelope instead would
-    reintroduce the gap -- inflating obs_intervals duration and letting
-    sub-min_length slivers survive. The artifact-detected (detect=True)
-    per-chunk subtraction is pinned by the synthetic ``detect_artifacts``
-    test in ``test_disjoint_artifact.py``.
+    With the ``none`` preset on a two-chunk Recording, the persisted artifact
+    ``IntervalList`` splits at the gap. ``test_disjoint_artifact.py`` covers
+    the detect=True path.
     """
     import uuid
 
@@ -1018,15 +932,10 @@ def test_artifact_valid_times_respect_disjoint_gap(polymer_smoke_session):
 def test_disjoint_multi_gap_readback_and_artifact(
     polymer_smoke_session, monkeypatch
 ):
-    """Spike readback + artifact valid_times are gap-correct across MULTIPLE
-    gaps (3 chunks, 2 gaps), not just the first.
+    """Spike readback and artifact valid_times are gap-correct across two gaps.
 
-    Every other disjoint DB test is single-gap (two chunks). This builds a
-    three-chunk recording and asserts: ``base_intervals_and_gaps``
-    (exercised via the populated timeline) yields one valid interval per
-    chunk -- none spanning either gap -- and ``get_sorting`` recovers a
-    spike planted in EACH chunk exactly (the per-chunk ``searchsorted``
-    readback must stay correct past the second gap, not only the first).
+    On a three-chunk recording, artifact valid_times hold one interval per
+    chunk and ``get_sorting`` recovers a spike planted in each chunk exactly.
     """
     import uuid
 
@@ -1122,9 +1031,7 @@ def test_disjoint_multi_gap_readback_and_artifact(
         assert not (start < gap1_mid < end), "valid interval spans gap 1"
         assert not (start < gap2_mid < end), "valid interval spans gap 2"
 
-    # Plant one spike in EACH chunk, recover the boundary frames from the
-    # populated timeline, then assert get_sorting reads all three back
-    # exactly (past BOTH gaps).
+    # Plant one spike per chunk and read all three back exactly.
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],

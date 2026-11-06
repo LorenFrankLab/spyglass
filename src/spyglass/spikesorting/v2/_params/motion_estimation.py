@@ -1,20 +1,14 @@
 """Validated parameter schema for the motion-estimation parameter table.
 
 A ``MotionEstimationParameters`` row names one SpikeInterface motion preset plus
-per-step overrides. SpikeInterface merges each override one level deep over the
-preset step (``dict(preset_step, **user_step)``); the fully resolved
-configuration that is actually passed to SpikeInterface, including every
-signature default the preset leaves implicit, is built by
-``spyglass.spikesorting.v2._motion.estimation.resolve_estimation_params``.
+per-step overrides, merged one level deep over the preset step. The fully
+resolved configuration is built by ``_motion.estimation.resolve_estimation_params``.
 
-This schema only checks the shape of the blob and rejects overrides that would
-re-bind an argument the estimator passes itself, change where outputs go, or
-select a compute device other than the CPU. Whether each remaining key is a
-real parameter of the selected SpikeInterface method is checked when the row is
-resolved (``MotionEstimationParameters.insert`` resolves every row).
+This schema rejects overrides that re-bind an argument the estimator passes
+itself, redirect outputs, or select a non-CPU device. Unknown keys are caught
+when ``MotionEstimationParameters.insert`` resolves the row.
 
-No SpikeInterface import: the default rows are built from this schema at
-import time of the recipe catalog.
+No SpikeInterface import: the recipe catalog builds default rows at import.
 """
 
 from __future__ import annotations

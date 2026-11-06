@@ -39,30 +39,11 @@ def assert_concat_preflight(
 ) -> list[str]:
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
-    Concat counterpart of :func:`preflight_v2_pipeline`: the group, its members,
-    and -- because each member is sorted through the same single-session
-    ``Recording`` build -- each member's session / sort-group / sampling-rate
-    prerequisites, run through the single-session ``_check_*`` helpers (so
-    the two preflights cannot drift), plus the
-    ``auto_curate`` metric/rule/metric-waveform rows
-    (when opted in), and the compute-time param rows + sorter binary via
-    :func:`assert_preset_compute_rows`, including member artifact parameters.
-    With a motion mode, also the recipe, that the preset's preprocessing
-    recipe (the concatenation's) applies a temporal filter, each member's
-    geometry against the estimation recipe, and (for ``"apply"``) the
-    sorter's own motion correction, as in :func:`preflight_v2_pipeline`.
-    A supplied ``motion_estimate_id`` must be a populated estimate, made with
-    the recipe's estimation row, of a concatenation of this session group under
-    the preset's preprocessing recipe whose frozen members are the member
-    recordings and artifact detections this run would select.
-    ``sort_checks=False`` skips the sorter-only checks (the sorter rows and
-    runtime, the display analyzer recipe, each member's preset sampling
-    rate and the sorter's own motion correction), as in
-    :func:`preflight_v2_pipeline`. A failing per-member check names the
-    member (``"concat member {i}: ..."``). Fails before member/concat
-    populate. Returns advisory warnings (including explicitly disabled artifact
-    masking) for symmetry with
-    :func:`preflight_v2_pipeline`.
+    Concat counterpart of :func:`preflight_v2_pipeline`, using the same
+    ``_check_*`` helpers for the group, each member, the preset rows, and the
+    motion stage. A supplied ``motion_estimate_id`` must match the
+    concatenation this run would build. Member failures name the member.
+    Returns advisory warnings.
     """
     group_key = {
         "session_group_owner": concat_session_group_owner,
@@ -70,21 +51,12 @@ def assert_concat_preflight(
     }
     members = _assert_session_group_members(group_key, caller)
 
-    # Each member is sorted through the same single-session Recording build, so
-    # run preflight_v2_pipeline's per-session checks for EVERY member;
-    # SessionGroup.Member's FK set validates only that the master rows exist, not
-    # Raw / 'raw data valid times' / a non-empty, distinct-contact sort group /
-    # a matching rate, so a partially-ingested or empty-sort-group member would
-    # otherwise fail deep in the member populate with an opaque error.
+    # Member FKs do not cover Raw, valid times, or sort-group contents.
     for member in members:
         _assert_concat_member_inputs(
             member, bundle, caller=caller, sort_checks=sort_checks
         )
 
-    # Auto-curation prerequisites (preset-level, same rows as single-session),
-    # only when the caller opts into auto_curate -- so a concat auto-curate run
-    # fails fast on a missing metric / rule / metric-waveform recipe rather than
-    # after the member + concat + sort compute.
     if auto_curate:
         _check_auto_curation_rows(_raising_check(caller), bundle)
 
@@ -168,11 +140,8 @@ def _assert_concat_member_inputs(
 ) -> None:
     """Raise ``PreflightError`` if a member cannot be built as a recording.
 
-    Runs the single-session session-row and sort-group checks (``Raw``,
-    ``'raw data valid times'``, electrodes, distinct contact geometry) and,
-    with ``sort_checks``, the preset sampling-rate check on the member. The
-    session / interval / team / sort-group rows themselves are FK-guaranteed
-    by ``SessionGroup.Member``, so those checks always pass here.
+    Runs the single-session session-row, sort-group and (with
+    ``sort_checks``) sampling-rate checks on the member.
     """
     check = _member_check(member, caller)
     nwb_file_name = member["nwb_file_name"]
@@ -201,17 +170,10 @@ def _assert_concat_motion_stage(
 ) -> None:
     """Raise ``PreflightError`` if a concat run's motion stage cannot run.
 
-    Runs the single-session motion checks (:func:`_check_motion_stage`) with
-    every member's sort group: the preset's preprocessing recipe must filter,
-    the recipe must resolve, every member's geometry must support the
-    estimation recipe, and an ``"apply"`` sort must not run the sorter's own
-    motion correction (checked when ``sorter_row`` is given). A supplied
-    ``motion_estimate_id`` must also match the concatenation the run would
-    build.
+    Runs :func:`_check_motion_stage` over every member's sort group, and
+    checks a supplied ``motion_estimate_id`` against the concatenation.
     """
-    # The concatenation is built with the preset's preprocessing recipe
-    # (checked to exist by assert_preset_compute_rows, which
-    # assert_concat_preflight runs before this function).
+    # assert_preset_compute_rows already checked the preprocessing row.
     motion_recipe = _check_motion_stage(
         _raising_check(caller),
         bundle,
@@ -252,15 +214,11 @@ def _assert_supplied_concat_estimate(
 ) -> None:
     """Raise ``PreflightError`` unless the estimate matches this concat run.
 
-    It must be a populated estimate, made with the recipe's estimation row,
-    of a concatenation of this session group under the preset's
-    preprocessing recipe whose frozen members are the member recordings and
-    artifact detections this run would select.
+    Its frozen members must be the recordings and artifact detections this
+    run would select.
     """
     from spyglass.spikesorting.v2.exceptions import PreflightError
 
-    # The member recordings and masks the run would select, derived
-    # like the single-session preview (manual exclusions per member).
     concat_members = []
     for member in members:
         recording_id, artifact_detection_id = expected_source_ids(

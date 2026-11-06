@@ -51,21 +51,11 @@ def _planted_source_sort(
 ):
     """Plant a SortingSelection + source-part + stub upstream selection row.
 
-    Resolver / make_fetch tests need a sort whose source carries a given
-    preprocessing recipe, without a full populate. This builds the upstream
-    ``selection_table`` row from its live heading (the ``id_attr`` PK + the
-    ``preprocessing_params_name`` set; numeric columns -> 0, the rest ->
-    "bypass") and the ``SortingSelection`` master + ``source_part`` link, all
-    with FK checks off, then yields the ``sorting_id`` and tears the rows down
-    on exit. Works for both source kinds via (``selection_table``, ``id_attr``,
-    ``source_part``): RecordingSelection/recording_id/RecordingSource or
-    ConcatenatedRecordingSelection/concat_recording_id/ConcatenatedRecordingSource.
-
-    The ``sorting_id`` is the one ``SortingSelection.insert_selection`` derives
-    from these parts, so the selection passes the part-consistency check
-    ``SortingSelection.resolve_effective_source`` makes. ``trace_table``
-    (``Recording`` or ``ConcatenatedRecording``), when given, also gets a stub
-    row for the source, for callers that resolve the source's traces row.
+    Gives resolver tests a sort with a chosen preprocessing recipe without
+    a populate. Rows are inserted with FK checks off and removed on exit;
+    yields the ``sorting_id`` ``insert_selection`` would derive. Works for
+    single-recording and concat sources. ``trace_table``, when given, also
+    gets a stub row.
     """
     import datajoint as dj
 
@@ -147,13 +137,7 @@ def test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch():
 
 
 def test_analyzer_waveform_params_schema_rejects_nonpositive_bounds():
-    """A zero/negative window or sub-unit subsample raises.
-
-    A zero/negative extraction window or ``max_spikes_per_unit < 1`` would
-    reach ``analyzer.compute(...)`` and produce a meaningless analyzer; the
-    field bounds (``ms_before/ms_after gt=0``, ``max_spikes_per_unit ge=1``)
-    must reject them.
-    """
+    """A zero/negative window or ``max_spikes_per_unit < 1`` raises."""
     for bad in (
         {"ms_before": 0.0},
         {"ms_before": -0.5},
@@ -174,9 +158,7 @@ def test_analyzer_waveform_params_schema_rejects_nonpositive_bounds():
 def test_waveform_params_for_preprocessing_literal_region_names():
     """Region recipes map to their (display, metric) pairs.
 
-    Asserts the LITERAL recipe names (not the module constants the mapping is
-    built from) so the test pins the actual region behavior rather than being a
-    tautology against the same constants.
+    Uses literal names, not the module constants, to avoid a tautology.
     """
     assert waveform_params_for_preprocessing(
         "franklab_hippocampus_2026_06"
@@ -192,8 +174,6 @@ def test_waveform_params_for_preprocessing_literal_region_names():
 
 def test_waveform_params_for_preprocessing_falls_back_to_cortex(dj_conn):
     """Recipes with no region mapping or recorded windows use the cortex pair."""
-    # The schema-default "default" recipe and any unknown / multi-region recipe
-    # fall back to the wide cortex pair -- never a silently mixed window.
     assert waveform_params_for_preprocessing("default") == (
         "franklab_cortex_actual_waveforms",
         "franklab_cortex_metric_waveforms",
@@ -259,10 +239,8 @@ def test_analyzer_waveform_params_rejects_unsafe_name(dj_conn):
 def test_analyzer_waveform_params_insert_guards(dj_conn):
     """The insert path validates the blob and rejects duplicate content.
 
-    The blob is Pydantic-validated through ``validate_lookup_rows`` (an invalid
-    purpose/whiten pair is rejected at insert, not just at schema-construction
-    time), and a second NAME for an already-shipped blob forks provenance and
-    is rejected unless ``allow_duplicate_params=True``.
+    A second name for an existing blob is rejected unless
+    ``allow_duplicate_params=True``.
     """
     from spyglass.spikesorting.v2.exceptions import (
         DuplicateParameterContentError,
@@ -271,8 +249,7 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
 
     AnalyzerWaveformParameters.insert_default()
 
-    # A contradictory blob is rejected THROUGH the table insert (not only at
-    # schema construction): build a valid display dict, then corrupt it.
+    # Rejected at table insert, not only at schema construction.
     bad_blob = AnalyzerWaveformParamsSchema().model_dump()
     bad_blob["whiten"] = True  # display + whiten=True -> invalid pair
     with pytest.raises(Exception):
@@ -280,7 +257,6 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
             {"waveform_params_name": "bad_pair", "params": bad_blob}
         )
 
-    # A new name for the cortex display blob forks provenance -> rejected.
     cortex_blob = (
         AnalyzerWaveformParameters
         & {"waveform_params_name": "franklab_cortex_actual_waveforms"}
@@ -289,7 +265,6 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
         AnalyzerWaveformParameters().insert1(
             {"waveform_params_name": "cortex_clone", "params": cortex_blob}
         )
-    # ...unless the escape hatch is set.
     try:
         AnalyzerWaveformParameters().insert1(
             {"waveform_params_name": "cortex_clone", "params": cortex_blob},
@@ -308,9 +283,7 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
 def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
     """The display recipe is a secondary Sorting attr, never sort identity.
 
-    ``sorting_id`` is content-addressed from (recording, sorter,
-    sorter_params, artifact_detection); the region-resolved display window is
-    NOT an input, so it cannot perturb idempotency.
+    It is not an input to the content-addressed ``sorting_id``.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
@@ -329,11 +302,8 @@ def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
 def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
     """A concat-backed sort resolves its recipe from the concat selection.
 
-    Drives the resolver with direct source-part rows (FK checks off) rather
-    than a populated ``ConcatenatedRecording``, keeping this a fast unit test:
-    the resolver must read the
-    ``ConcatenatedRecordingSelection -> PreprocessingParameters`` FK, NOT a
-    member ``RecordingSelection``.
+    It reads ``ConcatenatedRecordingSelection.preprocessing_params_name``,
+    not a member ``RecordingSelection``.
     """
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.session_group import (
@@ -379,11 +349,8 @@ def test_recording_source_display_recipe_resolved_by_region(
     """A single-recording sort resolves its display recipe from its source
     ``RecordingSelection.preprocessing_params_name`` (region).
 
-    Drives the resolver with direct ``RecordingSource`` rows (FK checks off) so
-    it does not depend on a full populate: hippocampus -> the 0.5/0.5 display
-    row, cortex -> the 1.0/2.0 display row, any other recipe -> the wide cortex
-    fallback. Pins the actual region behavior the generic populated-sort
-    integration (which only exercises the fallback) does not.
+    Hippocampus -> 0.5/0.5, cortex -> 1.0/2.0, anything else -> the wide
+    cortex fallback.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -413,12 +380,8 @@ def test_recording_source_display_recipe_resolved_by_region(
 def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
     """``Sorting.make_fetch`` resolves AND fetches the hippocampus 0.5/0.5 blob.
 
-    The build-window unit tests prove ``build_analyzer`` honors a 0.5/0.5 blob,
-    and the resolver tests prove the hippocampus recipe NAME resolves; this
-    closes the gap between them by driving the real ``make_fetch`` for a
-    hippocampus-source sort and asserting the resolved ``display_waveform_params``
-    blob it threads to ``make_compute`` is the 0.5/0.5 window (not the cortex
-    fallback the generic populated-sort integration exercises).
+    The blob passed to ``make_compute`` is the 0.5/0.5 window, not the
+    cortex fallback.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -435,9 +398,7 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
     PreprocessingParameters.insert_default()
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
-    # The planted Recording row names no real file. make_fetch's last step
-    # resolves the traces file (rebuilding it when missing), which this
-    # recipe check does not read, so resolve it to a placeholder path.
+    # The planted Recording has no file; this test never reads traces.
     monkeypatch.setattr(
         SortingSelection,
         "ensure_effective_traces",
@@ -455,8 +416,6 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
             fetched.display_waveform_params_name
             == "franklab_hippocampus_actual_waveforms"
         )
-        # The fetched blob (threaded into make_compute -> build_analyzer) is
-        # the hippocampus 0.5/0.5 window, not the cortex fallback.
         assert fetched.display_waveform_params["ms_before"] == 0.5
         assert fetched.display_waveform_params["ms_after"] == 0.5
         assert fetched.display_waveform_params["max_spikes_per_unit"] == 20000
@@ -465,15 +424,11 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
 def test_fetch_waveform_params_missing_row_raises(dj_conn):
     """Resolution is strict: a missing tracked row raises a clear error.
 
-    The analyzer's waveform parameters must be recorded in the database
-    (provenance); resolving an uninstalled recipe must fail loudly with an
-    actionable message, never silently fall back to a hardcoded / catalog
-    default.
+    Never falls back to a hardcoded default.
     """
     from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
-    # Ensure the row is absent, then assert the strict failure.
     missing = "definitely_not_installed_recipe"
     (
         AnalyzerWaveformParameters & {"waveform_params_name": missing}
@@ -499,23 +454,19 @@ def test_sorting_records_display_waveform_params(populated_sorting):
     if int(row["n_units"]) == 0:
         pytest.skip("zero-unit smoke sort: no analyzer to assert")
 
-    # The smoke sort uses the 'default' preprocessing recipe, which is not in
-    # the region map -> the wide cortex display fallback.
+    # 'default' is not in the region map -> cortex fallback.
     stored_name = row["display_waveform_params_name"]
     assert stored_name == CORTEX_DISPLAY_WAVEFORMS
 
-    # make_fetch resolves the row (DB I/O lives here, not in make_compute).
     fetched = Sorting().make_fetch(dict(populated_sorting))
     assert fetched.display_waveform_params_name == stored_name
     assert isinstance(fetched.display_waveform_params, dict)
     assert fetched.display_waveform_params["ms_before"] == 1.0
     assert fetched.display_waveform_params["ms_after"] == 2.0
 
-    # The on-disk analyzer folder is named by the stored recipe.
     folder = analyzer_path(sid, stored_name)
     assert folder.exists()
 
-    # Cache-miss rebuild resolves the SAME folder from the stored name.
     import shutil
 
     import spikeinterface as si
@@ -533,15 +484,8 @@ def test_rebuild_reads_stored_window_never_re_resolves(
 ):
     """A cache-miss rebuild reads the STORED recipe, never re-resolving region.
 
-    The contract is that the region-resolved window is computed once at sort
-    time, persisted on ``Sorting.display_waveform_params_name``, and never
-    re-derived from the recipe catalog on later rebuilds (otherwise a later
-    recipe-map change would silently shift an existing sort's window and its
-    ``peak_amplitude_uv``). The existing happy-path test can't distinguish
-    "read the stored field" from "re-resolved to the same answer" because the
-    map returns the same name. Here the sort-time resolver is monkeypatched to
-    RAISE, so any rebuild that re-resolves blows up loudly; a correct rebuild
-    (reading the stored field) never calls it.
+    A recipe-map change must not shift an existing sort's window. The
+    resolver is patched to raise, so re-resolving fails the test.
     """
     import shutil
 
@@ -573,7 +517,6 @@ def test_rebuild_reads_stored_window_never_re_resolves(
     shutil.rmtree(folder)
     assert not folder.exists()
 
-    # Rebuild must succeed WITHOUT calling the (now-raising) region resolver.
     analyzer = Sorting().get_analyzer(dict(populated_sorting))
     assert isinstance(analyzer, si.SortingAnalyzer)
     # Rebuilt under the originally-persisted recipe; the stored field is intact.
@@ -586,9 +529,8 @@ def test_rebuild_reads_stored_window_never_re_resolves(
 def test_sparsity_params_default_matches_si_and_validates_methods():
     """``sparsity`` defaults to SI's radius/100 um; method fields are checked.
 
-    The default must reproduce ``create_sorting_analyzer(sparse=True)``'s own
-    sparsity (so the numerical baseline matches SI's), and every
-    effective value -- including SI's own defaults -- is recorded in the row.
+    The default reproduces ``create_sorting_analyzer(sparse=True)``, and
+    every effective value is recorded in the row.
     """
     import pydantic
 

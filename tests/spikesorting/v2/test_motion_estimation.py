@@ -324,14 +324,8 @@ def test_default_rows_resolve():
 # same errors (RMS 0.319 - 0.273, max |error| 1.175 - 0.985).
 MEASURED_RIGID_RMS_UM = 0.319
 MEASURED_RIGID_MAX_ABS_UM = 1.175
-# Physical bounds on the same common-frame error, from the probe rather than
-# from a benchmark: the correction is useful only if the residual stays a
-# small fraction of one contact spacing (26 um pitch). A residual near one
-# pitch would put a unit on its neighbour's contact; leaving the +/-25 um
-# zigzag uncorrected has an RMS error of 25 / sqrt(3) ~ 14 um. One tenth of
-# the pitch (RMS) and one quarter of it (worst bin) are several times below
-# that failure level and several times above the measured errors, so they
-# fail only on a real estimation failure, not on platform numerics.
+# Physical bounds: 1/10 (RMS) and 1/4 (worst bin) of the 26 um pitch, well
+# below the uncorrected ~14 um RMS and well above platform numerics.
 PHYSICAL_RIGID_RMS_UM = 26.0 / 10
 PHYSICAL_RIGID_MAX_ABS_UM = 26.0 / 4
 MEASURED_STATIC_MAX_ABS_UM = 0.197
@@ -568,18 +562,12 @@ def test_non_positive_or_non_finite_noise_level_is_an_error(masked):
 
 @pytest.mark.parametrize("preset", ["rigid_fast", "dredge_fast"])
 def test_integer_calibrations_of_one_voltage_estimate_identically(preset):
-    """Two int16 encodings of the same microvolts (0.25 uV per count with
-    offset 0, and the counts shifted by 10000 with offset -2500 uV) estimate
-    exactly what the float microvolt recording of those values estimates.
-    Each source is masked directly with SpikeInterface's
-    ``silence_periods(..., mode="zeros")`` (``preprocessing/
-    silence_periods.py``) in its own raw units, so the int16 sources still
-    reach the estimator as int16 with their original gain/offset and its own
-    calibration step (``_motion.recording_in_microvolts``) does the
-    conversion to microvolts, rather than arriving pre-converted. The masked
-    range is therefore 0 raw counts on every source -- which reads back as
-    the channel offset voltage on the shifted encoding -- until the estimator
-    calibrates and re-silences it."""
+    """Two int16 encodings of the same microvolts (0.25 uV/count, with and
+    without a -2500 uV offset) estimate exactly what the float microvolt
+    recording does.
+
+    Each source is masked in raw units, so the estimator's own calibration
+    (``_motion.recording_in_microvolts``) converts and re-silences it."""
     from unittest import mock
 
     import spikeinterface.preprocessing as sip

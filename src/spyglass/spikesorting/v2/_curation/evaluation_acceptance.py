@@ -1,17 +1,7 @@
 """Acceptance workflow behind ``CurationEvaluation``'s acceptance verbs.
 
-The public verbs (``accept_evaluation_outputs``, ``preview_merges``,
-``accept_merges``, ``accept_all_suggested_merges``, ``use_evaluation_labels``,
-``overlay_evaluation_labels``) stay on ``CurationEvaluation``; this module turns
-an evaluation's outputs into a child ``CurationV2`` row. It requires a
-populated evaluation (:func:`evaluated_curation_key`), resolves which merges
-were accepted (:func:`resolve_accepted_merges`), and inserts a committed child
-(:func:`accept_evaluation_outputs`) or a draft with unapplied merges
-(:func:`create_preview_curation`). ``table`` is the ``CurationEvaluation``
-instance whose ``get_labels`` / ``get_suggested_merge_groups`` supply the
-proposals.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
+Turns an evaluation's outputs into a child ``CurationV2`` row. ``table`` is
+the ``CurationEvaluation`` instance. DataJoint tables are imported inside the
 functions.
 """
 
@@ -21,14 +11,8 @@ from __future__ import annotations
 def evaluated_curation_key(key) -> dict:
     """Resolve a CurationEvaluation key to its evaluated curation key.
 
-    Requires the ``CurationEvaluation`` row to be POPULATED, not merely
-    selected. Acceptance writes ``curation_source='curation_evaluation'``
-    children, so the workflow contract is "evaluate, THEN accept": minting
-    an evaluation-sourced child from a bare selection (no computed
-    metrics/proposals) would be a provenance lie. The check holds even when
-    labels / merge groups are supplied explicitly -- the provenance tag
-    claims an evaluation backs the child regardless of how the merges/labels
-    were chosen.
+    Requires a populated evaluation, even with explicit labels or merges,
+    since children are tagged ``curation_source='curation_evaluation'``.
     """
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -55,16 +39,9 @@ def resolve_accepted_merges(
 ) -> list[list[int]]:
     """Resolve the merge groups to accept (explicit, all-suggested, none).
 
-    Never applies all suggested merges implicitly: the caller must pass an
-    explicit ``merge_groups`` OR ``use_all_suggested_merges=True``.
-
-    CALLER-SUPPLIED ``merge_groups`` retain their group structure and require
-    integer unit IDs, so a singleton/empty group reaches
-    ``CurationV2.insert_curation``'s >=2-member typo guard and raises instead
-    of degrading into a labels-only child. Only the PERSISTED
-    suggestions (``use_all_suggested_merges``) are filtered to the real
-    (>=2-member) groups, since the stored suggestion set is not a caller
-    typo. All ids are in the evaluated curation's own unit namespace.
+    Suggestions apply only with ``use_all_suggested_merges=True`` and are
+    filtered to >=2-member groups. Caller groups are kept as-is so
+    ``insert_curation``'s typo guard sees singletons.
     """
     if merge_groups is not None and use_all_suggested_merges:
         raise ValueError(
@@ -134,12 +111,9 @@ def require_merge_acceptance(
 ) -> list[list[int]]:
     """Resolve merge groups for an action method and require a real merge.
 
-    Enforces the populated-evaluation contract BEFORE resolving suggestions:
-    the ``use_all_suggested_merges`` path reads the evaluation NWB via
-    ``get_suggested_merge_groups``, which on an unpopulated selection would fail with
-    an opaque fetch error instead of the friendly "populate first" message.
+    Checks population first so an unpopulated selection gets a clear error.
     """
-    evaluated_curation_key(key)  # populated-evaluation guard
+    evaluated_curation_key(key)
     accepted = resolve_accepted_merges(
         table, key, merge_groups, use_all_suggested_merges
     )
@@ -166,22 +140,9 @@ def create_preview_curation(
 ) -> dict:
     """Create a DRAFT (preview) child from the evaluation's outputs.
 
-    The explicit opt-in for drafting a merge for review before committing:
-    the proposed merges are recorded in ``CurationV2.MergeGroup`` WITHOUT
-    being applied (``apply_merge=False``), so the child is a preview --
-    ``has_unapplied_proposed_merges`` is True and downstream consumers
-    reject it until it is committed. Distinct from
-    ``CurationEvaluation.accept_evaluation_outputs``, which only ever
-    produces committed children. A preview is, by
-    definition, an UNAPPLIED merge for review, so it must actually draft a
-    merge: pass ``merge_groups`` or ``use_all_suggested_merges=True`` (and
-    the latter must resolve at least one merge). With no merge this would
-    otherwise produce a normal committed labels-only child, contradicting
-    the "preview/draft" contract -- so it raises instead. For a committed
-    labels-only child use ``CurationEvaluation.use_evaluation_labels`` /
-    ``CurationEvaluation.overlay_evaluation_labels``.
-
-    Returns the child's ``{"sorting_id", "curation_id"}``.
+    Records the merges unapplied (``apply_merge=False``); downstream
+    consumers reject the child until committed. Raises ``ValueError`` if no
+    merge resolves. Returns the child's ``{"sorting_id", "curation_id"}``.
     """
     curation_key = evaluated_curation_key(key)
     accepted = resolve_accepted_merges(

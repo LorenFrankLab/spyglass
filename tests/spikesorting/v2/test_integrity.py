@@ -1,40 +1,14 @@
 """Cross-table integrity tests for v2 spike-sorting tables.
 
-Tests verify cross-table invariants and transactional atomicity that
-the per-table tests in the ``single_session/`` suite do not
-exercise directly:
+- Every v2 ``AutoPopulate`` table uses tri-part ``make`` (compute runs outside
+  the transaction), except a documented exclusion set.
+- Each ``SortingSelection`` has exactly one source part, and an artifact-backed
+  sort maps to exactly one ``RecordingArtifactSelection``.
+- The v2 merge parts and ``source_class_dict`` entries are registered.
+- No part rows without a master.
 
-- **Tri-part dispatch active**: every v2 ``AutoPopulate`` table (discovered
-  from the package, minus a short documented exclusion set) uses DataJoint's
-  tri-part ``make_fetch`` / ``make_compute`` / ``make_insert`` rather than a
-  monolithic ``make``. The reason is to move the long-running compute step
-  OUTSIDE the framework transaction so it does not hold row locks.
-- **Selection FK consistency**: every ``SortingSelection`` master row has
-  EXACTLY one source-part row (recording XOR concatenated), and an
-  artifact-backed sort's ``artifact_detection_id`` maps back to exactly one
-  ``RecordingArtifactSelection`` master. (The artifact selection is
-  structurally single-source -- the recording source is a required master FK on
-  ``RecordingArtifactSelection``, not an XOR source part.)
-- **Merge-table v2 parts are correctly wired**:
-  ``SpikeSortingOutput.CurationV2`` and
-  ``SpikeSortingOutput.ConcatMemberCuration`` are the v2 routing entries;
-  v1's ``CurationV1`` and v0's ``CuratedSpikeSorting`` keep their
-  separate parts. ``source_class_dict["CurationV2"] = CurationV2``
-  so ``get_recording`` / ``get_sorting`` / ``get_sort_group_info``
-  / ``get_spike_times`` all dispatch correctly.
-- **No FK orphans**: no ``CurationV2.Unit`` row without a parent
-  ``CurationV2`` master, no ``Sorting.Unit`` row without a parent
-  ``Sorting``, no ``SharedArtifactGroup.Member`` row without a
-  parent ``SharedArtifactGroup``.
-
-The selection-FK and no-orphan tests share the package-scoped
-``populated_sorting`` fixture from ``conftest.py`` so they have at
-least one master row to exercise; without the fixture an empty test DB
-would let the iteration loops pass vacuously. The fixture is resolved
-from conftest rather than imported from a sibling test module so a CI
-shard split that collects this module alone still gets the populated
-state (a cross-module import would silently leave the loops iterating
-over an empty DB).
+The DB tests use the ``populated_sorting`` fixture so their loops are not
+vacuous.
 """
 
 from __future__ import annotations
@@ -46,9 +20,8 @@ import pytest
 pytestmark = pytest.mark.usefixtures("dj_conn")
 
 
-#: v2 ``AutoPopulate`` tables that intentionally keep a monolithic ``make``,
-#: each with the reason it does no work worth moving out of the framework
-#: transaction. Anything not listed here must be tri-part.
+#: v2 ``AutoPopulate`` tables that keep a monolithic ``make``, each with why.
+#: Anything not listed here must be tri-part.
 _MONOLITHIC_MAKE_EXCLUSIONS = {
     # DB reads plus a bounded pure-Python clique partition (``max_strict_nodes``
     # budget enforced); no SpikeInterface, NWB, or file I/O.
@@ -59,14 +32,9 @@ _MONOLITHIC_MAKE_EXCLUSIONS = {
 def _autopopulate_tables_in(package) -> dict[str, type]:
     """Return the ``AutoPopulate`` tables declared under ``package``.
 
-    Discovery imports every module in the package, subpackages included,
-    instead of trusting a hand-written list, so a new ``dj.Computed`` /
-    ``dj.Imported`` table cannot escape the check. Only classes defined in the
-    module being scanned count (re-exports are skipped). Tables are keyed by
-    ``f"{obj.__module__}.{obj.__qualname__}"`` so two same-named classes in
-    different modules stay apart; two distinct classes with one key (for
-    example two classes built by one factory function) fail here instead of
-    one silently replacing the other.
+    Imports every module, subpackages included; re-exports are skipped.
+    Tables are keyed by ``module.qualname``; two distinct classes with one key
+    raise.
     """
     import importlib
     import pkgutil
@@ -106,20 +74,12 @@ def _v2_autopopulate_tables() -> dict[str, type]:
 def test_tripart_dispatch_active_on_all_v2_computed_tables():
     """Every v2 ``AutoPopulate`` table routes through tri-part dispatch.
 
-    DataJoint fires tri-part dispatch only when
-    ``inspect.isgeneratorfunction(self.make)`` is True (the inherited
-    generator-based ``make`` from ``AutoPopulate``, which exists only when the
-    class defines ``make_fetch`` / ``make_compute`` / ``make_insert``); a
-    subclass that overrides ``make`` with a regular function runs monolithic,
-    with the whole ``make`` inside the populate transaction, and its tri-part
-    methods become dead code. ``_parallel_make`` routes
-    ``populate(processes>1)`` through Spyglass's non-daemon pool, which a
-    ``make_compute`` running SpikeInterface ``n_jobs>1`` needs.
-
-    The tables are discovered from the v2 package, not listed by hand. The
-    only exceptions are :data:`_MONOLITHIC_MAKE_EXCLUSIONS`, and those must
-    really be monolithic (a regular-function ``make``): an exclusion that was
-    converted, or that no longer exists, fails here so the set stays honest.
+    - DataJoint uses tri-part only when ``make`` is a generator function; a
+      regular ``make`` override runs monolithic.
+    - ``_parallel_make`` is required so ``populate(processes>1)`` uses the
+      non-daemon pool that SI ``n_jobs>1`` needs.
+    - Each :data:`_MONOLITHIC_MAKE_EXCLUSIONS` entry must exist and be
+      monolithic.
     """
     tables = _v2_autopopulate_tables()
 
@@ -328,10 +288,7 @@ def test_table_discovery_rejects_two_tables_with_one_key(tmp_path, monkeypatch):
 def test_v2_dispatch_classes_wired_into_merge_table():
     """Both v2 source classes and merge parts are registered.
 
-    This is a registration / wiring check only -- behavioral
-    coverage that the dispatch methods (``get_recording`` /
-    ``get_sorting`` / etc.) actually return correct results on a
-    v2 merge_id lives in ``test_downstream_consumers.py``.
+    Dispatch behavior is tested in ``test_downstream_consumers.py``.
     """
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
@@ -361,19 +318,9 @@ def test_v2_dispatch_classes_wired_into_merge_table():
 def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
     populated_sorting,
 ):
-    """A ``SortingSelection`` master reachable from the populated fixture has
-    EXACTLY one source-part row (recording XOR concatenated) and, when
-    artifact-backed, its ``artifact_detection_id`` maps back to exactly one
-    ``RecordingArtifactSelection`` master.
-
-    The sort source is recorded in exactly one of the two XOR source parts --
-    never zero (the insert_selection path failed atomicity) and never more than
-    one (a logical contradiction). The artifact selection is structural
-    single-source: the recording is a required FK on the
-    ``RecordingArtifactSelection`` master, so on that side the FK chain is what
-    remains to guard -- an artifact-backed sort's ``artifact_detection_id``
-    points at exactly one master (never zero: insert_selection would have failed
-    atomicity).
+    """A ``SortingSelection`` has exactly one source part (recording XOR
+    concatenated) and, when artifact-backed, its ``artifact_detection_id`` maps
+    to exactly one ``RecordingArtifactSelection``.
     """
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactSelection,
@@ -402,8 +349,6 @@ def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
     )
 
     # Artifact master reachable via SortingSelection -> artifact_detection_id.
-    # The recording-backed fixture's detection lives in the split
-    # RecordingArtifactSelection master (recording is a required FK on it).
     art_id = SortingSelection.resolve_artifact_detection(sort_master_pk)
     art_master_rows = RecordingArtifactSelection & {
         "artifact_detection_id": art_id
@@ -418,24 +363,14 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
     """No ``CurationV2.Unit`` / ``Sorting.Unit`` /
     ``SharedArtifactGroup.Member`` row without a parent master.
 
-    DataJoint's FK cascade should prevent this; the test is a
-    cheap belt-and-suspenders guard against an accidental
-    ``super_delete`` ordering bug that leaks orphans.
-
-    The fixture guarantees at least one ``Sorting.Unit`` row;
-    ``CurationV2.Unit`` and ``SharedArtifactGroup.Member`` may
-    legitimately be empty in this fixture state, in which case the
-    no-orphan check is trivially satisfied for those tables. The
-    ``Sorting.Unit`` non-empty guard is the load-bearing one.
+    Only ``Sorting.Unit`` is guaranteed non-empty by the fixture.
     """
     _ = populated_sorting  # ensure population
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    # Sorting.Unit -> Sorting master. This relation is guaranteed
-    # non-empty by the populated_sorting fixture; the assertion
-    # protects against a vacuous pass if it is ever empty.
+    # Sorting.Unit -> Sorting master; must be non-empty.
     sorting_unit_keys = (Sorting.Unit).fetch("KEY", as_dict=True)
     assert len(sorting_unit_keys) >= 1, (
         "Sorting.Unit is empty; orphan check would pass vacuously. "
@@ -447,9 +382,7 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
             len(Sorting & {"sorting_id": sid}) == 1
         ), f"Sorting.Unit references missing master sorting_id={sid!r}"
 
-    # CurationV2.Unit -> CurationV2 master. May be empty if no
-    # curation has been inserted; the FK check still runs on any
-    # rows that exist.
+    # CurationV2.Unit -> CurationV2 master; may be empty.
     unit_keys = (CurationV2.Unit).fetch("KEY", as_dict=True)
     master_pks = {(r["sorting_id"], r["curation_id"]) for r in unit_keys}
     for sid, cid in master_pks:
@@ -458,9 +391,7 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
             f"sorting_id={sid!r}, curation_id={cid!r}"
         )
 
-    # SharedArtifactGroup.Member -> SharedArtifactGroup master.
-    # Same: may be empty in fixtures that don't exercise the
-    # shared-artifact path.
+    # SharedArtifactGroup.Member -> SharedArtifactGroup master; may be empty.
     member_keys = (SharedArtifactGroup.Member).fetch("KEY", as_dict=True)
     group_master_pks = {r["shared_artifact_group_name"] for r in member_keys}
     for name in group_master_pks:
@@ -473,18 +404,11 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
 
 
 def test_v2_lookup_tables_validate_via_pydantic():
-    """``PreprocessingParameters`` / ``ArtifactDetectionParameters``
-    / ``SorterParameters`` all validate ``params`` through Pydantic
-    on ``insert1``. The ``_validate_params`` +
-    ``_assert_schema_version_matches`` wiring is the contract; a
-    refactor that silently dropped either check would let bogus
-    params blobs land in the Lookup tables and crash only at
-    populate time.
+    """``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
+    ``SorterParameters`` validate ``params`` through Pydantic on ``insert1``.
 
-    The ``match=`` strings pin the assertion to the validator's
-    own message (the offending field name), so an unrelated
-    ``DataJointError`` (e.g. a PK collision) cannot satisfy the
-    raises-context.
+    ``match=`` names the offending field so an unrelated ``DataJointError``
+    cannot satisfy the check.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,

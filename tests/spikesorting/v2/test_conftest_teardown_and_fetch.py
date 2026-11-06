@@ -1,9 +1,6 @@
 """Tests for the shared pytest harness: teardown, fixture fetching, warnings.
 
-These exercise the *harness itself* (``tests/conftest.py`` teardown, the shared
-``DataDownloader``), not any Spyglass pipeline, so they run DB-free. Run with
-``--no-docker`` to skip the MySQL container the root ``pytest_configure`` would
-otherwise build at session start.
+DB-free; run with ``--no-docker`` to skip the MySQL container.
 """
 
 from __future__ import annotations
@@ -17,15 +14,8 @@ import pytest
 def test_unconfigure_tolerates_unbound_server():
     """``pytest_unconfigure`` must not raise when ``SERVER`` is unset.
 
-    ``pytest_configure`` sets ``TEARDOWN`` before it binds ``SERVER`` (the latter
-    only after building the Docker MySQL manager). If configure raises in between
-    -- e.g. Docker is unavailable -- pytest still runs ``pytest_unconfigure`` from
-    ``wrap_session``'s ``finally``. An unguarded ``SERVER.stop()`` would then
-    raise a second traceback (``NameError`` where the name was never bound;
-    ``AttributeError`` here, where we bind the module default ``None``) that
-    buries the real configuration error. The module-level ``SERVER = None``
-    default plus the ``SERVER is not None`` teardown guard make the real error
-    surface instead.
+    If ``pytest_configure`` fails before binding ``SERVER`` (e.g. no Docker),
+    unconfigure still runs; a second traceback would bury the real error.
     """
     import tests.conftest as root_conftest
 
@@ -40,8 +30,7 @@ def test_unconfigure_tolerates_unbound_server():
         root_conftest.SERVER = None
         root_conftest.TMP_BASE_DIR = None
 
-        # Must not raise. Unguarded, this would raise AttributeError on
-        # ``None.stop()`` (NameError where the name is unbound).
+        # Must not raise.
         root_conftest.pytest_unconfigure(_DummyConfig())
     finally:
         for name, value in saved.items():
@@ -72,12 +61,8 @@ class _FakePopen:
 def test_data_downloader_no_download_on_construction(tmp_path, monkeypatch):
     """Constructing the shared ``DataDownloader`` must not launch a download.
 
-    The root ``pytest_configure`` builds a ``DataDownloader`` against a fresh,
-    empty temp ``base_dir`` on every session -- including pure-helper runs that
-    touch no DB and no sample data. Resolving ``file_downloads`` eagerly in
-    ``__init__`` would spawn a ``curl`` per absent file (minirec + videos) for
-    tests that never consume them, so the download fires lazily, on the first
-    ``wait_for`` / ``move_dlc_items`` call.
+    Every session builds one, so downloads wait for the first ``wait_for`` /
+    ``move_dlc_items`` call.
     """
     import tests.data_downloader as dd
 
@@ -96,11 +81,7 @@ def test_data_downloader_no_download_on_construction(tmp_path, monkeypatch):
 
 
 def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
-    """The deferred download still fires when a consumer calls ``wait_for``.
-
-    Deferring the download must not turn into never downloading: tests that
-    genuinely need minirec/video must still get them.
-    """
+    """The deferred download still fires when a consumer calls ``wait_for``."""
     import tests.data_downloader as dd
 
     launched = []
@@ -120,18 +101,12 @@ def test_data_downloader_downloads_lazily_on_wait_for(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# The v2 smoke fixture is fetched only when a collected test needs the DB, not
-# unconditionally at session start, so pure-helper unit runs that consume
-# nothing do not download the 57MB fixture.
+# The v2 smoke fixture is fetched only when a collected test needs the DB.
 # --------------------------------------------------------------------------
 
 
 def test_eager_fetch_names_empty_for_pure_helper_run(monkeypatch):
-    """With neither env var set, session start downloads nothing eagerly.
-
-    A pure-helper run that requires no fixture and opts into no full fetch
-    triggers no download at session start.
-    """
+    """With neither env var set, session start downloads nothing eagerly."""
     from tests.spikesorting.v2.conftest import _eager_fetch_names
 
     monkeypatch.delenv("SPYGLASS_V2_REQUIRE_FIXTURES", raising=False)
@@ -195,7 +170,7 @@ def test_smoke_fixture_fetches_missing_verified_artifact(tmp_path, monkeypatch):
 
 
 def test_smoke_fixture_download_failure_is_an_error(tmp_path, monkeypatch):
-    """A missing required input cannot silently skip a targeted regression."""
+    """A missing required input fails instead of skipping its test."""
     from tests.spikesorting.v2.conftest import smoke_nwb
     from tests.spikesorting.v2.fixtures import _fetch
 
@@ -306,16 +281,10 @@ def test_require_fixtures_gate_ignores_stale_ingested_copies(
 ):
     """A leftover ingest copy must not satisfy a downloaded fixture's check.
 
-    ``copy_and_insert_nwb`` copies every ingested fixture into the shared raw
-    data directory under its own stem, so that directory accumulates files
-    named exactly like the v2 fixtures. The check exists to prove THIS run
-    downloaded and verified the fixture, so only
-    ``tests/spikesorting/v2/fixtures/<name>.nwb`` counts for a name
-    ``_fetch.py`` knows.
-
-    The real recorded session (``minirec20230622``) has no entry there -- CI
-    curls it straight into the raw data directory -- so for that name, and
-    only that name, the raw directory is where the check looks.
+    - A name ``_fetch.py`` knows counts only in
+      ``tests/spikesorting/v2/fixtures/`` (ingest copies land in the raw dir).
+    - ``minirec20230622`` is not in ``_fetch.py`` (CI curls it into the raw
+      dir), so only it is looked for there.
     """
     import tests.spikesorting.v2.conftest as v2_conftest
     from tests.spikesorting.v2.conftest import _missing_required_fixtures
@@ -351,21 +320,17 @@ def test_require_fixtures_gate_ignores_stale_ingested_copies(
     (fixtures_dir / "mearec_polymer_smoke.nwb").write_bytes(b"downloaded")
     assert _missing_required_fixtures(required) == []
 
-    # ...and the fixtures directory is NOT where the real session is looked
-    # for, so a file of that name there does not clear it.
+    # The real session is not looked for in the fixtures directory.
     (raw_dir / "minirec20230622.nwb").unlink()
     (fixtures_dir / "minirec20230622.nwb").write_bytes(b"wrong home")
     assert _missing_required_fixtures(required) == ["minirec20230622"]
 
 
 def test_missing_fixture_message_separates_unhosted_from_failed(monkeypatch):
-    """The check's exit message says WHY each required fixture is absent.
+    """The check's exit message names each absent fixture under its reason.
 
-    A fixture with no download URL is not hosted, so no re-run can fix it and
-    the message must point at the hosting instructions. A fixture that has a
-    URL, or that ``_fetch.py`` does not know (the curled real session), is
-    absent because a download failed or a link went stale. Each stem must be
-    named only under its own reason.
+    - No download URL: not hosted; point at the hosting instructions.
+    - Has a URL, or unknown to ``_fetch.py``: the download failed.
     """
     from tests.spikesorting.v2.conftest import _missing_fixtures_message
     from tests.spikesorting.v2.fixtures import _fetch
@@ -397,20 +362,10 @@ def test_missing_fixture_message_separates_unhosted_from_failed(monkeypatch):
 
 
 def test_require_fixtures_gate_still_exits_nonzero():
-    """The required-fixture check fails loudly when a required fixture is
-    absent.
-
-    Fetching fixtures lazily must not weaken this into a silent skip: CI relies
-    on it to catch a fixture whose download failed. Run a child pytest that
-    requires a genuinely-absent fixture and assert it exits non-zero with a
-    pointed message.
-    """
-    # Target this very module by its absolute path (``__file__``) so the
-    # reference can never rot when the file is renamed. The check fires in the
-    # package ``pytest_sessionstart`` regardless of which path is collected;
-    # using a real, collectable module guarantees the ONLY reason for a
-    # non-zero exit is the check -- a bogus path would exit non-zero on its own
-    # and mask a weakened check (false green).
+    """A child pytest requiring an absent fixture exits non-zero with a
+    pointed message, not a skip."""
+    # Collect this real module, so the check is the only reason to exit
+    # non-zero (a bogus path would fail on its own).
     proc = subprocess.run(
         [
             sys.executable,
@@ -443,9 +398,7 @@ def test_require_fixtures_gate_still_exits_nonzero():
     assert proc.returncode != 0, (
         "check did not fail on a missing required fixture:\n" + out
     )
-    # The non-zero exit must come from the check, not a file-not-found /
-    # collection error -- otherwise this test would stay green even if the check
-    # stopped firing.
+    # The non-zero exit must come from the check, not a collection error.
     assert "Required v2 fixtures are absent" in out, (
         "exit was not the required-fixture check:\n" + out
     )
@@ -463,10 +416,8 @@ def _clean_env():
 
 
 # --------------------------------------------------------------------------
-# Every category named in ``filterwarnings`` must stay resolvable, so toggling
-# ``-p no:warnings`` (a developer wanting to see warnings) does not break
-# collection. pytest resolves a bare category against ``builtins``; a bare
-# *custom* category therefore fails with AttributeError.
+# Every ``filterwarnings`` category must resolve so ``-p no:warnings`` does
+# not break collection.
 # --------------------------------------------------------------------------
 
 

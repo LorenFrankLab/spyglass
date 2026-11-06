@@ -1,15 +1,6 @@
 """Pre-staging steps of ``CurationV2.insert_curation``.
 
-``insert_curation`` stays on ``CurationV2`` as the orchestrator: it stages the
-curated-units NWB and then commits the rows in one transaction, retrying on a
-concurrent ``curation_id`` collision. The steps before staging live here:
-:func:`normalize_curation_inputs` validates the labels and source,
-:func:`validate_parent_or_reuse_root` checks the parent (or returns an existing
-root to reuse), :func:`resolve_curation_source` reads what the new curation
-composes from, and :func:`find_matching_child_curation` finds an existing
-child with the same content. ``table_cls`` is ``CurationV2``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
+``table_cls`` is ``CurationV2``. DataJoint tables are imported inside the
 functions.
 """
 
@@ -86,14 +77,8 @@ def normalize_curation_inputs(
     value, an unrecognized label, a non-integer ID, or an invalid source.
     """
     if labels is None:
-        # ``None`` is semantically equivalent to "no labels".
-        # Normalize to ``{}`` so the rest of the helper does not
-        # need an extra None check.
         labels = {}
-    # Reject a scalar string label value BEFORE coercing to list:
-    # ``list("custom_tag")`` would silently split into per-character
-    # labels (and ``allow_custom_labels=True`` would then write them).
-    # A label value must be an explicit list/tuple of labels.
+    # ``list("mua")`` would split a scalar into per-character labels.
     for uid, lbls in labels.items():
         if isinstance(lbls, str) or not isinstance(lbls, (list, tuple)):
             raise ValueError(
@@ -102,8 +87,6 @@ def normalize_curation_inputs(
                 f"unit_id={uid}. Wrap a single label as a one-element "
                 'list, e.g. {unit_id: ["mua"]}.'
             )
-    # Normalize label keys to int once so the rest of the helper
-    # can do straight ``labels.get(int_uid, [])`` lookups.
     labels = {
         lossless_int(uid, "label unit_id"): list(lbls)
         for uid, lbls in labels.items()
@@ -111,10 +94,7 @@ def normalize_curation_inputs(
 
     validate_labels(labels, allow_custom_labels=allow_custom_labels)
 
-    # Coerce curation_source through the enum up front so a typo raises a
-    # friendly error on EVERY path -- including the idempotent
-    # existing-root early return below, which would otherwise swallow an
-    # invalid value and return the existing root instead of rejecting it.
+    # Coerce first so the existing-root reuse path cannot swallow a typo.
     try:
         curation_source = CurationSource(curation_source).value
     except ValueError as exc:
@@ -140,13 +120,13 @@ def validate_parent_or_reuse_root(
 ) -> dict | None:
     """Validate the parent curation, or return an existing root to reuse.
 
-    For a child curation (``parent_curation_id != -1``) verifies the
-    parent row exists. For a root curation (``parent_curation_id ==
-    -1``) returns the canonical existing-root key when one already
-    exists (idempotent re-insert), or ``None`` to proceed with a fresh
-    insert. Raises ``ValueError`` if the named parent is missing, or if
-    a root already exists and the caller passed non-default parameters
-    without ``reuse_existing=True``.
+    - Child: verifies the parent exists and is committed.
+    - Root (``parent_curation_id == -1``): returns the existing root's key,
+      or ``None`` for a fresh insert.
+
+    Raises ``ValueError`` if the parent is missing or a preview, or if a
+    root exists and non-default parameters were passed without
+    ``reuse_existing=True``.
     """
     from spyglass.utils import logger
 
@@ -162,17 +142,8 @@ def validate_parent_or_reuse_root(
                 f"{sorting_id}. Pass parent_curation_id=-1 for a "
                 "root curation."
             )
-        # Reject building on a PREVIEW/draft parent. A preview
-        # (apply_merge=False with an unapplied proposed merge) is not a
-        # committed state: a child of it would get self-only
-        # ParentMergeGroup rows -- so get_unit_contributor_groups /
-        # has_unapplied_proposed_merges would read the child as committed --
-        # AND its raw MergeGroup would inherit the parent's UNAPPLIED
-        # proposed merge as though it had been applied. Either way the
-        # draft is silently laundered into a committed-looking curation.
-        # Commit the draft (commit_merges /
-        # insert_curation(apply_merge=True) on the proposed groups) or
-        # discard it, then branch from the committed curation.
+        # A child of a preview would read as committed and inherit its
+        # unapplied merges as applied.
         if not table_cls.is_committed_curation(parent_key):
             raise ValueError(
                 f"CurationV2.insert_curation: parent_curation_id="
@@ -185,15 +156,7 @@ def validate_parent_or_reuse_root(
                 "committed curation."
             )
     else:
-        # Idempotency: if a root curation already exists for this
-        # sorting_id, return its key without staging a new NWB or
-        # creating a duplicate row. Without this, every repeat
-        # call grows another row + analysis file + merge-table
-        # entry.
-        # ``order_by="curation_id"`` makes the reused root deterministic:
-        # if more than one root somehow exists (a raw/manual insert that
-        # bypassed this helper), the canonical lowest-curation_id root is
-        # returned every time rather than a DB-row-order coin flip.
+        # Reuse an existing root; order_by picks the lowest id if several.
         existing_root = (
             table_cls
             & {
@@ -202,18 +165,7 @@ def validate_parent_or_reuse_root(
             }
         ).fetch("KEY", as_dict=True, order_by="curation_id")
         if existing_root:
-            # A root curation already exists. If the caller passed ANY
-            # non-default parameter -- labels / merge_groups / description
-            # / apply_merge / a non-"manual" curation_source -- it would be
-            # SILENTLY ignored by returning the existing row, a
-            # parameter-change-with-no-effect footgun. The apply_merge /
-            # curation_source cases matter because ``merges_applied`` and
-            # the curation provenance record user intent: a second
-            # ``apply_merge=True`` insert must NOT quietly return a
-            # ``merges_applied=False`` root. Raise unless the caller opts
-            # into reuse. curation_source is already coerced to its enum
-            # value above, so a typo has already raised before reaching
-            # this point (it is never silently treated as "unchanged").
+            # Returning the root would silently ignore non-default params.
             curation_source_changed = curation_source != "manual"
             if (
                 bool(labels)
@@ -249,25 +201,16 @@ def resolve_curation_source(
 ) -> tuple[list[dict], str | None, dict[int, list[int]] | None, dict]:
     """Resolve where a curation composes its units / trains / labels from.
 
-    A root curation (``parent_curation_id == -1``) composes from the raw
-    sort; a child composes from its PARENT ``CurationV2`` row. Returns
-    ``(source_units, source_units_abs_path, parent_raw_contributors,
-    parent_labels)``:
+    A root (``parent_curation_id == -1``) composes from the raw sort; a
+    child from its parent ``CurationV2`` row. Returns:
 
-    * ``source_units`` -- the source ``Unit`` rows the merge/label plan is
-      built over (raw ``Sorting.Unit`` for a root, parent
-      ``CurationV2.Unit`` for a child). Both shapes carry ``unit_id`` + the
-      peak ``Electrode`` FK + ``peak_amplitude_uv`` + ``n_spikes``.
-    * ``source_units_abs_path`` -- the units NWB to read source spike
-      trains from (``None`` for a root -> the raw Sorting NWB; the parent
-      curation's NWB for a child).
-    * ``parent_raw_contributors`` -- ``{parent_unit_id: [raw contributor
-      ids]}`` from the PARENT's ``MergeGroup`` (always raw by invariant),
-      so a child's parent-namespace contributors can be expanded back to
-      raw provenance. ``None`` for a root (its contributors are already
-      raw).
-    * ``parent_labels`` -- the parent's ``{unit_id: [label, ...]}`` for
-      label inheritance (``{}`` for a root).
+    - ``source_units``: raw ``Sorting.Unit`` or parent ``CurationV2.Unit``
+      rows.
+    - ``source_units_abs_path``: the parent's units NWB (``None`` for root:
+      the raw Sorting NWB).
+    - ``parent_raw_contributors``: ``{parent_unit_id: [raw ids]}`` from the
+      parent's ``MergeGroup`` (``None`` for root).
+    - ``parent_labels``: ``{unit_id: [label, ...]}`` (``{}`` for root).
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 

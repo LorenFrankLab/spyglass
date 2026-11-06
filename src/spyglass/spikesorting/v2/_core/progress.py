@@ -1,10 +1,7 @@
 """Step reports from long computations to whoever is showing their progress.
 
-A connected browser review runs each action in a worker process that can take
-minutes (a merge re-evaluates the whole sort). The worker installs a reporter
-with :func:`progress_reporter`; scientific code calls :func:`report_progress`
-at each step and stays unaware of the review. With no reporter installed, a
-report does nothing.
+A review worker installs a reporter with :func:`progress_reporter`; compute
+code calls :func:`report_progress`, which is a no-op without a reporter.
 """
 
 from __future__ import annotations

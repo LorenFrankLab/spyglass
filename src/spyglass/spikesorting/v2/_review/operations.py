@@ -37,9 +37,8 @@ run_operation(**request)
 
 def _worker_error_tail(stream):
     """Read a bounded utf-8 diagnostic, even after a noisy scientific run."""
-    # Four bytes per character cover the final N Unicode characters without
-    # loading the entire file. A partial leading character is outside the tail
-    # or decoded with replacement rather than hiding the worker's exception.
+    # Four bytes per character bound the read; a split leading character
+    # decodes with replacement.
     limit = 4 * _WORKER_ERROR_TAIL_CHARS
     stream.seek(0, os.SEEK_END)
     stream.seek(max(0, stream.tell() - limit))
@@ -51,9 +50,8 @@ def _worker_error_tail(stream):
 def _acquire_operation_lock(bundle):
     """Own a bundle until both the launcher and its worker close the file.
 
-    The descriptor is inherited by the worker on our supported Linux/macOS
-    hosts. Closing a notebook or restarting its HTTP server therefore cannot
-    release ownership while the scientific operation is still running.
+    The worker inherits the descriptor (Linux/macOS), so closing the notebook
+    or server cannot release ownership mid-operation.
     """
     import fcntl
 
@@ -129,9 +127,7 @@ class ReviewOperationService:
             "lock_fd": lock_fd,
         }
         try:
-            # Scientific progress can be large. Stderr goes straight to an
-            # anonymous disk file and stdout is discarded (never used by this
-            # transport); neither stream is buffered in the launcher process.
+            # Output can be large: stderr goes to disk, stdout is discarded.
             with tempfile.TemporaryFile() as stderr:
                 subprocess.run(
                     [sys.executable, "-c", _WORKER],
@@ -164,9 +160,8 @@ class ReviewOperationService:
             operation_lock = _acquire_operation_lock(self.bundle)
         except BlockingIOError:
             state = read_json(self.bundle / OPERATION_FILE)
-            # The worker journals its result before exiting. Keep actions
-            # disabled until ownership is released, or an immediate commit
-            # after preview can fail on the previous worker's lock.
+            # Report running until the lock is released, or a quick commit
+            # after preview hits the previous worker's lock.
             if state.get("status") != "running":
                 state.update(
                     status="running", message="Finishing review operation…"

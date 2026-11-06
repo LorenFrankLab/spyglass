@@ -1,22 +1,7 @@
 """Units-NWB read/write IO for v2 sorts.
 
-These functions are the units-NWB IO core behind ``Sorting`` and
-``CurationV2``: reading a units NWB's stored ABSOLUTE spike times,
-reading the required sample-frame and observation-window columns, writing the
-pre-curation sorting-units NWB (``write_sorting_units_nwb``), and writing
-the post-curation curated-units NWB (``write_curated_units_nwb``). Most take
-already-resolved paths / SpikeInterface objects / fetched row dicts and do
-pure pynwb IO;
-``write_curated_units_nwb`` is the exception -- it resolves the source
-sort itself (``Sorting`` / ``SortingSelection`` / ``RecordingSelection``
-fetches) before writing, so ``CurationV2.insert_curation`` stays a thin
-orchestrator. ``Sorting`` and ``CurationV2`` share the readback helpers here.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: like ``_storage.analyzer_cache``, the only DataJoint
-dependency (``AnalysisNwbfile`` for path resolution / file creation) is
-imported lazily at call time. The IO itself is pynwb against the
-filesystem, not the database.
+Shared by ``Sorting`` and ``CurationV2``. DB-free at import;
+``write_curated_units_nwb`` alone queries the source sort before writing.
 """
 
 from __future__ import annotations
@@ -120,9 +105,7 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
 def read_units_abs_spike_times(abs_path) -> dict:
     """Return ``{unit_id(int): abs_spike_times(np.ndarray seconds)}``.
 
-    The persisted wall-clock ``spike_times`` exactly -- no affine round-trip
-    and no full DataFrame materialization. ``{}`` for an empty/absent Units
-    table (see :func:`read_units_columns`).
+    ``{}`` for an empty or absent Units table.
     """
     return read_units_columns(abs_path, ("spike_times",))[0]
 
@@ -130,9 +113,8 @@ def read_units_abs_spike_times(abs_path) -> dict:
 def read_units_spike_sample_indices(abs_path) -> dict:
     """Return ``{unit_id: spike_sample_index}`` from a current v2 Units NWB.
 
-    Stored sample frames reconstruct ``NumpySorting`` objects without reading
-    the upstream recording's full timestamp vector. Populated tables require
-    sample frames and observation intervals; empty/absent tables return ``{}``.
+    Avoids reading the recording's timestamps. ``{}`` for an empty or absent
+    Units table.
     """
     return read_units_columns(abs_path, (SPIKE_SAMPLE_INDEX_COLUMN,))[0]
 
@@ -140,23 +122,9 @@ def read_units_spike_sample_indices(abs_path) -> dict:
 def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
     """Open the units NWB ONCE; return ``(abs_times, sample_indices, obs)``.
 
-    :func:`read_units_columns` of ``spike_times``, ``spike_sample_index`` and
-    ``obs_intervals``, for callers that need all three (curated-units write +
-    lazy-merge preview). ``obs`` is ``{unit_id: obs_intervals}`` (the per-unit
-    ``(n, 2)`` observation window); the curated writer carries it forward
-    so a curated export keeps the correct observation window; without
-    it, NWB-only firing-rate / presence-ratio / duration denominators over a
-    curated export silently assume the full session.
-
-    ``unit_ids`` (optional iterable of int): when given, read ONLY those units'
-    spike trains / sample frames / obs rather than every unit -- so a curation
-    that keeps a subset of a large multi-day sort never materializes the
-    discarded units' data. ``None`` (the default) reads every unit, for the
-    preview / full-write paths that need all of them (see
-    ``curation_source_unit_ids``). A requested id absent from the table is
-    skipped: the caller's kept-set is authoritative, and a genuinely-missing
-    source unit surfaces as a downstream KeyError, as it would without the
-    filter.
+    ``obs`` is ``{unit_id: (n, 2) obs_intervals}``; the curated writer carries
+    it forward so exported rates use the right denominator. ``unit_ids``
+    restricts the read, as in :func:`read_units_columns`.
     """
     return read_units_columns(
         abs_path,
@@ -168,14 +136,8 @@ def read_units_abs_times_and_sample_indices(abs_path, *, unit_ids=None):
 def curation_source_unit_ids(kept_unit_to_contributors, apply_merge):
     """Return the source unit ids ``write_curated_units_nwb`` will actually read.
 
-    Mirrors ``_write_curated_units_nwb_body``'s access so the curated-units write
-    reads only the kept subset rather than every source unit (a large multi-day
-    sort otherwise materializes the discarded units' trains too). With
-    ``apply_merge=True`` a multi-contributor kept unit reads each contributor's
-    train and a single-contributor kept unit reads its own (by its kept id == the
-    surviving source id); the fresh merged-head id is never read from the source
-    file. With ``apply_merge=False`` every original unit is written 1:1
-    (preview), so this returns ``None`` -> read all.
+    Must mirror ``_write_curated_units_nwb_body``'s reads. A merged unit reads
+    its contributors; a fresh merged id is never read from the source.
 
     Parameters
     ----------
@@ -222,8 +184,7 @@ def numpysorting_from_sample_indices(sample_indices, fs):
 def sorting_from_units_nwb(abs_path, sampling_frequency):
     """Read a current v2 Units NWB using its stored source-recording frames.
 
-    Shared by Sorting, CurationV2, ConcatMemberCuration, and tri-part compute
-    readers. Performs no DB access or source-recording timestamp reads.
+    No DB access or timestamp reads.
     """
     return numpysorting_from_sample_indices(
         read_units_spike_sample_indices(abs_path), sampling_frequency
@@ -231,11 +192,7 @@ def sorting_from_units_nwb(abs_path, sampling_frequency):
 
 
 class StoredUnits(NamedTuple):
-    """A Units NWB path and source rate for DB-free frame readback.
-
-    Tri-part ``make_fetch`` resolves these scalar inputs and ``make_compute``
-    reads them with :func:`read_stored_units`.
-    """
+    """A Units NWB path and source rate for DB-free frame readback."""
 
     abs_path: str
     sampling_frequency: float
@@ -286,9 +243,8 @@ def build_lazy_merged_sorting_from_samples(
 ):
     """Reconstruct a lazily-merged sorting using stored frames.
 
-    Deduplication still happens in absolute time so disjoint-recording gaps are
-    respected. The kept absolute-time events carry their aligned sample frames
-    through the same mask, avoiding a full recording timestamp-vector read.
+    Deduplicates in absolute time so recording gaps are respected; the kept
+    events' frames come through the same mask.
     """
     abs_times, sample_indices = _validated_spike_mappings(
         abs_times, sample_indices
@@ -449,9 +405,6 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 
     from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 
-    # A unit's spike frames may be unsorted or repeat; ``_segment_times_at``
-    # reads the sorted unique frames the h5py-/mmap-backed timestamp vector
-    # requires and scatters them back -- no full-vector materialization.
     return {
         int(uid): finite_vector(
             _segment_times_at(recording, frames), name="spike_times"
@@ -463,12 +416,8 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
 def recording_timestamps(recording_row):
     """Return the full timestamp vector of the upstream Recording.
 
-    Reads the persisted ``ElectricalSeries`` timestamps -- which for
-    disjoint sort intervals are gap-preserving (non-uniform). Member exports
-    use this acquisition clock to map stored frames back to wall-clock times;
-    the affine ``t_start + i/fs`` assumption is wrong across gaps.
-    Reads only the timestamps dataset (not the traces), so it is far
-    lighter than loading the full SI recording.
+    Timestamps keep gaps between disjoint sort intervals, so
+    ``t_start + i/fs`` would be wrong. Reads no traces.
 
     Parameters
     ----------
@@ -491,9 +440,6 @@ def recording_timestamps(recording_row):
 
 def read_series_timestamps(abs_path, electrical_series_path):
     """Read a persisted ``ElectricalSeries``' full timestamp vector; no DB.
-
-    The file-level half of :func:`recording_timestamps`, for callers that
-    resolved the artifact path already.
 
     Parameters
     ----------
@@ -518,9 +464,8 @@ def read_series_timestamps(abs_path, electrical_series_path):
         return np.asarray(series.timestamps[:], dtype=np.float64)
 
 
-#: Sorting-provenance field holding the sort's statistics spans: the
-#: artifact-free half-open frame ranges of the sorted recording that never
-#: cross a selection or member join, as a JSON list of ``[start, end]`` pairs.
+#: Sorting-provenance field: artifact-free half-open frame spans that never
+#: cross a join, as ``[start, end]`` pairs.
 STATISTICS_SPANS_FIELD = "statistics_spans"
 
 
@@ -544,9 +489,10 @@ def read_sorting_statistics_spans(
     Raises
     ------
     RuntimeError
-        If the file has no sorting provenance or no persisted spans. There
-        is no fallback: estimating over the whole recording would include
-        artifact-masked samples and cross joins.
+        If the file has no persisted spans. The whole recording is not a
+        safe fallback.
+    ValueError
+        If the spans are not ordered, non-overlapping and non-empty.
     """
     from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
@@ -581,8 +527,8 @@ def read_sorting_statistics_spans(
 def _add_sample_frame_column(nwbf, frame_trains):
     """Write aligned ragged frames, including units whose trains are all empty.
 
-    Adding the typed column after unit rows avoids HDMF extending an empty
-    ndarray into a two-dimensional array while appending empty unit trains.
+    Added after the unit rows; otherwise HDMF turns appended empty trains into
+    a 2D array.
     """
     import numpy as np
 
@@ -599,8 +545,7 @@ def _add_sample_frame_column(nwbf, frame_trains):
         data=frame_trains,
         index=True,
     )
-    # HDMF correctly builds zero-length ragged rows from the list of trains;
-    # make its flattened target explicitly numeric even when every row is empty.
+    # Keep the flattened target int64 even when every row is empty.
     nwbf.units[SPIKE_SAMPLE_INDEX_COLUMN].target.transform(
         lambda frames: np.asarray(frames, dtype=np.int64)
     )
@@ -617,22 +562,10 @@ def write_sorting_units_nwb(
 ):
     """Write a fresh AnalysisNwbfile containing only the v2 Units table.
 
-    Spike times are stored in the recording's absolute timeline so downstream
-    consumers can compare directly against the Recording's IntervalList
-    valid_times. Spyglass also stores ``spike_sample_index`` (frame indices into
-    the sorted recording) so ``get_sorting`` can reconstruct SI objects without
-    reading the full recording timestamp vector.
-    ``AnalysisNwbfile().create`` already strips any parent ``/units``
-    from the analysis NWB so the sort outputs are the only Units rows
-    in the file (addresses #1437).
-
-    Every unit row carries ``obs_intervals`` (the artifact-
-    removed valid-time window the sort observed) and a
-    ``curation_label`` placeholder (``"uncurated"``), so
-    external readers that grep for either column on a pre-curation
-    NWB find them. ``obs_intervals`` defaults to the recording's contiguous
-    observation windows when no artifact mask was applied
-    (``obs_intervals=None``).
+    Spike times are absolute, comparable with the Recording's valid times.
+    ``spike_sample_index`` lets ``get_sorting`` skip the recording's
+    timestamps. Every row carries ``obs_intervals`` (default: the recording's
+    contiguous spans) and ``curation_label="uncurated"``.
     """
     from spyglass.spikesorting.v2._storage.provenance import (
         validate_sorting_provenance,
@@ -643,10 +576,7 @@ def write_sorting_units_nwb(
         staged_analysis_file,
     )
 
-    # ``create`` writes a stub file to disk; if any step below raises before
-    # the caller registers the AnalysisNwbfile row, unlink that orphan
-    # (mirrors the recording writer -- the caller's staging cleanup only knows
-    # the analyzer folder, not this file's name).
+    # The caller's staging cleanup does not know this file's name.
     with staged_analysis_file(
         nwb_file_name, context="write_sorting_units_nwb"
     ) as analysis_file_name:
@@ -671,15 +601,9 @@ def _write_sorting_units_nwb_body(
 ):
     """Fill the staged sort-units ``AnalysisNwbfile`` (no cleanup on failure).
 
-    Separate from :func:`write_sorting_units_nwb` so the staged-file cleanup-on-
-    error wrapper there stays a thin try/except. Returns
-    ``(analysis_file_name, units_object_id)``.
-
-    ``unit_metadata`` (``{unit_id: {peak_amplitude_uv, peak_electrode_id,
-    n_spikes, brain_region}}``) adds the matching per-unit columns -- the SAME
-    values used for ``Sorting.Unit`` (computed once). ``source_provenance``
-    (from :mod:`._storage.provenance`, already validated by the caller) is
-    embedded as a scratch header so the file is interpretable without the DB.
+    Returns ``(analysis_file_name, units_object_id)``. ``unit_metadata``
+    (``{unit_id: {peak_amplitude_uv, peak_electrode_id, n_spikes,
+    brain_region}}``) adds the ``Sorting.Unit`` values as columns.
     """
     import pynwb
 
@@ -711,17 +635,8 @@ def _write_sorting_units_nwb_body(
         positive=True,
     )
     if obs_intervals is None:
-        # ``obs_intervals is None`` is the "no artifact-detection pass" case:
-        # the artifact-detection pass is optional (an ArtifactDetectionSource
-        # part is zero-or-one; no part / artifact_detection_id=None means no
-        # masking), so there is no artifact-removed IntervalList to read. The
-        # recorded window(s) ARE the correct obs_intervals then -- the
-        # sort observed every recorded sample. Split at wall-clock
-        # discontinuities so a DISJOINT recording reports one interval
-        # per recorded chunk rather than a single envelope spanning the
-        # gaps (which would inflate the observation duration). For a
-        # contiguous recording this collapses to a single
-        # ``[t0, t_end]``, unchanged.
+        # No artifact pass: every recorded sample was observed. Split at gaps
+        # so a disjoint recording's duration excludes them.
         obs_intervals_arr = finite_intervals(
             base_intervals_and_gaps(
                 recording, sampling_frequency
@@ -737,18 +652,8 @@ def _write_sorting_units_nwb_body(
         path=analysis_abs_path, mode="a", load_namespaces=True
     ) as io:
         nwbf = io.read()
-        # ``curation_label`` is a scalar ``"uncurated"`` at sort
-        # time, so external readers can do
-        # ``nwb.units["curation_label"][i] == "uncurated"`` -- an
-        # equality check that would silently fail against a list.
-        # ``CurationV2.insert_curation`` rewrites this to the
-        # indexed ragged-list shape at post-curation time. The
-        # pre-vs-post shape discontinuity is intentional.
-        #
-        # ``add_unit_column`` must be declared BEFORE any
-        # ``add_unit`` call that passes the column as a kwarg;
-        # pynwb rejects the kwarg as "extra keys" otherwise.
-        # The scalar shape uses no ``index=True``.
+        # Scalar here so ``== "uncurated"`` works; curation writes a ragged
+        # list. Columns must exist before ``add_unit`` passes them.
         if len(sorting.unit_ids) > 0:
             nwbf.add_unit_column(
                 name="curation_label",
@@ -759,9 +664,6 @@ def _write_sorting_units_nwb_body(
                 ),
             )
             if unit_metadata is not None:
-                # Per-unit metadata mirroring Sorting.Unit (computed once),
-                # so an NWB-only reader has peak channel / amplitude / count /
-                # region without the DB.
                 for name, desc in (
                     ("peak_amplitude_uv", "Peak template amplitude (uV)."),
                     (
@@ -795,9 +697,7 @@ def _write_sorting_units_nwb_body(
                 nwbf,
                 [sample_indices_by_unit[int(uid)] for uid in sorting.unit_ids],
             )
-        # pynwb leaves ``nwbf.units = None`` if no add_unit() was
-        # called, so a zero-unit sort would crash on .object_id.
-        # Initialize an empty Units table explicitly.
+        # pynwb leaves ``units`` None for a zero-unit sort.
         if nwbf.units is None:
             nwbf.units = pynwb.misc.Units(
                 name="units",
@@ -809,10 +709,7 @@ def _write_sorting_units_nwb_body(
         )
         io.write(nwbf)
 
-    # The AnalysisNwbfile DB-row registration (.add) is deliberately
-    # NOT done here -- ``Sorting.make`` registers it inside its
-    # ``_safe_context()`` block so the row rolls back atomically
-    # if any of the master / Unit-part inserts fail.
+    # The caller registers the file in its insert transaction.
     return analysis_file_name, units_object_id
 
 
@@ -829,33 +726,18 @@ def write_curated_units_nwb(
     """Write the curated-units NWB.
 
     Returns ``(analysis_file_name, units_object_id, nwb_file_name,
-    n_spikes_by_uid)`` where ``n_spikes_by_uid`` maps each written
-    unit_id to the length of its STORED (post cross-unit dedup) spike
-    train, so the caller can override ``CurationV2.Unit.n_spikes`` and
-    keep the ``n_spikes == len(get_sorting train)`` invariant.
+    n_spikes_by_uid)``; ``n_spikes_by_uid`` counts the stored, deduplicated
+    trains.
 
-    ``source_units_abs_path`` selects WHERE the source spike trains are read
-    from. ``None`` (a root curation) reads the raw ``Sorting`` units NWB, so
-    ``kept_unit_to_contributors`` is in the raw-sort unit namespace. A child
-    curation passes its PARENT curation's units NWB; the kept/contributor ids
-    are then in the parent's unit namespace, so a merged-parent id composes
-    correctly and absorbed raw contributors are not resurrected.
+    ``source_units_abs_path`` is ``None`` for a root curation (reads the
+    ``Sorting`` units NWB) or the parent curation's units NWB, whose unit ids
+    ``kept_unit_to_contributors`` then uses.
 
-    With ``apply_merge=True`` the kept unit's spike train is the
-    sorted union of its contributors' spike trains and its id is a
-    fresh ``max(source unit_ids) + 1`` assigned in ascending
-    min-contributor order (so the lazy ``get_merged_sorting`` preview
-    assigns matching ids -- see ``build_curated_unit_rows``); the
-    absorbed contributors are dropped from both the NWB and
-    ``CurationV2.Unit``. Surviving source units are written first (in
-    source order) and merged ids are appended in that same
-    ascending-min order.
-
-    With ``apply_merge=False`` (preview) every original unit is
-    written 1:1 -- contributors included -- so the proposed merge
-    can be reviewed before committing; the merge structure lives in
-    ``CurationV2.MergeGroup`` and is reconstructed by
-    ``get_merged_sorting`` on demand.
+    With ``apply_merge=True`` a merged unit is the deduplicated union of its
+    contributors, with id ``max(source unit_ids) + 1`` onward in ascending
+    min-contributor order (matching ``build_curated_unit_rows``); survivors
+    come first in source order. With ``apply_merge=False`` (preview) every
+    source unit is written unchanged.
     """
     from spyglass.spikesorting.v2._storage.provenance import (
         validate_curation_header,
@@ -865,32 +747,17 @@ def write_curated_units_nwb(
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    # Anchor the curated-units NWB to the same parent as the Sorting (the sort's
-    # own session, or the first frozen MemberSnapshot member for a concat
-    # source). The
-    # curated absolute spike times are read from the Sorting units NWB below
-    # (source-agnostic), so only the parent-file anchor differs by source kind.
+    # Same parent NWB as the Sorting.
     nwb_file_name = Sorting.resolve_anchor_nwb_file_name(
         {"sorting_id": sorting_id}
     )
 
-    # Source the units' ABSOLUTE spike times plus Spyglass's sample-frame
-    # sidecar. A root curation reads the raw Sorting units NWB; a child reads
-    # its PARENT curation's units NWB (``source_units_abs_path``) so stored
-    # frames, dedup, and obs_intervals compose from the actual parent state.
-    # Absolute seconds keep the curated NWB interoperable and gap-correct;
-    # sample frames let Spyglass reconstruct sortings without reading the full
-    # recording timeline.
     if source_units_abs_path is None:
         src_abs_path = AnalysisNwbfile.get_abs_path(
             (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
         )
     else:
         src_abs_path = source_units_abs_path
-    # Read ONLY the source units this curation will write: kept singletons +
-    # merge contributors for apply_merge=True, every unit for the apply_merge=
-    # False preview (see curation_source_unit_ids). A large multi-day sort
-    # otherwise materializes the discarded units' spike trains here too.
     abs_times_by_uid, sample_indices_by_uid, obs_intervals_by_uid = (
         read_units_abs_times_and_sample_indices(
             src_abs_path,
@@ -904,9 +771,7 @@ def write_curated_units_nwb(
         staged_analysis_file,
     )
 
-    # ``create`` stages a stub file; unlink it if the write below fails before
-    # the caller registers the AnalysisNwbfile row (curation stages OUTSIDE its
-    # rows-transaction try, so its cleanup does not otherwise cover this file).
+    # Curation stages outside its transaction, so its cleanup misses this file.
     with staged_analysis_file(
         nwb_file_name, context="write_curated_units_nwb"
     ) as analysis_file_name:
@@ -929,11 +794,8 @@ def _curated_obs_intervals(
 ):
     """Per-unit ``obs_intervals`` for one curated/kept unit.
 
-    A merged unit (``apply_merge`` with >1 contributor) gets the INTERSECTION of
-    its contributors' windows -- the conservative choice, so a unit is reported
-    observed only where EVERY contributor was observed; in practice every unit of
-    one sort shares the same window, so the intersection equals that shared
-    window. A singleton / preview unit keeps its own window.
+    A merged unit gets the intersection of its contributors' windows; other
+    units keep their own.
     """
     from spyglass.spikesorting.v2._core.signal_math import (
         intersect_interval_sets,
@@ -961,12 +823,9 @@ def _write_curated_units_nwb_body(
 ):
     """Fill the staged curated-units ``AnalysisNwbfile`` (no cleanup on error).
 
-    Separate from :func:`write_curated_units_nwb` so its staged-file cleanup-on-
-    error wrapper stays a thin try/except. Returns ``(analysis_file_name,
-    units_object_id, nwb_file_name, n_spikes_by_uid)``. ``obs_intervals_by_uid``
-    (``{unit_id: (n, 2) array}``) carries the
-    per-unit observation window forward for consumers that explicitly use
-    valid observation time. SI quality metrics do not automatically use it.
+    Returns ``(analysis_file_name, units_object_id, nwb_file_name,
+    n_spikes_by_uid)``. ``obs_intervals_by_uid`` is
+    ``{unit_id: (n, 2) array}``; SI quality metrics do not use it.
     """
     import numpy as np
     import pynwb
@@ -1010,32 +869,12 @@ def _write_curated_units_nwb_body(
         path=analysis_abs_path, mode="a", load_namespaces=True
     ) as io:
         nwbf = io.read()
-        # Add the ``curation_label`` column ONLY when at least one
-        # unit will be written. Adding a column ahead of any
-        # ``add_unit`` call would create an empty Units table whose
-        # ``curation_label`` column has no rows; pynwb's writer
-        # then fails dtype inference at ``io.write`` with
-        # "Cannot infer dtype of empty list or tuple". For the
-        # empty-curation case (zero kept units after filtering, or
-        # the contrived all-merged-away case) we initialize a
-        # bare ``pynwb.misc.Units`` without the column so the
-        # write succeeds.
-        # Resolve which units get written + their spike trains:
-        #   apply_merge=True  -> kept units; a merged head gets the
-        #     concatenated contributor trains.
-        #   apply_merge=False -> every original unit 1:1 (preview);
-        #     proposed merges stay in MergeGroup for lazy application
-        #     via get_merged_sorting.
         if apply_merge:
             write_specs = []
             for kept_uid, contribs in kept_unit_to_contributors.items():
                 if len(contribs) > 1:
-                    # Membership-aware 0.4 ms dedup of cross-unit
-                    # double-detections (a neuron's refractory period
-                    # makes any sub-0.4 ms cross-unit pair one physical
-                    # spike). Uses the same dedup as the lazy
-                    # get_merged_sorting, so the stored
-                    # (apply_merge=True) train equals the previewed one.
+                    # Same dedup as get_merged_sorting, so stored equals
+                    # previewed.
                     spike_times, spike_indices = (
                         _dedup_merged_spike_times_and_frames(
                             [abs_times_by_uid[int(u)] for u in contribs],
@@ -1064,32 +903,15 @@ def _write_curated_units_nwb_body(
                 )
                 for uid in sorted(abs_times_by_uid)
             ]
-        # ``n_spikes`` per written unit is the length of its STORED
-        # (post-dedup) train, so the invariant
-        # ``CurationV2.Unit.n_spikes == len(get_sorting train)`` holds
-        # even after cross-unit dedup removes double-detections. The
-        # caller overrides ``unit_rows`` with this map.
+        # Post-dedup counts keep ``Unit.n_spikes`` equal to the stored train.
         n_spikes_by_uid = {
             int(uid): int(len(spike_times))
             for uid, spike_times, _spike_indices, _obs in write_specs
         }
 
         if write_specs:
-            # ``curation_label`` is written as an ``index=True``
-            # (ragged) column with a per-unit list of label
-            # strings. External readers do
-            # ``list(nwb_sorting.get('curation_label', []))`` and
-            # expect a list per unit -- they would misparse a
-            # comma-separated string by splitting on every
-            # character. This is the shape the ``CurationV2.UnitLabel``
-            # docstring describes.
-            #
-            # Call ``add_unit(...)`` for every unit FIRST, then add
-            # the column with ``data=label_values`` AFTER -- this
-            # gives pynwb a full per-unit list-of-lists to infer
-            # dtype from. Pre-declaring the column and passing labels
-            # per ``add_unit`` makes pynwb fail dtype inference when
-            # all labels happen to be empty (the no-labels case).
+            # Labels are added as a ragged column after the units so pynwb
+            # can infer its dtype.
             all_labels: list[list[str]] = []
             for unit_id, spike_times, spike_indices, obs in write_specs:
                 lbl_list = labels.get(int(unit_id), [])
@@ -1099,19 +921,10 @@ def _write_curated_units_nwb_body(
                     "spike_times": np.asarray(spike_times, dtype=np.float64),
                     "id": int(unit_id),
                 }
-                # Carry the per-unit observation window forward so a
-                # curated export retains its valid observation time. Consumers
-                # must explicitly use these intervals in duration calculations.
                 unit_kwargs["obs_intervals"] = np.asarray(obs, dtype=np.float64)
                 nwbf.add_unit(**unit_kwargs)
             _add_sample_frame_column(nwbf, [spec[2] for spec in write_specs])
-            # Only add the column when at least one unit
-            # carries a non-empty label list. pynwb's dtype
-            # inference fails on an all-empty list-of-lists
-            # ("Cannot infer dtype of empty list"); the
-            # column-missing case is handled by downstream
-            # readers via ``nwb_sorting.get('curation_label',
-            # [])``.
+            # pynwb cannot infer the dtype of all-empty label lists.
             if any(all_labels):
                 nwbf.add_unit_column(
                     name="curation_label",
@@ -1125,20 +938,14 @@ def _write_curated_units_nwb_body(
                     index=True,
                 )
         else:
-            # Empty curation: initialize an empty Units table so
-            # ``.object_id`` is defined and ``io.write`` does not
-            # try to infer a dtype for any column.
+            # Empty curation: pynwb would leave ``units`` None.
             nwbf.units = pynwb.misc.Units(
                 name="units",
                 description=("Empty units table (curation kept zero units)."),
             )
         units_object_id = nwbf.units.object_id
-        # Self-describing provenance: the curation header (identity/source,
-        # incl. merges_applied) and the kept->contributor merge lineage. The
-        # lineage mirrors CurationV2.MergeGroup -- the RAW contributors, so a
-        # child of a merged parent expands correctly rather than vanishing into
-        # inherited singletons -- restricted to actual merges (a kept unit with
-        # >1 contributor); singleton self-entries are identity, not lineage.
+        # Lineage mirrors CurationV2.MergeGroup (raw contributors), real merges
+        # only.
         from collections import defaultdict
 
         from spyglass.spikesorting.v2._storage.provenance import (
@@ -1171,12 +978,7 @@ def _write_curated_units_nwb_body(
         )
         io.write(nwbf)
 
-    # The AnalysisNwbfile DB-row registration (.add) is deliberately
-    # NOT done here -- the caller does it inside its transaction
-    # block so the row rolls back atomically if any of the
-    # CurationV2 / Unit / UnitLabel / merge-insert steps fail.
-    # The file on disk is the only side effect left to clean up on
-    # rollback.
+    # The caller registers the file in its insert transaction.
     return (
         analysis_file_name,
         units_object_id,

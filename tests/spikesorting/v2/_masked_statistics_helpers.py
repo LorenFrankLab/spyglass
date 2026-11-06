@@ -1,14 +1,8 @@
 """Masked-recording builders for the valid-sample statistics tests.
 
-The sort stage silences artifact frames with zeros, and every
-noise/whitening estimator must then draw only from the retained frames.
-These helpers build a CLEAN ground-truth recording, a masked twin whose
-excluded frame ranges first carry large transients (so any excluded sample
-that leaked into an estimate would move it) and are then silenced exactly
-as production does, and the statistics spans of the retained frames.
-
-Targets are always computed from the clean twin, never from the recording
-that carries transients. DB-free.
+Excluded frames carry large transients before being silenced, so any
+excluded sample leaking into a noise/whitening estimate moves it. Targets
+come from the clean twin. DB-free.
 """
 
 from __future__ import annotations
@@ -63,9 +57,7 @@ def numpy_recording(traces, probe):
 def excluded_ranges(n_samples: int, fraction: float, *, seed: int = 0):
     """One excluded half-open range per equal block, ``fraction`` of each.
 
-    Twelve blocks keep the excluded ranges spread across the recording, so
-    the statistics spans are many and interleaved rather than one long
-    retained stretch.
+    Twelve blocks interleave many statistics spans across the recording.
     """
     block = n_samples // N_EXCLUDED_BLOCKS
     length = int(round(fraction * block))

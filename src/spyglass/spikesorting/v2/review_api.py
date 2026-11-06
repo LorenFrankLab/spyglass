@@ -39,11 +39,6 @@ from spyglass.spikesorting.v2.exceptions import (
     UnresolvedMergeLabelConflictError,
 )
 
-# "computed" / "reused" say whether THIS call materialized the step or found
-# it already present (the curation layer's ``MaterializationStatus``);
-# "complete" only attests the step is done, without that classification
-# (the commit path reports its identity / edit / evaluation steps this way;
-# ``child_committed`` keeps computed / reused).
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -185,9 +180,8 @@ def _unknown_conflict_resolution_labels(
 ) -> list[str]:
     """Return labels newly introduced by a merge-conflict resolution.
 
-    A profile palette controls labels the reviewer may add. It does not erase
-    valid labels inherited from the merged contributors, even when an older or
-    site-specific label is absent from the active profile.
+    Labels inherited from merged contributors are allowed even when absent
+    from the profile palette.
     """
     return sorted(
         set(map(str, values)) - valid_labels - set(conflict.inherited_labels())
@@ -249,30 +243,23 @@ class FigPackReview:
     ) -> str:
         """Deliver the review to a browser and return its URL.
 
-        A hosted review opens its persisted URL. A local review is served
-        from this Python process over loopback -- the exact saved bundle
-        (``self.uri``), so **Save draft** in the browser writes the
-        same ``annotations.json`` that :meth:`preview_import` reads; nothing
-        is copied, rebuilt or uploaded to open it. Repeated calls reuse the
-        running server; after a kernel restart, ``resume()`` + ``open()``
-        starts delivery again over the same files (the port is process
-        state, never persisted).
+        A hosted review opens its persisted URL. A local review serves the
+        saved bundle (``self.uri``) over loopback from this process, so
+        **Save draft** writes the ``annotations.json`` that
+        :meth:`preview_import` reads. Repeated calls reuse the running server;
+        after a kernel restart, ``resume()`` + ``open()`` serves it again.
 
-        In a local browser: select units, edit labels or propose merges, then
-        **Save draft**. Hosted figures use **Curate Figure** and the authenticated
-        **Save Annotations** toolbar action. Both save a draft. Local reviews
-        offer **Preview and commit** in the browser; hosted reviews use
-        ``review.commit_panel()`` in the notebook.
+        Local reviews: edit, **Save draft**, then **Preview and commit** in
+        the browser. Hosted reviews: **Curate Figure**, **Save Annotations**,
+        then ``review.commit_panel()`` in the notebook.
 
         Parameters
         ----------
         open_browser : bool, optional
             Launch the default browser (default). ``False`` only returns the
-            URL -- for a notebook printing it, a test driving its own
-            browser, or an SSH-forwarded remote kernel (forward the printed
-            port, e.g. ``ssh -L <port>:localhost:<port> host``, and open the
-            same returned URL locally, including its bundle path; the frontend
-            enables local editing only for a ``localhost`` origin).
+            URL. For a remote kernel, forward the port
+            (``ssh -L <port>:localhost:<port> host``) and open the returned
+            URL locally; editing requires a ``localhost`` origin.
         port : int, optional
             Loopback port for a local review's server (default: a free
             port). Ignored when this process already serves any review;
@@ -412,14 +399,10 @@ class FigPackReview:
     ) -> tuple["FigPackReview", ...]:
         """Every built, profile-backed review of ``curation``, oldest first.
 
-        The way back to "the review I was editing" without its id: a
-        review's identity includes the parent's children at the time it
-        started, so once the parent gains a child (a merge preview included)
-        ``start_review`` over the same parent begins a NEW review (fresh seeded bundle) rather
-        than reusing the one holding your saved edits. Resume the earlier
-        one from here; each review's ``preview_import()`` shows whether its
-        saved edits differ from the parent and ``uri`` names its bundle.
-        Expert (non-profile) views are not listed.
+        A review's identity includes the parent's children when it started,
+        so once the parent gains a child, ``start_review`` begins a new
+        review. Use this to resume an earlier one. Expert (non-profile) views
+        are not listed.
 
         Parameters
         ----------
@@ -645,11 +628,8 @@ class CurationChangeSet:
     def next_step(self) -> str:
         """One line saying where this review stands and what to do next.
 
-        The browser saves a draft; nothing reaches Spyglass until ``commit()``.
-        The preview compares the saved annotations with the reviewed PARENT
-        only: it cannot tell whether
-        an identical diff was already committed (``commit()`` reuses that
-        child), so the wording says what is actually known.
+        Compares saved annotations with the reviewed parent only, so it
+        cannot tell whether an identical diff was already committed.
         """
         hosted = self.review.is_hosted
         if self.has_changes:
@@ -786,9 +766,8 @@ class ReviewImportReceipt:
     def continue_review(self) -> FigPackReview:
         """Open/reuse a verification review over the actual child.
 
-        Parent annotation sets are intentionally not carried across the new
-        curation identity. Compute/select child-scoped sets explicitly after a
-        merge or label commit.
+        Parent annotation sets are not carried to the child; select
+        child-scoped sets explicitly.
         """
         return start_review(
             self.curation,
@@ -801,8 +780,7 @@ class ReviewImportReceipt:
             metric_waveform_params_name=(
                 self.changes.review.evaluation._metric_waveform_params_name()
             ),
-            # The display budget is part of the review the user configured;
-            # continuing onto the committed child must not silently revert it.
+            # Keep the reviewer's display budget.
             display_options=self.changes.review.display_options,
         )
 
@@ -873,13 +851,10 @@ def start_review(
 ) -> FigPackReview:
     """Evaluate one pinned curation and build/reuse its seeded review view.
 
-    Resolves ``profile`` to its persisted recipe, evaluates ``parent`` with
-    that recipe (or checks the supplied ``evaluation``), then builds the
-    FigPack review view, reusing an existing view with the same inputs. A
-    review's identity includes the parent's children at the time it starts,
-    so once the parent gains a child (a merge preview included) the same call
-    starts a new review;
-    use :meth:`FigPackReview.find` to resume an earlier one.
+    Evaluates ``parent`` with the profile's recipe (or checks the supplied
+    ``evaluation``), then builds or reuses the FigPack review view. Once the
+    parent gains a child, the same call starts a new review; use
+    :meth:`FigPackReview.find` to resume an earlier one.
 
     Parameters
     ----------
@@ -910,12 +885,10 @@ def start_review(
         accepts) to include in the review. Each must belong to ``parent``
         and none may repeat. Default ``()`` includes none.
     display_options : ReviewDisplayOptions or mapping, optional
-        Bounds the browser payload -- per-unit raster and amplitude samples,
-        their firing-rate budgets, the initial point budget, and the
-        correlogram pair filter -- and is persisted with the review, never
-        affecting the scientific evaluation. A mapping may only use
-        ``ReviewDisplayOptions`` field names. Default ``None`` uses the
-        ``ReviewDisplayOptions`` defaults.
+        Browser payload bounds (raster/amplitude samples, point budget,
+        correlogram pair filter). Persisted with the review; does not affect
+        the evaluation. A mapping may only use ``ReviewDisplayOptions`` field
+        names. Default ``None`` uses the defaults.
 
     Returns
     -------
@@ -1080,10 +1053,8 @@ def _normalize_review_edits(
             raise ValueError(
                 f"FigPack annotations for unit {uid} contain duplicate labels."
             )
-        # FigPack seeds every existing parent label into the annotations even
-        # when the active review profile does not offer that label as a new
-        # choice. Preserve those inherited labels on their original unit while
-        # still rejecting an out-of-palette label newly added to another unit.
+        # FigPack seeds parent labels even outside the palette; allow them on
+        # their original unit only.
         inherited_labels = set(labels_before.get(uid, ()))
         unknown_labels = sorted(set(values) - valid_labels - inherited_labels)
         if unknown_labels:
@@ -1381,8 +1352,7 @@ def _commit_change_set(
         ),
         reuse_existing=True,
         label_policy="replace",
-        # Review validation above restricts new labels to the profile palette
-        # and allows inherited labels. Preserve those custom values on write.
+        # New labels were palette-checked above; inherited ones may be custom.
         allow_custom_labels=True,
     )
     child = CurationRef.from_key(child_key)

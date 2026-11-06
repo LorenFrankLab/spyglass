@@ -1,24 +1,17 @@
 """Release-workload measurement: the supported v2 workflow end to end.
 
-Runs prepare -> sort -> auto-label -> review bundle (+ reopen from its id) ->
-merge -> reevaluate -> detailed inspection (waveform plot + Phy export) ->
-unit selection -> warm rerun on ONE NWB file, against a PRIVATE MySQL
-container (``tests/container.py``) and a private base dir, while sampling
-the WHOLE process tree's RSS (SpikeInterface workers included) and the
-scratch-disk footprint. Writes ``<label>.json`` into ``--out-dir`` with stage
-timings, per-stage completed / skipped / failed results, peak memory, peak
-scratch, the monitored roots, bundle bytes, the preflight effective
-configuration and resource notes, the ``describe_run`` receipt and hardware
-details. A stage failure still writes the JSON (``outcome: failed``) before
-the error propagates, so partial measurements are never lost.
+Runs prepare, sort, auto-label, review bundle (and reopen), merge,
+reevaluate, detailed inspection, unit selection and a warm rerun on one NWB
+file against a private MySQL container and base dir, sampling process-tree
+RSS and scratch-disk size. Writes ``<label>.json`` to ``--out-dir`` with
+stage timings and outcomes, peaks, preflight configuration, the
+``describe_run`` receipt and hardware details; a failed stage still writes it
+(``outcome: failed``).
 
-This is the repeatable release run for the long-recording gate: run it on a
-lab Linux machine with one representative 1-3 h tetrode recording and one
->= 1 h high-channel-count probe recording, then set the supported machine
-budgets from the JSON. Numbers from short MEArec fixtures are NOT evidence of
-long-recording capacity. Report the channels of the sorted GROUP, not the
-file: a high-channel-count NWB sorted one shank at a time is a per-shank
-benchmark.
+Run on a lab Linux machine with a 1-3 h tetrode recording and a >= 1 h
+high-channel-count probe recording to set supported machine budgets. Short
+MEArec fixtures say nothing about long-recording capacity. Report the
+channels of the sorted group, not the file.
 
 Usage (from the repo root, in the spikesorting-v2 environment)::
 
@@ -28,21 +21,16 @@ Usage (from the repo root, in the spikesorting-v2 environment)::
         --label probe_1h --n-jobs 8 [--sort-group-id N] [--port 3313] \\
         [--out-dir DIR] [--base-dir DIR]
 
-Docker is reached through ``docker.from_env()`` exactly as the caller has it
-configured (``DOCKER_HOST`` / current context). Colima users export
-``DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`` before running.
+Docker is reached through ``docker.from_env()`` (``DOCKER_HOST`` or the
+current context; Colima users set
+``DOCKER_HOST=unix://$HOME/.colima/default/docker.sock``).
 
-Measurement semantics: ``peak_process_tree_rss_gb`` is the peak SUM of RSS
-over the runner and its descendants (SpikeInterface workers) -- shared pages
-count once per process, so it is an upper bound on physical RAM, not a
-deduplicated measurement. ``peak_scratch_disk_gb`` is the peak total size
-under ``scratch_roots`` (nested roots are deduplicated); Phy exports written
-to ``--out-dir`` are not counted. The run is CPU-only (CUDA disabled).
-
-Run ONE measurement at a time: never alongside a pytest session on the same
-machine (they would share scratch and CPU). On macOS SpikeInterface spawns
-fresh worker processes per computation (slow imports), so only Linux timings
-are representative of lab machines.
+- ``peak_process_tree_rss_gb``: peak sum of RSS over the runner and its
+  workers; shared pages count per process, so an upper bound on RAM.
+- ``peak_scratch_disk_gb``: peak size under ``scratch_roots``, excluding Phy
+  exports in ``--out-dir``.
+- CPU-only. Run one measurement at a time, not alongside pytest. macOS
+  timings are not representative (SpikeInterface spawns workers there).
 """
 
 from __future__ import annotations
@@ -68,9 +56,8 @@ sys.path.insert(0, str(REPO))
 def distinct_roots(paths) -> list[Path]:
     """Resolve ``paths`` and drop any root nested under another one.
 
-    Summing recursive sizes of both a directory and its subdirectory would
-    count the subdirectory twice (the default analyzer cache root lives under
-    the temp dir); a separately configured analyzer root stays separate.
+    Avoids counting a nested root twice (the default analyzer cache lives
+    under the temp dir).
     """
     resolved = sorted({Path(p).expanduser().resolve() for p in paths})
     kept: list[Path] = []

@@ -1,10 +1,8 @@
 """Playwright helpers for driving a served FigPack review in a real browser.
 
-Shared by the DB-free view test and the database-backed review journey.
-Every interaction is an ordinary user action (visible controls, normal
-clicks, no DOM patching); a save is awaited as the browser's own ``PUT`` of
-``annotations.json`` returning 2xx so the assertion is on the file the
-importer reads, written by the frontend.
+Interactions are ordinary user actions (no DOM patching). A save waits for
+the browser's own ``PUT`` of ``annotations.json``, so assertions read the
+file the importer reads.
 """
 
 from __future__ import annotations
@@ -35,9 +33,9 @@ def browser_unavailable_reason() -> str | None:
 
 
 def require_browser() -> None:
-    """Skip when the browser stack is absent -- or FAIL when the lane that
-    is supposed to run these tests (``SPYGLASS_REQUIRE_BROWSER_TESTS=1``)
-    is missing a dependency, so a green job cannot be made of skips."""
+    """Skip when the browser stack is absent; fail instead under
+    ``SPYGLASS_REQUIRE_BROWSER_TESTS=1`` so the browser lane cannot pass on
+    skips."""
     reason = browser_unavailable_reason()
     if reason is None:
         return

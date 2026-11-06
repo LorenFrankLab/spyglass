@@ -8,28 +8,19 @@ peak RSS is its own::
         --manifest M.json --scenario rigid --seed 0 --recipe dredge --out DIR
 
 writes ``DIR/<scenario>__s<seed>__<recipe>.json``. A case generates the
-scenario's recording and its noise-free twin (SpikeInterface
-``generate_drifting_recording``), bandpasses them, derives continuity with the
-stage's own helpers (``continuity_from_timestamps`` / ``concat_continuity``),
-masks planted artifacts (``statistics_spans``, ``silence_frame_ranges``),
-estimates with ``_motion.estimation.estimate_motion_in_spans`` on the estimation clock
-(``build_estimation_clock``), applies with
-``_motion.estimation.apply_motion_on_estimation_clock``, sorts with the sorting stage's
-``run_si_sorter`` + ``remove_excess_spikes`` and compares with the ground
-truth. The metrics (motion error, corrected-signal fidelity, sorting accuracy,
-border channels, cost) are defined in :func:`plain_motion_error`,
-:func:`source_clock_motion_error`, :func:`fidelity_sums`,
-:func:`sorting_metrics`, :func:`predicted_removed_channels` and
-:func:`run_case`.
+scenario and its noise-free twin, then estimates, applies, and sorts through
+the v2 stage functions and compares with ground truth. Metrics are defined
+in :func:`plain_motion_error`, :func:`source_clock_motion_error`,
+:func:`fidelity_sums`, :func:`sorting_metrics`,
+:func:`predicted_removed_channels` and :func:`run_case`.
 
-The ``representative`` command runs a paired off / dredge / dredge_fast
-estimate-and-apply (and optionally sorting) on one shank of the MEArec polymer
-drift fixture and records quality, border effects, runtime and memory; it
-applies no gate.
+The ``representative`` command runs off / dredge / dredge_fast on one shank
+of the MEArec polymer drift fixture and records quality, border effects,
+runtime and memory; it applies no gate.
 
-DB-FREE: no DataJoint connection is opened. The sorter's scratch lives under
-``spyglass.settings.temp_dir``, which a test session's teardown clears: do not
-run another pytest session on the same checkout while cases run.
+DB-free. Sorter scratch lives under ``spyglass.settings.temp_dir``, which a
+test session's teardown clears, so do not run pytest on the same checkout
+while cases run.
 """
 
 from __future__ import annotations
@@ -48,14 +39,8 @@ import numpy as np
 def peak_rss_bytes() -> int:
     """This process's peak resident set size (bytes), for the cost metric.
 
-    ``getrusage(RUSAGE_SELF).ru_maxrss`` counts this process only. It equals
-    the maximum resident set size ``/usr/bin/time -l`` reports for the case
-    process because everything runs in it: SpikeInterface jobs use the
-    manifest's job kwargs (``n_jobs=1``, no worker processes) and
-    MountainSort5 runs in-process through ``run_sorter`` (local backend).
-    On the 108 cases of the development manifest the two agreed to the byte.
-    With ``n_jobs > 1`` or a container sorter, worker or container memory would
-    be missing from it.
+    Counts this process only, which is complete while ``n_jobs=1`` and the
+    sorter runs in-process; worker or container memory would be missing.
     """
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # ``ru_maxrss`` is bytes on macOS and KiB on Linux.
@@ -782,9 +767,7 @@ def run_case(
         ).items()
     }
     timings["fidelity"] = time.perf_counter() - t
-    # ``ru_maxrss`` only grows, so this is the peak of everything before the
-    # sort: generation, estimation and the interpolation the fidelity windows
-    # read (the sort interpolates the whole recording again).
+    # ``ru_maxrss`` only grows: this is the peak before the sort.
     result["peak_rss_before_sort_bytes"] = peak_rss_bytes()
 
     t = time.perf_counter()
@@ -811,16 +794,13 @@ def run_representative(
 ):
     """Paired off / dredge / dredge_fast on one shank of a MEArec fixture.
 
-    Reads the fixture with SpikeInterface's NWB reader, keeps one 32-contact
-    shank, bandpasses it like the v2 hippocampus recipe, and runs the shipped
-    ``dredge_v1`` / ``dredge_fast_v1`` estimation rows and
-    ``kriging_force_extrapolate_v1`` interpolation through the stage
-    functions. Records the estimate, its correlation with the MEArec drift
-    vector when ``gt_h5`` is given (both signs: the fixture's convention is
-    unconfirmed), per-channel RMS of the corrected over the uncorrected
-    traces (border effects), runtimes and peak RSS; with ``sort`` also sorts
-    off and corrected with MountainSort5 and reports unit counts and, with
-    ``gt_h5``, agreement with the shank's ground-truth units
+    Keeps one 32-contact shank, bandpasses it like the v2 hippocampus recipe,
+    and runs the shipped ``dredge_v1`` / ``dredge_fast_v1`` and
+    ``kriging_force_extrapolate_v1`` rows. Records the estimate, its
+    correlation with the MEArec drift when ``gt_h5`` is given (both signs:
+    the fixture's sign convention is unconfirmed), per-channel corrected /
+    uncorrected RMS, runtimes and peak RSS. With ``sort``, also reports
+    MountainSort5 unit counts and, with ``gt_h5``, ground-truth agreement
     (:func:`_representative_sorting_summary`).
     """
     import spikeinterface as si

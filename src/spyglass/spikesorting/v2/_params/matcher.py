@@ -59,17 +59,15 @@ class UnitMatchParamsSchema(WaveformBundleParamsSchema, TrackingParamsSchema):
         ``TrackedUnitBudgetExceededError``. Default ``2000``.
     ms_before, ms_after : float
         Symmetric waveform window (ms) for the per-session UnitMatch bundle.
-        Identity-bearing: they change the dense templates the matcher compares,
-        so they live in the named params blob (not as silent
-        ``extract_unitmatch_bundle`` function defaults). Default ``1.5`` each.
+        Identity-bearing. Default ``1.5`` each.
     max_spikes_per_unit : int
         Random-spike cap per unit per cross-validation half when building the
         bundle: up to twice this many spikes are drawn per unit and split in
         spike-time order into the two halves. Identity-bearing. Default
         ``100``.
     seed : int
-        Seed for the bundle's random-spike subsample. Identity-bearing and
-        authoritative -- a ``random_seed`` in ``job_kwargs`` never overrides it.
+        Seed for the bundle's random-spike subsample. Identity-bearing; a
+        ``random_seed`` in ``job_kwargs`` never overrides it.
         Default ``0``.
     schema_version : int
         Bumped on breaking field changes; rows insert at the current version.

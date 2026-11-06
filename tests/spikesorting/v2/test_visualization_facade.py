@@ -1,13 +1,8 @@
-"""Routing tests for the ``v2.visualization`` facade (db_unit, monkeypatched).
+"""Routing tests for the ``v2.visualization`` facade.
 
-These exercise the key -> recording/analyzer/metric routing without populating a
-sort: SI widget/exporter functions, the raw and curation analyzer resolvers /
-``Recording.get_recording`` / ``CurationEvaluation.get_metrics`` /
-``CurationEvaluation.get_suggested_merge_groups`` and the curation resolver are
-monkeypatched with fakes, and the assertions pin which analyzer (display vs
-whitened) and which extensions each helper touches. The ``db_unit`` mark is for
-the schema-class imports (Docker MySQL only); nothing here populates. Real
-matplotlib rendering against the MEArec fixture lives in the ``slow`` tests.
+SI widgets and the analyzer, recording and metric resolvers are faked; tests
+pin which analyzer (display vs whitened) and extensions each helper uses.
+``db_unit`` only for schema-class imports; nothing populates.
 """
 
 from __future__ import annotations
@@ -721,10 +716,8 @@ def test_plot_suggested_merges_uses_persisted_merge_groups(
 def test_plot_suggested_merges_compute_missing_requests_display_extensions(
     dj_conn, monkeypatch
 ):
-    """The missing-extension advice (compute_missing=True) is honored here:
-    the opt-in requests exactly the widget's display-safe extensions on the
-    curation's analyzer, while the merge suggestions are still never
-    recomputed. The read-only default still raises."""
+    """``compute_missing=True`` requests exactly the widget's display-safe
+    extensions without recomputing merge suggestions; the default raises."""
     import spikeinterface.curation as sic
     import spikeinterface.widgets as sw
 
@@ -844,9 +837,7 @@ def test_export_report_uses_working_copy(dj_conn, monkeypatch):
 def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
     """``compute_missing=False`` refuses to run when ``unit_locations`` is absent.
 
-    SI's ``export_report`` computes ``unit_locations`` unconditionally if missing,
-    so the read-only path must raise rather than compute -- and must not call
-    SI at all.
+    SI's ``export_report`` would compute it, so SI is not called.
     """
     import spikeinterface.exporters as sie
 
@@ -870,9 +861,8 @@ def test_export_report_read_only_requires_unit_locations(dj_conn, monkeypatch):
 def test_export_to_phy_uses_working_copy(dj_conn, monkeypatch):
     """``export_to_phy`` wraps SI ``export_to_phy`` over a curation working copy.
 
-    PC features default OFF so SI never computes the whitened-metric-only
-    ``principal_components`` extension onto the unwhitened display copy; an
-    explicit ``compute_pc_features=True`` still passes through.
+    PC features default off, so SI never computes ``principal_components`` on
+    the unwhitened display copy; ``compute_pc_features=True`` passes through.
     """
     import spikeinterface.exporters as sie
 
@@ -894,9 +884,8 @@ def test_export_to_phy_uses_working_copy(dj_conn, monkeypatch):
         {"role": "display", "extra_extensions": {}},
         {"working_copy": True},
     ]
-    # PC features off by default (no principal_components on the display path),
-    # and raw SI display-analyzer metric TSVs off by default (the routed
-    # CurationEvaluation.get_metrics() stays the single source of official metrics).
+    # PC features and SI metric TSVs off by default; official metrics come
+    # from CurationEvaluation.get_metrics().
     assert captured["kwargs"]["compute_pc_features"] is False
     assert captured["kwargs"]["add_quality_metrics"] is False
     assert captured["kwargs"]["add_template_metrics"] is False
@@ -994,8 +983,8 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
     ):
         sig = inspect.signature(getattr(ssviz, name))
         assert sig.parameters["backend"].default == "matplotlib"
-    # The two widgets SI offers no matplotlib backend for default honestly:
-    # sorting summary requires an explicit backend, potential-merges is ipywidgets.
+    # SI has no matplotlib backend for these two: sorting summary requires an
+    # explicit backend, potential-merges defaults to ipywidgets.
     assert (
         inspect.signature(ssviz.plot_sorting_summary)
         .parameters["backend"]
@@ -1025,9 +1014,7 @@ def test_backend_policy_default_and_opt_in(dj_conn, monkeypatch):
 def test_schema_modules_do_not_import_visualization_eagerly(dj_conn):
     """No populate/make path can publish: the facade is imported only lazily.
 
-    The schema modules expose visualization only through method-local imports
-    (the delegate one-liners), so importing them -- and therefore the populate
-    path -- never pulls the SI-widget facade in at module load.
+    Schema modules import visualization only inside methods.
     """
     import spyglass.spikesorting.v2.metric_curation as mc
     import spyglass.spikesorting.v2.recording as rec

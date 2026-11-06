@@ -1,29 +1,13 @@
 """Local HTTP delivery of a saved FigPack review bundle.
 
-A FigPack bundle opened as a ``file://`` URL shows a directory listing (or,
-for its ``index.html``, an empty page whose module scripts fail CORS), and
-the local draft control requires a loopback HTTP origin to write
-``annotations.json``. This module serves the exact persisted bundle so **Save
-draft** writes the same file that :meth:`FigPackReview.preview_import` reads.
-Nothing is copied or rebuilt to open a review.
+``file://`` breaks the bundle's module scripts and draft saving, so the
+persisted bundle is served over loopback; **Save draft** writes the
+``annotations.json`` that :meth:`FigPackReview.preview_import` reads.
 
-One server lives in this Python process (a background daemon thread, reused
-across bundles, stopped at interpreter exit); the port is
-never persisted -- ``review.uri`` stays the durable filesystem location and a
-resume after a kernel restart simply starts delivery again over the same
-files.
-
-Security posture of the writable endpoint: bind loopback only, serve only the
-requested bundle directory (FigPack's handler already refuses paths outside
-it), and accept ``PUT`` for the bundle's ``annotations.json`` alone -- the
-scientific data (``data.zarr``), the frontend assets and the Spyglass identity
-sidecar stay read-only. An optional operation adapter accepts same-origin,
-review-scoped POST requests for scientific actions; the handler itself has no
-database connection or scientific policy.
-
-Draft saves require the revision returned by the last read. A filesystem lock
-serializes revision checks and atomic replacement across review processes.
-DB-free; FigPack is imported when starting delivery, filelock when saving a draft.
+- One daemon server per process, reused across bundles; the port is never
+  persisted.
+- Only ``annotations.json`` accepts ``PUT``, with the last-read revision.
+- An optional operation adapter accepts same-origin, review-scoped POSTs.
 """
 
 from __future__ import annotations
@@ -108,8 +92,7 @@ def serve_review_bundle(
     Raises
     ------
     FileNotFoundError
-        If the bundle directory or its ``index.html`` is missing (the
-        message names the recovery: rebuild the review).
+        If the bundle directory or its ``index.html`` is missing.
     """
     global _SERVER
     root = Path(bundle).resolve()

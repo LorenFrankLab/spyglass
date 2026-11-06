@@ -1,15 +1,6 @@
 """Sort-group id allocation and existing-entry checks for ``SortGroupV2``.
 
-Both ``SortGroupV2.set_group_by_*`` constructors pick their sort-group ids and
-check them against the session's existing rows before inserting:
-:func:`next_sort_group_ids` allocates ids after the session's largest, and
-:func:`handle_existing` refuses a rerun that would silently extend or
-overwrite the session's groups unless the caller confirms a cautious delete.
-:func:`cross_team_downstream` counts, per team, the downstream rows such an
-overwrite would delete, for ``SortGroupV2.preview_existing_entries``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -18,12 +9,8 @@ from __future__ import annotations
 def cross_team_downstream(nwb_file_name: str) -> tuple:
     """Per-team downstream rows an overwrite of this session would delete.
 
-    Deleting a session's ``SortGroupV2`` cascades through
-    ``RecordingSelection`` (which carries the owning ``team_name``) to
-    ``Sorting`` and ``CurationV2``. Because sort groups in one session can
-    belong to different teams, this enumerates the cross-team blast radius
-    so the operator sees whose downstream rows would vanish before
-    confirming. Visibility only -- it never blocks.
+    Sort groups in one session can belong to different teams. Visibility
+    only; never blocks.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -55,22 +42,12 @@ def handle_existing(
 ) -> None:
     """Enforce the inspect-before-destroy contract.
 
-    Default rerun behavior is to REFUSE: callers must either pass
-    explicit non-overlapping ``sort_group_ids`` (an opt-in additive
-    insert) or set ``delete_existing_entries=True, confirm=True``
-    after reviewing the deletion preview. Auto-allocation is allowed
-    ONLY on the first call for a session; on rerun it would silently
-    pad ``sort_group_id`` values, which this guard refuses.
-
-    ``table_cls`` is the ``SortGroupV2`` class.
+    A rerun is refused unless the caller passes explicit non-overlapping
+    ``sort_group_ids`` or ``delete_existing_entries=True, confirm=True``.
+    Auto-allocation is allowed only on a session's first call.
+    ``table_cls`` is ``SortGroupV2``.
     """
-    # Intra-list duplicate check: ``set(new_sort_group_ids)`` below
-    # loses the duplicate, and the ``zip`` in the caller would
-    # happily build two rows with the same sort_group_id, failing
-    # late on a DataJoint duplicate-key error. Catch the typo here
-    # for BOTH fresh and existing sessions (auto-allocated ranges
-    # are guaranteed unique, so the check only matters when the
-    # caller passed an explicit list).
+    # Otherwise set() below hides the duplicate until a late DuplicateError.
     if explicit_sort_group_ids and len(set(new_sort_group_ids)) != len(
         new_sort_group_ids
     ):
@@ -129,11 +106,7 @@ def handle_existing(
 def next_sort_group_ids(table_cls, nwb_file_name: str, count: int) -> list[int]:
     """Auto-allocate ``count`` sort_group_ids after the session's max.
 
-    Returns the next ``count`` integers starting from
-    ``max(existing) + 1`` (or 0 on a fresh session) so additive inserts
-    never collide with prior rows on rerun. Shared by both
-    ``set_group_by_*`` constructors; ``table_cls`` is the ``SortGroupV2``
-    class.
+    Starts at 0 on a fresh session. ``table_cls`` is ``SortGroupV2``.
     """
     existing_ids = (table_cls & {"nwb_file_name": nwb_file_name}).fetch(
         "sort_group_id"

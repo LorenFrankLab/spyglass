@@ -1,19 +1,12 @@
 """Analyzer acquisition and evaluation for ``CurationEvaluation.make_compute``.
 
-A committed root or label-only curation keeps the raw sort's unit set, so
-:func:`evaluate_cached_analyzers` loads (or rebuilds) the sort's canonical
-display and metric analyzers and evaluates them while holding the per-sort
-analyzer-cache lock. A committed applied-merge curation does not, so
-:func:`evaluate_temporary_analyzers` evaluates curation-scoped analyzers over
-the merged sorting: working copies in a temporary directory that is removed
-afterwards, the display one copied from the curation's published merged
-analyzer (the cache its review page reads) when there is one. Both evaluate through
-:func:`._curation.metrics.evaluate_analyzers`.
+- :func:`evaluate_cached_analyzers`: curations with the raw sort's unit set
+  use the sort's cached analyzers.
+- :func:`evaluate_temporary_analyzers`: applied-merge curations use temp
+  analyzers over the merged sorting.
 
-These functions read and write analyzer folders on disk, so they are kept out
-of the pure :mod:`._curation.metrics`. The module imports without the DB
-layer. The analyzer-cache, analyzer-build and settings names are imported
-inside the functions so that patches applied to those modules take effect.
+Kept out of the pure :mod:`._curation.metrics` because they touch disk.
+Dependencies are imported inside functions so module patches take effect.
 """
 
 from __future__ import annotations
@@ -85,12 +78,7 @@ def evaluate_cached_analyzers(
         load_or_rebuild_analyzer_from_resolved,
     )
 
-    # Root / label-only: the cached raw-sort analyzers already carry
-    # this curation's unit set. Hold the per-sort lock around the
-    # canonical-folder load/rebuild, metric-extension mutation and source
-    # hashing so the snapshot describes the same protected cache generation.
-    # (_curation.metrics.compute_metrics / compute_merge_groups
-    # mutate the shared analyzer in place).
+    # Metrics mutate the shared analyzer, so hold the lock through hashing.
     raw_sorting = read_stored_units(sorting_inputs.raw_units)
     with analyzer_cache_lock(sorting_inputs.sorting_id):
         display_analyzer = load_or_rebuild_analyzer_from_resolved(
@@ -129,11 +117,8 @@ def evaluate_cached_analyzers(
             )
         )
 
-        # The metrics were computed over the canonical raw-sort analyzers --
-        # regeneratable scratch not pinned in the schema -- so snapshot the
-        # content hash of EVERY one consumed for stale detection: the display
-        # analyzer always, plus the whitened metric analyzer when PC/NN metrics
-        # consumed it (metric_analyzer is None otherwise).
+        # The cached analyzers are unpinned scratch; hash them for stale
+        # detection.
         source_analyzer_hashes = analyzer_role_hashes(
             display_analyzer, metric_analyzer
         )
@@ -178,9 +163,7 @@ def evaluate_temporary_analyzers(
     merge_groups : list
         Suggested merge groups.
     source_analyzer_hashes : None
-        The temporary analyzers are pinned by the committed curation and
-        the recipe, both reachable through the selection, so no snapshot
-        is recorded.
+        No snapshot: the curation and recipe pin these analyzers.
     """
     import tempfile
     from pathlib import Path
@@ -191,12 +174,6 @@ def evaluate_temporary_analyzers(
     )
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
-    # Applied-merge: evaluate curation-scoped analyzers over the merged
-    # curated sorting, never the sort's canonical cache (identity is
-    # curation-scoped). The display analyzer comes from the curation's
-    # published per-generation cache when make_fetch resolved one; the
-    # working copies are cleaned on success and failure by
-    # TemporaryDirectory.
     curated_sorting = read_stored_units(sorting_inputs.curated_units)
     compute_key = {"sorting_id": sorting_inputs.sorting_id}
     from spyglass.settings import temp_dir as spyglass_temp_dir
@@ -207,17 +184,13 @@ def evaluate_temporary_analyzers(
     )
 
     with tempfile.TemporaryDirectory(dir=spyglass_temp_dir) as tmp:
-        # Same binary_folder convention (and memmap loader) as the
-        # canonical cache, in a private temp folder.
         display_folder = Path(tmp) / (f"display{ANALYZER_FOLDER_SUFFIX}")
         report_progress(
             "Re-evaluating the merged curation: building its display analyzer…"
         )
         if analyzer_inputs.merged_display_cache is not None:
-            # Publish (or reuse) the merged curation's display analyzer: the
-            # same cache slot its review page reads, so a merge is built once.
-            # The metrics run on a private working copy, which leaves the
-            # published folder exactly as the page validates it.
+            # Share the review page's cache; compute on a copy so the
+            # published folder stays valid.
             published = publish_resolved_merged_analyzer(
                 analyzer_inputs.merged_display_cache,
                 curated_sorting,
@@ -270,10 +243,7 @@ def evaluate_temporary_analyzers(
                 continuity_spans=continuity_spans,
             )
         )
-        # Unmap both analyzers before the folder is removed. On NFS a
-        # still-mapped file leaves a .nfs placeholder and the removal fails
-        # with "Directory not empty". An analyzer and its extensions refer to
-        # each other, so only the cycle collector frees them.
+        # Unmap before removal (NFS); analyzer-extension cycles need gc.
         del display_analyzer, metric_analyzer
         gc.collect()
     return metrics_df, labels_by_unit, merge_groups, None

@@ -10,19 +10,8 @@ from __future__ import annotations
 def read_artifact_removed_intervals(key, as_dict=False):
     """Return the artifact-removed ``valid_times`` for ``key``.
 
-    Single-recording source: one ``IntervalList`` row keyed by
-    the recording's parent ``nwb_file_name`` -- returned as a
-    plain ``(n_intervals, 2)`` ndarray (or, with ``as_dict=True``,
-    a one-key ``{nwb_file_name: ndarray}`` dict).
-
-    Shared-artifact-group source: ``make_insert`` writes one
-    ``IntervalList`` row per distinct member ``nwb_file_name``
-    (today single-session, so length 1). Returns a dict
-    keyed by ``nwb_file_name`` mapping to the per-member
-    ``valid_times`` array. All values are equal across keys
-    (the detection ran ONCE over the unioned channels and
-    ``make_insert`` wrote the same array per member), so a
-    caller that wants a single array can ``next(iter(d.values()))``.
+    A shared-group source returns ``{nwb_file_name: valid_times}``; all
+    values are equal.
 
     Parameters
     ----------
@@ -31,13 +20,8 @@ def read_artifact_removed_intervals(key, as_dict=False):
         ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``);
         must include ``artifact_detection_id``.
     as_dict : bool, optional
-        If ``False`` (default), the return type depends on the
-        source: a plain ``(n_intervals, 2)`` ndarray for a
-        single-recording source, a ``{nwb_file_name: ndarray}`` dict
-        for a shared-artifact-group source. If ``True``, BOTH sources
-        return the dict shape (a single-recording result is wrapped
-        as a one-key dict), so source-agnostic callers can avoid
-        branching on the return type.
+        If ``True``, a single-recording result is also returned as a
+        one-key dict. Default ``False``.
 
     Returns
     -------
@@ -80,12 +64,9 @@ def read_recording_artifact_valid_times(
 ):
     """Return one recording's artifact-removed ``valid_times``.
 
-    Reads through :func:`read_artifact_removed_intervals`, which validates
-    that the detection's ``RemovedInterval`` part rows own the
-    ``IntervalList``, rather than fetching the ``IntervalList`` by its
-    reconstructed name: that direct fetch would accept a partially deleted
-    detection or a hand-inserted same-name ``IntervalList``. The per-nwb dict
-    form covers single-recording and shared-group detections alike.
+    Reads through ``RemovedInterval`` ownership rather than the reconstructed
+    name, which would accept a partially deleted detection or a hand-inserted
+    same-name ``IntervalList``.
 
     Parameters
     ----------
@@ -123,19 +104,8 @@ def read_recording_artifact_valid_times(
 def read_owned_artifact_intervals(detection_cls, key):
     """Return the artifact-removed ``valid_times`` a detection row owns.
 
-    Source-agnostic reader for the split ``*ArtifactDetection`` result
-    tables: reads the detection row's OWN ``RemovedInterval`` part rows and
-    the ``IntervalList`` rows they own, keyed by ``nwb_file_name``. Because
-    the source kind is structural (a ``RecordingArtifactDetection`` owns
-    exactly one row; a ``SharedGroupArtifactDetection`` owns one per distinct
-    member ``nwb_file_name``), this reader stays uniform -- the per-table
-    ``get_artifact_removed_intervals`` shapes the return (a bare array for a
-    single-recording source, the dict for a shared-group source).
-
-    Reads only OWNED part rows, so the returned set is exactly what
-    ``make_insert`` wrote -- a missing part-row IntervalList row surfaces
-    loudly through ``fetch1`` (a partially-deleted detection) rather than
-    being silently dropped.
+    Reads the row's ``RemovedInterval`` part rows, so a missing
+    ``IntervalList`` row raises in ``fetch1`` instead of being dropped.
 
     Parameters
     ----------
@@ -185,10 +155,7 @@ def read_owned_artifact_intervals(detection_cls, key):
 def collect_artifact_interval_rows_to_remove(rows, detection_cls):
     """Resolve the artifact ``IntervalList`` rows paired with master rows.
 
-    Layer-2 delete-cleanup helper: fetches the owned ``RemovedInterval`` part
-    rows BEFORE the master delete, while they still exist, and returns the
-    matching ``{nwb_file_name, interval_list_name}`` restrictions. The caller
-    removes those ``IntervalList`` rows after the master delete succeeds.
+    Call before the master delete, while the part rows still exist.
 
     Parameters
     ----------
@@ -225,11 +192,8 @@ def collect_artifact_interval_rows_to_remove(rows, detection_cls):
 def remove_artifact_interval_rows(restrictions):
     """Delete the artifact-removed ``IntervalList`` rows for ``restrictions``.
 
-    Companion to ``collect_artifact_interval_rows_to_remove``: removes the
-    matching IntervalList rows AFTER the artifact-detection master delete
-    committed. All restrictions go through one delete because each
-    ``SpyglassMixin.delete`` call sweeps lab-wide external files; does
-    nothing when no restriction matches a row.
+    Call after the master delete commits. Uses one delete because each
+    ``SpyglassMixin.delete`` sweeps lab-wide external files.
 
     Parameters
     ----------
@@ -239,10 +203,7 @@ def remove_artifact_interval_rows(restrictions):
     """
     from spyglass.common import IntervalList
 
-    # SpyglassMixin ``.delete`` re-checks team permission (the caller already
-    # passed it on the detection rows for the same nwb_file_name);
-    # safemode=False only skips the re-prompt. ``super_delete`` would skip
-    # the check and could delete other users' rows in a shared session.
+    # Not ``super_delete``: keep the team-permission check.
     rows = IntervalList & restrictions
     if len(rows) == 0:
         return

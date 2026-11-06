@@ -1,16 +1,7 @@
 """Shared helpers for ingesting NWB files into the isolated test database.
 
-Modern-spike-sorting fixture generation, the v1 baseline-capture script, and
-the fixture round-trip test all need the same three-step pattern: copy the
-NWB into the isolated raw directory, run ``insert_sessions``, and look up the
-``Nwbfile`` row Spyglass created. Centralising it here keeps the deterministic
-copy naming and the ``reinsert=True`` choice in one place.
-
-This helper is intentionally version-tolerant on the ``reinsert`` kwarg
-because ``baseline_capture.py`` is designed to run under master spyglass
-(SI 0.99) where ``insert_sessions`` predates the ``reinsert`` parameter;
-the v2 parity test then consumes the captured baseline under the current
-spyglass + SI 0.104.
+``copy_and_insert_nwb`` tolerates an ``insert_sessions`` without ``reinsert``
+because ``baseline_capture.py`` runs under master spyglass (SI 0.99).
 """
 
 from __future__ import annotations
@@ -34,18 +25,15 @@ def copy_and_insert_nwb(
     nwb_source : pathlib.Path or str
         Source NWB file. Copied (not linked) into ``$SPYGLASS_RAW_DIR``.
     dest_name : str, optional
-        Basename to copy the source to (and ingest under) instead of the
-        source's own basename. Use this to ingest the same fixture under a
-        DISTINCT ``nwb_file_name`` so that one module's session cleanup /
-        ``reinsert`` cannot cascade-delete rows another fixture depends on.
-        Must end in ``.nwb``.
+        Basename to copy and ingest under instead of the source's basename.
+        A distinct ``nwb_file_name`` keeps one module's cleanup or
+        ``reinsert`` from cascade-deleting another fixture's rows. Must end
+        in ``.nwb``.
 
     Returns
     -------
     str
-        The Spyglass ``nwb_file_name``: the basename with the trailing-
-        underscore copy suffix Spyglass uses
-        (``get_nwb_copy_filename``).
+        The Spyglass ``nwb_file_name`` (``get_nwb_copy_filename``).
     """
     from spyglass.data_import import insert_sessions
     from spyglass.settings import raw_dir
@@ -54,12 +42,8 @@ def copy_and_insert_nwb(
     nwb_source = Path(nwb_source)
     ingest_name = dest_name or nwb_source.name
     raw_target = Path(raw_dir) / ingest_name
-    # A copy left by an earlier fixture version would otherwise be ingested.
-    # Generated fixtures differ on every write (NWB object ids are random), so
-    # first close the NWB file cache, which is keyed by path and would keep
-    # serving the old file. Then replace the copy rather than rewrite it in
-    # place: HDF5 matches open files by inode, so a handle still open on the
-    # old copy would otherwise be reused against the rewritten bytes.
+    # Close the path-keyed NWB cache, then replace (not rewrite) the copy:
+    # HDF5 matches open files by inode and would reuse a stale handle.
     if not (raw_target.exists() and filecmp.cmp(nwb_source, raw_target)):
         from spyglass.utils.nwb_helper_fn import close_nwb_files
 
@@ -71,11 +55,8 @@ def copy_and_insert_nwb(
     if "reinsert" in inspect.signature(insert_sessions).parameters:
         kwargs["reinsert"] = True
     else:
-        # Master spyglass's ``insert_sessions`` lacks the ``reinsert``
-        # parameter and silently no-ops on a duplicate Nwbfile row.
-        # Emulate the v2-branch reinsert path: drop any existing row
-        # for the target name (cascades through downstream tables) so
-        # ``populate_all_common`` actually runs.
+        # Master spyglass no-ops on a duplicate Nwbfile row; delete it so
+        # ``populate_all_common`` runs.
         from spyglass.common.common_nwbfile import Nwbfile
 
         target_copy = get_nwb_copy_filename(ingest_name)
@@ -111,10 +92,8 @@ def drop_unitmatch_selections_for(sorting_restriction) -> None:
 def clear_curations_for(sorting_key) -> None:
     """Delete every ``CurationV2`` row for a sorting plus its merge masters.
 
-    DataJoint refuses to drop a part row whose master is still present, so
-    walk from the ``SpikeSortingOutput`` merge master down before dropping
-    the ``CurationV2`` rows. The single implementation shared by conftest's
-    curation fixture and the v2 test modules.
+    Merge masters go first because DataJoint refuses to drop a part row
+    whose master is still present.
 
     Parameters
     ----------
@@ -154,10 +133,8 @@ def configure_v2_run_inputs(
 ) -> dict:
     """Seed defaults + LabTeam + sort group (no populate); return run inputs.
 
-    Idempotent ensure-exists setup shared by the v2 pipeline test modules:
-    inserts the default Lookup rows and the LabTeam, builds one sort group per
-    shank if absent, and returns the ``run_v2_pipeline`` input dict keyed on
-    the lowest ``sort_group_id``. Does NOT call ``populate``.
+    Idempotent. Builds one sort group per shank if absent and keys the
+    returned ``run_v2_pipeline`` inputs on the lowest ``sort_group_id``.
 
     Parameters
     ----------
@@ -201,25 +178,10 @@ def configure_v2_run_inputs(
 def _clean_session_v2(session_key):
     """Cascade-aware cleanup of every v2 row for a session.
 
-    The recording source is a ``SortingSelection`` XOR source part
-    (``RecordingSource`` / ``ConcatenatedRecordingSource``) FK'ing the upstream
-    ``Recording`` / ``ConcatenatedRecording``, and the artifact pass is an
-    ``ArtifactDetectionSource`` part FK'ing the ``ArtifactDetectionOutput``
-    merge, whose parts FK the split-detection rows. DataJoint's cascade can't
-    traverse the merge master cleanly, and a plain
-    ``super_delete(SortGroupV2 & session_key)`` raises ``Attempt to delete part
-    table ... before deleting from its master`` once the cascade reaches a
-    ``SortingSelection`` source part (or a merge part) because DataJoint refuses
-    to drop a part without its master.
-
-    Tests historically worked around this with an order-of-declaration
-    convention (SortGroup tests run before tests that populate the artifact /
-    sorting selections, so the cascade chain stays empty). Anything that
-    runs the suite in a different order (``-k``, parallel sharding,
-    rerun-failed) tripped the same DataJoint error. This helper makes
-    the cleanup order-independent by walking the dependency graph
-    leaves-first and deleting source-polymorphic masters explicitly
-    before their upstream tables.
+    Deletes leaves-first, removing source-polymorphic masters
+    (``SortingSelection``, merge tables) before their upstream tables. A plain
+    ``super_delete(SortGroupV2 & session_key)`` fails because DataJoint
+    refuses to drop a source or merge part before its master.
 
     Parameters
     ----------
@@ -247,10 +209,8 @@ def _clean_session_v2(session_key):
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    # Step 1: drop any SpikeSortingOutput / CurationV2 / Sorting rows for a
-    # sorting derived from this session, then the SortingSelection master. The
-    # recording source is a ``RecordingSource`` XOR part FK'ing Recording, so the
-    # master must go before Recording to satisfy the master-before-part rule.
+    # Step 1: sorting-derived rows, then SortingSelection masters (before
+    # Recording, per master-before-part).
     rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
     split_artifact_keys = (
         (
@@ -270,9 +230,8 @@ def _clean_session_v2(session_key):
         if shared_groups
         else []
     )
-    # FreeTable cascades bypass each detection's delete override. Capture the
-    # exact IntervalList keys while the ownership parts still exist, including
-    # shared detections whose parts disappear with their group master.
+    # FreeTable cascades bypass the detections' delete override, so collect
+    # owned IntervalList keys while the ownership parts exist.
     owned_intervals = []
     for owner, keys in (
         (RecordingArtifactDetection.RemovedInterval, split_artifact_keys),
@@ -298,17 +257,12 @@ def _clean_session_v2(session_key):
                 )
             (CurationV2 & sorting_keys).super_delete(warn=False)
             (Sorting & sorting_keys).super_delete(warn=False)
-            # Step 2: drop SortingSelection masters BEFORE removing
-            # Recording, otherwise the Recording cascade tries to
-            # delete the orphan RecordingSource part and fails.
+            # Step 2: masters before Recording, whose cascade would hit
+            # the orphan RecordingSource part.
             (SortingSelection & sorting_keys).super_delete(warn=False)
 
-        # Step 3: RecordingArtifactSelection/Detection + the
-        # ArtifactDetectionOutput merge. Drop the merge MASTER first
-        # (force_masters) so the later Recording cascade never hits the merge's
-        # RecordingSource part before its master; SortingSelection's
-        # ArtifactDetectionSource part (which FKs the merge) is already gone
-        # with the SortingSelection masters above.
+        # Step 3: artifact merge master first, so the Recording cascade
+        # never reaches its RecordingSource part.
         if split_artifact_keys:
             art_merge_ids = (
                 ArtifactDetectionOutput.RecordingSource & split_artifact_keys
@@ -325,32 +279,21 @@ def _clean_session_v2(session_key):
                 warn=False
             )
 
-    # Step 4: SharedArtifactGroup tables. The master FK's Session
-    # and the Member part FK's Recording, so prior shared-group
-    # rows pointing at THIS session's Recording rows must be
-    # cleaned before we drop Recording -- otherwise DJ refuses to
-    # cascade through the part-without-master constraint. Delete
-    # master + Member explicitly (master first satisfies the
-    # master-before-part rule).
+    # Step 4: SharedArtifactGroup before Recording (its Member part FKs
+    # Recording).
     if shared_groups:
-        # force_masters=True: the cascade can reach a
-        # ``SharedGroupArtifactSelection`` (which FKs ``SharedArtifactGroup``)
-        # or another part whose master is not ``SharedArtifactGroup``; without
-        # it DataJoint raises "delete part before master". Mirrors the other
-        # master-before-part super_deletes here.
+        # force_masters: the cascade reaches parts of other masters.
         (SharedArtifactGroup & shared_groups).super_delete(
             warn=False, force_masters=True
         )
 
-    # Step 5: now the cascade is unblocked -- Recording and SortGroupV2
-    # can be deleted normally, followed by abandoned artifact intervals below.
+    # Step 5: Recording and SortGroupV2, then abandoned artifact intervals.
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
 
-    # Another detection can still own a collected key (e.g. a repaired or
-    # directly inserted shared ownership row). Preserve both owner kinds and
-    # never cascade deletion outward from an IntervalList into surviving rows.
+    # Keep intervals another detection still owns; delete_quick never
+    # cascades into surviving rows.
     for interval_key in owned_intervals:
         if (RecordingArtifactDetection.RemovedInterval & interval_key) or (
             SharedGroupArtifactDetection.RemovedInterval & interval_key
@@ -360,27 +303,17 @@ def _clean_session_v2(session_key):
 
 
 def _synthetic_artifact_recording(offsets=None):
-    """8-channel, 90 000-sample (3 s @ 30 kHz) recording with three planted
-    artifact bursts -- one common-mode amplitude burst (all channels), one
-    single-channel burst sized to trip both amplitude and z-score regardless
-    of gain, and one smaller single-channel burst sized to cross an
-    amplitude threshold in raw counts but NOT after that channel's gain (180
-    raw * 0.25 µV/count = 45 µV, below a 50 µV threshold; the same 180 raw
-    counts read as already-µV would wrongly exceed it) -- plus heterogeneous
-    per-channel gains, so a wrong (or dropped) gain broadcast surfaces as a
-    disagreement between the chunked scan and an in-memory reference.
+    """8-channel, 3 s @ 30 kHz recording with three planted artifact bursts.
 
-    Both ``gain_to_uV`` and ``offset_to_uV`` are always set on the returned
-    recording (never gain alone), matching Spyglass's real NWB-backed
-    recordings: SpikeInterface's NWB reader always sets both properties
-    (``spikeinterface/extractors/nwbextractors.py:581-582,834-837,866-869``
-    in the installed SI 0.104.3). SpikeInterface's own
-    ``get_traces(return_in_uV=True)`` only actually scales when BOTH
-    properties are present (``has_scaleable_traces()``,
-    ``spikeinterface/core/baserecordingsnippets.py:47-49``); with gain set
-    but offset unset, it silently returns the raw, unscaled traces instead
-    (``spikeinterface/core/baserecording.py:364-374``) -- always setting
-    both here avoids that gap.
+    - common-mode amplitude burst on all channels
+    - single-channel burst that trips amplitude and z-score at any gain
+    - single-channel burst over a 50 µV threshold in raw counts but not
+      after gain (180 raw * 0.25 µV/count = 45 µV)
+
+    Per-channel gains differ, so a wrong gain broadcast shows up as a
+    mismatch between the chunked scan and an in-memory reference. Both
+    ``gain_to_uV`` and ``offset_to_uV`` are set, as the SI NWB reader does;
+    SI's ``return_in_uV=True`` silently skips scaling if either is missing.
 
     Parameters
     ----------
@@ -403,15 +336,11 @@ def _synthetic_artifact_recording(offsets=None):
     # Single-channel transient, large enough to trip amplitude AND z-score
     # regardless of gain (channel 3, gain 0.25 -> 100 µV peak).
     traces[60_000:60_120, 3] += 400.0
-    # Single-channel transient sized to straddle the amplitude threshold
-    # depending on whether gain is applied: 180 raw counts * 0.25 µV/count
-    # (channel 3's gain) = 45 µV, below a 50 µV threshold; 180 raw counts
-    # compared directly against that same threshold would wrongly exceed it.
+    # 180 raw * 0.25 µV/count = 45 µV: under a 50 µV threshold only if gain
+    # is applied.
     traces[75_000:75_050, 3] += 180.0
     rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
-    # Heterogeneous gains: the chunk worker and the reference must apply the
-    # SAME per-channel gain, so a wrong gain broadcast surfaces as
-    # inequality (see the 75_000:75_050 burst above).
+    # Heterogeneous gains expose a wrong gain broadcast.
     rec.set_channel_gains([1.0, 0.5, 2.0, 0.25, 1.0, 1.5, 0.8, 1.2])
     if offsets is None:
         offsets = [0.0] * n_channels
@@ -422,11 +351,8 @@ def _synthetic_artifact_recording(offsets=None):
 def clean_session_groups_for_owner(owner: str) -> None:
     """Cascade-delete every SessionGroup (and its concat lineage) for an owner.
 
-    Walks the concat lineage leaves-first so the source-polymorphic
-    ``SortingSelection``/merge masters are removed before their upstream
-    tables, mirroring :func:`_clean_session_v2`. Idempotent: a missing row at
-    any step is a no-op. Used by the chronic fixture's setup/teardown and by
-    tests that build their own groups.
+    Walks the concat lineage leaves-first, like :func:`_clean_session_v2`.
+    Idempotent.
 
     Parameters
     ----------
@@ -505,13 +431,9 @@ def synthesize_minirec_nwb(
 ):
     """Write a short single-tetrode synthetic recording to a Spyglass NWB.
 
-    Synthesizes one 4-channel SpikeInterface ground-truth recording and
-    writes it into the same Frank-lab-style NWB layout the MEArec fixtures
-    use (tetrode probe + electrodes + a single ``ElectricalSeries``), so the
-    file ingests through ``insert_sessions`` like a real session. The probe
-    geometry is the fixed ``tetrode_probe_layout()`` for EVERY call, so two
-    files synthesized this way carry byte-identical channel positions and can
-    be concatenated; only ``seed`` / ``firing_rates`` vary the planted spikes.
+    Uses the MEArec fixtures' NWB layout so it ingests like a real session.
+    Every call uses the same ``tetrode_probe_layout()``, so outputs can be
+    concatenated; only ``seed`` and ``firing_rates`` vary the spikes.
 
     Parameters
     ----------
@@ -563,9 +485,7 @@ def synthesize_minirec_nwb(
         },
         seed=seed,
     )
-    # Traces are returned in the recording's native microvolt scale; the NWB
-    # ElectricalSeries carries ``conversion=1e-6`` (uV -> V), matching the
-    # trodes_to_nwb convention the MEArec fixtures and Spyglass ingestion use.
+    # Traces are in µV; ``conversion=1e-6`` follows trodes_to_nwb.
     traces = recording.get_traces(return_in_uV=True)
 
     nwbfile = _build_nwbfile(
@@ -585,22 +505,10 @@ def synthesize_minirec_nwb(
 def zero_raw_electrode_geometry(nwb_path):
     """Zero the electrodes table's ``rel_x``/``rel_y``/``rel_z`` in place.
 
-    Reproduces the legacy Frank-lab session whose contact positions were
-    never written into the electrodes table: SpikeInterface reads exactly
-    these three columns as the recording's channel locations, so every
-    contact in a sort group collapses onto a single point and only
-    ``maybe_apply_tetrode_geometry`` can spread them apart again.
-
-    The ``ShanksElectrode`` probe metadata is deliberately LEFT ALONE.
-    Spyglass ingests it into ``Probe.Electrode``, whose primary key is
-    ``(probe_id, probe_shank, probe_electrode)`` with ``probe_id`` taken
-    from the probe TYPE -- device metadata is global, not per session. A
-    second ``tetrode_12.5`` probe carrying zeroed positions therefore
-    collides with the canonical one (``DuplicateError: ... already exists
-    with different values for rel_z``) and no test database can hold both.
-
-    Edited with h5py rather than pynwb because the columns are datasets
-    already on disk and only their values change.
+    Mimics Frank-lab sessions with no contact positions, so every contact
+    collapses to one point until ``maybe_apply_tetrode_geometry`` runs.
+    Probe metadata is left alone: ``Probe.Electrode`` is keyed by probe type,
+    so a zeroed ``tetrode_12.5`` would collide with the canonical one.
 
     Parameters
     ----------
@@ -631,27 +539,21 @@ def inject_raw_nan(
 ):
     """Overwrite one raw ``ElectricalSeries`` sample with NaN, in place.
 
-    Writes the corruption where it can actually arise on the real ingestion
-    path -- the raw acquisition data -- rather than editing an already
-    DataJoint-tracked (checksum-verified) artifact after the fact. The raw
-    ``data`` dataset is a plain HDF5 array of the acquisition's own dtype;
-    this only works when that dtype can represent NaN (a float dtype), which
-    the caller should check first (an integer raw dtype cannot hold NaN and
-    silently truncates/wraps instead).
+    The raw dtype must be float; callers check first, since an integer
+    dtype silently wraps NaN.
 
     Parameters
     ----------
     nwb_path : pathlib.Path or str
-        NWB file to edit IN PLACE. Must not yet be registered as a
-        DataJoint ``Nwbfile`` row -- edit a copy, then ingest the copy.
+        NWB file to edit IN PLACE. Must not be registered as an ``Nwbfile``
+        row yet; edit a copy, then ingest it.
     frame_index : int
         Row (sample) index into ``data`` to corrupt.
     channel_index : int
         Column (channel) index into ``data`` to corrupt.
     series_name : str
-        Acquisition ``ElectricalSeries`` name. Default ``"e-series"``, the
-        name the MEArec fixture generator (``fixtures/mearec_to_nwb.py``)
-        writes.
+        Acquisition ``ElectricalSeries`` name. Default ``"e-series"``, as
+        written by ``fixtures/mearec_to_nwb.py``.
 
     Returns
     -------
@@ -676,12 +578,9 @@ def inject_raw_nan(
 def rename_probe_type(nwb_path, new_probe_type: str):
     """Relabel every ``ndx_franklab_novela.Probe`` device in place.
 
-    ``Probe`` (and therefore ``Probe.Electrode``) is keyed by the probe TYPE
-    alone, so one database can hold exactly ONE geometry per probe type.
-    Ingesting a second session whose ``tetrode_12.5`` contacts sit elsewhere
-    raises ``DuplicateError``. Relabelling the copy gives it private device
-    rows, at the cost of the ``tetrode_12.5``-gated geometry repair no longer
-    applying to it.
+    ``Probe`` is keyed by probe type, so a second ``tetrode_12.5`` geometry
+    raises ``DuplicateError``. Relabelling gives the copy private device rows
+    but skips the ``tetrode_12.5`` geometry repair.
 
     Parameters
     ----------
@@ -718,13 +617,9 @@ def write_two_eseries_nwb(
 ):
     """Write an NWB with TWO acquisition ``ElectricalSeries`` objects.
 
-    The first series is rate-based (``starting_time`` + ``rate``) and the
-    second carries an explicit ``timestamps`` vector, so a caller can assert
-    that raw-source resolution returns the *matched* series' own path AND
-    timestamp mode -- not whatever the acquisition iteration happens to yield
-    first. Both series share one electrodes table; their per-series
-    ``object_id`` values (the identifiers a ``Raw`` row would store) are
-    returned so the caller can pin resolution to either one.
+    The first series is rate-based and the second has explicit
+    ``timestamps``, so callers can check that resolution returns the matched
+    series' path and timestamp mode, not the first one iterated.
 
     Parameters
     ----------
@@ -741,8 +636,7 @@ def write_two_eseries_nwb(
     -------
     dict
         ``{"first_series": (name, object_id), "second_series": (name,
-        object_id)}`` -- the in-file acquisition name and NWB object id of
-        each written ``ElectricalSeries``.
+        object_id)}``: acquisition name and NWB object id per series.
     """
     from datetime import datetime, timezone
     from pathlib import Path
@@ -808,10 +702,8 @@ def write_processed_recording_nwb(
 ):
     """Write a minimal analysis-style NWB with one preprocessed ElectricalSeries.
 
-    Mirrors the shape v2's ``write_nwb_artifact`` persists -- unscaled traces
-    plus ``conversion``/``offset``, an explicit ``timestamps`` vector, and an
-    electrodes region carrying ``rel_x``/``rel_y`` geometry -- so the content
-    fingerprint can be exercised without a database.
+    Mirrors what ``write_nwb_artifact`` persists, so the content fingerprint
+    can be tested without a database.
 
     Parameters
     ----------
@@ -893,15 +785,9 @@ def write_processed_recording_nwb(
 def _plant_concat_sorting_selection(sid):
     """Land a minimal concat-source ``SortingSelection`` via FK-checks-off.
 
-    ``insert_selection`` accepts a concat source, but it requires a real,
-    populated ``ConcatenatedRecording`` (the ``ConcatenatedRecordingSource``
-    part's FK target). This bypass plants a ``SortingSelection`` master + a
-    ``ConcatenatedRecordingSource`` part pointing at a fake
-    ``concat_recording_id`` via FK-checks-off -- so source-dispatch tests that
-    don't need a materialized concat recording (e.g. the concat brain-region
-    raise, the key_source membership check) stay cheap and ``resolve_source``
-    still reports a concat source. The caller cleans up
-    ``SortingSelection & {sid}``.
+    Points the source part at a fake ``concat_recording_id`` so
+    source-dispatch tests skip building a real ``ConcatenatedRecording``.
+    The caller cleans up ``SortingSelection & {sid}``.
     """
     import uuid
 
@@ -916,8 +802,7 @@ def _plant_concat_sorting_selection(sid):
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        # dj.Table.insert bypasses the SelectionMasterInsertGuard insert
-        # override so a fake master + source part can be planted directly.
+        # dj.Table.insert bypasses SelectionMasterInsertGuard.
         dj.Table.insert(
             SortingSelection(),
             [
@@ -959,10 +844,8 @@ def build_reference_merged_analyzer(
 ):
     """Build a committed merged curation's analyzer from scratch.
 
-    A reference for the published merged-curation analyzer: the same
-    low-level builder over the curation's own merged sorting, the sort's
-    recording and statistics spans, and ``waveform_recipe``'s params, written
-    to ``analyzer_folder`` outside the analyzer cache.
+    Reference for the published analyzer, written to ``analyzer_folder``
+    outside the analyzer cache.
     """
     from spyglass.spikesorting.v2._curation import analyzer as resolver
     from spyglass.spikesorting.v2._sorting.analyzer import (

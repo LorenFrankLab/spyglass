@@ -1,28 +1,14 @@
-"""Real-merge-master test for multi_source SpikeSortingOutput.fetch_nwb.
+"""Multi-source ``SpikeSortingOutput.fetch_nwb`` on a real merge table.
 
-The hermetic two-source tests in ``tests/utils/test_merge_consumer_boundary.py``
-exercise the generic ``_Merge.fetch_nwb`` on a synthetic merge table with
-single-int-PK leaves. This module covers what those cannot: it builds a REAL
-``SpikeSortingOutput`` with rows from two
-DISTINCT source part types and exercises:
+Uses one ``CurationV2`` and one ``ImportedSpikeSorting`` row (creating v0/v1
+rows needs SI 0.99). Covers:
 
-- the multi_source MASTER path on real parts -- a ``merge_id``-spanning
-  restriction over the two sources, aligned per file (``..._aligned``);
-- the parent-attribute JOIN path on a real COMPOSITE-PK parent -- restricting
-  by ``CurationV2``'s ``(sorting_id, curation_id)`` PK routes through
-  ``self * part * parent`` and the ``parent.primary_key`` / merge_id-by-PK
-  mapping (``..._parent_key_join_branch``);
+- a ``merge_id``-spanning restriction, aligned per file;
+- the parent-attribute join on ``CurationV2``'s composite PK;
 - the ``SortedSpikesGroup`` consumer over a 2-source group.
 
-Under SI 0.104 the only two source types whose ``fetch_nwb`` works are
-``CurationV2`` (the v2 pipeline) and ``ImportedSpikeSorting`` (reads
-``nwb_file.units`` directly; only its ``get_recording``/``get_sorting`` raise
-NotImplementedError). v0/v1 modules import and their rows stay queryable
-under SI 0.104, but creating v0/v1 rows needs the legacy SI 0.99 environment,
-so this module uses the two sources this environment can populate.
-The ``ImportedSpikeSorting`` source needs an NWB with a populated ``units``
-table -- the MEArec fixtures deliberately keep ``nwbfile.units`` empty, so we
-plant a small units table onto a copy and ingest it as its own session.
+The MEArec fixtures have no ``units`` table, so one is planted on a copy for
+``ImportedSpikeSorting``.
 """
 
 from __future__ import annotations
@@ -42,12 +28,7 @@ _SMOKE = (
 
 
 def _build_units_nwb(dst: Path) -> Path:
-    """Copy the smoke NWB and plant a small ``units`` table.
-
-    The smoke NWB carries all Spyglass-required session metadata
-    (subject/devices/electrodes); only ``units`` is missing, which is what
-    ``ImportedSpikeSorting`` ingests.
-    """
+    """Copy the smoke NWB and plant a small ``units`` table."""
     import pynwb
 
     shutil.copy(_SMOKE, dst)
@@ -237,20 +218,15 @@ def test_spikesortingoutput_get_spike_times_warns_across_sources(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_spikesortingoutput_parent_key_join_branch(two_source_output):
-    """Restricting by CurationV2's composite primary key
-    ``(sorting_id, curation_id)`` routes through the parent-attribute join
-    branch (``self * part * parent``) on a REAL composite-PK parent and
-    resolves the single owning file + merge_id.
-
-    The merge_id-spanning test above stays on the master path; this is the
-    only case that drives the join branch / ``parent.primary_key`` mapping
-    against a real (non-synthetic, multi-field-PK) parent.
+    """Restricting by CurationV2's composite PK ``(sorting_id, curation_id)``
+    goes through the parent-attribute join (``self * part * parent``) and
+    resolves the single owning file and merge_id.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_source_output
-    # cur_v2 is the CurationV2 PK dict {sorting_id, curation_id} -- both are
-    # parent (not master) attributes, so this enters the join branch.
+    # sorting_id and curation_id are parent attributes, so this takes the
+    # join branch.
     nwb_list, merge_ids = SpikeSortingOutput().fetch_nwb(
         ctx["cur_v2"], return_merge_ids=True
     )
@@ -264,8 +240,7 @@ def test_sorted_spikes_group_fetch_spike_data_spans_sources(
     two_source_output,
 ):
     """SortedSpikesGroup.fetch_spike_data over a group whose units span
-    CurationV2 + ImportedSpikeSorting works end-to-end (the migrated
-    multi_source=True caller), returning spikes from both sources."""
+    CurationV2 + ImportedSpikeSorting returns spikes from both sources."""
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
         UnitSelectionParams,
@@ -312,10 +287,8 @@ def test_unit_annotation_hard_blocks_multi_source(two_source_output):
     """UnitAnnotation.fetch_unit_spikes raises on a restriction spanning >1
     SpikeSortingOutput source, but a single-source restriction still fetches.
 
-    Annotations -- which are single-analysis by design -- carry a domain-specific
-    hard block in fetch_unit_spikes itself. Unlike SortedSpikesGroup (above),
-    which intentionally spans sources, UnitAnnotation must not mix spike-time
-    namespaces.
+    Unlike SortedSpikesGroup, annotations are single-analysis and must not mix
+    spike-time namespaces.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         _get_nwb_unit_ids,
@@ -349,7 +322,7 @@ def test_unit_annotation_hard_blocks_multi_source(two_source_output):
             )
             inserted.append({"spikesorting_merge_id": mid, "unit_id": unit_id})
 
-        # Single source: the guard must NOT false-raise -- spikes are returned.
+        # Single source: spikes are returned.
         single = (
             UnitAnnotation & {"spikesorting_merge_id": ctx["mid_v2"]}
         ).fetch_unit_spikes()

@@ -1,13 +1,7 @@
 """Recording artifact self-heal, verified rebuilding and atomic publication.
 
-This module owns file verification memoization, missing-artifact reconstruction,
-content and span drift checks, checksum reconciliation, and rebuild rollback.
-Single-session, concatenated and motion-corrected recordings use the same
-publication contract. Readers and NWB writers live in ``_storage.nwb``.
-
-DB-free at import. Database rows, persisted file locations and metadata are
-resolved only when a lifecycle operation runs. Rebuilding calls the owning
-table's fetch/compute methods and publishes only verified staged output.
+Rebuilds call the owning table's fetch/compute methods and publish only
+output whose content hash matches the stored row. DB-free at import.
 """
 
 from __future__ import annotations
@@ -20,10 +14,8 @@ from spyglass.spikesorting.v2._storage.staged_outputs import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 
-#: ``{analysis_file_name: (abs_path, file_identity)}`` for each cached trace
-#: artifact this process resolved through ``AnalysisNwbfile.get_abs_path``
-#: (which checksums the file) outside a transaction; ``file_identity`` is
-#: :func:`_file_identity` at that time. See :func:`ensure_artifact_file`.
+#: ``{analysis_file_name: (abs_path, file_identity)}`` for files checksummed
+#: outside a transaction. See :func:`ensure_artifact_file`.
 _VERIFIED_ARTIFACT_PATHS: dict[str, tuple[str, tuple[int, int, int]]] = {}
 
 
@@ -31,7 +23,7 @@ def _restore_object_id(path: str, rebuilt_id: str, stored_id: str) -> None:
     """Give the rebuilt series the object id the stored row records.
 
     Spyglass ``fetch_nwb`` finds each ``*object_id`` column's object by that
-    id, so a rebuild that kept its new id made the row unreadable that way.
+    id.
     """
     import h5py
 
@@ -65,11 +57,8 @@ def install_rebuilt_recording(
 ) -> None:
     """Install a verified rebuild and refresh its tracked byte checksum.
 
-    The caller holds the recording's artifact lock and has checked that the
-    temp's content fingerprint matches the stored recording. Give the rebuilt
-    series the stored row's object id, replace the file atomically, refresh
-    its checksum, then verify that it resolves. On failure, remove the temp or
-    installed file so the next read can retry the rebuild.
+    The caller holds the artifact lock and has verified the content hash. On
+    failure the temp or installed file is removed so the next read retries.
     """
     import os
     from pathlib import Path
@@ -142,22 +131,10 @@ def _file_identity(abs_path: str) -> tuple[int, int, int] | None:
 def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
     """Absolute path of a cached trace artifact, rebuilt first if missing.
 
-    The one self-heal every trace-artifact table shares: when the file is
-    gone, ``table()._rebuild_nwb_artifact(key)`` restores it (a locked,
-    content-verified rebuild; the DataJoint row is never deleted) at the
-    already-resolved path. The rebuild's install checksums the file through
-    ``get_abs_path``, so the path is not resolved a second time.
-
-    ``AnalysisNwbfile.get_abs_path`` checksums the whole file, about 1.3 s per
-    GiB (measured on a 1 GiB file with a warm page cache, dominated by
-    DataJoint's ``uuid_from_file``). DataJoint runs a tri-part ``make_fetch``
-    twice, the second time inside the insert transaction, so that checksum
-    would run twice per populate, once while the transaction is open. A
-    resolution outside a transaction always goes through ``get_abs_path``.
-    Inside a transaction, a file this process already resolved that way and
-    whose inode, size and modification time are unchanged reuses that result:
-    in a populate, that is the first ``make_fetch``'s check of the same file.
-    A rebuilt or rewritten file differs and is checked again.
+    ``get_abs_path`` checksums the whole file (~1.3 s/GiB) and DataJoint runs
+    ``make_fetch`` twice. Inside a transaction, a file already checksummed by
+    this process with unchanged inode, size and mtime is not checksummed
+    again.
 
     Parameters
     ----------
@@ -222,38 +199,22 @@ def stored_traces(table, key: dict, row: dict) -> StoredTraces:
 
 
 def rebuild_nwb_artifact(table, key) -> None:
-    """Rebuild a missing recording artifact -- locked, atomic, reconciled.
+    """Rebuild a missing recording artifact under its lock.
 
-    Locked + atomic-publish: acquire
-    ``recording_artifact_lock(recording_id)``, double-check the file is
-    still missing under the lock (a peer may have rebuilt while we waited),
-    then rebuild to a PRIVATE temp file on the same filesystem as the
-    canonical slot, fingerprint it, and only on a ``content_hash`` match
-    ``os.replace`` it into the slot and refresh the DataJoint ``~external``
-    byte checksum. A rebuild whose fingerprint diverges from the stored
-    ``content_hash`` (SpikeInterface/BLAS drift, an edited raw NWB, or
-    changed upstream inputs) raises ``RecordingContentDriftError`` and never
-    touches the canonical slot -- drifted bytes are never served.
-
-    Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
-    if ``os.replace`` ran but the checksum refresh then failed, the
-    canonical is unlinked to return the slot to the missing state for the
-    next (locked) ``get_recording``. Ordering is load-bearing -- the atomic
-    ``os.replace`` precedes ``_resolve_external``.
-
-    Calls ``make_fetch`` to re-derive every DB input -- the same fetch the
-    populate path uses -- so a rebuild cannot drift from the original
-    write's inputs. Safe to call directly (it takes the lock itself) and
-    from ``get_recording`` (which does not hold the lock).
+    Rebuilds via ``make_fetch`` to a temp file and installs it only on a
+    ``content_hash`` match. Takes the lock itself.
 
     Parameters
     ----------
     table : Recording
-        A ``Recording`` instance. ``make_fetch`` and
-        ``_compute_recording_artifact`` are called on it so patched
-        methods take effect.
+        A ``Recording`` instance.
     key : dict
         Restriction selecting a single ``Recording`` row.
+
+    Raises
+    ------
+    RecordingContentDriftError
+        If the rebuild does not reproduce the stored ``content_hash``.
     """
     import time
     from pathlib import Path
@@ -270,9 +231,7 @@ def rebuild_nwb_artifact(table, key) -> None:
     canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     with recording_artifact_lock(recording_id):
-        # Double-checked: a peer rebuilt (or the file was never gone) while
-        # we waited for the lock -- nothing to do. Two readers cannot both
-        # rebuild.
+        # A peer may have rebuilt it while we waited.
         if Path(canonical_abs).exists():
             return
 
@@ -283,10 +242,7 @@ def rebuild_nwb_artifact(table, key) -> None:
             "the preprocessed artifact..."
         )
         fetched = table.make_fetch(key)
-        # Rebuild to a FRESH, unregistered temp file -- same analysis dir
-        # (and filesystem) as the canonical slot, so the install is an
-        # atomic rename. ``_compute_recording_artifact`` returns the temp's
-        # readback content fingerprint as ``content_hash``.
+        # Same filesystem as the canonical slot, so install is an atomic rename.
         rebuilt = table._compute_recording_artifact(
             fetched,
             existing_analysis_file_name=None,  # fresh temp, not the slot
@@ -331,28 +287,15 @@ def rebuild_nwb_artifact(table, key) -> None:
             f"{time.monotonic() - started:.1f}s"
         )
 
-    # Best-effort (outside the all-or-nothing block): clear a stale
-    # RecordingArtifactRecompute deleted=1 flag now the file is back on
-    # disk. File tracking is presence-aware, so a failed clear cannot hide
-    # the rebuilt file -- this only keeps the flag accurate.
     clear_recompute_deleted_flag(recording_id)
 
 
 def rebuild_motion_corrected_artifact(table, key) -> None:
     """Rebuild a missing corrected artifact from the SAVED motion.
 
-    Locked on the corrected recording, double-checked under the lock,
-    then ``make_fetch`` / ``make_compute`` write a fresh temp artifact:
-    the saved estimate is reapplied, never estimated again, under the
-    installed SpikeInterface even if it differs from the one the
-    selection was made with. Only a temp
-    whose ``content_hash`` equals the stored one is installed
-    (``install_rebuilt_recording``); otherwise it is removed,
-    ``RecordingContentDriftError`` is raised and the canonical slot is
-    left untouched. A selection whose interpolation recipe now resolves
-    differently, or whose application algorithm version changed, cannot
-    reproduce the stored traces: ``RecordingContentDriftError`` names
-    the missing file and the repair before anything is computed.
+    The saved estimate is reapplied, under any SpikeInterface version; only a
+    ``content_hash`` match is installed. A stale selection is refused before
+    computing.
 
     Parameters
     ----------
@@ -361,6 +304,12 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
         ``make_compute`` are called on it.
     key : dict
         Restriction selecting a single ``MotionCorrectedRecording`` row.
+
+    Raises
+    ------
+    RecordingContentDriftError
+        If the selection is stale or the rebuild does not reproduce the
+        stored ``content_hash``.
     """
     from pathlib import Path
 
@@ -395,10 +344,8 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
             ]
         }
         fetched = table.make_fetch(master_key)
-        # The content hash is the guard (as for Recording), so a rebuild
-        # under another SpikeInterface version is allowed and installed
-        # only if it reproduces the stored traces. A changed recipe
-        # resolution or application algorithm cannot reproduce them.
+        # The content hash guards SI version changes; a changed recipe or
+        # algorithm cannot reproduce the traces.
         stale = stale_corrected_selection_fields(
             fetched.selection,
             resolve_interpolation_params(fetched.interpolation_params),
@@ -444,11 +391,8 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
 def clear_recompute_deleted_flag(recording_id) -> None:
     """Best-effort clear of stale ``RecordingArtifactRecompute.deleted``.
 
-    After an on-demand rebuild restores the file, clear any ``deleted=1``
-    recompute rows for this recording so the flag stays semantically true
-    ("intentionally removed and still absent"). Best-effort: a failed clear
-    is logged, never raised, and cannot hide the rebuilt file because file
-    tracking is presence-aware.
+    ``deleted=1`` means "removed and still absent". A failed clear is logged;
+    file tracking is presence-aware, so it cannot hide the rebuilt file.
     """
     from spyglass.utils import logger
 
@@ -472,32 +416,9 @@ def clear_recompute_deleted_flag(recording_id) -> None:
 
 
 def rebuild_concat_nwb_artifact(table, key) -> None:
-    """Rebuild a missing concat artifact -- locked, atomic, content-verified.
+    """Rebuild a missing concat artifact under its lock.
 
-    The concat analog of ``Recording._rebuild_nwb_artifact``. Acquire
-    ``concat_recording_artifact_lock(concat_recording_id)``, double-check the
-    file is still missing under the lock (a peer may have rebuilt while we
-    waited), then re-run the materialization (``make_fetch`` -> ``make_compute``
-    -- which also re-verifies the frozen member set against the live
-    recordings) to a FRESH temp analysis file, fingerprint it, and only on a
-    ``content_hash`` match ``os.replace`` it into the canonical slot and
-    refresh the DataJoint ``~external`` byte checksum. A rebuild whose
-    fingerprint diverges from the stored ``content_hash`` raises
-    ``RecordingContentDriftError`` and never touches the canonical slot --
-    drifted bytes are never served.
-
-    Cleanup contract (all-or-nothing): the temp is unlinked on any failure;
-    if ``os.replace`` ran but the checksum refresh then failed, the canonical
-    is unlinked to return the slot to the missing state for the next (locked)
-    ``get_recording``. Ordering is load-bearing -- the atomic ``os.replace``
-    precedes ``_resolve_external``.
-
-    An irreproducible rebuild (e.g. a changed SpikeInterface or NWB read
-    path) surfaces loudly as ``RecordingContentDriftError`` rather than
-    silently serving different bytes (the fingerprint's trace rounding
-    absorbs sub-µV noise).
-    Safe to call directly (it takes the lock itself) and from
-    ``get_recording`` (which does not hold the lock).
+    Like :func:`rebuild_nwb_artifact`; the stored spans must also match.
 
     Parameters
     ----------
@@ -506,6 +427,11 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
         ``make_compute`` are called on it.
     key : dict
         Restriction selecting a single ``ConcatenatedRecording`` row.
+
+    Raises
+    ------
+    RecordingContentDriftError
+        If the rebuilt content hash or spans differ from the stored row.
     """
     from pathlib import Path
 
@@ -526,8 +452,6 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
     canonical_abs = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
     with concat_recording_artifact_lock(concat_recording_id):
-        # Double-checked: a peer rebuilt (or the file was never gone) while
-        # we waited for the lock -- nothing to do.
         if Path(canonical_abs).exists():
             return
 
@@ -537,8 +461,6 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
             "the concatenated artifact..."
         )
         fetched = table.make_fetch(key)
-        # make_compute writes a FRESH (unregistered) temp analysis file and
-        # returns its readback content fingerprint as ``content_hash``.
         computed = table.make_compute(key, *fetched)
         _reject_irreproducible_rebuild(
             computed,
@@ -553,10 +475,8 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
                 "ConcatenatedRecording row (and its downstream)."
             ),
         )
-        # The traces fingerprint does not include the stored spans:
-        # downstream sorts estimate noise from the statistics spans and
-        # motion estimation reads the continuity spans and their first
-        # and last timestamps, so a rebuild must reproduce them exactly.
+        # The content hash omits the spans, which noise and motion
+        # estimation read.
         drifted = [
             name
             for name, shape in (

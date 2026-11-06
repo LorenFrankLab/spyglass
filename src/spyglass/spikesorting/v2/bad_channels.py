@@ -1,24 +1,13 @@
 """Bad-channel detection (SpikeInterface ``coherence+psd``).
 
-Two helpers:
+- ``detect_bad_channels``: wrapper over
+  ``spikeinterface.preprocessing.detect_bad_channels`` that pins the method
+  and returns flagged ids plus per-channel labels.
+- ``suggest_bad_channels``: detects per shank on a session's band-passed raw
+  recording and reports, or with ``persist=True`` writes, the ``dead`` /
+  ``noise`` channels to ``Electrode.bad_channel``.
 
-- ``detect_bad_channels`` -- a thin, pure wrapper over
-  ``spikeinterface.preprocessing.detect_bad_channels`` that pins only the
-  detection method and returns the flagged channel ids plus the per-channel
-  label map (``good`` / ``dead`` / ``noise`` / ``out``).
-- ``suggest_bad_channels`` -- a suggest-then-confirm helper that loads a
-  session's raw recording, band-pass filters it, runs detection **per full
-  shank** (the coherence method is spatially local), and reports -- or, with
-  ``persist=True``, persists -- the quality-bad (``dead`` / ``noise``) channels
-  onto ``Electrode.bad_channel``.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: SpikeInterface / spyglass (``Electrode``,
-``read_recording_nwb``, ``spikeinterface_channel_ids``, ``logger``)
-dependencies are imported lazily inside the functions. ``suggest_bad_channels``
-does touch the DB at CALL time (an ``Electrode`` fetch, plus ``Electrode.update1``
-when ``persist=True``) via those lazy imports -- mirroring
-``_recording/geometry.py``'s contract.
+DB-free at import: dependencies are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -30,38 +19,23 @@ if TYPE_CHECKING:
 
 __all__ = ["detect_bad_channels", "suggest_bad_channels"]
 
-# We pin ONLY the method. Every threshold is left to SpikeInterface's own
-# signature default (e.g. SI 0.104.3: dead -0.5, noisy 1.0, outside -0.75,
-# psd_hf 0.02, seed None) so "ships SI defaults" is literally true and a future
-# SI default change flows through. Do NOT hardcode threshold values here -- they
-# would silently diverge from SI and masquerade as defaults.
+# Pin only the method; thresholds stay at SpikeInterface's defaults.
 BAD_CHANNEL_DETECT_DEFAULTS: dict[str, str] = {"method": "coherence+psd"}
 
-# Labels that ``persist=True`` writes to ``Electrode.bad_channel``. These are
-# the *quality-bad* classes (a dead/flat contact, a noisy contact) -- safe to
-# interpolate from neighbours or to remove. ``"out"`` (outside-brain) is
-# deliberately excluded: the boolean flag cannot carry the label, and a
-# persisted ``out`` would later be wrongly *interpolated* by downstream handling.
+# Labels persisted to Electrode.bad_channel. "out" is excluded: the boolean
+# flag cannot carry it, and downstream would wrongly interpolate it.
 _WRITABLE_LABELS: tuple[BadChannelLabel, ...] = ("dead", "noise")
 
 
 def detect_bad_channels(recording, **overrides) -> dict:
     """Detect bad channels, returning ids and per-channel labels.
 
-    Thin wrapper over ``spikeinterface.preprocessing.detect_bad_channels``.
-    Only ``method="coherence+psd"`` (the IBL coherence/PSD method) is pinned;
-    every other knob falls through to SpikeInterface's signature default unless
-    the caller overrides it. The method is force-pinned *after* the override
-    merge, so a caller-supplied ``method=`` cannot silently replace it. ``None``
-    overrides are **dropped** so a "leave at SI default" sentinel never reaches
-    SI, where e.g. ``psd_hf_threshold=None`` would be invalid (SI expects
-    ``0.02``).
+    Wraps ``spikeinterface.preprocessing.detect_bad_channels`` with
+    ``method="coherence+psd"`` pinned; other arguments use SpikeInterface's
+    defaults unless overridden.
 
-    The recording must already be band-pass / high-pass filtered (the method
-    assumes spike-band data) and carry µV-scaled traces (SI asserts
-    ``recording.has_scaleable_traces()``; set channel gains/offsets if working
-    with synthetic data). Thresholds are Neuropixels-derived -- recalibrate for
-    other probe geometries (e.g. polymer) if over/under-flagging.
+    The recording must be high-pass filtered and µV-scaled. Thresholds are
+    Neuropixels-derived; recalibrate for other probes (e.g. polymer).
 
     Parameters
     ----------
@@ -103,15 +77,10 @@ def _shank_groups(
     """Group fetched ``Electrode`` rows by physical shank.
 
     Returns ``{(electrode_group_name, probe_shank): [electrode_id, ...]}``,
-    ordered by ``(electrode_group_name, probe_shank)`` with each id list
-    sorted, so iteration is deterministic.
+    sorted by key with each id list sorted.
 
-    ``probe_shank`` rides into ``Electrode`` through the *nullable*
-    ``Electrode -> Probe.Electrode -> Probe.Shank`` FK chain (``probe_shank``
-    is the ``Probe.Shank`` key), so it is unset when an NWB lacks novela probe
-    metadata. Per-shank detection is undefined without it (and ``int(None)``
-    would otherwise crash), so this raises a clear ``ValueError`` naming the
-    fix. Pure / DB-free -- it operates only on the already-fetched rows.
+    Raises ``ValueError`` if any row has no ``probe_shank`` (the nullable
+    ``Probe.Electrode`` FK is unset when the NWB lacks probe metadata).
     """
     no_shank = sorted(
         int(r["electrode_id"]) for r in electrodes if r["probe_shank"] is None
@@ -135,12 +104,9 @@ def _shank_groups(
 def _persist_quality_bad(nwb_file_name: str, report: list[dict]) -> int:
     """Additively persist a report's ``dead``/``noise`` electrodes.
 
-    Sets ``Electrode.bad_channel='True'`` for every ``dead``/``noise`` entry in
-    ``report``; ``out`` is never written (see :func:`suggest_bad_channels`).
-    Additive and idempotent: an electrode already flagged ``'True'`` is skipped,
-    so a curated flag is never cleared and a re-run is a no-op. All writes share
-    one transaction, so a mid-loop DB error is all-or-nothing rather than
-    leaving a half-written flag set. Returns the count of newly-written rows.
+    Sets ``Electrode.bad_channel='True'`` for each ``dead``/``noise`` entry,
+    skipping rows already flagged, in one transaction. Never clears a flag.
+    Returns the count of newly written rows.
     """
     from spyglass.common.common_ephys import Electrode
 
@@ -172,56 +138,24 @@ def suggest_bad_channels(
     persist: bool = False,
     reviewed_report: list[dict] | None = None,
 ) -> list[dict]:
-    """Suggest -- and optionally persist -- a session's bad channels.
+    """Suggest, and optionally persist, a session's bad channels.
 
-    Suggest-then-confirm helper. By default (``persist=False``) it changes
-    nothing: it loads the session's raw recording, band-pass filters it, runs
-    :func:`detect_bad_channels` **per full shank** (the coherence method is
-    spatially local; mixing shanks corrupts it), maps SpikeInterface channel
-    ids back to spyglass ``electrode_id`` s, and returns one report dict per
-    flagged electrode carrying its label so you can review what kind of bad it
-    is before persisting anything.
+    By default nothing is written: the raw recording is band-pass filtered,
+    :func:`detect_bad_channels` runs per shank (the coherence method is
+    spatially local), and one report dict is returned per flagged electrode.
 
-    To make the confirm step persist **exactly** what you reviewed, pass the
-    reviewed report back: ``suggest_bad_channels(nwb, persist=True,
-    reviewed_report=reviewed)`` skips detection entirely and writes from ``reviewed``.
-    This matters because the ``coherence+psd`` method samples random chunks with
-    SpikeInterface's ``seed=None`` default, so a *fresh* ``persist=True`` call
-    (no ``reviewed_report=``) re-detects and may flag a slightly different set
-    than the ``persist=False`` review returned. (Passing a fixed
-    ``detection_params={"seed": ...}`` to both calls makes the fresh path
-    reproducible too.)
-
-    With ``persist=True`` it sets ``Electrode.bad_channel='True'`` for **only**
-    the ``dead`` / ``noise`` electrodes. The write is **additive** -- it never
-    clears an existing curated ``'True'`` and never writes ``'False'``. ``out``
-    (outside-brain) channels are **report-only**: they are surfaced for
-    awareness but **never** written, because ``Electrode.bad_channel`` is a
-    boolean that cannot carry the ``out`` label and a persisted ``out`` would
-    later be wrongly *interpolated* by downstream handling.
-
-    Invariant: ``Electrode.bad_channel='True'`` means a *quality-bad*
-    (``dead`` / ``noise`` class) channel that is safe to interpolate or remove;
-    it must NOT mark an outside-brain channel. That is why this helper refuses
-    to write ``out``. To keep an ``out`` channel out of a sort, omit it from the
-    sort group's membership (it is not auto-handled anywhere), e.g. build the
-    group with ``SortGroupV2.set_group_by_electrode_table_column(nwb_file_name,
-    electrode_column="electrode_id",
-    value_groups=[[...in-brain electrode_ids...]])``.
-
-    Ordering: finalize ``bad_channel`` flags **before** creating sort groups.
-    ``SortGroupV2.set_group_by_*`` excludes flagged channels at creation and a
-    flag added after a group exists does not retroactively drop its members --
-    recreate the group to apply later flags.
-
-    Two caveats on the detection itself. The ``coherence+psd`` method estimates
-    from random data chunks with SpikeInterface's ``seed=None`` default, so the
-    flagged set can vary run-to-run; pass ``detection_params={"seed": ...}`` for
-    a reproducible result (relevant when ``persist=True`` persists the outcome).
-    The method is also Neuropixels-density-tuned (default ``n_neighbors=11``): on
-    a shank with only a few contacts (e.g. a tetrode) the spatial-coherence
-    statistic is degenerate and the scan tends to report "no bad channels" --
-    treat small-shank results with skepticism rather than as a clean bill.
+    - Persist exactly what you reviewed with ``persist=True,
+      reviewed_report=reviewed``. A fresh ``persist=True`` call re-detects,
+      and detection is random unless ``detection_params={"seed": ...}``.
+    - ``persist=True`` writes ``Electrode.bad_channel='True'`` only for
+      ``dead`` / ``noise``, additively. ``out`` (outside-brain) is
+      report-only, because downstream would interpolate a flagged channel.
+      Exclude ``out`` channels from the sort group instead, e.g. with
+      ``SortGroupV2.set_group_by_electrode_table_column``.
+    - Set flags before creating sort groups; existing groups keep their
+      members until recreated.
+    - The method is tuned for Neuropixels density (``n_neighbors=11``). On a
+      few-contact shank such as a tetrode it tends to report no bad channels.
 
     Parameters
     ----------
@@ -239,13 +173,12 @@ def suggest_bad_channels(
         ``{"dead_channel_threshold": -0.4}``). ``None`` values within it are
         dropped. Default ``None`` uses SI's defaults.
     persist : bool, optional
-        ``False`` (default) suggests only -- mutates nothing. ``True`` persists
-        ``dead`` / ``noise`` flags (additive).
+        ``False`` (default) writes nothing. ``True`` persists ``dead`` /
+        ``noise`` flags additively.
     reviewed_report : list[dict], optional
-        A report previously returned by this function. When given (with
-        ``persist=True``), detection is **skipped** and these exact entries are
-        persisted -- so the confirm step writes precisely what was reviewed.
-        Default ``None`` detects fresh.
+        A report previously returned by this function. With ``persist=True``,
+        skips detection and persists these entries. Default ``None`` detects
+        fresh.
 
     Returns
     -------
@@ -262,9 +195,7 @@ def suggest_bad_channels(
     """
     from spyglass.utils import logger
 
-    # Apply mode: persist a previously-reviewed report verbatim, no re-detection
-    # (so the confirm step writes exactly what was reviewed -- detection with
-    # ``seed=None`` is otherwise non-deterministic run-to-run).
+    # Apply mode: persist the reviewed report without re-detecting.
     if reviewed_report is not None:
         if not persist:
             raise ValueError(
@@ -292,9 +223,7 @@ def suggest_bad_channels(
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
 
-    # 1. Electrode metadata, grouped by physical shank (fail loud on a missing
-    #    shank). ``probe_shank`` is read exactly as ``set_group_by_shank`` reads
-    #    it (off a plain ``Electrode`` fetch, via the Probe FK chain).
+    # Read probe_shank the same way set_group_by_shank does.
     query = Electrode() & {"nwb_file_name": nwb_file_name}
     if electrode_group_names is not None:
         query = query & [
@@ -315,13 +244,8 @@ def suggest_bad_channels(
         )
     shanks = _shank_groups(electrodes, nwb_file_name)
 
-    # 2. Load the raw recording and band-pass filter ONCE so detection runs on
-    #    spike-band data. The NWB conversion makes the recording µV-scaled, so
-    #    ``coherence+psd`` (which asserts ``has_scaleable_traces``) is satisfied.
-    #    Resolve every electrode_id -> SI channel id in a single NWB read (not
-    #    once per shank).
-    #    Read the series Recording reads: the one ``Raw.raw_object_id`` names,
-    #    falling back to name-based selection for a session without a Raw row.
+    # Read the series Recording reads; fall back to name-based selection
+    # when the session has no Raw row.
     raw_path = Nwbfile.get_abs_path(nwb_file_name)
     raw_object_ids = (Raw & {"nwb_file_name": nwb_file_name}).fetch(
         "raw_object_id"
@@ -334,9 +258,7 @@ def suggest_bad_channels(
         ),
         load_time_vector=False,
     )
-    # freq_max must be below the recording's Nyquist (fs/2); a value at/above
-    # it fails opaquely inside scipy's filter design (shared check with
-    # apply_temporal_preprocessing).
+    # scipy's filter design fails opaquely at or above Nyquist.
     from spyglass.spikesorting.v2._core.signal_math import (
         assert_freq_max_below_nyquist,
     )
@@ -352,8 +274,6 @@ def suggest_bad_channels(
         zip(all_ids, spikeinterface_channel_ids(raw_path, all_ids))
     )
 
-    # 3. Detect within each shank; build the report. Detection is read-only --
-    #    nothing is persisted until the (optional) atomic write below.
     detected_report = []
     n_out = 0
     for (e_group, shank), electrode_ids in shanks.items():
@@ -389,7 +309,6 @@ def suggest_bad_channels(
             f"shank {shank}: {summary}."
         )
 
-    # 4. Persist dead/noise (additive, atomic) from the freshly-built report.
     n_written = (
         _persist_quality_bad(nwb_file_name, detected_report) if persist else 0
     )

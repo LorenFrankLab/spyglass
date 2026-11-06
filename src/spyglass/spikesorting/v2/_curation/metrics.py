@@ -1,17 +1,15 @@
-"""DB-free compute and transform helpers for analyzer-driven metric curation.
+"""DB-free metric computation and labeling for ``CurationEvaluation``.
 
-Pure logic shared by ``CurationEvaluation`` (the ``@schema`` table lives in
-``metric_curation.py``): turning quality-metric columns into per-unit labels,
-sanitizing non-finite metric values before serialization, reproducing
-Spyglass's ``isi_violation`` fraction, and telling a legitimately unassessable
-unit's NaN metric apart from a failed metric computation. It also holds the
-evaluation's compute steps over SpikeInterface analyzers: ``compute_metrics``
-(voltage metrics on the display analyzer, PC/NN metrics on the whitened metric
-analyzer), ``compute_merge_groups`` and ``evaluate_analyzers``, which labels
-the units and enforces the curation's unit namespace. SpikeInterface is
-imported inside those functions, so the module imports with only NumPy /
-pandas and no DataJoint connection, and its helpers can be unit-tested
-without a database.
+- ``compute_metrics``: voltage metrics on the display analyzer, PC/NN
+  metrics on the whitened metric analyzer.
+- ``apply_label_rules``: threshold rules to per-unit labels.
+- ``expected_missing_units``: separates an unassessable unit's NaN from a
+  failed computation.
+- ``evaluate_analyzers``: metrics, labels, and merge groups with namespace
+  checks.
+
+SpikeInterface is imported inside functions, so helpers test without a
+database.
 """
 
 from __future__ import annotations
@@ -37,11 +35,8 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
 )
 from spyglass.utils import logger
 
-# Threshold-rule comparison operators. Mirrors the ``operator`` enum on
-# ``AutoCurationRules.Rule`` and the ``RuleOperator`` Literal in
-# ``_params/metric_curation.py``. Non-finite metric values are filtered before
-# operator dispatch so low-spike / invalid metrics are NOT auto-flagged,
-# including for ``!=`` where NumPy would otherwise treat NaN as unequal.
+# Mirrors ``AutoCurationRules.Rule.operator`` and ``RuleOperator``. Non-finite
+# values are filtered before dispatch, so NaN never matches (even ``!=``).
 _COMPARISON_TO_FUNCTION = {
     "<": np.less,
     "<=": np.less_equal,
@@ -53,13 +48,10 @@ _COMPARISON_TO_FUNCTION = {
 
 
 def _is_finite_metric_value(value) -> bool:
-    """Return whether one metric scalar can participate in thresholding.
+    """Return whether one metric scalar can be thresholded.
 
-    A legitimate ``NaN`` (a low-spike unit's metric) is filtered silently. A
-    genuinely non-numeric value -- which would mean SpikeInterface's metric
-    output drifted to a non-scalar shape/dtype -- is also filtered, but logged
-    at WARNING rather than swallowed. The NWB write path is stricter and rejects
-    that drift before a persisted evaluation can reach this read-side filter.
+    NaN is filtered silently; a non-numeric value (SI output drift) is
+    filtered with a warning.
     """
     if pd.isna(value):
         return False
@@ -85,17 +77,9 @@ def apply_metric_peak_sign(
 ) -> dict:
     """Set the sort's ``peak_sign`` on every requested polarity metric.
 
-    SI reads ``snr``, ``sd_ratio`` and ``nn_advanced`` at each template's
-    extremum for a ``peak_sign`` that defaults to ``"neg"``, and the v2
-    default metric rows hard-code ``snr.peak_sign="neg"``. A
-    positive/bidirectional sorter (clusterless ``peak_sign="pos"/"both"``,
-    MountainSort ``detect_sign=1/0``) would then measure them on the
-    most-negative channel instead of its true peak. The sort's polarity
-    (``resolve_peak_sign``, which also drives per-unit attribution) overrides
-    the metric's, even when it carried no kwargs yet; its other kwargs are
-    preserved. For negative-default sorts nothing changes numerically.
-
-    Returns a NEW mapping (the caller's dict is not mutated).
+    SI reads these metrics at the template extremum for ``peak_sign``
+    (default ``"neg"``), so a positive or bidirectional sort would measure the
+    wrong channel. Other kwargs are kept; the input is not mutated.
 
     Parameters
     ----------
@@ -125,13 +109,9 @@ def apply_metric_peak_sign(
 def apply_metric_seed(metric_names, metric_kwargs: dict, seed) -> dict:
     """Seed the requested random metrics a row leaves unseeded.
 
-    ``nn_advanced`` draws its spike subsample and noise cluster from
-    ``seed`` (SI default ``None``: unseeded), and ``sd_ratio`` estimates
-    noise from SI's random chunks (``random_slices_kwargs``) whenever no span
-    estimate is cached. Unseeded, a re-evaluation of the same curation gives
-    different values and possibly different labels. ``seed`` (the display
-    analyzer's noise seed) fills only what the row leaves unset; a row's own
-    seed wins. Returns a NEW mapping.
+    ``nn_advanced`` and ``sd_ratio`` draw random samples, so unseeded
+    re-evaluations can change labels. A row's own seed wins. Returns a new
+    mapping.
 
     Parameters
     ----------
@@ -174,10 +154,7 @@ def apply_label_rules(
     ----------
     metrics_df : pandas.DataFrame
         One row per unit (indexed by ``unit_id``), one column per quality
-        metric. A non-finite entry never satisfies a threshold; whether it is
-        treated as an expected, legitimately-unassessable value or as a
-        metric computation failure is decided by ``expected_missing`` (or, if
-        that is not given, by the rule's ``missing_policy`` alone, as before).
+        metric. A non-finite entry never satisfies a threshold.
     rule_rows : list of dict
         ``AutoCurationRules.Rule`` rows, each with ``rule_index``,
         ``metric_name``, ``operator``, ``threshold``, and ``label``. Rules are
@@ -186,24 +163,16 @@ def apply_label_rules(
         rule label to a unit whose value is non-finite, while ``"pass"``
         leaves it unlabelled.
     expected_missing : dict[str, set or None] or None, optional
-        Output of ``expected_missing_units`` for the columns these rules
-        reference. When given, a rule's ``missing_policy`` only governs units
-        whose non-finite value is in the column's expected-missing set. A
-        non-finite value for a unit NOT in that set, or any non-finite value
-        in a column with no registered eligibility rule (the column's entry
-        is ``None`` or it is absent from this mapping), is instead treated as
-        a metric computation failure and raises regardless of
-        ``missing_policy``. When ``expected_missing`` is ``None`` (the
-        default), every non-finite value follows ``missing_policy`` as if it
-        were expected.
+        Output of ``expected_missing_units`` for the rule columns. When
+        given, ``missing_policy`` governs only expected-missing units; any
+        other non-finite value, or one in a column with no eligibility rule
+        (``None`` or absent), raises. When ``None``, every non-finite value
+        follows ``missing_policy``.
 
     Returns
     -------
     dict[int, list[str]]
-        ``unit_id -> [label, ...]`` containing ONLY units that matched at
-        least one rule. Units with no labels are absent (the caller omits the
-        ragged label column entirely when this dict is empty, because an
-        empty list-of-lists column cannot be written; see #1625).
+        ``unit_id -> [label, ...]`` for units matching at least one rule.
 
     Raises
     ------
@@ -213,17 +182,8 @@ def apply_label_rules(
         value and the rule's missing policy is ``"error"``; or if
         ``expected_missing`` classifies a unit's non-finite value as a metric
         computation failure (regardless of ``missing_policy``).
-
-    Notes
-    -----
-    Addresses the three #1513 bug classes: every rule is processed (the return
-    is at function scope, never inside the rule loop); each unit's label list
-    is an independent object (a fresh list per ``unit_id``); and a label is
-    appended only when not already present (element-against-list dedupe).
     """
     _metric_unit_ids(metrics_df.index)
-    # A plain dict with explicit fresh-list construction -- each unit_id gets
-    # its own list object, so one unit's append cannot leak into another.
     labels: dict[int, list[str]] = {}
 
     for rule in sorted(rule_rows, key=lambda r: r["rule_index"]):
@@ -265,12 +225,9 @@ def apply_label_rules(
         ]
 
         if expected_missing is None:
-            # No classifier was given: every non-finite value is handled by
-            # missing_policy alone.
             policy_missing_ids = missing_unit_ids
         else:
-            # A column never classified (absent) fails closed like one with
-            # no registered eligibility rule.
+            # An unclassified (absent) column fails closed.
             policy_missing_ids = _expected_missing_unit_ids(
                 metric_name,
                 missing_unit_ids,
@@ -291,12 +248,7 @@ def apply_label_rules(
             and policy_missing_ids
             and len(policy_missing_ids) == len(metrics_df.index)
         ):
-            # A per-unit NaN is an expected low-spike skip, but a metric that
-            # is missing for EVERY unit means the rule made no real
-            # comparison at all, so the rule is silently inert. Say so
-            # without raising: "pass" applied no labels; "fail" applied its
-            # label to everyone for that reason, not because any unit
-            # crossed the threshold.
+            # NaN for every unit means the rule compared nothing; warn.
             if missing_policy == "pass":
                 logger.warning(
                     f"Auto-curation rule {rule_name!r} "
@@ -334,17 +286,13 @@ def apply_label_rules(
 def sanitize_for_json(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of ``df`` with every non-finite value replaced by None.
 
-    ``compute_quality_metrics`` legitimately returns NaN for low-spike units
-    (and rarely +-inf). Those values break NWB / JSON serialization, so every
-    serialized target coerces them to ``None`` first (#1556). The input
-    DataFrame is not modified -- in-memory consumers that filter on NaN keep
-    their semantics; only the serialized copy is sanitized.
+    SI returns NaN (rarely inf) for low-spike units, which breaks NWB/JSON
+    serialization. The input is not modified.
     """
     sanitized = df.replace([np.inf, -np.inf], np.nan)
     non_finite = sanitized.isna()
-    # Cast to object first: ``pandas.where(..., other=None)`` treats ``None``
-    # as "use the default NaN" and leaves NaN in place, so use an explicit
-    # boolean-mask assignment, which writes real ``None`` into object columns.
+    # ``where(..., other=None)`` keeps NaN; mask assignment on object dtype
+    # writes a real None.
     sanitized = sanitized.astype(object)
     sanitized[non_finite] = None
     return sanitized
@@ -353,12 +301,8 @@ def sanitize_for_json(df: pd.DataFrame) -> pd.DataFrame:
 def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     """Reproduce Spyglass's bounded ISI-violation fraction.
 
-    Spyglass defines ``isi_violation`` as ``count / (n_spikes - 1)`` -- the
-    observed fraction of too-short inter-spike intervals (``v1/metric_utils``).
-    This is NOT SpikeInterface's ``isi_violations_ratio`` (the unbounded
-    Hill/UMS2000 contamination estimate). Evaluation counts violations on
-    the retained spikes' original clock; SI's count and ratio remain separate
-    sample-clock diagnostics.
+    ``count / (n_spikes - 1)`` (``v1/metric_utils``), not SI's unbounded
+    ``isi_violations_ratio``.
 
     Parameters
     ----------
@@ -370,9 +314,7 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        The per-unit fraction. Units with <=1 spike yield NaN (caught by NaN
-        sanitization), which avoids both the ``0/0`` 1-spike case and the
-        spurious finite ``(-1)/(0-1)=1.0`` 0-spike artifact.
+        The per-unit fraction; NaN for units with <= 1 spike.
     """
     counts = np.asarray(isi_violations_count, dtype=float)
     n = np.asarray(num_spikes, dtype=float)
@@ -386,9 +328,8 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
 def isi_continuity_boundaries(analyzer, continuity_spans):
     """Join frames between ``continuity_spans``, or ``None`` without spans.
 
-    Concat-backed sources replace acquisition clocks with a synthetic clock;
-    their persisted continuity spans identify pairs across unrelated chunks.
-    Artifact exclusions do not split these spans or change elapsed time.
+    Concat-backed sources use a synthetic clock; their continuity spans mark
+    joins between unrelated chunks. Artifact exclusions do not split spans.
     """
     if continuity_spans is None:
         return None
@@ -448,14 +389,8 @@ def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
 
 
 # ---------- metric eligibility: which NaNs SpikeInterface leaves on purpose --
-#
-# SpikeInterface swallows a failing metric to NaN (per metric in
-# ``core/analyzer_extension_core.py:1281-1286``; per unit for ``nn_advanced``
-# in ``metrics/quality/pca_metrics.py:180-181,193-194``), so a NaN alone does
-# not say whether the unit was simply not assessable or the computation broke.
-# Each predicate below reproduces the exact condition under which SI 0.104.3
-# (and Spyglass's ``isi_violation`` fraction) returns NaN without any error.
-# Paths are relative to the installed ``spikeinterface`` package.
+# SI also swallows failures to NaN, so each predicate reproduces when SI 0.104.3
+# returns NaN without error. Paths are relative to ``spikeinterface``.
 
 
 def _nn_advanced_missing(
@@ -463,13 +398,8 @@ def _nn_advanced_missing(
 ) -> np.ndarray:
     """``nn_isolation`` / ``nn_noise_overlap``: below the spike or rate floor.
 
-    SI returns NaN when ``n_spikes < min_spikes`` or ``firing_rate < min_fr``
-    (``metrics/quality/pca_metrics.py:619-630`` isolation, ``825-836`` noise
-    overlap; Spyglass's patched noise overlap keeps both checks,
-    ``_core.si_metric_patches._nn_noise_overlap_sparse_fixed``). The rate is
-    ``n_spikes / (total_samples / fs)`` (``metrics/spiketrain/metrics.py:69-77``
-    with ``metrics/utils.py:100-125``). A zero-spike unit fails every nn
-    computation, so it is expected-missing even with ``min_spikes=0``.
+    ``metrics/quality/pca_metrics.py:619-630,825-836``; Spyglass's patched
+    noise overlap keeps both checks. A zero-spike unit is always missing.
     """
     duration_s = total_samples / fs
     below_floor = n_spikes < max(params["min_spikes"], 1)
@@ -495,9 +425,7 @@ def _amplitude_cutoff_missing(
 ) -> np.ndarray:
     """``amplitude_cutoff``: too few amplitudes for the histogram.
 
-    ``metrics/quality/misc_metrics.py:1670-1671`` is the only NaN path (the
-    result below it is always finite, 1673-1686); the amplitudes are every
-    spike of the unit (1005-1011).
+    ``metrics/quality/misc_metrics.py:1670-1671`` is the only NaN path.
     """
     return (
         n_spikes / params["num_histogram_bins"]
@@ -508,10 +436,7 @@ def _amplitude_cutoff_missing(
 def _isi_violation_missing(
     n_spikes: np.ndarray, *, total_samples: int, fs: float, params: dict
 ) -> np.ndarray:
-    """Spyglass ``isi_violation`` fraction: undefined for <= 1 spike.
-
-    See ``isi_violation_fraction`` above.
-    """
+    """Spyglass ``isi_violation`` fraction: undefined for <= 1 spike."""
     return n_spikes <= 1
 
 
@@ -530,10 +455,8 @@ def _never_missing(
 ) -> np.ndarray:
     """``snr`` / ``num_spikes``: never legitimately missing.
 
-    ``num_spikes`` is an integer count (``metrics/spiketrain/metrics.py:7-34``).
-    ``snr`` is ``abs(amplitude) / noise`` (``metrics/quality/misc_metrics.py:
-    205-209``); it is non-finite only when the extremum channel's noise level is
-    zero, which is a degenerate recording, not an unassessable unit.
+    Non-finite ``snr`` means zero noise on the extremum channel, a degenerate
+    recording.
     """
     return np.zeros(n_spikes.shape, dtype=bool)
 
@@ -555,10 +478,8 @@ class _EligibilityRule(NamedTuple):
     is_missing: Callable[..., np.ndarray]
 
 
-# Keyed by OUTPUT column name. Deliberately absent: SI's
-# ``isi_violations_ratio`` / ``isi_violations_count``, template metrics (e.g.
-# ``trough_half_width``), Spyglass's ``observed_*`` columns and custom metrics;
-# a rule on any of them fails closed on NaN.
+# Keyed by output column. Unlisted columns (``isi_violations_*``, template,
+# ``observed_*``, custom) fail closed on NaN.
 _METRIC_ELIGIBILITY: dict[str, _EligibilityRule] = {
     "nn_isolation": _EligibilityRule("nn_advanced", _nn_advanced_missing),
     "nn_noise_overlap": _EligibilityRule("nn_advanced", _nn_advanced_missing),
@@ -578,16 +499,9 @@ _METRIC_ELIGIBILITY: dict[str, _EligibilityRule] = {
 def _si_metric_params(si_metric: str, metric_kwargs: Mapping) -> dict:
     """SI's defaults for one metric merged with the caller's kwargs.
 
-    Mirrors the merge in ``core/analyzer_extension_core.py:1172-1178``. SI
-    reads its defaults from the metric classes' ``metric_params`` (943) and
-    that merge updates those class dicts in place, so a direct compute with
-    custom kwargs changes the defaults for later computes in the same
-    process. ``CurationEvaluation`` computes inside
-    ``isolated_si_metric_defaults``, which leaves them unchanged; reading
-    them here at call time, rather than a fixed copy, keeps the classifier
-    on the params SI applies either way. The defaults are copied, never
-    mutated, under ``SI_METRIC_STATE_LOCK`` so no isolated compute on
-    another thread swaps them mid-read.
+    Mirrors ``core/analyzer_extension_core.py:1172-1178``. Defaults are read
+    at call time because SI mutates them in place, and copied under
+    ``SI_METRIC_STATE_LOCK``.
     """
     from spikeinterface.metrics.quality import (
         get_default_quality_metrics_params,
@@ -621,9 +535,7 @@ def expected_missing_units(
         ``sorting.count_num_spikes_per_unit()``.
     total_samples : int
         Total samples across segments (``analyzer.get_total_samples()``). SI
-        derives firing rates from ``total_samples / sampling_frequency``, not
-        from the recording's time vector, so a recording whose timestamps
-        have gaps must still pass its sample count here.
+        rates spikes over samples, not timestamps, even with gaps.
     sampling_frequency : float
         Sampling frequency in Hz.
     metric_kwargs : Mapping
@@ -684,10 +596,9 @@ def _expected_missing_unit_ids(
 ) -> list:
     """Return the non-finite unit ids that are expected to be missing.
 
-    Raises ``ValueError`` (message prefixed by ``prefix``) if ``expected`` is
-    ``None`` -- the column has no registered eligibility rule -- and any unit
-    is non-finite, or if a non-finite unit is not in ``expected`` (a metric
-    computation failure).
+    Raises ``ValueError`` (prefixed by ``prefix``) if ``expected`` is ``None``
+    (no eligibility rule) and any unit is non-finite, or if a non-finite unit
+    is not in ``expected``.
     """
     if expected is None:
         if non_finite_ids:
@@ -739,12 +650,8 @@ def assert_rule_metrics_computed(
 
 
 # ---------- SpikeInterface metric-computation errors -------------------------
-#
-# SI runs each metric in its own ``try``; on any exception it warns
-# ``f"Error computing metric {metric_name}: {e}"`` and fills every column of
-# that metric with NaN (``core/analyzer_extension_core.py:1270-1286``). The
-# same calculator computes the template metrics. ``metric_name`` is SI's
-# metric name (``nn_advanced``, ``half_width``), not an output column.
+# SI warns "Error computing metric {name}: {e}" and NaN-fills that metric
+# (``core/analyzer_extension_core.py:1270-1286``); ``name`` is not a column.
 _SI_METRIC_ERROR = re.compile(
     r"Error computing metric (?P<metric>\S+?): (?P<error>.*)", re.DOTALL
 )
@@ -753,12 +660,9 @@ _SI_METRIC_ERROR = re.compile(
 def si_quality_metric_output_columns(si_metric: str) -> tuple[str, ...]:
     """Ordered output columns SpikeInterface fills for one quality metric.
 
-    Read from SI's own metric metadata: the quality metric class's
-    ``metric_columns`` (``core/analyzer_extension_core.py:838``), found by
-    name through ``BaseMetricExtension.get_metric_by_name`` (1052-1070), in
-    SI's order. Spyglass computes its ``isi_violation`` fraction alongside
-    SI's metric, so it leads that metric's columns. A name that is not an SI
-    quality metric maps to no columns.
+    Read from the metric class's ``metric_columns``. Spyglass's
+    ``isi_violation`` fraction leads that metric's columns. Unknown names map
+    to ``()``.
     """
     from spikeinterface.metrics.quality import ComputeQualityMetrics
 
@@ -824,10 +728,8 @@ def report_si_metric_errors(
 
     Notes
     -----
-    Every other warning is re-emitted unchanged, so it passes through the
-    caller's warning filters as if it had never been recorded. A metric
-    error on columns no rule references is logged at WARNING and its
-    columns stay NaN. All warnings are handled before anything is raised.
+    Other warnings are re-emitted unchanged. A metric error on columns no
+    rule references is logged. All warnings are handled before raising.
     """
     rule_columns = frozenset(rule_columns)
     failures = []
@@ -863,19 +765,11 @@ def report_si_metric_errors(
 def escalate_si_metric_errors(rule_columns: Collection[str]):
     """Raise on SpikeInterface metric errors that affect rule columns.
 
-    Records every warning raised in the block (``simplefilter("always")``,
-    so neither a caller's ``ignore`` filter nor the once-per-location
-    registry can hide one) and passes them to ``report_si_metric_errors``
-    when the block exits. If the block itself raises, that error
-    propagates unchanged: metric errors are then only logged and other
-    warnings are still re-emitted.
-
-    ``warnings.catch_warnings`` swaps process-wide state, so the block
-    holds ``SI_METRIC_STATE_LOCK`` (``_core.si_metric_patches``) from before the
-    capture starts until its warnings are reported: captures on different
-    threads run one after another and each records only its own thread's
-    warnings. Warnings raised meanwhile by other (non-Spyglass) threads are
-    still recorded here.
+    Records every warning in the block (``simplefilter("always")``) and
+    passes them to ``report_si_metric_errors`` on exit. If the block raises,
+    metric errors are only logged. Holds ``SI_METRIC_STATE_LOCK`` because
+    ``catch_warnings`` swaps process-wide state; warnings from non-Spyglass
+    threads are still recorded.
 
     Parameters
     ----------
@@ -902,21 +796,13 @@ def escalate_si_metric_errors(rule_columns: Collection[str]):
 def rules_payloads_match(expected: dict, stored: dict) -> bool:
     """Return whether two normalized parameter payloads are equal.
 
-    Compares the ``{master, rules}`` payloads built by
-    ``AutoCurationRules._payload_for_compare`` for the idempotency guard, and
-    ``QualityMetricParameters`` content for
-    ``reject_stale_quality_metric_defaults``. The compared numeric columns
-    (``Rule.threshold``, ``observed_presence_bin_duration_s``) are ``double``,
-    so a stored value reads back bit-equal to the validated Python float and
-    numbers compare exactly.
+    Numeric columns are ``double``, so stored floats compare exactly.
     """
     return _values_match(expected, stored)
 
 
 def _values_match(a, b) -> bool:
     """Recursively compare JSON-native values exactly; bools stay distinct."""
-    # bool is an int subclass; compare by exact type+value so True and 1 do
-    # not conflate through ``==``.
     if isinstance(a, bool) or isinstance(b, bool):
         return type(a) is type(b) and a == b
     if isinstance(a, dict) and isinstance(b, dict):
@@ -930,19 +816,11 @@ def _values_match(a, b) -> bool:
     return a == b
 
 
-# Extensions CurationEvaluation adds to the sort-time analyzer before metrics and
-# auto-merge. The sort-time base set (random_spikes, noise_levels, templates,
-# waveforms) is already present; these derive from it. ``principal_components``
-# is added separately, only when PCA metrics are requested.
+# Added before metrics and auto-merge; ``principal_components`` only for PCA
+# metrics.
 _CURATION_EXTENSIONS = STANDARD_DISPLAY_ANALYZER_EXTENSIONS
 
-# Pinned principal_components params for the whitened METRIC analyzer. The
-# recording is already SPATIALLY whitened (sip.whiten decorrelates channels);
-# SI's PCA then computes components on those decorrelated waveforms and, with
-# whiten=True, normalizes the component variances -- the standard input space
-# for the PC/NN cluster-separation metrics. These are SI 0.104's defaults
-# (including dtype), pinned explicitly so a future SI default change cannot
-# silently alter the whitened-space PCA (and therefore the PC/NN metric values).
+# SI 0.104 defaults, pinned so an SI default change cannot alter PC/NN metrics.
 _PCA_EXTENSION_PARAMS = {
     "n_components": 5,
     "mode": "by_channel_local",
@@ -954,9 +832,7 @@ _PCA_EXTENSION_PARAMS = {
 def _pca_params_match(existing: dict) -> bool:
     """True if a stored ``principal_components`` matches the pinned params.
 
-    Compared key-by-key over ``_PCA_EXTENSION_PARAMS`` only (SI may store extra
-    keys); ``dtype`` is normalized through ``np.dtype`` so the stored
-    ``dtype('float32')`` matches the pinned ``"float32"`` string.
+    Compares only the pinned keys; ``dtype`` is normalized via ``np.dtype``.
     """
     import numpy as np
 
@@ -971,26 +847,20 @@ def _pca_params_match(existing: dict) -> bool:
 
 
 _AUTO_MERGE_EXTRA_EXTENSIONS = {
-    # SI's ``feature_neighbors`` preset includes the ``knn`` step, whose
-    # required extensions are templates, spike_locations, and spike_amplitudes.
-    # The sort-time/base curation extension set already covers templates and
-    # spike_amplitudes; add spike_locations only for that preset.
+    # The ``knn`` step also needs spike_locations.
     "feature_neighbors": ("spike_locations",),
 }
 
-# SI presets with an ``snr`` step. That step reads the analyzer's stored
-# ``quality_metrics["snr"]`` (spikeinterface/curation/auto_merge.py:255-261),
-# which ``compute_metrics`` has just replaced with this evaluation's columns.
+# Presets whose ``snr`` step reads the stored ``quality_metrics["snr"]``
+# (``curation/auto_merge.py:255-261``).
 _SNR_MERGE_PRESETS = frozenset({"feature_neighbors"})
 
 
 def assert_merge_preset_metrics(auto_merge_preset, metric_names) -> None:
     """Raise if the auto-merge preset filters on SNR the evaluation lacks.
 
-    Without ``snr`` in ``metric_names`` the preset's ``snr`` step fails with a
-    bare ``KeyError`` after the metrics are computed. Requiring it also makes
-    the step use this evaluation's sorter-signed SNR (see
-    :func:`apply_metric_peak_sign`).
+    Without ``snr`` the preset fails with a bare ``KeyError``; requiring it
+    also makes the step use this evaluation's sorter-signed SNR.
 
     Raises
     ------
@@ -1010,13 +880,8 @@ def assert_merge_preset_metrics(auto_merge_preset, metric_names) -> None:
 def _requested_pc_metrics(metric_names) -> list[str]:
     """PC/NN metrics among ``metric_names`` (route to the whitened analyzer).
 
-    PCA-based metrics (``d_prime``, ``mahalanobis``, ``nearest_neighbor``,
-    ``nn_advanced``, ``silhouette`` in SI 0.104) need the ``principal_components``
-    extension and measure cluster separation, so they compute in the
-    decorrelated (whitened) space -- the whitened METRIC analyzer; everything
-    else stays on the unwhitened DISPLAY analyzer. The PCA set is the same one
-    the insert-time validator uses (``_available_pca_metric_names``), so routing
-    and validation cannot disagree about which metrics are PCA-based.
+    Uses the insert-time validator's set (``_available_pca_metric_names``) so
+    routing and validation agree.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         _available_pca_metric_names,
@@ -1036,43 +901,25 @@ def evaluate_analyzers(
     statistics_spans,
     continuity_spans,
 ):
-    """Compute metrics / labels / merge suggestions and enforce namespace.
+    """Compute metrics, labels, and merge suggestions; enforce the namespace.
 
-    Reuses :func:`compute_metrics` / :func:`compute_merge_groups` and
-    ``apply_label_rules`` over the curation's analyzers, then enforces the
-    unit-namespace invariant BEFORE labels/merges are returned (and
-    before the NWB write): the metric index must equal the curation's unit
-    set, and every suggested merge member must be a unit in that set. This
-    catches a stale temp analyzer, accidental raw-sort analyzer reuse, or a
-    preview row that slipped past selection. ``statistics_spans`` (the
-    sort's persisted spans; ``None`` = the whole recording) are forwarded
-    to :func:`compute_metrics`. ``metric_inputs`` is the
-    ``CurationEvaluation`` ``EvaluationMetricInputs`` carrier (metric set,
-    auto-merge settings and label rules).
+    - The metric index must equal ``expected_unit_ids`` and every merge
+      member must be in it, catching a stale or raw-sort analyzer.
+    - A rule metric SI failed, or NaN for a unit meeting the metric's
+      preconditions, raises ``ValueError``; other NaNs follow
+      ``missing_policy``.
+    - Holds ``SI_METRIC_STATE_LOCK`` (after any ``analyzer_cache_lock``), so
+      evaluations on different threads run one after another.
 
-    Rule-referenced metrics must be computed wherever SpikeInterface can
-    compute them: a metric SpikeInterface failed (``compute_metrics``'s
-    ``rule_columns``), or a non-finite value for a unit that meets the
-    metric's preconditions (``expected_missing_units``), raises
-    ``ValueError`` instead of leaving the rule silently inert. A NaN for a
-    unit SpikeInterface cannot assess (e.g. below ``nn_advanced``'s
-    ``min_spikes``) follows the rule's ``missing_policy``.
-
-    The whole evaluation holds ``SI_METRIC_STATE_LOCK``
-    (``_core.si_metric_patches``), taken after any ``analyzer_cache_lock``
-    the caller holds, so evaluations on different threads of one process
-    run one after another.
+    ``metric_inputs`` is an ``EvaluationMetricInputs``. ``statistics_spans``
+    (``None``: whole recording) goes to :func:`compute_metrics`.
     """
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         SI_METRIC_STATE_LOCK,
     )
 
-    # SpikeInterface's metric defaults (which the classifier reads) and
-    # Spyglass's capture of SpikeInterface warnings are process-wide:
-    # hold the lock from the computes through the classification so no
-    # evaluation on another thread changes them in between. The merge
-    # suggestions stay inside too: SI's auto-merge can compute
-    # quality_metrics itself (spikeinterface/curation/auto_merge.py:256).
+    # SI metric defaults and warning capture are process-wide; the lock also
+    # covers auto-merge, which can compute quality_metrics itself.
     from spyglass.spikesorting.v2._core.progress import report_progress
 
     report_progress("Computing quality metrics and proposed labels…")
@@ -1138,12 +985,9 @@ def evaluate_analyzers(
 
 
 def spike_counts(display_analyzer, metric_analyzer) -> dict[int, int]:
-    """Per-unit spike counts, identical on both analyzers.
+    """Per-unit spike counts, checked equal on both analyzers.
 
-    The voltage metrics count spikes on the display analyzer and the
-    PC/NN metrics on the whitened metric analyzer (when there is one).
-    Both are built from the same sorting, so their full per-unit counts
-    must agree; the eligibility classifier uses one set for both.
+    The eligibility classifier uses one set for voltage and PC/NN metrics.
     """
     counts = {
         integer_scalar(unit_id, name="unit_id"): integer_scalar(
@@ -1243,49 +1087,21 @@ def compute_metrics(
 ):
     """Compute quality metrics, routing PC/NN metrics to the whitened one.
 
-    Voltage / spike-train metrics (``snr``, ``amplitude_*``,
-    ``firing_rate``, ``num_spikes``, ``presence_ratio``, ``isi_violation``)
-    compute on the unwhitened DISPLAY analyzer -- whitening normalizes
-    per-channel variance, so SNR / amplitude on whitened traces would be
-    meaningless. PC / cluster-separation metrics (the SI PCA-metric set)
-    compute on the whitened METRIC analyzer, where decorrelated separation
-    is meaningful. The two frames are merged by unit id. Spyglass's
-    ``isi_violation`` fraction counts short intervals using the recording's
-    original spike timestamps. For concat-backed sources, ``continuity_spans``
-    excludes pairs across acquisition/member joins on the synthetic clock.
-    SI's count and contamination ratio keep their sample-clock definitions.
-    ``job_kwargs`` drive the heavy extension computation; ``search_threads``
-    (``None``: ``resolve_search_threads()``) sets the threads of the nn
-    metrics' exact neighbor searches.
-
-    ``template_metric_columns`` (SI output COLUMN names) are surfaced from
-    the DISPLAY analyzer's ``template_metrics`` extension -- waveform SHAPE
-    must come from real, unwhitened templates, exactly as ``snr`` does. The
-    columns are selected directly (config already holds column names, so no
-    name->column mapping) and joined onto the result by unit id; they are
-    exposed for downstream cell typing, never thresholded here.
-
-    ``statistics_spans`` are the sort's artifact-free, join-free frame
-    spans (``Sorting.get_statistics_spans``); ``nn_noise_overlap`` draws
-    its noise cluster only from inside them. They are set (via
-    ``noise_cluster_spans``) around both metric computes, which run in
-    this process. ``sd_ratio``'s noise standard deviation is likewise
-    estimated from the span samples, and its correction for the unit's
-    own template variance counts only the spikes and samples inside
-    them. ``None`` (or one span covering the recording) keeps
-    SpikeInterface's whole-recording estimates.
-
-    ``rule_columns`` are the metric columns auto-curation rules
-    threshold. SpikeInterface turns a metric that raises into a warning
-    and an all-NaN column; around every compute that can run quality or
-    template metrics, such a failure raises ``ValueError`` if it hits a
-    rule column and is logged otherwise (``escalate_si_metric_errors``).
-    The default, empty, escalates nothing.
-
-    ``peak_sign`` is the sort's polarity; amplitude extensions computed
-    here read spikes at it (``metric_kwargs`` already carry it, see
-    :func:`apply_metric_peak_sign`). ``noise_seed`` is the display analyzer's
-    noise seed, reused for ``sd_ratio``'s span noise.
+    - Voltage and spike-train metrics use the unwhitened display analyzer,
+      since whitening normalizes per-channel variance. PC/NN metrics use the
+      whitened metric analyzer. Frames join by unit id.
+    - ``isi_violation`` counts short intervals on original spike timestamps;
+      ``continuity_spans`` excludes pairs across concat joins.
+    - ``template_metric_columns`` (SI column names) come from the display
+      analyzer's ``template_metrics`` for cell typing, never thresholded.
+    - ``statistics_spans`` (``Sorting.get_statistics_spans``) restrict
+      ``nn_noise_overlap``'s noise cluster and ``sd_ratio``'s noise
+      estimate; ``None`` uses the whole recording.
+    - An SI metric failure on a ``rule_columns`` column raises
+      ``ValueError``; others are logged.
+    - ``peak_sign`` is the sort's polarity; ``noise_seed`` seeds
+      ``sd_ratio``'s span noise; ``search_threads`` (``None``:
+      ``resolve_search_threads()``) sets nn neighbor-search threads.
     """
     import numpy as np
     import pandas as pd
@@ -1311,13 +1127,8 @@ def compute_metrics(
     frames = []
     # Voltage / spike-train metrics -> unwhitened display analyzer.
     if voltage_names:
-        # Compute each requested voltage metric's display-safe extension
-        # dependencies (read from SI's registry, not hardcoded) beyond the
-        # default curation set -- otherwise SI silently skips a metric whose
-        # extension is absent (e.g. ``drift`` needs ``spike_locations``),
-        # leaving the column missing and any rule thresholding it never
-        # firing. ``principal_components`` is excluded defensively: it is
-        # metric-analyzer-only and voltage metrics never depend on it.
+        # SI silently skips a metric whose extension is absent (``drift``
+        # needs ``spike_locations``). PCA belongs to the metric analyzer.
         base_present = {*BASE_ANALYZER_EXTENSIONS, *_CURATION_EXTENSIONS}
         extra_extensions = [
             ext
@@ -1335,16 +1146,8 @@ def compute_metrics(
                 job_kwargs=job_kwargs,
             )
         if "sd_ratio" in voltage_names:
-            # SI's sd_ratio divides by get_noise_levels(method="std") on
-            # this analyzer's recording, which returns a cached
-            # noise_level_std_* property when present. Cache the std of
-            # the span samples there (same seed and budget as the
-            # analyzer's MAD), so masked zeros do not bias it low.
-            # Covering spans cache nothing and leave SI's estimator.
-            # SI's correction for the unit's own template variance must
-            # then count spikes and samples over the same spans; the
-            # patched metric reads them from noise_cluster_spans below
-            # (SI runs each metric in this thread).
+            # Cache span-only noise std (masked zeros would bias it low) and
+            # patch sd_ratio's template-variance correction to the same spans.
             from spyglass.spikesorting.v2._core.si_metric_patches import (
                 patch_sd_ratio_statistics_spans,
             )
@@ -1368,9 +1171,8 @@ def compute_metrics(
             escalate_si_metric_errors(rule_columns),
         ):
             if "isi_violation" in voltage_names:
-                # Resolve defaults under the same lock as SI's compute, so a
-                # concurrent compute's temporary defaults cannot change this
-                # fraction's refractory window.
+                # Read under the lock so a concurrent compute cannot change
+                # the refractory window.
                 defaults = get_default_quality_metrics_params()["isi_violation"]
                 isi_kwargs = metric_kwargs.get("isi_violation") or {}
                 isi_threshold_ms = isi_kwargs.get(
@@ -1384,11 +1186,8 @@ def compute_metrics(
                 }
                 or None,
                 skip_pc_metrics=True,
-                # The analyzer is shared across curations; SI preserves
-                # the stored quality_metrics by default, so a prior
-                # curation's columns would leak into this result (and an
-                # auto-rule could threshold a stale metric). Compute only
-                # THIS row's metrics.
+                # The analyzer is shared across curations; drop stored
+                # metrics so stale columns cannot leak in.
                 delete_existing_metrics=True,
             )
         voltage_df.index = pd.Index(
@@ -1404,14 +1203,8 @@ def compute_metrics(
                 "analyzer was provided -- make_compute must build it when "
                 "PC metrics are requested."
             )
-        # nn_noise_overlap needs a 'median' template AND SI 0.104.3's metric
-        # is broken for sparse analyzers (it derives the peak channel from a
-        # dense median but indexes the sparse noise cluster -> IndexError,
-        # swallowed as NaN). Ensure the median operator, then install the
-        # sparse fix and the threaded k-d tree isolation search both NN
-        # metrics use. The PC compute below runs n_jobs=1 so the fixes
-        # (main-process monkeypatches) are the code that actually runs;
-        # ``search_threads`` sets the neighbor-search threads instead.
+        # nn_noise_overlap needs a 'median' template, and SI 0.104.3 breaks
+        # on sparse analyzers; install the sparse fix and k-d tree search.
         from spyglass.spikesorting.v2._core.job_config import (
             resolve_search_threads,
         )
@@ -1437,10 +1230,8 @@ def compute_metrics(
             )
         patch_nn_noise_overlap_sparsity()
         patch_isolation_kdtree()
-        # Enforce the pinned PCA params even if a stale/manual analyzer
-        # already carries principal_components computed with different ones
-        # (ensure_extensions skips a present extension without checking its
-        # params): drop a mismatched extension so it recomputes pinned.
+        # ensure_extensions skips a present extension without checking its
+        # params, so drop a mismatched PCA first.
         if metric_analyzer.has_extension("principal_components"):
             existing_pca = dict(
                 metric_analyzer.get_extension("principal_components").params
@@ -1478,16 +1269,9 @@ def compute_metrics(
                 }
                 or None,
                 skip_pc_metrics=False,
-                # As above: compute only this row's PC metrics, never
-                # inherit a prior curation's stored quality_metrics on this
-                # analyzer.
                 delete_existing_metrics=True,
-                # nn_noise_overlap's sparse fix and its span-restricted
-                # noise cluster (patch_nn_noise_overlap_sparsity /
-                # noise_cluster_spans) are a main-process monkeypatch and a
-                # ContextVar; SI parallelises nn_advanced with spawned
-                # workers that re-import SI and would see neither, so pin
-                # the PC/NN metric compute to the main process.
+                # Spawned SI workers would not see the main-process patches
+                # or the noise_cluster_spans ContextVar.
                 n_jobs=1,
             )
         pc_df.index = pd.Index(
@@ -1503,13 +1287,8 @@ def compute_metrics(
             "them, or include a voltage-based metric."
         )
     if len(frames) > 1:
-        # The display and metric analyzers derive from the SAME canonical
-        # sorting, so the voltage and PC frames must share a unit-id index.
-        # Concat defaults to an OUTER join that would silently NaN-fill a
-        # mismatched unit (and a label rule would then never fire on the
-        # NaN); assert the set invariant loudly. Ordering differences are
-        # harmless, so reindex PC metrics to the display order before
-        # concatenating.
+        # An outer concat would NaN-fill a mismatched unit, so require equal
+        # unit sets, then align order.
         if set(frames[0].index) != set(frames[1].index):
             raise ValueError(
                 "voltage and PC metric frames have mismatched unit ids "
@@ -1530,8 +1309,7 @@ def compute_metrics(
         counts = metrics_df["isi_violations_count"].to_numpy(
             dtype=float, copy=True
         )
-        # Preserve SI failures as unavailable values for the rule-error checks;
-        # only successful units have their counts mapped to the source clock.
+        # Keep SI failures NaN for the rule-error checks.
         computed = np.isfinite(counts)
         if computed.any():
             counts[computed] = _source_clock_isi_counts(
@@ -1546,12 +1324,7 @@ def compute_metrics(
         )
         metrics_df["isi_violation"] = isi_violation_fraction(counts, n_spikes)
 
-    # Surfacing the configured shape columns must not depend on a voltage
-    # metric having grown the display extensions: a PC-only row (e.g.
-    # metric_names=["nn_advanced"], skip_pc_metrics=False) skips the voltage
-    # branch above, so ensure template_metrics on the display analyzer
-    # whenever shape columns are requested -- otherwise they would be
-    # silently dropped rather than surfaced.
+    # A PC-only row skips the voltage branch, which would drop shape columns.
     if template_metric_columns and not display_analyzer.has_extension(
         "template_metrics"
     ):
@@ -1574,22 +1347,16 @@ def surface_template_columns(
 ):
     """Join configured waveform-shape columns onto the metric frame.
 
-    Reads the already-computed ``template_metrics`` extension from the
-    DISPLAY (unwhitened) analyzer per the display-vs-metric routing
-    contract, selects the configured output COLUMNS directly (no
-    name->column mapping), and joins them by unit id so a unit missing from
-    either frame yields ``NaN`` rather than a misaligned row. Surfaces, does
-    not threshold. A no-op when no columns are configured or the extension
-    is absent (e.g. a PC-only row that never grew the display extensions).
+    Reads ``template_metrics`` from the unwhitened display analyzer and
+    joins by unit id. No-op when no columns are configured or the extension
+    is absent.
     """
     if not template_metric_columns:
         return metrics_df
     if not display_analyzer.has_extension("template_metrics"):
         return metrics_df
     tm_df = display_analyzer.get_extension("template_metrics").get_data()
-    # Select the configured columns directly (config holds column names, so
-    # no name->column mapping), never shadowing a same-named quality-metric
-    # column with a template one.
+    # Never shadow a same-named quality-metric column.
     present = [
         c
         for c in template_metric_columns
@@ -1597,10 +1364,7 @@ def surface_template_columns(
     ]
     missing = [c for c in template_metric_columns if c not in tm_df.columns]
     if missing:
-        # Validation guarantees the configured columns are real
-        # single-channel output columns, so this only fires if SI's default
-        # template_metrics compute omits a validated column -- an
-        # upstream-version drift signal, surfaced loudly, not silent.
+        # Validation guarantees these columns, so a miss means SI drift.
         logger.warning(
             "template_metric_columns %s absent from computed "
             "template_metrics columns %s; surfacing %s only.",

@@ -71,11 +71,8 @@ def test_non_root_facade_requires_typed_parent():
 def test_merge_group_normalization_is_lossless():
     """Malformed merge requests fail loudly instead of selecting other units.
 
-    ``int()`` truncated ``1.9`` to ``1``, accepted ``True`` as ``1`` and split
-    the string group ``"12"`` into units 1 and 2 -- all of which could pass
-    membership checks as a merge the caller never asked for. Only integers
-    (Python or NumPy) in non-string containers are accepted; the shape checks
-    run before any database read.
+    Only integers in non-string containers are accepted (no ``1.9``,
+    ``True`` or ``"12"``), checked before any database read.
     """
     import numpy as np
 
@@ -262,8 +259,7 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
         run["auto_labeled_curation_id"] = merged.curation_id
         run["auto_labeled_curation_uuid"] = merged.curation_uuid
         assert run.auto_labeled_curation == merged
-        # The receipt pins the GENERATION: a receipt carrying a stale uuid for
-        # the same numeric id must not resolve to a replacement row.
+        # A stale uuid for the same numeric id must not resolve.
         stale_receipt = RunResult(
             {
                 "sorting_id": root.sorting_id,
@@ -276,8 +272,7 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
         with pytest.raises(CurationNotFoundError):
             stale_receipt.root_curation
 
-        # Delete and recreate the highest numeric id: the old ref must reject
-        # the replacement generation even though the DataJoint PK is reused.
+        # The earlier ref rejects a recreated row that reuses the PK.
         stale = save_manual_curation(
             parent_curation=root, description="generation one"
         )
@@ -292,10 +287,8 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
 
         with pytest.raises(CurationNotFoundError, match="was replaced"):
             stale.as_key()
-        # Serializing a ref preserves its identity guarantee: a mapping that
-        # carries the stale curation_uuid is refused too, a mapping carrying
-        # the replacement's uuid resolves it, and a bare numeric key resolves
-        # the CURRENT generation.
+        # Mappings: stale uuid refused, new uuid resolves, bare key resolves
+        # the current generation.
         from dataclasses import asdict
 
         with pytest.raises(CurationNotFoundError, match="stale curation_uuid"):
@@ -430,8 +423,7 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
                     groups=[[unit_ids[0], unit_ids[1]]],
                 )
 
-        # The expert commit is intentionally separate and performs no
-        # evaluation. merge_and_evaluate then resumes from that child.
+        # The expert commit does not evaluate; merge_and_evaluate resumes.
         committed = evaluation.commit_merges([[unit_ids[0], unit_ids[1]]])
         assert not (
             CurationEvaluationSelection & committed.as_key()
@@ -469,12 +461,8 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
 def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """The merged child is evaluated with the parent's metric waveforms.
-
-    A parent evaluation can name its metric waveform recipe explicitly. The
-    child evaluation used the default recipe instead, so its metrics came from
-    different waveform windows than the parent's.
-    """
+    """The merged child is evaluated with the parent's metric waveform
+    recipe, not the default."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2.curation_api import (
@@ -535,12 +523,7 @@ def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
 def test_merge_and_evaluate_function_uses_a_requested_recipe(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """The function form evaluates parent and child with a named recipe.
-
-    Without it, a parent already evaluated under a non-default metric
-    waveform recipe was re-evaluated, and its child scored, under the
-    default recipe.
-    """
+    """The function form evaluates parent and child with a named recipe."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2.curation_api import (

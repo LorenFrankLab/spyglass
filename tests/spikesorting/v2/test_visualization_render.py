@@ -1,11 +1,7 @@
-"""Real matplotlib rendering / export smoke tests for the visualization facade.
+"""Real matplotlib rendering and export smoke tests for the visualization facade.
 
-Integration-tier: these populate the shared MEArec sort
-(``populated_sorting``) and render genuine SpikeInterface figures / write a
-real local report folder against its DISPLAY analyzer and saved preprocessed
-recording, under the Agg backend. They complement the fast, monkeypatched
-routing tests in ``test_visualization_facade.py`` by proving the wrappers
-actually drive SI end to end.
+Renders SpikeInterface figures from the shared MEArec sort's display analyzer
+under the Agg backend.
 """
 
 from __future__ import annotations
@@ -38,9 +34,7 @@ def test_recording_trace_and_probe_map_render(populated_sorting):
     assert traces is not None
     plt.close("all")
 
-    # SI's probe-map widget defaults to a 2D axis; a 3D probe geometry (the
-    # MEArec fixture sets rel_z) needs a 3D axis, supplied through the wrapper's
-    # kwargs passthrough -- the thin wrapper forwards ``ax`` straight to SI.
+    # The MEArec probe is 3D (rel_z), so pass a 3D ``ax`` through to SI.
     recording = Recording().get_recording(recording_key)
     probe_ndim = recording.get_probegroup().probes[0].ndim
     if probe_ndim == 3:
@@ -86,11 +80,7 @@ def test_unit_summary_renders_with_compute_missing(populated_sorting):
 def test_unit_locations_renders_with_compute_missing(populated_sorting):
     """``plot_unit_locations`` renders end to end against the display analyzer.
 
-    The opt-in computes the display ``unit_locations`` extension if the
-    package-shared analyzer does not already carry it, then renders. The
-    read-only-by-default error path is pinned deterministically by the
-    monkeypatched unit test (a shared on-disk analyzer can't reliably present a
-    *fresh* extension here, so this integration check stays on the render path).
+    The read-only error path is covered by the monkeypatched unit test.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
 

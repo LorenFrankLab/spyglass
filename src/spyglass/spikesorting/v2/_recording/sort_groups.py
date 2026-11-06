@@ -1,15 +1,7 @@
 """Pure planning helpers for ``SortGroupV2`` electrode grouping.
 
-These functions resolve electrode-grouping decisions (by probe shank or
-by an arbitrary ``Electrode``-table column) and materialize the resulting
-table rows. They issue no DataJoint queries and trigger no ``dj.schema``
-activation -- ``SortGroupV2`` fetches the ``Electrode`` rows and runs the
-inserts; everything in between lives here so it is unit-testable without a
-live DB connection (the test imports THIS module, not a ``@schema``
-module, so collection needs no container). "No DB" means no connection /
-activation, NOT "no DataJoint installed" -- importing any spyglass module
-still pulls DataJoint / SpikeInterface via the package ``__init__``.
-Mirrors the ``_curation.transforms`` / ``_core.signal_math`` service modules.
+No DataJoint queries or schema activation; ``SortGroupV2`` fetches the
+``Electrode`` rows and runs the inserts.
 """
 
 from __future__ import annotations
@@ -28,14 +20,8 @@ from spyglass.utils import logger
 def _electrode_group_sort_key(name):
     """Sort key for ``electrode_group_name`` tolerant of non-numeric names.
 
-    NWB ``electrode_group_name`` is a free-form string. A plain
-    ``int(name)`` raises ``ValueError`` on names like ``"probeA"``; this
-    key sorts all-numeric names numerically (and ahead of any non-numeric
-    name), then non-numeric names lexically -- so purely numeric group
-    names keep their natural order while arbitrary names sort instead of
-    raising.
-    ``isdecimal`` (not ``isdigit``) is the gate so the predicate matches
-    exactly the strings ``int()`` accepts.
+    Numeric names sort numerically and first, then other names lexically.
+    ``isdecimal`` matches exactly the strings ``int()`` accepts.
     """
     text = str(name)
     return (0, int(text)) if text.isdecimal() else (1, text)
@@ -44,24 +30,9 @@ def _electrode_group_sort_key(name):
 def _reference_electrode_group(all_electrodes, reference_electrode_id):
     """Validate a ``"specific"`` reference electrode and return its group.
 
-    Looks the reference electrode up in the FULL (not bad-channel-filtered)
-    session electrode set -- so a configured reference flagged
-    ``bad_channel='True'`` is still found -- and enforces two invariants that
-    a resolved ``"specific"`` reference must satisfy before any row is
-    inserted:
-
-    * the id must exist, so a ``"specific"`` sort group never persists a
-      reference the recording cannot subtract (which would otherwise pass
-      group creation and only fail later inside ``Recording.populate``);
-    * it must belong to exactly one electrode group. The ``Electrode`` primary
-      key is ``(nwb_file_name, electrode_group_name, electrode_id)``, so the
-      same ``electrode_id`` can appear under more than one
-      ``electrode_group_name``; an ambiguous owner is rejected rather than
-      silently resolved to the first match.
-
-    ``set_group_by_shank`` uses the returned group to honor
-    ``omit_ref_electrode_group``; ``set_group_by_electrode_table_column``
-    calls it for the existence / uniqueness validation only.
+    Searches the unfiltered electrode set, so a reference flagged bad is
+    still found. The id must exist and belong to exactly one electrode
+    group, since ``electrode_id`` can repeat across groups.
 
     Parameters
     ----------
@@ -125,14 +96,10 @@ def _plan_sort_groups_by_shank(
 ) -> tuple[list[tuple], list[dict]]:
     """Plan sort groups by probe shank (pure; no DataJoint access).
 
-    Given the bad-channel-filtered ``electrodes`` and the full
-    ``all_electrodes`` (both as returned by ``Electrode().fetch()``),
-    enumerate ``(electrode_group, shank)`` groupings and resolve each
-    group's reference, applying the ``omit_unitrode`` /
-    ``omit_ref_electrode_group`` skips. ``override_pair`` is the
-    call-wide ``(reference_mode, reference_electrode_id)`` override (or
-    ``None`` to inherit per group); ``references`` is the optional
-    per-electrode-group reference mapping.
+    ``electrodes`` is bad-channel-filtered; ``all_electrodes`` is not.
+    ``override_pair`` is a call-wide ``(reference_mode,
+    reference_electrode_id)``, or ``None`` to resolve per group;
+    ``references`` optionally maps electrode group to reference.
 
     Returns ``(proposed, skipped)`` where each ``proposed`` entry is
     ``(electrode_group_name, electrode_ids, reference_mode,
@@ -141,7 +108,6 @@ def _plan_sort_groups_by_shank(
     no sort group survives filtering, or for the reference-resolution
     failures documented on ``set_group_by_shank``.
     """
-    # Enumerate (electrode_group, shank) groupings.
     e_groups = sorted(
         np.unique(electrodes["electrode_group_name"]).tolist(),
         key=_electrode_group_sort_key,
@@ -170,7 +136,6 @@ def _plan_sort_groups_by_shank(
                 )
                 continue
 
-            # Resolve THIS group's reference (per group, not call-wide).
             if override_pair is not None:
                 resolved_mode, resolved_ref_id = override_pair
             elif references is not None:
@@ -193,16 +158,11 @@ def _plan_sort_groups_by_shank(
                     group_label=str(e_group),
                 )
 
-            # A "specific" reference must name a real, unambiguous
-            # electrode; validate it (and locate its owning group)
-            # regardless of omit, so a bad id fails here instead of later
-            # inside Recording.populate.
+            # Validated regardless of omit, so a bad id fails here.
             if resolved_mode == "specific":
                 ref_group = _reference_electrode_group(
                     all_electrodes, resolved_ref_id
                 )
-                # omit_ref_electrode_group: skip the electrode group that
-                # CONTAINS this group's resolved specific reference.
                 if omit_ref_electrode_group and str(ref_group) == str(e_group):
                     logger.warning(
                         f"set_group_by_shank: skipping "
@@ -218,9 +178,6 @@ def _plan_sort_groups_by_shank(
                     )
                     continue
 
-            # Fail early if the resolved specific reference is itself a
-            # member of the sort group we are about to insert (it would be
-            # subtracted then dropped, silently shrinking the group).
             assert_reference_not_member(
                 resolved_mode, resolved_ref_id, electrode_ids
             )
@@ -253,13 +210,8 @@ def _plan_sort_groups_by_column(
 ) -> tuple[list[tuple], list[dict]]:
     """Plan sort groups by an Electrode-table column (pure; no DataJoint).
 
-    ``electrodes`` is the (optionally bad-channel-filtered) electrode set
-    matched against; ``all_electrodes`` is the full session set used to
-    validate a resolved ``"specific"`` reference. ``sort_group_ids`` is
-    the per-input-group id list (already resolved by the caller, same
-    length as ``groups``); a skipped group leaves a gap in the assigned
-    ids (survivors are not renumbered, so each keeps the id the caller
-    assigned it).
+    ``all_electrodes`` validates a ``"specific"`` reference.
+    ``sort_group_ids`` aligns with ``groups``; a skipped group leaves a gap.
 
     Returns ``(proposed, skipped)`` where each ``proposed`` entry is
     ``(sort_group_id, group_electrodes, reference_mode,
@@ -290,9 +242,6 @@ def _plan_sort_groups_by_column(
             )
             continue
 
-        # Resolve THIS group's reference (per group, not call-wide): the
-        # call-wide override if given, else inherit from the group's
-        # members' configured original_reference_electrode.
         if override_pair is not None:
             resolved_mode, resolved_ref_id = override_pair
         else:
@@ -300,12 +249,8 @@ def _plan_sort_groups_by_column(
                 group_electrodes["original_reference_electrode"],
                 group_label=str(sort_group_id),
             )
-        # A "specific" reference must name a real, unambiguous session
-        # electrode -- fail here instead of later in Recording.populate.
         if resolved_mode == "specific":
             _reference_electrode_group(all_electrodes, resolved_ref_id)
-        # Fail early if the resolved specific reference is itself a member
-        # of the sort group (it would be subtracted then dropped).
         assert_reference_not_member(
             resolved_mode,
             resolved_ref_id,
@@ -334,10 +279,7 @@ def _build_sort_group_rows(
 ) -> tuple[list[dict], list[dict]]:
     """Build SortGroupV2 master + SortGroupElectrode part rows (pure).
 
-    Materializes the resolved ``plans`` into the two row lists the
-    transaction inserts: one master row per plan and one part row per
-    ``(electrode_group_name, electrode_id)`` pair, in plan order. No
-    DataJoint access -- unit-testable in isolation.
+    One master row per plan and one part row per electrode, in plan order.
     """
     master_rows, part_rows = [], []
     for plan in plans:

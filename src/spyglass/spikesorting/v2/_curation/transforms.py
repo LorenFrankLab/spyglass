@@ -1,22 +1,9 @@
 """Pure curation transforms behind ``CurationV2``.
 
-These functions are the dependency-light core of v2 curation --
-label-value validation, ``UnitLabel``-row validation, native manual-curation
-input normalization, parent/supplied label composition (inherit vs. replace; union on a committed
-merge), the post-merge ``CurationV2.Unit`` row construction (merge-group
-validation, ``kept_unit_to_contributors`` mapping, and the per-unit row build),
-and the raw ``MergeGroup`` / ``ParentMergeGroup`` provenance rows
-(``build_merge_provenance_rows``).
-They are pure Python: given the already-fetched source ``Unit`` rows (raw
-``Sorting.Unit`` for a root, the parent ``CurationV2.Unit`` for a child) and
-the caller's label / merge-group payloads, they decide WHAT to insert without
-touching the database, so the merge/label logic is testable without one.
-
-DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection
-and activates no ``dj.schema`` at import. Its imports are limited to the
-standard library and dependency-light enum / validation helpers. (The
-``spyglass`` package ``__init__`` still loads DataJoint; these transforms
-add no DB/SpikeInterface dependency of their own.)
+Label validation and composition, manual-input normalization, post-merge
+``CurationV2.Unit`` rows, and ``MergeGroup`` / ``ParentMergeGroup``
+provenance rows. Given pre-fetched ``Unit`` rows, they decide what to insert
+without a database. Imports stay dependency-light: no DB or SpikeInterface.
 """
 
 from __future__ import annotations
@@ -35,23 +22,13 @@ def validate_curation_label_rows(
 ) -> None:
     """Reject ``UnitLabel`` rows whose ``curation_label`` is not canonical.
 
-    Validates the ``curation_label`` on each row dict against the
-    ``CurationLabel`` set so a direct ``CurationV2.UnitLabel.insert1`` /
-    ``insert`` cannot slip a typo'd label past the Python-side guard the
-    way a bare ``varchar`` column would (DataJoint does not enforce the
-    open-ended label set at the DB; see ``CurationLabel``).
-    ``allow_custom_labels=True`` accepts labels outside the canonical set
-    (labs using custom semantics). Rows without a ``curation_label`` key
-    are left alone -- DataJoint raises its own missing-attribute error
-    for those.
+    The column is a bare ``varchar``, so direct inserts need this guard.
+    ``allow_custom_labels=True`` accepts non-canonical labels. Rows without
+    ``curation_label`` are left to DataJoint's missing-attribute error.
     """
     valid = {member.value for member in CurationLabel}
     for row in rows:
-        # DataJoint accepts ordered (tuple/list) rows too, but this guard
-        # reads ``curation_label`` by key -- a membership test that is
-        # False for an ordered row, which would silently skip validation
-        # and let a bogus varchar label through. Require a mapping so the
-        # label is always inspected (validate on every insert path).
+        # An ordered row would silently skip the by-key label check.
         if not isinstance(row, Mapping):
             raise ValueError(
                 "CurationV2.UnitLabel insert requires mapping (dict) rows "
@@ -78,12 +55,9 @@ def validate_curation_label_rows(
 def validate_labels(labels: dict, allow_custom_labels: bool = False) -> None:
     """Validate that every value in ``labels`` is a recognized label.
 
-    Accepts ``CurationLabel`` instances OR their string values; any
-    other label raises ``ValueError`` listing the offending entry
-    and the valid label names. Pass ``allow_custom_labels=True`` to
-    accept labels outside the canonical ``CurationLabel`` set (labs
-    tagging units with custom semantics). Each ``labels[unit_id]`` must
-    already be a list (``normalize_curation_inputs`` enforces it).
+    Accepts ``CurationLabel`` instances or their string values; others raise
+    ``ValueError`` unless ``allow_custom_labels=True``. Each
+    ``labels[unit_id]`` must already be a list.
     """
     if allow_custom_labels:
         return
@@ -159,11 +133,9 @@ def normalize_manual_curation(
 ) -> tuple[dict[int, list[str]], list[list[int]]]:
     """Normalize native ``labels=`` and ``merge_groups=`` inputs.
 
-    Unit IDs must be integers, including NumPy integers. Merge groups must be
-    a list of lists; floats, booleans and transport string IDs are rejected.
-    Label values are coerced through :class:`CurationLabel`;
-    Merge membership, duplicate/overlap and empty/singleton validation is left to
-    ``CurationV2.insert_curation`` so typos still produce the same errors there.
+    Unit IDs must be integers (NumPy included); floats, booleans and string
+    IDs are rejected. Labels are coerced through :class:`CurationLabel`.
+    Merge-group validation is left to ``CurationV2.insert_curation``.
     """
     return (
         _normalize_manual_labels(labels),
@@ -284,25 +256,11 @@ def compose_curation_labels(
 ) -> dict[int, list[str]]:
     """Resolve a child curation's effective label state.
 
-    A child curation edits its parent's committed state, so by default it
-    inherits the parent's labels (``label_policy="inherit"``); a caller wanting
-    the supplied labels to be the whole child state passes
-    ``label_policy="replace"``. Root curations have an empty ``parent_labels``,
-    so ``"inherit"`` reduces to "supplied labels only" -- a full-state
-    insert.
+    - ``"inherit"``: parent labels (see :func:`inherit_parent_labels`), then
+      supplied labels override per unit; an empty list clears.
+    - ``"replace"``: supplied labels are the whole state.
 
-    Inheritance is identity-preserving except across a committed merge:
-
-    * ``apply_merge=True`` -- a kept unit (possibly a fresh merged id) inherits
-      the UNION of its contributors' parent labels, so labels on absorbed
-      contributors do not disappear when the merge is committed.
-    * ``apply_merge=False`` (preview) -- every parent unit passes through 1:1,
-      so each written unit inherits only its OWN parent labels (the proposed
-      merge does not yet combine label state).
-
-    Supplied labels are then overlaid per unit (an explicit override wins over
-    the inherited value, and an explicit empty list clears it). Units that end
-    up with no labels are dropped from the result.
+    Units with no labels are dropped.
 
     Parameters
     ----------
@@ -339,8 +297,6 @@ def compose_curation_labels(
         parent_labels, kept_unit_to_contributors, apply_merge=apply_merge
     )
     for unit_id, labels in supplied_labels.items():
-        # An explicit supplied entry overrides the inherited value for that
-        # unit (an empty list clears it; the trailing filter drops it).
         composed[int(unit_id)] = list(labels)
     return {k: v for k, v in composed.items() if v}
 
@@ -379,17 +335,13 @@ def validate_merge_groups(
     seen: set[int] = set()
     for group in merge_groups:
         if len(group) < 2:
-            # Empty or singleton "merge groups" aren't merges; silently
-            # no-oping (empty) or renaming the singleton would hide a likely
-            # typo.
+            # Likely a typo; do not silently no-op.
             raise ValueError(
                 f"{prefix}merge_groups contains a group with fewer than 2 "
                 f"members ({group}); each merge group must contain at least "
                 "two unit ids (at least 2 units)."
             )
         if len(set(group)) != len(group):
-            # A group like [0, 0] passes the size check but would
-            # double-count contributor 0.
             raise ValueError(
                 f"{prefix}merge_groups contains a group with duplicate "
                 f"members ({group}); each unit can appear at most once per "
@@ -418,10 +370,9 @@ def allocate_merged_unit_ids(
 ) -> dict[int, list[int]]:
     """Map fresh IDs to validated merge groups in min-contributor order.
 
-    This order matches the stored preview's merge leaders, so preview,
-    committed rows, and review labels agree on each merged unit's ID.
-    Contributor order within a group is preserved for metadata tie-breaking.
-    Callers validate the groups first (:func:`validate_merge_groups`).
+    Matches the preview's merge-leader order so preview, committed rows, and
+    review labels agree on IDs. Contributor order is preserved for
+    tie-breaking. Validate groups first (:func:`validate_merge_groups`).
     """
     next_id = max(source_unit_ids, default=-1) + 1
     return {
@@ -442,13 +393,10 @@ def key_manual_labels_to_merged_units(
 ) -> dict[int, list[str]]:
     """Move a committed merge's contributor labels onto its merged unit.
 
-    Manual edits are keyed by the parent's unit ids, so labels supplied for
-    merge contributors would be dropped as absorbed and the merged unit would
-    inherit the parent's labels instead. Each merged unit gets the union of its
-    contributors' supplied labels; under ``"inherit"`` a contributor with no
-    supplied entry contributes its parent labels, the same union a commit
-    applies to parent labels. Labels that touch no contributor are returned
-    unchanged.
+    Manual edits are keyed by parent unit ids, so contributor labels would
+    otherwise be dropped as absorbed. Each merged unit gets the union of its
+    contributors' supplied labels (parent labels for unsupplied contributors
+    under ``"inherit"``). Other labels are unchanged.
     """
     absorbed = {unit_id for group in merge_groups for unit_id in group}
     if not absorbed & labels.keys():
@@ -476,32 +424,19 @@ def build_curated_unit_rows(
 ) -> tuple[list[dict], dict[int, list[int]]]:
     """Resolve the post-merge ``CurationV2.Unit`` rows.
 
-    Each kept unit's Electrode FK + peak amplitude come from the
-    contributor with the largest ``peak_amplitude_uv``. The merged-unit
-    ``unit_id`` depends on ``apply_merge``: a fresh
-    ``max(source unit_ids) + 1`` for ``apply_merge=True``;
-    ``min(group)`` for ``apply_merge=False`` (the proposed merge
-    leader, kept as a regular Unit row alongside the absorbed
-    contributors so the preview retains every original unit). Each
-    merge group must have at least 2 members; empty or singleton
-    groups raise ``ValueError``.
-
-    ``n_spikes`` is computed to match what ``write_curated_units_nwb``
-    writes for the SAME ``apply_merge``: the merged sum only when the
-    merged spike train is actually staged (``apply_merge and
-    len(contribs) > 1``), otherwise the kept (head) unit's own count.
-    This keeps the invariant ``CurationV2.Unit.n_spikes ==
-    len(get_sorting().get_unit_spike_train(kept_uid))`` for BOTH
-    ``apply_merge`` values -- otherwise an ``apply_merge=False``
-    preview would store the merged sum against a head-only train.
+    - Electrode and peak amplitude come from the contributor with the
+      largest ``peak_amplitude_uv``.
+    - Merged ``unit_id``: fresh ``max(source unit_ids) + 1`` when
+      ``apply_merge``; else ``min(group)``, with every original unit kept.
+    - ``n_spikes`` matches the train ``write_curated_units_nwb`` writes: the
+      merged sum only when ``apply_merge``, else each unit's own count.
 
     Parameters
     ----------
     sorting_id
         ``sorting_id`` of the upstream Sorting row.
     sorting_units : list of dict
-        Pre-fetched ``Sorting.Unit`` rows for ``sorting_id``; the
-        caller fetches once and threads through to avoid re-querying.
+        Pre-fetched ``Sorting.Unit`` rows for ``sorting_id``.
     merge_groups : list of list of int
         Merge groups, each a list of ``unit_id`` ints (>=2 each).
     curation_id : int
@@ -530,9 +465,7 @@ def build_curated_unit_rows(
         [lossless_int(u, "merge group unit_id") for u in g]
         for g in merge_groups
     ]
-    # Validate ALL merge groups eagerly -- BEFORE any early return
-    # below -- so a zero-unit sort with non-empty merge_groups raises
-    # rather than silently no-op.
+    # Before the zero-unit return, so merge groups on an empty sort raise.
     validate_merge_groups(
         normalized_groups,
         unit_ids=by_id,
@@ -542,8 +475,6 @@ def build_curated_unit_rows(
     merged_ids = {uid for group in normalized_groups for uid in group}
 
     if not by_id:
-        # Zero-unit sort with no merge groups -> empty curation.
-        # (Non-empty merge groups already raised above.)
         return [], {}
 
     # Committed groups get fresh IDs; previews keep min(group) as the
@@ -562,26 +493,13 @@ def build_curated_unit_rows(
     # Then merged units, in canonical min-contributor order (SI parity).
     kept_to_contributors.update(merge_specs)
 
-    # Symmetric provenance for apply_merge=False: absorbed
-    # contributors still get a CurationV2.Unit row (preview parity),
-    # so give each a 1-element self-entry so every Unit row has at
-    # least one MergeGroup row with its own ``unit_id`` -- a
-    # ``Unit * MergeGroup`` join on unit_id does not drop them.
-    # get_merged_sorting filters ``len(contribs) > 1`` so the
-    # self-entries are auto-skipped when reconstructing merges.
+    # Previews keep absorbed units, so give each a self-entry; a
+    # Unit * MergeGroup join then keeps every row.
     if not apply_merge:
         for uid in by_id:
             if uid not in kept_to_contributors:
                 kept_to_contributors[uid] = [uid]
 
-    # The written unit set depends on apply_merge:
-    #   apply_merge=True  -> kept units only; a merged head absorbs
-    #     its contributors (peak channel inherited from the
-    #     highest-amplitude contributor, n_spikes = summed train).
-    #   apply_merge=False -> every original unit passes through 1:1
-    #     (preview); the proposed merges live in MergeGroup for lazy
-    #     application via get_merged_sorting. n_spikes is each unit's
-    #     own count, matching the train write_curated_units_nwb writes.
     if apply_merge:
         specs = []
         for kept_uid, contribs in kept_to_contributors.items():
@@ -623,18 +541,10 @@ def build_merge_provenance_rows(
 
     Returns ``(merge_group_rows, parent_merge_group_rows)``.
 
-    For a ROOT (``parent_raw_contributors is None``) the contributors in
-    ``kept_unit_to_contributors`` are already raw ``Sorting.Unit`` ids, so
-    ``MergeGroup`` rows are written verbatim and there is no parent
-    operation (``parent_merge_group_rows`` is empty).
-
-    For a CHILD the contributors are PARENT ``CurationV2.Unit`` ids. Each
-    is expanded through the parent's raw provenance
-    (``parent_raw_contributors``) so ``MergeGroup`` stays raw + FK-safe
-    (a fresh merged parent id is never written there), while the immediate
-    parent operation is recorded verbatim in ``ParentMergeGroup`` (parent
-    namespace, validated against the parent unit set by construction --
-    every contributor came from the parent ``Unit`` rows).
+    - Root (``parent_raw_contributors is None``): contributors are raw
+      ``Sorting.Unit`` ids, written verbatim; no parent rows.
+    - Child: contributors are parent unit ids, expanded to raw ids for
+      ``MergeGroup`` (FK-safe) and recorded verbatim in ``ParentMergeGroup``.
     """
     if parent_raw_contributors is None:
         merge_group_rows = [
@@ -653,14 +563,8 @@ def build_merge_provenance_rows(
     parent_merge_group_rows = []
     for kept_uid, parent_contributors in kept_unit_to_contributors.items():
         kept_uid = int(kept_uid)
-        # Raw provenance: union the parent contributors' raw contributors
-        # (deduped + sorted) so a unit physically derived from raw N
-        # appears once, queryable, and FK-satisfiable against Sorting.Unit.
-        # Every parent unit has a MergeGroup self-entry when the parent was
-        # created via insert_curation; a missing key means the parent lacks
-        # raw provenance (e.g. hand-inserted, bypassing insert_curation) --
-        # surface that as a named integrity error rather than a bare
-        # KeyError mid-transaction.
+        # A hand-inserted parent may lack raw provenance; name it rather
+        # than raise a bare KeyError mid-transaction.
         missing = [
             int(p)
             for p in parent_contributors
@@ -690,7 +594,6 @@ def build_merge_provenance_rows(
             }
             for raw in raw_ids
         )
-        # Immediate parent operation: which parent units were composed.
         parent_merge_group_rows.extend(
             {
                 "sorting_id": sorting_id,

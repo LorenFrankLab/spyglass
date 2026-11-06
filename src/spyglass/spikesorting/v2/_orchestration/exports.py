@@ -4,8 +4,7 @@ Kept dependency-light so the package root can expose lazy re-exports without
 importing DataJoint / SpikeInterface-backed modules at import time.
 """
 
-# Names re-exported lazily at the package root (``spyglass.spikesorting.v2``)
-# and by the facade.
+# Re-exported lazily at the package root and by the facade.
 PACKAGE_ROOT_REEXPORTS = (
     "run_v2_pipeline",
     "run_v2_concat_pipeline",
@@ -56,8 +55,7 @@ PACKAGE_ROOT_REEXPORTS = (
     "V2_UNIT_SELECTION_POLICIES",
 )
 
-# Facade-only names: importable from ``spyglass.spikesorting.v2.pipeline``
-# but not re-exported at the package root.
+# Importable from ``v2.pipeline`` but not the package root.
 _FACADE_ONLY_EXPORTS = (
     # preflight reports
     "PreflightCheck",

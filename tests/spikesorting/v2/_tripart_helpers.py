@@ -59,8 +59,8 @@ def forbid_db_queries(monkeypatch, label: str, *, allow_staging=False):
           ``get_abs_path``, whatever the caller.
         - ``AnalysisNwbfile.get_abs_path`` may resolve only a file that
           ``AnalysisNwbfile().create`` returned inside the block (or be called
-          from within ``create``). Resolving any other analysis file -- an
-          input that belongs in ``make_fetch`` -- raises.
+          from within ``create``). Resolving any other analysis file, an
+          input that belongs in ``make_fetch``, raises.
     """
     import datajoint as dj
 

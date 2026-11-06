@@ -1,8 +1,7 @@
 """Generate MEArec ground-truth fixtures and convert them to Spyglass NWB files.
 
-This script is the manual one-shot that populates the cached simulated
-recordings used by the modern-spike-sorting validation suite. It is **not** a
-pytest test (no ``test_`` prefix) and is not run during normal test collection.
+Manual script that builds the cached simulated recordings used by the v2
+tests; not collected by pytest.
 
 For each fixture it:
 
@@ -13,9 +12,8 @@ For each fixture it:
 5. Round-trips the NWB through Spyglass session ingestion to prove it works.
 6. Records fixture provenance (versions, seeds, hashes) in a manifest.
 
-It always runs against the isolated Docker test database via
-``bootstrap_v2_test_environment`` and writes only under a temporary
-``SPYGLASS_BASE_DIR``; it never touches production.
+Writes only to the Docker test database and a temporary
+``SPYGLASS_BASE_DIR``.
 
 Usage
 -----
@@ -40,10 +38,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tests.spikesorting.v2.fixtures.mearec_to_nwb import ProbeLayout
 
-# The bootstrap must run before importing Spyglass, so resolve and import the
-# standalone test-environment helper by path rather than as a package. The
-# repository root makes the `tests` package (and its fixture converter)
-# importable when this file runs as a script.
+# The bootstrap must run before importing Spyglass, so import it by path; the
+# repo root makes the `tests` package importable when run as a script.
 _THIS_DIR = Path(__file__).resolve().parent
 _V2_TEST_DIR = _THIS_DIR.parent
 for _path in (_V2_TEST_DIR, _THIS_DIR.parents[3]):
@@ -52,9 +48,8 @@ for _path in (_V2_TEST_DIR, _THIS_DIR.parents[3]):
 
 from test_env import bootstrap_v2_test_environment  # noqa: E402
 
-# Spyglass is imported lazily inside functions, always after
-# `bootstrap_v2_test_environment` has repointed `dj.config` at the isolated
-# test database -- never at module import time.
+# Spyglass is imported inside functions, after the bootstrap repoints
+# dj.config at the test database.
 
 _DEFAULT_BASE_DIR = "tests/_data/spikesorting_v2"
 _DEFAULT_PREFIX = "pytests"
@@ -81,14 +76,10 @@ class FixtureSpec:
     seed : int
         Deterministic seed shared by templates, spike trains, and convolution.
     template_seed : int or None
-        Seed for MEArec's *template selection* (``seeds.templates``), decoupled
-        from the spike-train / convolution / noise seed. ``None`` (the default)
-        falls back to ``seed`` so existing single-session fixtures keep their
-        all-seeds-equal behavior. Two fixtures that share a ``template_seed``
-        (and the same template library, i.e. matching ``drifting``) select the
-        SAME ground-truth neurons in the SAME order, so unit ``i`` in one
-        corresponds to unit ``i`` in the other -- the planted cross-session
-        correspondences the matcher gate scores against.
+        Seed for MEArec's template selection (``seeds.templates``); ``None``
+        uses ``seed``. Fixtures sharing ``template_seed`` and ``drifting``
+        select the same neurons in the same order, so unit ``i`` corresponds
+        across them.
     """
 
     name: str
@@ -99,13 +90,8 @@ class FixtureSpec:
     drifting: bool
     drift_um_per_min: float
     seed: int
-    # Optional overrides for MEArec's template-placement / amplitude
-    # constraints. The defaults work for polymer and Neuropixels-scale
-    # probes but reject ALL cell positions on a tetrode (single
-    # ``contact_size=12.5`` probe with spatial extent < 30 µm).
-    # Per-fixture override: e.g. ``{"min_amp": 20, "ylim": [-60, 60],
-    # "zlim": [-60, 60]}`` opens the placement volume for tiny probes.
-    # ``None`` leaves MEArec's defaults untouched.
+    # MEArec placement/amplitude overrides; its defaults reject every cell
+    # position on a tetrode. None keeps the defaults.
     templates_overrides: dict | None = None
     template_seed: int | None = None
 
@@ -119,11 +105,9 @@ class FixtureSpec:
 class GenProfile:
     """Tunable cost parameters for a generation run.
 
-    The ``smoke`` profile is a cheap end-to-end pipeline check; the ``full``
-    profile produces the fixtures the validation suite actually uses. Both use
-    every bundled cell model -- the smoke speedup comes from generating far
-    fewer templates per model, not from dropping models (the bundled cell
-    models share one compiled-mechanism folder).
+    ``smoke`` is a cheap pipeline check; ``full`` builds the fixtures the
+    tests use. Both use every bundled cell model (they share one compiled
+    mechanism folder); smoke generates fewer templates per model.
     """
 
     name: str
@@ -195,22 +179,9 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                     drift_um_per_min=5.0,
                     seed=2,
                 ),
-                # Single-tetrode probe (Frank-lab tetrode_12.5 metadata).
-                # Few planted units because a single tetrode has a tiny
-                # spatial footprint -- only neurons within ~30 µm contribute
-                # detectable spikes. 4 excitatory + 1 inhibitory is a realistic upper
-                # bound for what a single tetrode could record from in vivo;
-                # too many planted units would just stack noise.
-                #
-                # ``templates_overrides``: MEArec's default placement
-                # constraints (``ylim=None, zlim=None``) auto-fit the
-                # probe's spatial extent + 30 µm overhang. For a tetrode
-                # at ±6.25 µm that's a ~75 µm cube and ``min_amp=30``,
-                # which rejects all candidate cell positions (verified:
-                # ``0 EAPs in 5.4s`` on the first attempt). Open the
-                # placement volume to ±60 µm and drop ``min_amp`` to
-                # 20 µV so MEArec can place ~10 candidate cells per
-                # model in a tetrode-realistic in-vivo spatial regime.
+                # - Few units: a tetrode only detects neurons within ~30 µm.
+                # - MEArec's default placement volume and min_amp=30 reject
+                #   every tetrode position; widen to ±60 µm, min_amp 20 µV.
                 FixtureSpec(
                     name="mearec_tetrode_60s",
                     layout=tetrode,
@@ -226,19 +197,10 @@ def _profiles() -> dict[str, tuple[GenProfile, tuple[FixtureSpec, ...]]]:
                         "min_amp": 20,
                     },
                 ),
-                # Cross-session matcher gate: a PAIR of polymer sessions built
-                # from one drifting template library with a SHARED
-                # ``template_seed`` so both select the SAME ground-truth neurons
-                # in the same order -- unit ``i`` in ``_s1`` is the same neuron
-                # as unit ``i`` in ``_s2`` (the planted correspondences the AUC
-                # gate scores). Both sessions are ``drifting=True`` (MEArec's cell
-                # SELECTION depends on the drift flag, so the two must match it --
-                # and ``template_seed`` -- to share a selection), but at DIFFERENT
-                # slow-drift speeds: ``_s1`` barely moves (~1 µm over 60 s) while
-                # ``_s2`` drifts ~8 µm, so ``_s2``'s average waveform positions
-                # shift a few µm relative to ``_s1`` -- the small inter-session
-                # drift UnitMatch must correct. Distinct ``seed`` gives each
-                # session its own spike-train + noise realization.
+                # Matcher pair: shared template_seed and drifting=True (cell
+                # selection depends on both), so unit i is the same neuron in
+                # both. Different drift speeds (~1 vs ~8 µm over 60 s) give the
+                # small inter-session shift UnitMatch must correct.
                 FixtureSpec(
                     name="mearec_polymer_128ch_2sessions_s1",
                     layout=polymer,
@@ -400,9 +362,8 @@ def _generate_templates(
         parallel=True,
         n_jobs=profile.template_n_jobs,
         recompile=recompile,
-        # Keep the per-cell EAP scratch: MEArec's delete_tmp cleanup does a
-        # bare rmtree that fails on NFS ghost (.nfs*) files. The templates are
-        # already loaded into memory by then, so skipping the cleanup is safe.
+        # MEArec's cleanup rmtree fails on NFS .nfs* files; templates are
+        # already in memory.
         delete_tmp=False,
         verbose=False,
     )
@@ -439,22 +400,14 @@ def _generate_recording(
         return
 
     params = MEArec.get_default_recordings_params()
-    # Pin the recording to 30 kHz (Hz). MEArec's default leaves
-    # recordings ``fs`` unset, so the recording inherits the template
-    # rate (dt=0.03125 ms = 32 kHz). 30 kHz is the Frank-lab-standard
-    # rate: it matches the real minirec test data and the filters
-    # ``FirFilterParameters.create_standard_filters`` builds (30 kHz /
-    # 20 kHz only), so downstream LFP/filter code finds a matching
-    # filter without a custom 32 kHz entry. MEArec resamples the
-    # cached 32 kHz templates to this rate at recording time.
+    # 30 kHz, not the 32 kHz template rate: create_standard_filters only
+    # builds 30/20 kHz filters.
     params["recordings"]["fs"] = 30000
     params["spiketrains"]["n_exc"] = spec.n_exc
     params["spiketrains"]["n_inh"] = spec.n_inh
     params["spiketrains"]["duration"] = spec.duration_s
     params["seeds"]["spiketrains"] = spec.seed
-    # ``templates`` seeds the cell SELECTION (decoupled from the spike-train
-    # realization), so two sessions sharing ``effective_template_seed`` pick the
-    # same ground-truth neurons in the same order -- the planted correspondences.
+    # Sessions sharing effective_template_seed select the same neurons.
     params["seeds"]["templates"] = spec.effective_template_seed
     params["seeds"]["convolution"] = spec.seed
     params["seeds"]["noise"] = spec.seed
@@ -518,10 +471,8 @@ def _write_probeinterface_json(layout: ProbeLayout, json_path: Path) -> str:
 def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
     """Round-trip the fixture NWB through Spyglass session ingestion.
 
-    Proves a freshly generated fixture ingests end to end: a ``Session``,
-    ``Raw``, non-empty ``Electrode`` table, ``IntervalList`` rows, the probe
-    tables, and the sidecar ``ground_truth/units`` processing-module
-    table all appear.
+    Checks that ``Session``, ``Raw``, ``Electrode``, ``IntervalList``, the
+    probe tables and the ``ground_truth/units`` table are populated.
 
     Parameters
     ----------
@@ -573,12 +524,8 @@ def _verify_ingestion(nwb_path: Path, spec: FixtureSpec) -> dict:
         num_shanks == spec.layout.n_shanks
     ), f"ProbeType.num_shanks {num_shanks} != {spec.layout.n_shanks}"
 
-    # Planted ground-truth units live in a sidecar
-    # ``ProcessingModule("ground_truth")["units"]`` table (NOT
-    # ``nwbfile.units``), so ``ImportedSpikeSorting`` -- which only
-    # reads ``nwbfile.units`` -- has nothing to ingest from these
-    # fixtures and is intentionally NOT exercised here. Verify
-    # instead that the sidecar table is present and non-empty.
+    # Ground truth is in processing["ground_truth"]["units"], not
+    # nwbfile.units, so ImportedSpikeSorting has nothing to ingest.
     import pynwb
 
     from tests.spikesorting.v2.fixtures.mearec_to_nwb import (
@@ -626,15 +573,12 @@ def generate_fixtures(
     base_dir : pathlib.Path
         Resolved Spyglass base directory.
     profile_name : str
-        Key into ``_profiles()`` -- ``"smoke"`` or ``"full"``.
+        Key into ``_profiles()``: ``"smoke"`` or ``"full"``.
     skip_ingestion : bool
         Skip the Spyglass ingestion round-trip (geometry/conversion only).
     only : tuple of str, optional
         If non-empty, only generate fixtures whose ``name`` is in this
-        tuple. Useful for adding a new fixture without regenerating the
-        existing ones (saves ~30 min wall time on the polymer + np set).
-        The manifest is REPLACED, not merged, so callers using ``only``
-        must take care if they rely on the manifest for the other fixtures.
+        tuple. Existing manifest entries for other fixtures are kept.
 
     Returns
     -------
@@ -663,10 +607,6 @@ def generate_fixtures(
         "spikeinterface_version": pkg_version("spikeinterface"),
         "fixtures": {},
     }
-    # When ``--only`` filters to a subset of fixtures, preserve existing
-    # manifest entries for the other fixtures so we don't wipe their hashes
-    # just because we regenerated one fixture. New entries override existing
-    # ones with the same name (intentional -- the regen IS the new truth).
     existing_manifest_path = fixtures_dir / "fixtures_manifest.json"
     if only and existing_manifest_path.exists():
         try:

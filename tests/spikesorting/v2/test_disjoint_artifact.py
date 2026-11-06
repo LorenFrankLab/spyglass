@@ -1,19 +1,8 @@
 """Artifact detection on disjoint recordings.
 
-Taking the artifact complement over a single envelope
-``timestamps[0]..timestamps[-1]`` would be wrong for DISJOINT sort intervals:
-that envelope includes the wall-clock gaps ``Recording.make`` excluded, so
-the artifact-removed ``valid_times`` could span a gap. That inflates the
-obs_intervals duration/firing-rate metadata and can let a sub-
-``min_length_s`` sliver survive by borrowing gap time. v2 instead splits the
-persisted timestamp vector at discontinuities into base chunks and
-subtracts artifacts per chunk (v1 subtracts from the explicit
-``sort_interval_valid_times``).
-
-The hermetic tests here pin the discontinuity-split helper; the
-DB-gated tests exercise ``detect_artifacts`` / ``apply_artifact_mask``
-on a synthetic disjoint recording. A full-pipeline integration test
-lives in ``single_session/test_disjoint_intervals.py``.
+Artifacts are subtracted per recorded chunk, so ``valid_times`` never span a
+wall-clock gap. Full-pipeline coverage is in
+``single_session/test_disjoint_intervals.py``.
 """
 
 from __future__ import annotations
@@ -57,9 +46,7 @@ def test_base_intervals_and_gaps_contiguous():
 def test_base_intervals_and_gaps_splits_at_gap():
     """A wall-clock gap (diff > 1.5/fs) splits the vector into two chunks.
 
-    The chunk bounds are the first/last sample of each chunk -- the
-    inter-chunk gap is NOT part of any base interval, so an artifact
-    complement built per-chunk can never span it.
+    Bounds are each chunk's first/last sample; no interval spans the gap.
     """
     fs = 30000.0
     dt = 1.0 / fs
@@ -75,7 +62,6 @@ def test_base_intervals_and_gaps_splits_at_gap():
     assert intervals[0][1] == pytest.approx(ts[99])
     assert intervals[1][0] == pytest.approx(ts[100])
     assert intervals[1][1] == pytest.approx(ts[-1])
-    # No base interval spans the gap.
     for start, end in intervals:
         assert not (
             start < ts[99] + gap / 2 < end
@@ -90,10 +76,7 @@ def test_base_intervals_and_gaps_empty():
 def test_base_intervals_and_gaps_three_chunks_two_gaps():
     """Three chunks separated by TWO gaps yield three correct intervals.
 
-    Every existing disjoint fixture is a single gap (two chunks); this
-    pins the ``zip(starts, ends)`` indexing on the multi-gap path. With
-    chunk lengths 80 / 120 / 100 the per-chunk bounds must come from the
-    correct sample offsets, not a hard-coded 2-chunk assumption.
+    Uses unequal chunk lengths (80 / 120 / 100) so offsets are checked.
     """
     fs = 30000.0
     dt = 1.0 / fs
@@ -117,7 +100,6 @@ def test_base_intervals_and_gaps_three_chunks_two_gaps():
     for (got_s, got_e), (exp_s, exp_e) in zip(intervals, expected):
         assert got_s == pytest.approx(exp_s)
         assert got_e == pytest.approx(exp_e)
-    # Neither gap is spanned by any base interval.
     gap1_mid = 0.5 * (ts[n1 - 1] + ts[n1])
     gap2_mid = 0.5 * (ts[n1 + n2 - 1] + ts[n1 + n2])
     for start, end in intervals:
@@ -128,11 +110,7 @@ def test_base_intervals_and_gaps_three_chunks_two_gaps():
 def test_base_intervals_gap_threshold_robust_to_subsample_jitter():
     """The ``1.5 / fs`` split threshold straddles the decision boundary.
 
-    Within-chunk timestamp jitter (a diff of ``1.4 / fs`` -- below the
-    1.5-sample threshold) must NOT spuriously split a chunk, while a
-    genuine missing-sample gap (a diff of ``1.6 / fs`` -- just above the
-    threshold) MUST split. Pins both sides of the boundary so a future
-    threshold change (e.g. to ``1.0 / fs``) is caught.
+    A ``1.4 / fs`` diff does not split; a ``1.6 / fs`` diff does.
     """
     fs = 30000.0
     dt = 1.0 / fs
@@ -154,8 +132,7 @@ def test_base_intervals_gap_threshold_robust_to_subsample_jitter():
     assert (
         len(intervals) == 2
     ), "a 1.6/fs supra-threshold gap must split the chunk"
-    # The split lands exactly at the enlarged diff (between sample 25 and
-    # 26 of the cumulative vector).
+    # Split between samples 25 and 26.
     assert intervals[0][1] == pytest.approx(ts_split[25])
     assert intervals[1][0] == pytest.approx(ts_split[26])
 
@@ -182,11 +159,7 @@ def _disjoint_recording(chunk_len=200, n_ch=4, fs=30000.0, gap_s=0.5):
 def test_detect_artifacts_valid_times_never_cross_gap():
     """``detect_artifacts`` keeps valid_times within recorded chunks.
 
-    A transient in chunk 1 plus the (artifact-free) chunk 2 must yield
-    valid intervals that each lie within a single chunk -- never one
-    interval spanning the inter-chunk wall-clock gap. Subtracting from a
-    single envelope would merge the post-transient
-    chunk-1 tail with chunk 2 across the gap.
+    Each valid interval lies within a single chunk.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -226,11 +199,8 @@ def test_detect_artifacts_valid_times_never_cross_gap():
 def test_apply_artifact_mask_preserves_chunk_boundary_frame():
     """``apply_artifact_mask`` zeros artifacts but not the gap boundary.
 
-    With gap-respecting valid_times, the complement between chunk 1's last
-    frame and chunk 2's first frame is a pure wall-clock gap (zero real
-    frames). The mask must zero the in-chunk artifact frames yet leave the
-    chunk-boundary sample untouched -- masking it would zero a good sample
-    per gap.
+    The complement across a gap holds no real frames, so the samples on
+    either side stay untouched.
     """
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
@@ -265,14 +235,8 @@ def test_apply_artifact_mask_preserves_chunk_boundary_frame():
 def test_detect_artifacts_removal_window_does_not_spill_across_gap():
     """Chunk 1's removal window must not reach across the gap into chunk 2.
 
-    The removal window expands the detected artifact; expanding it in
-    FRAME space (``end_f + half_window_frames``) lets an artifact near
-    chunk 1's end land in chunk 2's frames across a large wall-clock gap,
-    so chunk 2's first samples get removed. v1's window is time-based
-    (``timestamps[end] + half_win`` seconds), which cannot cross a gap
-    orders of magnitude larger than the window. Chunk 2 must stay fully
-    valid: a valid interval starts at ``times[chunk_len]`` (chunk 2's
-    first sample), NOT ``times[chunk_len + half_window_frames]``.
+    The window is applied in time, not frames, so a valid interval starts
+    at chunk 2's first sample ``times[chunk_len]``.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -280,9 +244,8 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
-    # Transient on the 3rd-to-last frame of chunk 1; the 1 ms removal
-    # window (half = ceil(0.5 ms * fs) = 15 frames at 30 kHz) would, in
-    # frame space, reach ~12 frames into chunk 2.
+    # 3rd-to-last frame of chunk 1; a 15-frame half-window in frame space
+    # would reach ~12 frames into chunk 2.
     traces[chunk_len - 3, :] = 5000.0
     times = rec.get_times()
     chunk2_start = times[chunk_len]
@@ -311,12 +274,8 @@ def test_detect_artifacts_removal_window_does_not_spill_across_gap():
 def test_detect_artifacts_join_does_not_bridge_gap():
     """Artifacts in different chunks must not join across the gap.
 
-    Frame indices are contiguous across the inter-chunk gap, so a
-    frame-space join (``f - cur_end <= join_window_frames``) can merge an
-    artifact near chunk 1's end with one near chunk 2's start even though
-    they are 0.5 s apart in wall-clock. The merged span then straddles
-    both chunks and over-masks chunk 1's valid tail. The join must not
-    bridge a timestamp gap.
+    Frame indices are contiguous across the gap, so a frame-space join
+    would merge them and over-mask chunk 1's tail.
     """
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
@@ -324,9 +283,8 @@ def test_detect_artifacts_join_does_not_bridge_gap():
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rec, traces, fs, chunk_len, gap_s = _disjoint_recording()
-    # Artifact 20 frames before chunk 1's end, and one at chunk 2's first
-    # frame: 20 frames apart, within the 30-frame (1 ms) join window, but
-    # 0.5 s apart in wall-clock.
+    # 20 frames apart (inside the 30-frame join window) but 0.5 s apart in
+    # wall-clock.
     traces[chunk_len - 20, :] = 5000.0
     traces[chunk_len, :] = 5000.0
     times = rec.get_times()
@@ -342,9 +300,7 @@ def test_detect_artifacts_join_does_not_bridge_gap():
     )
     valid_times = detect_artifacts(rec, validated)
 
-    # The chunk-1 tail just before the gap (beyond artifact's own 15-frame
-    # window) must remain valid -- it must not be removed by a span that
-    # bridged to the chunk-2 artifact.
+    # Chunk 1's tail beyond the artifact's own window stays valid.
     tail_t = times[chunk_len - 4]
     covered = any(s <= tail_t < e for s, e in valid_times)
     assert covered, (

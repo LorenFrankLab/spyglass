@@ -1,18 +1,8 @@
-"""v2 (SI 0.104) clusterless waveform-feature extraction.
+"""Clusterless waveform features (``UnitWaveformFeatures.make``) for v2.
 
-``UnitWaveformFeatures.make`` is the clusterless-decoding input. It must run
-for v2 (``CurationV2``) sources under SpikeInterface 0.104 -- without the
-legacy-SI guard and without the removed ``si.extract_waveforms`` -- producing
-per-spike amplitudes from a freshly built ``SortingAnalyzer``, keyed by the
-true NWB unit_id. The legacy v0/v1 path stays guarded and unchanged under
-SI 0.99.
-
-Tests dispatch on the installed SI version: the v2 tests need SI >= 0.101 and
-skip under the legacy env; the legacy guard test needs SI < 0.101 and skips
-under the modern env, so each environment runs only the tests it supports.
-
-All tests are ``slow``: each runs a full MEArec sort plus an analyzer build
-against the Docker MySQL container.
+- v2 (``CurationV2``) sources run under SI >= 0.101 from a fresh
+  ``SortingAnalyzer``, keyed by the true NWB unit_id.
+- The legacy guard test needs SI < 0.101; each env skips the other's tests.
 """
 
 from __future__ import annotations
@@ -24,17 +14,9 @@ import pytest
 import spikeinterface as si
 from packaging.version import Version
 
-# The v2 conftest (tests/spikesorting/v2/conftest.py) provides the autouse
-# no-op ``mini_insert`` (skips the repo-wide minirec Box download/ingestion)
-# and the boolean ``safemode`` override this module's super_delete cleanup
-# relies on -- so this file lives here rather than under tests/decoding/.
-#
-# NOTE: imports of the v2 test infrastructure (``copy_and_insert_nwb``,
-# ``_clean_session_v2``) are deliberately LAZY (inside the helpers/fixtures
-# below). This module also runs in the legacy SI 0.99 job for the guard test
-# (collected as a single explicit path, NOT the whole v2 dir); importing the
-# heavy v2 test modules at collection time could fail under the legacy
-# environment, whereas the legacy test itself touches none of them.
+# Lives under v2/ for the v2 conftest's no-op ``mini_insert`` and ``safemode``.
+# v2 test helpers are imported lazily: the legacy SI 0.99 job collects this
+# file for the guard test, and those imports could fail there.
 
 _SI_IS_LEGACY = Version(si.__version__) < Version("0.101")
 _skip_if_legacy = pytest.mark.skipif(
@@ -48,9 +30,8 @@ _skip_unless_legacy = pytest.mark.skipif(
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 _FIXTURE_PATH = _FIXTURE_DIR / "mearec_polymer_smoke.nwb"
-# 60s polymer fixture: same probe geometry as the smoke fixture (identical
-# probe_json in the fixtures manifest), so co-ingesting both in one module is
-# conflict-free, and its 24 ground-truth units yield >=2 MS5 units per shank.
+# Same probe as the smoke fixture (safe to co-ingest); its 24 ground-truth
+# units yield >= 2 MS5 units per shank.
 _POLYMER_60S_PATH = _FIXTURE_DIR / "mearec_polymer_128ch_60s.nwb"
 _TEAM = "v2_wave_team"
 _AMP_PARAM = "v2_wave_amplitude"
@@ -72,10 +53,8 @@ def wave_session(dj_conn, smoke_nwb):
 def polymer_60s_session(dj_conn):
     """Ingest the 60s polymer fixture (24 ground-truth units).
 
-    Used by the sparse-unit-id test: the 4-second smoke shank yields only a
-    single MS5 unit, too few to form a merge-applied (sparse) id set, whereas a
-    60s shank reliably yields several. Shares the smoke fixture's probe, so
-    co-ingestion does not collide on the probe/electrode tables.
+    The sparse-unit-id test needs several units to merge; the 4 s smoke shank
+    yields one.
     """
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
@@ -117,11 +96,8 @@ def _amplitude_param():
 def _drop_feature_rows():
     """Prompt-free removal of this module's UnitWaveformFeatures rows.
 
-    The downstream ``UnitWaveformFeatures`` row makes ``_clean_session_v2``'s
-    merge-master ``super_delete`` cascade into the decoding schema, which trips
-    ``cautious_delete``'s confirmation prompt (EOF under pytest). Dropping the
-    feature + selection rows first (``delete_quick`` -> no cascade, no prompt)
-    removes that downstream dependency so the session cleanup runs cleanly.
+    Otherwise the session cleanup cascades into decoding and hits
+    ``cautious_delete``'s confirmation prompt (EOF under pytest).
     """
     from spyglass.decoding.v1.waveform_features import (
         UnitWaveformFeatures,
@@ -292,11 +268,8 @@ def _units_dataframe(nwb_row):
 def test_analyzer_waveform_accessor_zero_unit_contract():
     """The empty (``analyzer=None``) accessor only accepts a zero-unit sorting.
 
-    Constructing it with a non-empty sorting is rejected up front -- otherwise
-    ``get_waveforms`` would raise a misleading "zero-unit" error for a sort that
-    actually has units. The legitimate zero-unit accessor refuses
-    ``get_waveforms`` with a clear ``RuntimeError`` (never reached in normal
-    flow because there are no units to iterate).
+    A non-empty sorting is rejected at construction. The zero-unit accessor's
+    ``get_waveforms`` raises ``RuntimeError``.
     """
     from spyglass.decoding.v1.waveform_features import (
         _AnalyzerWaveformAccessor,
@@ -402,13 +375,10 @@ def test_location_accessor_preserves_sparse_units_segments_and_coordinates(
 
 @pytest.mark.usefixtures("dj_conn")
 def test_v2_dispatch_table_name_resolution():
-    """``make`` routes only a ``CurationV2`` source to the v2 (non-legacy) path.
+    """``make`` routes only a ``CurationV2`` source to the v2 path.
 
-    Pins the ``to_camel_case(table_name) == "CurationV2"`` dispatch contract in
-    ``waveform_features.py``: the tier prefix is stripped (``curation_v2`` ->
-    ``CurationV2``) and the match is exact, so a legacy (``CurationV1``) source
-    or a hypothetical ``MetricCurationV2`` source does not collide onto the v2
-    branch.
+    The tier prefix is stripped (``curation_v2`` -> ``CurationV2``) and the
+    match is exact, so ``CurationV1`` or ``MetricCurationV2`` do not match.
     """
     from datajoint.utils import to_camel_case
 
@@ -422,9 +392,7 @@ def test_v2_dispatch_table_name_resolution():
 def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
     """A v2 clusterless ``merge_id`` runs ``make`` under SI 0.104.
 
-    No ``_require_legacy_si_environment`` raise, no ``extract_waveforms``
-    error: features come from a freshly built ``SortingAnalyzer``. The single
-    clusterless unit's amplitude array is ``(n_spikes, n_channels)`` and aligns
+    The single unit's amplitude array is ``(n_spikes, n_channels)`` and aligns
     1:1 with the written ``spike_times``.
     """
     param_pk = _amplitude_param()
@@ -460,33 +428,22 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
             "expected finite per-spike amplitudes for a populated "
             "clusterless unit"
         )
-        # ``peak_sign="neg"`` + ``return_in_uV=True``: a real detected spike
-        # has a negative peak on its detection channel, so some amplitudes
-        # must be negative. An all-nonnegative result signals a sign flip,
-        # an ``abs()``, or a broken uV scaling -- none caught by shape /
-        # finiteness alone.
+        # peak_sign="neg": some amplitudes must be negative, or the sign or
+        # uV scaling is wrong.
         assert (amps < 0).any(), (
             "neg peak_sign should yield some negative (uV) amplitudes; "
             "all-nonnegative suggests a sign/scale error"
         )
 
-        # Independent value oracle: with estimate_peak_time=False the stored
-        # amplitude for each spike is the CENTER sample of the extracted
-        # waveform, which equals the recording trace at that spike's frame.
-        # Recompute it from the recording (a different artifact than the
-        # analyzer the feature came from) and require an exact-ish match.
-        # This catches channel-order, uV-scaling, and spike<->amplitude
-        # misalignment bugs in make() that shape/sign/finiteness miss.
+        # With estimate_peak_time=False each amplitude is the recording trace
+        # at the spike's frame; recompute it from the recording directly.
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
         )
 
         recording = SpikeSortingOutput.get_recording({"merge_id": merge_id})
         sorting = SpikeSortingOutput.get_sorting({"merge_id": merge_id})
-        # The oracle indexes segment-0 traces directly; make() concatenates
-        # multi-segment recordings before extraction. Fail loudly if a future
-        # fixture is multi-segment so the frame<->trace mapping can't silently
-        # diverge. The MEArec fixtures are single-segment.
+        # The oracle indexes segment 0 only; make() concatenates segments.
         assert recording.get_num_segments() == 1, (
             "amplitude oracle assumes a single-segment recording; got "
             f"{recording.get_num_segments()} segments"
@@ -499,12 +456,9 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
             "recomputed center samples must match the stored amplitude shape: "
             f"{expected_center.shape} vs {amps.shape}"
         )
-        # A spike whose [ms_before, ms_after] window runs off the recording
-        # edge gets a zero-padded snippet from SI (here all-zero), so its
-        # extracted amplitude is 0 rather than the raw trace. Compare exact
-        # values only for INTERIOR spikes whose full window fits; assert the
-        # edge spikes are the documented zero-padded case. _AMP_PARAM uses
-        # ms_before == ms_after == 0.5 ms.
+        # SI zero-pads a window that runs off the recording edge, so edge
+        # spikes have amplitude 0. Compare exact values for interior spikes
+        # only (_AMP_PARAM: ms_before == ms_after == 0.5 ms).
         n_samples = traces.shape[0]
         fs = recording.get_sampling_frequency()
         margin = int(np.ceil(0.5e-3 * fs))
@@ -540,14 +494,10 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
 def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
     """Features are keyed by the true unit_id, not a positional index.
 
-    A merge-applied v2 curation assigns the survivor a fresh ``max(id)+1`` id,
-    so the surviving unit_id is non-positional (``!= 0``). The written feature
-    row must be keyed by that true id, and its amplitude array must align 1:1
-    with that unit's own spike train. Merging ALL units into a single survivor
-    keeps the written ``amplitude`` column rectangular (one unit), isolating the
-    true-id keying from the pre-existing ragged-multi-unit-column write
-    limitation in ``_write_waveform_features_to_nwb`` (which never bit
-    clusterless decoding -- the thresholder always emits exactly one unit).
+    Merging all units gives one survivor with a fresh ``max(id)+1`` id; its
+    feature row uses that id and aligns 1:1 with its spike train. One unit
+    keeps the ``amplitude`` column rectangular, since
+    ``_write_waveform_features_to_nwb`` cannot write ragged multi-unit columns.
     """
     param_pk = _amplitude_param()
     run_summary = _run_ms5(polymer_60s_session)
@@ -568,10 +518,7 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
         )
         merged_id = max(source_ids) + 1  # CurationV2 apply_merge convention
 
-        # Merge ALL source units into one. ``run_v2_pipeline`` already inserted
-        # the root (parent_curation_id=-1) curation; this merge-applied curation
-        # is a child of it. The single survivor carries the fresh
-        # non-positional id.
+        # Child of the root curation that run_v2_pipeline inserted.
         merge_id = _curation_merge_id(
             sort_pk,
             parent_curation_id=run_summary["root_curation_id"],
@@ -633,11 +580,8 @@ def test_unit_waveform_features_zero_unit_v2(wave_session):
             f"{len(feature_df)} rows"
         )
 
-        # ``fetch_data`` must return two empty sequences (not the bare ``()``
-        # that ``zip(*[])`` produces), so the public consumer
-        # ``ClusterlessDecodingV1.fetch_spike_data`` -- which unpacks the
-        # result into ``spike_times, spike_waveform_features`` -- does not
-        # raise on an all-zero-unit feature set.
+        # Two empty sequences, not ``zip(*[])``'s ``()``, so
+        # ClusterlessDecodingV1.fetch_spike_data can unpack them.
         spike_times, spike_features = tbl.fetch_data()
         assert spike_times == [] and spike_features == [], (
             "zero-unit fetch_data must yield ([], []); got "
@@ -654,12 +598,10 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
 ):
     """v2 supports both ``full_waveform`` and ``spike_location``.
 
-    Shares one tuned clusterless sort. ``full_waveform`` writes a
-    ``(n_spikes, n_time*n_channels)`` column aligned 1:1 with ``spike_times``.
-    ``spike_location`` (an optional clusterless mark) writes a
-    ``(n_spikes, 2 or 3)`` column per unit -- the v2 SortingAnalyzer path
-    computes it lazily from the ``spike_locations`` extension, so ``make``
-    completes without ``NotImplementedError``.
+    - ``full_waveform``: ``(n_spikes, n_time*n_channels)`` per unit.
+    - ``spike_location``: ``(n_spikes, 2 or 3)`` per unit.
+
+    Both align 1:1 with ``spike_times``.
     """
     from spyglass.decoding.v1.waveform_features import (
         UnitWaveformFeatures,
@@ -796,11 +738,10 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
 
 @pytest.mark.db_unit
 def test_spike_location_rejects_legacy_waveform_extractor_clearly(dj_conn):
-    """``spike_location`` is intentionally v2-only under modern SI.
+    """``spike_location`` is v2-only under modern SI.
 
-    ``db_unit`` (not ``unit``): importing ``waveform_features`` activates the
-    decoding/common schemas, so it needs a live DB connection -- ``dj_conn``
-    ensures the container is healthy before the import rather than racing it.
+    ``db_unit``: importing ``waveform_features`` activates schemas, so
+    ``dj_conn`` must be ready first.
     """
     from spyglass.decoding.v1.waveform_features import (
         WAVEFORM_FEATURE_FUNCTIONS,
@@ -823,14 +764,8 @@ def test_spike_location_rejects_legacy_waveform_extractor_clearly(dj_conn):
 def test_unit_waveform_features_v0v1_guard_unchanged_under_legacy():
     """Under SI 0.99 the legacy-SI guard is a no-op, so v0/v1 ``make`` runs.
 
-    ``make`` applies the guard on the v0/v1 branches only; under the legacy
-    env that guard must NOT raise (otherwise the v0/v1 extraction path would
-    be broken for legacy-supported feature rows such as ``amplitude``). Here
-    we pin the guard-version contract make() depends on. The real v1
-    ``UnitWaveformFeatures.populate`` runs in the legacy job in
-    ``tests/spikesorting/v1/test_waveform_features_legacy.py``, which checks
-    the stored amplitudes against the recording traces. ``spike_location``
-    itself is covered separately as an intentional v2-only feature.
+    The v1 populate itself is tested in
+    ``tests/spikesorting/v1/test_waveform_features_legacy.py``.
     """
     from spyglass.spikesorting._legacy_runtime import (
         _require_legacy_si_environment,
@@ -846,9 +781,8 @@ def test_unit_waveform_features_v0v1_guard_unchanged_under_legacy():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_waveform_v2_rejects_max_spikes_per_unit(wave_session):
-    """A finite ``max_spikes_per_unit`` fails FAST (clusterless needs every
-    spike 1:1) rather than building the whole analyzer and only tripping the
-    write-time 1:1 check."""
+    """A finite ``max_spikes_per_unit`` fails before the analyzer is built
+    (clusterless needs every spike)."""
     from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
 
     sort_pk, _ = _run_clusterless(wave_session, tuned=True)
@@ -882,8 +816,7 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
     # Waveforms are readable from disk during the accessor's lifetime.
     uid = acc.sorting.get_unit_ids()[0]
     assert acc.get_waveforms(uid).shape[0] > 0
-    # Dropping the accessor cleans the scratch folder (TemporaryDirectory
-    # finalizer) -- the lifetime contract a disk-backed analyzer relies on.
+    # Dropping the accessor removes the scratch folder.
     del acc
     gc.collect()
     assert not Path(
@@ -898,11 +831,8 @@ def test_fetch_waveform_v2_is_disk_backed_and_cleaned(wave_session):
 def test_clusterless_waveform_buffer_is_disk_backed(dj_conn):
     """Every-spike, every-channel extraction must not be resident in RAM.
 
-    The accessor is documented as disk-backed so a long noisy tetrode (millions
-    of crossings x all channels) does not OOM. SpikeInterface honours that only
-    for ``format="binary_folder"`` (``mode="memmap", copy=False``); the zarr
-    format extracts into shared memory and then COPIES the full array into RAM
-    before writing it out, so the scratch folder bounded nothing.
+    SI extracts to disk only for ``format="binary_folder"``; zarr copies the
+    full array into RAM before writing.
     """
     import spikeinterface.full as si
 

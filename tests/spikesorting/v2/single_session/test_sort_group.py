@@ -19,7 +19,7 @@ def test_set_group_by_shank_creates_one_group_per_shank(polymer_smoke_session):
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
-    # Clean any rows a previous module run may have left.
+    # Clean rows left by an earlier run.
     _clean_session_v2(polymer_smoke_session)
 
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
@@ -85,7 +85,7 @@ def test_set_group_by_shank_can_include_bad_channels(polymer_smoke_session):
 
 @pytest.mark.slow
 def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
-    """Rerun without an override raises (v1 silently overwrites)."""
+    """Rerun without an override raises."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
@@ -189,19 +189,14 @@ def test_set_group_by_column_lists_valid_columns_on_typo(
         )
     msg = str(excinfo.value)
     assert "probe_shanke" in msg
-    assert "probe_shank" in msg  # the suggestion is implicit -- it's listed
+    assert "probe_shank" in msg
 
 
 def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
-    """``set_group_by_shank``'s group ordering must not assume numeric
-    ``electrode_group_name`` values.
+    """The electrode-group sort key orders numeric names numerically, ahead
+    of non-numeric names, which sort lexically.
 
-    A plain ``int(name)`` raises ``ValueError`` on free-form NWB group
-    names (e.g. ``"probeA"``). The sort key sorts numeric names
-    numerically (and ahead of non-numeric) and non-numeric names
-    lexically, so valid datasets do not crash while purely numeric
-    names keep their natural order. (``dj_conn`` only because importing
-    the module declares its schema.)
+    ``dj_conn`` only because importing the module declares its schema.
     """
     from spyglass.spikesorting.v2._recording.sort_groups import (
         _electrode_group_sort_key,
@@ -220,20 +215,15 @@ def test_electrode_group_sort_key_tolerates_non_numeric(dj_conn):
 
 
 def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
-    """Explicit ``sort_group_ids`` with intra-list duplicates raises up
-    front instead of failing late on a DataJoint duplicate-key error
-    when the master rows are inserted. Auto-allocated ranges
-    (``explicit_sort_group_ids=False``) are always unique, so the check
-    is gated on the explicit path.
+    """Explicit ``sort_group_ids`` with duplicates raise before any insert;
+    auto-allocated ids skip the check.
     """
     from spyglass.spikesorting.v2._recording.sort_groups_insert import (
         handle_existing,
     )
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
-    # Duplicates surface on a fresh session (no existing rows): the
-    # check runs BEFORE the ``len(existing) == 0`` early return so it
-    # fires either way.
+    # Fresh session: the check precedes the no-existing-rows early return.
     with pytest.raises(ValueError, match="duplicate"):
         handle_existing(
             SortGroupV2,
@@ -243,8 +233,7 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
             delete_existing_entries=False,
             confirm=False,
         )
-    # The auto-allocated path is exempt (range() is unique by
-    # construction); a same-shape list with no duplicate must NOT raise.
+    # The auto-allocated path is exempt.
     handle_existing(
         SortGroupV2,
         nwb_file_name="nonexistent.nwb",
@@ -258,7 +247,7 @@ def test_handle_existing_rejects_duplicate_sort_group_ids(dj_conn):
 @pytest.mark.slow
 def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
     """``set_group_by_electrode_table_column`` returns a skip summary for
-    a single-channel (unitrode) group instead of silently succeeding.
+    a single-channel (unitrode) group.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -292,11 +281,9 @@ def test_set_group_by_column_surfaces_unitrode_skip(polymer_smoke_session):
 def test_sort_group_reference_mode_enforced(polymer_smoke_session, request):
     """SortGroupV2.insert1 enforces the reference_mode / electrode invariants.
 
-    ``reference_mode`` is validated against the ``ReferenceMode`` Literal
-    at insert time (a typo raises), ``"specific"`` requires a
-    ``reference_electrode_id``, and the non-specific modes reject one. A
-    valid ``"specific"`` row stores both fields; a default (mode omitted)
-    row stores ``"none"`` with a NULL electrode.
+    A typo'd mode raises, ``"specific"`` requires a ``reference_electrode_id``,
+    and other modes reject one. Omitting the mode stores ``"none"`` with a
+    NULL electrode.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -346,12 +333,9 @@ def test_sort_group_reference_mode_enforced(polymer_smoke_session, request):
 def test_sort_group_update1_validates_merged_reference(
     polymer_smoke_session, request
 ):
-    """``SortGroupV2.update1`` permits a valid reference edit (the reference is
-    folded into recording_id, so a change mints a distinct recording) but
-    validates the MERGED (current + payload) state: an invalid mode, a
-    ``'specific'`` mode missing its electrode id, a stale id under a
-    non-specific mode, and a ``'specific'`` reference that is a group member all
-    raise; a valid edit goes through."""
+    """``SortGroupV2.update1`` validates the merged (current + payload)
+    reference: an invalid mode, ``'specific'`` without an id, a stale id under
+    a non-specific mode, and a member reference raise; a valid edit passes."""
     from spyglass.common import Electrode
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -412,29 +396,13 @@ def test_sort_group_update1_validates_merged_reference(
     assert eid is None
 
 
-# ===========================================================================
-# Edge-case coverage for SortGroupV2 reference handling and group construction.
-#
-# reference_mode validation (a ``reference_mode`` varchar validated against
-# the ReferenceMode Literal, in place of v1's integer sentinel),
-# the all-shanks-filtered guard, the omit_ref no-op under the default mode,
-# additive inserts, length-mismatch, and the empty-match guard on the
-# electrode-table-column constructor. The RecordingSelection duplicate guard
-# (test_recording_selection_raises_on_duplicate_logical_identity, len==2) and
-# _electrode_group_sort_key (test_electrode_group_sort_key_tolerates_non_numeric)
-# are covered elsewhere (test_recording.py and above in this module).
-# ===========================================================================
+# ---------- SortGroupV2 edge cases ------------------------------------------
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sort_group_rejects_invalid_reference_mode():
-    """``SortGroupV2.insert1`` rejects an unknown ``reference_mode``.
-
-    In place of v1's integer ``sort_reference_electrode_id`` sentinel,
-    ``reference_mode`` is a varchar validated against the ``ReferenceMode``
-    Literal at the insert boundary. An invalid mode (here ``"banana"``)
-    raises before any DB write -- the varchar's typo guard standing in for a
-    MySQL enum. The message names the valid modes.
+    """``SortGroupV2.insert1`` rejects an unknown ``reference_mode`` before
+    any DB write, naming the valid modes.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -450,11 +418,8 @@ def test_sort_group_rejects_invalid_reference_mode():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sort_group_reference_electrode_id_consistency():
-    """``reference_electrode_id`` is non-null iff mode=='specific'.
-
-    The split's second invariant: a 'specific' reference needs a channel to
-    subtract, and a non-specific mode must not carry a stray channel id the
-    runtime would silently ignore. Both directions raise at insert.
+    """``reference_electrode_id`` is non-null iff mode=='specific'; both
+    violations raise at insert.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -483,11 +448,8 @@ def test_sort_group_reference_electrode_id_consistency():
 def test_set_group_by_shank_all_shanks_filtered_raises(polymer_smoke_session):
     """When every shank is filtered out, ``set_group_by_shank`` raises.
 
-    The smoke fixture's 4 shanks all live in one electrode group ("0"), so
-    ``omit_ref_electrode_group=True`` with ``reference_mode='specific'`` and a
-    reference electrode in that group skips ALL shanks (the skip is keyed on
-    the electrode group, and the whole probe is one group). No sort group
-    survives -> ValueError naming "no sort groups".
+    All 4 smoke shanks share electrode group "0", so omitting the specific
+    reference's group skips them all.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -510,13 +472,8 @@ def test_set_group_by_shank_omit_ref_noop_under_default_mode(
     """``omit_ref_electrode_group=True`` is a no-op when no group resolves
     to a ``"specific"`` reference.
 
-    The omit-reference-group skip is gated on a group's *resolved* reference
-    being ``"specific"`` (a ``"none"`` / ``"global_median"`` reference names
-    no electrode to exclude). The smoke fixture's electrodes all carry
-    ``original_reference_electrode = -1``, so the default auto-inheritance
-    resolves every group to ``"none"`` and the flag drops nothing: all 4
-    shanks become sort groups and the returned skip list has no
-    reference-group entries.
+    Smoke electrodes are configured ``-1``, so every group resolves to
+    ``"none"`` and all 4 shanks are kept.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -539,12 +496,8 @@ def test_set_group_by_shank_omit_ref_noop_under_default_mode(
 
 # ---------- SortGroupV2 reference inheritance ------------------------------
 #
-# The default referencing behavior now inherits each group's configured
-# reference (Electrode.original_reference_electrode) instead of defaulting to
-# no reference. The smoke fixture ships every electrode at -1 (no reference),
-# so these tests temporarily set a real configured reference to exercise the
-# inheritance paths, restoring it afterward via the context manager below so
-# the session-scoped fixture is unchanged for other tests.
+# By default each group inherits Electrode.original_reference_electrode. Smoke
+# electrodes are all -1, so these tests set a reference temporarily.
 
 
 @contextmanager
@@ -621,8 +574,7 @@ def test_set_group_by_shank_inherits_specific_reference_from_config(
     assert len(shanks) >= 2
     cfg_shank, ref_shank = shanks[0], shanks[1]
     ref_id = sorted(by_shank[ref_shank])[0]
-    # Reference cfg_shank to ref_id (on a different shank, so it is not a
-    # member of cfg_shank's sort group and passes the membership guard).
+    # ref_id is on another shank, so it passes the membership guard.
     updates = {eid: ref_id for eid in by_shank[cfg_shank]}
 
     with _temp_original_reference(nwb_file_name, updates):
@@ -719,14 +671,10 @@ def test_set_group_by_shank_explicit_none_overrides_config(
 @pytest.mark.slow
 def test_set_group_by_shank_omit_ref_electrode_group(polymer_smoke_session):
     """``omit_ref_electrode_group`` skips the electrode group owning a group's
-    *resolved* specific reference, and a missing reference raises.
+    resolved specific reference, and a nonexistent reference raises.
 
-    The skip now keys off each group's resolved reference (not a call-wide
-    scalar). The fixture's shanks all share electrode group ``"0"``, so a
-    specific reference inside ``"0"`` skips every sort group -> "no sort
-    groups produced" (the skip runs BEFORE the in-group membership check,
-    which would otherwise raise a different error). A specific reference id
-    that is not an Electrode at all raises a clear error.
+    All shanks share electrode group ``"0"``, so a reference inside it skips
+    every group. The skip runs before the membership check.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -736,9 +684,7 @@ def test_set_group_by_shank_omit_ref_electrode_group(polymer_smoke_session):
     all_eids = sorted(eid for ids in by_shank.values() for eid in ids)
     ref_in_group = all_eids[0]
 
-    # AUTO-resolved specific: every electrode references one of its own
-    # group's electrodes. With omit, the owning group ("0") is skipped before
-    # the membership check, so no group survives.
+    # Every electrode references one in group "0"; omitting it leaves none.
     with _temp_original_reference(
         nwb_file_name, {eid: ref_in_group for eid in all_eids}
     ):
@@ -747,8 +693,7 @@ def test_set_group_by_shank_omit_ref_electrode_group(polymer_smoke_session):
                 nwb_file_name=nwb_file_name, omit_ref_electrode_group=True
             )
 
-    # A specific reference id absent from the Electrode table raises rather
-    # than silently failing to find the group to omit.
+    # A reference id absent from Electrode raises.
     with pytest.raises(ValueError, match="not in the Electrode table"):
         SortGroupV2.set_group_by_shank(
             nwb_file_name=nwb_file_name,
@@ -818,8 +763,7 @@ def test_set_group_by_electrode_table_column_auto_and_global_override(
 @pytest.mark.usefixtures("dj_conn")
 def test_set_group_reference_electrode_id_without_mode_raises():
     """``reference_electrode_id`` without ``reference_mode`` raises on both
-    grouping helpers, before any electrode fetch (a likely user error: an id
-    with the mode forgotten)."""
+    grouping helpers, before any electrode fetch."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     with pytest.raises(ValueError, match="only meaningful"):
@@ -841,13 +785,8 @@ def test_set_group_by_shank_in_group_specific_reference_raises(
     polymer_smoke_session,
 ):
     """A resolved ``"specific"`` reference that is a member of its own sort
-    group fails early at group creation (not deep in ``make``), via both
-    auto-inheritance and an explicit ``references`` mapping.
-
-    The fixture's shanks all share electrode group ``"0"``; configuring every
-    electrode to reference one of group ``"0"``'s own electrodes makes the
-    reference a member of whichever shank owns it, so the membership guard
-    must raise rather than silently sort that shank with a dropped channel.
+    group raises at group creation, via auto-inheritance and via an explicit
+    ``references`` mapping.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -865,8 +804,7 @@ def test_set_group_by_shank_in_group_specific_reference_raises(
         with pytest.raises(ValueError, match="also a sort-group channel"):
             SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-    # Same via an explicit `references` mapping carrying a specific id: the
-    # id flows through the resolver to the membership guard and raises.
+    # Same via an explicit ``references`` mapping.
     e_group = str(
         (Electrode & {"nwb_file_name": nwb_file_name}).fetch(
             "electrode_group_name"
@@ -885,8 +823,7 @@ def test_set_group_by_nonexistent_specific_reference_raises(
     polymer_smoke_session,
 ):
     """A ``"specific"`` reference id absent from the session raises at group
-    creation even without ``omit_ref_electrode_group`` -- not later at
-    ``Recording.populate``. Covers both grouping helpers."""
+    creation, without ``omit_ref_electrode_group``, on both grouping helpers."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
@@ -910,13 +847,10 @@ def test_set_group_by_nonexistent_specific_reference_raises(
 
 @pytest.mark.usefixtures("dj_conn")
 def test_reference_electrode_group_existence_and_uniqueness():
-    """``_reference_electrode_group`` validates a specific reference: it must
-    exist and belong to exactly one electrode group.
+    """``_reference_electrode_group`` requires a specific reference to exist
+    in exactly one electrode group.
 
-    Operates on a synthetic electrode recarray (the ``Electrode`` primary key
-    allows the same ``electrode_id`` under different ``electrode_group_name``
-    values, so an ambiguous owner must be rejected, not silently resolved to
-    the first match).
+    The ``Electrode`` key allows one ``electrode_id`` in several groups.
     """
     import numpy as np
 
@@ -943,12 +877,8 @@ def test_reference_electrode_group_existence_and_uniqueness():
 def test_set_group_by_shank_additive_insert_with_explicit_ids(
     polymer_smoke_session,
 ):
-    """Explicit non-overlapping ``sort_group_ids`` opt into an additive
-    insert that coexists with prior rows.
-
-    The default rerun refuses to silently extend (covered elsewhere); passing
-    explicit non-overlapping ids is the opt-in. After grouping once (ids
-    0-3), a second call with ids 10-13 leaves all eight groups present.
+    """Explicit non-overlapping ``sort_group_ids`` insert alongside prior
+    rows: ids 0-3 then 10-13 leave eight groups.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -984,10 +914,7 @@ def test_set_group_by_shank_additive_insert_with_explicit_ids(
 @pytest.mark.slow
 def test_set_group_by_shank_length_mismatch_raises(polymer_smoke_session):
     """``sort_group_ids`` whose length differs from the derived group
-    count raises.
-
-    The fixture derives 4 groups from shank metadata; passing only two ids
-    is a mismatch the helper rejects before any insert.
+    count raises before any insert.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -1004,11 +931,8 @@ def test_set_group_by_shank_length_mismatch_raises(polymer_smoke_session):
 def test_set_group_by_electrode_table_column_empty_match_raises(
     polymer_smoke_session,
 ):
-    """A ``groups`` sublist matching zero electrodes raises.
-
-    ``set_group_by_electrode_table_column`` with a value that no electrode
-    carries produces an empty group, which is a user error (typo'd id) the
-    helper rejects with a message naming the offending sort group.
+    """A ``groups`` sublist matching zero electrodes raises, naming the
+    sort group.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -1027,11 +951,8 @@ def test_set_group_by_electrode_table_column_empty_match_raises(
 def test_sortgroup_overwrite_preview_lists_cross_team_downstream(
     polymer_smoke_session,
 ):
-    """The overwrite preview enumerates downstream rows owned by EACH team.
-
-    Sort groups in one session can belong to different teams, so an overwrite
-    can cascade-delete another team's downstream rows. The preview surfaces
-    that cross-team blast radius (visibility only; it does not block).
+    """The overwrite preview lists downstream rows owned by each team whose
+    sort groups it would cascade into (it does not block).
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults

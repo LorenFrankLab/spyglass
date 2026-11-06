@@ -1,10 +1,7 @@
-"""Tests for the UnitMatch matcher backend.
+"""Tests for the UnitMatch matcher backend (the MatcherProtocol implementation).
 
-The backend is the concrete MatcherProtocol implementation. Registration and
-the degenerate single-session case are hermetic; the end-to-end match is an
-integration test that builds two bundles from the committed polymer fixture
-(pseudo-session split of the same ground-truth neurons) and checks that planted
-correspondences score above random pairs.
+The end-to-end test splits the polymer fixture into two pseudo-sessions and
+checks that planted correspondences score above random pairs.
 """
 
 from __future__ import annotations
@@ -193,11 +190,10 @@ def test_pairs_from_matrix_preserves_sparse_ids_and_session_boundaries(
 
 
 def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
-    """A dropped bundle (fewer loaded sessions than inputs) fails loudly.
+    """A dropped bundle (fewer loaded sessions than inputs) raises.
 
-    UnitMatchPy's load_good_waveforms excludes a session whose bundle fails to
-    load instead of raising; without a guard, the compact session indexes would
-    misattribute one session's units to another session's Spyglass key.
+    UnitMatchPy's load_good_waveforms silently drops a session that fails to
+    load, which would shift units onto another session's key.
     """
     from types import SimpleNamespace
 
@@ -215,8 +211,7 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
         for s in ("A", "B")
     ]
 
-    # Fake UnitMatch namespace: load_good_waveforms returns only ONE session's
-    # good_units while two inputs were provided (a silently dropped session).
+    # load_good_waveforms returns one session's good_units for two inputs.
     def _fake_load(wave_paths, label_paths, param, good_units_only=True):
         param["n_units"], param["n_sessions"] = 1, 1
         return (
@@ -224,7 +219,7 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
             np.array([0]),  # session_id
             np.array([0, 1]),  # session_switch
             np.zeros((1, 1)),  # within_session
-            [np.array([[5]])],  # good_units -- length 1, not 2
+            [np.array([[5]])],  # good_units: length 1, not 2
             param,
         )
 
@@ -245,11 +240,8 @@ def test_match_raises_if_unitmatch_drops_a_session(tmp_path, monkeypatch):
 
 
 def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
-    """Two sessions that load zero good units -> no pairs, no divide-by-zero.
-
-    The prior-probability computation divides by ``n_units ** 2``; the backend
-    must return early (it is a public MatcherProtocol impl and cannot assume the
-    table layer's non-empty-matchable precondition).
+    """Two sessions with zero good units return no pairs, without dividing
+    by ``n_units ** 2``.
     """
     from types import SimpleNamespace
 
@@ -275,7 +267,7 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
             np.array([], dtype=int),  # session_id
             np.array([0, 0, 0]),  # session_switch
             np.zeros((0, 0)),  # within_session
-            [np.empty((0, 1)), np.empty((0, 1))],  # good_units -- len 2, empty
+            [np.empty((0, 1)), np.empty((0, 1))],  # good_units: len 2, empty
             param,
         )
 
@@ -295,12 +287,9 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
 
 
 def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
-    """Sessions with different channel geometry are rejected up front.
+    """Sessions with different channel geometry raise before UnitMatch runs.
 
-    UnitMatch assumes one probe across the group (it derives geometry from the
-    first session and runs per-channel loops); cross-probe matching is out of
-    scope, so a channel-position mismatch must raise a clear error before
-    UnitMatch runs rather than failing deep in a shape mismatch.
+    UnitMatch takes geometry from the first session only.
     """
     from types import SimpleNamespace
 
@@ -339,13 +328,7 @@ def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
 
 def test_bundle_geometry_is_2d(tmp_path, monkeypatch):
     """A 3D-probe recording yields a saved ``(n_channels, 2)``
-    ``channel_positions.npy``.
-
-    Spyglass stores 3D electrode geometry (z typically 0), but the UnitMatch
-    matcher contract requires 2D channel positions; the bundle projects the
-    probe to 2D (mirroring the analyzer path) and guards the saved shape so a 3D
-    probe never reaches the matcher silently. UnitMatch is faked so the test
-    does not require the optional UnitMatchPy extra.
+    ``channel_positions.npy``; UnitMatch requires 2D positions.
     """
     import types
 
@@ -374,9 +357,8 @@ def test_bundle_geometry_is_2d(tmp_path, monkeypatch):
 
 
 def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
-    """The bundle guards the 2D contract: a non-``(n, 2)`` channel-positions
-    array is rejected up front (before the expensive split-half build) rather
-    than handed to the matcher."""
+    """A non-``(n, 2)`` channel-positions array is rejected before the
+    split-half build."""
     import types
 
     import spikeinterface.full as si
@@ -393,8 +375,7 @@ def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
     recording, sorting = si.generate_ground_truth_recording(
         durations=[2.0], num_channels=8, num_units=3, seed=0
     )
-    # Force a 3D positions array past the probe (the planar probe needs no
-    # projection, so this exercises the shape guard directly).
+    # A planar probe needs no projection, so this hits the shape guard.
     monkeypatch.setattr(
         recording, "get_channel_locations", lambda *a, **k: np.zeros((8, 3))
     )
@@ -616,9 +597,8 @@ def test_bundle_unmaps_waveforms_before_scratch_cleanup(
 ):
     """No scratch file is still mapped when the scratch directory is removed.
 
-    On NFS (the lab's ``temp_dir``) a still-mapped ``waveforms.npy`` makes
-    the scratch cleanup raise ``Directory not empty``, which fails the
-    whole UnitMatch populate.
+    On NFS a still-mapped ``waveforms.npy`` makes cleanup raise ``Directory
+    not empty``.
     """
     from spyglass import settings
     from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
@@ -865,17 +845,11 @@ def test_bundle_writes_kept_units_raw_waveforms(tmp_path):
 
 def test_bundle_control_matches_previous_construction(tmp_path, saved_bundles):
     """On a stationary session, per-unit temporal halves reproduce the
-    recording-half templates (Pearson r > 0.99 for every unit and half).
+    recording-half (``time_half``) templates (Pearson r > 0.99 for every unit
+    and half).
 
-    The recording-half (``time_half``) construction is the local copy kept by
-    the half-split experiment script; both constructions run on that script's
-    control session A (60 s, 16 channels, 20 units that fire throughout). The
-    spike cap is at least every unit's spike count, so neither construction
-    subsamples: the per-unit one averages all of a unit's interior spikes,
-    the recording-half one all of its spikes in each recording half. For a stationary unit the
-    first/second half of its spikes and the recording halves then hold nearly
-    the same spikes, so the correlation measures the construction rather than
-    random-subset noise.
+    Uses the half-split experiment's control session A. The spike cap exceeds
+    every unit's count, so neither construction subsamples.
     """
     from tests.spikesorting.v2.scripts import (
         unitmatch_half_split_experiment as experiment,
@@ -1461,7 +1435,7 @@ def _gate_test_record(
     ``condition`` defaults to ``"per_unit"`` (the gated condition); pass
     ``"time_half"`` to build the baseline side of an excess-drop
     comparison. No UnitMatchPy or DB access
-    happens here -- ``score_pairs`` is pure counting.
+    happens here; ``score_pairs`` is pure counting.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         score_pairs,
@@ -1493,11 +1467,9 @@ def test_evaluate_gates_drift_out_recall_is_exact_and_sxs_rate_is_diagnostic():
     """Drift-out recall (>=) passes exactly on the threshold, fails one
     count under it.
 
-    The S x S false-pair rate is a printed diagnostic, not an acceptance
-    gate -- UnitMatch's per-run match threshold is unstable when a session
-    has few units, so a burst of false pairs is not attributable to the
-    cross-validation-half construction under test. Its exact-fraction value
-    is still checked at its reported limit.
+    The S x S false-pair rate is a printed diagnostic, not a gate:
+    UnitMatch's per-run threshold is unstable with few units. Its value is
+    still checked at its reported limit.
 
     |S| = 25 makes both the diagonal denominator (25) and the off-diagonal
     denominator (25 * 24 = 600) exact multiples of the thresholds' reduced
@@ -1642,12 +1614,9 @@ def test_evaluate_gates_healthy_prob_drop_is_exact_at_its_boundary():
     """The healthy true-pair probability drop passes on dyadic drops at or
     below 0.04 and fails clearly above it.
 
-    Every ``q`` here is a dyadic fraction (a binary fraction like ``1/32``),
-    so every value AND every subtraction is bit-exact in IEEE 754 double
-    precision -- no case here depends on 1-ulp rounding luck the way
-    ``0.05 - 0.01`` or ``0.07 - 0.03`` would (those are not exactly
-    representable in binary and only pass/fail by which way they happen to
-    round). One paired non-S unit per case, control ``q = 0.5 = 1/2``:
+    Every ``q`` is dyadic (e.g. ``1/32``), so values and differences are
+    bit-exact in float64. One paired non-S unit per case, control
+    ``q = 0.5``:
 
     - scenario ``q = 0.46875 = 15/32`` -> drop ``0.03125 = 1/32``: PASS,
       comfortably under the threshold.
@@ -1687,27 +1656,16 @@ def test_evaluate_gates_healthy_prob_drop_is_exact_at_its_boundary():
 
 
 def test_evaluate_gates_healthy_prob_drop_uses_min_of_directed_probabilities():
-    """The probability drop's ``q_u = min(p_ab, p_ba)`` -- not ``max`` or a
-    mean -- is what decides the drop. Every other probability-drop fixture
-    in this module uses
-    ``p_ab == p_ba``, so a change from ``min`` to ``max`` or to a mean would
-    pass every one of them unnoticed; this fixture uses asymmetric directed
-    probabilities so the three choices disagree.
+    """The probability drop uses ``q_u = min(p_ab, p_ba)``, not ``max`` or a
+    mean. Asymmetric directed probabilities make the three choices disagree.
 
     Control ``(p_ab, p_ba) = (0.5, 0.75)`` -> ``q = min = 0.5``. Scenario
     ``(0.4375, 0.9375)`` -> ``q = min = 0.4375``. Every value here is dyadic
     (a binary fraction), so the drop is bit-exact:
 
-    - ``min``: drop ``0.5 - 0.4375 = 0.0625`` -- clearly above the 0.04
-      limit: FAIL.
-    - ``max`` (wrong): drop ``0.75 - 0.9375 = -0.1875`` -- a rise, passes
-      trivially.
-    - mean of the two directions (wrong): drop
-      ``0.625 - 0.6875 = -0.0625`` -- also passes trivially.
-
-    Both wrong implementations pass where the correct one fails, so this
-    case would catch a ``min`` -> ``max``/mean swap that every symmetric
-    fixture here misses.
+    - ``min``: drop ``0.5 - 0.4375 = 0.0625`` > 0.04: FAIL.
+    - ``max`` (wrong): drop ``0.75 - 0.9375 = -0.1875``: passes.
+    - mean (wrong): drop ``0.625 - 0.6875 = -0.0625``: passes.
     """
     s_units = [99]
     unit_ids = s_units + [1]
@@ -1724,9 +1682,8 @@ def test_evaluate_gates_healthy_prob_drop_uses_min_of_directed_probabilities():
 
 
 def test_evaluate_gates_healthy_prob_drop_pools_units_not_per_seed_means():
-    """The pooled mean is ONE mean over every paired unit, not a mean of
-    per-seed means -- the two differ whenever seeds contribute unequal
-    paired counts.
+    """The pooled mean is one mean over every paired unit, not a mean of
+    per-seed means.
 
     Seed 1 has a single paired non-S unit with ``q_control = 1.0``; seed 2
     has three paired non-S units all with ``q_control = 0.0``. A naive
@@ -1773,13 +1730,10 @@ def test_evaluate_gates_healthy_prob_drop_pools_units_not_per_seed_means():
 
 
 def test_paired_true_pair_probs_drops_unit_missing_on_either_side():
-    """A unit missing a probability on EITHER side is dropped the same way
-    and counted in ``n_unpaired``, not silently ignored.
+    """A unit missing a probability on either side is dropped and counted in
+    ``n_unpaired``.
 
-    Unit 1 has a probability on both sides (paired); unit 2 is missing from
-    the control side; unit 3 is missing from the scenario side. Both 2 and 3
-    must be dropped identically (symmetric treatment) and both counted in
-    ``n_unpaired`` -- regardless of which side is missing.
+    Unit 1 is paired; unit 2 lacks control, unit 3 lacks scenario.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         paired_true_pair_probs,
@@ -1812,10 +1766,9 @@ def test_evaluate_gates_healthy_prob_drop_reports_unpaired_and_capture_missing()
     n_capture_missing_runs, not just the paired count.
 
     Seed 1's non-S units are 1 (paired) and 2 (missing from the scenario
-    side -> unpaired). Seed 2's scenario run has NO recorded probabilities
-    at all despite having non-S units -- a stand-in for UnitMatch returning
-    early or the capture wrap never firing -- so it must be flagged as a
-    capture-missing run (on top of its unit also landing in n_unpaired).
+    side -> unpaired). Seed 2's scenario run has no recorded probabilities
+    despite having non-S units, so it is a capture-missing run (and its unit
+    is also unpaired).
     """
     seed1_units = [900, 1, 2]
     seed1_control = _gate_test_record(
@@ -1870,10 +1823,8 @@ def test_evaluate_gates_excess_prob_drop_pass_fail_and_not_evaluated():
     - FAIL: per_unit drop (``0.5 -> 0.375``, drop ``0.125``) is worse than
       the time_half drop (``0.5 -> 0.5``, drop ``0.0``) by more than the 0.04
       limit; excess ``0.125 - 0.0 = 0.125 > 0.04``.
-    - Not evaluated: only the ``per_unit`` records exist for the seed (no
-      ``time_half`` run), so there is nothing to compare against -- unlike a
-      silent pass on an empty comparison, ``passed`` is ``None`` and the
-      detail says a time_half run is not available.
+    - Not evaluated: no ``time_half`` run for the seed, so ``passed`` is
+      ``None`` and the detail says so.
     """
     s_units = [99]
     unit_ids = s_units + [1]
@@ -2012,16 +1963,11 @@ def test_evaluate_gates_template_identity_fails_on_one_differing_half(tmp_path):
 def test_evaluate_gates_template_identity_counts_missing_unit_as_not_identical(
     tmp_path,
 ):
-    """A non-S unit present in control but excluded from the scenario bundle
-    (or the reverse) counts as NOT identical -- it must not be skipped.
+    """A non-S unit in only one of control and scenario counts as not
+    identical rather than being skipped.
 
-    Unit 3 is present (and bit-identical) in both control and scenario, both
-    sessions. Unit 5 is present in control but entirely missing from the
-    scenario bundle (both sessions) -- as if it had fewer than two sampled
-    spikes in that run only. Unit 5 contributes 4 non-identical comparisons
-    (2 sessions x 2 halves) and 0 identical ones; unit 3 contributes 4
-    identical comparisons: total 4/8, not 4/4 (which is what skipping unit 5
-    would have reported).
+    Unit 3 is identical in both; unit 5 is missing from the scenario bundle.
+    Expected 4/8 identical halves, not 4/4.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         evaluate_gates,
@@ -2075,10 +2021,9 @@ def test_evaluate_gates_template_identity_counts_missing_unit_as_not_identical(
 def test_true_pair_probability_lookup_sparse_reordered_ids():
     """The true-pair lookup resolves each unit by id, not by position.
 
-    Session 0 (A) keeps units ``[7, 3]`` (not sorted); session 1 (B) keeps
-    ``[12, 7, 3]`` -- unit 12 has no partner in A, and the shared units 7/3
-    sit at different ranks in each session. Every cell of the probability
-    matrix is a distinct value, so a wrong index would read the wrong cell.
+    Session A keeps units ``[7, 3]``, session B ``[12, 7, 3]``; shared units
+    sit at different ranks. Every matrix cell is distinct, so a wrong index
+    reads a wrong value.
     """
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
         true_pair_directed_probs,

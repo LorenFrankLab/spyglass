@@ -1,15 +1,8 @@
 """DB-free validation for shared (cross-recording) artifact groups.
 
-A ``SharedArtifactGroup`` bundles populated ``Recording`` rows whose
-artifact-detection pass runs ONCE over the union of channels. SpikeInterface's
-``aggregate_channels`` stacks the members by frame index, so they must share a
-time axis. ``SharedArtifactGroup.insert_group`` gathers the member facts (via
-``Recording`` / ``RecordingSelection`` fetches) and delegates the cheap,
-pre-load consistency checks here so their error cases are unit-testable without
-a database.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection; its only import is the standard library.
+A ``SharedArtifactGroup`` runs one artifact pass over the union of its
+members' channels. ``aggregate_channels`` stacks members by frame index, so
+they must share a time axis. No DB import.
 """
 
 from __future__ import annotations
@@ -18,11 +11,7 @@ from __future__ import annotations
 def validate_shared_artifact_group_members(member_meta) -> str:
     """Validate session + sampling-frequency consistency; return the nwb_file_name.
 
-    These are the cheap checks ``insert_group`` runs BEFORE loading any
-    member's (5-50 GB) preprocessed recording, so a misconfigured group is
-    rejected without the load cost. The exact-timestamp / n_samples / dtype
-    checks stay in ``insert_group`` because they are interleaved with the
-    per-member recording load (their error priority depends on load order).
+    Runs before ``insert_group`` loads any (multi-GB) member recording.
 
     Parameters
     ----------
@@ -68,14 +57,9 @@ def assert_shared_group_recordings_aggregatable(
 ) -> None:
     """Re-assert at compute that shared-group members can be channel-aggregated.
 
-    ``SharedGroupArtifactDetection.make_compute`` unions the member recordings
-    with ``si.aggregate_channels``, which stacks by frame index and so requires
-    every member to share one session, sampling frequency, sample count, dtype, and
-    exact timestamp vector. ``SharedArtifactGroup.insert_group`` enforces this at
-    insert, but a direct ``SharedGroupArtifactSelection`` insert can bypass that
-    check and leave make_compute aggregating an incompatible member set into a
-    silently-wrong union. This re-runs the invariants over the already-loaded
-    recordings and raises ``SchemaBypassError`` so a bypass fails loudly.
+    A direct ``SharedGroupArtifactSelection`` insert can bypass
+    ``SharedArtifactGroup.insert_group``'s checks and yield a silently wrong
+    ``si.aggregate_channels`` union.
 
     Parameters
     ----------
@@ -128,9 +112,7 @@ def assert_shared_group_recordings_aggregatable(
         )
 
     for recording, rid in zip(recordings[1:], recording_ids[1:]):
-        # Effectively exact: aggregate_channels stacks by frame index, so even
-        # a sub-Hz fs drift misaligns the time axis (np.isclose's default
-        # rtol=1e-5 would accept 30000.0 vs 30000.3).
+        # Exact: even sub-Hz fs drift misaligns frame-index stacking.
         if not np.isclose(
             float(recording.get_sampling_frequency()),
             reference_fs,

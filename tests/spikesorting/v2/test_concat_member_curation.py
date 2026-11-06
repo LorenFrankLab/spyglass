@@ -396,9 +396,8 @@ def test_session_consumers_read_member_row(concat_member_curation):
         annotated = (UnitAnnotation & annotation_unit_key).fetch_unit_spikes()
         np.testing.assert_array_equal(annotated[0], expected_spikes)
 
-        # The generic merge FK cannot encode the group's Session. The explicit
-        # member-session guard rejects a valid member output placed in the wrong
-        # session rather than silently mixing incompatible wall-clock axes.
+        # The merge FK cannot encode the group's Session, so an explicit guard
+        # rejects a member output from another session.
         with pytest.raises(ValueError, match="different session"):
             SortedSpikesGroup().create_group(
                 group_name="concat_member_wrong_session",
@@ -421,14 +420,7 @@ def test_session_consumers_read_member_row(concat_member_curation):
 def test_waveform_features_group_rejects_other_sessions_member(
     concat_member_curation,
 ):
-    """A clusterless group keyed by session A must refuse member B's output.
-
-    ``UnitWaveformFeaturesGroup`` is keyed by ``Session`` while its
-    ``UnitFeatures`` part only foreign-keys a merge id, the same structural gap
-    ``SortedSpikesGroup`` closes with ``assert_merge_ids_match_session``. The
-    duplicate-curation / unapplied-merge guard alone lets a valid member output
-    into the wrong session's decode with that member's wall-clock timestamps.
-    """
+    """A clusterless group keyed by session A must refuse member B's output."""
     from spyglass.decoding.v1.clusterless import UnitWaveformFeaturesGroup
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
@@ -518,9 +510,8 @@ def test_waveform_features_use_member_recording(concat_member_curation):
         np.testing.assert_array_equal(spike_times[0], direct[0])
         assert features[0].shape[0] == len(direct[0])
 
-        # estimate_peak_time=False makes every mark the source voltage at its
-        # planted spike frame. Resolve that source independently of merge dispatch
-        # so dispatching waveforms to another member cannot produce a false pass.
+        # estimate_peak_time=False makes each mark the voltage at its planted
+        # frame; resolve that independently of merge dispatch.
         snapshot = (
             ConcatenatedRecordingSelection.MemberSnapshot
             & concat_member_curation["concat_key"]
@@ -622,9 +613,7 @@ def test_changed_second_fetch_leaves_no_staged_member_file(
     """A member populate refused by DataJoint's fetch check leaves no file.
 
     The member Units NWB is staged in ``make_compute``, outside the insert
-    transaction. When the in-transaction ``make_fetch`` no longer matches
-    (a parent changed while computing), DataJoint refuses the insert before
-    ``make_insert`` runs; the staged file must not outlive that refusal.
+    transaction, and must not outlive the refused insert.
     """
     from datajoint.errors import DataJointError
 
@@ -721,10 +710,8 @@ def test_delete_cascades_member_rows_and_reclaims_files(
 
 @pytest.mark.slow
 def test_member_analysis_files_are_not_orphans(concat_member_curation):
-    """The member table shares the secondary ``nwb_file_name`` with
-    ``AnalysisNwbfile``; the registry's orphan query, which
-    ``AnalysisNwbfile().cleanup()`` relies on, must run and keep every file
-    a member row references."""
+    """Despite sharing the secondary ``nwb_file_name`` with ``AnalysisNwbfile``,
+    the orphan query behind ``cleanup()`` runs and keeps member files."""
     from spyglass.common import AnalysisNwbfile
 
     member_files = [

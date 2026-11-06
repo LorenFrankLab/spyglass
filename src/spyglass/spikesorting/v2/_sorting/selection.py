@@ -1,14 +1,6 @@
 """Insert path behind ``SortingSelection.insert_selection``.
 
-:func:`insert_selection` validates a sort request, returns an existing
-selection's key when one matches (:func:`find_existing_pk`, reached through the
-table class), checks the request's inputs exist (and, for a motion-corrected
-source, :func:`validate_motion_correction_source`), then inserts the master and
-its source parts in one transaction while holding the artifact detection's
-advisory lock.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -22,14 +14,11 @@ from spyglass.spikesorting.v2._recording.source import (
 def insert_selection(table_cls, key: dict) -> dict:
     """Insert master + exactly one source part; return PK-only dict.
 
-    The body of ``SortingSelection.insert_selection`` (see its docstring for
-    the request fields and errors). ``table_cls`` is the ``SortingSelection``
-    class; ``_find_existing_pk`` is called on it.
+    The body of ``SortingSelection.insert_selection`` (see its docstring).
+    ``table_cls`` is ``SortingSelection``.
 
-    Duplicate-key recovery has no savepoint: it relies on the deterministic
-    primary key colliding on the master insert, the transaction's first
-    statement, before any part row is written. Keep the master insert first,
-    or the recovery would leave part rows inside a caller's transaction.
+    Duplicate-key recovery has no savepoint, so the master insert must stay
+    the transaction's first statement.
     """
     from spyglass.spikesorting.v2._core.selection_plan import (
         build_sorting_selection_plan,
@@ -41,14 +30,8 @@ def insert_selection(table_cls, key: dict) -> dict:
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    # Pure half: validate inputs, normalize the artifact id, derive the
-    # deterministic sorting_id, and shape the master + source part rows.
     plan = build_sorting_selection_plan(key)
 
-    # Dispatch on the input source: a recording-backed sort inserts a
-    # RecordingSource part; a concat-backed sort inserts a
-    # ConcatenatedRecordingSource part. find-existing keys on the same
-    # source part so the two source families never alias.
     if plan.source_kind == "concat":
         source_part = table_cls.ConcatenatedRecordingSource
         source_row = plan.concat_source_row
@@ -70,8 +53,7 @@ def insert_selection(table_cls, key: dict) -> dict:
     if existing is not None:
         return existing
 
-    # Translate the would-be DataJoint FK IntegrityError into a
-    # clear "missing default row" message before the inserts attempt.
+    # Clearer than the FK IntegrityError.
     from spyglass.spikesorting.v2._core.lookup_validation import (
         _ensure_lookup_row_exists,
     )
@@ -82,9 +64,6 @@ def insert_selection(table_cls, key: dict) -> dict:
         helper_name="SortingSelection.insert_selection",
         insert_default_path="SorterParameters.insert_default()",
     )
-    # Artifact-detection passes apply only to a single-recording source;
-    # the plan already rejects a concat source that supplies an artifact,
-    # so this validation runs for the recording path only.
     if plan.source_kind == "recording":
         from spyglass.spikesorting.v2.artifact import (
             assert_artifact_detection_covers_recording,
@@ -96,12 +75,7 @@ def insert_selection(table_cls, key: dict) -> dict:
             caller="SortingSelection.insert_selection",
         )
 
-    # Pre-check the recording source exists so the most common mistake --
-    # selecting a sort before the recording is populated -- gives an
-    # actionable "populate first" message. The master does not FK the
-    # recording (the FK lives on the source part), so a missing recording
-    # would otherwise surface only as a source-part FK violation classified
-    # as a schema-bypass, which mis-frames a routine populate-first error.
+    # Otherwise a missing source surfaces as a misleading part-FK bypass error.
     if plan.source_kind == "recording":
         if not (Recording & plan.source_restriction):
             raise ValueError(
@@ -121,19 +95,9 @@ def insert_selection(table_cls, key: dict) -> dict:
     if plan.motion_corrected_recording_id is not None:
         validate_motion_correction_source(plan)
 
-    # The shared insert holds the artifact detection's advisory lock -- the
-    # same one ``_ArtifactDetectionMixin.delete`` takes -- across the
-    # transaction that links it, so a concurrent delete of that detection
-    # blocks until we commit, then sees us as a referrer and refuses. It
-    # refuses an artifact-bound sort inside a CALLER-owned transaction: the
-    # lock is released when it returns, before that transaction commits, and
-    # a ``force_masters`` detection delete could then cascade through the
-    # fresh ArtifactDetectionSource and consume the sort (see
-    # test_insert_selection_rejects_artifact_link_in_ambient_transaction and
-    # test_artifact_source_fk_rejects_dangling_detection). An artifact-FREE
-    # sort takes no lock and touches no merge.
+    # Holds the artifact detection's advisory lock across the transaction.
     def insert_rows(art_merge_id) -> None:
-        # allow_direct_insert: this helper IS the validation boundary.
+        # This helper is the validation boundary.
         table_cls.insert1(plan.master_row, allow_direct_insert=True)
         source_part.insert1(source_row)
         if art_merge_id is not None:
@@ -184,33 +148,10 @@ def find_existing_pk(
 ) -> dict | None:
     """Return the canonical master PK for this sort selection, or None.
 
-    ``source_part`` is the source part table for the requested input
-    (``RecordingSource`` for a recording source,
-    ``ConcatenatedRecordingSource`` for a concat source); the find-existing
-    join keys on that part so a recording-backed and a concat-backed sort
-    never alias even if their source-id strings collide.
-
-    Matches a master with the same sorter + source AND the same
-    artifact-detection-source state
-    (present-with-this-``artifact_detection_id`` vs absent -- a concat
-    source has no additional sorting-stage artifact pass), so an artifact-detection-backed
-    and an artifact-detection-free selection never alias. The
-    motion-correction state (present-with-this-
-    ``motion_corrected_recording_id`` vs absent) is matched the same way,
-    so a corrected and an uncorrected sort of one source never alias.
-    Splits the matches by primary key:
-
-    * the master at ``deterministic_id`` is the canonical, content-
-      addressed selection -> return ``{"sorting_id": ...}``;
-    * ANY master with a different ``sorting_id`` is non-deterministic
-      (a raw ``insert`` bypass) and violates the content-addressed-identity
-      invariant -> raise ``DuplicateSelectionError`` so it is reset rather
-      than silently returned.
-
-    Used by ``insert_selection`` for both the pre-insert lookup and
-    the post-duplicate-key refetch.
-
-    ``table_cls`` is the ``SortingSelection`` class.
+    Matches the sorter, the source through ``source_part``, the artifact
+    detection, and the motion correction, so none of those variants alias.
+    A match with a non-deterministic ``sorting_id`` raises
+    ``DuplicateSelectionError``. ``table_cls`` is ``SortingSelection``.
     """
     from spyglass.spikesorting.v2._core.selection_identity import (
         existing_selection_pk,

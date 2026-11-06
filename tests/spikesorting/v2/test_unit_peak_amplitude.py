@@ -1,23 +1,9 @@
 """``Sorting.Unit.peak_amplitude_uv`` is the template extremum on the
 attributed electrode.
 
-Guards two coupled failure modes of sort-time unit attribution:
-
-* Value: ``get_template_extremum_amplitude`` defaults to ``mode="at_index"``
-  (the value at the alignment sample), which under-reports the true peak.
-* Channel: ``at_index`` re-picks its own best channel, which could differ from
-  the electrode FK (``get_template_extremum_channel``, ``mode="extremum"``).
-
-v2 passes ``mode="extremum"`` (and the configured ``peak_sign``) to the
-amplitude call, so the stored amplitude is the template PEAK on the SAME
-channel as the attributed electrode. This test recomputes the extremum
-directly from the analyzer's template array (an independent code path, not
-``template_tools``) and asserts equality + channel consistency.
-
-The MountainSort5 integration fixture is trough-aligned, so it checks the
-persisted invariant. The synthetic row-producer regression deliberately
-places the strongest peak after alignment on a different electrode, with
-distinct gains and positive/negative polarity, to distinguish the modes.
+SI's default ``mode="at_index"`` reads the alignment sample, which
+under-reports the peak and may pick another channel. Expected values are
+recomputed from the template array, not ``template_tools``.
 """
 
 from __future__ import annotations

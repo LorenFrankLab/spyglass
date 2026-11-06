@@ -1,13 +1,9 @@
 """Analyzer-driven quality-metric curation for spike sorting v2.
 
-Replaces v1's ``MetricCuration`` + ``BurstPair`` with a single
-``CurationEvaluation`` computed table that walks a committed ``CurationV2``
-row's ``SortingAnalyzer`` extensions to compute quality metrics, suggest
-merges, and propose auto-curation labels in the curation's OWN unit namespace
-(a merged unit is scored over its merged spike train, never inherited from the
-highest-amplitude contributor). The proposed labels/merges are written to NWB;
-turning them into a committed child ``CurationV2`` row is an explicit user
-action (``CurationEvaluation.accept_evaluation_outputs`` /
+``CurationEvaluation`` computes quality metrics, merge suggestions and
+proposed labels in a committed ``CurationV2`` row's own unit namespace (a
+merged unit is scored over its merged spike train). Committing them to a child
+``CurationV2`` is an explicit user action (``accept_evaluation_outputs`` /
 ``use_evaluation_labels``).
 
 Tables
@@ -92,13 +88,14 @@ schema = dj.schema("spikesorting_v2_metric_curation")
 def _assert_is_metric_recipe(waveform_params_name: str) -> None:
     """Raise unless ``waveform_params_name`` is a whitened metric recipe.
 
-    The metric analyzer carries the PC/NN cluster-separation metrics, which must
-    compute in the WHITENED space. Asserted both at ``insert_selection`` (catch
-    a bad explicit override early) and again at the ``make_fetch`` consume
-    boundary (a row inserted via ``allow_direct_insert`` bypasses the selection
-    guard; re-validating here keeps a display/unwhitened recipe from silently
-    building an unwhitened metric analyzer, mirroring the consume-time re-check
-    in ``run_clusterless_thresholder``).
+    PC/NN cluster-separation metrics must compute in whitened space.
+    Checked at ``insert_selection`` and again in ``make_fetch``, since
+    ``allow_direct_insert`` bypasses the selection guard.
+
+    Raises
+    ------
+    ValueError
+        If the recipe is not ``purpose='metric'`` with ``whiten=True``.
     """
     from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
 
@@ -119,19 +116,14 @@ class EvaluationRecordingInputs(NamedTuple):
     nwb_file_name: str
     source_kind: str
     recording_id: str | None
-    # The lineage concatenation for a concat-backed sort (``None`` otherwise),
-    # read from the sort's lineage, never from the traces row: a corrected
-    # sort's traces row is the ``MotionCorrectedRecording``.
+    # From the sort's lineage, not the (possibly motion-corrected) traces row.
     concat_recording_id: str | None
     artifact_detection_id: str | None
     artifact_valid_times: object  # np.ndarray | None (DeepHashed, not ==)
-    # The sort's effective traces: the artifact every recording load reads,
-    # and its absolute path (the file rebuilt in make_fetch if it was missing).
+    # The sort's effective traces; make_fetch rebuilds a missing file.
     traces: EffectiveTraces
     traces_abs_path: str
-    # The sort's persisted statistics spans (``Sorting.get_statistics_spans``)
-    # as a tuple of ``(start, end)`` int frame pairs; every analyzer built or
-    # rebuilt here estimates noise and whitening from them.
+    # (start, end) frames; analyzers estimate noise and whitening from them.
     statistics_spans: tuple[tuple[int, int], ...]
 
 
@@ -140,8 +132,6 @@ class EvaluationSortingInputs(NamedTuple):
 
     sorting_id: str
     curation_id: int
-    # The raw sort's and the curation's units NWBs, resolved against the
-    # sort's lineage source row (``SortingSelection.resolve_stored_units``).
     raw_units: StoredUnits
     raw_n_units: int
     curated_units: StoredUnits
@@ -160,9 +150,8 @@ class EvaluationAnalyzerInputs(NamedTuple):
     metric_analyzer_folder: str
     sorter_row: dict
     analyzer_job_kwargs: dict
-    # A merged curation's display analyzer cache slot (folder + manifest
-    # identity), published by the evaluation and read by its review page;
-    # ``None`` when the curation uses the sort's cached analyzers.
+    # Merged curation's display analyzer cache slot; None when the sort's
+    # cached analyzers are used.
     merged_display_cache: dict | None = None
 
 
@@ -179,24 +168,16 @@ class EvaluationMetricInputs(NamedTuple):
     auto_merge_kwargs: dict
     rule_rows: list[dict]
     metric_job_kwargs: dict
-    # The sort's polarity (``resolve_peak_sign``) for polarity metrics and
-    # amplitude extensions.
     peak_sign: str
-    # The display analyzer's noise seed, so span noise estimates draw the
-    # same samples as its ``noise_levels``.
+    # Matches the display analyzer's noise_levels samples.
     noise_seed: int
     observed_presence_bin_duration_s: float = 60.0
-    # Threads for the nn metrics' exact neighbor searches; ``None`` uses
-    # ``resolve_search_threads()`` (see ``_core.job_config``).
+    # nn metrics' neighbor-search threads; None uses resolve_search_threads().
     search_threads: int | None = None
 
 
 class CurationEvaluationFetched(NamedTuple):
-    """Resolved inputs grouped by responsibility for DataJoint dispatch.
-
-    The outer tuple is unpacked into make_compute; inner records are read by
-    name and remain part of DataJoint's fetch-consistency hash.
-    """
+    """Resolved inputs, unpacked into ``make_compute``."""
 
     recording_inputs: EvaluationRecordingInputs
     sorting_inputs: EvaluationSortingInputs
@@ -212,9 +193,7 @@ class CurationEvaluationComputed(NamedTuple):
     merge_suggestions_object_id: str
     proposed_labels_object_id: str
     nwb_file_name: str
-    # Producer provenance (secondary, never identity): SI version at eval time
-    # and a {role: content_hash} manifest of the canonical analyzers consumed on
-    # the fast path (``None`` for the merged-curation temp-analyzer path).
+    # Provenance only. Analyzer hashes are None on the merged-curation path.
     spikeinterface_version: str
     source_analyzer_hashes: dict | None
 
@@ -227,11 +206,9 @@ class CurationEvaluationComputed(NamedTuple):
 class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Which quality metrics to compute and their per-metric kwargs.
 
-    ``metric_names`` is validated against the installed SpikeInterface's
-    exported metric list; ``metric_kwargs`` is passed straight through as
-    ``compute_quality_metrics(..., metric_params=metric_kwargs)``.
-    ``skip_pc_metrics`` defaults True (PCA metrics off); a row feeding an
-    ``nn_advanced`` rule must set it False.
+    ``metric_names`` is validated against SpikeInterface's metric list;
+    ``metric_kwargs`` is passed as ``compute_quality_metrics(metric_params=)``.
+    A row feeding an ``nn_advanced`` rule must set ``skip_pc_metrics=False``.
     """
 
     definition = """
@@ -268,11 +245,11 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def insert(self, rows, *, allow_duplicate_params=False, **kwargs):
         """Validate every row's params, reject duplicate content, then insert.
 
-        Like the sibling parameter Lookups, a second NAME for content identical
-        to an existing row raises ``DuplicateParameterContentError`` so
-        provenance never silently forks. ``allow_duplicate_params=True`` opts
-        out (the shipped franklab/neuropixels defaults use it -- see
-        ``insert_default``).
+        Raises
+        ------
+        DuplicateParameterContentError
+            If a row duplicates an existing row's content under a new name,
+            unless ``allow_duplicate_params=True``.
         """
         if isinstance(rows, dict):
             rows = [rows]
@@ -288,17 +265,12 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     def insert_default(cls):
         """Insert the default quality-metric parameter rows (idempotent).
 
-        Raises ``DuplicateParameterContentError`` naming the row if a stored
-        row already claims one of the shipped names (``franklab_default``,
-        ``neuropixels_default``, ``minimal``) but holds different scientific
-        content -- e.g. a hand-edited row -- so a caller never silently runs
-        something other than the shipped recipe under a name it expects to be
-        the default.
+        Raises
+        ------
+        DuplicateParameterContentError
+            If a stored row with a shipped name holds different content.
         """
-        # franklab_default and neuropixels_default deliberately ship identical
-        # content under two names (kept separate so a probe-specific divergence
-        # can be expressed later), so the shipped defaults opt out of the
-        # duplicate-content guard.
+        # franklab_default and neuropixels_default intentionally share content.
         default_rows = [
             prepare_quality_metric_row(row) for row in cls._default_rows()
         ]
@@ -316,26 +288,23 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Auto-merge preset + ordered threshold rules that label units.
 
-    Label rules are part rows (not a blob) so rule order is explicit and a
-    metric/label is queryable. Insert through ``insert_rules(row, rule_rows)``
-    so the master row and its rule rows are validated together; direct
-    ``insert1`` is unsupported.
+    Insert only through ``insert_rules(row, rule_rows)``, which validates
+    the master and its ordered ``Rule`` rows together.
 
-    Each rule persists a Spyglass ``missing_policy`` for units SpikeInterface
-    cannot assess for the rule's metric (e.g. fewer spikes than
-    ``nn_advanced``'s ``min_spikes``; ``expected_missing_units`` in
-    :mod:`._curation.metrics` lists every registered column and condition):
-    ``error`` raises, ``fail`` applies the rule label, and ``pass`` leaves the
-    unit unlabelled by that rule. Any other non-finite value raises regardless
-    of the policy: a NaN for a unit that meets the metric's conditions, and
-    any NaN in a column with no registered conditions (template metrics,
-    custom metrics, ``observed_*`` columns). A SpikeInterface error in a
-    metric a rule references aborts the evaluation; one in an unreferenced
-    metric is only logged. The shipped rule sets below use ``pass`` because
-    their metrics have validity floors; ``pass`` and ``fail`` both warn if a
-    metric is missing for EVERY unit, since the rule then made no real
-    comparison. This is distinct from SpikeInterface's ``nan_policy`` (its
-    ``fail`` mode labels and never raises).
+    Each rule's ``missing_policy`` covers units SpikeInterface cannot assess
+    for that metric (e.g. fewer spikes than ``nn_advanced``'s ``min_spikes``;
+    see ``expected_missing_units`` in :mod:`._curation.metrics`):
+
+    - ``error``: raise.
+    - ``fail``: apply the rule label.
+    - ``pass``: leave the unit unlabelled by that rule.
+
+    Any other NaN raises regardless of policy, including any NaN in a column
+    with no registered conditions (template, custom, ``observed_*``).
+    ``pass`` and ``fail`` warn when a metric is missing for every unit. A
+    SpikeInterface error in a referenced metric aborts the evaluation; one in
+    an unreferenced metric is logged. This is distinct from SpikeInterface's
+    ``nan_policy``.
     """
 
     definition = """
@@ -393,10 +362,17 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     ) -> dict:
         """Validate and insert a rules master row plus its ordered rule rows.
 
-        Validates the complete ``{master, rules}`` payload, then inserts the
-        master and ``Rule`` rows in one transaction. Returns a PK-only dict.
-        Idempotent when the master name already exists with the same payload;
-        raises if the existing name maps to different rules.
+        Inserts both in one transaction. Idempotent for an identical payload.
+
+        Returns
+        -------
+        dict
+            ``{"auto_curation_rules_name": ...}``.
+
+        Raises
+        ------
+        ValueError
+            If the name already exists with different rules.
         """
         name = row["auto_curation_rules_name"]
         master, rule_inserts = prepare_auto_curation_rules(row, rule_rows)
@@ -420,9 +396,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
         inst = cls()
         with inst.connection.transaction:
-            # Bypass the raising insert overrides on both the master and the
-            # Rule part by calling the next insert in the MRO (SpyglassMixin /
-            # dj.Table). insert_rules is the only validated write path.
+            # Skip the raising insert overrides via the next insert in the MRO.
             super(AutoCurationRules, inst).insert([master])
             if rule_inserts:
                 rule_inst = cls.Rule()
@@ -480,12 +454,7 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
 
 class _WaveformsAccessor:
-    """Narrow ``WaveformExtractor``-shaped view over a SortingAnalyzer.
-
-    Exposes the two accessors v1 notebook code used: SI's
-    ``get_waveforms_one_unit`` and v1's ``get_waveforms``, both reading the
-    analyzer's ``waveforms`` extension.
-    """
+    """``WaveformExtractor``-shaped view over a SortingAnalyzer's waveforms."""
 
     def __init__(self, analyzer):
         self._analyzer = analyzer
@@ -508,16 +477,9 @@ class CurationEvaluationSelection(
 ):
     """A committed ``CurationV2`` row paired with metric / auto-rule params.
 
-    ``CurationEvaluation`` scores the curation in ITS OWN unit namespace, so a
-    committed applied-merge curation is a valid target (a merged unit is scored
-    over its merged spike train, not the raw sort). What it rejects is a PREVIEW
-    curation (``apply_merge=False`` with an unapplied proposed merge):
-    evaluating that would score the unmerged preview units rather than the final
-    merged set.
-
-    Like the other deterministic-id selection masters, a raw ``insert`` /
-    ``insert1`` is blocked; use ``insert_selection`` (which passes
-    ``allow_direct_insert=True`` for its already-validated insert).
+    A preview curation (``apply_merge=False`` with an unapplied proposed
+    merge) is rejected, since its units are not the final merged set. Insert
+    through ``insert_selection``.
     """
 
     definition = """
@@ -534,21 +496,17 @@ class CurationEvaluationSelection(
     def insert_selection(cls, key: dict) -> dict:
         """Insert or find a curation-evaluation selection; return PK-only dict.
 
-        The ``curation_evaluation_id`` PK is content-addressed (a ``uuid5`` of
-        the logical identity ``(sorting_id, curation_id, metric_params_name,
-        auto_curation_rules_name, metric_waveform_params_name)``) under the
-        ``"curation_evaluation"`` deterministic-id namespace, so the same
-        logical selection always maps to one id.
+        ``curation_evaluation_id`` is a deterministic ``uuid5`` of the
+        selection fields. ``metric_waveform_params_name`` (the whitened recipe
+        for PC/NN metrics) defaults to the sort's region metric row.
 
-        ``metric_waveform_params_name`` (the whitened analyzer recipe the PC/NN
-        metrics compute on) defaults to the sort's region metric row, resolved
-        source-aware from the sort source's preprocessing recipe (recording or
-        concat). Pass it explicitly to override.
-
-        Raises ``ValueError`` when the parent curation is a PREVIEW (unapplied
-        proposed merges) -- evaluate a committed curation instead. Raises
-        ``DuplicateSelectionError`` if an existing row for this identity carries
-        a non-deterministic id.
+        Raises
+        ------
+        ValueError
+            If the parent curation is a preview (unapplied proposed merges) or
+            the metric recipe is not whitened.
+        DuplicateSelectionError
+            If an existing row for this identity has a non-deterministic id.
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             assert_supplied_id_matches,
@@ -557,10 +515,7 @@ class CurationEvaluationSelection(
 
         metric_waveform_params_name = key.get("metric_waveform_params_name")
         if metric_waveform_params_name is None:
-            # Default = the sort's region metric (whitened) recipe, resolved
-            # source-aware from the source preprocessing recipe (recording or
-            # concat). ``[1]`` is the metric element of the (display, metric)
-            # pair.
+            # [1] is the metric element of the (display, metric) pair.
             preproc = SortingSelection.resolve_source_preprocessing_params_name(
                 {"sorting_id": key["sorting_id"]}
             )
@@ -568,20 +523,14 @@ class CurationEvaluationSelection(
                 preproc
             )[1]
 
-        # Reject a display/unwhitened recipe before folding it into identity;
-        # the shipped default resolves a metric row, so this only fires on a bad
-        # explicit value (re-checked in make_fetch for an allow_direct_insert
-        # bypass).
         _assert_is_metric_recipe(metric_waveform_params_name)
 
         parent_key = {
             "sorting_id": key["sorting_id"],
             "curation_id": key["curation_id"],
         }
-        # Reject a preview/draft curation BEFORE the find-existing early-return,
-        # so an allow_direct_insert selection over a preview fails loudly
-        # here rather than being handed back as a "valid" row (also re-asserted
-        # in make_fetch so the preview compute path stays unreachable).
+        # Before the find-existing return, so a bypassed preview row is not
+        # handed back.
         CurationV2.assert_committed_curation(
             parent_key, context="CurationEvaluation"
         )
@@ -632,12 +581,12 @@ class CurationEvaluationSelection(
         metric_params_name,
         auto_curation_rules_name,
     ) -> dict:
-        """Insert a curation-evaluation selection for a curation (v1 analog).
+        """Call :meth:`insert_selection` from positional args (v1 analog).
 
-        Assemble the content-addressed selection key from a curation
-        (``sorting_id`` + ``curation_id``) and the named quality-metric /
-        auto-rule rows, then delegate to :meth:`insert_selection`. Returns the
-        PK-only dict.
+        Returns
+        -------
+        dict
+            PK-only dict.
         """
         return cls.insert_selection(
             {
@@ -673,15 +622,8 @@ class CurationEvaluationSelection(
     def pc_requesting(cls):
         """Selections whose QualityMetricParameters request PC/NN metrics.
 
-        Joined to ``QualityMetricParameters`` and restricted to
-        ``skip_pc_metrics=0`` -- the set whose evaluation builds a whitened
-        metric analyzer (CurationEvaluation's fast path loads/builds the
-        canonical ``analyzer_path(sorting_id, metric_waveform_params_name)``
-        folder for PC/NN metrics). The single source of truth for which metric
-        recipes are "in use", so the recompute key_source and the orphan-folder
-        audit cannot drift apart. Carries ``sorting_id`` (a secondary CurationV2
-        FK attr) and ``metric_waveform_params_name`` for the caller to project /
-        fetch.
+        These build a whitened metric analyzer. Single source of truth for
+        the recompute key_source and the orphan-folder audit.
         """
         return cls * QualityMetricParameters & "skip_pc_metrics = 0"
 
@@ -690,21 +632,15 @@ class CurationEvaluationSelection(
 class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Quality metrics / merge suggestions / labels over a committed curation.
 
-    The post-merge / final-metric path: scores an existing committed
-    ``CurationV2`` row in that curation's OWN unit namespace -- a merged unit
-    gets metrics recomputed over its merged spike trains/templates, never
-    inherited from the highest-amplitude contributor. Outputs (metrics, proposed
-    labels, merge suggestions) are written to three NWB scratch tables and are
-    PROPOSALS; the acceptance helpers (``accept_evaluation_outputs`` /
-    ``use_evaluation_labels`` / ``overlay_evaluation_labels`` /
-    ``preview_merges``) commit them into a child ``CurationV2`` row.
+    Scores the curation's own units (merged units over their merged spike
+    trains). Outputs are proposals in three NWB tables; the acceptance helpers
+    (``accept_evaluation_outputs``, ``use_evaluation_labels``,
+    ``overlay_evaluation_labels``, ``preview_merges``) commit them to a child
+    ``CurationV2`` row.
 
-    Routing: a committed root / label-only curation (unit set unchanged from the
-    raw sort) reuses the cached raw-sort analyzers (the fast path); a committed
-    applied-merge curation never touches the sort's analyzer cache: its display
-    analyzer is reused from (or published to) the curation's merged-analyzer
-    cache when ``make_fetch`` resolves one -- the cache its review page reads --
-    and metrics run on temporary working copies that are cleaned immediately.
+    - Root or label-only curation: reuses the sort's cached analyzers.
+    - Applied-merge curation: uses the curation's merged display-analyzer
+      cache and temporary metric analyzers.
     """
 
     definition = """
@@ -717,36 +653,15 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)  # spikeinterface.__version__ at eval time
     source_analyzer_hashes=null: blob    # role -> content_hash of each canonical analyzer consumed (fast path); NULL for merged-curation temp analyzers
     """
-    # ``source_analyzer_hashes`` records the content the metrics were computed
-    # over ONLY on the fast path, where the canonical analyzers are regeneratable
-    # scratch (not pinned in the schema) -- so ``detect_stale_source`` can re-hash
-    # them and flag drift. It is a {role: hash} manifest covering EVERY canonical
-    # analyzer actually consumed: ``"display"`` always, plus ``"metric"`` when the
-    # evaluation requests PC/NN metrics (which build + read the whitened metric
-    # analyzer). On the merged path the temp analyzers are built deterministically
-    # from the committed (immutable) curation unit set + the recipe, both
-    # reachable through the selection, so no snapshot is needed and the column is
-    # NULL. The evaluated curation identity + recipe names live on
-    # CurationEvaluationSelection (the row's FK parent), not duplicated here.
-    # Secondary provenance, never identity.
-
-    # Tri-part make so the metric/merge compute (and NWB write) run OUTSIDE the
-    # DB transaction. make_compute performs no DB writes: every upstream input
-    # is resolved in make_fetch and threaded through the carrier (no get_sorting
-    # / get_analyzer in compute, and the traces are read by the path make_fetch
-    # healed). Its only DB reads stage the output file (see _storage.nwb) --
-    # keeping the heavy NWB write off the commit txn.
+    # source_analyzer_hashes lets detect_stale_source flag drift in the
+    # regeneratable fast-path analyzers ("display", plus "metric" for PC/NN).
     _parallel_make = True
 
     def make_fetch(self, key) -> CurationEvaluationFetched:
         """Resolve every DB input make_compute needs (no SI/NWB compute here).
 
-        Resolves the params, the recording-reconstruction inputs (so the
-        compute stage can rebuild the recording + sorting), the curated-units
-        NWB abs path + expected unit ids, the analyzer recipes + cache folders,
-        and the committed-state routing decision. Re-asserts the parent is a
-        committed (non-preview) curation and the metric recipe is whitened, so a
-        row planted via ``allow_direct_insert`` cannot reach the compute path.
+        Re-asserts a committed parent and a whitened metric recipe, so a row
+        planted via ``allow_direct_insert`` cannot reach compute.
         """
 
         return _metric_curation_fetch.fetch_evaluation_inputs(key)
@@ -761,13 +676,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> CurationEvaluationComputed:
         """Compute metrics / merges / labels over the committed curation.
 
-        This stage performs no DB writes (tri-part contract): upstream inputs
-        are resolved in ``make_fetch``, and the recording + raw / curated
-        sortings are reconstructed from those threaded inputs rather than via
-        ``CurationV2.get_sorting`` / ``Sorting.get_analyzer``; the traces are
-        read from the path ``make_fetch`` resolved. The only DB reads left
-        stage the output file (see :mod:`._storage.nwb`). The heavy NWB
-        write remains outside the commit transaction.
+        No DB writes; every input comes from ``make_fetch``. The only DB
+        access stages the output file.
         """
         import spikeinterface as si
 
@@ -789,20 +699,13 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 _requested_pc_metrics(metric_inputs.metric_names)
             )
 
-            # Concat sources carry no single recording_id (recording_id is None);
-            # record the lineage concat_recording_id so the file identifies its
-            # upstream standalone. recording_content_hash is the content_hash of
-            # the traces the metrics were computed on: the source row's (the
-            # concat's, for a concat), or the corrected recording's for a sort of
-            # motion-corrected traces, whose id is then recorded too.
+            # recording_content_hash is of the traces actually scored (the
+            # corrected recording's, when motion-corrected).
             corrected_id = recording_inputs.traces.key.get(
                 "motion_corrected_recording_id"
             )
 
-            # Provenance header shared by the populated and zero-unit paths so every
-            # CurationEvaluation artifact is self-describing; source_analyzer_hashes
-            # is added per-path (a manifest on the fast path, None for a zero-unit
-            # or merged-temp-analyzer evaluation).
+            # Shared by the populated and zero-unit paths.
             base_provenance = {
                 "sorting_id": str(sorting_inputs.sorting_id),
                 "curation_id": int(sorting_inputs.curation_id),
@@ -859,9 +762,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     )
                 ]
 
-            # Zero-unit committed curation: nothing to analyze; write empty
-            # metric/merge/label tables (SI cannot build an analyzer over zero
-            # units). Write empty metric/merge/label tables.
+            # SI cannot build an analyzer over zero units; write empty tables.
             if not sorting_inputs.expected_unit_ids:
                 logger.warning(
                     "CurationEvaluation: curation "
@@ -899,10 +800,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             )
             base_provenance["observation_intervals_hash"] = interval_hash
 
-            # A root / label-only curation keeps the raw sort's unit set and is
-            # evaluated on the sort's cached analyzers; an applied-merge
-            # curation is evaluated on temporary analyzers over its merged
-            # sorting. Only the cached analyzers get a source-hash snapshot.
             evaluate = (
                 _evaluation_analyzers.evaluate_cached_analyzers
                 if sorting_inputs.use_fast_path
@@ -917,9 +814,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     wants_pc=wants_pc,
                     observation_metrics=observation_metrics,
                     statistics_spans=statistics_spans,
-                    # Concat traces carry a synthetic clock, including after
-                    # motion correction. Their continuity spans preserve the
-                    # member/acquisition joins that timestamps cannot recover.
+                    # Concat traces use a synthetic clock; the spans keep
+                    # the member/acquisition joins timestamps cannot recover.
                     continuity_spans=(
                         recording_inputs.traces.row["continuity_spans"]
                         if recording_inputs.source_kind
@@ -928,9 +824,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     ),
                 )
             )
-            # Self-describing provenance: the evaluation inputs + the source
-            # provenance the row stores (analyzer-hash manifest, SI version) plus
-            # the upstream recording content hash (see ``base_provenance``).
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,
@@ -960,11 +853,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> None:
         """Register the analysis file and insert the row (atomic).
 
-        ``AnalysisNwbfile().add`` + ``insert1`` run inside
-        ``_safe_context()`` so a failed insert never orphans a registered
-        AnalysisNwbfile row (mirrors Sorting). Removing a failed attempt's
-        staged analysis file is ``StagedOutputCleanupMixin``'s job during
-        ``populate()``; a direct call leaves that to its caller.
+        A direct call (outside ``populate``) must remove a failed attempt's
+        staged file itself.
         """
 
         with self._safe_context():
@@ -987,15 +877,10 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def detect_stale_source(cls, key) -> dict:
         """Flag whether an evaluation's recorded source provenance still holds.
 
-        Compares the stored ``spikeinterface_version`` to the running SI version
-        and, for a fast-path evaluation, re-hashes EVERY canonical analyzer the
-        evaluation recorded consuming (``source_analyzer_hashes`` -- ``"display"``
-        always, plus ``"metric"`` when PC/NN metrics were requested) and compares
-        each to its stored hash, so a regenerated/mutated analyzer cache or a
-        library upgrade surfaces as drift. A merged-curation evaluation stored
-        ``source_analyzer_hashes=NULL`` (its temp analyzers are pinned by the
-        committed curation + recipe, both reachable), so only the SI version is
-        compared.
+        Compares the stored ``spikeinterface_version`` with the running one
+        and, on the fast path, re-hashes each analyzer in
+        ``source_analyzer_hashes``. Merged-curation evaluations compare only
+        the SI version.
 
         Parameters
         ----------
@@ -1007,14 +892,12 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         dict
             ``{"stale": bool, "reasons": list[str],
             "spikeinterface_version": {"stored", "current"},
-            "source_analyzer_hashes": {"stored", "current"}}``. ``reasons`` names
-            each drifted field: ``source_analyzer_hash:<role>`` for a content
-            mismatch, or ``source_analyzer_missing:<role>`` /
-            ``source_analyzer_invalid:<role>`` when a regeneratable analyzer cache
-            was reclaimed or corrupted (reported as stale, never raised, since the
-            stored metrics can no longer be reproduced from it). ``current`` is
-            the re-hashed manifest (an absent/invalid role maps to ``None``; empty
-            on the merged path).
+            "source_analyzer_hashes": {"stored", "current"}}``. ``reasons``
+            entries are ``source_analyzer_hash:<role>`` (content mismatch) or
+            ``source_analyzer_missing:<role>`` /
+            ``source_analyzer_invalid:<role>`` (cache reclaimed or corrupt;
+            reported, not raised). ``current`` maps
+            an absent/invalid role to ``None`` and is empty on the merged path.
         """
 
         return _metric_curation_fetch.detect_stale_source(cls, key)
@@ -1048,9 +931,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _read_outputs(cls, key) -> tuple:
         """Return ``(metrics, merge_groups, labels)`` from one file open.
 
-        Each element equals what :meth:`get_metrics`,
-        :meth:`get_suggested_merge_groups` and :meth:`get_labels` return, read
-        with one row fetch and one path resolution.
+        Same values as :meth:`get_metrics`, :meth:`get_suggested_merge_groups`
+        and :meth:`get_labels`.
         """
         row = (cls & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
@@ -1077,28 +959,14 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Accept selected evaluation outputs into a COMMITTED child curation.
 
-        Creates a new committed child ``CurationV2`` row branched off the
-        evaluated curation, in that curation's own unit namespace. The child is
-        always committed (``assert_committed_curation`` true) -- it never leaves
-        a preview row with unapplied proposed merges; use :meth:`preview_merges`
-        for an explicit draft.
+        The child is always committed; use :meth:`preview_merges` for a draft.
+        Merges apply only if ``merge_groups`` or ``use_all_suggested_merges``
+        is given; otherwise the child is labels-only.
 
-        Merges are applied ONLY when the caller is explicit: pass
-        ``merge_groups`` (the exact accepted groups, in the evaluated
-        curation's namespace) or ``use_all_suggested_merges=True`` (apply every
-        >=2-member suggestion this evaluation proposed). Neither -> a
-        labels-only committed child.
-
-        Labels default to the evaluation's proposed labels
-        (:meth:`get_labels`) and, with the default ``label_policy="replace"``,
-        are the child's FULL label state -- the auto-curation verdict, not
-        layered on the parent's labels. This matches v1 (a re-evaluation writes
-        the complete label state), so a unit the rules no longer flag is not
-        left carrying a stale ``reject`` / ``noise`` from an earlier curation
-        (which would silently drop it from the matchable-unit set downstream).
-        Pass ``label_policy="inherit"`` to instead overlay the proposals on the
-        parent's labels, or ``labels`` to supply the state explicitly. Accepted
-        children carry the ``curation_source='curation_evaluation'`` provenance.
+        With ``label_policy="replace"`` the proposed labels are the child's
+        full label state, so a unit the rules no longer flag drops a stale
+        ``reject`` / ``noise``. The child records
+        ``curation_source='curation_evaluation'``.
 
         Parameters
         ----------
@@ -1112,18 +980,12 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Apply every >=2-member suggested merge group instead of an explicit
             list. Mutually exclusive with ``merge_groups``.
         labels : dict or None
-            ``{unit_id: [label, ...]}`` to write; ``None`` defaults to the
-            evaluation's proposed labels. The proposed labels are in the
-            evaluated curation's PRE-merge namespace: when this call also
-            applies a merge, a label on a unit absorbed by that merge cannot
-            attach to the fresh merged unit and is dropped with a warning -- the
-            merged unit's labels come from RE-EVALUATING the merged child (the
-            recommended accept-merge-then-evaluate workflow), not from the
-            pre-merge proposals. Combine merges + labels in one call only when
-            the labels are on surviving (non-absorbed) units.
+            ``{unit_id: [label, ...]}`` to write; ``None`` uses the
+            evaluation's proposed labels. These are in the pre-merge namespace,
+            so a label on a unit absorbed by a merge in this call is dropped
+            with a warning. Re-evaluate the merged child to label merged units.
         label_policy : str
-            ``"replace"`` (default for acceptance: the proposed labels are the
-            full label state) or ``"inherit"`` -- see
+            ``"replace"`` (default) or ``"inherit"``; see
             ``CurationV2.insert_curation``.
         description : str
             Free-text description for the child curation.
@@ -1164,13 +1026,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Draft selected merge suggestions without committing the merge.
 
-        Action-oriented alias for the review-before-commit workflow. By default
-        it drafts only merges and inherits the evaluated curation's labels; it
-        does not apply pre-merge evaluation labels to the draft.
+        Inherits the evaluated curation's labels; pre-merge evaluation labels
+        are not applied.
         """
-        # create_preview_curation resolves the merge groups and enforces the
-        # populated-evaluation + non-empty contracts itself, so pass the
-        # request through rather than resolving the same suggestions twice.
         return _evaluation_acceptance.create_preview_curation(
             self,
             key,
@@ -1194,12 +1052,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Commit selected merge groups into a child curation.
 
-        This is the recommended merge-acceptance action: it commits the merged
-        unit set and inherits existing labels, but deliberately does NOT apply
-        pre-merge evaluation labels. Re-evaluate the merged child, then call
-        :meth:`use_evaluation_labels` or :meth:`overlay_evaluation_labels`.
-        ``allow_custom_labels`` is forwarded so an inherited custom (non-canonical)
-        parent label does not fail the child insert.
+        Inherits existing labels; pre-merge evaluation labels are not applied.
+        Re-evaluate the merged child, then call :meth:`use_evaluation_labels`
+        or :meth:`overlay_evaluation_labels`.
         """
         accepted = _evaluation_acceptance.require_merge_acceptance(
             self,
@@ -1228,8 +1083,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Commit every persisted >=2-unit merge suggestion from this evaluation.
 
-        Inherits existing labels (``allow_custom_labels`` forwarded so an
-        inherited custom parent label does not fail the child insert).
+        Inherits existing labels.
         """
         accepted = _evaluation_acceptance.require_merge_acceptance(
             self,
@@ -1258,17 +1112,14 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Use the evaluation verdict as the child's full label state.
 
-        The authoritative "use this evaluation's labels" path (label-only, no
-        merges) -- the child's labels are exactly the evaluation's proposed
-        labels, CLEARING any label the evaluation does not propose. A unit no
-        longer flagged loses a stale ``reject`` / ``noise`` (v1 "final
-        auto-curation writes the full label state"), so it is not silently
-        dropped from a unit-selection population. This is the default
-        final-metrics path; use :meth:`overlay_evaluation_labels` to instead
-        keep the current labels. To commit other labels, pass them to
-        :meth:`accept_evaluation_outputs`.
+        Label-only. Labels the evaluation does not propose are cleared, so a
+        unit no longer flagged loses a stale ``reject`` / ``noise``. Use
+        :meth:`overlay_evaluation_labels` to keep current labels.
 
-        Returns the child's ``{"sorting_id", "curation_id"}``.
+        Returns
+        -------
+        dict
+            The child's ``{"sorting_id", "curation_id"}``.
         """
         return self.accept_evaluation_outputs(
             key,
@@ -1289,16 +1140,16 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
     ) -> dict:
-        """Overlay the evaluation's labels ON TOP of the curation's current ones.
+        """Overlay the evaluation's labels on the curation's current ones.
 
-        The manual-curation path (label-only, no merges): KEEP the evaluated
-        curation's existing labels and add/override only the proposed ones.
-        Deliberately a different method from :meth:`use_evaluation_labels` so
-        the "keep my labels" choice is visible at the call site rather than a
-        quiet flag -- overlaying can retain prior auto labels, which
-        :meth:`use_evaluation_labels` (the default verdict path) clears.
+        Label-only. Keeps existing labels and adds or overrides the proposed
+        ones, so prior auto labels can survive (unlike
+        :meth:`use_evaluation_labels`).
 
-        Returns the child's ``{"sorting_id", "curation_id"}``.
+        Returns
+        -------
+        dict
+            The child's ``{"sorting_id", "curation_id"}``.
         """
         return self.accept_evaluation_outputs(
             key,
@@ -1331,12 +1182,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def get_waveforms(self, key, fetch_all: bool = False):
         """Return a waveform accessor over this curation's display analyzer.
 
-        The returned object exposes SI's ``get_waveforms_one_unit(unit_id)``
-        and a v1-style ``get_waveforms(unit_id)`` over the analyzer's
-        ``waveforms`` extension, replacing v1 ``MetricCuration.get_waveforms``.
-        Committed merged curations resolve their own analyzer and unit namespace.
-        ``fetch_all`` is accepted for v1 signature parity; the sort-time
-        waveform subsample is returned (full re-extraction is not supported).
+        Exposes ``get_waveforms_one_unit(unit_id)`` and v1-style
+        ``get_waveforms(unit_id)``. ``fetch_all`` is accepted for v1 parity
+        but only the sort-time waveform subsample is available.
         """
         if fetch_all:
             logger.warning(
@@ -1349,10 +1197,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _display_analyzer_key(self, key):
         """Resolve the curation + DISPLAY recipe request for every plot.
 
-        The curation analyzer resolver classifies the namespace centrally:
-        raw-unit curations reuse the sort analyzer, while committed merged
-        curations build or reuse their per-generation analyzer. Preview and
-        zero-unit handling therefore cannot drift among individual helpers.
+        Raw-unit curations reuse the sort analyzer; committed merged
+        curations use their own.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             display_analyzer_request,
@@ -1369,12 +1215,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _analyzer_for(self, key):
         """Return this curation's DISPLAY analyzer for a controlled read.
 
-        All burst-pair legs, peak amplitudes, and the notebook plots load
-        through here, so they all read real waveforms / amplitudes / positions
-        -- never the whitened metric analyzer (which is built only for the PC/NN
-        cluster-separation metrics). Committed merged curations are resolved in
-        their own unit namespace. The returned cache-backed analyzer must not be
-        mutated; helpers needing an extension use ``_display_analyzer`` below.
+        Never the whitened metric analyzer, so plots show real waveforms.
+        Do not mutate it; use ``_display_analyzer`` to add extensions.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             _resolve_curation_analyzer,
@@ -1386,10 +1228,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _display_analyzer(self, key, *, extra_extensions=None):
         """Yield a display analyzer without mutating its published cache.
 
-        Standard display extensions are built before a merged analyzer is
-        published. Any unusual missing extension is computed once into a
-        disk-backed derivative keyed by the exact request (see
-        ``_curation.analyzer``), never into the published base cache.
+        A missing extension is computed into a disk-backed derivative, never
+        into the published cache.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             curation_analyzer_with_extensions,
@@ -1406,13 +1246,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Static population QC overview: metric histograms + depth scatter.
 
-        The at-a-glance "do these units look reasonable as a population?"
-        view (complement to the per-unit ``describe_units`` table). Renders one
-        histogram per quality metric (NaN values dropped) and a scatter placing
-        each unit at its estimated probe position colored by ``color_metric``.
-        A zero-unit sort returns an empty, labeled axes rather than raising.
-        Pass ``axes`` to draw into a notebook/dashboard layout; otherwise a
-        figure is created.
+        One histogram per quality metric (NaNs dropped) plus a scatter of unit
+        positions colored by ``color_metric``. Pass ``axes`` to draw into an
+        existing layout; otherwise a figure is created.
 
         Returns
         -------
@@ -1519,23 +1355,16 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Per-pair burst-merge diagnostics as a DataFrame (v1 BurstPair data).
 
-        The queryable counterpart of v1's ``BurstPair.BurstPairUnit`` part
-        table, computed on the fly from the evaluation's display analyzer
-        rather than stored: ``wf_similarity`` (SI cosine template similarity),
-        ``isi_violation`` of the train the merge would commit (cross-unit
-        duplicates removed, intervals on the source clock), directional
-        ``xcorrel_asymm``,
-        and ``unit_distance`` between unit locations. Ordered pairs are
-        distinct rows because the correlogram asymmetry is directional.
-        ``pairs`` defaults to every ordered pair. The ISI fraction uses
-        violating intervals / (spikes - 1), matching stored unit QC. Its
-        refractory window comes from this evaluation's metric recipe unless
-        ``isi_threshold_ms`` explicitly overrides it.
+        Computed from the display analyzer, not stored. Columns:
 
-        Unlike ``get_metrics`` / ``get_labels`` this is an instance method: it
-        reads the analyzer through ``_display_analyzer`` rather than the
-        stored NWB. Any missing display extension is built on a detached
-        derivative, never persisted into the published cache.
+        - ``wf_similarity``: SI cosine template similarity.
+        - ``isi_violation``: violating intervals / (spikes - 1) of the merged
+          train (cross-unit duplicates removed, source clock).
+        - ``xcorrel_asymm``: directional, so ordered pairs are separate rows.
+        - ``unit_distance``: distance between unit locations.
+
+        ``pairs`` defaults to every ordered pair. ``isi_threshold_ms``
+        defaults to the evaluation's metric recipe.
 
         Returns
         -------
@@ -1573,9 +1402,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _isi_continuity_spans(self, key):
         """The evaluated sort's continuity spans when its clock is synthetic.
 
-        As in stored unit QC, a concat source's synthetic clock hides its
-        member and acquisition joins; its continuity spans mark them. Other
-        sources read their own timestamps, so ``None``.
+        A concat source's synthetic clock hides its joins; other sources
+        return ``None``.
         """
         sorting_id = (CurationEvaluationSelection & key).fetch1("sorting_id")
         lineage, traces = SortingSelection.resolve_effective_source(
@@ -1588,11 +1416,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def plot_burst_pair_metrics(self, key, pairs=None, **kwargs):
         """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).
 
-        Scatters waveform similarity vs cross-correlogram asymmetry, one point
-        per unit pair, over the frame from ``get_burst_pair_metrics`` (which
-        also takes the keyword arguments). v1 laid out one panel per sort
-        group; a v2 sort is a single sort group, so this renders that sort's
-        pairs. ``pairs`` defaults to all ordered pairs.
+        Waveform similarity vs cross-correlogram asymmetry, one point per
+        pair. ``kwargs`` go to ``get_burst_pair_metrics``.
         """
         from spyglass.spikesorting.utils_burst import plot_burst_metrics
 
@@ -1604,12 +1429,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     # ---- SI metric / merge delegates (see v2.visualization facade) --------
 
     def plot_metrics(self, key, *, backend="matplotlib", **kwargs):
-        """Delegate to ``visualization.plot_metrics`` for this curation.
-
-        A local-discoverability one-liner over the Spyglass-routed
-        ``get_metrics()`` table; the plotting lives in the ``v2.visualization``
-        facade, which the notebook/docs teach as the primary surface.
-        """
+        """Delegate to ``visualization.plot_metrics`` for this curation."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_metrics(key, backend=backend, **kwargs)
@@ -1637,8 +1457,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def plot_suggested_merges(self, key, *, backend="ipywidgets", **kwargs):
         """Delegate to ``visualization.plot_suggested_merges`` for this curation.
 
-        Defaults to the ``ipywidgets`` backend (SI's ``PotentialMergesWidget``
-        has no matplotlib backend); see the facade.
+        SI's ``PotentialMergesWidget`` has no matplotlib backend.
         """
         from spyglass.spikesorting.v2 import visualization
 

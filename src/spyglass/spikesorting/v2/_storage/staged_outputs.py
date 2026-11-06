@@ -1,41 +1,10 @@
 """Remove what a tri-part ``make_compute`` staged when its populate fails.
 
-A v2 table whose ``make_compute`` writes an output (an ``AnalysisNwbfile``, a
-private analyzer build, a figure bundle) leaves registering it to
-``make_insert``. DataJoint 0.14.9 runs the two in separate steps of
-``AutoPopulate._populate1`` (``datajoint/autopopulate.py:362-453``):
-
-1. ``make_fetch`` then ``make_compute``, outside any transaction (lines
-   404-407). The generator running them is dropped right after
-   ``make_compute`` returns, even on success, so nothing can be cleaned up
-   in it.
-2. A transaction starts, ``make`` restarts and ``make_fetch`` runs again
-   (lines 409-411). If that fetch raises, or its hash differs from the first
-   one, DataJoint raises (``Referential integrity failed``, lines 412-420)
-   before the computed result ever reaches ``make_insert`` (line 421).
-3. Any exception cancels the transaction (lines 423-427) and is re-raised,
-   or returned as ``(key, error)`` when ``suppress_errors`` (lines 443-447).
-
-A table's own ``make_compute`` cleanup covers a compute that raises: nothing
-is recorded until it returns. The :class:`StagedOutputCleanupMixin` covers
-everything from ``make_compute`` returning until ``make_insert`` returns,
-including a ``make_insert`` that raises: it
-records the staged outputs of each computed result when ``make_compute``
-returns, forgets them once ``make_insert`` returns (they are registered from
-then on), and removes whatever is still recorded when ``_populate1`` ends
-without success.
-
-Not covered: a failed COMMIT after ``make_insert`` has returned (DataJoint's
-``else`` clause, line 449). The registration rolls back but the outputs were
-already forgotten, so they stay on disk -- including what ``make_insert``
-moved into place before the commit (``Sorting``'s analyzer publish,
-``FigPackCuration``'s bundle install). Forgetting at that point is what keeps
-a failure after a successful commit (``jobs.complete``, line 452) from
-removing a committed row's files. Nor is a process killed between
-``make_compute`` and ``make_insert``; its staging stays until swept.
-
-This module is DB-free at import; removing an ``AnalysisNwbfile`` imports its
-path resolver lazily.
+DataJoint runs ``make_compute`` outside the transaction and can fail before
+``make_insert`` registers what it wrote. Outputs are recorded when
+``make_compute`` returns, forgotten when ``make_insert`` returns, and removed
+if ``_populate1`` ends without success. A failed commit after ``make_insert``
+or a killed process leaves staging on disk until swept.
 """
 
 from __future__ import annotations
@@ -52,8 +21,7 @@ from spyglass.spikesorting.v2._core.dj_compat import (
 )
 from spyglass.utils import logger
 
-#: Instance attribute holding one list of recorded outputs per active
-#: ``_populate1`` call (a stack, so a nested populate keeps its own list).
+#: Stack of recorded-output lists, one per active ``_populate1`` call.
 _SCOPES_ATTR = "_staged_output_scopes"
 
 
@@ -65,11 +33,8 @@ def unlink_staged_analysis_file(
 ) -> None:
     """Discard a staged analysis file without masking the caller's failure.
 
-    Only files created by the failed attempt may be removed. An in-place
-    writer passes ``existing_analysis_file_name`` to identify a canonical
-    artifact, which is left untouched even if the write failed. Path lookup
-    and unlink failures are logged with the caller's ``context`` and never
-    raised. The AnalysisNwbfile dependency is loaded only on a cleanup call.
+    A canonical artifact named by ``existing_analysis_file_name`` is never
+    removed. Failures are logged with ``context``, never raised.
     """
     if existing_analysis_file_name:
         logger.error(
@@ -98,11 +63,8 @@ def staged_analysis_file(
 ) -> Iterator[str]:
     """Create an unregistered ``AnalysisNwbfile``; remove it if the body fails.
 
-    ``AnalysisNwbfile().create`` writes a stub to disk (0o644) before the
-    caller fills it, so a write that raises before ``make_insert`` registers
-    the row would otherwise orphan that file. On an exception in the ``with``
-    body the staged file is discarded with
-    :func:`unlink_staged_analysis_file` and the exception re-raised.
+    ``AnalysisNwbfile().create`` writes a stub to disk immediately, so a
+    failed write would otherwise orphan it.
 
     Parameters
     ----------
@@ -180,16 +142,10 @@ def _releasing_insert(insert):
 class StagedOutputCleanupMixin:
     """Remove a populate attempt's staged outputs unless its insert succeeds.
 
-    For a tri-part table whose ``make_compute`` returns a carrier with a
-    ``staged_outputs() -> StagedOutputs`` method. ``make_compute`` and
-    ``make_insert`` defined on the class are wrapped when the class is
-    created; the inherited generator ``make`` is untouched, so DataJoint's
-    tri-part dispatch still applies. Put the mixin first in the bases so its
-    ``_populate1`` runs around DataJoint's.
-
-    Outputs are recorded only inside ``_populate1``, on the table instance
-    running it: a direct ``make_compute`` call records nothing, and
-    ``populate(processes>1)`` records in each worker's own instance.
+    For tri-part tables whose ``make_compute`` result has
+    ``staged_outputs() -> StagedOutputs``. Put the mixin first in the bases.
+    Outputs are recorded only inside ``_populate1``, so a direct
+    ``make_compute`` call records nothing.
     """
 
     def __init_subclass__(cls, **kwargs):
@@ -206,12 +162,8 @@ class StagedOutputCleanupMixin:
     def _populate1(self, key, jobs, *args, **kwargs):
         """Run DataJoint's ``_populate1``; remove outputs left unregistered.
 
-        DataJoint returns ``True`` after a committed insert, ``False`` for a
-        key it skipped (already populated or reserved elsewhere; nothing was
-        computed), and ``(key, error)`` for a failure under
-        ``suppress_errors``; any other failure raises. Recorded outputs are
-        removed on a raise or a ``(key, error)`` return, after DataJoint has
-        cancelled the transaction, and the error is passed on unchanged.
+        Removes outputs on a raise or a non-``True`` status (``False`` for a
+        skipped key, ``(key, error)`` under ``suppress_errors``).
         """
         scopes = self.__dict__.setdefault(_SCOPES_ATTR, [])
         pending: list[StagedOutputs] = []

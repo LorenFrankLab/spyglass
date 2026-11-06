@@ -1,11 +1,5 @@
-"""write_buffer_gb bounds the streaming-write buffer to ~N seconds of data.
-
-A fixed 5 GB buffer buffers the WHOLE recording for narrow sort groups (a
-4-channel tetrode = ~87 min in 5 GB), defeating streaming and spiking RAM
-under parallel per-group workers. The buffer should scale with channel count
-so a tetrode and a Neuropixels group both buffer ~the same bounded duration.
-
-Hermetic -- pure function, no DB.
+"""write_buffer_gb sizes the streaming-write buffer to a fixed duration,
+capped at 5 GB, so narrow groups do not buffer the whole recording.
 """
 
 from __future__ import annotations

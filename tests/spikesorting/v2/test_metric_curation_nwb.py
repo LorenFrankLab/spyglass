@@ -1,10 +1,4 @@
-"""DB-free round-trip tests for analyzer-curation NWB (de)serialization.
-
-Builds a minimal NWB file on a temp path (no DataJoint, no AnalysisNwbfile
-registration) and exercises ``_metric_curation_nwb`` write/read for the
-normal, no-label, and zero-unit cases -- including the #1625 omit-empty-label
-rule and the NaN->None read-path coercion (#1556).
-"""
+"""DB-free round-trip tests for analyzer-curation NWB (de)serialization."""
 
 from __future__ import annotations
 
@@ -72,8 +66,8 @@ def test_round_trip_metrics_merges_labels(empty_nwb_path):
 def test_no_labels_omits_column_and_reads_empty(empty_nwb_path):
     """A sort with units but no labels saves cleanly; get_labels is empty.
 
-    The ragged ``curation_label`` column is omitted (not an all-empty
-    list-of-lists), so no hdmf dtype-inference crash (#1625).
+    The ragged ``curation_label`` column is omitted, since hdmf cannot infer
+    a dtype for an all-empty list-of-lists.
     """
     metrics = pd.DataFrame(
         {"snr": [5.0, 6.0]}, index=pd.Index([1, 2], name="unit_id")
@@ -105,13 +99,8 @@ def test_zero_unit_writes_empty_tables(empty_nwb_path):
 
 
 def test_round_trip_preserves_template_columns(empty_nwb_path):
-    """Surfaced waveform-shape columns flow through the column-generic writer.
+    """Template-shape columns round-trip through ``read_quality_metrics``."""
 
-    The write -> ``read_quality_metrics`` path (the same one ``get_metrics``
-    reads through) is column-generic, so a frame carrying template-shape
-    columns alongside the quality metrics round-trips with its values intact --
-    the metric table surfaces them for downstream cell typing.
-    """
     metrics = pd.DataFrame(
         {
             "firing_rate": [3.0, 12.0],

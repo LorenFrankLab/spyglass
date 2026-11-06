@@ -1,12 +1,6 @@
-"""Schema-level validation tests for v2 Pydantic parameter models.
+"""Validation tests for the v2 Pydantic parameter models in ``v2._params``.
 
-These tests exercise the Pydantic models in
-``spyglass.spikesorting.v2._params`` directly (no DataJoint server required)
-so schema-regression catches happen before the slower
-``single_session/`` integration suite ever spins up. The
-DataJoint-level "reject bogus values at insert" assertion lives in the
-integration suite once the Lookup tables exist; this file owns the cheap,
-fast schema round-trip and rejection cases.
+Mostly DB-free round-trip and rejection cases; tests of table rows need a DB.
 """
 
 from __future__ import annotations
@@ -37,13 +31,9 @@ from spyglass.spikesorting.v2._params.sorter import (
 
 
 def test_preprocessing_non_default_blob_round_trips():
-    """A fully NON-default blob survives ``dump -> validate -> dump`` unchanged.
+    """A fully non-default blob survives ``dump -> validate -> dump`` unchanged.
 
-    A default-constructed model dumped then re-validated is equal essentially
-    by construction (near-tautological). Round-tripping a blob whose every
-    field diverges from the schema defaults gives the test teeth: a validator
-    or normalizer that mangles a real configured params blob is caught here,
-    cheaply, instead of at populate time.
+    Every field differs from its default so a mangling validator is caught.
     """
     schema = PreprocessingParamsSchema(
         phase_shift={"margin_ms": 50.0},
@@ -70,9 +60,8 @@ def test_preprocessing_non_default_blob_round_trips():
 def test_preprocessing_rejects_negative_min_segment_length(bad_min_segment):
     """``min_segment_length`` is non-negative (``ge=0``); negatives reject.
 
-    The field drops disjoint-interval slivers shorter than this many seconds
-    before the sorter; a negative value is meaningless and silently disabling
-    the filter via a bad row must fail loudly at insert, not at sort time.
+    It drops disjoint-interval slivers shorter than this many seconds before
+    the sorter.
     """
     with pytest.raises(ValidationError):
         PreprocessingParamsSchema(min_segment_length=bad_min_segment)
@@ -84,8 +73,7 @@ def test_preprocessing_rejects_negative_min_segment_length(bad_min_segment):
 def test_preprocessing_rejects_unknown_bad_channel_handling():
     """``bad_channel_handling`` is ``Literal['remove','interpolate']``.
 
-    A typo (e.g. ``'drop'``) must reject rather than silently fall through to
-    the default handling, which would change which channels reach the sorter.
+    A typo (e.g. ``'drop'``) rejects instead of falling back to the default.
     """
     with pytest.raises(ValidationError):
         PreprocessingParamsSchema(bad_channel_handling="drop")
@@ -148,10 +136,8 @@ def test_preprocessing_inverted_bandpass_rejected():
 def test_preprocessing_rejects_recording_stage_whiten():
     """A ``whiten`` key is rejected: no recording cache ever applied it.
 
-    Whitening ownership is unambiguous -- ``SorterParameters`` (external
-    float64 pin for MS4/MS5) and ``AnalyzerWaveformParameters`` (metric
-    analyzer). Accepting an inert field here would let a row claim whitening
-    it does not perform.
+    Whitening belongs to ``SorterParameters`` (MS4/MS5) and
+    ``AnalyzerWaveformParameters`` (metric analyzer).
     """
     with pytest.raises(ValidationError, match="whiten"):
         PreprocessingParamsSchema(whiten=None)
@@ -164,9 +150,7 @@ def test_preprocessing_rejects_recording_stage_whiten():
 def test_preprocessing_no_filter_is_none():
     """``bandpass_filter=None`` disables filtering; the default keeps it.
 
-    A real "no filter" config is ``bandpass_filter=None`` (the
-    dumped params carry ``None`` so the runtime skips the step),
-    not a wide-band filter that silently still filters.
+    The dumped params carry ``None`` so the runtime skips the step.
     """
     disabled = PreprocessingParamsSchema(bandpass_filter=None)
     assert disabled.bandpass_filter is None
@@ -179,7 +163,7 @@ def test_preprocessing_no_filter_is_none():
 
 
 def test_preprocessing_schema_version_is_four():
-    """Removing the inert ``whiten`` field bumped the blob schema version."""
+    """The preprocessing blob schema is at version 4 (no ``whiten`` field)."""
     assert PREPROCESSING_SCHEMA_VERSION == 4
     assert PreprocessingParamsSchema().schema_version == 4
 
@@ -190,12 +174,9 @@ def test_preprocessing_schema_version_is_four():
 def test_artifact_default_field_values():
     """Defaults use the v2 field names and ship the expected values.
 
-    Shipping v2 default values:
-    * ``amplitude_threshold_uv == 500.0`` -- matches v1's effective
-      Intan-probe behavior (v1's nominal 3000 is in raw counts, not uV;
-      see the CHANGELOG entry).
-    * ``proportion_above_threshold == 1.0`` -- v1 parity (every
-      channel must exceed the threshold), not 0.5.
+    - ``amplitude_threshold_uv == 500.0``: v1's effective Intan value (v1's
+      nominal 3000 is in raw counts).
+    - ``proportion_above_threshold == 1.0``: v1 parity (every channel).
     """
     blob = ArtifactDetectionParamsSchema().model_dump()
     assert blob["detect"] is True
@@ -209,9 +190,7 @@ def test_artifact_default_field_values():
 def test_artifact_none_preset_disables_detection():
     """``detect=False`` lets all threshold fields be None and they round-trip.
 
-    Turning detection off relaxes the ``detect=True`` requirement of at least
-    one threshold: both thresholds may be None and persist as None. Asserting
-    only ``detect is False`` would merely echo the constructor argument.
+    ``detect=True`` requires at least one threshold; ``detect=False`` does not.
     """
     blob = ArtifactDetectionParamsSchema(
         detect=False, amplitude_threshold_uv=None, zscore_threshold=None
@@ -260,7 +239,7 @@ def test_artifact_thresholds_or_semantics():
     ArtifactDetectionParamsSchema(
         amplitude_threshold_uv=None, zscore_threshold=5.0
     )
-    # both thresholds at once -- the OR mode
+    # both thresholds at once (OR)
     both = ArtifactDetectionParamsSchema(
         amplitude_threshold_uv=500.0, zscore_threshold=5.0
     ).model_dump()
@@ -318,11 +297,9 @@ def test_ms4_detect_sign_rejects_invalid_value():
 def test_ms4_rejects_open_interval_adjacency_radius(bad_radius):
     """``adjacency_radius`` in the open interval ``(-1, 0)`` is rejected.
 
-    ``-1`` is SpikeInterface's "use all channels" sentinel and ``>= 0`` is an
-    explicit radius; anything strictly between is meaningless. These values
-    pass the ``ge=-1.0`` Field bound, so the rejection here exercises the
-    custom ``_reject_open_interval_radius`` validator specifically (matched on
-    its message), not the Field constraint.
+    ``-1`` is SI's "use all channels" sentinel and ``>= 0`` is a radius. These
+    values pass the ``ge=-1.0`` bound, so the match checks
+    ``_reject_open_interval_radius``'s message.
     """
     with pytest.raises(ValidationError, match="open interval"):
         MountainSort4Schema(adjacency_radius=bad_radius)
@@ -352,10 +329,9 @@ def test_ms5_scheme_literal_enforced():
 def test_ms5_schema_accepts_and_defaults_filter_whiten():
     """MS5 exposes ``filter`` / ``whiten`` with behavior-preserving defaults.
 
-    ``filter`` defaults to ``False`` (the v2 recording stage already
-    bandpass-filters the input, so MS5's internal filter must stay off to
-    avoid double-filtering) and ``whiten`` defaults to ``True`` (matching
-    the SI 0.104 ``Mountainsort5Sorter._default_params`` ``whiten=True``).
+    - ``filter=False``: the recording stage already bandpass-filters.
+    - ``whiten=True``: SI 0.104's MS5 default.
+
     Both toggle, and ``extra="forbid"`` still rejects an unknown kwarg.
     """
     blob = MountainSort5Schema().model_dump()
@@ -365,7 +341,7 @@ def test_ms5_schema_accepts_and_defaults_filter_whiten():
     flipped = MountainSort5Schema(filter=True, whiten=False).model_dump()
     assert flipped["filter"] is True
     assert flipped["whiten"] is False
-    # Adding the toggles did not loosen the strict schema.
+    # The schema stays strict.
     with pytest.raises(ValidationError):
         MountainSort5Schema(filterr=True)
 
@@ -383,43 +359,34 @@ def test_ks4_default_values():
 def test_clusterless_default_matches_v1():
     """Clusterless-thresholder defaults mirror v1's row.
 
-    ``ClusterlessThresholderSchema`` drops ``outputs`` and
-    ``random_chunk_kwargs`` (both stripped at runtime in
-    ``Sorting._run_sorter``); ``noise_levels`` is now OPTIONAL --
-    callers who want raw-uV threshold semantics pass
-    ``noise_levels=[1.0]`` explicitly (mirroring v1's
-    ``default_clusterless``); callers who want MAD-multiplier
-    semantics set ``threshold_unit='mad'`` (noise_levels omitted so SI
-    computes per-channel noise internally). The shipped v2 ``default``
-    row passes ``[1.0]`` for v1 parity.
+    - ``outputs`` and ``random_chunk_kwargs`` are not schema fields (stripped
+      at runtime in ``Sorting._run_sorter``).
+    - ``noise_levels`` is optional; ``threshold_unit='mad'`` gives
+      MAD-multiplier semantics.
+    - The shipped ``default`` row passes ``noise_levels=[1.0]`` (uV), as v1's
+      ``default_clusterless`` does.
     """
     blob = ClusterlessThresholderSchema().model_dump()
     assert blob["detect_threshold"] == 100.0
     assert blob["method"] == "locally_exclusive"
     assert blob["peak_sign"] == "neg"
-    # Regression guard: the dropped fields must not appear in the
-    # validated blob. Re-adding them to the schema without
-    # justification would silently break the runtime-strip
-    # invariants.
+    # The runtime-stripped fields must not appear in the validated blob.
     assert "outputs" not in blob
     assert "random_chunk_kwargs" not in blob
-    # ``noise_levels`` is now optional; the schema field default is None.
-    # With the default ``threshold_unit='uv'`` the runtime derives [1.0] (a
-    # microvolt/native threshold); MAD-multiplier mode is opt-in via
-    # ``threshold_unit='mad'``. The v2 production ``default`` row passes
-    # ``[1.0]`` explicitly.
+    # Schema default is None; with threshold_unit='uv' the runtime derives
+    # [1.0].
     assert blob["noise_levels"] is None
     explicit = ClusterlessThresholderSchema(noise_levels=[1.0]).model_dump()
     assert explicit["noise_levels"] == [1.0]
 
 
 def test_clusterless_threshold_unit_explicit():
-    """``threshold_unit`` makes the noise_levels unit a first-class knob.
+    """``threshold_unit`` sets the noise_levels unit explicitly.
 
-    The default is ``"uv"`` (the production/real-data 100 uV threshold; at
-    runtime 'uv' derives noise_levels=[1.0]). ``"mad"`` is the MAD-multiplier
-    mode (the simulation fixture's regime). Typos are rejected
-    (``extra="forbid"`` + Literal), and the schema is at version 4.
+    - ``"uv"`` (default): runtime derives noise_levels=[1.0].
+    - ``"mad"``: MAD multiplier (the simulation fixture's regime).
+
+    Typos are rejected and the schema is at version 4.
     """
     default = ClusterlessThresholderSchema()
     assert default.threshold_unit == "uv"
@@ -443,13 +410,9 @@ def test_clusterless_threshold_unit_explicit():
 def test_clusterless_rejects_implausible_mad_threshold():
     """A microvolt threshold left in MAD units is rejected at insert.
 
-    ``threshold_unit='mad'`` with no explicit ``noise_levels`` makes SI treat
-    ``detect_threshold`` as a MAD multiplier (real ones are ~3-15). A value
-    like 100 (a microvolt threshold copied into a MAD-mode row) makes the
-    effective threshold absurd and silently detects almost nothing -- a
-    zero-unit sort. The ``_guard_implausible_mad_threshold`` validator must
-    reject it, accept a plausible multiplier, and stay out of the way of the
-    explicit-``noise_levels`` advanced override.
+    In MAD mode without ``noise_levels``, ``detect_threshold`` is a MAD
+    multiplier (typically ~3-15); 100 would detect almost nothing. An explicit
+    ``noise_levels`` override bypasses the guard.
     """
     # Reject: > _MAX_PLAUSIBLE_MAD_MULTIPLIER (50) in mad mode, no noise_levels.
     with pytest.raises(ValidationError, match="implausibly large MAD"):
@@ -480,12 +443,10 @@ def test_clusterless_rejects_implausible_mad_threshold():
 def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     """``_insert_row_to_dict`` handles the supported insert row shapes.
 
-    Mapping rows pass through (shallow-copied); positional sequences zip
-    against the heading order (the ``_DEFAULT_CONTENTS`` tuple form). A
-    bare ``str``/``bytes`` row -- the shape that leaks through a
-    ``DataFrame`` / CSV-path insert (iterating those yields column-name
-    strings / characters) -- is rejected loudly rather than silently
-    zipped into a malformed row.
+    - Mappings pass through (shallow-copied).
+    - Sequences zip against the heading order and must match its length.
+    - A bare ``str``/``bytes`` row (as from iterating a DataFrame or CSV path)
+      is rejected.
     """
     from spyglass.spikesorting.v2._core.lookup_validation import (
         _insert_row_to_dict,
@@ -502,13 +463,11 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
         "sorter_params_name": "name",
         "params": {"x": 1},
     }
-    # A str/bytes row fails loudly (the DataFrame / CSV-path footgun).
+    # A str/bytes row raises.
     for bad in ("params", b"params"):
         with pytest.raises(TypeError, match="mapping or"):
             _insert_row_to_dict(bad, names)
-    # Positional rows must match the heading length exactly. ``zip`` would
-    # otherwise truncate extras silently or let missing attrs fail later with
-    # an opaque KeyError.
+    # Positional rows must match the heading length (zip would truncate).
     for bad in (
         ("mountainsort4", "name"),
         ("mountainsort4", "name", {"x": 1}, "ignored_extra"),
@@ -520,13 +479,8 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
 def test_clusterless_noise_levels_length_guard():
     """The clusterless noise_levels length guard rejects bad explicit arrays.
 
-    ``_assert_noise_levels_length`` lives in the import-pure ``utils``
-    module (no ``dj.schema``), so this is a pure unit test of the guard
-    the runtime applies at ``run_clusterless_thresholder``
-    before broadcasting / indexing ``noise_levels`` per channel. An
-    explicit array must be length 1 (broadcast) or ``n_channels``; any
-    other explicit length is a configuration error; ``None`` is always
-    valid (SI estimates per-channel MAD).
+    An explicit array must be length 1 (broadcast) or ``n_channels``;
+    ``None`` is valid (SI estimates per-channel MAD).
     """
     from spyglass.spikesorting.v2._core.signal_math import (
         _assert_noise_levels_length,
@@ -541,9 +495,7 @@ def test_clusterless_noise_levels_length_guard():
     for bad in ([1.0, 2.0], [1.0, 2.0, 3.0], [1.0] * 5):
         with pytest.raises(ValueError, match="length 1.*or.*n_channels=4"):
             _assert_noise_levels_length(bad, n_channels)
-    # Raw update1 / legacy-row bypasses can carry non-list shapes. Reject them
-    # here with the curated message rather than letting len()/np.asarray()
-    # produce misleading behavior downstream.
+    # Rows written by update1 or legacy code can carry non-list shapes.
     for bad in (1.0, "1234", b"1234"):
         with pytest.raises(ValueError, match="numeric sequence"):
             _assert_noise_levels_length(bad, n_channels)
@@ -551,15 +503,7 @@ def test_clusterless_noise_levels_length_guard():
 
 def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
     """The shipped ``clusterless_thresholder`` / ``default`` row has
-    ``noise_levels=[1.0]`` baked into ``params``.
-
-    Guards the noise_levels unit semantics: a refactor that silently drops ``{"noise_levels": [1.0]}``
-    from ``SorterParameters._DEFAULT_CONTENTS`` would let the v2
-    production default fall back to MAD-multiplier semantics, so
-    a user setting ``detect_threshold=100`` would silently get
-    ~100xMAD on noisy channels (a ~5x detection shift) instead of
-    the 100 uV raw-amplitude threshold the v1 ``default_clusterless``
-    row ships.
+    ``noise_levels=[1.0]`` in ``params``, so its threshold is in uV as in v1.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -602,13 +546,8 @@ def test_generic_schema_accepts_arbitrary_kwargs():
 def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
     """The strict dedicated schemas catch misspelled field names.
 
-    This is the value-add over the generic ``extra='allow'`` fallback:
-    typos like ``detect_signe`` (extra 'e') silently pass on the generic
-    schema but raise on MS4/MS5/Clusterless. SC2, TDC2 and Kilosort4
-    use ``extra='allow'`` (KS4 by design, to mirror v1's escape
-    hatch at ``v1/sorting.py:184-189`` that lets users pass any
-    SI-recognized kwarg through without an upstream schema PR), so
-    their typos still pass here -- documented in the module docstring.
+    Typos like ``detect_signe`` raise on MS4/MS5/Clusterless. SC2, TDC2 and
+    KS4 use ``extra='allow'``, so their typos pass.
     """
     with pytest.raises(ValidationError):
         schema_cls.model_validate({typo_field: 1})
@@ -617,10 +556,8 @@ def test_dedicated_sorter_schemas_reject_typos(schema_cls, typo_field):
 def test_kilosort4_schema_accepts_extra_kwargs():
     """KS4 schema accepts undocumented SI kwargs.
 
-    Mirrors v1's escape hatch: a user wanting to set ``batch_size``
-    or ``nearest_chans`` on KS4 should not need a Spyglass PR to
-    add the field to the schema. ``extra='allow'`` lets the field
-    pass through to SI's KS4 runtime, which validates at sort time.
+    As in v1, ``extra='allow'`` passes fields like ``batch_size`` through to
+    SI, which validates them at sort time.
     """
     blob = Kilosort4Schema.model_validate(
         {"Th_universal": 9.0, "batch_size": 60000, "nearest_chans": 10}
@@ -634,11 +571,8 @@ def test_kilosort4_schema_accepts_extra_kwargs():
 def test_kilosort4_schema_rejects_whiten(bad):
     """A ``whiten`` key on a KS4 row is rejected at validation.
 
-    KS4 has no ``whiten`` kwarg -- it whitens internally -- and the
-    dispatcher's external whitening is MountainSort-only, so a ``whiten`` key
-    (which ``extra="allow"`` would otherwise accept) would reach the SI
-    wrapper and fail there at sort time. The schema rejects it up front. Any
-    value (even ``False``) is rejected, since KS4 has no such parameter.
+    KS4 whitens internally and has no ``whiten`` kwarg, so any value (even
+    ``False``) is rejected despite ``extra="allow"``.
     """
     with pytest.raises(ValidationError, match="whiten"):
         Kilosort4Schema.model_validate({"whiten": bad})
@@ -673,10 +607,9 @@ def test_ironclust_accepts_whiten():
 def test_quality_metric_schema_defaults_template_columns():
     """A row that omits ``template_metric_columns`` gets ``trough_half_width``.
 
-    The shipped default surfaces the single trough-local ``trough_half_width``
-    (an SI OUTPUT column name) for downstream cell typing. The post-trough
-    columns (``peak_to_trough_duration``, slopes) are NOT defaults -- they clip
-    on the narrow hippocampus display window -- so they stay opt-in.
+    ``trough_half_width`` is an SI output column, used for cell typing.
+    Post-trough columns (``peak_to_trough_duration``, slopes) clip on the
+    narrow hippocampus window, so they are opt-in.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         DEFAULT_TEMPLATE_METRIC_COLUMNS,
@@ -695,9 +628,8 @@ def test_template_metric_columns_validated():
     """Unknown column raises; a metric *name* raises with the column hint; an
     empty list is accepted (a row that surfaces no shape columns).
 
-    The vocabulary is SI OUTPUT columns, not metric names -- the load-bearing
-    distinction of this feature. A typo, or a metric name (``half_width``)
-    passed where a column is expected, must fail at insert, not at populate.
+    The vocabulary is SI output columns, not metric names; a typo or a metric
+    name (``half_width``) fails at insert.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         QualityMetricParamsSchema,
@@ -734,12 +666,7 @@ def test_template_metric_columns_validated():
     [SpykingCircus2Schema, Tridesclous2Schema],
 )
 def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
-    """SC2 and TDC2 keep ``extra='allow'`` -- arbitrary kwargs pass.
-
-    Documented in the module docstring as deliberate; SI validates these
-    at sort time. This test pins the behavior so a future tighten-up has
-    to actively decide to change it.
-    """
+    """SC2 and TDC2 keep ``extra='allow'``; SI validates kwargs at sort time."""
     blob = schema_cls.model_validate(
         {"random_sc2_kwarg": 99, "another": True}
     ).model_dump()
@@ -767,9 +694,7 @@ def test_uncurated_sorter_schemas_accept_arbitrary_kwargs(schema_cls):
 def test_schema_version_present_and_positive(schema_cls):
     """Every v2 Pydantic schema carries a positive ``schema_version`` int.
 
-    Every params schema must carry this field so the Lookup row can store
-    the schema generation number alongside the blob; a model-breaking
-    change bumps the version. The exact value differs per schema.
+    The Lookup row stores it alongside the blob; a breaking change bumps it.
     """
     blob = schema_cls().model_dump()
     assert isinstance(blob["schema_version"], int)
@@ -884,8 +809,8 @@ def test_reference_fields_validation():
 
     The ``reference_mode`` varchar is typo-guarded against the
     ``ReferenceMode`` Literal, and ``reference_electrode_id`` is non-null
-    iff the mode is ``"specific"``. (Validates the helper directly; the
-    same helper runs inside ``SortGroupV2.insert1`` / ``insert``.)
+    iff the mode is ``"specific"``. ``SortGroupV2.insert1`` / ``insert`` call
+    this helper.
     """
     from spyglass.spikesorting.v2._core.reference_resolution import (
         _validate_reference_fields,
@@ -933,9 +858,7 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
 
     Each shipped ``SorterParameters`` / ``PreprocessingParameters`` row's
     ``params_schema_version`` must equal the inner schema's
-    ``schema_version`` so ``_assert_schema_version_matches`` (run on every
-    insert1) stays green. Pins the version-bump bookkeeping for the
-    clusterless and preprocessing default rows.
+    ``schema_version``, or ``_assert_schema_version_matches`` rejects it.
     """
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
@@ -967,10 +890,8 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
 # ---------- bulk-insert validation -----------------------------------------
 
 # (module, class, valid_row_a, valid_row_b) for each param Lookup that
-# overrides ``insert``. The two valid rows differ only in their primary
-# key so a clean bulk insert lands two distinct rows. Table classes are
-# imported lazily inside the test because their modules evaluate
-# ``dj.schema(...)`` at import time (needs a DB connection).
+# overrides ``insert``; the two rows differ only in primary key. Imported
+# lazily because the modules declare ``dj.schema`` at import.
 _BULK_INSERT_CASES = [
     pytest.param(
         "spyglass.spikesorting.v2.sorting",
@@ -1028,16 +949,10 @@ _BULK_INSERT_CASES = [
 def test_param_lookup_bulk_insert_validates(
     dj_conn, module_path, cls_name, valid_a, valid_b
 ):
-    """Bulk ``insert`` validates every row, mirroring ``insert1``.
+    """Bulk ``insert`` validates every row, as ``insert1`` does.
 
-    Before this fix a ``Table.insert([{bad params}, ...])`` bypassed the
-    per-table Pydantic validation that ``insert1`` runs, so an invalid
-    ``params`` blob reached the DB unchecked. Each of the four param
-    Lookups now overrides ``insert`` to map the same ``_validate_params``
-    over the batch. Asserts: (1) a batch containing an invalid blob
-    raises the same ``ValidationError`` and lands NO row (validation runs
-    ahead of the single ``super().insert``); (2) a fully-valid batch
-    lands every row. Parametrized across all four Lookups.
+    A batch with one invalid blob raises and lands no row; a valid batch
+    lands every row.
     """
     import copy
     import importlib
@@ -1060,9 +975,7 @@ def test_param_lookup_bulk_insert_validates(
         "definitely_not_a_real_field": 1,
     }
 
-    # (1) A batch with one invalid row raises and commits nothing: the
-    #     override validates every row before the single super().insert,
-    #     so neither the valid sibling nor the invalid row should land.
+    # (1) One invalid row: raises and nothing lands.
     with pytest.raises(ValidationError):
         table.insert([valid_a, valid_b, invalid])
     assert not (table & restr(valid_a)), (
@@ -1076,10 +989,8 @@ def test_param_lookup_bulk_insert_validates(
         "super().insert (all-or-nothing)."
     )
 
-    # (2) A fully-valid batch lands every row. ``valid_a`` / ``valid_b`` are
-    #     intentionally identical content under two names (this test exercises
-    #     bulk *validation*, not the duplicate-content guard), so opt out of
-    #     the guard explicitly.
+    # (2) A valid batch lands every row. The rows share content, so opt out
+    #     of the duplicate-content guard.
     try:
         table.insert([valid_a, valid_b], allow_duplicate_params=True)
         assert len(table & restr(valid_a)) == 1
@@ -1130,10 +1041,8 @@ def test_quality_metric_params_default_skip_pc_true():
 def test_quality_metric_params_skip_pc_false_requires_pca_metric():
     """``skip_pc_metrics=False`` is meaningful only with a PCA metric.
 
-    Without one no whitened metric analyzer would be built, so the flag is a
-    contradiction (and recompute/orphan gating treats skip_pc_metrics=False as
-    an exact "metric analyzer exists" signal). The schema rejects it; adding a
-    PCA metric (e.g. nn_advanced) makes it valid.
+    Recompute and orphan gating read skip_pc_metrics=False as "a metric
+    analyzer exists", which needs a PCA metric (e.g. nn_advanced).
     """
     with pytest.raises(ValidationError, match="no PCA metric"):
         QualityMetricParamsSchema(
@@ -1142,9 +1051,8 @@ def test_quality_metric_params_skip_pc_false_requires_pca_metric():
     assert not QualityMetricParamsSchema(
         metric_names=["snr", "nn_advanced"], skip_pc_metrics=False
     ).skip_pc_metrics
-    # Dual contradiction: skip_pc_metrics=True with PCA metric names would
-    # store metrics that are intentionally skipped. Reject any such row so
-    # metric_names remains the list of metrics this row actually computes.
+    # skip_pc_metrics=True with PCA metric names is rejected, so metric_names
+    # lists only metrics the row computes.
     with pytest.raises(ValidationError, match="would be skipped"):
         QualityMetricParamsSchema(
             metric_names=["nn_advanced"], skip_pc_metrics=True
@@ -1307,9 +1215,7 @@ _BASE_EXTENSIONS = frozenset(
 def test_required_extensions_drift_needs_spike_locations():
     """``drift`` pulls in ``spike_locations`` (read from SI, not hardcoded).
 
-    The default curation ensure-set omits ``spike_locations``; without deriving
-    it, SI's ``compute_quality_metrics`` silently skips ``drift``. The resolver
-    reports the dependency so the pipeline can compute it.
+    Otherwise SI's ``compute_quality_metrics`` silently skips ``drift``.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         required_extensions_for_metrics,
@@ -1335,10 +1241,9 @@ def test_required_extensions_present_dep_is_not_recomputed():
 def test_required_extensions_either_or_dep_satisfied_without_spurious_compute():
     """An ``a|b`` dependency is satisfied by either option already present.
 
-    ``amplitude_cutoff`` depends on ``spike_amplitudes|amplitude_scalings``. With
-    ``spike_amplitudes`` already ensured (the curation default) nothing extra is
-    needed -- in particular ``amplitude_scalings`` is NOT spuriously computed.
-    Without either present, the first option is requested.
+    ``amplitude_cutoff`` needs ``spike_amplitudes|amplitude_scalings``. With
+    ``spike_amplitudes`` present nothing is added; with neither, the first
+    option is requested.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         required_extensions_for_metrics,

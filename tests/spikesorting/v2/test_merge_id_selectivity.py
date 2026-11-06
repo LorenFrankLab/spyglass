@@ -1,37 +1,9 @@
-"""Read-side correct-key selection when MORE THAN ONE merge_id exists.
+"""``SpikeSortingOutput`` accessors select the requested merge_id among two.
 
-The rest of the v2 suite proves insert-side integrity (duplicate detection,
-distinct-identity minting) thoroughly, but every *consumer* accessor on
-``SpikeSortingOutput`` -- ``get_recording``, ``get_sort_group_info``,
-``get_spike_times``, ``get_spike_indicator``, ``get_firing_rate``,
-``get_unit_brain_regions``, and ``get_restricted_merge_ids`` -- is
-otherwise exercised only with a SINGLE merge_id in the merge table. With one row
-a broken restriction is indistinguishable from a correct one: a dispatch that
-forgot its ``& merge_get_part(key)`` filter would return "the only row" and pass
-anyway.
-
-These tests populate TWO genuinely distinguishable v2 merge_ids and assert
-each accessor returns the data for the *requested* merge_id and not the
-other. The two sorts are built on two different sort groups (different
-electrode sets) and given deterministic, disjoint planted unit sets via a
-planted sorter (``plant_sorter``, the same plant pattern as
-``test_boundary_spike_round_trip_does_not_raise``), so:
-
-* electrode-keyed accessors (``get_recording``, ``get_sort_group_info``)
-  discriminate by electrode membership (shank 0 vs shank 1), and
-* unit-keyed accessors (``get_spike_times`` / ``get_spike_indicator`` /
-  ``get_firing_rate`` / ``get_unit_brain_regions``) discriminate by unit
-  count (2 vs 3) and disjoint spike-time range.
-
-Each test first establishes a *selectivity baseline* -- an unrestricted or
-cross query that sees BOTH merge_ids -- before asserting the restricted
-query isolates one. That proves the filter discriminates rather than
-trivially matching one-of-one (the pattern from
-``test_merge_id_artifact_resolution.py``).
-
-Self-contained: ingests the smoke fixture under a UNIQUE session name so
-its cleanup never cascades into the package-scoped ``populated_sorting``
-rows other modules depend on.
+With one merge_id a missing ``merge_get_part`` restriction passes unnoticed.
+Two planted sorts on different sort groups differ in electrodes (shank 0 vs
+1), unit count (2 vs 3) and spike-time range. Uses a unique session name so
+cleanup never touches the shared ``populated_sorting`` rows.
 """
 
 from __future__ import annotations
@@ -49,10 +21,7 @@ _FIXTURE_PATH = (
 )
 _SESSION_NWB = "mearec_multientry.nwb"
 
-# Deterministic planted spike frames (well within the ~3 s / ~90k-sample
-# smoke recording). Group-A frames are all < 6000; group-B frames are all
-# >= 40000, so the absolute spike-time ranges are disjoint and a wrong-key
-# read is caught by both unit count AND time range.
+# Group A frames < 6000, group B frames >= 40000: disjoint time ranges.
 _A_UNIT_FRAMES = {
     0: [500, 1500, 2500, 3500, 4500, 5500],
     1: [800, 1800, 2800, 3800, 4800, 5800],
@@ -65,13 +34,7 @@ _B_UNIT_FRAMES = {
 
 
 def _make_plant(unit_frames: dict[int, list[int]]):
-    """Build a ``plant_sorter`` stand-in that returns a fixed NumpySorting.
-
-    The stand-in replaces the sorter step of ``Sorting.make_compute``
-    for every sorter (clusterless and SI alike), so it plants a
-    deterministic unit set independent of the real sorter and of the smoke
-    fixture's stochastic unit yield.
-    """
+    """Build a ``plant_sorter`` stand-in that returns a fixed NumpySorting."""
 
     def _plant(
         sorter,
@@ -105,8 +68,8 @@ def _make_plant(unit_frames: dict[int, list[int]]):
 
 
 def _build_sort_on_group(sort_group_id, plant, nwb_file_name):
-    """Populate Recording -> ArtifactDetection(none) -> Sorting(planted) ->
-    root CurationV2 on one sort group; return (sort_pk, merge_id, rec_pk)."""
+    """Populate Recording, ArtifactDetection (none), planted Sorting and root
+    CurationV2 on one sort group; return (sort_pk, merge_id, rec_pk)."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
@@ -171,9 +134,8 @@ def two_v2_merge_ids(dj_conn, smoke_nwb):
     Sort A: sort group 0, 2 planted units (early spikes).
     Sort B: sort group 1, 3 planted units (later, disjoint spikes).
 
-    Yields a context dict with both merge_ids, recording ids, planted unit
-    counts, and the per-group electrode sets. Cleans the unique session on
-    setup and teardown (the persistent test DB carries rows across runs).
+    Yields a dict with both merge_ids, recording ids, planted unit counts,
+    and per-group electrode sets. Cleans the session on setup and teardown.
     """
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
@@ -268,13 +230,8 @@ def two_v2_merge_ids(dj_conn, smoke_nwb):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_get_spike_times_selects_only_target_merge_id(two_v2_merge_ids):
-    """``get_spike_times({"merge_id": A})`` returns A's planted trains only.
-
-    With two merge_ids present, a dispatch that dropped its
-    ``merge_get_part`` restriction would return both sorts' units. Asserts
-    the unit count (2 vs 3) AND that the returned spike-time range matches
-    the requested merge_id's disjoint planted window.
-    """
+    """``get_spike_times({"merge_id": A})`` returns A's planted trains only,
+    by unit count and spike-time range."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_v2_merge_ids
@@ -343,7 +300,7 @@ def test_get_spike_indicator_and_firing_rate_match_target_units(
 @pytest.mark.integration
 def test_get_sort_group_info_returns_target_electrodes(two_v2_merge_ids):
     """``get_sort_group_info({"merge_id": A})`` returns sort group A's
-    electrodes, disjoint from B's (catches a recording/electrode mis-join)."""
+    electrodes, disjoint from B's."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_v2_merge_ids
@@ -368,8 +325,7 @@ def test_get_sort_group_info_returns_target_electrodes(two_v2_merge_ids):
 @pytest.mark.integration
 def test_get_recording_returns_target_recording(two_v2_merge_ids):
     """``get_recording({"merge_id": A})`` loads A's recording: 32 channels
-    whose ids are disjoint from B's (a dropped restriction would return one
-    recording for both keys)."""
+    whose ids are disjoint from B's."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_v2_merge_ids
@@ -422,9 +378,7 @@ def test_get_unit_brain_regions_selects_target_units(two_v2_merge_ids):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_get_unit_brain_regions_rejects_ambiguous_key(two_v2_merge_ids):
-    """An OR restriction matching BOTH merge_ids hits the ``len(part_rows)
-    != 1`` guard and raises -- the guard only does real work when >=2
-    merge_ids exist (with one row it passes vacuously)."""
+    """An OR restriction matching both merge_ids raises."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_v2_merge_ids
@@ -445,8 +399,7 @@ def test_get_unit_brain_regions_rejects_ambiguous_key(two_v2_merge_ids):
 @pytest.mark.integration
 def test_get_restricted_merge_ids_discriminates_by_recording(two_v2_merge_ids):
     """``get_restricted_merge_ids`` returns only the merge_id whose recording
-    matches the key. Selectivity baseline: each recording resolves to exactly
-    its own merge_id, and the two are distinct."""
+    matches the key."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     ctx = two_v2_merge_ids

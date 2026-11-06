@@ -1,51 +1,38 @@
 """June-2026 Frank Lab production parameter recipes (parity source of truth).
 
-Independent literal values for the June 2026 Frank Lab production recipes. The
-parity tests compare the SHIPPED parameter rows (the ``_DEFAULT_CONTENTS``
-blobs) against these constants. A constant is a hand-written literal, NOT
-re-derived from the same Pydantic factory that builds the shipped row --
-otherwise the parity check would be a tautology that cannot catch a
-schema-default drift.
+Hand-written literals compared against the shipped ``_DEFAULT_CONTENTS``
+rows; deriving them from the shipped Pydantic factory would make the parity
+check a tautology. v1's ``margin_ms`` / ``seed`` have no v2 field and are
+omitted.
 
-These encode the **v2-expressible** recipe. v1's production preproc blob also
-carried ``margin_ms`` / ``seed``; v2's ``PreprocessingParamsSchema`` has no
-such fields (it is the nested ``bandpass_filter`` / ``common_reference`` /
-``phase_shift`` structure), so those values have no v2 home and are
-intentionally omitted.
-
-Naming: ``franklab_<distinguisher>_<YYYY_MM>``. The ``2026_06`` suffix dates
-the recipe; a future change is a NEW dated row, never an in-place edit, so a
-derived selection id stays reproducible from a name.
+Naming: ``franklab_<distinguisher>_<YYYY_MM>``. A recipe change is a new
+dated row, never an in-place edit, so selection ids stay reproducible.
 """
 
 from __future__ import annotations
 
 # --- Dated row names ---------------------------------------------------------
 
-# Preprocessing: region high-pass. Filtering happens at the preproc stage
-# (the sorter runs ``filter=False``), so the region band lives HERE.
+# Preprocessing: region high-pass. The sorter runs ``filter=False``, so the
+# region band lives here.
 FRANKLAB_HIPPOCAMPUS_2026_06 = "franklab_hippocampus_2026_06"
 FRANKLAB_CORTEX_2026_06 = "franklab_cortex_2026_06"
 
-# Sorter (MountainSort4): rate-keyed. The sorter band is inert under
-# ``filter=False``, so the only rate-dependent knobs are ``clip_size`` /
-# ``detect_interval`` (they hold the ~1.33 ms physical window across rates).
-# The tetrode/probe/region distinction is in the preproc row + the preset,
-# never the sorter row.
+# Sorter (MountainSort4): keyed by rate only; ``clip_size`` /
+# ``detect_interval`` hold a ~1.33 ms window across rates.
 FRANKLAB_30KHZ_MS4_2026_06 = "franklab_30khz_ms4_2026_06"
 FRANKLAB_20KHZ_MS4_2026_06 = "franklab_20khz_ms4_2026_06"
 
-# Artifact detection. (v2's 500 uV / 1.0 schema default stays named "default" --
-# it is NOT a production recipe and ships unchanged, so no constant is needed.)
+# Artifact detection. The 500 uV / 1.0 schema default is "default", not a
+# production recipe.
 FRANKLAB_100UV_P07_2026_06 = "franklab_100uv_p07_2026_06"
 FRANKLAB_50UV_P07_2026_06 = "franklab_50uv_p07_2026_06"
 
 
 # --- Preprocessing params blobs ----------------------------------------------
 
-# Hippocampus: 600 Hz high-pass (hippocampal spikes are denser/narrower);
-# 6000 Hz low-pass; 1.5 ms (0.0015 s) min-segment (production keeps the short
-# interval slivers the shipped 1.0 s default drops); median common reference.
+# Hippocampus: 600-6000 Hz (narrower spikes); 1.5 ms min-segment keeps the
+# short slivers the 1.0 s default drops; median common reference.
 FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS = {
     "schema_version": 4,
     "phase_shift": None,
@@ -55,8 +42,7 @@ FRANKLAB_HIPPOCAMPUS_2026_06_PARAMS = {
     "bad_channel_handling": "remove",
 }
 
-# Cortex: identical recipe with the 300 Hz high-pass (cortical waveforms are
-# wider).
+# Cortex: same recipe with a 300 Hz high-pass (wider waveforms).
 FRANKLAB_CORTEX_2026_06_PARAMS = {
     "schema_version": 4,
     "phase_shift": None,
@@ -69,9 +55,7 @@ FRANKLAB_CORTEX_2026_06_PARAMS = {
 
 # --- Artifact detection params blobs -----------------------------------------
 
-# Production artifact: 100 uV amplitude threshold, 0.7 proportion-above, 1.0 ms
-# removal window. (join_window_ms / min_length_s are not part of the
-# production recipe; the schema defaults of 1.0 / 1.0 are used.)
+# join_window_ms / min_length_s are not in the recipe; schema defaults apply.
 FRANKLAB_100UV_P07_2026_06_PARAMS = {
     "schema_version": 2,
     "detect": True,
@@ -98,13 +82,8 @@ FRANKLAB_50UV_P07_2026_06_PARAMS = {
 
 # --- Sorter (MountainSort4) params blobs -------------------------------------
 
-# Shared MS4 core: detect_sign=-1 (conservative downward-going), adjacency
-# radius 100 um, filter=False (the preproc stage already bandpassed; the
-# sorter must not double-filter), whiten=True (run externally once),
-# detect_threshold=3 (sigma of the ZCA-whitened signal, NOT absolute voltage
-# and NOT a MAD multiplier), num_workers=1. ``freq_min``/``freq_max`` are
-# INERT here (the sorter does not filter) and stay at the schema defaults.
-# 30 kHz window: clip_size=40, detect_interval=10.
+# filter=False: preproc already bandpassed, so freq_min/freq_max are inert.
+# detect_threshold is in sigma of the whitened signal, not uV or MAD.
 FRANKLAB_30KHZ_MS4_2026_06_PARAMS = {
     "schema_version": 1,
     "detect_sign": -1,
@@ -119,8 +98,7 @@ FRANKLAB_30KHZ_MS4_2026_06_PARAMS = {
     "detect_interval": 10,
 }
 
-# 20 kHz window: clip_size=27, detect_interval=7 hold the same ~1.33 ms
-# physical clip across the lower rate; everything else matches the 30 kHz row.
+# Matches the 30 kHz row except the rate-scaled clip_size / detect_interval.
 FRANKLAB_20KHZ_MS4_2026_06_PARAMS = {
     "schema_version": 1,
     "detect_sign": -1,

@@ -1,16 +1,7 @@
-"""DB inputs for a ``Recording`` populate.
+"""DB inputs for a ``Recording`` populate (``Recording.make_fetch``).
 
-:func:`fetch_recording_inputs` is the body of ``Recording.make_fetch``. It
-reads the selection row, the sort group's electrodes and reference, the sort
-and raw-data intervals, the raw source's object id, the validated
-preprocessing parameters, the per-channel probe metadata and, for the
-``interpolate`` path, the interior bad channels. It then checks that these
-inputs still hash to the selection's ``recording_input_hash``. DataJoint calls
-``make_fetch`` twice per populate and compares the two results, so every value
-is returned in a deterministic form.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-function.
+DataJoint calls ``make_fetch`` twice and compares the results, so every value
+is deterministic. DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -69,10 +60,8 @@ def resolve_recording_inputs(
 ) -> ResolvedRecordingInputs:
     """Read a recording's live construction inputs and hash them.
 
-    The single read path behind both ``resolve_recording_input_hash`` (which
-    mints ``recording_id`` at selection time) and :func:`fetch_recording_inputs`
-    (which re-checks it at populate time), so the two cannot drift into a
-    false ``RecordingInputDriftError``.
+    The single read path for selection and populate, so the two cannot
+    disagree.
 
     Parameters
     ----------
@@ -110,16 +99,13 @@ def resolve_recording_inputs(
     reference_electrode_id = (
         None if reference_electrode_id is None else int(reference_electrode_id)
     )
-    # The validated model is DeepHash-stable across DataJoint's two
-    # ``make_fetch`` calls (its ``__dict__`` is primitives).
+    # DeepHash-stable: its __dict__ is primitives.
     preprocessing_params = PreprocessingParamsSchema.model_validate(
         (
             PreprocessingParameters
             & {"preprocessing_params_name": preprocessing_params_name}
         ).fetch1("params")
     )
-    # Interior curated-bad channels the ``interpolate`` path re-includes and
-    # fills; empty for ``remove``.
     bad_channel_ids: tuple = ()
     if preprocessing_params.bad_channel_handling == "interpolate":
         bad_channel_ids = fetch_interior_bad_channel_ids(
@@ -180,9 +166,7 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
             f"Recording.make: sort group {sort_group_id} for "
             f"{nwb_file_name!r} has zero electrodes."
         )
-    # SortGroupV2.insert enforces this, but a bypassing write (e.g. update1)
-    # could leave a reference_electrode_id that a non-"specific" mode would
-    # silently ignore.
+    # A bypassing write (e.g. update1) can skip SortGroupV2.insert's check.
     _validate_reference_fields(
         {
             "reference_mode": resolved.reference_mode,
@@ -212,8 +196,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     probe_types, electrode_group_names = fetch_sort_group_probe_info(
         nwb_file_name, channel_ids
     )
-    # A changed membership, reference, or bad-channel set since
-    # insert_selection would build content that does not match recording_id.
     stored_input_hash = sel["recording_input_hash"]
     live_input_hash = resolved.input_hash
     if live_input_hash != stored_input_hash:

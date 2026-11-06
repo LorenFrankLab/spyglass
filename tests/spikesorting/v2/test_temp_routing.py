@@ -1,11 +1,6 @@
 """Scratch temp dirs honor the configured ``spyglass.settings.temp_dir``.
 
-The UnitMatch bundle scratch and the analyzer-recompute scratch must be created
-under the configured temp dir (shared storage on a cluster), not the system
-``/tmp``. These tests drive each compute helper with its expensive work mocked
-out, intercepting ``tempfile`` to capture the ``dir=`` argument the site passes.
-Importing the schema modules needs a live connection (``dj_conn``), but the
-bodies do no DB I/O.
+Each site is checked by intercepting ``tempfile`` and capturing ``dir=``.
 """
 
 from __future__ import annotations
@@ -45,8 +40,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(
         tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured_um)
     )
-    # Reach the temp site after the cheap pure preamble: an empty input plan
-    # is enough (the loop body never runs -- the recorder aborts first).
+    # An empty input plan reaches the temp site.
     with pytest.raises(_StopAfterTempDir):
         extract_and_match(
             input_plan=[],
@@ -67,8 +61,7 @@ def test_unitmatch_and_recompute_use_configured_temp(monkeypatch, tmp_path):
     monkeypatch.setattr(
         tempfile, "TemporaryDirectory", _capture_dir_then_stop(captured_rc)
     )
-    # Mock the pre-temp work (stored-analyzer load, hash, recording + sorting
-    # reads) so the function reaches the temp-dir site cheaply.
+    # Mock the work before the temp-dir site.
     monkeypatch.setattr(
         sa, "load_analyzer_folder_no_rebuild", lambda *a, **k: object()
     )

@@ -1,27 +1,12 @@
 """DB-free NWB provenance scratch (de)serialization for the v2 writers.
 
-The v2 NWB writers persist *results* (traces, spikes, pairs, metrics); this
-helper writes the *provenance* that makes each artifact self-describing into
-NWB scratch space, under stable container names retrieved BY NAME (never by
-object id, so no new DataJoint columns are needed to find them). Two shapes:
+Provenance lives in NWB scratch under stable names, read by name so no
+DataJoint column is needed to find it. Every container carries
+``provenance_schema_version``.
 
-- a scalar bundle (``build_provenance_table``): a two-column ``key`` /
-  ``value_json`` ``DynamicTable``, one row per field, every value JSON-encoded.
-  JSON sidesteps HDF5's inability to store a dict / list / ``None`` in a typed
-  cell, so nested params and nullable fields round-trip uniformly.
-- a typed long table (``build_long_provenance_table``): one row per member /
-  pair / boundary with concrete string / int / float / bool columns (concrete
-  dtypes so even a zero-row table writes).
-
-Builders return a ``DynamicTable``; the caller embeds it with
-``nwbfile.add_scratch(...)`` (directly, or via a writer's ``provenance_tables``
-loop).
-
-Every container carries ``provenance_schema_version`` so a future reader can
-tell which provenance layout produced the file.
-
-This module touches no DataJoint connection: the builders are pure and the read
-functions take an absolute file path the ``@schema`` table layer resolves.
+- ``build_provenance_table``: ``key`` / ``value_json`` rows. JSON stores the
+  dicts, lists and ``None`` that typed HDF5 cells cannot.
+- ``build_long_provenance_table``: one typed row per item.
 """
 
 from __future__ import annotations
@@ -40,7 +25,7 @@ from spyglass.spikesorting.v2._core.runtime import validate_runtime_provenance
 #: Bumped when the provenance container layout changes.
 PROVENANCE_SCHEMA_VERSION = 1
 
-#: Stable scratch container names (retrieved by name, not by object id).
+#: Stable scratch container names.
 RECORDING_PROVENANCE = "spyglass_v2_recording_provenance"
 SORTING_PROVENANCE = "spyglass_v2_sorting_provenance"
 UNITMATCH_PROVENANCE = "spyglass_v2_unitmatch_provenance"
@@ -70,10 +55,8 @@ CONCAT_MEMBER_COLUMNS = [
 ]
 
 #: Columns of ``UNITMATCH_INPUTS``: one row per matching input in
-#: ``input_index`` (chronological) order, naming its pinned curation
-#: generation, its sort source, its earliest session start (UTC ISO 8601) and
-#: the traces its matcher waveforms were read from (``motion_corrected_recording_id``
-#: is empty when the input was not motion corrected).
+#: chronological ``input_index`` order. Session start is UTC ISO 8601;
+#: ``motion_corrected_recording_id`` is empty for uncorrected inputs.
 UNITMATCH_INPUT_COLUMNS = [
     ("input_index", int),
     ("sorting_id", str),
@@ -291,10 +274,7 @@ def validate_curation_header(values: Mapping) -> None:
 def _json_default(value):
     """JSON encoder fallback for DataJoint-deserialized value types.
 
-    Provenance bundles re-emit values fetched from DataJoint (metric kwargs,
-    rule thresholds, hash manifests, row ids), which deserialize as numpy
-    scalars / arrays and ``uuid.UUID``; ``json.dumps`` cannot encode those
-    natively. UUIDs are stored in their canonical string form.
+    Encodes numpy scalars and arrays, and ``uuid.UUID`` as its string.
     """
     if isinstance(value, np.integer):
         return int(value)
@@ -331,8 +311,7 @@ def concrete_vectordata(
 ) -> VectorData:
     """Build a ``VectorData`` column with a concrete numpy dtype.
 
-    Passing a concrete-dtype array (rather than a Python list) lets hdmf write
-    even an empty column -- an empty Python list raises "Cannot infer dtype".
+    hdmf cannot infer the dtype of an empty Python list.
 
     Parameters
     ----------
@@ -359,9 +338,7 @@ def concrete_vectordata(
 def build_provenance_table(name: str, values: dict) -> DynamicTable:
     """Build a ``key`` / ``value_json`` scalar-provenance table.
 
-    Each entry in ``values`` becomes one row whose ``value_json`` is the
-    JSON-encoded value (so dicts / lists / ``None`` survive HDF5). A
-    ``provenance_schema_version`` row is always appended.
+    One row per entry, plus ``provenance_schema_version``.
     """
     payload = dict(values)
     payload[_SCHEMA_VERSION_FIELD] = PROVENANCE_SCHEMA_VERSION
@@ -398,10 +375,9 @@ def build_long_provenance_table(
 ) -> DynamicTable:
     """Build a typed long provenance table (one row per item).
 
-    ``columns`` is an ordered list of ``(column_name, python_type)`` where the
-    python type is one of ``str`` / ``int`` / ``float`` / ``bool``. A constant
-    ``provenance_schema_version`` int column is appended. Concrete dtypes mean a
-    zero-row ``rows`` still writes a valid (empty) table.
+    ``columns`` is an ordered list of ``(column_name, python_type)`` with
+    type ``str`` / ``int`` / ``float`` / ``bool``. A
+    ``provenance_schema_version`` column is appended.
     """
     col_specs = list(columns) + [(_SCHEMA_VERSION_FIELD, int)]
     data: dict[str, list] = {col: [] for col, _ in col_specs}

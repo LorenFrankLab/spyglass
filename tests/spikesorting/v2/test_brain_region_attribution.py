@@ -1,21 +1,7 @@
-"""Per-unit brain-region attribution coverage for CurationV2.
+"""``CurationV2.get_unit_brain_regions``.
 
-Two behavioral surfaces of ``CurationV2.get_unit_brain_regions`` that
-the pipeline suite does not cover:
-
-- **Multi-region attribution**: a sort group whose electrodes span more
-  than one ``BrainRegion`` must report the correct region *per unit_id*
-  (v1 under-reports the regions of a multi-region sort group).
-  The existing merge-table registration test would pass even if every
-  region were wrong, because it checks row counts, not the region a unit
-  actually maps to.
-- **``include_labels`` filter**: restricting to units carrying a given
-  curation label must exercise the ``UnitLabel``-join branch and return
-  only the matching units.
-
-Both build a root curation on the shared package-scoped
-``populated_sorting`` fixture (conftest) and clear any prior curation
-first so they are order-independent.
+- A multi-region sort group reports the correct region per unit_id.
+- ``include_labels`` returns only units carrying a matching label.
 """
 
 from __future__ import annotations
@@ -77,17 +63,11 @@ def _sort_group_electrodes(sorting_key):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_multi_region_unit_attribution(populated_sorting):
-    """A unit on a multi-region sort group reports the region of ITS OWN
-    peak electrode -- correct per unit_id, not just the right row count.
+    """Each unit on a multi-region sort group reports its own peak
+    electrode's region.
 
-    Mutates the ingested ``common.Electrode`` -> ``BrainRegion`` mapping
-    so the sort group's channels span two regions (each unit's peak
-    electrode in one, the remaining channels in another), then asserts
-    ``get_unit_brain_regions`` returns each unit's TRUE region rather
-    than an arbitrary region of the multi-region sort group (as v1
-    under-reports). Restores the original ``region_id`` values in
-    teardown (the fixture is shared package-scoped state). No recording
-    numerics change.
+    Temporarily remaps the shared fixture's ``common.Electrode`` regions so
+    the sort group spans two regions; restores them in teardown.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
@@ -128,14 +108,9 @@ def test_multi_region_unit_attribution(populated_sorting):
         key = (epk["electrode_group_name"], epk["electrode_id"])
         snapshot[key] = int((Electrode & epk).fetch1("region_id"))
 
-    # Spread the distinct peak electrodes ALTERNATELY across the two
-    # regions (and put every non-peak channel in region A). This makes
-    # the sort group genuinely multi-region AND, when more than one unit
-    # has a distinct peak, gives different units different expected
-    # regions -- so the assertion discriminates per-unit attribution,
-    # not just "single region vs correct region". With a single-unit
-    # sort the unit's peak lands in B and the distractor channels in A,
-    # so a buggy single-region fetch returning A would still be caught.
+    # Alternate distinct peak electrodes across the two regions and put
+    # non-peak channels in A, so different units expect different regions.
+    # A single unit's peak lands in B, so a fetch returning A still fails.
     distinct_peaks = sorted(set(unit_peak.values()))
     peak_region = {
         pk: (region_b if i % 2 == 0 else region_a)
@@ -153,8 +128,7 @@ def test_multi_region_unit_attribution(populated_sorting):
             key = (epk["electrode_group_name"], epk["electrode_id"])
             Electrode.update1({**epk, "region_id": assign[key]})
 
-        # Verify the precondition: the sort group genuinely spans two
-        # regions after the mutation.
+        # Precondition: the sort group spans two regions.
         sg_regions = {
             (Electrode * BrainRegion & epk).fetch1("region_name")
             for epk in sg_elec_pks
@@ -175,7 +149,7 @@ def test_multi_region_unit_attribution(populated_sorting):
             int(u): region
             for u, region in zip(df["unit_id"], df["region_name"])
         }
-        # Load-bearing assertion: the correct region for EACH unit_id.
+        # The correct region for each unit_id.
         assert got == expected, (
             f"per-unit region attribution wrong: got {got}, expected "
             f"{expected}."
@@ -207,8 +181,7 @@ def test_get_unit_brain_regions_include_labels(populated_sorting):
         labels={labeled_unit: ["mua"]},
     )
 
-    # The filter returns ONLY the mua-labeled unit (the UnitLabel-join
-    # branch restricts to label-carrying units).
+    # Only the mua-labeled unit is returned.
     filtered = CurationV2().get_unit_brain_regions(pk, include_labels=["mua"])
     assert {int(u) for u in filtered["unit_id"]} == {labeled_unit}
 
@@ -219,8 +192,7 @@ def test_get_unit_brain_regions_include_labels(populated_sorting):
     if len(unit_ids) > 1:
         assert {int(u) for u in filtered["unit_id"]} < set(unit_ids)
 
-    # A label no unit carries returns an empty frame (with full columns) --
-    # confirms the filter genuinely selects on the label, not a constant.
+    # A label no unit carries returns an empty frame with full columns.
     none_match = CurationV2().get_unit_brain_regions(
         pk, include_labels=["noise"]
     )
@@ -231,11 +203,8 @@ def test_get_unit_brain_regions_include_labels(populated_sorting):
 def test_get_unit_brain_regions_empty_include_labels_returns_all(
     populated_sorting,
 ):
-    """An EMPTY ``include_labels`` is treated as no filter (all units), not as
-    "match nothing". A bare ``is not None`` check would build ``& []`` (an
-    empty DataJoint OrList) and silently return zero units; the guard must
-    distinguish ``None``/``[]`` (no filter) from a non-empty label set,
-    as the unit-selection policies do."""
+    """An empty ``include_labels`` means no filter (all units), not "match
+    nothing" (``& []`` would return zero units)."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -263,11 +232,9 @@ def test_get_unit_brain_regions_empty_include_labels_returns_all(
 def region_60s_sort(dj_conn):
     """Sort shank 0 of the 60s polymer fixture and yield its sorting PK.
 
-    Unlike the package-scoped smoke ``populated_sorting`` (which can yield a
-    single unit), the 60s shank reliably produces several units with distinct
-    peak electrodes, so the multi-region per-unit attribution below genuinely
-    discriminates rather than collapsing to a one-unit case. Ingested under a
-    unique session name and cleaned on teardown.
+    The 60s shank yields several units with distinct peak electrodes (the
+    smoke fixture can yield one). Ingested under a unique session name and
+    cleaned on teardown.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -338,22 +305,13 @@ def region_60s_sort(dj_conn):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
-    """Per-unit multi-region attribution on a reliably-multi-unit sort,
-    asserted through BOTH ``CurationV2.get_unit_brain_regions`` and the
-    merge-level ``SpikeSortingOutput.get_unit_brain_regions`` dispatcher.
+    """Per-unit multi-region attribution on a multi-unit sort, through both
+    ``CurationV2.get_unit_brain_regions`` and the merge-level
+    ``SpikeSortingOutput.get_unit_brain_regions``.
 
-    Hardens the smoke-fixture ``test_multi_region_unit_attribution`` in two
-    ways: (1) it self-guards on >=2 units with distinct peak electrodes AND
-    >=2 distinct expected regions, so the per-unit
-    discrimination is genuine rather than collapsing to a single-unit case;
-    (2) it exercises the merge dispatcher (the consumer-facing path), which
-    the smoke test bypasses by calling ``CurationV2`` directly.
-
-    Note: a stronger *physical* oracle (matching each sorted unit to its
-    MEArec ground-truth soma and asserting the peak electrode is the
-    soma-nearest contact) was investigated and NOT adopted -- on this polymer
-    geometry the peak channel is the soma-nearest electrode only ~50% of the
-    time (top-3), so such an assertion would be flaky.
+    Requires >= 2 units with distinct peak electrodes and >= 2 expected
+    regions. Not checked against MEArec soma positions: on this geometry the
+    peak channel is the soma-nearest contact only ~50% of the time.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
@@ -423,7 +381,7 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
         expected = {
             uid: name_by_id[assign[peak]] for uid, peak in unit_peak.items()
         }
-        # The whole point: units genuinely map to >1 region.
+        # Units map to more than one region.
         assert len(set(expected.values())) >= 2, (
             "alternating assignment should yield >=2 distinct per-unit "
             f"regions; got {set(expected.values())}"
@@ -442,8 +400,7 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
             got2 == expected
         ), f"merge-dispatch path: got {got2}, want {expected}"
     finally:
-        # Restore every electrode even if one update raises, so a teardown
-        # hiccup can't strand the shared common.Electrode mid-mutation.
+        # Restore every electrode even if one update raises.
         restore_errors = []
         for epk in sg_elec_pks:
             try:

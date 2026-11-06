@@ -1,21 +1,7 @@
 """Tests for bad_channel_handling (remove vs interpolate).
 
-Three tiers:
-
-- **Unit (no DB):** the pitch-anchored adjacency helpers (`_shank_pitch`,
-  `_interior_bad_channel_ids`) -- geometry math only.
-- **Stub (no DB, monkeypatched SI):** the preprocessing stack runs the
-  handling step between filter and reference, `remove` is a no-op, the reference
-  is never interpolated, and missing channel locations raise clearly.
-- **Integration (DB / DB+SI):** `make_fetch` re-includes only the group's
-  pitch-adjacent interior curated-bad channels; `interpolate` materializes a
-  complete probe while `remove` omits the flagged channel; the flag-before-create
-  ordering contract and a bad-marked reference are pinned. Every test that mutates
-  `Electrode` restores it on teardown.
-
-Geometry uses the probe-relative `Probe.Electrode.rel_x/rel_y/rel_z` (the same
-coordinate system SpikeInterface reads), NOT the absolute `Electrode.x/y/z`
-(which are unset/zero for the fixture and for typical data).
+Geometry uses probe-relative `Probe.Electrode.rel_x/rel_y/rel_z`, as
+SpikeInterface does; absolute `Electrode.x/y/z` is usually unset.
 """
 
 from __future__ import annotations
@@ -34,8 +20,8 @@ from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 
 
 def test_shank_pitch_is_full_shank_spacing():
-    """`_shank_pitch` is the dense nominal spacing over ALL shank electrodes,
-    independent of how few a sort group keeps; NaN -> None; < 2 -> None."""
+    """`_shank_pitch` is the median nearest-neighbor spacing of the given
+    electrodes; NaN or fewer than 2 electrodes give None."""
     import numpy as np
 
     from spyglass.spikesorting.v2._recording.geometry import _shank_pitch
@@ -43,17 +29,13 @@ def test_shank_pitch_is_full_shank_spacing():
     # A dense 10-um linear shank.
     shank = np.array([[0, k * 10.0, 0] for k in range(8)], dtype=float)
     assert _shank_pitch(shank) == 10.0
-    # Subsetting to two far-apart electrodes must NOT change the (full-shank)
-    # pitch -- callers pass the whole shank precisely so this can't happen, but
-    # the helper's value is the median NN over whatever it is given.
-    assert _shank_pitch(shank[[0, 7]]) == 70.0  # (demonstrates why full-shank)
-    # Guards.
+    # A subset gives a larger pitch, so callers pass the whole shank.
+    assert _shank_pitch(shank[[0, 7]]) == 70.0
     nan_shank = shank.copy()
     nan_shank[3, 1] = np.nan
     assert _shank_pitch(nan_shank) is None
     assert _shank_pitch(shank[:1]) is None
-    # Degenerate geometry: coincident contacts -> 0 median -> None (so the
-    # caller raises rather than the falsy-0 path silently re-including nothing).
+    # Coincident contacts give None so the caller raises.
     assert _shank_pitch(np.zeros((4, 3), dtype=float)) is None
 
 
@@ -67,10 +49,8 @@ def test_interior_bad_channel_ids_pitch_anchored():
         _interior_bad_channel_ids,
     )
 
-    # Degenerate case: exactly two good channels 100 um apart, full-shank
-    # pitch 10 um. The midpoint bad (50 um from each) is many pitches from any
-    # good channel -> dropped. A group-relative radius (1.5 * 100) would wrongly
-    # keep it.
+    # Two good channels 100 um apart, pitch 10 um: the midpoint bad is many
+    # pitches from both, so it is dropped.
     good_sparse = np.array([[0, 0, 0], [0, 100.0, 0]], dtype=float)
     midpoint = [(7, (0, 50.0, 0))]
     assert _interior_bad_channel_ids(good_sparse, midpoint, 10.0) == []
@@ -80,8 +60,7 @@ def test_interior_bad_channel_ids_pitch_anchored():
     embedded = [(5, (0, 20.0, 0))]  # within 15 of both [0,10] and [0,30]
     assert _interior_bad_channel_ids(good_dense, embedded, 10.0) == [5]
 
-    # Guards: pitch None / < 2 good -> []; a NaN candidate is skipped, never
-    # silently counted as adjacent.
+    # Pitch None or < 2 good -> []; a NaN candidate is skipped.
     assert _interior_bad_channel_ids(good_dense, embedded, None) == []
     assert _interior_bad_channel_ids(good_dense[:1], embedded, 10.0) == []
     nan_cand = [(9, (0, np.nan, 0))]
@@ -106,8 +85,7 @@ class _FakeRecording:
         return list(self._ids)
 
     def get_sampling_frequency(self):
-        # 30 kHz: well above 2x the default bandpass freq_max (6 kHz), so the
-        # Nyquist guard in apply_temporal_preprocessing is a no-op here.
+        # Above 2x the 6 kHz bandpass max, so the Nyquist guard is a no-op.
         return 30000.0
 
     def get_num_segments(self):
@@ -119,21 +97,19 @@ class _FakeRecording:
         return self
 
     def has_time_vector(self):
-        # These routing oracles use a continuous, uniformly sampled segment.
-        # The real acquisition-span gate must run before temporal operations.
+        # A continuous, uniformly sampled segment.
         return False
 
     def get_property(self, key):
         return None
 
     def has_channel_location(self):
-        # The predicate `apply_spatial_preprocessing` actually uses (SI's
-        # `get_channel_locations()` *raises* when no geometry, it never returns
-        # None -- so the guard checks `has_channel_location()`).
+        # SI's get_channel_locations() raises without geometry, so the guard
+        # checks this instead.
         return bool(self._locations)
 
     def get_channel_locations(self):
-        # Faithful to SI: raises (does not return None) when no geometry.
+        # Like SI, raises when there is no geometry.
         if not self._locations:
             raise Exception("There are no channel locations")
         return [[0.0, float(i)] for i in range(len(self._ids))]
@@ -149,11 +125,8 @@ class _FakeRecording:
         )
 
     def set_channel_offsets(self, offsets):
-        # SI 0.104.3: mutates IN PLACE and returns None. The write path zeroes
-        # per-channel offsets after referencing; a no-op here, and deliberately
-        # NOT recorded in ``calls`` -- the order assertions track the SI
-        # PROCESSING steps (filter/interpolate/reference), not this metadata
-        # write, so appending it would break the exact-sequence checks.
+        # SI mutates in place and returns None. Not recorded in ``calls``,
+        # which tracks only processing steps for the order assertions.
         return None
 
 
@@ -205,12 +178,10 @@ def _apply_preprocessing(
     bad_channel_handling="remove",
     bad_channel_ids=(),
 ):
-    """Compose the two preprocessing halves the way ``make_compute`` does.
+    """Compose the temporal and spatial preprocessing halves like ``make_compute``.
 
-    ``make_compute`` runs ``apply_temporal_preprocessing`` on the continuous
-    recording, restricts time, then runs ``apply_spatial_preprocessing``. The
-    time restriction between them cannot reorder SpikeInterface calls, so
-    composing them directly pins the same apply order these tests are about.
+    The time restriction between them cannot reorder SpikeInterface calls,
+    so it is skipped here.
     """
     from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
@@ -321,9 +292,8 @@ def test_invalid_bad_channel_handling_raises(monkeypatch):
 
 
 def test_filtering_description_interpolate_branch():
-    """`filtering_description` appends the interpolate clause only when N > 0
-    (so `remove` provenance/content_hash is unchanged), singular vs plural, and
-    positioned between bandpass and reference."""
+    """`filtering_description` adds the interpolate clause only when N > 0,
+    with correct plural, between bandpass and reference."""
     from spyglass.spikesorting.v2._recording.preprocessing import (
         filtering_description,
     )
@@ -499,7 +469,7 @@ def test_make_fetch_reincludes_only_interior_bad(handling_session):
             }
         )
         fetched = Recording().make_fetch(rec_pk)
-        # Only the embedded interior bad is re-included; the gap bad is not.
+        # Only the embedded bad is re-included.
         assert tuple(fetched.bad_channel_ids) == (embedded_bad,)
 
 
@@ -538,8 +508,8 @@ def test_make_fetch_remove_reincludes_nothing(handling_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_make_fetch_reincludes_interior_bad_per_shank(handling_session):
-    """A group spanning two shanks re-includes the interior bad on EACH shank
-    (the per-shank pitch/adjacency loop) and excludes a gap bad."""
+    """A two-shank group re-includes the interior bad on each shank and
+    excludes a gap bad."""
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
@@ -578,15 +548,14 @@ def test_make_fetch_reincludes_interior_bad_per_shank(handling_session):
             }
         )
         fetched = Recording().make_fetch(rec_pk)
-        # One interior bad from each shank; the gap bad excluded.
         assert tuple(fetched.bad_channel_ids) == (interior_s0, interior_s1)
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_interpolate_completes_probe_remove_omits(handling_session):
-    """``interpolate`` materializes the flagged interior channel back (count
-    complete); ``remove`` (default) omits it. The headline behavior."""
+    """``interpolate`` restores the flagged interior channel; ``remove``
+    (default) omits it."""
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
@@ -631,11 +600,7 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         assert n_remove == 31  # flagged channel stays excluded
         assert n_interp == 32  # flagged interior channel re-included + filled
 
-        # The re-included channel is genuinely present and filled (finite,
-        # non-zero) in the cached recording -- not a zeroed/broken stub. (The
-        # stub test proves `interpolate_bad_channels` is invoked between filter
-        # and reference; this confirms the end-to-end result is real.) `remove`
-        # omits it entirely.
+        # The re-included channel is present and filled (finite, non-zero).
         import numpy as np
         import spikeinterface.preprocessing as sip
 
@@ -650,10 +615,8 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         col = np.asarray(interp_rec.get_traces()[:, interp_ids.index(bad_eid)])
         assert np.all(np.isfinite(col)) and np.any(col != 0)
 
-        # A healthy fixture channel is merely marked bad: retaining its
-        # original traces would also be finite/nonzero. Compare with the raw
-        # channel filtered independently of the production compute/spatial
-        # stack, so losing the fetched bad-channel IDs cannot pass unnoticed.
+        # The fixture channel is healthy, so its original traces are also
+        # finite; compare with an independently filtered raw channel.
         fetched = Recording().make_fetch(interp_pk)
         assert fetched.reference_mode == "none"
         series_path, load_times = raw_eseries_path_and_timestamp_mode(
@@ -677,8 +640,7 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
         assert len(original_bad) == len(col)
         scale = max(1.0, float(np.max(np.abs(original_bad))))
         assert np.max(np.abs(col - original_bad)) > 1e-3 * scale
-        # Interpolation replaces only the requested bad contact; it must not
-        # manufacture the difference above by changing neighboring good ones.
+        # Neighboring good channels are unchanged.
         good_ids = [bad_eid - 1, bad_eid + 1]
         np.testing.assert_allclose(
             interp_rec.get_traces(channel_ids=good_ids, return_in_uV=True),
@@ -697,7 +659,7 @@ def test_interpolate_completes_probe_remove_omits(handling_session):
 @pytest.mark.integration
 def test_interpolate_without_geometry_raises(handling_session):
     """``interpolate`` on a group whose member lacks probe geometry raises the
-    clear "needs positions" error -- it does NOT silently re-include nothing."""
+    "needs positions" error."""
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -763,8 +725,8 @@ def test_interpolate_without_geometry_raises(handling_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_flag_before_create_then_remove_omits(handling_session):
-    """Flag, THEN create the group -> the channel is excluded at creation and
-    ``remove`` omits it (the documented ordering contract)."""
+    """A channel flagged before group creation is excluded and ``remove``
+    omits it."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb = handling_session["nwb_file_name"]
@@ -780,8 +742,8 @@ def test_flag_before_create_then_remove_omits(handling_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_stale_group_post_flag_stays_member(handling_session):
-    """Create the group FIRST, then flag a member -> it stays a member
-    (declared membership is authoritative; recreate to apply later flags)."""
+    """A member flagged after group creation stays a member (recreate the
+    group to apply later flags)."""
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     nwb = handling_session["nwb_file_name"]
@@ -799,15 +761,8 @@ def test_stale_group_post_flag_stays_member(handling_session):
 def test_remove_field_does_not_change_default_recording(
     handling_session, request
 ):
-    """A params blob with no ``bad_channel_handling`` key materializes to the
-    SAME traces as ``default`` (which carries
-    ``bad_channel_handling='remove'``), so a blob that omits the field yields
-    the default recording.
-
-    Compared by trace equality (the most direct check), as
-    ``single_session/test_recording.py``'s
-    ``test_phase_shift_field_does_not_change_default_recording`` does.
-    """
+    """A params blob without ``bad_channel_handling`` materializes the same
+    traces as ``default`` (``bad_channel_handling='remove'``)."""
     import numpy as np
 
     from spyglass.spikesorting.v2._params.preprocessing import (
@@ -842,9 +797,8 @@ def test_remove_field_does_not_change_default_recording(
 
         legacy_blob = PreprocessingParamsSchema().model_dump()
         legacy_blob.pop("bad_channel_handling")  # a blob without the field
-        # After validation this re-fills the default, so the blob is content-
-        # identical to the shipped ``default`` row (the point of the test).
-        # Opt out of the duplicate-content guard.
+        # Validation refills the default, making this a content twin of
+        # ``default``, so opt out of the duplicate-content guard.
         PreprocessingParameters().insert1(
             {
                 "preprocessing_params_name": "_pytest_legacy_no_bad_channel_handling",
@@ -855,12 +809,8 @@ def test_remove_field_does_not_change_default_recording(
             skip_duplicates=True,
             allow_duplicate_params=True,
         )
-        # This row is content-identical to ``default`` by construction. Drop it
-        # at teardown so it does not leak into the shared DB and make the
-        # duplicate-content guard tests order-dependent -- they assume
-        # ``default`` is the unique content-twin, and a lingering twin makes the
-        # guard report this row instead. ``_clean_sort_groups`` cascades away the
-        # RecordingSelection rows that reference it, but not the Lookup row.
+        # Drop the twin row at teardown: the duplicate-content guard tests
+        # assume ``default`` has no twin in the shared DB.
         request.addfinalizer(
             lambda: (
                 PreprocessingParameters
@@ -892,10 +842,9 @@ def test_remove_field_does_not_change_default_recording(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_bad_marked_specific_reference_materializes(handling_session):
-    """A ``specific`` sort group whose reference electrode is flagged
-    ``bad_channel='True'`` (e.g. a dedicated ground) still materializes: the
-    reference is subtracted then dropped, with no reference-quality raise and
-    no interpolation of the reference."""
+    """A ``specific`` sort group with a bad-flagged reference electrode still
+    materializes: the reference is subtracted, then dropped, and never
+    interpolated."""
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
@@ -931,6 +880,5 @@ def test_bad_marked_specific_reference_materializes(handling_session):
         ids = {
             int(c) for c in Recording().get_recording(rec_pk).get_channel_ids()
         }
-        # The bad-marked reference is subtracted then dropped; only the members
-        # remain. Materializing without a raise is the point.
+        # Only the members remain.
         assert ids == set(members)

@@ -1,15 +1,9 @@
-"""Unit tests for ``split_leading_restrictions`` (the delete-footgun guard).
+"""DB-free tests for ``split_leading_restrictions``.
 
-``Sorting.delete`` / ``ArtifactDetection.delete`` peel leading
-``dict`` / ``list`` / ``str`` positionals into restrictions so the
-easy-to-mistype ``Table().delete(restriction)`` form does not reach
-Spyglass's cautious-delete layer as a truthy ``force_permission`` (which
-would cascade-delete every row and destroy each row's 5-50 GB on-disk
-artifact). This pins the pure peeling half DB-free; the end-to-end cascade
-behavior is covered by ``test_delete_cleanup``.
-
-``utils`` is DB-free at import, so this module-level import needs no
-database fixture.
+``Sorting.delete`` / ``ArtifactDetection.delete`` treat a leading ``dict`` /
+``list`` / ``str`` positional as a restriction, not a truthy
+``force_permission`` that would delete every row. End-to-end behavior is in
+``test_delete_cleanup``.
 """
 
 from __future__ import annotations
@@ -51,9 +45,8 @@ def test_multiple_leading_restrictions_peeled_in_order():
 
 
 def test_non_restriction_first_arg_is_not_peeled():
-    # A genuine ``force_permission`` positional (bool / int) passes through
-    # untouched -- ONLY dict/list/str leading args are treated as
-    # restrictions, so the documented ``delete(True)`` path still works.
+    # A bool / int ``force_permission`` positional passes through, so
+    # ``delete(True)`` still works.
     assert split_leading_restrictions((True,)) == ([], (True,))
     assert split_leading_restrictions((5,)) == ([], (5,))
 

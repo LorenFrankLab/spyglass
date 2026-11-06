@@ -17,16 +17,13 @@ def test_curation_v2_insert_root_unlabeled(populated_sorting):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    # Clean any prior curations for this sort so the assertion on
-    # curation_id is stable.
+    # Stable curation_id.
     _clear_curations(populated_sorting)
 
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     assert pk == {**populated_sorting, "curation_id": 0}
     assert len(CurationV2 & pk) == 1
-    # Pin not just the count but the actual unit_id set: a regression
-    # that produced the wrong unit ids (e.g., an off-by-one on
-    # build_curated_unit_rows) would pass a count-only check.
+    # Pin the id set, not just the count.
     expected_unit_ids = set(
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
@@ -72,8 +69,7 @@ def test_curation_uuid_immutable_and_unique(populated_sorting):
         with pytest.raises(dj.errors.DataJointError, match="In-place update1"):
             CurationV2.update1({**root_row, "curation_uuid": uuid.uuid4()})
 
-        # The heading's UNIQUE INDEX is defense in depth against a deliberate
-        # factory bypass that tries to reuse a generation token.
+        # The UNIQUE INDEX also blocks a factory bypass reusing a token.
         child_row = (CurationV2 & child).fetch1()
         with pytest.raises(dj.errors.DuplicateError):
             CurationV2.insert1(
@@ -145,15 +141,8 @@ def test_reuse_existing_keeps_uuid(populated_sorting):
 
 @pytest.mark.slow
 def test_curation_source_invalid_preserves_cause(populated_sorting):
-    """A bogus ``curation_source`` re-raise preserves the enum cause.
-
-    ``insert_curation`` coerces ``curation_source`` through the
-    ``CurationSource`` enum and re-raises a friendlier ``ValueError`` on a
-    typo. The re-raise uses ``from exc`` so the underlying enum
-    ``ValueError`` is preserved as ``__cause__`` -- without it the
-    original "'bogus' is not a valid CurationSource" context is lost from
-    the traceback. (Reaching the enum check requires a real Sorting row;
-    the earlier "not in Sorting" guard fires first otherwise.)
+    """A bogus ``curation_source`` re-raise keeps the enum error as
+    ``__cause__``. Needs a real Sorting row to reach the enum check.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -162,29 +151,20 @@ def test_curation_source_invalid_preserves_cause(populated_sorting):
         CurationV2.insert_curation(
             sorting_key=populated_sorting, curation_source="bogus"
         )
-    # The friendly message names the offending value...
     assert "curation_source" in str(excinfo.value)
-    # ...and the underlying enum ValueError is preserved as the cause.
     assert isinstance(excinfo.value.__cause__, ValueError)
     assert excinfo.value.__cause__ is not excinfo.value
 
 
 @pytest.mark.slow
 def test_curation_source_invalid_rejected_with_existing_root(populated_sorting):
-    """A bogus ``curation_source`` raises even when a root curation already
-    exists. ``curation_source`` is coerced through the enum up front, so the
-    idempotent existing-root early return does NOT swallow an invalid value
-    (which would otherwise let ``curation_source="not_a_real_source"`` quietly
-    return the existing root). Complements
-    ``test_curation_source_invalid_preserves_cause``, which exercises the
-    no-existing-root path.
+    """A bogus ``curation_source`` raises even when a root already exists,
+    instead of returning the existing root.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
     CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
-    # A root now exists; a second call with a bogus curation_source must still
-    # raise the friendly enum error, not return the existing root.
     with pytest.raises(ValueError) as excinfo:
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
@@ -219,7 +199,6 @@ def test_curation_v2_insert_with_labels(populated_sorting):
     assert (target_unit, "accept") in label_set
     assert (CurationV2 & pk).fetch1("description") == "manual labels test"
 
-    # Unknown label rejects.
     with pytest.raises(ValueError, match="not in CurationLabel"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
@@ -232,11 +211,7 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     """parent_curation_id must reference an existing row for the same
     sort; auto-incremented curation_id starts at 0 and increments.
 
-    For v1 surface parity ``labels=None`` is treated as no-labels
-    rather than raising; this test asserts the permissive contract.
-    Root-curation insertion is idempotent; the repeated-root
-    assertion is exercised in ``test_root_curation_idempotent``
-    below.
+    ``labels=None`` means no labels, as in v1.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -245,7 +220,6 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     pk0 = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     assert pk0["curation_id"] == 0
 
-    # Child curation referencing pk0 succeeds.
     pk1 = CurationV2.insert_curation(
         sorting_key=populated_sorting,
         labels={},
@@ -254,7 +228,6 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
     assert pk1["curation_id"] == 1
     assert (CurationV2 & pk1).fetch1("parent_curation_id") == 0
 
-    # Bogus parent rejects.
     with pytest.raises(ValueError, match="does not exist for sorting_id"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
@@ -276,8 +249,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(
     populated_sorting,
 ):
     """``get_sort_group_info`` returns a DataJoint relation covering
-    every electrode in the sort group -- regression vs v1's
-    ``fetch(limit=1)``."""
+    every electrode in the sort group, not one row like v1."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
         RecordingSelection,
@@ -288,9 +260,6 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(
     _clear_curations(populated_sorting)
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     rel = CurationV2().get_sort_group_info(pk)
-    # The relation is a DataJoint object (not a DataFrame); we can
-    # restrict it further. Just fetching its length proves it spans
-    # the full sort group.
     rec_row = (
         RecordingSelection
         & (SortingSelection.RecordingSource & populated_sorting)
@@ -346,7 +315,7 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
     assert hasattr(SpikeSortingOutput, "CurationV2")
 
     _clear_curations(populated_sorting)
-    # Belt and suspenders: also clear any stale merge rows for this sort.
+    # Also clear stale merge rows for this sort.
     stale = (SpikeSortingOutput.CurationV2 & populated_sorting).fetch(
         "merge_id"
     )
@@ -354,20 +323,14 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
 
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
-    # The merge part has exactly one row for this curation.
     merge_rows = (SpikeSortingOutput.CurationV2 & pk).fetch(as_dict=True)
     assert len(merge_rows) == 1
     merge_id = merge_rows[0]["merge_id"]
-    # And the master surfaces the v2 source enum.
     assert (SpikeSortingOutput & {"merge_id": merge_id}).fetch1(
         "source"
     ) == "CurationV2"
 
-    # Dispatch round-trip: get_unit_brain_regions resolves to
-    # CurationV2's accessor and returns a DataFrame. Tighter than a
-    # column-name-only check: an empty DataFrame with the right
-    # schema would pass a column check but indicate a broken join,
-    # so also pin row count and unit-id set.
+    # Pin row count and unit ids: an empty frame would mean a broken join.
     df = SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})
     assert "unit_id" in df.columns
     assert "region_resolution" in df.columns
@@ -389,9 +352,7 @@ def test_curation_v2_auto_registers_in_merge_table(populated_sorting):
 def test_unit_brain_region_df_empty_keeps_full_schema(dj_conn):
     """An empty unit-region lookup returns the full column schema.
 
-    ``pd.DataFrame([])`` would drop every column, leaving callers a frame
-    with only ``region_resolution``; the builder now pins ``columns=`` so
-    empty and non-empty results share a shape.
+    Empty and non-empty results share a shape.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2._recording.unit_metadata import (
@@ -416,15 +377,8 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
     """All-noise label set: the matching population is empty AND
     ``insert_curation`` succeeds without crashing.
 
-    Pins two contracts together: (1) the unit-selection policy
-    correctly excludes every unit when
-    every unit is labeled ``noise``, and (2) ``insert_curation``
-    completes even when every unit is labeled an excluded class.
-    The curated Units NWB still contains every unit because the
-    label filter is applied at the *consumer* (``resolve_unit_selection``)
-    rather than at NWB-write time; the empty-units guard in
-    ``write_curated_units_nwb`` is exercised by the sibling test
-    ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
+    The curated Units NWB still has every unit: labels filter at the
+    consumer (``resolve_unit_selection``), not at write time.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -432,7 +386,6 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
 
     _clear_curations(populated_sorting)
 
-    # Fetch all unit_ids so we can mark every one as noise.
     unit_ids = (Sorting.Unit & populated_sorting).fetch("unit_id")
     assert len(unit_ids) > 0, (
         "populated_sorting fixture should have at least one unit; "
@@ -446,17 +399,12 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
         description="all-noise curation regression",
     )
 
-    # The matching policy filters out noise/artifact/reject, so the
-    # matchable set is empty.
     matchable = matched_unit_ids(pk)
     assert list(matchable) == [], (
         f"Expected zero matchable unit ids after labeling every unit "
         f"noise; got {list(matchable)}."
     )
 
-    # The curated NWB still has all units (labels are stored
-    # separately in CurationV2.UnitLabel, not used to filter the
-    # written units). Verify:
     n_curated_units = len(CurationV2.Unit & pk)
     assert n_curated_units == len(unit_ids), (
         f"Curated NWB has {n_curated_units} units; expected "
@@ -469,32 +417,18 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
 def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
     populated_sorting, monkeypatch
 ):
-    """``write_curated_units_nwb`` initializes an empty
-    ``pynwb.misc.Units`` when ``kept_unit_to_contributors`` is
-    empty, so ``nwbf.units.object_id`` does not raise
-    ``AttributeError``.
+    """``write_curated_units_nwb`` writes an empty ``pynwb.misc.Units``
+    when no units are kept, so ``nwbf.units.object_id`` does not raise.
 
-    Pynwb leaves ``nwbf.units = None`` if no ``add_unit`` is
-    called. The v2 guard in ``_units_nwb.write_curated_units_nwb``
-    initializes an empty ``Units`` table explicitly in this case.
-    This test forces the empty-kept path via monkeypatch (the
-    natural way to hit it -- a sorting with zero units -- is
-    rejected upstream by ``Sorting.make``).
+    Monkeypatched because ``Sorting.make`` rejects zero-unit sorts.
     """
     from spyglass.spikesorting.v2._curation import plan as _curation_plan
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
 
-    # Patch build_curated_unit_rows where ``build_curation_insert_plan`` calls
-    # it (the ``_curation_plan`` service module; the insert path was extracted
-    # out of ``curation.py``) to return an empty plan. ``apply_merge=True`` is
-    # required: only then does ``write_curated_units_nwb`` build ``write_specs``
-    # from ``kept_unit_to_contributors`` (now empty) instead of from the source
-    # units, so it reaches the empty-Units guard that initializes a bare
-    # ``pynwb.misc.Units`` -- the thing preventing the AttributeError at
-    # ``nwbf.units.object_id``. Under the default ``apply_merge=False`` the
-    # writer uses every source unit and never reaches that guard.
+    # Patch where build_curation_insert_plan looks it up. apply_merge=True:
+    # only then does the writer use kept_unit_to_contributors.
     def _empty_rows(
         sorting_id, sorting_units, merge_groups, curation_id, apply_merge
     ):
@@ -508,9 +442,6 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
         description="empty-kept rollback guard regression",
         apply_merge=True,
     )
-    # The CurationV2 row exists; no AttributeError raised inside the
-    # transaction (the empty-Units guard fired). The curated NWB has zero Unit
-    # part rows.
     assert len(CurationV2 & pk) == 1
     assert len(CurationV2.Unit & pk) == 0
 
@@ -519,15 +450,9 @@ def test_curation_v2_stages_empty_units_nwb_on_zero_kept_units(
 def test_curation_v2_insert_rollback_cleans_units_nwb(
     populated_sorting, monkeypatch
 ):
-    """``CurationV2.insert_curation``'s except block unlinks the
-    staged Units NWB on a transaction rollback.
+    """``insert_curation`` unlinks the staged Units NWB on rollback.
 
-    Mirrors ``test_sorting_make_rollback_cleans_units_nwb`` (which
-    pins the same contract for Sorting.make). Patches
-    ``SpikeSortingOutput._merge_insert`` to raise mid-transaction so
-    the curation rows + AnalysisNwbfile registration roll back. The
-    except block must unlink the staged units NWB so the file
-    system doesn't accumulate orphans on each retry.
+    ``SpikeSortingOutput._merge_insert`` is patched to raise mid-transaction.
     """
     import pathlib
 
@@ -561,13 +486,10 @@ def test_curation_v2_insert_rollback_cleans_units_nwb(
             description="rollback regression test",
         )
 
-    # Restore the original (monkeypatch.setattr handles teardown but
-    # being explicit is clearer than relying on fixture order).
     monkeypatch.setattr(
         SpikeSortingOutput, "_merge_insert", original_merge_insert
     )
 
-    # No CurationV2 / SpikeSortingOutput row was inserted.
     assert len(CurationV2 & populated_sorting) == 0, (
         "CurationV2 row present after a transaction that should "
         "have rolled back."
@@ -577,8 +499,7 @@ def test_curation_v2_insert_rollback_cleans_units_nwb(
         "a transaction that should have rolled back."
     )
 
-    # No new orphan analysis NWB file remains on disk: the except
-    # block in insert_curation unlinks the staged file.
+    # No orphan analysis NWB on disk.
     after = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
         if analysis_dir.exists()
@@ -595,14 +516,8 @@ def test_curation_v2_insert_rollback_cleans_units_nwb(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
-    """``CurationV2.get_sorting(as_dataframe=True)`` carries
-    a ``curation_label`` column joined from UnitLabel.
-
-    v1's ``Curation.get_sorting(as_dataframe=True)`` returned
-    ``nwbf.units.to_dataframe()`` which carried ``curation_label``.
-    An earlier v2 implementation stripped the join, producing only
-    unit_id + spike_times; v2 now joins the labels back in. This
-    test pins the column presence + correct per-unit values.
+    """``CurationV2.get_sorting(as_dataframe=True)`` carries the per-unit
+    ``curation_label`` column from UnitLabel, as v1 did.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -632,14 +547,8 @@ def test_get_sorting_dataframe_includes_curation_label(populated_sorting):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
-    """Post-curation NWB writes ``curation_label`` as an indexed
-    (ragged) list column matching v1's shape.
-
-    The pre-curation shape is scalar; the post-curation shape is
-    the ragged list per-unit (mirrors
-    ``v1/curation.py:398-403``). Tests assume the same NWB file
-    written by ``CurationV2.insert_curation`` carries the ragged
-    shape.
+    """Post-curation NWB writes ``curation_label`` as an indexed (ragged)
+    list column, matching v1's shape.
     """
     import pynwb
 
@@ -664,12 +573,8 @@ def test_curation_label_post_curation_is_indexed_ragged_list(populated_sorting):
     assert (
         "curation_label" in df.columns
     ), "Curated NWB missing curation_label column."
-    # The labeled unit's column value is iterable-of-labels (the
-    # ragged ``index=True`` column). pynwb's ``to_dataframe`` may
-    # surface this as either ``list`` or ``np.ndarray(dtype=object)``;
-    # both forms preserve the multi-label invariant. A scalar
-    # (regression to non-indexed column) would NOT be iterable
-    # over individual label strings.
+    # pynwb may return a list or an object ndarray; a scalar would mean a
+    # non-indexed column.
     import numpy as np
 
     labeled_value = df.loc[units[0], "curation_label"]
@@ -732,10 +637,7 @@ def test_curation_insert_idempotent_rejects_new_args(populated_sorting):
     _clear_curations(populated_sorting)
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
 
-    # A non-default description on a second root insert would be silently
-    # dropped by the idempotent reuse -> raises. (Uses description rather
-    # than labels so the test does not depend on the smoke sort's
-    # non-deterministic unit count.)
+    # description, not labels: the smoke sort's unit count varies.
     with pytest.raises(ValueError, match="already exists"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting, description="changed description"
@@ -811,13 +713,7 @@ def test_curation_label_validation_all_paths(populated_sorting):
 def test_unit_label_insert_rejects_ordered_row(populated_sorting):
     """A direct ordered-sequence (tuple) UnitLabel insert is validated.
 
-    DataJoint accepts positional/ordered rows, but the canonical-label
-    guard reads ``row["curation_label"]`` -- a membership test that is
-    False for a tuple, so an ordered row of
-    ``(sorting_id, curation_id, unit_id, "noies")`` could slip a bogus
-    label past validation, breaking the "validate on every insert path"
-    guarantee. The override must reject non-mapping rows (or validate
-    them) rather than silently passing them through.
+    A tuple row must not slip a bogus label past the mapping-based check.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -842,8 +738,7 @@ def test_unit_label_insert_rejects_ordered_row(populated_sorting):
         ValueError, match="requires mapping|not in CurationLabel"
     ):
         CurationV2.UnitLabel.insert([ordered])
-    # allow_custom_labels=True must NOT let an ordered row bypass the
-    # mapping check (the type guard precedes the custom-label opt-out).
+    # The type guard precedes the custom-label opt-out.
     with pytest.raises(ValueError, match="requires mapping"):
         CurationV2.UnitLabel.insert1(ordered, allow_custom_labels=True)
 
@@ -852,12 +747,8 @@ def test_unit_label_insert_rejects_ordered_row(populated_sorting):
 def test_insert_curation_rejects_scalar_string_label(populated_sorting):
     """A scalar string label value is rejected, not split per-character.
 
-    ``labels={unit_id: "custom_tag"}`` (a bare string instead of a list
-    of labels) must raise -- NOT be coerced to
-    ``["c","u","s","t","o","m",...]`` and written as per-character labels.
-    Coercion would bite hardest with ``allow_custom_labels=True``, which skips
-    the per-value canonical check, so the test pins both the default and
-    the escape-hatch paths.
+    Checked with and without ``allow_custom_labels``, which skips the
+    per-value check.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -881,9 +772,7 @@ def test_insert_curation_rejects_scalar_string_label(populated_sorting):
 def test_insert_curation_rejects_invalid_curation_source(populated_sorting):
     """An unknown ``curation_source`` raises naming the valid options.
 
-    ``curation_source`` is coerced through the ``CurationSource`` enum so a typo
-    fails at the Python boundary (with the valid set) rather than at the
-    DataJoint enum-mismatch layer.
+    Fails in Python, before the DataJoint enum check.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -898,24 +787,17 @@ def test_insert_curation_rejects_invalid_curation_source(populated_sorting):
 def test_insert_curation_idempotent_root_rejects_nondefault_args(
     populated_sorting_with_curation, populated_sorting
 ):
-    """(LIVE) A second root insert with non-default args raises.
-
-    Returning the existing root while silently dropping the caller's
-    new labels/merge_groups/description is a footgun, so it raises unless
-    ``reuse_existing=True``. The fixture already inserted a root; a second
-    call passing a description must raise, and ``reuse_existing=True`` must
-    return the existing key instead.
+    """A second root insert with non-default args raises unless
+    ``reuse_existing=True``, which returns the existing key.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     existing = populated_sorting_with_curation
-    # Non-default args + no reuse -> raises (silent-drop footgun guard).
     with pytest.raises(ValueError, match="already exists"):
         CurationV2.insert_curation(
             sorting_key=populated_sorting,
             description="a second description that would be ignored",
         )
-    # reuse_existing=True returns the existing root key unchanged.
     reused = CurationV2.insert_curation(
         sorting_key=populated_sorting,
         description="ignored but explicitly tolerated",
@@ -929,11 +811,7 @@ def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
 ):
     """The existing-root guard also covers apply_merge / curation_source.
 
-    ``merges_applied`` and the curation provenance record user intent, so a
-    second root insert that flips ``apply_merge=True`` (or sets a
-    non-"manual" ``curation_source``) must NOT silently return the existing
-    ``merges_applied=False`` / manual root. It raises unless
-    ``reuse_existing=True``.
+    Raises unless ``reuse_existing=True``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -946,7 +824,6 @@ def test_insert_curation_idempotent_root_rejects_apply_merge_and_metrics(
         CurationV2.insert_curation(
             sorting_key=populated_sorting, curation_source="figpack"
         )
-    # Opt-in reuse still returns the existing root unchanged.
     reused = CurationV2.insert_curation(
         sorting_key=populated_sorting,
         apply_merge=True,
@@ -960,12 +837,7 @@ def test_insert_curation_root_reuse_deterministic_with_multiple_roots(
 ):
     """Reuse picks the canonical lowest-curation_id root.
 
-    A raw/manual insert can leave a SECOND root (parent_curation_id=-1).
-    ``order_by="curation_id"`` makes ``insert_curation(reuse_existing=True)``
-    return the lowest-id (canonical) root deterministically rather than a
-    DB-row-order coin flip. Plant a second bare root master row (a raw
-    bypass insert_curation would never produce) and assert the lowest id is
-    returned.
+    A second root can only come from a raw insert, so one is planted.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -1017,8 +889,7 @@ def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
 def test_insert_curation_rejects_missing_sorting_id(dj_conn):
     """A ``sorting_id`` not in ``Sorting`` raises a clear ValueError.
 
-    Translates what would be a raw FK IntegrityError into a "populate Sorting
-    first" message.
+    Not a raw FK IntegrityError.
     """
     import uuid
 
@@ -1033,9 +904,8 @@ def test_curation_get_unit_brain_regions_concat_raises():
     """The CurationV2 accessor raises ``ConcatBrainRegionAmbiguousError``
     for a concat-backed sorting (mirror of the Sorting accessor).
 
-    The guard reads the sorting's source before touching ``CurationV2.Unit``,
-    so a concat ``SortingSelection`` (planted via the FK-checks-off bypass) is
-    enough to exercise the raise.
+    A planted concat ``SortingSelection`` suffices: the guard reads the
+    source before ``CurationV2.Unit``.
     """
     import uuid
 
@@ -1086,11 +956,8 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
     """``CurationV2.get_unit_brain_regions(..., allow_anchor_member=True)``
     returns the ``unit_brain_region_df`` DataFrame labeled ``anchor_member``.
 
-    The opt-in path returns the DataFrame (NOT a ``SourceResolution``), same
-    shape as the ``Sorting`` accessor. Non-vacuous: a ``CurationV2.Unit`` row
-    is planted with an Electrode FK copied from the populated fixture so the
-    BrainRegion join yields a real row carrying
-    ``region_resolution == 'anchor_member'``.
+    Same shape as the ``Sorting`` accessor. A ``CurationV2.Unit`` row with a
+    real Electrode FK makes the BrainRegion join non-empty.
     """
     import datetime as dt
     import uuid
@@ -1135,14 +1002,11 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
                 "object_id": "a28-concat-object-id",
                 "n_units": 1,
                 "time_of_sort": dt.datetime(2020, 1, 1),
-                # The display-recipe FK column (the cortex display recipe).
-                # This bypassed concat insert runs with FK checks off, so the
-                # row need not pre-exist, but the column is NOT NULL.
+                # NOT NULL; FK checks are off so the row need not exist.
                 "display_waveform_params_name": (
                     "franklab_cortex_actual_waveforms"
                 ),
-                # Synthetic provenance for this bypassed row; the column is
-                # NOT NULL (set from si.__version__ on a real sort).
+                # NOT NULL; a real sort sets si.__version__.
                 "spikeinterface_version": "0.0.0",
             },
             allow_direct_insert=True,
@@ -1191,21 +1055,14 @@ def test_insert_curation_empty_labels_skip_unit_label_insert(
     """With empty labels the ``UnitLabel`` insert is skipped, while the
     ``MergeGroup`` self-entries are still written.
 
-    The ``if unit_label_rows:`` / ``if merge_group_rows:`` guards skip a
-    zero-row batch insert. With ``labels={}`` ``unit_label_rows`` is empty so
-    ``UnitLabel`` stays empty; but ``merge_group_rows`` is NOT empty even
-    without merges -- every ``CurationV2.Unit`` row gets a 1-element
-    self-entry so ``Unit * MergeGroup`` preserves all units. This pins both
-    guard branches: one skipped, one taken.
+    Every unit gets a self-entry so ``Unit * MergeGroup`` keeps all units.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
     key = populated_sorting_with_curation
     n_units = len(CurationV2.Unit & key)
     assert n_units >= 1, "fixture curation must have >= 1 unit"
-    # unit_label_rows empty -> guard skipped the UnitLabel insert.
     assert len(CurationV2.UnitLabel & key) == 0
-    # merge_group_rows non-empty -> one self-entry per unit (guard taken).
     assert len(CurationV2.MergeGroup & key) == n_units
 
 
@@ -1215,9 +1072,7 @@ def test_curation_label_column_added_only_with_nonempty_labels(
     """The units NWB carries a ``curation_label`` column iff at least one
     unit has a non-empty label.
 
-    Adding the column for an all-empty curation would trip pynwb's empty-list
-    dtype inference, so it is gated on ``any(labels)``. We inspect the staged
-    units NWB column set directly for both cases.
+    An all-empty column would trip pynwb's empty-list dtype inference.
     """
     import pynwb
 
@@ -1236,12 +1091,10 @@ def test_curation_label_column_added_only_with_nonempty_labels(
             nwbf = io.read()
             return list(nwbf.units.colnames) if nwbf.units is not None else []
 
-    # All-empty labels: no curation_label column.
     _clear_curations(populated_sorting)
     empty_key = CurationV2.insert_curation(sorting_key=populated_sorting)
     assert "curation_label" not in _units_colnames(empty_key)
 
-    # At least one non-empty label: column present.
     _clear_curations(populated_sorting)
     uid = int((Sorting.Unit & populated_sorting).fetch("unit_id")[0])
     labeled_key = CurationV2.insert_curation(

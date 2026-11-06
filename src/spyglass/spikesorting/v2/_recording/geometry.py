@@ -1,19 +1,6 @@
 """Channel-id / probe-geometry services behind ``Recording``.
 
-These functions resolve SpikeInterface channel ids and per-channel probe
-metadata for ``Recording.make_compute`` (and the rebuild path), attach the
-legacy ``tetrode_12.5`` geometry to four-channel tetrode groups, and select the
-interior curated-bad channels the ``interpolate`` path re-includes. The table
-threads already-fetched DB state in (the tri-part
-``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute), so the geometry math here is DB-free.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: all SpikeInterface / numpy / probeinterface / spyglass
-dependencies are imported lazily inside the functions. Only the ``fetch_*``
-functions (``fetch_sort_group_probe_info``,
-``fetch_sort_group_contact_positions``, ``fetch_interior_bad_channel_ids``)
-read the DB, at call time; the rest touch no database.
+DB-free at import; only the ``fetch_*`` functions read the database.
 """
 
 from __future__ import annotations
@@ -22,33 +9,23 @@ from __future__ import annotations
 def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
     """Map Spyglass electrode_ids onto SpikeInterface channel ids.
 
-    SpikeInterface 0.104's ``read_nwb_recording`` uses the raw NWB
-    electrodes table's ``channel_name`` string column as the channel id if
-    present; otherwise the integer ``electrode_id`` is the channel id (the 1-1
-    fallback). The ``channel_name`` column is POSITIONAL -- row ``k`` holds
-    channel ``k``'s name -- but Spyglass electrode ids are not guaranteed to
-    equal table row positions (production NWBs can be non-contiguous,
-    non-zero-based, or reordered). Each electrode id is therefore resolved to
-    its electrodes-table ROW via ``get_electrode_indices`` (the same id->row
-    mapping the write side uses in ``electrode_table_region``) before reading
-    ``channel_name`` -- never ``channel_name[electrode_id]``, which would slice
-    the wrong channel. A requested id that is absent, or that maps to more than
-    one row, raises rather than silently mis-indexing.
+    SpikeInterface 0.104 uses the electrodes table's ``channel_name`` column
+    as the channel id when present, else ``electrode_id``. ``channel_name``
+    is positional and electrode ids need not equal row positions, so each id
+    is resolved to its row first.
 
     Parameters
     ----------
     nwb_file_abs_path : str
-        Absolute path of the parent (raw) NWB whose electrodes table is read;
-        the caller resolves it (``Nwbfile.get_abs_path``), so this reads no
-        DB.
+        Absolute path of the parent (raw) NWB whose electrodes table is read.
     spyglass_ids : sequence of int
         Spyglass electrode ids to map onto SI channel ids.
 
     Returns
     -------
     list
-        SpikeInterface channel ids -- ``channel_name`` strings (in the order
-        of ``spyglass_ids``) when the electrodes table carries that column,
+        SpikeInterface channel ids in ``spyglass_ids`` order:
+        ``channel_name`` strings when the electrodes table has that column,
         otherwise the integer electrode ids.
 
     Raises
@@ -72,7 +49,6 @@ def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
         nwbfile = io.read()
         electrodes_table = nwbfile.electrodes
         table_ids = [int(e) for e in electrodes_table.id[:]]
-        # Map each requested electrode id -> electrodes-table row index.
         row_indices = get_electrode_indices(nwbfile, ids)
         missing = [
             eid
@@ -91,8 +67,6 @@ def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
                 f"more than one row in the {nwb_file_name!r} electrodes table"
             )
         if "channel_name" not in electrodes_table.colnames:
-            # No channel_name column: SI uses the integer electrode_id as the
-            # channel id (validated present above), independent of row order.
             return ids
         channel_names = electrodes_table["channel_name"]
         return [channel_names[idx] for idx in row_indices]
@@ -103,22 +77,8 @@ def fetch_sort_group_probe_info(
 ) -> tuple[tuple, tuple]:
     """Fetch per-channel ``probe_type`` + ``electrode_group_name``.
 
-    Returns a pair of tuples (probe_types, electrode_group_names),
-    one entry per channel id in ``channel_ids``. The tuple form
-    is DeepHash-stable (NamedTuple field constraint for
-    ``RecordingFetched``). Used by both the populate path
-    (``make_fetch``) and the rebuild path
-    (``_rebuild_nwb_artifact``) to feed
-    ``maybe_apply_tetrode_geometry``.
-
-    The fetch is ``order_by="electrode_id"`` so two successive
-    ``make_fetch`` calls return byte-identical tuples; without an
-    explicit ordering, DataJoint/MySQL row order is unspecified and
-    the tri-part DeepHash integrity check inside the populate
-    transaction can spuriously raise on reorder. This matches the
-    ordered-fetch pattern used by the other tri-part ``make_fetch``
-    paths in this package (e.g. ``SharedGroupArtifactDetection.make_fetch`` in
-    artifact.py, which orders its member fetch by ``recording_id``).
+    Ordered by ``electrode_id`` so DataJoint's two ``make_fetch`` calls
+    return identical tuples.
 
     Parameters
     ----------
@@ -157,29 +117,10 @@ def fetch_sort_group_probe_info(
 def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
     """Fetch the ``Probe.Electrode`` 3D contact position of each channel.
 
-    The probe-relative ``rel_x``/``rel_y``/``rel_z`` columns (joined onto
-    ``Electrode``), NOT ``Electrode.x/y/z`` -- the same source
-    :func:`fetch_interior_bad_channel_ids` uses.
-
-    **This is the registered probe's geometry, not the session's.**
-    ``Probe.Electrode`` is ingested from the NWB's ``ShanksElectrode`` device
-    metadata and keyed by probe TYPE, so one row set serves every session
-    recorded on that probe type. SpikeInterface, by contrast, reads the
-    per-session electrodes table's ``rel_x``/``rel_y``/``rel_z`` columns. The
-    two normally agree, because Frank-lab writers fill both from the same
-    probe YAML -- but nothing enforces it, and a file whose electrodes table
-    was written (or edited) independently of its device metadata will
-    disagree. The v2 suite has such a fixture on purpose: a synthesized
-    tetrode whose electrodes table is zeroed while its ``ShanksElectrode``
-    attributes keep the canonical square. Callers reasoning about what the
-    SORT will see should keep that gap in mind.
-
-    The columns are nullable and the join drops any electrode with no probe
-    link, so both "no geometry" cases arrive as ``NaN`` rows rather than a
-    silent 0.0: the caller decides whether that means "this group has no
-    geometry at all" (the legacy all-zero tetrode, which
-    :func:`maybe_apply_tetrode_geometry` repairs) or a partially-populated
-    probe (an error).
+    The probe-relative ``rel_*`` columns, not ``Electrode.x/y/z``. This is
+    the registered probe type's geometry, which can differ from the
+    session's electrodes table that SpikeInterface reads. Missing positions
+    arrive as ``NaN``, not 0.0.
 
     Parameters
     ----------
@@ -192,10 +133,9 @@ def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
     -------
     numpy.ndarray
         ``(len(channel_ids), 3)`` float array of ``(rel_x, rel_y, rel_z)``,
-        row-aligned to ``sorted(channel_ids)`` -- the order
-        :func:`fetch_sort_group_probe_info` returns its tuples in, so the two
-        can be zipped. ``NaN`` where the electrode has no probe link or a
-        NULL coordinate.
+        row-aligned to ``sorted(channel_ids)``, as
+        :func:`fetch_sort_group_probe_info` is. ``NaN`` where the electrode
+        has no probe link or a NULL coordinate.
     """
     import numpy as np
 
@@ -220,24 +160,16 @@ def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
     return positions
 
 
-# Gates for the legacy ``tetrode_12.5`` geometry repair, as
-# (predicate-of-failure, reason) pairs built from the sort group's probe
-# metadata. The reason text lives next to its predicate so adding/removing a
-# gate is a one-line edit with no index alignment.
 def _tetrode_repair_skip_reason(
     probe_types: tuple, electrode_group_names: tuple, n_channels: int
 ) -> "str | None":
     """Why the ``tetrode_12.5`` repair does NOT apply, or ``None`` if it does.
 
-    Separated from :func:`maybe_apply_tetrode_geometry` so preflight can ask
-    the same question without a recording (see
-    :func:`tetrode_repair_applies`), and so the log message an operator greps
-    for stays next to the predicate that produced it.
+    Shared with preflight via :func:`tetrode_repair_applies`.
     """
     unique_probes = set(probe_types)
     unique_groups = set(electrode_group_names)
-    # ``next(iter(...), None)`` avoids StopIteration on an empty probe set --
-    # the ``len != 1`` gate above it fires first.
+    # next(iter(...), None) avoids StopIteration on an empty probe set.
     gates = (
         (
             len(unique_probes) != 1,
@@ -268,10 +200,7 @@ def tetrode_repair_applies(
 ) -> bool:
     """True when :func:`maybe_apply_tetrode_geometry` would spread this group.
 
-    Preflight uses this to decide whether a sort group whose stored geometry
-    collapses in every plane (the legacy all-zero tetrode) is nevertheless
-    runnable: the repair installs the 12.5 µm square before the uniqueness
-    assertion runs, so those groups must not be reported as broken.
+    Preflight uses this so a legacy all-zero tetrode is not reported broken.
 
     Parameters
     ----------
@@ -303,21 +232,10 @@ def maybe_apply_tetrode_geometry(
 ):
     """Attach the ``tetrode_12.5`` probe geometry when the sort group fits.
 
-    Sort groups of exactly 4 channels on a single ``tetrode_12.5``
-    probe and a single electrode group get an explicit
-    ``(0,0)-(0,12.5)-(12.5,0)-(12.5,12.5)`` µm probe with 6.25 µm
-    contact radius. Exists for legacy Frank-lab NWBs where contact
-    positions were never written into the electrode table, but (as in
-    v1) it replaces whatever positions are stored whenever the gates
-    pass.
-    Geometry-aware sorters (Kilosort, MountainSort5) on those
-    recordings depend on this patch; clusterless_thresholder and
-    MS4 are unaffected.
-
-    When any gate fails the recording is returned untouched and an
-    ``INFO`` log names the failed gate's reason, so an operator
-    debugging "Kilosort sees the wrong geometry" can grep the populate
-    log for which condition skipped the patch.
+    Exactly 4 channels on one ``tetrode_12.5`` probe and one electrode
+    group get the 12.5 µm square (6.25 µm radius), replacing any stored
+    positions. For legacy Frank-lab NWBs without contact positions. A
+    skipped repair logs the failed gate at INFO.
 
     Parameters
     ----------
@@ -341,9 +259,6 @@ def maybe_apply_tetrode_geometry(
     """
     from spyglass.utils import logger
 
-    # First failing gate wins. The gates themselves live in
-    # ``_tetrode_repair_skip_reason`` so preflight (via
-    # ``tetrode_repair_applies``) cannot drift from what this actually does.
     reason = _tetrode_repair_skip_reason(
         probe_types, electrode_group_names, len(sort_group_channel_ids)
     )
@@ -373,10 +288,8 @@ TETRODE_12_5_POSITIONS = ((0.0, 0.0), (0.0, 12.5), (12.5, 0.0), (12.5, 12.5))
 def sort_group_planar_positions(positions, probe_types, electrode_group_names):
     """Return the 2D contact positions the recording stage gives a sort group.
 
-    Mirrors preflight from registered positions: when the ``tetrode_12.5``
-    repair's gates pass, :func:`maybe_apply_tetrode_geometry` replaces the
-    group's positions with the 12.5 um square; otherwise the recording keeps
-    the plane that separates every contact.
+    The ``tetrode_12.5`` square when the repair applies, else the plane that
+    separates every contact.
 
     Parameters
     ----------
@@ -407,49 +320,25 @@ def sort_group_planar_positions(positions, probe_types, electrode_group_names):
     return select_distinct_plane(registered)
 
 
-# Axis pairs tried, in order, when reducing 3D contact positions to the plane
-# SpikeInterface will actually use. ``x-y`` first because that is what
-# probeinterface's ``select_axes`` default gives, so a genuinely planar x-y
-# probe is never re-projected.
+# x-y first: probeinterface's select_axes default.
 _CANDIDATE_PLANES = ("xy", "xz", "yz")
 
-# Coordinates are micrometres read from ``Probe.Electrode`` ``rel_*`` columns
-# (``float``, i.e. single precision in DataJoint); 6 decimals is far below the
-# smallest real contact pitch and above float32 representation noise, so
-# rounding here decides "same contact" without float equality surprises.
+# µm; below any contact pitch, above float32 noise of the rel_* columns.
 _POSITION_DECIMALS = 6
 
 
 def classify_missing_geometry(locations) -> str:
     """Say how much of a contact-position set is missing.
 
-    ``Probe.Electrode`` ``rel_x``/``rel_y``/``rel_z`` are nullable, so a NULL
-    reaches numpy as NaN. How much is missing decides what happens next, and
-    preflight and the recording stage MUST answer that the same way -- a
-    group that clears preflight and then raises at ``Recording.make`` has
-    wasted the operator's run.
+    Preflight and the recording stage must agree on this.
 
-    * ``"complete"`` -- no coordinate of any contact is finite. That is
-      indistinguishable from "geometry was never written": the raw electrodes
-      table reads back all-zero, which is exactly what the ``tetrode_12.5``
-      repair covers, so preflight maps the group onto the all-zero legacy
-      geometry and the recording stage passes it through untouched.
-    * ``"partial"`` -- some but not all coordinates are non-finite. One NaN
-      ``rel_z`` on otherwise positioned contacts counts, and so does a single
-      contact with no position among positioned ones. Nothing downstream
-      repairs these: the repair needs the WHOLE group to be unpositioned, and
-      a NaN coordinate compares as distinct, so it would otherwise sail
-      through the uniqueness check into a probe build.
-    * ``"none"`` -- every coordinate is finite. (The all-zero legacy geometry
-      is "none" here: it is present, just degenerate. Plane selection reports
-      that separately.)
+    - ``"complete"``: no coordinate is finite; treated as the legacy
+      all-zero geometry the ``tetrode_12.5`` repair covers.
+    - ``"partial"``: some coordinates are non-finite; nothing repairs this.
+    - ``"none"``: every coordinate is finite, including all-zero.
 
-    An EMPTY set is refused rather than classified. Every verdict above is a
-    claim about contacts that exist, and the vacuous one ("no coordinate of
-    any contact is finite") is the dangerous reading: it would route an
-    empty group onto the all-zero legacy geometry and let it run. No caller
-    can reach this today -- preflight returns before it on a group with no
-    electrodes, and a recording always has channels.
+    An empty set raises: ``"complete"`` would wrongly route it to the
+    all-zero geometry.
 
     Parameters
     ----------
@@ -495,10 +384,8 @@ def _all_rows_distinct(positions) -> bool:
 def assert_finite_contact_positions(locations) -> None:
     """Refuse contact positions with a non-finite coordinate.
 
-    ``rel_x``/``rel_y``/``rel_z`` are nullable, so a NULL arrives as NaN. NaN
-    rows compare as distinct under ``np.unique``, which would let a NaN plane
-    win and sail through :func:`assert_unique_contact_positions` into a probe
-    build. Same finiteness screen ``_shank_pitch`` applies.
+    NaN rows compare as distinct under ``np.unique``, so they would pass
+    :func:`assert_unique_contact_positions`.
 
     Parameters
     ----------
@@ -526,12 +413,8 @@ def assert_finite_contact_positions(locations) -> None:
 def select_distinct_plane(locations):
     """Pick the axis pair in which every contact has a distinct position.
 
-    SpikeInterface reduces 3D channel locations to 2D whenever it builds a
-    probe -- ``create_dummy_probe_from_locations`` calls
-    ``probeinterface.select_axes(locations, axes)`` with ``axes="xy"`` -- and
-    a probe with two contacts at the same position is rejected. Real
-    Frank-lab tetrodes lie in the x-z plane (``rel_y`` constant), so their x-y
-    projection collapses pairs of contacts; this picks x-z instead.
+    SpikeInterface projects to x-y when building a probe and rejects
+    coincident contacts. Frank-lab tetrodes lie in the x-z plane.
 
     Parameters
     ----------
@@ -544,8 +427,7 @@ def select_distinct_plane(locations):
     tuple of (str, numpy.ndarray) or None
         The chosen axis pair (``"xy"``, ``"xz"`` or ``"yz"``) and the
         corresponding ``(n_contacts, 2)`` positions, preferring ``"xy"``.
-        ``None`` when no pair separates every contact -- including the
-        all-zero legacy geometry, where no projection can.
+        ``None`` when no pair separates every contact.
 
     Raises
     ------
@@ -573,15 +455,9 @@ def select_distinct_plane(locations):
 def effective_contact_plane(locations) -> tuple:
     """Classify a sort group's registered positions the way preflight does.
 
-    The shared first steps of reproducing the recording stage's planar
-    geometry without a recording: :func:`classify_missing_geometry`, then --
-    reading a group with no position at all as the legacy all-zero geometry
-    -- :func:`select_distinct_plane`. Whether a collapsed group is rescued by
-    the ``tetrode_12.5`` repair is left to the caller
-    (:func:`tetrode_repair_applies`), which needs the probe metadata.
-    :func:`normalize_channel_locations` does not use this: it chooses the
-    plane from a retained subset of a sliced recording and raises on
-    incomplete rows.
+    :func:`classify_missing_geometry` then :func:`select_distinct_plane`,
+    reading no positions as all-zero. The ``tetrode_12.5`` rescue is left
+    to the caller.
 
     Parameters
     ----------
@@ -617,43 +493,16 @@ def effective_contact_plane(locations) -> tuple:
 def normalize_channel_locations(recording, *, channel_ids=None):
     """Reduce 3D channel locations to the distinct 2D plane, in place.
 
-    Runs at the recording stage on the channel-sliced recording -- so a group
-    whose bad channels were removed is normalized on the channels it actually
-    contains -- and *before* any probe exists, because SpikeInterface's
-    ``set_channel_locations`` refuses to write locations once a
-    ``contact_vector`` is attached (it would silently desynchronize the probe
-    from the property). Nothing here builds a probe.
+    Must run before any probe is attached: SpikeInterface refuses to set
+    locations once a ``contact_vector`` exists.
 
-    A recording whose locations are already 2D, or that carries no ``location``
-    property at all, is returned untouched. So is one no plane separates: the
-    legacy all-zero geometry is repaired downstream by
-    :func:`maybe_apply_tetrode_geometry`, and
-    :func:`assert_unique_contact_positions` raises afterwards if it was not.
-    A set in which EVERY coordinate of EVERY SLICED channel is non-finite is
-    treated the same way -- as no usable geometry rather than as an error --
-    because that is exactly what ``sort_group_geometry_problem`` clears at
-    preflight (it maps such a group onto the all-zero legacy geometry so the
-    ``tetrode_12.5`` repair can rescue it). Raising here would fail at make a
-    group preflight passed. PARTIAL non-finite rows still raise: the repair
-    does not apply to them, so the missing contacts are a defect no
-    downstream step can fix.
-
-    SUBSET RULE. ``channel_ids`` scopes the choice of PLANE, and nothing
-    else: how much geometry is missing is decided on the whole sliced set
-    (above) before the subset is consulted. The plane is chosen from the rows
-    of ``channel_ids`` -- the contacts that REMAIN on the sort surface -- and
-    the chosen projection is then applied to EVERY channel of the recording. The channel slice is wider
-    than that surface: it also carries the ``specific`` reference electrode,
-    which is subtracted and dropped in ``apply_spatial_preprocessing``.
-    ``Probe.Electrode`` ``rel_*`` are recorded per probe TYPE, so a reference
-    on another probe of the same type has the same raw coordinates as one of
-    the members; letting it take part in the choice means no plane separates
-    the sliced set, the recording stays 3D, and
-    :func:`assert_unique_contact_positions` then rejects member geometry that
-    is perfectly distinct on its own. The reference still gets 2D coordinates
-    because preprocessing and the writer require one consistent location
-    array across the surface -- it is dropped before the uniqueness
-    assertion, so its (possibly duplicated) position never has to be distinct.
+    - Returned untouched when already 2D, without locations, when no plane
+      separates the contacts, or when every coordinate is non-finite (the
+      case preflight routes to the ``tetrode_12.5`` repair).
+    - Partially non-finite positions raise.
+    - ``channel_ids`` scopes only the plane choice; the projection is
+      applied to every channel. This keeps a ``specific`` reference on a
+      same-type probe from blocking the plane.
 
     Parameters
     ----------
@@ -661,10 +510,8 @@ def normalize_channel_locations(recording, *, channel_ids=None):
         The channel-sliced recording, with no probe attached.
     channel_ids : sequence, optional
         Keyword-only. Channel ids of the contacts the plane is chosen from;
-        ``None`` (default) uses every channel. Pass the contacts the sort
-        surface retains: the members plus, on the ``interpolate`` path, the
-        interior bad channels -- everything except the ``specific``
-        reference.
+        ``None`` (default) uses every channel. Pass every retained contact,
+        i.e. all but the ``specific`` reference.
 
     Returns
     -------
@@ -675,9 +522,8 @@ def normalize_channel_locations(recording, *, channel_ids=None):
     ------
     ValueError
         If a probe is already attached to ``recording``, if ``channel_ids``
-        names a channel the recording does not carry, or if SOME but not all
-        of the recording's 3D contact positions are non-finite (a NULL
-        ``rel_*`` column) -- on any sliced channel, not just a retained one.
+        names a channel the recording does not carry, or if some but not all
+        3D contact positions on any sliced channel are non-finite.
     """
     import numpy as np
     from probeinterface import select_axes
@@ -691,9 +537,7 @@ def normalize_channel_locations(recording, *, channel_ids=None):
             "Normalize the geometry before any probe is built (before "
             "set_probe / get_probe / create_sorting_analyzer)."
         )
-    # get_channel_locations() raises when there is no location property, and
-    # axes="xyz" on a 2D property indexes out of bounds, so the property
-    # itself is the ndim test.
+    # get_channel_locations raises without the property, so test it directly.
     locations = recording.get_property("location")
     if locations is None or np.asarray(locations).shape[1] != 3:
         return recording
@@ -701,28 +545,16 @@ def normalize_channel_locations(recording, *, channel_ids=None):
     positions_3d = np.asarray(
         recording.get_channel_locations(axes="xyz"), dtype=float
     )
-    # ``ids_to_indices`` raises naming the unknown ids, which is the report an
-    # operator needs when the retained set and the slice have drifted apart.
+    # ids_to_indices raises naming any unknown ids.
     retained = (
         positions_3d
         if channel_ids is None
         else positions_3d[recording.ids_to_indices(list(channel_ids))]
     )
-    # How much geometry is missing is a question about the WHOLE sliced set,
-    # answered before the retained subset is consulted: only the choice of
-    # plane is scoped to the retained contacts.
+    # Missing geometry is judged on the whole sliced set.
     if classify_missing_geometry(positions_3d) == "complete":
-        # No coordinate at all is indistinguishable from an absent location
-        # property, and preflight clears exactly this case so the tetrode
-        # repair can run; the finiteness screen would raise on it.
         return recording
-    # Every sliced contact has to be placeable, retained or not: the
-    # reference keeps its coordinates until it is dropped, and the
-    # interpolate path reads every channel's location (SI's kriging weights
-    # are built from the whole good set), so a NULL rel_* there would spread
-    # NaN into the filled channels. This also covers unpositioned members
-    # beside a positioned reference -- a half-populated probe, not the
-    # legacy geometry the repair rescues.
+    # Interpolation's kriging weights use every channel's location.
     assert_finite_contact_positions(positions_3d)
 
     chosen = select_distinct_plane(retained)
@@ -735,7 +567,6 @@ def normalize_channel_locations(recording, *, channel_ids=None):
             "using the %s plane for this sort group",
             axes,
         )
-    # The projection the retained contacts chose, applied to every channel.
     recording.set_channel_locations(select_axes(positions_3d, axes))
     return recording
 
@@ -745,30 +576,18 @@ def assert_unique_contact_positions(
 ) -> None:
     """Require every contact to have a distinct 2D position.
 
-    Reads ``get_channel_locations()`` -- the x-y projection of whatever is
-    attached, probe or bare property -- because that is the geometry
-    SpikeInterface will hand to ``create_sorting_analyzer``. Run this last, so
-    the *effective* geometry is what is checked. Single-channel groups pass
-    trivially.
-
-    With ``require_2d`` (the default) a recording whose ``location`` property
-    is STILL 3D is refused here rather than deep inside the artifact writer.
-    The recording stage can reach that state: a ``specific`` reference channel
-    takes part in plane selection and is dropped afterwards, so a group whose
-    contacts separate in no plane WITH the reference can end up 3D but
-    x-y-distinct without it -- which the coincidence check below waves through
-    and ``write_nwb_artifact`` then rejects, after the whole compute has run.
+    Checks ``get_channel_locations()``, the geometry
+    ``create_sorting_analyzer`` will see, so run it last. With
+    ``require_2d``, 3D locations are refused here rather than later in the
+    artifact writer.
 
     Parameters
     ----------
     recording : si.BaseRecording
         The fully prepared recording, after normalization and any probe patch.
     require_2d : bool, default True
-        Keyword-only. When False, 3D locations are projected to x-y for the
-        uniqueness check instead of being refused. Consumers that reload a
-        written artifact pass False: the writer persists ``rel_z``, so
-        ``NwbRecordingExtractor`` rebuilds a 3D ``location`` property for every
-        artifact, and those callers project it deliberately.
+        Keyword-only. When False, 3D locations are projected to x-y instead
+        of refused; reloaded artifacts always come back 3D.
 
     Raises
     ------
@@ -778,9 +597,7 @@ def assert_unique_contact_positions(
     """
     import numpy as np
 
-    # get_channel_locations raises a bare Exception("There are no channel
-    # locations") when neither a probe nor a location property is present;
-    # answer that case here so the operator gets the same actionable message.
+    # get_channel_locations would raise a bare Exception here.
     if (
         recording.get_property("contact_vector") is None
         and recording.get_property("location") is None
@@ -817,18 +634,8 @@ def assert_unique_contact_positions(
 def flatten_planar_geometry(recording) -> None:
     """Drop the constant third coordinate from a reloaded recording, in place.
 
-    Recording artifacts are read back from NWB, and SpikeInterface builds a 3D
-    ``location`` property whenever the electrodes table carries ``rel_z``
-    (``NwbRecordingExtractor._fetch_locations_and_groups``) -- which it always
-    does for an artifact ``write_nwb_artifact`` produced. That writer persists
-    the NORMALIZED 2D geometry with a constant ``rel_z = 0``, so the x-y
-    columns already ARE the geometry the recording was prepared with. Making
-    that explicit keeps every consumer -- the artifact mask, the sorter, the
-    motion estimator, and the artifact writer, which REFUSES 3D locations
-    rather than silently projecting them -- on one unambiguous plane.
-
-    No-op when the locations are already 2D or absent (a bare synthetic
-    recording in a test).
+    SpikeInterface reloads artifacts with a 3D ``location`` because the
+    writer persists ``rel_z = 0``. No-op when locations are 2D or absent.
 
     Parameters
     ----------
@@ -858,9 +665,7 @@ def flatten_planar_geometry(recording) -> None:
     recording.set_channel_locations(locations[:, :2])
 
 
-# Pitch-anchored adjacency for the ``interpolate`` re-inclusion. Constants are
-# dimensionless multiples of the probe's own physical pitch, so one rule fits
-# dense Neuropixels shanks and sparse polymer groups alike.
+# ``interpolate`` adjacency, in multiples of the probe's own pitch.
 MIN_GOOD_NEIGHBORS = 2  # surrounded (>=2), not merely adjacent on one side
 RADIUS_FACTOR = 1.5  # one pitch away counts; a multi-pitch gap does not
 
@@ -868,15 +673,9 @@ RADIUS_FACTOR = 1.5  # one pitch away counts; a multi-pitch gap does not
 def _shank_pitch(shank_xyz):
     """Compute the median nearest-neighbor distance over a shank.
 
-    ``shank_xyz``: (M, 3) probe-relative positions (``Probe.Electrode``
-    ``rel_x/rel_y/rel_z``) of every electrode on the shank (good AND bad), so
-    the result is the probe's physical pitch, independent of which channels a
-    sort group happens to keep. Returns ``None`` when the shank has < 2
-    electrodes, any coordinate is non-finite (``rel_x/rel_y/rel_z`` are
-    nullable -> a NULL arrives as NaN), OR the spacing is non-positive
-    (coincident / duplicate contact positions give a 0 median). A ``None``
-    pitch makes the caller raise the clear "needs positions" error rather than
-    silently producing NaN distances or a 0 pitch that re-includes nothing.
+    ``shank_xyz``: (M, 3) ``rel_*`` positions of every electrode on the
+    shank, good and bad. Returns ``None`` for fewer than 2 electrodes, any
+    non-finite coordinate, or a non-positive spacing.
     """
     import numpy as np
 
@@ -886,28 +685,19 @@ def _shank_pitch(shank_xyz):
     dd = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
     np.fill_diagonal(dd, np.inf)
     pitch = float(np.median(dd.min(axis=1)))
-    # A non-positive median (coincident/duplicate contacts) is degenerate
-    # geometry the adjacency test can't use; treat it as undefined so the caller
-    # raises rather than the falsy-0 path silently returning an empty set.
     return pitch if pitch > 0 else None
 
 
 def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
     """Select curated-bad ids embedded among a group's good channels.
 
-    ``good_xyz``: (N, 3) probe-relative positions of the group's good channels.
-    ``candidate_xyz``: list of ``(electrode_id, rel_position_array)`` for the
-    curated-bad electrodes on the group's shank(s) (the position is a
-    ``(rel_x, rel_y, rel_z)`` array or tuple). ``pitch``: the shank's
-    physical electrode spacing from :func:`_shank_pitch` (NOT derived from the
-    possibly-sparse good set). A candidate is kept only when at least
-    ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR * pitch`` of
-    it -- so a bad channel between two far-apart good channels (its nearest good
-    channel many pitches away) is excluded, while a bad channel in a dense run
-    is kept. Returns a sorted list. Defensive on non-finite input
-    (``make_fetch`` raises before calling): a non-finite ``pitch`` or good
-    position -> ``[]``; a candidate with a non-finite position is skipped (never
-    silently treated as adjacent).
+    ``good_xyz``: (N, 3) ``rel_*`` positions of the good channels.
+    ``candidate_xyz``: ``(electrode_id, (rel_x, rel_y, rel_z))`` per
+    curated-bad electrode on the shank(s). ``pitch``: from
+    :func:`_shank_pitch`. A candidate is kept when at least
+    ``MIN_GOOD_NEIGHBORS`` good channels lie within ``RADIUS_FACTOR *
+    pitch``. Non-finite input yields ``[]`` or skips the candidate. Returns
+    a sorted list.
     """
     import numpy as np
 
@@ -938,33 +728,14 @@ def fetch_interior_bad_channel_ids(
 ) -> tuple:
     """Fetch the sort group's *interior* curated-bad electrode ids.
 
-    For the ``interpolate`` bad-channel-handling path.
+    The curated-bad electrodes on the group's ``(electrode_group_name,
+    probe_shank)`` that are embedded among its good channels (see
+    :func:`_interior_bad_channel_ids`). Uses ``Probe.Electrode`` ``rel_*``,
+    the same coordinates SpikeInterface interpolates with;
+    ``Electrode.x/y/z`` are brain coordinates and often unset.
 
-    Returns a sorted tuple of the curated-bad (``Electrode.bad_channel='True'``)
-    electrodes on the sort group's shank(s) that are physically embedded among
-    the group's good channels (>= ``MIN_GOOD_NEIGHBORS`` good channels within
-    ``RADIUS_FACTOR * pitch``, ``pitch`` the full-shank spacing). These are the
-    channels ``interpolate`` re-includes and fills. The candidate set is scoped
-    to the group's ``(electrode_group_name, probe_shank)`` -- NOT a shank-wide
-    grab -- because ``set_group_by_electrode_table_column`` builds
-    arbitrary-membership groups and stores no original column values.
-
-    Geometry comes from the probe-relative ``Probe.Electrode``
-    ``rel_x/rel_y/rel_z`` (joined onto ``Electrode``), NOT ``Electrode.x/y/z``:
-    the latter are absolute brain coordinates that are commonly unset (all
-    zero / NULL), whereas ``rel_*`` is the physical contact geometry -- the
-    same coordinate system SpikeInterface's ``get_channel_locations`` (and
-    therefore ``interpolate_bad_channels``) reads from the NWB. Using the same
-    source keeps the adjacency decision consistent with the actual fill.
-
-    Raises ``ValueError`` (pointing the user at ``remove``) when any required
-    position is null/NaN, a needed electrode has no probe geometry, or a shank's
-    pitch is undefined -- the full-shank position fetch is a superset of the
-    good + candidate positions, so a ``_shank_pitch`` of ``None`` is the
-    finiteness gate for the whole shank (rather than silently returning an empty
-    set that masquerades as "no bad channels to fill"). DB-touching at call time
-    via lazy ``Electrode`` / ``Probe`` imports; the geometry math is delegated to
-    the pure helpers above.
+    Raises ``ValueError`` when a needed position or probe link is missing or
+    a shank's pitch is undefined.
 
     Parameters
     ----------
@@ -995,9 +766,7 @@ def fetch_interior_bad_channel_ids(
         )
 
     good_ids = {int(c) for c in sort_group_channel_ids}
-    # Inner-join Electrode with Probe.Electrode to bring in rel_x/rel_y/rel_z
-    # (and probe_shank). Electrodes lacking a probe link drop out of the join,
-    # so an incomplete result means a member without geometry -> fail loud.
+    # Electrodes without a probe link drop out of the join.
     good_rows = (
         (Electrode * Probe.Electrode)
         & {"nwb_file_name": nwb_file_name}
@@ -1019,7 +788,6 @@ def fetch_interior_bad_channel_ids(
             "(no Probe.Electrode link)"
         )
 
-    # Group the good channels by physical shank.
     good_by_shank: dict[tuple[str, int], list] = {}
     for r in good_rows:
         if r["probe_shank"] is None:
@@ -1048,7 +816,6 @@ def fetch_interior_bad_channel_ids(
             "rel_z",
             as_dict=True,
         )
-        # Full-shank positions -> physical pitch (and the finiteness gate).
         shank_xyz = np.array(
             [[r["rel_x"], r["rel_y"], r["rel_z"]] for r in shank_rows],
             dtype=float,
@@ -1059,9 +826,7 @@ def fetch_interior_bad_channel_ids(
                 f"shank {shank} of group {egroup!r} has < 2 positioned "
                 "electrodes or a null coordinate (pitch undefined)"
             )
-        # Curated-bad candidates on this shank, excluding any that are already
-        # sort-group members (an omit_bad_channels=False group keeps its own
-        # bad members present; only the *excluded* interior bad are re-included).
+        # Bad channels already in the group need no re-inclusion.
         candidate_xyz = [
             (
                 int(r["electrode_id"]),

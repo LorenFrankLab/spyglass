@@ -1,11 +1,7 @@
-"""``apply_artifact_mask`` rejects non-finite / out-of-envelope times.
+"""Artifact masking and statistics-span helpers (DB-free).
 
-The complement walk silently clips ``valid_times`` to the recording envelope
-and a NaN slips through the ``<`` / sorted ordering checks (every NaN compare is
-False), so a non-finite or out-of-recording-envelope interval would under-mask
-instead of failing loudly. These guards fire BEFORE the complement walk.
-
-Hermetic -- in-memory NumpyRecording, no DB.
+``apply_artifact_mask`` rejects non-finite or out-of-envelope times before the
+complement walk, which would otherwise clip them and under-mask.
 """
 
 from __future__ import annotations
@@ -28,10 +24,8 @@ def _recording(n_samples=30_000, n_channels=4, fs=30_000.0):
 def _serializable_recording(n_channels=4, duration=1.0, fs=30_000.0):
     """A JSON-serializable, non-zero base recording (parametric noise).
 
-    Unlike ``_recording`` (an in-memory ``NumpyRecording``, which is not
-    JSON-serializable), this is needed by the run_sorter serialization test so
-    the masked recording's own json flag -- not the base's -- decides the dump
-    format.
+    Unlike a ``NumpyRecording``, it lets the masked recording's own json flag
+    decide the dump format.
     """
     from spikeinterface.core import generate_recording
 
@@ -77,14 +71,8 @@ def test_mask_rejects_out_of_envelope(valid_times):
 
 
 def test_mask_rejects_multi_segment():
-    """A multi-segment recording is a caller error, rejected with a clear message.
-
-    ``apply_artifact_mask`` reads ``segment_index=0`` and passes a
-    single-segment ``list_periods`` to ``silence_periods``. The v2 sort
-    recording is always a mono-segment concatenated timeline
-    (``concatenate_recordings``), so >1 segment signals an upstream construction
-    error -- fail loudly here instead of with a cryptic ``IndexError`` from deep
-    in SpikeInterface.
+    """A multi-segment recording is rejected with a clear message; v2 sort
+    recordings are always single-segment.
     """
     import spikeinterface as si
 
@@ -120,11 +108,8 @@ def test_mask_accepts_in_envelope_finite_times():
 
 
 def _roundtrip_as_run_sorter_would(recording, folder):
-    """Serialize + reload ``recording`` exactly as SpikeInterface's
-    ``run_sorter`` does in ``basesorter.setup_recording`` / reload: dump to
-    JSON when ``check_serializability("json")`` is truthy, else pickle, then
-    ``load`` it back. Returns the reloaded recording (raises if the reload
-    fails, which is the behavior under test).
+    """Serialize and reload ``recording`` as ``run_sorter`` does: JSON when
+    ``check_serializability("json")`` is truthy, else pickle.
     """
     from pathlib import Path
 
@@ -145,18 +130,11 @@ def _roundtrip_as_run_sorter_would(recording, folder):
 
 
 def test_masked_recording_survives_run_sorter_serialization(tmp_path):
-    """A masked recording with multiple artifact periods must survive the
-    serialize + reload that ``run_sorter`` performs.
+    """A masked recording with several artifact periods survives
+    ``run_sorter``'s serialize and reload, keeping its mask.
 
-    ``apply_artifact_mask`` returns a SpikeInterface ``SilencedPeriodsRecording``
-    whose artifact intervals live in ``_kwargs["periods"]`` as a *structured*
-    numpy array. That array cannot survive a JSON round-trip (JSON has no
-    structured-array type), yet the recording reports ``check_serializability(
-    "json") == True``, so ``run_sorter`` dumps it to
-    ``spikeinterface_recording.json`` and the reload raises
-    ``ValueError: periods must be a np.array with dtype ...`` -- the sort fails
-    only when artifact detection actually flags intervals (Sorting.populate on
-    real data). This test checks the masked recording survives that reload.
+    SI's ``SilencedPeriodsRecording`` stores periods as a structured array,
+    which JSON cannot round-trip.
     """
     from spikeinterface.preprocessing.silence_periods import (
         SilencedPeriodsRecording,
@@ -166,14 +144,9 @@ def test_masked_recording_survives_run_sorter_serialization(tmp_path):
         apply_artifact_mask,
     )
 
-    # A JSON-serializable, non-zero base recording. This matters: the bug only
-    # manifests when the base is JSON-serializable, so the masked recording's
-    # own (buggy) json flag decides the dump format. A NumpyRecording is NOT
-    # JSON-serializable and would hide the bug by forcing the pickle path.
+    # A JSON-serializable base, so the JSON path is taken.
     rec = _serializable_recording()
-    # Kept intervals whose complement leaves SEVERAL small artifact gaps
-    # (~0.20-0.22 s, ~0.40-0.42 s, ~0.60-0.62 s) -- multiple artifact periods,
-    # well under the 50% frame-fraction guard.
+    # Three ~20 ms artifact gaps, well under the 50% frame-fraction guard.
     valid_times = np.array(
         [[0.0, 0.2], [0.22, 0.4], [0.42, 0.6], [0.62, 0.999]], dtype=float
     )
@@ -184,9 +157,7 @@ def test_masked_recording_survives_run_sorter_serialization(tmp_path):
     reloaded = _roundtrip_as_run_sorter_would(masked, tmp_path)
     assert isinstance(reloaded, SilencedPeriodsRecording)
 
-    # ... and the masking must be preserved through the round-trip: two
-    # SEPARATE artifact gaps read back all-zero (proving multiple artifacts
-    # were masked), while a kept region retains its non-zero signal.
+    # ... and two separate gaps read back zero while kept samples do not.
     fs = rec.get_sampling_frequency()
     first_gap = reloaded.get_traces(
         start_frame=int(0.21 * fs), end_frame=int(0.21 * fs) + 100
@@ -417,15 +388,11 @@ def test_sample_span_data_never_crosses_a_span_boundary():
 
 
 def test_sample_span_data_uses_short_spans():
-    """Every span here is shorter than ``max_piece`` (matching production's
-    ``int(0.5 * fs)`` default against 400-frame spans), and only the spans
-    carry noise -- the 100-frame gaps between them stay exactly zero. Two
-    distinct bugs must fail this test: (1) a sampler that drops/rejects a
-    span shorter than ``max_piece`` (SpikeInterface's own failure mode)
-    would process zero spans, so ``data.shape[0] != 4000``; (2) a sampler
-    that ignores ``spans`` and reads anywhere in the recording would pull in
-    some of the zeroed gap frames, pulling the sampled MAD below the
-    all-noise reference built strictly from the spans.
+    """Spans shorter than ``max_piece`` are sampled, and only spans are read.
+
+    Only the spans carry noise; the gaps between them are zero. Dropping
+    short spans (SpikeInterface's behavior) samples nothing; reading gaps
+    lowers the MAD.
     """
     import spikeinterface as si
 
@@ -454,9 +421,7 @@ def test_sample_span_data_uses_short_spans():
         rec,
         spans,
         target_samples=4000,
-        max_piece=500,  # > every span's length (400): exercises the "piece
-        # never longer than its own span" cap, not the max_piece cap, and
-        # would starve every span under a drop-short-spans bug.
+        max_piece=500,  # > every span's length (400): the span caps the piece
         seed=2,
         return_in_uV=False,
     )
@@ -512,10 +477,7 @@ def test_sample_span_data_exact_quotas_heterogeneous_noise():
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data
 
-    # A higher fs keeps the 9 s / 100 ms durations exact while giving the
-    # empirical MAD estimator enough samples for a tight (<2%) comparison
-    # against the closed-form mixture MAD -- at fs=1000 (9000/100 samples)
-    # the estimator's own sampling noise is comparable to the 2% tolerance.
+    # fs high enough that MAD sampling noise is well under the 2% tolerance.
     fs = 10_000.0
     rng = np.random.default_rng(15)
     big_len = 90_000  # 9 s, sigma=1
@@ -552,9 +514,7 @@ def test_sample_span_data_exact_quotas_heterogeneous_noise():
     assert n_from_big == 45_000  # exact quota: 50000 * 90000 / 100000
     assert n_from_small == 5_000  # exact quota: 50000 * 10000 / 100000
 
-    # Expected pooled MAD computed numerically from the exact-quota mixture
-    # (90% sigma=1, 10% sigma=5) via `_mixture_mad`, not from the
-    # length-weighted mean of the sigmas -- which is not the mixture MAD.
+    # Mixture MAD (90% sigma=1, 10% sigma=5), not a weighted mean of sigmas.
     expected_mad = _mixture_mad([(0.9, 1.0), (0.1, 5.0)])
     pooled = data[:, 0]
     sample_mad = np.median(np.abs(pooled - np.median(pooled)))
@@ -630,9 +590,8 @@ def test_no_piece_crosses_selection_join_when_unmasked():
     assert starts.shape == (200,)
     assert not np.any((starts < boundary) & (starts + 40 > boundary))
 
-    # Contrast (not a pass condition of the new code): SpikeInterface's own
-    # random-chunk sampler ignores internal joins and DOES straddle the
-    # boundary on this same recording -- proving the fixture discriminates.
+    # Fixture check: SpikeInterface's random-chunk sampler does straddle the
+    # join on this recording.
     slices = get_random_recording_slices(
         timed_rec, num_chunks_per_segment=20, chunk_duration="500ms", seed=11
     )
@@ -799,7 +758,7 @@ def _offset_counts_recording(dtype="int16", gain=0.25, offset=-2500.0):
     """Counts that encode 0 uV plus a +/-100 uV ramp: ``raw * gain + offset``.
 
     The counts sit ``-offset / gain`` above zero, so a stored 0 reads as
-    ``offset`` uV -- the voltage a raw-unit silencing writes.
+    ``offset`` uV.
     """
     import spikeinterface as si
 
@@ -847,11 +806,9 @@ def test_silenced_samples_read_zero_microvolts_on_an_offset_source():
     ],
 )
 def test_zero_offset_sources_are_silenced_in_their_stored_units(dtype, gain):
-    """A stored 0 already reads as 0 uV when every offset is 0, whatever the
-    gains, so the mask is applied to the stored samples exactly as
-    SpikeInterface's ``silence_periods`` does: same dtype, same calibration,
-    same bytes. This keeps sorter inputs and concat artifacts of such sources
-    unchanged."""
+    """With zero offsets a stored 0 is 0 uV, so masking matches
+    SpikeInterface's ``silence_periods`` byte for byte (same dtype and
+    calibration)."""
     import spikeinterface as si
     import spikeinterface.preprocessing as sip
 

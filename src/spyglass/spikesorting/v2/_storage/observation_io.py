@@ -216,8 +216,8 @@ def resolve_review_timeline_inputs(curation_key) -> ReviewTimelineInputs:
 def review_timeline(curation_key):
     """Excluded frame spans and original-session mapping for browser inspection.
 
-    V2 currently applies one shared observation mask to every unit. Read that
-    mask directly, without materializing the NWB spike trains for a display.
+    Every unit shares one observation mask, so it is read without the spike
+    trains.
     """
     return review_timeline_from_inputs(
         resolve_review_timeline_inputs(curation_key)

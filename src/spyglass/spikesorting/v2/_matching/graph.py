@@ -1,25 +1,7 @@
 """DB-free graph logic for cross-session unit tracking.
 
-Pure transforms the ``unit_matching`` tables delegate to so the
-matcher-output validation and the tracked-unit derivation are unit-testable
-without a database:
-
-- :func:`canonicalize_match_pairs` validates raw :class:`MatchPair` records
-  against the explicitly pinned matching-input curations and orients each by
-  ascending ``input_index``. It rejects pairs whose curation is not pinned,
-  same-input pairs (which include self-pairs), and reversed/duplicate pairs --
-  so ``(A, B)`` and ``(B, A)`` can never both be inserted into ``UnitMatch.Pair``.
-- :func:`input_set_hash` / :func:`chronological_input_order` content-address
-  and order the frozen matching inputs of a selection.
-- :func:`count_recording_spikes` counts each parent unit's spikes inside each
-  constituent recording of its matching input.
-- :func:`derive_tracked_units` seeds a graph from the full curated-unit universe,
-  enforces the strict node budget, and partitions the units into tracked units
-  via a greedy maximal-clique cover (each unit in exactly one tracked unit; the
-  strongest overlapping clique wins), with isolated units surfacing as singletons.
-
-None of them imports DataJoint or SpikeInterface, so the module loads without a
-database connection.
+Pure transforms the ``unit_matching`` tables delegate to. No DataJoint or
+SpikeInterface imports.
 """
 
 from __future__ import annotations
@@ -44,26 +26,11 @@ if TYPE_CHECKING:
 def input_set_hash(input_rows, recording_rows) -> str:
     """Content-address a UnitMatch selection's frozen matching inputs.
 
-    The sha256 hex digest over the inputs in ascending ``input_index`` order
-    (the frozen chronological order), each contributing its pinned curation
-    (``sorting_id``, ``curation_id``, ``curation_uuid``), its source
-    (``source_kind``, ``source_id``, ``motion_corrected_recording_id``) and,
-    per constituent recording in ``recording_index`` order, the
-    ``recording_id``, ``recording_content_hash``, its frozen
-    ``session_start_time`` (as UTC, :func:`utc_datetime`), the recording's
-    ``[start_sample, end_sample)`` frames in the sort and its kept
-    ``valid_times``. An input's ``input_start_time`` is not hashed on its own:
-    :func:`frozen_order_errors` requires it to equal the earliest of its
-    recordings' session start times. A corrected
-    ``Session.session_start_time`` therefore gives a new hash, and selecting
-    the same curations again gives a new selection. It is the
-    ``input_set_hash`` stored on every ``UnitMatchSelection`` master and the
-    single source of truth for that selection's identity:
-    ``insert_inputs`` calls it to mint the hash from the part rows it is about
-    to insert, and both ``_find_existing_pk`` and ``UnitMatch.make_fetch``
-    call it to re-derive the hash from the stored ``Input`` /
-    ``InputRecording`` rows and reject a selection whose stored hash
-    disagrees with its parts.
+    The single source of a ``UnitMatchSelection``'s identity: minted by
+    ``insert_inputs`` and re-derived by ``_find_existing_pk`` and
+    ``UnitMatch.make_fetch``. Hashes every input field listed below in
+    ``input_index`` order. ``input_start_time`` is not hashed; it must equal
+    the earliest recording ``session_start_time``, which is.
 
     Parameters
     ----------
@@ -75,12 +42,10 @@ def input_set_hash(input_rows, recording_rows) -> str:
     recording_rows : iterable of dict
         ``UnitMatchSelection.InputRecording`` rows (``input_index``,
         ``recording_index``, ``recording_id``, ``recording_content_hash``,
-        ``session_start_time`` (``datetime``; naive is read as UTC, so a
-        naive and an aware value of one instant hash identically),
+        ``session_start_time`` (``datetime``; naive is read as UTC),
         ``start_sample``, ``end_sample``, ``valid_times`` as an
-        ``(n_intervals, 2)`` array of seconds; each float enters the digest
-        exactly; ``source_coverage``). Rows whose ``input_index`` has no
-        input row do not enter the digest; the caller rejects them with
+        ``(n_intervals, 2)`` array of seconds, ``source_coverage``). Rows
+        without an input row are ignored; see
         :func:`input_part_structure_errors`.
 
     Returns
@@ -130,12 +95,9 @@ def input_set_hash(input_rows, recording_rows) -> str:
 def input_part_structure_errors(input_rows, recording_rows) -> list[str]:
     """Describe structural defects of a selection's ``Input`` parts.
 
-    A selection written by ``insert_inputs`` numbers its inputs ``0..n-1``,
-    gives every input at least one constituent recording numbered
-    ``0..k-1``, and has no recording row without an input. A raw insert can
-    break any of these; the hash alone cannot see a recording row whose input
-    is missing, so the selection boundary and ``UnitMatch.make_fetch`` check
-    the structure explicitly.
+    Well-formed parts number inputs ``0..n-1``, give each input recordings
+    ``0..k-1`` with ``k >= 1``, and have no orphan recording rows. The hash
+    cannot detect an orphan recording row.
 
     Parameters
     ----------
@@ -190,14 +152,10 @@ def utc_datetime(value: datetime) -> datetime:
 def chronological_input_order(inputs: list[dict]) -> list[dict]:
     """Order matching inputs chronologically, the order ``input_index`` freezes.
 
-    Sorts by session start, same-source epoch start, then sorting/curation ID:
-    ``input_start_time`` is the earliest session start among an input's
-    constituent recordings. Epoch inputs sharing one NWB are ordered by their
-    earliest actual source sample before the UUID tie-break. Disjoint-NWB
-    inputs fall back to the sorting/curation-ID tie-break, so any caller
-    order of the same inputs yields the same order. UnitMatchPy aligns each
-    input's drift to the previous input in
-    feed order, so the matcher is fed in this order.
+    Sort key: ``input_start_time``, then the earliest source sample for
+    epochs sharing one NWB, then sorting/curation ID. The matcher is fed in
+    this order because UnitMatchPy aligns each input's drift to the previous
+    one.
 
     Parameters
     ----------
@@ -210,8 +168,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     list of dict
         The same dicts, chronologically ordered.
     """
-    # Epochs of one acquisition share its session start. Use their original
-    # source position before the UUID tie-break.
+    # Epochs of one acquisition share its session start.
     shared = {}
     for item in inputs:
         for row in item.get("recordings", ()):
@@ -244,9 +201,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     )
 
 
-#: The only tracked-unit policy shipped today (greedy maximal-clique cover).
-#: Future policies are pure inserts into ``TrackedUnit.policy_used`` -- no
-#: schema migration.
+#: Greedy maximal-clique cover, the only tracked-unit policy.
 STRICT_POLICY = "strict"
 
 #: Node identity for the tracked-unit graph: one curated unit.
@@ -258,8 +213,7 @@ def frozen_order_errors(input_rows, recording_rows) -> list[str]:
 
     Each input's ``input_start_time`` must be the earliest
     ``session_start_time`` among its recordings, and ``input_index`` must
-    follow :func:`chronological_input_order` of those frozen times -- the
-    order the matcher is fed and pairs are oriented by.
+    follow :func:`chronological_input_order` of those frozen times.
 
     Parameters
     ----------
@@ -318,13 +272,8 @@ def frozen_order_errors(input_rows, recording_rows) -> list[str]:
 def count_recording_spikes(unit_spike_trains: dict, spans: list) -> dict:
     """Count each unit's spikes inside each constituent recording's span.
 
-    A matching input's parent unit (a unit of a concatenation sort) covers
-    every constituent recording and may fire in only some of them. Its
-    spikes are split by the recordings' frozen ``[start_sample,
-    end_sample)`` frame spans with
-    :func:`spyglass.spikesorting.v2._recording.concat.split_spike_frames_by_spans`, which conserves
-    every spike: a spike outside all spans raises rather than going
-    uncounted, so the per-recording counts always sum to the unit's total.
+    Per-recording counts always sum to the unit's total; a spike outside
+    every span raises.
 
     Parameters
     ----------
@@ -367,22 +316,12 @@ def canonicalize_match_pairs(
 ) -> list[dict]:
     """Validate and canonically orient raw matcher output before insertion.
 
-    Each :class:`MatchPair` carries ``(sorting_id, curation_id)`` per side; this
-    maps both sides to their pinned matching input's ``input_index`` (via
-    ``input_index_by_curation``) and:
-
-    - rejects a side whose ``(sorting_id, curation_id)`` is not one of the
-      pinned ``UnitMatchSelection.Input`` curations (the matcher returned a key
-      it was never fed);
-    - rejects a pair whose two sides share an ``input_index`` (a same-input
-      pair, which includes self-pairs) -- match pairs must span two distinct
-      matching inputs;
-    - requires integer curation and unit identifiers without coercion, and
-      when prepared unit sets are supplied, rejects units outside those sets;
-    - orients each pair so side A is the lower ``input_index``, then rejects a
-      second pair that orients to the same ``(input_a, unit_a, input_b,
-      unit_b)`` identity (a reversed duplicate), so ``UnitMatch.Pair`` cannot
-      hold both orientations.
+    - Rejects a side whose curation is not pinned.
+    - Rejects same-input pairs, including self-pairs.
+    - Requires integer identifiers without coercion; rejects units outside
+      ``eligible_unit_ids_by_curation`` when given.
+    - Orients side A to the lower ``input_index`` and rejects reversed
+      duplicates.
 
     Parameters
     ----------
@@ -391,9 +330,8 @@ def canonicalize_match_pairs(
     input_index_by_curation : dict[(str, int), int]
         ``(sorting_id, curation_id) -> input_index`` for the pinned curations.
     eligible_unit_ids_by_curation : dict[(str, int), set[int]], optional
-        Units retained by each input's preparer. Compute supplies this after
-        exclusions; excluded units remain in the frozen tracking universe but
-        cannot occur in a match pair.
+        Units retained by each input's preparer. Excluded units stay in the
+        tracking universe but cannot occur in a pair.
 
     Returns
     -------
@@ -451,7 +389,6 @@ def canonicalize_match_pairs(
                 f"sides are input_index {input_a}; this includes self-pairs). "
                 "Match pairs must span two distinct matching inputs."
             )
-        # Orient so side A is the lower input_index (canonical orientation).
         if input_a > input_b:
             side_a, unit_a, input_a, side_b, unit_b, input_b = (
                 side_b,
@@ -489,9 +426,9 @@ def canonicalize_match_pairs(
 def assert_disjoint_source_coverage(inputs) -> None:
     """Allow disjoint epochs while refusing shared original acquisition samples.
 
-    Inputs contain resolved/frozen ``recordings`` with ``source_coverage``.
-    Artifact masks are absent from this check. Validate constituent members too:
-    a concatenation must not silently include the same raw samples twice.
+    Inputs contain ``recordings`` with ``source_coverage``. Artifact masks
+    are ignored. Members of one concatenation are checked against each other
+    too.
     """
     from spyglass.spikesorting.v2.exceptions import OverlappingMatchInputError
 
@@ -537,19 +474,10 @@ def assert_disjoint_source_coverage(inputs) -> None:
 def divergent_electrode_space_members(signatures_by_member) -> list:
     """Return member indexes whose electrode signature differs from the anchor.
 
-    Channel GEOMETRY (positions) can coincide across two physically distinct
-    probes / sort groups, so a geometry match alone does not prove two members
-    are the same chronic implant. This compares each member's electrode IDENTITY
-    signature -- e.g. the ``(electrode_group_name, electrode_id, region)`` tuple
-    the concat path uses -- against the anchor (lowest ``member_index``).
-
-    The result is ADVISORY, not a rejection. Unlike concatenation (which reads
-    members in one electrode frame, so a mismatch corrupts data and is rejected
-    outright), UnitMatch does not stitch recordings, and electrode-group names /
-    ids come from each NWB file's ``ElectrodeGroup`` and are NOT guaranteed
-    stable across labs' ingestion. So the UnitMatch caller WARNS on a divergence
-    rather than blocking a possibly-legitimate chronic match -- a genuine
-    distinct-probe mix-up still surfaces as poor matcher AUC / few pairs.
+    Geometry can coincide across distinct probes, so this compares electrode
+    identity signatures against the anchor (lowest ``member_index``). The
+    result is advisory: electrode names/ids are not stable across labs'
+    ingestion, so callers warn rather than refuse.
 
     Parameters
     ----------
@@ -587,25 +515,12 @@ def derive_tracked_units(
 ) -> list[dict]:
     """Group curated units into tracked (biological) units via strict cliques.
 
-    The graph is seeded with EVERY node in ``node_universe`` so a unit the
-    matcher emitted no pair for still surfaces as a singleton tracked unit. An
-    edge is added only when its probability is strictly above ``threshold``.
-
-    Strict tracked units are a **partition**: each curated unit belongs to
-    exactly one tracked unit (mirroring UnitMatch's conservative unique-id
-    assignment, which keeps one group id per unit). Maximal cliques
-    (``networkx.find_cliques``) can overlap -- e.g. edges ``a1-b1``, ``a1-b2``,
-    ``a2-b1`` yield three size-2 cliques sharing ``a1``/``b1`` -- so emitting
-    every clique would assign one unit to several biological identities. Instead
-    the graph is covered greedily by maximal clique, largest first
-    (deterministic tie-break by sorted members): each clique contributes only its
-    not-yet-claimed members. A fully-connected group that overlaps no stronger
-    clique stays whole. A group that shares a unit with a stronger clique can
-    lose that unit and is not formed again from the units that remain, so
-    overlap can leave singletons. Among equal-size overlapping cliques the
-    strongest (highest median edge probability) is assigned first, so a weaker
-    identity never preempts a stronger one (mirroring UnitMatch's
-    descending-probability assignment). Isolated nodes are singletons.
+    - Every node in ``node_universe`` is seeded, so unpaired units become
+      singletons.
+    - Edges need probability strictly above ``threshold``.
+    - The result is a partition: maximal cliques are claimed greedily by
+      size, then median edge probability, then sorted members; each clique
+      keeps only unclaimed members, so overlap can leave singletons.
 
     Parameters
     ----------
@@ -620,23 +535,18 @@ def derive_tracked_units(
         :class:`TrackedUnitBudgetExceededError` before the (exponential) clique
         search runs.
     policy : str, optional
-        Persisted on every row. Only ``"strict"`` ships today.
+        Persisted on every row. Only ``"strict"`` is supported.
     input_by_node : dict, optional
         ``{node: matching-input key}`` (e.g. the node's ``input_index``);
         ``n_matching_inputs`` counts distinct values among a tracked unit's
         members. When ``None``, a node's input is its ``(sorting_id,
         curation_id)``, since an input pins one curation per sorting.
     detected_sessions_by_node : dict, optional
-        ``{node: iterable of session}``: the original recording sessions
-        (``nwb_file_name``) in which the node's unit has at least one spike.
-        A concatenation input's parent unit covers several recordings and
-        lists only those it fired in; two intervals of one nwb are one
-        session, and a unit with no spikes lists none (a node absent from
-        the map is detected nowhere). ``n_sessions_detected`` counts the
-        distinct sessions over a tracked unit's members, so two sortings
-        from one nwb (different sort groups of the same day) count once --
-        a within-session match cannot inflate to multi-session. When
-        ``None``, each node counts as detected in its own input.
+        ``{node: iterable of nwb_file_name}`` where the unit has at least
+        one spike; an absent node is detected nowhere.
+        ``n_sessions_detected`` counts distinct sessions over members, so
+        two sortings of one nwb count once. When ``None``, each node counts
+        as detected in its own input.
 
     Returns
     -------
@@ -662,8 +572,7 @@ def derive_tracked_units(
         )
 
     nodes = [tuple(node) for node in node_universe]
-    # Enforce the node budget BEFORE building the graph / running find_cliques --
-    # the cap is the guard against the exponential maximal-clique blow-up.
+    # Before find_cliques, which is exponential in the worst case.
     if len(nodes) > max_strict_nodes:
         raise TrackedUnitBudgetExceededError(
             f"TrackedUnit.make: the curated-unit graph has {len(nodes)} nodes, "
@@ -678,10 +587,7 @@ def derive_tracked_units(
     node_set = set(nodes)
     for node_a, node_b, probability in edges:
         edge = (tuple(node_a), tuple(node_b))
-        # networkx ``add_edge`` silently CREATES missing endpoints, which would
-        # smuggle a unit past the node budget and into the partition without it
-        # being part of the declared curated-unit universe. Require every edge
-        # endpoint to be a seeded node instead.
+        # networkx add_edge silently creates missing endpoints.
         if edge[0] not in node_set or edge[1] not in node_set:
             raise ValueError(
                 f"derive_tracked_units: edge {edge} references a node absent "
@@ -698,12 +604,7 @@ def derive_tracked_units(
             if graph.has_edge(u, v)
         ]
 
-    # Greedy maximal-clique cover -> partition. Largest cliques first (so a
-    # fully-connected group is emitted whole); among equal-size cliques the
-    # STRONGEST wins (highest median edge probability), mirroring UnitMatch's
-    # descending-probability assignment so a weaker identity never preempts a
-    # stronger overlapping one. Members break any remaining tie deterministically.
-    # Each clique contributes only its still-unclaimed members.
+    # Strongest first mirrors UnitMatch's descending-probability assignment.
     def _clique_strength(members: list) -> float:
         probs = _clique_edge_probs(members)
         return median(probs) if probs else 0.0
@@ -730,10 +631,6 @@ def derive_tracked_units(
             continue
         claimed.update(members)
         inputs = {_node_input(node) for node in members}
-        # Count distinct RECORDING SESSIONS in which a member unit fired, not
-        # inputs or recordings: two sortings (or two concatenated intervals)
-        # of one nwb are one session, and a member with an empty train in a
-        # recording is not detected there.
         if detected_sessions_by_node is None:
             sessions = inputs
         else:
@@ -753,6 +650,5 @@ def derive_tracked_units(
                 "policy_used": policy,
             }
         )
-    # Deterministic order: by the sorted member tuple of each tracked unit.
     tracked.sort(key=lambda tu: tu["members"])
     return tracked

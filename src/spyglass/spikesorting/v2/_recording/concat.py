@@ -1,14 +1,6 @@
-"""Pure + SpikeInterface helpers behind the concatenated-recording cache.
+"""Pure and SpikeInterface helpers behind the concatenated-recording cache.
 
-The concat math and the SpikeInterface concatenate call, kept out of the
-``session_group`` schema module so ``ConcatenatedRecording`` only fetches,
-calls these, writes, and inserts.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import; the SpikeInterface dependency is imported lazily inside
-:func:`build_concatenated_recording`. The sample-boundary / back-mapping math
-is pure (stdlib + numpy) so it is unit-testable without a database or a real
-recording.
+DB-free at import; SpikeInterface is imported lazily.
 """
 
 from __future__ import annotations
@@ -19,13 +11,8 @@ def member_recording_selection_key(
 ) -> dict:
     """Build the ``RecordingSelection`` key for one ``SessionGroup.Member``.
 
-    A member contributes ``nwb_file_name`` / ``sort_group_id`` /
-    ``interval_list_name`` / ``team_name``; the concat preprocessing recipe is
-    shared across all members, so it is injected rather than read from the
-    member row. The five returned fields are the ``RecordingSelection``
-    logical identity. A changed sort group can leave more than one selection
-    for this key, so a caller that needs one recording also restricts on the
-    member's current ``recording_input_hash``.
+    A changed sort group can leave several selections for this key; restrict
+    on the member's ``recording_input_hash`` to get one.
 
     Parameters
     ----------
@@ -53,15 +40,8 @@ def member_recording_selection_key(
 def member_split_key(member: dict) -> tuple:
     """Hashable per-member key for ``split_sorting_by_session`` output.
 
-    Returns the full member identity
-    ``(nwb_file_name, sort_group_id, interval_list_name, team_name)`` -- the
-    same fields (minus the shared preprocessing recipe) that resolve a member's
-    ``RecordingSelection``. Keying on all four means no two distinct members
-    collide: ``sort_group_id`` separates two shanks of the same NWB/interval,
-    and ``team_name`` separates the mixed-team case (``create_group`` permits
-    the same spatial member under two teams, since its duplicate guard also
-    keys on ``team_name``). The full member dict is not hashable, so this tuple
-    is the addressable per-session identity.
+    All four fields are needed: ``create_group`` permits the same spatial
+    member under two teams.
 
     Parameters
     ----------
@@ -82,12 +62,8 @@ def member_split_key(member: dict) -> tuple:
     )
 
 
-#: The per-member logical-identity fields folded into ``concat_recording_id``
-#: via :func:`member_set_hash`. Ordered by ``member_index`` so the concatenation
-#: order is part of identity. ``recording_content_hash`` / sample counts are
-#: deliberately EXCLUDED: member content is verified at materialize/rebuild
-#: against the stored snapshot, not folded into identity (a member rebuild that
-#: reproduces its content must not fork the concat id).
+#: Per-member identity fields hashed by :func:`member_set_hash`. Content hashes
+#: are verified at rebuild, not hashed, so a reproducing rebuild keeps the id.
 MEMBER_SNAPSHOT_LOGICAL_FIELDS = (
     "member_index",
     "nwb_file_name",
@@ -102,20 +78,9 @@ MEMBER_SNAPSHOT_LOGICAL_FIELDS = (
 def member_set_hash(snapshot_rows: list[dict]) -> str:
     """Return the content-addressed hash of an ordered concat member set.
 
-    Hashes only the LOGICAL identity of each member
-    (:data:`MEMBER_SNAPSHOT_LOGICAL_FIELDS`), canonicalized and ordered by
-    ``member_index``, into a 64-char SHA-256 hex digest. This is folded into
-    ``concat_recording_id`` so that two ``SessionGroup``\\s identical in name and
-    params but differing in their ordered member set mint DIFFERENT concat ids --
-    and so a later edit to ``SessionGroup.Member`` produces a new id rather than
-    silently reusing an existing concat over a changed member set.
-
-    The per-member ``recording_content_hash`` (and any sample-count field) is
-    excluded: member content is verification, not identity. Content drift is
-    caught at materialize/rebuild by comparing the live ``Recording`` against the
-    stored snapshot (``ConcatMemberDriftError``), the same separation
-    ``Recording`` keeps between its selection-logical ``recording_id`` and its
-    post-write ``content_hash``.
+    Hashes :data:`MEMBER_SNAPSHOT_LOGICAL_FIELDS` in ``member_index`` order,
+    so a changed member set mints a new ``concat_recording_id``. Content
+    drift is caught at rebuild (``ConcatMemberDriftError``).
 
     Parameters
     ----------
@@ -135,11 +100,6 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
         sha256_json,
     )
 
-    # Reuse the single v2 identity canonicalization (UUID<->str, numpy<->int
-    # collapse) so the folded member-set hash can never drift from the rest of
-    # the deterministic-id system. ``canonical_identity`` sorts keys, so each
-    # member's logical fields canonicalize order-independently; we order the
-    # MEMBERS by member_index so the concatenation order is part of the hash.
     ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
     return sha256_json(
         [
@@ -178,11 +138,8 @@ def cumulative_member_boundaries(
 ) -> list[int]:
     """Return the cumulative end-sample boundary for each member.
 
-    The boundary for member ``i`` is the number of samples in the
-    concatenated recording up to and INCLUDING member ``i`` -- i.e. the
-    exclusive end frame of that member's span. Member ``i`` therefore occupies
-    concat frames ``[boundaries[i-1], boundaries[i])`` (with ``boundaries[-1]``
-    read as 0 for member 0). The final boundary equals the total sample count.
+    Member ``i`` occupies ``[boundaries[i-1], boundaries[i])``, with 0 as
+    the start of member 0.
 
     Parameters
     ----------
@@ -208,20 +165,8 @@ def split_unit_spike_trains(
 ) -> list[dict]:
     """Slice concat-frame spike trains into per-member local frames.
 
-    Maps each unit's spike frames (indices into the concatenated recording)
-    back into each member's LOCAL sample frame: member ``i`` keeps the frames
-    in ``[start_i, end_i)`` and shifts them by ``-start_i`` so they index that
-    member's own recording from sample 0. Unit ids are preserved across every
-    member (a unit absent from a member's span gets an empty array).
-
-    Spike conservation is enforced, not assumed. The members partition
-    ``[0, boundaries[-1])`` into disjoint, contiguous half-open intervals, so
-    every concat-frame spike must land in exactly one member. This raises
-    ``ConcatSplitError`` rather than silently dropping a spike when the
-    boundaries are not strictly increasing (overlapping / empty intervals), when
-    ``total_n_samples`` is given and the final boundary does not equal it (a
-    boundary set that does not cover the whole recording), or when any input
-    frame falls outside ``[0, boundaries[-1])``.
+    Every unit id appears in every member, possibly empty. Every spike must
+    land in exactly one member, or this raises.
 
     Parameters
     ----------
@@ -257,8 +202,6 @@ def split_unit_spike_trains(
             "split_unit_spike_trains: no member boundaries; a concatenated "
             "recording must have at least one member boundary to split back."
         )
-    # Strictly increasing from the implicit start 0 -> disjoint, non-empty,
-    # contiguous member intervals covering [0, boundaries[-1]).
     previous = 0
     for index, end in enumerate(boundaries):
         end = int(end)
@@ -279,9 +222,6 @@ def split_unit_spike_trains(
             "the whole recording, so trailing spikes would be dropped."
         )
 
-    # Per-spike conservation: reject (rather than silently drop) any frame
-    # outside the covered range [0, total). Within range, the strictly-
-    # increasing boundaries guarantee each frame maps to exactly one member.
     dropped = {}
     for unit_id, frames in unit_spike_trains.items():
         frames = np.asarray(frames)
@@ -317,12 +257,8 @@ def split_spike_frames_by_spans(
 ) -> list[dict]:
     """Slice a sort's spike frames by its constituent recordings' frame spans.
 
-    A sort of one recording has one span, ``[0, n_samples)``; a sort of a
-    concatenation has one span per member, each starting where the previous
-    one ended. The spans must be contiguous from frame 0, so they are exactly
-    the member boundaries :func:`split_unit_spike_trains` splits by, and its
-    per-spike conservation applies: every spike lands in exactly one span, or
-    this raises.
+    Spans must be contiguous from frame 0; every spike must land in exactly
+    one span, or this raises.
 
     Parameters
     ----------
@@ -369,10 +305,7 @@ def member_spike_times(
 ) -> dict:
     """Map member-local spike frames onto the member recording's own clock.
 
-    A member's local frame ``k`` is sample ``k`` of that member's
-    ``Recording``, so its time is ``timestamps[k]`` on the member's original
-    clock (gaps between members and inside a member are kept, unlike the
-    synthetic concatenation timeline).
+    Unlike the synthetic concatenation timeline, this keeps real gaps.
 
     Parameters
     ----------
@@ -419,15 +352,8 @@ def electrode_signature_from_rows(
 ) -> tuple:
     """Build a member sort group's electrode/region signature.
 
-    The signature identifies the physical electrode space a member contributes
-    so two members of the same implant share a signature while members on
-    different probes, sort groups, or regions diverge. Each electrode is keyed
-    by ``(electrode_group_name, electrode_id)`` -- NOT ``electrode_id`` alone --
-    because the ``Electrode`` primary key is
-    ``(nwb_file_name, electrode_group_name, electrode_id)`` and the same
-    ``electrode_id`` can repeat across electrode groups; collapsing on the id
-    would let two physically distinct probes with reused ids and matching
-    regions pass as one electrode space.
+    Keyed by ``(electrode_group_name, electrode_id)`` because
+    ``electrode_id`` can repeat across electrode groups.
 
     Parameters
     ----------
@@ -461,11 +387,9 @@ def electrode_signature_from_rows(
 def _sampling_frequency_tolerance(reference, recording) -> float:
     """Bound rate roundoff from explicit timestamps, without scanning the clock.
 
-    NWB readers infer the rate from the median of the first 1000 timestamp
-    differences. Subtracting two rounded timestamps can change that period
-    by one timestamp ULP; the corresponding reciprocal error grows with the
-    clock's absolute offset. Rate-based clocks need no such allowance. Cap
-    the combined uncertainty at one frame of drift over either recording.
+    NWB readers infer the rate from the first 1000 timestamp differences,
+    which can shift by one ULP of the clock's absolute offset. Capped at one
+    frame of drift over either recording.
     """
     import numpy as np
 
@@ -496,14 +420,8 @@ def _sampling_frequency_tolerance(reference, recording) -> float:
 def assert_concat_compatible(recordings: list) -> None:
     """Reject member recordings that cannot be concatenated channel-for-channel.
 
-    SI's ``concatenate_recordings`` already requires identical channel ids, but
-    it fails deep in the stitch with an opaque message and does NOT check probe
-    geometry. Cross-session concatenation additionally needs identical geometry
-    so a unit's waveform footprint is the same across members. This front-loads
-    both checks (against the first member, the deterministic anchor) with a
-    clear message naming the first offending member, so an incompatible
-    SessionGroup fails fast in ``ConcatenatedRecording.make`` rather than mid-
-    stitch or, worse, silently anchoring to the first member's geometry.
+    Compares every member to the first. SI's ``concatenate_recordings``
+    fails opaquely on channel ids and does not check geometry.
 
     Parameters
     ----------
@@ -526,19 +444,12 @@ def assert_concat_compatible(recordings: list) -> None:
         )
 
     def _locations(recording):
-        # Cached Recording artifacts (the production input) always carry probe
-        # locations from the NWB electrodes table; bare synthetic recordings may
-        # not. Return None when geometry is unavailable so a probe-less member
-        # is not falsely flagged -- but a member that HAS geometry while another
-        # does not is still surfaced below.
+        # Synthetic recordings may lack probe locations.
         if not recording.has_channel_location():
             return None
         return np.asarray(recording.get_channel_locations())
 
     def _scaling(recording, kind):
-        # ``gain_to_uV`` / ``offset_to_uV`` are optional; a recording without
-        # them returns None. Mirror the geometry presence handling so a member
-        # that HAS scaling while another does not is surfaced.
         getter = (
             recording.get_channel_gains
             if kind == "gain"
@@ -548,9 +459,6 @@ def assert_concat_compatible(recordings: list) -> None:
         return None if values is None else np.asarray(values)
 
     def _assert_array_matches(reference, value, index, *, noun, share_clause):
-        # Shared presence-XOR + shape/allclose check for the optional per-channel
-        # arrays (geometry, gains, offsets): a member that HAS the array while
-        # another does not, or whose values differ, is surfaced.
         if (reference is None) != (value is None):
             raise ValueError(
                 f"build_concatenated_recording: member {index} {noun} presence "
@@ -582,11 +490,7 @@ def assert_concat_compatible(recordings: list) -> None:
                 "layout across sessions)."
             )
         fs = float(recording.get_sampling_frequency())
-        # Cached NWBs carry explicit timestamps. SI's inferred rate varies
-        # with their float precision, so equal acquisition rates can reload
-        # slightly differently when the selected epochs start at different
-        # offsets. Allow only that numerical uncertainty, bounded to one
-        # frame of accumulated drift; rate-based clocks stay effectively exact.
+        # Rates inferred from explicit timestamps vary with float precision.
         tolerance = (
             1e-9
             if abs(fs - reference_fs) <= 1e-9
@@ -640,21 +544,10 @@ def assert_concat_compatible(recordings: list) -> None:
 def mask_member_recordings(recordings, member_valid_times):
     """Mask each member and map its excluded frames into the concat timeline.
 
-    Uses the standalone mask's frame mapping, including disjoint timestamps.
-    The result scales with interval count rather than recording duration.
-    ``None`` explicitly means no artifact detection for that member.
-
-    Masked samples must read 0 uV. When any member keeps a nonzero channel
-    offset (an unfiltered, unreferenced source; see
-    :func:`~spyglass.spikesorting.v2._sorting.artifact_mask.has_nonzero_offset`),
-    every member, masked or not, is presented as float32 microvolts with a
-    unit calibration (SpikeInterface ``scale_to_uV``), so the concatenation
-    is on one scale and one dtype even for offsets the compatibility check
-    treats as equal (``allclose``, e.g. 0 and 1e-9). Otherwise every member
-    is masked in its stored units, so its samples are unchanged. The members
-    are checked for compatibility (:func:`assert_concat_compatible`) before
-    that conversion, which would otherwise give members with different
-    offsets or gains the same unit calibration.
+    A ``None`` valid-times entry means no artifact detection for that member.
+    Masked samples must read 0 uV, so if any member has a nonzero channel
+    offset, every member is converted with ``scale_to_uV`` to keep one scale
+    and dtype. Compatibility is checked before that conversion.
     """
     import spikeinterface.preprocessing as sip
 
@@ -688,14 +581,8 @@ def mask_member_recordings(recordings, member_valid_times):
 def concat_continuity(member_recordings, member_sample_counts):
     """Continuity spans of a concatenation, from its members' own timestamps.
 
-    Each member's spans come from its persisted timestamps
-    (``continuity_from_timestamps``), so a member-internal wall-clock gap is a
-    boundary too; they are offset into concat frames by the cumulative
-    member sample counts (the same basis as
-    :func:`cumulative_member_boundaries`), so every member join is a boundary
-    as well, however short the real gap. The concatenation itself replaces the
-    members' timestamps with one synthetic clock, so these must be taken from
-    the members before they are concatenated.
+    Member-internal gaps and every member join are boundaries. Must run on
+    the members before concatenation replaces their clocks.
 
     Parameters
     ----------
@@ -736,12 +623,8 @@ def concat_span_arrays(
 ):
     """Continuity and statistics spans of a concatenation, as stored arrays.
 
-    The continuity spans come from :func:`concat_continuity`, so
-    ``member_recordings`` must be the members as loaded: their persisted
-    timestamps still carry each member's own gaps, which the concatenation
-    replaces with one synthetic timeline. The statistics spans are the
-    artifact-free parts of the continuity spans
-    (:func:`~spyglass.spikesorting.v2._sorting.artifact_mask.statistics_spans`).
+    ``member_recordings`` must be the members as loaded, before
+    concatenation (see :func:`concat_continuity`).
 
     Parameters
     ----------
@@ -812,8 +695,7 @@ def concat_provenance_tables(
 ) -> list:
     """Provenance tables embedded in the concatenated recording's NWB file.
 
-    Self-describing provenance: a header and the ordered member map with
-    per-member frame boundaries, so ``split_sorting_by_session`` is
+    A header and the ordered member map, so ``split_sorting_by_session`` is
     reconstructable from the file alone.
 
     Parameters
@@ -891,21 +773,14 @@ def concat_provenance_tables(
 def build_concatenated_recording(recordings: list):
     """Concatenate per-member recordings into one mono-segment recording.
 
-    Stitches the ordered per-member ``Recording`` artifacts into one
-    mono-segment recording with a continuous (uniform) timeline -- the members
-    are independent sessions, so their wall-clock gaps are dropped
-    (``ignore_times=True``) and the result is a synthetic continuous recording
-    a sorter can consume as one piece. The traces are the members' traces
-    unchanged (no motion correction, no whitening); only the constant third
-    contact coordinate is dropped (see
-    :func:`~spyglass.spikesorting.v2._recording.geometry.flatten_planar_geometry`).
+    Wall-clock gaps are dropped (``ignore_times=True``). Traces are
+    unchanged; only a constant third contact coordinate is dropped.
 
     Parameters
     ----------
     recordings : list of si.BaseRecording
         Per-member preprocessed recordings, ordered by ``member_index``. Must
-        share channel ids and geometry (enforced upstream by reusing the same
-        sort group / probe layout across members).
+        share channel ids and geometry.
 
     Returns
     -------
@@ -915,17 +790,13 @@ def build_concatenated_recording(recordings: list):
     """
     from spikeinterface.core import concatenate_recordings
 
-    # Fail fast (and clearly) on incompatible members BEFORE the stitch, and
-    # before the result anchors to the first member's NWB geometry downstream.
     assert_concat_compatible(recordings)
 
     from spyglass.spikesorting.v2._recording.geometry import (
         flatten_planar_geometry,
     )
 
-    # SI independently requires equal rates by default. The compatibility
-    # check above has already bounded any timestamp-inference roundoff, so
-    # permit exactly the accepted difference when stitching the members.
+    # Permit exactly the rate roundoff the compatibility check accepted.
     reference_fs = recordings[0].get_sampling_frequency()
     sampling_frequency_max_diff = max(
         abs(recording.get_sampling_frequency() - reference_fs)

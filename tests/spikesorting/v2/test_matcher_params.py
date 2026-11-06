@@ -58,11 +58,8 @@ def test_unitmatch_schema_rejects_out_of_range(field, value):
 
 
 def test_unitmatch_schema_has_bundle_params():
-    """The waveform-bundle params are identity-bearing fields on the schema, so
-    they enter the named, content-addressed params blob (and therefore the
-    matcher_params_name -> unitmatch_id identity) rather than being silent
-    extract_unitmatch_bundle function defaults. The schema defaults below are
-    the shipped default row's values."""
+    """Waveform-bundle params are schema fields, so they are part of the
+    params identity; the defaults match the shipped default row."""
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 
     dumped = UnitMatchParamsSchema().model_dump()
@@ -91,10 +88,8 @@ def test_unitmatch_schema_rejects_bad_bundle_params(field, value):
 
 
 def test_bundle_compute_kwargs_seed_is_authoritative():
-    """The bundle ``seed`` field is authoritative: a stray ``random_seed`` in
-    the SI job kwargs (an ambient dj.config seed, or a leaked value) is stripped
-    and IGNORED, never allowed to override the identity-bearing seed -- else the
-    stored identity would disagree with the seed actually used."""
+    """The bundle ``seed`` is authoritative; a ``random_seed`` in the SI job
+    kwargs is stripped so it cannot override the stored identity."""
     from spyglass.spikesorting.v2._matching.waveforms import (
         _bundle_compute_kwargs,
     )
@@ -109,10 +104,8 @@ def test_bundle_compute_kwargs_seed_is_authoritative():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_bundle_seed_override_rejected_at_insert(isolated_matcher_rows):
-    """A random_seed in the job_kwargs blob is a second, non-identity seed the
-    bundle extractor must ignore, so it is rejected at insert rather than
-    silently dropped (which would mislead the user). A job_kwargs blob without
-    random_seed inserts fine."""
+    """A ``random_seed`` in the job_kwargs blob is rejected at insert, not
+    silently dropped."""
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
@@ -143,9 +136,8 @@ def test_bundle_seed_override_rejected_at_insert(isolated_matcher_rows):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_named_bundle_params_stored_distinctly(isolated_matcher_rows):
-    """Two named MatcherParameters rows that differ only in a bundle field are
-    stored as distinct, content-addressed identities (the bundle window is part
-    of the named params blob, not a silent function default)."""
+    """MatcherParameters rows differing only in a bundle field are distinct
+    identities."""
     from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
@@ -173,8 +165,7 @@ def test_named_bundle_params_stored_distinctly(isolated_matcher_rows):
 @pytest.mark.usefixtures("dj_conn")
 def test_bundle_params_reach_extract(monkeypatch):
     """The named bundle params and the sort's statistics spans reach
-    extract_unitmatch_bundle in the matcher compute path -- the params are no
-    longer silent function defaults."""
+    extract_unitmatch_bundle in the matcher compute path."""
     from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
     from spyglass.spikesorting.v2._matching import (
         unitmatch_backend as _unitmatch_backend,

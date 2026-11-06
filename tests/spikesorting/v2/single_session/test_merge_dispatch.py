@@ -9,14 +9,8 @@ from tests.spikesorting.v2.single_session._helpers import _clear_curations
 
 @pytest.mark.slow
 def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
-    """``SpikeSortingOutput.get_spike_times`` dispatches to a v2 source.
-
-    The previous review caught that the consumer-facing
-    ``get_spike_times`` had a v0 / v1 / imported test but no v2
-    dispatch path. This regression test pins the v2 NWB
-    ``object_id`` -> spike-times resolution through the merge master,
-    so a change to the v2 Units-NWB layout that breaks
-    ``fetch_nwb`` immediately fails the suite.
+    """``SpikeSortingOutput.get_spike_times`` resolves a v2 Units-NWB
+    ``object_id`` to absolute spike times through the merge master.
     """
     import numpy as np
 
@@ -28,9 +22,6 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
-    # The consumer-facing API returns a list of per-unit spike-time
-    # arrays. Pin shape (n_units arrays) + dtype (float seconds) +
-    # value range (non-negative, within the recording duration).
     spike_times = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
     assert isinstance(spike_times, list)
     assert len(spike_times) > 0, (
@@ -46,13 +37,8 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
         f"expected {expected_units} from Sorting.n_units."
     )
 
-    # Spike times must fall within the recording's wall-clock window,
-    # specifically [t_start, t_end] where t_start is the FIRST
-    # timestamp of the upstream recording. The smoke fixture starts
-    # at t=0 so a naive ``>= 0.0`` check is satisfied by both correct
-    # (absolute-time) and broken (relative-time) implementations.
-    # Pinning against the actual t_start (and t_end) catches a
-    # regression to relative storage on any non-zero-start session.
+    # Check against the recording's own [t_start, t_end]; ``>= 0`` would
+    # not distinguish absolute from relative times.
     from spyglass.spikesorting.v2.recording import (
         Recording,
     )
@@ -72,9 +58,7 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
             f"{arr.dtype.kind!r}, expected 'f' (float seconds)."
         )
         if arr.size:
-            # Strict absolute-time check: any spike before t_start
-            # would indicate a relative-time / t_start=0 regression.
-            # The tolerance is one sample (1/fs).
+            # Tolerance: one sample.
             fs = rec.get_sampling_frequency()
             assert arr.min() >= rec_t_start - 1.0 / fs, (
                 f"Unit {unit_idx}: spike time {arr.min():.9f} is "
@@ -104,12 +88,8 @@ def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
         sources=["v2"],
     )
     assert len(merge_ids) == 1
-    # Re-resolving by the FULL set of v2 chain fields (more
-    # restrictive than ``sorter`` alone, which would match every v2
-    # MS5 sorting from any prior test run) returns the same single
-    # merge_id. The previous looser assertion (``merge_ids[0] in
-    # merge_ids2``) was vacuously satisfied if state pollution
-    # produced multiple matches.
+    # Full chain fields, since ``sorter`` alone matches every MS5 sort in
+    # the DB; expect exactly one merge_id.
     merge_ids2 = SpikeSortingOutput().get_restricted_merge_ids(
         {
             "sorter": "mountainsort5",
@@ -131,12 +111,7 @@ def test_get_restricted_merge_ids_v2_resolves_through_chain(populated_sorting):
 def test_fetch_nwb_v2_dispatch(populated_sorting):
     """``SpikeSortingOutput.fetch_nwb`` works for a v2 source.
 
-    ``get_spike_times`` is the consumer-facing API but it dispatches
-    through ``fetch_nwb`` (the merge-table primitive). Downstream
-    consumers like decoding use ``fetch_nwb`` directly. This test
-    pins the v2 ``object_id`` -> Units NWB resolution at the lower
-    level so a change to the merge dispatch / column-name convention
-    surfaces immediately.
+    Decoding calls ``fetch_nwb`` directly, not via ``get_spike_times``.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -152,28 +127,19 @@ def test_fetch_nwb_v2_dispatch(populated_sorting):
         "merge_id; expected exactly one."
     )
     payload = nwb_results[0]
-    # v2 stores the Units NWB; ``object_id`` is the convention key
-    # downstream consumers use to fetch spike times. Either
-    # ``object_id`` (the v2/v1 convention) or ``units`` (the v0
-    # convention) must be present AND non-None.
+    # ``object_id`` (v1/v2) or ``units`` (v0) must be non-None.
     assert "object_id" in payload or "units" in payload, (
         f"fetch_nwb result missing both 'object_id' and 'units' keys; "
         f"got keys {sorted(payload.keys())}."
     )
     if "object_id" in payload:
-        # ``payload["object_id"]`` is the DataFrame that fetch_nwb
-        # builds from the Units NWB referenced by CurationV2.object_id.
-        # The schema-only assertion above just checked the key is
-        # present; this check pins that the DataFrame actually
-        # round-tripped from the NWB (non-None, has rows, has the
-        # expected columns).
+        # The DataFrame fetch_nwb builds from the Units NWB.
         loaded = payload["object_id"]
         assert loaded is not None, (
             "fetch_nwb returned object_id=None; the v2 Units NWB "
             "did not round-trip through the merge dispatch."
         )
-        # DataFrame check: rows correspond to CurationV2.Unit rows
-        # (one row per kept unit).
+        # One row per kept unit.
         expected_unit_ids = set(
             int(u) for u in (CurationV2.Unit & pk).fetch("unit_id")
         )
@@ -189,7 +155,7 @@ def test_fetch_nwb_v2_dispatch(populated_sorting):
         )
 
 
-# ---------- v1 / imported dispatch regression after v2 import ------------
+# ---------- v1 / imported dispatch after v2 import ------------------------
 
 
 @pytest.mark.slow
@@ -198,31 +164,20 @@ def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
     ``SpikeSortingOutput.source_class_dict`` after the v2 module
     adds itself to the registry.
 
-    Regression guard for the conditional ``source_class_dict["CurationV2"]
-    = CurationV2`` block in ``spikesorting_merge.py``: a future
-    refactor that broke v1 dispatch as a side effect of v2 changes
-    should fail this test.
-
-    Uses the ImportedSpikeSorting source registered by the test
-    bootstrap (via ``mini_insert``) rather than v0/v1 sorting paths,
-    because the v2 environment has SpikeInterface 0.104 which is
-    incompatible with the SI 0.99-based v0/v1 production code.
+    Uses ImportedSpikeSorting because v0/v1 sorting needs SI 0.99.
     """
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
         source_class_dict,
     )
 
-    # Both v2 and the imported source must be registered.
     assert "CurationV2" in source_class_dict
     assert "ImportedSpikeSorting" in source_class_dict
-    # The Merge class also resolves both via merge_get_parent_class.
     assert SpikeSortingOutput().merge_get_parent_class("CurationV2") is not None
     assert (
         SpikeSortingOutput().merge_get_parent_class("ImportedSpikeSorting")
         is not None
     )
-    # And the Imported part table is reachable through the master.
     assert hasattr(SpikeSortingOutput, "ImportedSpikeSorting")
 
 
@@ -232,13 +187,7 @@ def test_merge_dispatch_get_recording_works_for_v2(populated_sorting):
     """``SpikeSortingOutput.get_recording`` returns a v2 recording
     with ``is_filtered=True`` annotated.
 
-    Without the ``CurationV2.get_recording`` classmethod +
-    part-table source-class wiring, the merge dispatcher at
-    ``spikesorting_merge.py:317`` raises ``AttributeError`` on
-    every v2 ``merge_id``. Without the ``recording.annotate(
-    is_filtered=True)`` call, downstream SI consumers may re-apply
-    a bandpass to the already-filtered preprocessed recording. Pin
-    both invariants in one test.
+    ``is_filtered`` stops SI consumers from re-applying a bandpass.
     """
     import spikeinterface as si
 
@@ -267,12 +216,7 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
     """``SpikeSortingOutput.get_sort_group_info`` returns the full
     electrode set for a v2 merge_id.
 
-    The merge dispatcher calls
-    ``source_table.get_sort_group_info(merge_key)`` on the source
-    CLASS, not an instance, so ``CurationV2.get_sort_group_info``
-    must be a classmethod (an instance method raises
-    ``TypeError: missing self``). This test confirms the call
-    returns a non-empty multi-row relation.
+    The dispatcher calls it on the class, so it must be a classmethod.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -288,9 +232,7 @@ def test_merge_dispatch_get_sort_group_info_works_for_v2(populated_sorting):
         "per electrode (a fetch(limit=1) would under-report "
         "multi-region groups)."
     )
-    # The result must include the electrode-level columns (rows
-    # for every electrode in the sort group, joined to
-    # BrainRegion). Spot-check a couple of canonical column names.
+    # Spot-check electrode and BrainRegion columns.
     for required in ("electrode_id", "region_name"):
         assert required in rows[0], (
             f"get_sort_group_info row missing {required!r}; check "
@@ -305,10 +247,8 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     ``restrict_by_artifact=True`` honors the v2 ``f"artifact_detection_
     {artifact_detection_id}"`` IntervalList naming convention.
 
-    The dispatcher converts ``interval_list_name="artifact_detection_<uuid>"``
-    back to ``artifact_detection_id=<uuid>`` for the v2 join chain. Without
-    this conversion an artifact-named restriction returns no v2
-    merge_ids.
+    The dispatcher maps ``interval_list_name="artifact_detection_<uuid>"``
+    to ``artifact_detection_id=<uuid>`` for the v2 join chain.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -321,10 +261,8 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     expected = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
-    # Resolve this sort's artifact_detection_id (the "none" preset writes
-    # one IntervalList with the artifact-naming convention). The artifact
-    # pass lives on the ArtifactDetectionSource part, not the master, so read it
-    # through the resolver rather than a master column.
+    # The artifact pass is on the ArtifactDetectionSource part, so use the
+    # resolver.
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         populated_sorting
     )
@@ -350,19 +288,9 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
 def test_merge_dispatch_consumer_api_works_on_v2_merge_id(
     populated_sorting, method_name
 ):
-    """Downstream-consumer dispatch sanity for the two highest-
-    leverage time-binned APIs.
-
-    ``get_spike_indicator`` is the consumer-facing API for
-    clusterless decoding; ``get_firing_rate`` is the
-    decoding/unit-quality counterpart. Both iterate
-    ``get_spike_times(merge_key)`` under the hood -- a regression
-    in v2's ``get_spike_times`` dispatch silently breaks
-    downstream consumers. Both APIs must return a
-    ``(n_time, n_units)`` array that is non-negative and finite
-    in every bin the units were observed over, and ``np.nan`` in
-    the bins they were not. Parametrized so the same shape
-    contract is verified on both with identical setup.
+    """``get_spike_indicator`` and ``get_firing_rate`` on a v2 merge_id
+    return ``(n_time, n_units)``: non-negative and finite in observed bins,
+    ``np.nan`` elsewhere.
     """
     import numpy as np
 
@@ -407,14 +335,8 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     """Downstream-consumer: ``SortedSpikesGroup`` builds and
     fetches spike data + firing rate on a v2 merge_id.
 
-    Constructs a ``SortedSpikesGroup`` from a v2 curation's
-    merge_id (the cross-pipeline path used by decoding and
-    ripple-detection workflows), then exercises
-    ``fetch_spike_data``, ``get_spike_indicator``,
-    ``get_firing_rate`` (per-unit and MUA-multiunit modes).
-    Catches sparse-unit_id and v2-merge-dispatch regressions on
-    the actual SortedSpikesGroup surface, not just the
-    SpikeSortingOutput primitive APIs.
+    Covers ``fetch_spike_data``, ``get_spike_indicator`` and
+    ``get_firing_rate`` (per-unit and multiunit), including sparse unit ids.
     """
     import numpy as np
 
@@ -430,8 +352,6 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
-    # Use the default ``all_units`` UnitSelectionParams that ships
-    # with the analysis module.
     UnitSelectionParams().insert_default()
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -444,7 +364,7 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     )
 
     group_name = "v2_test_sorted_spikes_group"
-    # Idempotent: drop any prior group from earlier test runs.
+    # Drop any group left by an earlier run.
     existing = SortedSpikesGroup & {
         "sorted_spikes_group_name": group_name,
         "nwb_file_name": actual_nwb,
@@ -473,8 +393,7 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
         "SortedSpikesGroup.fetch_spike_data returned zero units for a "
         "v2 merge_id with n_units>=1; sparse-unit_id regression."
     )
-    # file_unit_ids is a list of dicts; each carries the v2 merge_id
-    # + unit_id from the NWB index (not a positional range).
+    # unit_id comes from the NWB index, not a positional range.
     for entry in file_unit_ids:
         assert entry["spikesorting_merge_id"] == merge_id
 

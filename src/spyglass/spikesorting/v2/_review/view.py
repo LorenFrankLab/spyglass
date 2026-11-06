@@ -1,12 +1,7 @@
 """Build the FigPack review figure without database access.
 
-``build_curation_view`` composes the scientific inspection view, official unit
-properties, seeded draft control, and review context. The schema layer resolves
-the analyzer and review inputs before calling it. Browser regression tests use
-the same builder over an in-memory analyzer.
-
-FigPack and SpikeInterface are imported only when rendering; importing this
-module activates no schema or database connection.
+The schema layer resolves the analyzer and review inputs. FigPack and
+SpikeInterface are imported only when rendering.
 """
 
 from __future__ import annotations
@@ -20,11 +15,8 @@ from spyglass.spikesorting.v2.exceptions import (
     FigPackDisplayedUnitPropertyError,
 )
 
-#: Fixed height (px) reserved for the curation control when expanded. A
-#: LayoutItem with only ``max_size`` reserves NO space when a sibling has
-#: ``stretch``, which would collapse the control to its title and leave its
-#: buttons unclickable; the pane is collapsible so the scientific views can take the
-#: whole height while inspecting.
+#: Fixed control height (px). With only ``max_size``, a LayoutItem beside a
+#: ``stretch`` sibling reserves no space and hides the buttons.
 CURATION_CONTROL_HEIGHT = 150
 
 CURATION_PANE_TITLE = "Curation"
@@ -89,10 +81,8 @@ def compose_review_layout(
 ):
     """Stack the SI sorting summary over the curation control.
 
-    The summary (selectable unit table + scientific views) takes all
-    remaining height; the control keeps a fixed strip below it so its label
-    and merge buttons are clickable at laptop and large viewports alike, and
-    collapses (title click) to hand the whole height to the views.
+    The summary takes the remaining height; the control keeps a fixed,
+    collapsible strip so its buttons stay clickable.
     """
     figpack_views, _ = require_figpack()
     return figpack_views.Box(
@@ -125,14 +115,9 @@ def compose_review_layout(
 def coerce_units_table_ids(view) -> None:
     """Coerce ``UnitsTable`` unit ids to Python ``int`` in place (bug workaround).
 
-    ``figpack_spike_sorting``'s ``UnitsTable.write_to_zarr_group`` ``json.dumps``
-    its rows directly, and SpikeInterface's ``generate_unit_table_view`` builds
-    each ``UnitsTableRow`` from ``sorting.unit_ids`` WITHOUT coercion -- so a real
-    v2 analyzer (integer unit ids stored as ``numpy.int32``) raises
-    ``TypeError: Object of type int32 is not JSON serializable`` at save/upload.
-    Walk the composed view and coerce every ``UnitsTableRow.unit_id`` and
-    ``UnitSimilarityScore`` id to ``int``. Remove once upstream serializes these
-    (e.g. via ``check_json``).
+    ``UnitsTable`` ``json.dumps`` rows that SI builds from ``numpy.int32``
+    unit ids, raising ``TypeError`` at save. Remove once upstream serializes
+    these.
     """
     import figpack_spike_sorting.views as figpack_ss_views
 
@@ -199,24 +184,15 @@ def build_curation_view(
 ):
     """Build the FigPack curation view for a curation (minimal-attach).
 
-    Composes individual SpikeInterface inspection widgets over the sort's
-    display ``analyzer`` (which already carries the curation-view extensions;
-    resolved by the schema layer), checking that any explicitly
-    requested unit-table columns are available, then attaches only the
-    Spyglass draft control as a sibling. ``timeline`` is the
-    ``review_timeline`` of the curation. ``display_options``
-    (:class:`ReviewDisplayOptions`) bounds the bundle payload -- the per-unit
-    amplitude sample and the correlogram pair filter -- and is display-only.
-    No DB access.
+    Composes SI inspection widgets over the display ``analyzer`` and attaches
+    the draft control. No DB access. ``timeline`` is the curation's
+    ``review_timeline``; ``display_options`` (:class:`ReviewDisplayOptions`)
+    bounds the payload.
 
-    A profile-backed review passes ``review_table`` (the selected
-    evaluation's metrics, annotation columns and proposals, indexed by unit
-    id). Its columns are shown in SpikeInterface's selectable unit table via
-    ``extra_unit_properties`` -- the table that drives unit selection for
-    the curation control -- in the requested order and INSTEAD of SI's
-    default columns, so the official evaluation stays authoritative even
-    when the display analyzer carries a same-named property. Returns the
-    composed ``figpack.views`` object.
+    ``review_table`` (profile-backed reviews: evaluation metrics, annotation
+    columns and proposals, indexed by unit id) replaces SI's default unit
+    table columns, so the evaluation wins over same-named analyzer
+    properties.
     """
     from spyglass.spikesorting.v2._review.inspection import (
         defer_time_views,
@@ -235,8 +211,7 @@ def build_curation_view(
             review_table, analyzer.unit_ids
         )
     else:
-        # Expert path: analyzer-native SI unit properties (or SI's
-        # defaults when None).
+        # Expert path: analyzer-native properties (None: SI defaults).
         analyzer_properties = displayed_unit_properties
         extra_properties = None
     assert_displayed_unit_properties_available(analyzer, analyzer_properties)

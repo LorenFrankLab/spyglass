@@ -1,12 +1,6 @@
 """Notebook-facing reporting helpers for the v2 pipeline.
 
-Holds ``describe_parameter_rows`` (parameter catalog table),
-``verify_v2_default_catalog`` (stored-vs-shipped default audit),
-``describe_units`` (per-unit table for one sort), and ``describe_run``
-(receipt table for a run result) with their row builders. ``pipeline.py``
-re-exports the ``describe_*`` functions and the package ``__init__`` re-exports
-``verify_v2_default_catalog``. The session batch runner imports
-``_session_outcome_counts`` from here; reporting does not import the runners.
+Reporting does not import the runners.
 """
 
 from __future__ import annotations
@@ -42,28 +36,11 @@ _PARAMETER_ROW_COLUMNS = [
 def describe_parameter_rows() -> "pd.DataFrame":
     """Catalog the parameter-Lookup rows currently in the database.
 
-    One row per parameter-Lookup row across ALL ten v2 parameter tables that
-    ``initialize_v2_defaults`` seeds -- the three preset-referenced tables
-    (``PreprocessingParameters`` / ``ArtifactDetectionParameters`` /
-    ``SorterParameters``) plus the downstream / cross-session / motion ones
-    (``AnalyzerWaveformParameters`` / ``QualityMetricParameters`` /
-    ``AutoCurationRules`` / ``MatcherParameters`` /
-    ``MotionEstimationParameters`` / ``MotionInterpolationParameters`` /
-    ``MotionCorrectionParameters``)
-    -- each with its content fingerprint (the row name excluded;
-    ``SorterParameters`` scoped per sorter), whether it is a shipped catalog
-    default, which pipeline presets reference it, and -- when its content
-    duplicates another row's -- the name it duplicates. Discovery metadata that
-    lives on the *presets* (``probe_type`` / ``sampling_rate_hz`` /
-    ``recommendation_status``) applies only to the three preset-referenced
-    stage tables and is left blank / ``None`` for the others;
-    ``used_by_pipeline_presets`` also lists the presets that score with each
-    ``QualityMetricParameters`` / ``AutoCurationRules`` row;
-    ``adjacency_radius_um`` is read straight from the ``SorterParameters`` blob.
-
-    Unlike the DB-free :func:`describe_pipeline_presets`, this reads the **live
-    tables**, so user-added rows appear -- call ``initialize_v2_defaults()`` (or
-    each table's ``insert_default()``) first to populate the shipped catalog.
+    One row per row of every parameter table ``initialize_v2_defaults``
+    seeds, with its content fingerprint (name excluded), whether it is a
+    shipped default, the presets that use it, and any row it duplicates.
+    Preset metadata columns are blank for tables presets do not name.
+    Reads the live tables, so user-added rows appear.
 
     Returns
     -------
@@ -168,10 +145,7 @@ def _num_axis(used_by: list[str], attr: str):
 
 def _num(value) -> str:
     """Format a parameter value compactly for a row summary."""
-    # describe reads extra="allow" blobs, so a knob can legitimately be a
-    # string / list / dict. Format numerics compactly, but fall back to
-    # str() instead of letting one odd user row raise and take down the
-    # whole catalog.
+    # extra="allow" blobs can hold non-numeric knobs.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return str(value)
     return f"{value:g}"
@@ -228,13 +202,10 @@ def _preset_parameter_records(
 ) -> list[dict]:
     """Catalog records for every row of a preset-referenced param Lookup.
 
-    ``preset_use`` maps each row's key -- its ``name_attr`` value, or
-    ``(sorter, name)`` when ``sorter_keyed`` -- to the presets that name it.
-    ``summarize(row, params)`` renders the row's one-line summary.
-    ``sorter_keyed`` (``SorterParameters``) also fills the ``sorter`` and
-    ``adjacency_radius_um`` columns and folds the sorter and
-    execution_params (local vs container backend) into the fingerprint, as
-    the duplicate-content guard does.
+    ``preset_use`` maps each row's key (``(sorter, name)`` when
+    ``sorter_keyed``) to the presets that name it. ``sorter_keyed`` also
+    folds the sorter and ``execution_params`` into the fingerprint, as the
+    duplicate-content guard does.
     """
     from spyglass.spikesorting.v2._core.lookup_validation import (
         _jsonable_blob,
@@ -282,14 +253,8 @@ def _preset_parameter_records(
 def _downstream_parameter_records() -> list[dict]:
     """Catalog records for the parameter Lookups outside the stage tables.
 
-    These Lookups are resolved downstream of preset selection, used only by
-    cross-session matching, or chosen per run as a motion recipe, so the
-    preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
-    recommendation_status) stay blank. Presets do name a metric row and an
-    auto-curation rule row, so those two fill ``used_by_pipeline_presets``. They ARE
-    content-addressed by name and user-populatable, so listing them keeps this
-    report aligned with the full ``initialize_v2_defaults`` surface (ten
-    Lookups, not three).
+    Preset metadata columns stay blank; metric and auto-curation rows still
+    fill ``used_by_pipeline_presets``.
     """
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
@@ -367,12 +332,10 @@ def _simple_parameter_records(
 ) -> list[dict]:
     """List a name-keyed param Lookup with preset-fold columns blank.
 
-    ``shipped`` is the set of names the table's default catalog ships
-    (each caller knows its table's catalog). ``used_by`` maps a row name to
-    the presets that name it, for tables a preset references by name. ``extra_content(row)`` folds
-    part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
-    fingerprint so a name-keyed master with identical scalar columns but
-    different part rows is not falsely flagged as a content duplicate.
+    ``shipped`` is the set of shipped default names. ``used_by`` maps a row
+    name to the presets that use it. ``extra_content(row)`` folds part-table
+    rows into the fingerprint so masters differing only in parts are not
+    duplicates.
     """
     from spyglass.spikesorting.v2._core.parameter_identity import (
         parameter_fingerprint,
@@ -421,12 +384,7 @@ def _autocuration_rule_content(rules_row) -> list[dict]:
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
-    # The Rule part rows define the named ruleset's content, so fold them
-    # (ordered by rule_index) into the fingerprint -- two rulesets with the
-    # same master columns but different Rule rows are NOT duplicates.
-    # Exclude the auto_curation_rules_name FK (it IS the name being
-    # abstracted away) so two IDENTICAL rule sets under different names share
-    # a fingerprint and surface as duplicate_of.
+    # Drop the name FK so identical rule sets under different names match.
     return [
         {
             k: _jsonable_blob(v)
@@ -501,16 +459,8 @@ def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
 def _content_equal(left, right) -> bool:
     """Deep equality for fetched-vs-shipped default content.
 
-    Deliberately NOT ``_curation.metrics._values_match`` despite the near-identical
-    shape: this audit compares a SHIPPED Python value against a DB-FETCHED value,
-    where a ``bool`` column comes back as ``int`` (DataJoint stores bool as
-    tinyint), so ``False`` shipped must equal ``0`` stored -- the ``left == right``
-    bool branch here conflates them on purpose. ``_values_match`` does the
-    opposite (strict ``type(a) is type(b)``) because its own callers compare two
-    in-memory blobs where a bool-vs-int distinction is real. The audited
-    columns are blobs and doubles, which round-trip exactly, so values compare
-    exactly; dicts/lists recurse. Both sides are pre-normalized via
-    ``_jsonable_blob``.
+    Fetched bool columns come back as int, so ``False`` equals ``0`` here,
+    unlike the strict ``_curation.metrics._values_match``.
     """
     if isinstance(left, bool) or isinstance(right, bool):
         return left == right
@@ -528,10 +478,8 @@ def _content_equal(left, right) -> bool:
 def _canonical_quality_metric_rows(table) -> list[dict]:
     """Shipped ``QualityMetricParameters`` defaults in their STORED shape.
 
-    ``_default_rows`` is the raw insert INPUT -- it omits the columns the
-    validated insert fills (``template_metric_columns``, ``params_schema_version``,
-    ``job_kwargs``). Run them through the same preparation the insert uses so
-    every stored column joins the drift comparison, not just the raw inputs.
+    ``_default_rows`` is insert input; prepare it as the insert does so every
+    stored column is compared.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         prepare_quality_metric_row,
@@ -543,11 +491,8 @@ def _canonical_quality_metric_rows(table) -> list[dict]:
 def _canonical_autocuration_master_rows(table) -> list[dict]:
     """Shipped ``AutoCurationRules`` MASTER defaults in their STORED shape.
 
-    ``_default_payloads`` masters omit the validated-fill columns
-    (``auto_merge_kwargs``, ``params_schema_version``, ``job_kwargs``). Run
-    them through the same preparation ``insert_rules`` uses so a drift in
-    those defaulted master columns is compared too (the ``Rule`` parts are
-    compared separately in ``verify_v2_default_catalog``).
+    Prepared as ``insert_rules`` does so defaulted columns are compared.
+    ``Rule`` parts are compared separately.
     """
     from spyglass.spikesorting.v2._params.metric_curation import (
         prepare_auto_curation_rules,
@@ -562,12 +507,7 @@ def _canonical_autocuration_master_rows(table) -> list[dict]:
 def _shipped_default_rows(table) -> list[dict]:
     """Shipped default rows for a Lookup in their STORED (canonical) shape.
 
-    ``_DEFAULT_CONTENTS`` positional tuples are zipped to the table heading (and
-    are already canonical). The dynamic-default tables expose raw insert INPUT
-    (``_default_rows`` / ``_default_payloads``), so their canonical stored rows
-    are rebuilt via the table's own validation so EVERY stored column -- not just
-    the raw inputs -- joins the drift comparison. Returns ``[]`` when a table
-    exposes no static default source.
+    Returns ``[]`` when a table has no static default source.
     """
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
@@ -584,9 +524,7 @@ def _shipped_default_rows(table) -> list[dict]:
         return [dict(row) for row in rows_fn()]
     payloads_fn = getattr(table, "_default_payloads", None)
     if callable(payloads_fn):
-        # Master scalars only; the ``Rule`` parts are compared separately in
-        # ``verify_v2_default_catalog`` (a drifted rule threshold would otherwise
-        # be invisible).
+        # Rule parts are compared separately in verify_v2_default_catalog.
         return [dict(master) for master, _parts in payloads_fn()]
     return []
 
@@ -594,8 +532,7 @@ def _shipped_default_rows(table) -> list[dict]:
 def _v2_default_catalog_tables():
     """The default-bearing v2 parameter Lookups + their name attribute.
 
-    Every table ``initialize_v2_defaults`` seeds, paired with its params-name
-    column. Imported lazily so the package stays import-light.
+    Every table ``initialize_v2_defaults`` seeds.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -631,10 +568,8 @@ def _v2_default_catalog_tables():
 def _diverged_autocuration_rules(table) -> list[dict]:
     """Stale ``AutoCurationRules.Rule`` part rows vs the shipped rule sets.
 
-    The master scalar compare misses a drifted rule (threshold / operator / label
-    / shape column), so compare the shipped ``_default_payloads`` rule rows to the
-    stored ``Rule`` rows per name: a different rule count, a missing
-    ``rule_index``, or a diverged rule field is a stale default.
+    A different rule count, a missing ``rule_index``, or a diverged field is
+    stale.
     """
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
@@ -692,18 +627,10 @@ def _diverged_autocuration_rules(table) -> list[dict]:
 def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
     """Flag stored same-name default rows whose content diverged from shipped.
 
-    ``initialize_v2_defaults`` re-runs each ``insert_default()`` idempotently and
-    NEVER compares a stored same-name row's content to the shipped content
-    (``reject_duplicate_parameter_content`` skips existing-PK rows). So a stored
-    shipped-default row whose content has since diverged from the shipped content
-    -- e.g. a hand-edited stored blob or a row seeded under an older default --
-    silently keeps its stale content. This audit compares, for each shipped
-    default present in the DB, the stored content to the shipped content (per PK,
-    so the per-sorter ``SorterParameters`` keys correctly) and returns the
-    divergences. For ``QualityMetricParameters`` the canonical
-    ``template_metric_columns`` default is included, and for ``AutoCurationRules``
-    the ``Rule`` part rows are compared too, so a drifted rule threshold or
-    waveform-shape column is not invisible.
+    ``initialize_v2_defaults`` skips existing names without comparing content,
+    so a hand-edited or older-default row keeps its stale content. Compares
+    each seeded default per primary key, including ``AutoCurationRules.Rule``
+    parts.
 
     Parameters
     ----------
@@ -734,10 +661,10 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
             try:
                 pk = tuple(shipped[field] for field in pk_fields)
             except KeyError:
-                continue  # shipped row missing a PK field -> not comparable
+                continue
             stored = stored_by_pk.get(pk)
             if stored is None:
-                continue  # not seeded (e.g. sorter not installed); skip
+                continue  # not seeded
             diverged = [
                 field
                 for field, shipped_value in shipped.items()
@@ -781,11 +708,8 @@ _UNIT_COLUMNS = [
 def _observed_duration_s(sorting_id) -> float:
     """Seconds the sort actually observed, for a firing-rate denominator.
 
-    Mirrors ``Sorting.make_fetch``: when the sort ran artifact detection the
-    denominator is the retained sample duration, otherwise the materialized
-    recording's sample count / sampling frequency (not its wall-clock span).
-    Using the raw recording length would overstate the denominator -- and so
-    understate firing rate -- for artifact-masked sorts.
+    Mirrors ``Sorting.make_fetch``: the artifact-retained duration if masked,
+    else sample count / sampling frequency.
     """
     import numpy as np
 
@@ -798,8 +722,7 @@ def _observed_duration_s(sorting_id) -> float:
 
     sorting_key = {"sorting_id": sorting_id}
     source, traces = SortingSelection.resolve_effective_source(sorting_key)
-    # Only the sample count and timestamps are read, so the traces load as
-    # persisted, with no artifact mask applied at load.
+    # Only samples and timestamps are read; no mask needed.
     recording = SortingSelection.load_stored_traces(traces)
     if source.kind == "concatenated_recording":
         from spyglass.spikesorting.v2.session_group import (
@@ -828,20 +751,10 @@ def _observed_duration_s(sorting_id) -> float:
 def describe_units(sorting_id) -> "pd.DataFrame":
     """Return a per-unit, sort-time quality snapshot for one sort.
 
-    A read-only "what did this sort produce?" receipt built entirely from
-    metadata committed at sort time -- it computes no SpikeInterface extension
-    and loads no recording. Use it right after ``run_v2_pipeline``
-    (``describe_units(run_summary["sorting_id"])``) to sanity-check a sort
-    before the deeper analyzer-backed quality metrics (SNR / ISI / nearest-
-    neighbour), which are computed by the analyzer-driven curation step
-    (``CurationEvaluation``).
-
-    ``firing_rate_hz`` uses the duration the sort actually OBSERVED -- the
-    artifact-removed ``valid_times`` total when the sort ran artifact detection,
-    otherwise the materialized recording duration (see
-    :func:`_observed_duration_s`). ``peak_electrode_id`` and ``brain_region``
-    come from each unit's peak-amplitude ``Electrode`` row (anchored to the
-    first member for concat sorts).
+    Read-only, from sort-time metadata. ``firing_rate_hz`` divides by the
+    observed (artifact-removed) duration. ``peak_electrode_id`` and
+    ``brain_region`` come from the peak-amplitude electrode (the first
+    member's for concat sorts).
 
     Parameters
     ----------
@@ -880,10 +793,7 @@ def describe_units(sorting_id) -> "pd.DataFrame":
 
     duration_s = _observed_duration_s(sorting_id)
     if duration_s <= 0:
-        # Units present but zero observed seconds is a contradiction (an
-        # all-artifact mask or a truncated recording). Raise loudly rather than
-        # emitting an all-NaN firing_rate column that reads as a display quirk
-        # and hides the upstream defect.
+        # Units with zero observed time indicate an upstream defect.
         raise ValueError(
             f"describe_units: sorting_id {sorting_id!r} has {len(unit_rows)} "
             f"unit(s) but its observed duration is {duration_s}s. A sort with "
@@ -929,14 +839,9 @@ _RUN_COLUMNS = [
 _RUN_STAGE_ORDER = (
     "recording",
     "artifact_detection",
-    # Concat-mode source stages run BEFORE sorting (a single-session run has
-    # recording/artifact_detection instead; the receipt lists only the stages a
-    # run actually has), so order them here to keep the receipt chronological.
     "member_recording",
     "member_artifact_detection",
     "concat_recording",
-    # The motion stages run on the sort's source, after it is built and
-    # before the sort, in either input mode.
     "motion_estimate",
     "motion_corrected_recording",
     "sorting",
@@ -1065,10 +970,7 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
 
     rows = []
     auto_labeled_merge_id = run_summary.get("auto_labeled_merge_id")
-    # The root-only / auto-curated status is a run_v2_pipeline concept, keyed on
-    # its root_merge_id. Other dict summaries that flow through describe_run
-    # (e.g. a run_v2_unit_match manifest) have no root_merge_id -- leave their
-    # summary status blank rather than mislabeling them "root only".
+    # Only run_v2_pipeline summaries have a root_merge_id.
     if "root_merge_id" in run_summary:
         summary_status = (
             "auto-labeled"
@@ -1117,9 +1019,6 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
             value=str(run_summary["artifact_masked_duration_s"]),
         )
         rows.append(row)
-    # The motion stage's receipt: one ``config`` row per field (``None``
-    # where the mode does not produce it), so an estimate or a corrected
-    # recording is never hidden in a nested dict.
     if "motion_mode" in run_summary:
         for setting in _RUN_MOTION_FIELDS:
             row = _run_row(
@@ -1137,8 +1036,6 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
             member_merge_id=member_merge_id,
         )
         rows.append(row)
-    # A run_v2_unit_match receipt: one row per matching input, in input_index
-    # (chronological) order.
     for match_input in run_summary.get("inputs") or ():
         row = _run_row(
             row_type="input",
@@ -1153,10 +1050,6 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
             warning=str(warning),
         )
         rows.append(row)
-    # What the sort stage executed, from the receipt's resolved sorter config
-    # (the same ``resolve_sort_config`` the dispatcher runs): one ``config``
-    # row per effective setting so the receipt shows the SI kwargs, whiten
-    # routing, seed, job kwargs and backend that produced this sort.
     sorter_config = run_summary.get("sorter_config")
     if isinstance(sorter_config, dict):
         for setting in (
@@ -1182,50 +1075,30 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
 def describe_run(result) -> "pd.DataFrame":
     """Render a ``run_v2_pipeline`` summary (or session result) as a receipt.
 
-    The post-run companion to the ``describe_*`` discovery helpers: it turns the
-    plain dict / list those runners return into a long-format DataFrame whose
-    rows are explicit, so the things easiest to overlook -- a zero-unit sort, a
-    concat member merge ID, a warning, or a failed group -- are first-class
-    rows, not values buried in a nested dict. Warnings never disappear into a
-    print statement.
-
-    Pass a single ``dict`` run summary -- a ``run_v2_pipeline`` summary or a
-    ``run_v2_unit_match`` manifest (both carry ``stage_seconds`` + per-stage
-    ``*_status`` keys) -- or a ``run_v2_pipeline_session`` result (``list`` of
-    dicts). For the session form, a leading ``summary`` row carries the ok /
-    failed / zero-unit / with-warnings counts and ``seconds`` is
-    ``sum(stage_seconds.values())`` per group; partial / missing summaries on
-    failed groups are tolerated.
+    Long format, so zero-unit sorts, concat member merge IDs, warnings and
+    failed groups are explicit rows. Accepts a ``run_v2_pipeline`` summary or
+    ``run_v2_unit_match`` manifest (``dict``), or a
+    ``run_v2_pipeline_session`` result (``list``), whose leading ``summary``
+    row counts ok / failed / zero-unit / warned groups.
 
     Returns
     -------
     pandas.DataFrame
-        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"member"`` /
-        ``"input"`` / ``"group"`` / ``"warning"``), ``sort_group_id``,
-        ``stage``, ``status``,
+        Columns ``row_type`` (``"summary"`` / ``"stage"`` / ``"config"`` /
+        ``"member_artifact"`` / ``"member"`` / ``"input"`` / ``"group"`` /
+        ``"warning"``), ``sort_group_id``, ``stage``, ``status``,
         ``seconds``, ``n_units``, ``root_merge_id``, ``auto_labeled_merge_id``,
         ``member_index``, ``nwb_file_name``, ``member_merge_id``, ``warning``,
-        ``error``, ``setting``, ``value``. ``config`` rows carry the
-        scientific setup, the effective sorter configuration and the motion
-        receipt (``motion_mode``, ``motion_correction_params_name``,
-        ``motion_estimate_id``, ``motion_estimate_supplied``,
-        ``motion_estimation_preset``,
-        ``motion_corrected_recording_id``, ``motion_removed_channel_ids``,
-        ``motion_spans_without_evidence``; ``"None"`` where the mode produces
-        none). For a
-        ``run_v2_pipeline`` summary the ``summary`` row's
-        ``status`` is ``"root only"`` / ``"auto-labeled"``. Single-session
-        runs expose the auto-labeled child through ``auto_labeled_merge_id``;
-        concat runs leave that synthetic-timeline ID unset and expose their
-        session-safe outputs through the ``member`` rows instead. For any other
-        dict summary (e.g. ``run_v2_unit_match``, which has no
-        ``root_merge_id``) the ``summary`` status is blank and its stages render
-        from its own ``*_status`` keys. A ``run_v2_unit_match`` receipt adds one
-        ``input`` row per matching input, in ``input_index`` order:
-        ``setting`` is ``input_<index>``, ``nwb_file_name`` lists the input's
-        sessions, and ``value`` gives its source kind and id, recordings,
-        pinned curation and whether its waveforms came from motion-corrected
-        traces (with the ``motion_corrected_recording_id``).
+        ``error``, ``setting``, ``value``.
+
+        - ``config`` rows: scientific setup, effective sorter configuration,
+          and motion fields (``"None"`` where the mode produces none).
+        - ``summary`` status: ``"root only"`` / ``"auto-labeled"`` for a
+          ``run_v2_pipeline`` summary, blank otherwise.
+        - Concat runs leave ``auto_labeled_merge_id`` unset and report
+          ``member`` rows instead.
+        - ``input`` rows (``run_v2_unit_match``): one per matching input, in
+          ``input_index`` order.
     """
     import pandas as pd
 
@@ -1248,9 +1121,7 @@ def describe_run(result) -> "pd.DataFrame":
                 entry, partial, "auto_labeled_merge_id"
             )
             if outcome not in ("ok", "failed"):
-                # Don't silently count an unrecognized entry as ok -- that would
-                # inflate the ok tally and give false reassurance (e.g. a raw
-                # run summary mistakenly wrapped in a list has no 'outcome').
+                # E.g. a run summary wrongly wrapped in a list.
                 raise ValueError(
                     "describe_run: session-result entry for sort_group_id="
                     f"{sort_group_id!r} has outcome={outcome!r}; expected 'ok' "

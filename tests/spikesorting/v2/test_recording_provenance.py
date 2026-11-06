@@ -1,9 +1,7 @@
 """Recording / Units NWB provenance.
 
-Covers the ``ElectricalSeries.filtering`` provenance string reflecting the
-preprocessing steps that actually ran, and the per-unit ``obs_intervals``
-fallback to the recorded windows when no artifact pass was applied (vs the
-artifact IntervalList's valid_times when one was).
+Covers the ``ElectricalSeries.filtering`` string, source provenance,
+``obs_intervals`` and ``channel_name`` resolution.
 """
 
 from __future__ import annotations
@@ -16,15 +14,9 @@ def _fresh_unit_producing_selection(populated_sorting):
     """Build a fresh MS5 ``SortingSelection`` on the fixture's
     recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
 
-    The fallback test needs a sort that actually yields units so the Units NWB
-    carries real ``obs_intervals``; the clusterless ``default`` row finds zero
-    peaks on the MEArec smoke fixture. MS5 produces units.
-
-    The selection is ARTIFACT-FREE (no ``artifact_detection_id``) so it is a DISTINCT
-    row from the package fixture's artifact-backed MS5 sort -- otherwise
-    ``insert_selection`` (find-existing-or-insert) would return the shared
-    fixture's sort and a destructive test would delete shared state. The
-    caller owns populate + teardown.
+    MS5 yields units on the smoke fixture. Artifact-free, so it is distinct
+    from the shared artifact-backed sort. The caller owns populate and
+    teardown.
     """
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -45,11 +37,7 @@ def _fresh_unit_producing_selection(populated_sorting):
 
 
 def test_filtering_description_reflects_actual_steps():
-    """The persisted ``ElectricalSeries.filtering`` provenance is built from
-    the preprocessing steps that ACTUALLY ran, not a fixed
-    "Bandpass filter + common reference" string that would misdescribe the
-    no_filter / reference_mode='none' artifact.
-    """
+    """``ElectricalSeries.filtering`` names only the steps that ran."""
     from spyglass.spikesorting.v2._params.preprocessing import (
         BandpassFilterParams,
     )
@@ -71,9 +59,7 @@ def test_filtering_description_reflects_actual_steps():
     assert "bandpass filter 300-6000 Hz" in bp_only
     assert "common reference" not in bp_only
 
-    # Bandpass + common reference -> both steps named, in the RUNTIME APPLY
-    # order (bandpass first, then reference -- the order is non-commutative on
-    # the global-median branch, so the provenance must track the apply order).
+    # Apply order: bandpass, then reference (non-commutative for median).
     both = filtering_description(bp, "global_median", no_ps)
     assert "bandpass filter 300-6000 Hz" in both
     assert "common reference (global_median)" in both
@@ -81,9 +67,7 @@ def test_filtering_description_reflects_actual_steps():
         "common reference"
     ), "provenance must list bandpass before reference (the apply order)"
 
-    # Phase-shift is named ONLY when the applied-step report says it ran, and
-    # listed first; a requested-but-skipped phase-shift (report False) is not
-    # claimed -- the provenance tracks what RAN, not what was requested.
+    # Phase-shift is named first, and only if the step report says it ran.
     with_ps = filtering_description(bp, "global_median", {"phase_shift": True})
     assert with_ps.startswith("phase-shift (ADC); bandpass filter 300-6000 Hz")
     assert "phase-shift" not in both
@@ -94,11 +78,7 @@ def test_filtering_description_reflects_actual_steps():
 def test_recording_nwb_carries_source_provenance(populated_sorting):
     """The Recording artifact NWB embeds the full source-provenance set.
 
-    A shared NWB must be interpretable without the DataJoint DB: the artifact
-    carries the raw source object id, the recording id, the preprocessing
-    recipe name, the sort group, the resolved reference mode, the bad-channel
-    handling, and the producing SpikeInterface version. Each is asserted
-    against the same DB source ``make_fetch`` resolves it from -- not a subset.
+    A shared NWB must be interpretable without the database.
     """
     import spikeinterface as si
 
@@ -153,8 +133,7 @@ def test_recording_nwb_carries_source_provenance(populated_sorting):
 
     prov = read_provenance_values(abs_path, RECORDING_PROVENANCE)
 
-    # recording_id is a UUID in the DB; the artifact stores its canonical
-    # string form (JSON has no UUID type).
+    # JSON has no UUID type.
     assert prov["recording_id"] == str(recording_id)
     assert prov["raw_object_id"] == raw_object_id
     assert prov["preprocessing_params_name"] == sel["preprocessing_params_name"]
@@ -171,16 +150,8 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
     window(s); an artifact-backed sort writes the artifact IntervalList's
     valid_times.
 
-    The Units NWB carries ``obs_intervals`` per unit for downstream
-    firing-rate windows. When no artifact mask was applied the fallback is
-    the recording's recorded window(s) -- split at wall-clock
-    discontinuities, so a contiguous recording yields a single interval
-    (asserted here) and a DISJOINT recording yields one per chunk (asserted
-    in ``test_obs_intervals_no_artifact_respects_disjoint_gap``). When an
-    artifact pass exists the obs_intervals come from its IntervalList (the
-    make_fetch path), not the fallback. We populate an artifact-FREE MS5
-    sort for the fallback and reuse the artifact-backed fixture for the
-    IntervalList path.
+    A contiguous recording yields one interval; the disjoint case is in
+    ``test_obs_intervals_no_artifact_respects_disjoint_gap``.
     """
     import pynwb
 
@@ -251,12 +222,7 @@ def test_obs_intervals_recorded_windows_fallback(populated_sorting):
 
 
 # --------------------------------------------------------------------------- #
-# channel_name resolution on a real-NWB-shape fixture.
-#
-# ``spikeinterface_channel_ids`` resolves channel ids from the raw
-# NWB ``channel_name`` column when present and falls back to the integer
-# ``electrode_id`` when absent. This exercises both branches on a fixture built
-# to match production Frank-lab NWB shape.
+# channel_name resolution.
 # --------------------------------------------------------------------------- #
 
 
@@ -270,12 +236,7 @@ def test_channel_name_resolution_path_real_nwb(
     NWB ``channel_name`` column when present, and falls back to integer
     ``electrode_id`` when absent.
 
-    The MEArec fixtures omit ``channel_name`` so only the integer-fallback
-    branch was exercised; production Frank-lab NWBs carry the column. This
-    test builds a 4-contact NWB via the fixture builder's ``channel_names``
-    parameter (injecting the column) and via the default (no column), then
-    asserts the resolved SpikeInterface channel ids match each branch's
-    expected mapping.
+    MEArec fixtures omit the column; Frank-lab NWBs carry it.
     """
     from datetime import datetime, timezone
 
@@ -304,8 +265,7 @@ def test_channel_name_resolution_path_real_nwb(
     with pynwb.NWBHDF5IO(str(out), mode="w") as io:
         io.write(nwbfile)
 
-    # spikeinterface_channel_ids reads the file at the given path (no
-    # ingestion needed for the lookup).
+    # Reads the file directly; no ingestion needed.
     spyglass_ids = [0, 1, 2, 3]
     resolved = spikeinterface_channel_ids(str(out), spyglass_ids)
 
@@ -323,16 +283,7 @@ def test_channel_name_resolution_path_real_nwb(
 
 
 # --------------------------------------------------------------------------- #
-# channel_name lookup must map electrode_id -> electrodes-table ROW index.
-#
-# The raw NWB ``channel_name`` column is positional: row k holds channel k's
-# name. Spyglass electrode ids are NOT guaranteed to equal row positions
-# (production NWBs can be non-contiguous, non-zero-based, or reordered).
-# Indexing ``channel_name`` by the electrode id treats the id as a row index,
-# so v2 could slice raw channel B and rename it as electrode A -- the sorter
-# then sees a different channel's signal than the row implies. The mapping must
-# go through the electrodes-table id->row resolution the write path already
-# uses (``get_electrode_indices``).
+# ``channel_name`` is positional; electrode ids need not equal row positions.
 # --------------------------------------------------------------------------- #
 
 
@@ -340,10 +291,7 @@ def _write_electrode_table_nwb(path, electrode_ids, *, channel_names=None):
     """Write a minimal NWB whose electrodes table has ``electrode_ids`` (in row
     order) and an optional positional ``channel_name`` column.
 
-    ``electrode_ids[k]`` becomes the id of electrodes-table row ``k``;
-    ``channel_names[k]`` (when given) is that row's channel name. Pass
-    non-contiguous / shuffled ids so id-as-row-index and a correct id->row
-    mapping give different answers.
+    ``electrode_ids[k]`` is row ``k``'s id and ``channel_names[k]`` its name.
     """
     from datetime import datetime, timezone
 
@@ -373,14 +321,8 @@ def _write_electrode_table_nwb(path, electrode_ids, *, channel_names=None):
 
 
 def test_channel_name_maps_by_electrode_id_not_row(dj_conn, tmp_path):
-    """``spikeinterface_channel_ids`` resolves each electrode id to its
-    electrodes-table ROW, then reads ``channel_name`` -- it must NOT treat the
-    electrode id as a row index.
-
-    The electrodes table has non-contiguous ids ``[10, 11, 12, 13]`` in row
-    order, so the buggy ``channel_names[int(electrode_id)]`` would index row
-    12 / row 10 (out of range) instead of the rows holding electrode ids 12
-    and 10. Requesting ids ``[12, 10]`` must return their own channel names.
+    """``spikeinterface_channel_ids`` maps each electrode id to its row before
+    reading ``channel_name``; ids ``[10, 11, 12, 13]`` are non-contiguous.
     """
     from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
@@ -402,14 +344,7 @@ def test_channel_name_maps_by_electrode_id_not_row(dj_conn, tmp_path):
 
 
 def test_missing_electrode_id_raises(dj_conn, tmp_path):
-    """A requested electrode id absent from the electrodes table raises,
-    rather than silently mis-indexing the ``channel_name`` column.
-
-    With non-contiguous ids ``[10, 11, 12, 13]`` the buggy
-    ``channel_names[int(electrode_id)]`` would silently return rows 1 and 2
-    for the absent ids 1 and 2 (a wrong-channel mapping with no error). The
-    id->row mapping has no entry for those ids and must raise.
-    """
+    """An electrode id absent from the electrodes table raises."""
     from spyglass.spikesorting.v2._recording.geometry import (
         spikeinterface_channel_ids,
     )
@@ -428,12 +363,7 @@ def test_channel_selection_carries_correct_traces(dj_conn, tmp_path):
     """After ``select_sort_group_channels`` renames sliced SI channels back to
     electrode ids, each renamed electrode id carries ITS OWN raw trace.
 
-    Builds an electrodes table whose ids are a shuffled in-range permutation
-    ``[2, 3, 0, 1]`` (so id-as-row-index silently maps to the wrong channel)
-    with distinguishable per-channel constant traces. Requesting electrode ids
-    ``[0, 1]`` must slice the SI channels for rows holding ids 0 and 1 (rows 2
-    and 3), so the renamed recording's id 0 carries row-2's trace and id 1
-    carries row-3's. The buggy id-as-row lookup would instead carry rows 0/1.
+    Row ids are the in-range permutation ``[2, 3, 0, 1]``.
     """
     from spikeinterface.core import NumpyRecording
 
@@ -450,8 +380,7 @@ def test_channel_selection_carries_correct_traces(dj_conn, tmp_path):
         path, ids_in_row_order, channel_names=si_channel_names
     )
 
-    # Distinguishable constant traces: SI channel ``s{k}`` carries value
-    # k * 1000, so a mis-mapped channel is unambiguous on readback.
+    # SI channel ``s{k}`` carries the constant k * 1000.
     fs, n_samples, n_channels = 1000.0, 1000, 4
     traces = np.empty((n_samples, n_channels), dtype="float32")
     for k in range(n_channels):

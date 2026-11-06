@@ -1,16 +1,7 @@
 """Pure-resolver tests for SortGroupV2 reference inheritance.
 
-``resolve_group_reference`` maps one sort group's configured / explicit
-reference to a validated ``(reference_mode, reference_electrode_id)`` pair
-using the v1-compatible sentinels (``-1`` / ``None`` -> none, ``-2`` ->
-global median, ``>= 0`` -> a specific electrode). The grouping helpers call
-it per electrode group; these tests pin every sentinel branch and every
-raise without a database (plain Python / numpy inputs, no fixture).
-
-The membership check (``assert_reference_not_member``) lives in
-``test_reference_member_guard.py``; the final test here exercises the
-combined contract -- resolve to ``"specific"``, then reject a reference that
-is a member of the group -- the way the helpers chain them.
+Sentinels: ``-1`` / ``None`` -> none, ``-2`` -> global median, ``>= 0`` ->
+a specific electrode. No database.
 """
 
 from __future__ import annotations
@@ -30,9 +21,7 @@ def test_auto_specific_uniform_positive():
 
 
 def test_auto_specific_numpy_array():
-    # The helpers pass a numpy int array (Electrode column slice); numpy
-    # scalars must resolve the same as Python ints, not leak through as a
-    # non-int type.
+    # numpy scalars resolve the same as Python ints.
     refs = np.array([7, 7, 7], dtype=np.int64)
     assert resolve_group_reference(refs) == ("specific", 7)
 
@@ -42,8 +31,7 @@ def test_auto_none_uniform_minus_one():
 
 
 def test_auto_none_uniform_python_none():
-    # A configured None must mean "no reference" -- NOT be confused with the
-    # private _AUTO_REFERENCE sentinel that triggers config derivation.
+    # A configured None is "no reference", not _AUTO_REFERENCE.
     assert resolve_group_reference([None, None]) == ("none", None)
 
 
@@ -62,14 +50,12 @@ def test_auto_mixed_raises_naming_group_and_values():
 
 
 def test_explicit_overrides_mixed_config_no_raise():
-    # An explicit reference wins over (and silences) mixed config: explicit
-    # -1 forces "none" even though the configured values disagree.
+    # An explicit reference wins over mixed config.
     assert resolve_group_reference([3, 7], explicit_ref=-1) == ("none", None)
 
 
 def test_explicit_none_is_no_reference_not_auto():
-    # Explicit None ("no reference") must NOT fall back to config derivation,
-    # even when config is mixed (which would otherwise raise).
+    # Explicit None does not fall back to config derivation.
     assert resolve_group_reference([3, 7], explicit_ref=None) == ("none", None)
 
 
@@ -88,16 +74,13 @@ def test_bad_sentinel_raises():
 
 
 def test_auto_empty_members_raises_clearly():
-    # Auto-deriving from an empty member set is a distinct error (no members
-    # to read), not the confusing "mixed values []" message.
+    # An empty member set has its own error, not "mixed values []".
     with pytest.raises(ValueError, match="no member electrodes"):
         resolve_group_reference([], group_label="probeZ")
 
 
 def test_resolved_specific_in_group_is_rejected_by_membership_check():
-    # The helper-level contract: resolve to a specific reference, then reject
-    # it when that electrode is itself a member of the sort group (it would be
-    # subtracted then dropped, silently shrinking the group).
+    # A member reference would be subtracted then dropped, shrinking the group.
     mode, ref_id = resolve_group_reference([2, 2, 2, 2])
     assert (mode, ref_id) == ("specific", 2)
     with pytest.raises(ValueError, match="also a sort-group channel"):

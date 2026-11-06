@@ -1,11 +1,7 @@
 """Direct coverage for the chunked NWB-write iterators.
 
-``Recording._write_nwb_artifact`` streams the preprocessed traces and the
-timestamps vector into the AnalysisNwbfile via these iterators. Exercised only
-transitively through the full write path, a chunk/buffer-sizing or
-``np.squeeze`` regression could silently corrupt persisted timestamps (the
-spine of disjoint-recording readback), so they are tested directly here.
-Hermetic -- no DataJoint / DB.
+``Recording._write_nwb_artifact`` streams traces and timestamps through
+them. DB-free.
 """
 
 from __future__ import annotations
@@ -22,9 +18,7 @@ def test_timestamps_iterator_reconstructs_with_final_one_sample_chunk():
         TimestampsDataChunkIterator,
     )
 
-    # [chunk1, large wall-clock gap, chunk2] -> non-uniform timestamps. Length
-    # 7 with buffer length 3 forces buffers of 3, 3, 1; the final 1-sample
-    # buffer is the length-1 tail edge.
+    # Gapped timestamps; length 7 with buffer 3 gives buffers 3, 3, 1.
     ts = np.array(
         [0.0, 1e-4, 2e-4, 5.0, 5.0001, 5.0002, 5.0003], dtype=np.float64
     )
@@ -33,7 +27,6 @@ def test_timestamps_iterator_reconstructs_with_final_one_sample_chunk():
         buffer_shape=(3,),
         chunk_shape=(1,),
     )
-    # 1D maxshape matches the 1D timestamps vector.
     assert it._get_maxshape() == (ts.shape[0],)
     assert np.dtype(it._get_dtype()) == np.float64
 
@@ -63,10 +56,7 @@ def test_timestamps_iterator_single_sample_input_round_trips():
 
 
 def test_timestamps_iterator_length_one_chunk_returns_1d():
-    """A single-sample chunk must return a 1-D ``(1,)`` array, not a 0-d
-    scalar. The slice of the 1-D timestamps vector is already 1-D, so no
-    squeeze is needed; squeezing collapsed an ``n_samples % buffer == 1`` tail
-    to 0-d, which only survived by HDMF's broadcast-assignment luck."""
+    """A single-sample chunk returns a 1-D ``(1,)`` array, not a 0-d scalar."""
     from spyglass.spikesorting.v2._storage.iterators import (
         TimestampsDataChunkIterator,
     )
@@ -95,10 +85,8 @@ def test_recording_iterator_chunks_hold_every_channel(tmp_path):
     """Each written chunk spans every channel, so a short full-channel read
     (SpikeInterface reads ~1 s windows) touches one or two chunks.
 
-    HDMF's default shape keeps the array's aspect ratio, which for a long
-    32-channel recording is ~37 s of ONE channel per chunk: every 1 s read then
-    touches 32 chunks, and through h5py's default 8 MiB chunk cache a 20 min
-    pass took ~8 min instead of seconds.
+    HDMF's default chunk is ~37 s of one channel for a long 32-channel
+    recording, so each 1 s read touched 32 chunks.
     """
     import h5py
     import spikeinterface as si

@@ -282,9 +282,7 @@ lock = _acquire_operation_lock(sys.argv[1])
 subprocess.Popen([sys.executable, "-c", sys.argv[2], sys.argv[1], str(lock.fileno())], pass_fds=(lock.fileno(),), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 os._exit(0)
 """
-    # The launcher imports spyglass before it spawns and exits, which takes
-    # ~3 s idle and longer under a loaded test session on NFS; the timeout
-    # only has to catch a launcher that hangs.
+    # Generous timeout: importing spyglass takes several seconds on NFS.
     subprocess.run(
         [sys.executable, "-c", launcher, str(tmp_path), worker],
         check=True,
@@ -312,9 +310,8 @@ os._exit(0)
 
 
 def test_operation_steps_reach_the_journal_with_timing(tmp_path, monkeypatch):
-    """A long commit reports each step from deep inside the scientific code,
-    and a running operation's status carries its elapsed time, so the page
-    can show what is happening instead of one message for several minutes."""
+    """A long commit reports each step from inside the scientific code, and a
+    running operation's status carries its elapsed time."""
     import time
 
     from spyglass.spikesorting.v2 import review_api
@@ -368,11 +365,8 @@ def test_operation_steps_reach_the_journal_with_timing(tmp_path, monkeypatch):
 
 
 def test_rewritten_review_files_stay_readable_by_other_reviewers(tmp_path):
-    """Draft and journal rewrites keep shared-folder permissions.
-
-    Two reviewers of one curation share its bundle folder. A rewrite that left
-    the file owner-only stopped the other reviewer from opening the draft.
-    """
+    """Draft and journal rewrites keep shared-folder permissions, so another
+    reviewer of the same bundle folder can still open them."""
     import os
     import stat
 
@@ -396,11 +390,9 @@ def test_rewritten_review_files_stay_readable_by_other_reviewers(tmp_path):
 def test_review_result_refuses_a_draft_edited_after_its_commit(
     tmp_path, monkeypatch
 ):
-    """review.result() does not return a commit older than the saved draft.
+    """review.result() does not return a commit older than the saved draft,
+    whose later edits are not in that curation."""
 
-    After a commit, further edits saved to the draft are not in the committed
-    curation. Returning that curation as the review's result hid the edits.
-    """
     from spyglass.spikesorting.v2 import review_api
     from spyglass.spikesorting.v2._review.operations import (
         RESULT_FILE,

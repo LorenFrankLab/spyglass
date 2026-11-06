@@ -86,13 +86,8 @@ def _bundle_compute_kwargs(
 ) -> tuple[int, dict]:
     """Resolve the bundle random seed + the SI ``compute`` job kwargs.
 
-    The bundle ``seed`` is authoritative: a stray ``random_seed`` in
-    ``job_kwargs`` (an ambient ``dj.config`` seed, or a value leaked from a
-    params blob) is stripped and IGNORED -- it never overrides ``seed``. Letting
-    it win would make the stored, identity-bearing ``seed`` disagree with the
-    seed actually used. ``random_seed`` is also not a valid
-    ``SortingAnalyzer.compute`` kwarg (SI raises "please remove
-    {'random_seed'}"), so stripping it is required regardless.
+    ``seed`` is authoritative; a ``random_seed`` in ``job_kwargs`` is
+    dropped, which ``SortingAnalyzer.compute`` also requires.
     """
     compute_job_kwargs = dict(job_kwargs or {})
     compute_job_kwargs.pop("random_seed", None)
@@ -102,11 +97,8 @@ def _bundle_compute_kwargs(
 class NoMatchableUnitsError(ValueError):
     """No unit of a session can enter the shared waveform bundle.
 
-    Raised by :func:`extract_waveform_bundle` when every unit has fewer than
-    two sampled spikes with full waveform support, so no unit has two
-    cross-validation halves. ``reason`` lets an input wrapper report the
-    scientific failure without including the bundle's temporary path; the
-    detailed message remains available in the chained cause.
+    Every unit has fewer than two sampled spikes with full waveform
+    support. ``reason`` omits the bundle's temporary path.
     """
 
     def __init__(self, message: str = "", *, reason: str | None = None):
@@ -119,9 +111,8 @@ def _sorting_with_window_in_one_span(
 ):
     """``sorting`` keeping only the spikes whose window lies in one span.
 
-    Every unit id is kept, including a unit left with no spike. The spike
-    vector keeps SpikeInterface's order (``to_spike_vector``), so each unit's
-    remaining spikes are in the same relative order as before.
+    Every unit id is kept, including a unit left with no spike; spike order
+    is preserved.
     """
     from spikeinterface.core import NumpySorting
 
@@ -163,26 +154,15 @@ def extract_waveform_bundle(
 ) -> list[int]:
     """Write a UnitMatch directory bundle for one curated session.
 
-    UnitMatch needs a dense per-unit average waveform of shape
-    ``(spike_width, n_channels, 2)`` -- two cross-validation halves across ALL
-    channels. The v2 canonical analyzer is sparse, so this re-extracts from one
-    dense (``sparse=False``) analyzer on the whole session. Up to
-    ``2 * max_spikes_per_unit`` spikes are drawn per unit, only from spikes at
-    least ``max(nbefore, nafter)`` samples from a segment border (SpikeInterface
-    zero-fills the waveform of a spike whose window crosses a border, so every
-    sampled spike has full waveform support). With ``statistics_spans``, a
-    spike is drawn only if its whole window ``[s - nbefore, s + nafter)`` also
-    lies inside one span, so no sampled waveform runs across a concatenation
-    join, an acquisition gap or an artifact exclusion, which a single segment
-    can hold. Each unit's sampled waveforms are
-    put in spike-time order and split per unit: half 0 averages the first
-    ``n // 2`` and half 1 the rest (an odd spike goes to half 1, as in
-    UnitMatchPy's own extraction). A unit that fires in only part of the
-    session therefore still gets two halves built from its own spikes. A unit
-    with fewer than two sampled spikes has no two halves; it is left out of the
-    bundle and its id returned. A *symmetric* waveform window keeps the trough
-    at the centre sample, matching UnitMatch's ``peak_loc = spike_width // 2``
-    assumption.
+    Each kept unit gets a dense average waveform of shape
+    ``(spike_width, n_channels, 2)``, one per cross-validation half.
+
+    - Re-extracts with a dense analyzer; the canonical analyzer is sparse.
+    - Spikes within ``max(nbefore, nafter)`` of a segment border are never
+      drawn, since SpikeInterface zero-fills their windows.
+    - Sampled spikes are put in time order; half 0 averages the first
+      ``n // 2``, half 1 the rest, as in UnitMatchPy.
+    - A unit with fewer than two sampled spikes is left out.
 
     Parameters
     ----------
@@ -201,16 +181,13 @@ def extract_waveform_bundle(
     seed : int
         Random-spikes seed for determinism (default 0).
     job_kwargs : dict or None
-        SpikeInterface job kwargs (``n_jobs`` / ``chunk_duration`` / ...) splatted
-        into the ``waveforms`` compute call. ``UnitMatch`` resolves these from
-        ``MatcherParameters.job_kwargs``; ``None`` uses the SpikeInterface
-        defaults.
+        SpikeInterface job kwargs for the ``waveforms`` compute call;
+        ``None`` uses the SpikeInterface defaults.
     statistics_spans : sequence of (int, int) or None
-        Sorted, non-overlapping half-open frame spans ``[start, end)`` of the
-        single-segment recording that each lie between two joins, gaps or
-        artifact exclusions (the sort's ``Sorting.get_statistics_spans``).
-        Spikes whose waveform window is not inside one span are removed
-        before sampling. ``None`` applies only the segment-border margin.
+        Sorted, non-overlapping half-open frame spans ``[start, end)``
+        (``Sorting.get_statistics_spans``). Spikes whose waveform window is
+        not inside one span are removed before sampling. ``None`` applies
+        only the segment-border margin.
 
     Returns
     -------
@@ -226,15 +203,13 @@ def extract_waveform_bundle(
         Every unit was left out. Raised before anything is written to
         ``session_dir``.
     RuntimeError
-        A kept unit's half is exactly all-zero over every sample and channel
-        (a waveform-extraction invariant violation).
+        A kept unit's half is exactly all-zero over every sample and channel.
     ValueError
         The recording's channel positions are not 2D, or ``statistics_spans``
         are malformed, end past the recording, or are given for a
         multi-segment recording or sorting.
     """
-    # Keep this public service boundary as strict as MatcherParameters.insert:
-    # UnitMatch locates the trough at the geometric midpoint.
+    # UnitMatch locates the trough at the window midpoint.
     validated = WaveformBundleParamsSchema(
         ms_before=ms_before,
         ms_after=ms_after,
@@ -251,14 +226,8 @@ def extract_waveform_bundle(
     session_dir = Path(session_dir)
     random_seed, compute_job_kwargs = _bundle_compute_kwargs(seed, job_kwargs)
 
-    # The UnitMatch matcher contract requires 2D channel positions. Spyglass
-    # stores 3D electrode geometry (z typically 0); project the probe to 2D --
-    # the same projection the analyzer build uses -- so the recording handed to
-    # the dense analyzer and the saved ``channel_positions.npy`` are
-    # consistently 2D. (SI's ``get_channel_locations`` defaults to ``axes="xy"``
-    # and so already drops z, but project + guard explicitly so the 2D contract
-    # does not silently depend on that default.) Validate up front so a bad
-    # geometry fails before the expensive dense analyzer build.
+    # UnitMatch needs 2D positions; Spyglass stores 3D. Check before the
+    # expensive dense analyzer build.
     probe = recording.get_probe()
     if probe.ndim == 3:
         recording = recording.set_probe(probe.to_2d())
@@ -272,26 +241,17 @@ def extract_waveform_bundle(
             "geometry; a non-2D probe cannot be fed to the matcher."
         )
 
-    # The waveforms extension's window in samples (same formula as
-    # ComputeWaveforms.nbefore / .nafter). Spikes closer than this to a segment
-    # border are never drawn, so no sampled waveform is zero-filled. The
-    # analyzer runs at the recording's rate (SpikeInterface adopts it when the
-    # sorting's rate differs by rounding), so the window is known before the
-    # analyzer exists.
+    # Same formula as ComputeWaveforms.nbefore / .nafter, at the recording's rate.
     fs = recording.get_sampling_frequency()
     nbefore = int(ms_before * fs / 1000.0)
     nafter = int(ms_after * fs / 1000.0)
     sampling_sorting = sorting
     if statistics_spans is not None:
-        # Remove, before sampling, every spike whose window leaves its span;
-        # random_spikes then draws uniformly from the rest exactly as it
-        # would from a sorting that only ever had those spikes.
         sampling_sorting = _sorting_with_window_in_one_span(
             sorting, recording, statistics_spans, nbefore, nafter
         )
-    # Dense waveform extraction must write to disk: SI's memory and zarr
-    # formats allocate the complete unit x spike x sample x channel volume.
-    # Only one unit's temporal halves enter RAM while averaging the mmap.
+    # SI's memory and zarr formats allocate the full unit x spike x sample x
+    # channel volume, so write to disk.
     import tempfile
 
     from spyglass.settings import temp_dir as spyglass_temp_dir
@@ -320,8 +280,7 @@ def extract_waveform_bundle(
             **compute_job_kwargs,
         )
         waveforms_ext = analyzer.get_extension("waveforms")
-        # Guard against SpikeInterface's ComputeWaveforms.nbefore/.nafter formula
-        # (analyzer_extension_core.py:172-177) drifting from the margin above.
+        # Guards against SI's nbefore/nafter formula drifting from the margin.
         if max(waveforms_ext.nbefore, waveforms_ext.nafter) > max(
             nbefore, nafter
         ):
@@ -352,10 +311,8 @@ def extract_waveform_bundle(
                 )
             )
             keep.append(unit_index)
-        # Unmap the scratch analyzer before its folder is removed. On NFS a
-        # still-mapped file leaves a .nfs placeholder and the removal fails
-        # with "Directory not empty". The analyzer and its extensions refer
-        # to each other, so only the cycle collector frees them.
+        # On NFS a still-mapped file blocks folder removal; the analyzer and
+        # its extensions form a cycle only gc frees.
         del analyzer, waveforms_ext, sampled
         gc.collect()
     keep = np.asarray(keep, dtype=np.intp)

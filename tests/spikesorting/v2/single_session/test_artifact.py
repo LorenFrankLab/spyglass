@@ -1,4 +1,4 @@
-"""ArtifactDetection selection/populate/delete and detect-artifacts tests for the v2 single-session pipeline."""
+"""Artifact detection selection, populate, delete and detection tests."""
 
 from __future__ import annotations
 
@@ -16,11 +16,8 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
     consistency, recording existence, sampling-frequency match,
     duration / n_samples match, and non-empty members.
 
-    The time-axis check is intentionally stricter than "same
-    nwb_file_name" -- ``RecordingSelection`` identity includes
-    ``interval_list_name``, so same NWB does NOT imply same
-    n_samples or fs. The invariants asserted here mirror what
-    ``si.aggregate_channels`` requires inside ``make_compute``.
+    Same NWB does not imply the same time axis (``interval_list_name`` is
+    part of the selection), and ``si.aggregate_channels`` needs one.
     """
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
 
@@ -44,11 +41,8 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
             [{"recording_id": bogus_rid}],
         )
 
-    # Happy path: one real recording -> master + Member rows
-    # written in one transaction. With a single member every
-    # multi-member-consistency check (sessions / fs / duration)
-    # trivially passes; the multi-member-divergence checks below
-    # exercise the real validation paths.
+    # Happy path: one member writes master + Member rows. Multi-member
+    # mismatches are tested below.
     SharedArtifactGroup.insert_group(
         "v2_solo_group",
         [{"recording_id": populated_recording["recording_id"]}],
@@ -77,21 +71,9 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
     different time windows (different ``interval_list_name`` on the
     upstream selection).
 
-    Same NWB, same fs -- but two ``RecordingSelection`` rows
-    pointing at different ``interval_list_name`` values can have
-    different sample counts. ``si.aggregate_channels`` would
-    crash with an opaque shape mismatch deep inside SI; the
-    insert-time guard loads each member's preprocessed recording
-    and requires EXACT time-axis parity. For two genuinely
-    different-duration members the exact-timestamp check
-    (``artifact.py`` ~460-485) trips first -- the timestamp
-    vectors have different shapes -- raising before the post-loop
-    ``distinct_n_samples`` check is reached; either way the
-    mismatch surfaces before the user pays the populate cost. (The
-    pure n_samples branch is only reachable when timestamp shapes
-    match but counts differ, which the per-member ``len(timestamps)
-    == n_samples`` assertion makes impossible for real recordings;
-    the dtype branch is covered by the companion stub test below.)
+    Raises at insert time rather than as an opaque shape mismatch inside
+    ``si.aggregate_channels``. Different durations trip the exact-timestamp
+    check before the ``n_samples`` check.
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
@@ -103,10 +85,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
 
     nwb_file_name = polymer_smoke_session["nwb_file_name"]
 
-    # Build a SECOND RecordingSelection on the same NWB but with a
-    # shorter IntervalList, then populate Recording so we have two
-    # Recording rows with the same nwb_file_name but different
-    # duration_s.
+    # Second Recording on the same NWB with a shorter interval.
     raw_times = (
         IntervalList
         & {
@@ -140,11 +119,6 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
     )
     Recording.populate(second_rec_pk, reserve_jobs=False)
 
-    # Now attempt to group the full-window populated_recording AND
-    # the truncated second_rec_pk. The strict time-axis check at
-    # insert_group time MUST raise -- different durations give
-    # different-shape timestamp vectors, so the exact-timestamp
-    # check fires before the post-loop n_samples check.
     with pytest.raises(ValueError, match="differing exact timestamps"):
         SharedArtifactGroup.insert_group(
             "v2_mismatched_durations",
@@ -170,15 +144,8 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     """``insert_group`` rejects members whose preprocessed
     recordings have differing ``get_dtype()`` values.
 
-    Constructing two real recordings of the same NWB with
-    different dtypes requires preproc-param plumbing the test
-    fixtures don't currently exercise; monkeypatch
-    ``Recording.get_recording`` to return SI-compatible stubs that
-    share ``n_samples`` but differ in ``get_dtype()``. This
-    exercises the dtype branch of the strict check; the
-    n_samples branch is exercised by
-    ``test_shared_artifact_group_insert_rejects_mismatched_durations``
-    above.
+    ``Recording.get_recording`` is stubbed to return recordings that differ
+    only in dtype; the fixtures have no real recording pair that does.
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
@@ -198,11 +165,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     ).fetch1("valid_times")
     t0 = float(raw_times[0][0])
     second_interval = "v2_shared_group_test_dtype_window"
-    # 2.5s window is well above the min_segment_length=1.0s filter
-    # the Recording pipeline applies; we only need a SECOND
-    # Recording row so the test has two distinct recording_ids to
-    # group, the dtype divergence is injected via monkeypatch
-    # below.
+    # Second recording_id to group (2.5 s clears min_segment_length=1.0 s).
     IntervalList.insert1(
         {
             "nwb_file_name": nwb_file_name,
@@ -230,11 +193,10 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     rid_b = second_rec_pk["recording_id"]
 
     class _FakeRec:
-        """Faithful explicit-time_vector SI stub: both members share identical
-        timestamps (so the fingerprint check passes) and differ only in dtype,
-        leaving the post-loop ``distinct_dtypes`` branch as the sole raiser.
-        Models the SI methods ``insert_group`` calls (``get_time_info`` /
-        ``sample_index_to_time`` / segment-indexed ``get_num_samples``)."""
+        """SI stub with shared timestamps and a given dtype.
+
+        Models the SI methods ``insert_group`` calls.
+        """
 
         def __init__(self, n_samples, dtype_str, fs=30000.0):
             self._n = n_samples
@@ -268,8 +230,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
             return self._times[sample_ind]
 
     def _fake_get_recording(self, key):
-        # Both stubs share ``n_samples`` so the dtype branch -- not
-        # the n_samples branch -- is the only thing that can raise.
+        # Same n_samples, so only the dtype check can raise.
         if str(key["recording_id"]) == str(rid_a):
             return _FakeRec(n_samples=30000, dtype_str="float32")
         return _FakeRec(n_samples=30000, dtype_str="int16")
@@ -306,7 +267,6 @@ def test_artifact_detection_populates_and_writes_interval_list(
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     ArtifactDetectionParameters.insert_default()
-    # Clean any prior selection / detection.
     existing = (
         RecordingArtifactSelection
         & {"recording_id": populated_recording["recording_id"]}
@@ -350,9 +310,7 @@ def test_artifact_detection_populates_and_writes_interval_list(
     retrieved = RecordingArtifactDetection().get_artifact_removed_intervals(pk)
     assert (retrieved == saved).all()
 
-    # as_dict=True wraps the single-recording array as a one-key dict
-    # keyed by nwb_file_name, so source-agnostic callers can avoid
-    # branching on the return type (single ndarray vs shared-group dict).
+    # as_dict=True returns {nwb_file_name: array} for a single recording too.
     retrieved_dict = (
         RecordingArtifactDetection().get_artifact_removed_intervals(
             pk, as_dict=True
@@ -430,22 +388,8 @@ def test_artifact_detection_delete_removes_interval_list_row(
 def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
     """``apply_artifact_mask`` actually zeros artifact frames.
 
-    Existing artifact tests only verify the ``IntervalList`` row was
-    written. The ``sip.remove_artifacts`` branch (the actual signal
-    masking) is bypassed by the ``"none"`` artifact preset which
-    writes a single all-valid interval. This test:
-
-    1. Writes a synthetic IntervalList row whose ``valid_times``
-       exclude a known frame range so the artifact "gap" is the
-       known range.
-    2. Calls ``apply_artifact_mask`` against the populated_recording's
-       preprocessed SI recording.
-    3. Asserts traces are zero inside the gap and unchanged outside.
-
-    Also pins the off-by-one boundary: the LAST artifact frame must
-    be zeroed (storing the IntervalList as ``[start, end]`` closed with
-    ``end = timestamps[end_f]`` drops it; v2 stores ``[start, end+1)``
-    so the complement subtraction captures end_f).
+    Traces are zero inside a known gap in ``valid_times``, including its
+    last frame, and unchanged outside.
     """
     import numpy as np
     import uuid
@@ -491,17 +435,11 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
         }
     )
     try:
-        # apply_artifact_mask now takes valid_times directly (no
-        # DB I/O inside Sorting.make_compute per the tri-part
-        # contract). Pass the same valid_times the IntervalList row
-        # carries.
         masked = apply_artifact_mask(
             recording=recording,
             valid_times=valid_times,
         )
 
-        # Inside the artifact window: all frames should be 0 across
-        # every channel.
         gap = masked.get_traces(
             start_frame=artifact_start_f, end_frame=artifact_end_f
         )
@@ -510,13 +448,8 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
             f"max abs value in gap = {np.abs(gap).max()}."
         )
 
-        # Boundary check: frame ``artifact_end_f`` (the half-open end)
-        # is the first VALID frame after the gap and should NOT be
-        # forced to zero by the masker. We compare to the unmasked
-        # value, but first assert the source sample is non-zero so the
-        # comparison cannot pass vacuously (if the preprocessed signal
-        # were 0 here by coincidence, masked == unmasked would be
-        # trivially true and the off-by-one guard would be inert).
+        # First valid frame after the gap is unmasked; check the source is
+        # non-zero so the comparison is not vacuous.
         unmasked_boundary = recording.get_traces(
             start_frame=artifact_end_f, end_frame=artifact_end_f + 1
         )
@@ -538,9 +471,7 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
             ),
         )
 
-        # And the last artifact frame (artifact_end_f - 1) MUST be
-        # zero. This is the exact frame a closed-interval off-by-one
-        # leaves unmasked.
+        # Last artifact frame is masked.
         last_artifact = masked.get_traces(
             start_frame=artifact_end_f - 1, end_frame=artifact_end_f
         )
@@ -562,32 +493,11 @@ def test_apply_artifact_mask_zeroes_artifact_frames(populated_recording):
 
 
 def test_detect_artifacts_finds_known_transient(dj_conn):
-    """``detect_artifacts`` runs its amplitude-
-    threshold scan body and produces the expected valid-time
-    complement of a known synthetic transient.
+    """``detect_artifacts`` excludes a planted amplitude transient.
 
-    Logically a unit test (the body calls a ``@staticmethod`` on an
-    in-memory ``NumpyRecording`` -- no DataJoint queries, no NWB
-    I/O). ``dj_conn`` is required only because importing the v2
-    ``artifact`` module activates ``dj.schema("spikesorting_v2_artifact")``
-    at module load time, which needs a live MySQL connection. The
-    test itself runs in well under a second and is not slow-marked
-    so it executes on every commit.
-
-    Every existing artifact test uses the ``"none"`` preset which
-    short-circuits at the ``if not validated.detect`` guard in
-    ``detect_artifacts`` and writes a single all-
-    valid interval. That left the entire amplitude-threshold
-    detection body (~50 lines, the actual artifact-finding code) at
-    0% coverage.
-
-    This test calls ``detect_artifacts`` directly with a synthetic
-    ``NumpyRecording`` carrying a deterministic 200-sample, 200 uV
-    transient at frames 1000-1199. The threshold (50 uV) and
-    proportion (50% of channels) are set so the transient
-    reliably trips detection and nothing else does. Asserts the
-    returned ``valid_times`` has exactly two intervals straddling
-    the planted transient and excludes the artifact samples.
+    A 200 uV transient at frames 1000-1199 yields two valid intervals around
+    it. ``dj_conn`` is needed only because importing the artifact module
+    declares its schema.
     """
     import numpy as np
     import spikeinterface as si
@@ -597,9 +507,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     )
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
-    # Build a synthetic 4-channel, 5000-sample recording with a
-    # 200 uV transient at frames 1000-1199 across all channels.
-    # Gain = 1.0 so traces are already in uV.
+    # Gain 1.0, so traces are in uV.
     fs = 30_000.0
     n_samples = 5000
     n_channels = 4
@@ -608,14 +516,8 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec.set_channel_gains([1.0] * n_channels)
 
-    # detect=True, 50 uV threshold, 50% of channels (= 2 of 4)
-    # must exceed simultaneously. The transient hits all 4
-    # channels at 200 uV; nothing else exceeds 50 uV. The
-    # minimal positive removal_window_ms (Pydantic enforces > 0)
-    # expands the artifact span by ceil(removal_window_ms * fs /
-    # 2000) frames on each side. At fs=30 kHz and 0.05 ms that's
-    # ``ceil(0.05 * 30000 / 2000) = 1`` frame -- intentionally
-    # small so the assertions below can be exact.
+    # removal_window_ms must be > 0; 0.05 ms widens the span by
+    # ceil(0.05 * 30000 / 2000) = 1 frame per side.
     params = ArtifactDetectionParamsSchema(
         detect=True,
         amplitude_threshold_uv=50.0,
@@ -629,9 +531,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
     valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
-    # half_window_frames = ceil(0.05 ms * 30 kHz / 2 / 1000) = 1.
-    # Artifact span expands from [1000, 1199] to [999, 1200]. The
-    # saved valid intervals straddle this expanded artifact run.
+    # Widened span: [999, 1200].
     expected_start_f = 999  # 1000 - half_window
     expected_end_f = 1200  # 1199 + half_window
     expected_end_open_f = expected_end_f + 1  # half-open boundary
@@ -642,8 +542,6 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         "detect_artifacts either skipped the detection body or "
         "merged the artifact and valid runs incorrectly."
     )
-    # First valid interval ends at the start of the expanded
-    # artifact span.
     assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
     assert valid_times[0][1] == pytest.approx(
         timestamps[expected_start_f], abs=1e-9
@@ -652,11 +550,7 @@ def test_detect_artifacts_finds_known_transient(dj_conn):
         f"{timestamps[expected_start_f]} (start of the expanded "
         "artifact span)."
     )
-    # Second valid interval starts AT the first sample AFTER the
-    # expanded artifact span (half-open boundary: the saved
-    # interval starts at ``timestamps[end_f + 1]``, so the LAST
-    # artifact frame is NOT silently included in the next valid
-    # interval).
+    # Second interval starts after the last artifact frame.
     assert valid_times[1][0] == pytest.approx(
         timestamps[expected_end_open_f], abs=1e-9
     ), (
@@ -673,10 +567,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     """``detect_artifacts`` returns the full recording window as a
     single valid interval when no frame trips the threshold.
 
-    Exercises the early-return branch at ``len(frames_above) == 0``
-    (artifact.py:926) without short-circuiting at the
-    ``detect=False`` guard. Complements the synthetic-transient
-    test by covering the "detection ran but found nothing" path.
+    Detection runs (``detect=True``) and finds nothing.
     """
     import numpy as np
     import spikeinterface as si
@@ -686,8 +577,7 @@ def test_detect_artifacts_no_threshold_crossings(dj_conn):
     )
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
-    # Recording with all-zero traces -- nothing can exceed any
-    # positive threshold.
+    # All-zero traces.
     rec = si.NumpyRecording(
         traces_list=[np.zeros((2000, 4), dtype=np.float32)],
         sampling_frequency=30_000.0,
@@ -712,15 +602,8 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     """``detect_artifacts`` runs the z-score-only branch when
     ``amplitude_threshold_uv is None``.
 
-    The z-score is **across channels per frame** (matching v1's
-    semantics); a frame where one channel deviates substantially
-    from the others trips. Common-mode pops where every channel
-    jumps together do NOT trip (per-frame mean shifts but
-    per-frame std stays ~0, so z ~= 0 everywhere on that row).
-
-    Synthetic: low-amplitude per-channel uncorrelated background +
-    a 10-sample artifact on ONE channel (the others stay quiet at
-    the artifact frames). Cross-channel z on that channel = high.
+    The z-score is across channels per frame (as in v1), so a 10-sample
+    excursion on one channel trips it.
     """
     import numpy as np
 
@@ -730,20 +613,12 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
     from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
 
     rng = np.random.default_rng(42)
-    # 32 channels so the cross-channel z-score on a single-channel
-    # excursion can plausibly exceed ``zscore_threshold``. With N
-    # channels and one channel at X while the rest are near zero,
-    # the per-frame z on the spiking channel is bounded by
-    # ~sqrt(N-1) (an algebraic upper limit of cross-channel
-    # z-score, regardless of X). 4 channels caps at ~1.7; 32
-    # channels caps at ~5.6 so a threshold of 4.0 sits inside
-    # the achievable range with headroom.
+    # One channel's cross-channel z is at most ~sqrt(N-1): ~5.6 for 32
+    # channels, so a 4.0 threshold is reachable (4 channels cap at ~1.7).
     n_samples, n_channels = 5000, 32
     traces = rng.normal(0.0, 0.5, size=(n_samples, n_channels)).astype(
         np.float32
     )
-    # Single-channel artifact: channel 0 spikes to 500 uV at frames
-    # 2000-2009; the other 31 channels stay quiet.
     traces[2000:2010, 0] = 500.0
     rec = _build_synthetic_rec(traces)
 
@@ -772,27 +647,14 @@ def test_detect_artifacts_zscore_only_detection(dj_conn):
 def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     """``detect_artifacts`` OR-combines the amplitude and z-score detectors.
 
-    v2 matches v1's per-channel OR (``above_amp | above_z`` in
-    ``_artifact_compute._compute_artifact_chunk``): a channel is flagged when
-    EITHER detector trips, then a frame is an artifact when enough channels
-    are hit. This test discriminates OR from a hypothetical AND by giving each
-    detector its OWN region that the other detector cannot see:
+    As in v1, a channel is flagged when either detector trips. Each detector
+    gets a region only it can see:
 
-    * frames 1000-1099 -- every channel at 100 uV: trips amplitude (>50 uV)
-      but NOT the across-channel z-score (uniform row -> ~0 cross-channel z);
-    * frames 3000-3099 -- channel 0 alone at 20 uV: trips the across-channel
-      z-score (one channel deviates) but NOT amplitude (20 < 50 uV).
+    - frames 1000-1099: every channel at 100 uV (amplitude only);
+    - frames 3000-3099: channel 0 alone at 20 uV (z-score only).
 
-    Under OR both regions are flagged, so the recording splits into three valid
-    segments. Under AND neither would be flagged (each region is seen by only
-    one detector), and a regression that broke EITHER branch would leave that
-    branch's region covered. The previous version used an 80 uV uniform
-    baseline that tripped amplitude on every frame, so the z-score branch
-    contributed nothing and the test passed on amplitude alone.
-
-    Background, channel count, z-score threshold, and proportion match
-    ``test_detect_artifacts_zscore_only_detection`` (a passing test), so the
-    uncorrelated background is known not to spuriously trip the z-score.
+    Both regions are excised. Background and thresholds match
+    ``test_detect_artifacts_zscore_only_detection``.
     """
     import numpy as np
 
@@ -806,12 +668,9 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     traces = rng.normal(0.0, 0.5, size=(n_samples, n_channels)).astype(
         np.float32
     )
-    # Amplitude-only region: uniform 100 uV (>50 uV amplitude; uniform across
-    # channels -> ~0 cross-channel z, so the z-score detector ignores it).
+    # Amplitude only: uniform across channels, so cross-channel z ~ 0.
     traces[1000:1100, :] = 100.0
-    # Z-score-only region: channel 0 deviates to 20 uV (<50 uV amplitude, so
-    # the amplitude detector ignores it; one deviating channel -> high
-    # cross-channel z). The other channels stay at background.
+    # Z-score only: below the 50 uV amplitude threshold.
     traces[3000:3100, 0] = 20.0
     rec = _build_synthetic_rec(traces)
 
@@ -830,10 +689,7 @@ def test_detect_artifacts_amplitude_and_zscore_combined(dj_conn):
     def _covered(t):
         return any(lo <= t <= hi for lo, hi in valid_times)
 
-    # Under OR, BOTH single-detector regions are excised while a quiet
-    # background frame stays valid. An AND combine would leave both regions
-    # covered; a broken amplitude or z-score branch would leave its region
-    # covered.
+    # Both regions excised; quiet background stays valid.
     assert not _covered(timestamps[1050]), (
         "amplitude-only region (frames 1000-1099) is still valid -- the "
         "amplitude branch did not contribute, or the combine became AND"
@@ -855,12 +711,8 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
     """``detect_artifacts`` merges two artifact runs separated by
     fewer than ``join_window_frames`` into a single artifact span.
 
-    Exercises the ``cur_end = f`` branch inside
-    ``detect_artifacts``'s join loop which the single-run test
-    doesn't hit. Builds two transients separated by 10 frames;
-    with join_window_ms set so join_window_frames > 10, the runs
-    merge into one. With a smaller join window, the runs stay
-    separate.
+    Two transients 10 frames apart merge with a 30-frame join window and
+    stay separate with a 3-frame one.
     """
     import numpy as np
 
@@ -895,14 +747,8 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
         f"valid intervals; got shape {merged.shape}."
     )
 
-    # join_window_ms = 0.1 -> join_window_frames = ceil(0.1 * 30 /
-    # 1) = 3 frames. Gap of 10 stays unbridged; two separate
-    # artifact runs, three valid intervals.
-    #
-    # ``min_length_s`` must be < the post-widening gap or the
-    # sliver filter eats the middle interval. The middle sliver is
-    # ``(10 frames gap) - 2*half_window_frames(=1) = 8 frames``
-    # = ~0.27 ms at 30 kHz. Use 0.0001 s (0.1 ms) to keep it.
+    # join_window_ms = 0.1 -> 3 frames; the 10-frame gap stays.
+    # min_length_s below the ~0.27 ms middle interval (8 frames) keeps it.
     unmerged = detect_artifacts(
         rec,
         ArtifactDetectionParamsSchema(
@@ -924,13 +770,7 @@ def test_detect_artifacts_join_window_merges_runs(dj_conn):
 
 @pytest.mark.slow
 def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
-    """``ArtifactDetectionParameters.insert1`` validates the
-    ``params`` blob through Pydantic before the row is written.
-
-    DataJoint's ``insert1`` dispatches to the validating ``insert`` override.
-    A blob with an unknown key violates ``extra="forbid"`` and the
-    insert is rejected before any row reaches the DB.
-    """
+    """``ArtifactDetectionParameters.insert1`` rejects an unknown params key."""
     from pydantic import ValidationError
 
     from spyglass.spikesorting.v2.artifact import (
@@ -967,13 +807,8 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
     fewer than ``proportion_above_threshold`` of channels exceed the
     amplitude threshold.
 
-    Existing detection tests put the transient on every channel,
-    so the proportion gate is never the binding constraint. This
-    test puts a 200 uV transient on a SINGLE channel of a
-    4-channel recording with ``proportion_above_threshold=0.5``
-    (= ceil(0.5 * 4) = 2 channels required). Detection must not
-    fire: the single-channel transient does not meet the cross-
-    channel quorum.
+    A 200 uV transient on one of 4 channels does not meet
+    ``proportion_above_threshold=0.5`` (2 channels).
     """
     import numpy as np
 
@@ -984,9 +819,6 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
 
     n_samples, n_channels = 5000, 4
     traces = np.zeros((n_samples, n_channels), dtype=np.float32)
-    # ONE channel has a 200 uV transient at frames 1000-1099; the
-    # other three channels stay at zero. 1 of 4 channels is below
-    # the 2-of-4 requirement.
     traces[1000:1100, 0] = 200.0
     rec = _build_synthetic_rec(traces)
 
@@ -1020,9 +852,7 @@ def test_artifact_detection_delete_uses_interval_ownership_part_rows(
 ):
     """``RecordingArtifactDetection.delete`` cleans via owned part rows.
 
-    Delete cleanup should not reconstruct artifact interval ownership from
-    the source selector or interval naming convention. The generated
-    ``RemovedInterval`` rows are the contract.
+    Ownership comes from ``RemovedInterval`` rows, not interval names.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -1060,10 +890,8 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
 ):
     """A row without ownership parts is invalid and must fail loudly.
 
-    We intentionally do not reconstruct missing ownership from
-    ``artifact_detection_id``-derived interval names. That would expose the
-    rows to the generic ``IntervalList.cleanup`` orphan problem this part
-    table prevents.
+    Ownership is not reconstructed from interval names, which would expose
+    the rows to ``IntervalList.cleanup`` as orphans.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -1097,9 +925,7 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
             (RecordingArtifactDetection & art_pk).delete(safemode=False)
         assert len(RecordingArtifactDetection & art_pk) == 1
     finally:
-        # force_masters: the detection registers itself into the
-        # ArtifactDetectionOutput merge at populate, so a raw super_delete must
-        # force through the merge part to reach the detection master.
+        # force_masters: the detection is also an ArtifactDetectionOutput part.
         if RecordingArtifactDetection & art_pk:
             (RecordingArtifactDetection & art_pk).super_delete(
                 warn=False, force_masters=True
@@ -1114,11 +940,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     """``detect_artifacts`` clamps the half-open end of an artifact
     that runs to the last sample.
 
-    The clamp ``min(end_f + 1, len(timestamps) - 1)`` at
-    ``artifact.py:973`` ensures the saved interval doesn't index
-    out of bounds when the artifact reaches the recording end. No
-    prior test puts a transient near the end of the recording, so
-    this clamp branch was unexercised.
+    An artifact reaching the last sample does not index past the end.
     """
     import numpy as np
 
@@ -1145,19 +967,12 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
     valid_times = detect_artifacts(rec, params)
     timestamps = rec.get_times()
 
-    # The artifact runs from frame 990 to the end. The clamp
-    # produces a single valid interval before the artifact (the
-    # tail-valid branch in ``detect_artifacts`` -- the
-    # ``if cursor < valid_end`` guard -- fires only if there is
-    # tail after the last artifact, which is false here because
-    # the artifact reaches the end).
+    # Artifact runs from frame 990 to the end: one valid interval before it.
     assert valid_times.shape == (1, 2), (
         f"Expected one valid interval ending before the boundary "
         f"artifact, got shape {valid_times.shape}."
     )
     assert valid_times[0][0] == pytest.approx(timestamps[0], abs=1e-9)
-    # The valid interval ends BEFORE the artifact span (boundary
-    # not included).
     assert valid_times[0][1] < timestamps[990] + 1e-9, (
         f"Valid interval ends at {valid_times[0][1]}, after the "
         f"start of the boundary artifact ({timestamps[990]}). "
@@ -1229,11 +1044,7 @@ def test_shared_artifact_group_populate_end_to_end(
     """End-to-end shared-group populate writes one IntervalList per
     member ``nwb_file_name``.
 
-    Cross-recording shared-artifact path contract. With a single-
-    recording smoke fixture the shared group has one member, so
-    ``per_member_nwb_files`` has length 1 and one IntervalList row
-    is written. The same code path scales to N members on a
-    multi-recording session (out of scope for the smoke fixture).
+    The smoke fixture gives a one-member group, so one row is written.
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -1249,7 +1060,6 @@ def test_shared_artifact_group_populate_end_to_end(
     ArtifactDetectionParameters.insert_default()
     group_name = "v2_e2e_shared_group"
 
-    # Clean up any prior group from earlier test runs.
     (
         SharedArtifactGroup & {"shared_artifact_group_name": group_name}
     ).super_delete(warn=False)
@@ -1265,13 +1075,9 @@ def test_shared_artifact_group_populate_end_to_end(
             "artifact_detection_params_name": "none",
         }
     )
-    # ``none`` preset writes a full-window valid interval so the test
-    # is amplitude-fixture-independent.
+    # ``none`` preset: full-window valid interval, independent of amplitude.
     SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-    # Exactly one IntervalList row (one member), keyed by the
-    # member's nwb_file_name with the canonical artifact-named
-    # convention.
     interval_name = artifact_detection_interval_list_name(
         art_pk["artifact_detection_id"]
     )
@@ -1291,10 +1097,7 @@ def test_shared_artifact_group_populate_end_to_end(
         "interval_list_name": interval_name,
     }, "SharedGroupArtifactDetection.populate did not insert the ownership part row"
 
-    # ``get_artifact_removed_intervals`` returns a dict keyed by
-    # member nwb_file_name for shared-group sources. Today single
-    # member -> single entry in the dict; the value array equals
-    # the IntervalList row's valid_times.
+    # Shared-group sources return {member nwb_file_name: valid_times}.
     import numpy as np
 
     shared_intervals = (
@@ -1309,9 +1112,7 @@ def test_shared_artifact_group_populate_end_to_end(
         shared_intervals[nwb_file_name], rows[0]["valid_times"]
     )
 
-    # ``SharedGroupArtifactDetection.delete()`` cleans up the matching
-    # IntervalList rows for ALL member nwb_file_names, not just
-    # the recording-source case.
+    # delete() removes the IntervalList rows of every member.
     (SharedGroupArtifactDetection & art_pk).delete(safemode=False)
     remaining = (
         IntervalList
@@ -1368,22 +1169,12 @@ def test_shared_artifact_group_multi_member_union(
 ):
     """The union scan reads both members and applies its channel quorum.
 
-    Every existing shared-group populate test has a single member, so the
-    ``si.aggregate_channels`` union-scan branch of ``make_compute`` is
-    untested. Here two time-aligned members are grouped; a supra-threshold
-    separate transients are planted on member A and member B.
-    With ``proportion_above_threshold=0.4`` over the 8-channel union, A's 4
-    channels alone exceed the required count, so the union scan removes the
-    artifact windows. A three-channel excursion on member A stays below the
-    four-of-eight quorum; a per-member denominator would wrongly flag it.
-    The single session writes one shared ``IntervalList`` row that every
-    member resolves to, so all members see identical artifact-removed times.
-
-    The two member recordings are loaded as synthetic SI recordings via a
-    monkeypatched ``Recording.get_recording`` and
-    ``_recording_nwb.read_stored_traces`` (planting a real artifact in
-    fixture data is not otherwise possible); the DB rows / FK chain are
-    real.
+    Two time-aligned members each get a transient. With
+    ``proportion_above_threshold=0.4`` over the 8-channel union, a 4-channel
+    transient is removed and a 3-channel excursion is not (a per-member
+    denominator would flag it). Every member resolves to one shared
+    ``IntervalList`` row. Traces are synthetic (via monkeypatch); DB rows
+    are real.
     """
     import spikeinterface as si
 
@@ -1426,9 +1217,7 @@ def test_shared_artifact_group_multi_member_union(
         rec.set_channel_offsets([0.0] * n_ch)
         return rec
 
-    # Second Recording row in the SAME session (a distinct recording_id to
-    # group). Its loaded SI object is replaced below; only the DB row /
-    # FK matters here.
+    # Second recording_id in the same session; its traces are replaced below.
     raw_times = (
         IntervalList
         & {
@@ -1483,9 +1272,7 @@ def test_shared_artifact_group_multi_member_union(
         ),
     )
 
-    # Custom param: detect with proportion 0.4 so 4 of 8 union channels
-    # (member A's) suffice to flag a frame; min_length 0.1 s so both
-    # post-split halves survive.
+    # 4 of 8 union channels flag a frame; min_length 0.1 s keeps both halves.
     params_name = "multi_member_union_test"
     ArtifactDetectionParameters.insert1(
         {
@@ -1507,10 +1294,7 @@ def test_shared_artifact_group_multi_member_union(
     group_name = "v2_multi_member_union_group"
 
     def _clear_shared_group():
-        # Master-first cleanup: drop any SharedGroupArtifactDetection +
-        # SharedGroupArtifactSelection referencing this group BEFORE the group
-        # itself, so deleting the group does not block on the selection's
-        # SharedArtifactGroup FK left by an interrupted prior run.
+        # Delete detections and selections before the group they reference.
         stale_art_ids = (
             SharedGroupArtifactSelection
             & {"shared_artifact_group_name": group_name}
@@ -1587,8 +1371,7 @@ def test_shared_artifact_group_multi_member_union(
             s <= below_quorum_mid <= e for s, e in valid_times
         ), "three channels must remain valid under the four-of-eight quorum"
 
-        # Every member resolves to the SAME artifact-removed times (single
-        # shared row; the per-member dict has one session entry equal to it).
+        # Every member resolves to the same artifact-removed times.
         shared = SharedGroupArtifactDetection().get_artifact_removed_intervals(
             art_pk
         )
@@ -1611,19 +1394,10 @@ def test_recording_artifact_detection_raises_on_raw_nan(
 ):
     """One raw NaN sample makes ``RecordingArtifactDetection.populate`` raise.
 
-    The corruption is written where it can really arise -- the raw
-    acquisition data, via a broken/saturated ADC channel -- into a COPY of
-    the fixture made BEFORE ingestion, never into an already-inserted,
-    checksum-verified DataJoint artifact. ``Recording`` has no finiteness
-    guard anywhere in its preprocessing path (no ``isfinite``/``isnan``
-    check in ``recording.py`` or ``_recording_preprocessing.py``), so
-    ``Recording.populate`` succeeds and bakes the (filtered) NaN into the
-    persisted analysis recording; ``RecordingArtifactDetection.populate``
-    is what actually reads it back and fails loudly instead of silently
-    reporting no artifacts. Empirically the zero-phase bandpass filter
-    smears the one bad sample across the ENTIRE channel (not just nearby
-    frames), so the scan raises on its first chunk, frames [0, 30000), with
-    only the corrupted channel named.
+    The NaN is written into a copy of the raw fixture before ingestion.
+    ``Recording.populate`` stores it; the artifact scan raises rather than
+    reporting no artifacts. The bandpass filter spreads the NaN over the
+    whole channel, so the first chunk raises and names only that channel.
     """
     import shutil
     from pathlib import Path
@@ -1657,22 +1431,12 @@ def test_recording_artifact_detection_raises_on_raw_nan(
     if not source.exists():
         pytest.skip(f"Fixture {source.name} not found.")
 
-    # Corrupt a COPY, off to the side in tmp_path -- the fixture on disk and
-    # any already-ingested Nwbfile row are untouched.
     corrupted = tmp_path / "mearec_polymer_smoke_raw_nan.nwb"
     shutil.copy2(source, corrupted)
-    # Channel 0 is a member of the lowest sort_group_id (shank 0, electrode
-    # ids 0-31); frame 45_000 sits mid-file (120_000 samples @ 30 kHz), well
-    # clear of any edge trimming. The exact frame does not determine which
-    # scan chunk raises: the bandpass filter smears it across the whole
-    # channel (see the docstring), so the scan always raises on its first
-    # chunk regardless of where in the file the raw sample sits.
+    # Channel 0 is in the lowest sort group; frame 45_000 is mid-file.
     inject_raw_nan(corrupted, frame_index=45_000, channel_index=0)
 
-    # Ingest under a name unique to this test, discarding any stale copy
-    # from a previous run (mirrors test_recording.py's ``_ingest_fresh``):
-    # otherwise ``copy_and_insert_nwb`` would skip the copy and ingest
-    # stale (possibly clean) bytes.
+    # Discard any stale copy; copy_and_insert_nwb would otherwise reuse it.
     dest_name = "mearec_polymer_smoke_raw_nan.nwb"
     Path(raw_dir, dest_name).unlink(missing_ok=True)
     Path(raw_dir, get_nwb_copy_filename(dest_name)).unlink(missing_ok=True)
@@ -1701,8 +1465,7 @@ def test_recording_artifact_detection_raises_on_raw_nan(
                 "team_name": "v2_test_team",
             }
         )
-        # Finding: Recording does not reject or fill the NaN -- it is not
-        # rejected by anything on this path, so this must SUCCEED.
+        # Recording does not check finiteness, so this succeeds.
         Recording.populate(rec_pk, reserve_jobs=False)
         assert Recording & rec_pk, "Recording.populate must have inserted a row"
 

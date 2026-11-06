@@ -1,24 +1,18 @@
 """Web-based curation views for v2 sorts, built with FigPack.
 
-The v2 successor to v1's FigURL chain
-(``spyglass.spikesorting.v1.figurl_curation``). ``FigPackCurationSelection``
-records an explicit UI configuration (label palette, unit-table properties, and
-upload mode) for a committed ``CurationV2`` row -- not just a bare FK -- so
-repeated calls are idempotent and several UI configurations of the same curation
-are representable. ``FigPackCuration`` builds the interactive view, publishes
-or saves it, and stores the resulting URI; ``fetch_curation_from_uri`` reads the
-edited labels and merge groups back in the exact shape
-``CurationV2.insert_curation`` consumes.
+Replaces v1's ``spyglass.spikesorting.v1.figurl_curation``.
+``FigPackCurationSelection`` records a UI configuration (label palette,
+unit-table properties, upload mode) for a committed ``CurationV2`` row.
+``FigPackCuration`` builds and publishes the view and stores its URI;
+``fetch_curation_from_uri`` reads edited labels and merge groups back in the
+shape ``CurationV2.insert_curation`` takes.
 
-SpikeInterface supplies the scientific summary. Spyglass adds raster and
-explicit autocorrelogram tabs, the authoritative evaluation table, and a draft
-control with the profile's label palette. Scientific commits and post-merge
-verification remain in the notebook; the browser saves only annotations.
+SpikeInterface supplies the sorting summary; Spyglass adds raster and
+autocorrelogram tabs, the evaluation table, and a label control. Commits stay
+in the notebook; the browser saves only annotations.
 
-The ``figpack`` and ``figpack_spike_sorting`` packages are an optional
-dependency (the ``spikesorting-v2-curation`` extra); they are imported lazily so
-this module loads without them, raising an actionable install message only when a
-curation view is actually built.
+``figpack`` and ``figpack_spike_sorting`` (the ``spikesorting-v2-curation``
+extra) are imported lazily, so this module loads without them.
 """
 
 from __future__ import annotations
@@ -98,9 +92,8 @@ class FigPackBuildResult:
 def figpack_cache_root() -> Path:
     """Return the configured root directory for saved FigPack bundles.
 
-    ``dj.config["custom"]["spikesorting_v2_figpack_dir"]`` when truthy, else
-    ``Path(temp_dir) / "spikesorting_v2" / "figpack"`` (mirrors
-    ``analyzer_cache_root``).
+    ``dj.config["custom"]["spikesorting_v2_figpack_dir"]`` when set, else
+    ``Path(temp_dir) / "spikesorting_v2" / "figpack"``.
     """
     from spyglass.settings import temp_dir
 
@@ -119,13 +112,9 @@ def figpack_bundle_path(figpack_curation_id) -> Path:
 def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
     """Fetch one figure JSON sidecar (HTTP or local); fail closed.
 
-    Mirrors how the FigPack frontend loads annotations: a GET on
-    ``<figure>/annotations.json`` for a hosted figure, or a file read for a
-    saved bundle directory. ONLY a genuine 404 / missing local file yields
-    ``{}`` (a pristine, never-edited figure). An unreachable host, refused
-    connection, non-404 HTTP error, or malformed JSON raises
-    ``FigPackRetrievalError`` rather than silently looking like "no edits" --
-    which could otherwise commit an empty child curation over a real one.
+    With ``missing_ok``, only a 404 or missing local file yields ``{}``.
+    Any other failure raises ``FigPackRetrievalError`` so an unreachable
+    figure is never read as "no edits".
     """
     import urllib.error
     import urllib.request
@@ -140,9 +129,7 @@ def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
 
     if base.startswith(("http://", "https://")):
         try:
-            # Bound the fetch so a stalled host fails closed instead of hanging
-            # indefinitely (a read timeout raises a bare TimeoutError, not a
-            # URLError, so both are caught below).
+            # A read timeout raises TimeoutError, not URLError.
             with urllib.request.urlopen(sidecar_url, timeout=30) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
@@ -290,10 +277,8 @@ def _assert_figure_identity(
 def _curation_view_analyzer(curation_ref):
     """Yield a curation's published display analyzer for the curation view.
 
-    The analyzer carries the sorting-summary widget's extensions, which both
-    the FigPack curation figure and a review's unit inspection render --
-    building, rebuilding, or extending the published cache as needed (see
-    ``curation_analyzer_with_extensions``). It must not be mutated.
+    Builds or extends the published cache with the sorting-summary
+    extensions as needed. Must not be mutated.
     """
     from spyglass.spikesorting.v2._review import visualization as _viz
     from spyglass.spikesorting.v2._curation.analyzer import (
@@ -314,11 +299,8 @@ def _resolve_curation_view_inputs(
 ) -> tuple[str, ReviewTimelineInputs]:
     """Resolve the DB inputs of :func:`._review.view.build_curation_view`.
 
-    Resolves the curation-view display analyzer
-    (:func:`_curation_view_analyzer`) and the review timeline's inputs.
     Returns ``(analyzer_folder, timeline_inputs)``. ``display_options`` is
-    validated first so a malformed display budget fails before any analyzer
-    work.
+    validated before any analyzer work.
     """
     from spyglass.spikesorting.v2._storage.observation_io import (
         resolve_review_timeline_inputs,
@@ -336,12 +318,8 @@ def _resolve_curation_view_inputs(
 def _assert_figpack_curatable(curation_key: dict) -> None:
     """Assert a curation is committed before building its exact analyzer.
 
-    Enforced at BOTH ``insert_selection`` (early, friendly) and ``make_fetch``
-    (the integrity boundary): ``SelectionMasterInsertGuard`` has an
-    ``allow_direct_insert`` escape hatch, so a row bypassing ``insert_selection``
-    must still be re-validated before the view is built -- otherwise a preview
-    could be rendered as though it had a final unit namespace. Mirrors
-    ``CurationEvaluation.make_fetch`` re-asserting its preview guard.
+    Called by ``insert_selection`` and again by ``make_fetch``, since
+    ``allow_direct_insert`` can bypass the former.
     """
     CurationV2.assert_committed_curation(
         curation_key, context="FigPackCuration"
@@ -351,15 +329,10 @@ def _assert_figpack_curatable(curation_key: dict) -> None:
 def _assert_selection_identity(selection: dict, key: dict) -> None:
     """Recheck the content-addressed identity at consume time (bypass guard).
 
-    ``figpack_config_hash`` and ``figpack_curation_id`` are derived from the
-    selection's own fields, but ``allow_direct_insert`` can store a row whose PK
-    / hash disagree with its label options, displayed properties, and upload
-    mode. Recompute both from the row and raise ``SchemaBypassError`` on
-    mismatch, mirroring the consume-time hash recheck the other v2
-    content-addressed selections do.
+    Recomputes ``figpack_config_hash`` and ``figpack_curation_id`` from the
+    row and raises ``SchemaBypassError`` on mismatch.
     """
-    # insert_selection normalizes ephemeral to False when offline, so an
-    # offline + ephemeral row can only come from a raw-insert bypass.
+    # insert_selection sets ephemeral=False when offline.
     if not bool(selection["upload"]) and bool(selection["ephemeral"]):
         raise SchemaBypassError(
             f"FigPackCurationSelection {key['figpack_curation_id']} has "
@@ -487,10 +460,7 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
         groups = [group for group in suggested_groups if unit_id in group]
         return "; ".join(",".join(map(str, group)) for group in groups)
 
-    # Actionable columns first (what the rule set proposes and what an
-    # earlier merge did), then the profile's metric / annotation columns in
-    # their requested order: on a laptop-width table the first columns are
-    # the ones a curator acts on.
+    # Actionable columns first so they stay visible on narrow screens.
     import pandas as pd
 
     actions = pd.DataFrame(
@@ -559,12 +529,10 @@ def _publish_view(
 ) -> tuple[str, str | None]:
     """Publish a built view; return its URI and any privately staged bundle.
 
-    ``upload=True`` publishes to figpack.org and requires a FigPack API key
-    (``SpyglassConfig.figpack_api_key``) unless ``ephemeral``; it returns
-    ``(url, None)``. ``upload=False`` saves the static bundle into a private
-    sibling of its durable folder and returns ``(durable folder, staged
-    folder)``; ``install_staged_folder`` moves it into place once the row
-    that records the URI is inserted.
+    ``upload=True`` publishes to figpack.org (API key required unless
+    ``ephemeral``) and returns ``(url, None)``. ``upload=False`` saves the
+    bundle to a private sibling folder and returns ``(durable folder, staged
+    folder)``; ``make_insert`` moves it into place.
     """
     if upload:
         from spyglass.settings import sg_config
@@ -578,10 +546,8 @@ def _publish_view(
                 "for a temporary figure, or use upload=False to save a local "
                 "bundle."
             )
-        # Build the exact bundle first. FigPack's recursive uploader includes
-        # both sidecars while consolidated-only mode omits redundant per-array
-        # zarr metadata, giving hosted and local reviews identical seeded state
-        # and identity semantics without multiplying the hosted file count.
+        # Save locally first so hosted and local bundles carry the same
+        # sidecars; consolidated metadata keeps the upload file count down.
         from figpack.core._upload_bundle import _upload_bundle
 
         with tempfile.TemporaryDirectory(prefix="spyglass-figpack-") as tmp:
@@ -598,9 +564,7 @@ def _publish_view(
 
     bundle = figpack_bundle_path(figpack_curation_id)
     bundle.parent.mkdir(parents=True, exist_ok=True)
-    # A hidden, attempt-unique sibling: a concurrent populate of the same
-    # figure, or a stale bundle already in the durable folder, is untouched
-    # until this attempt's row is inserted.
+    # Attempt-unique folder; the durable one is untouched until insert.
     staged = bundle.parent / f".{bundle.name}.build-{uuid.uuid4().hex}"
     try:
         view.save(str(staged), title=title)
@@ -657,9 +621,9 @@ class FigPackCurationFetched(NamedTuple):
 class FigPackCurationComputed(NamedTuple):
     """The ``FigPackCuration`` secondary fields make_compute returns.
 
-    ``staged_bundle`` is not a column: it is the private folder an offline
-    bundle was saved into (``None`` for a hosted figure), moved to
-    ``figpack_uri`` by ``make_insert``.
+    ``staged_bundle`` is not a column: it is the folder an offline bundle
+    was saved into (``None`` when hosted), moved to ``figpack_uri`` by
+    ``make_insert``.
     """
 
     figpack_uri: str
@@ -684,11 +648,9 @@ class FigPackCurationSelection(
 ):
     """A committed ``CurationV2`` row paired with a FigPack UI configuration.
 
-    The ``figpack_curation_id`` PK is content-addressed over the curation plus
-    the UI config (label palette, unit-table properties, and upload/ephemeral
-    mode), so the same configuration always maps to one row and distinct
-    configurations of one curation coexist. A raw ``insert`` / ``insert1`` is
-    blocked; use ``insert_selection``.
+    ``figpack_curation_id`` is content-addressed over the curation and UI
+    config, so one curation can have several configurations. Use
+    ``insert_selection``; raw inserts are blocked.
     """
 
     definition = """
@@ -727,7 +689,7 @@ class FigPackCurationSelection(
             Unit-table properties to pass to SpikeInterface's FigPack sorting
             summary. ``None`` (default) keeps SpikeInterface's defaults; ``[]``
             requests no property columns. Names are validated when the view is
-            built so explicit requests cannot be silently dropped.
+            built.
         upload : bool, optional
             Publish a hosted figpack.org figure (requires a FigPack API
             key unless ``ephemeral``). Default ``False`` (save a local bundle).
@@ -767,8 +729,7 @@ class FigPackCurationSelection(
             "curation_id": curation_key["curation_id"],
         }
         _assert_figpack_curatable(parent_key)
-        # ``ephemeral`` only affects a hosted upload; offline it is inert, so
-        # normalize it to False so it cannot fork the content-addressed identity.
+        # ephemeral is inert offline; keep it out of the identity.
         if not upload:
             ephemeral = False
 
@@ -844,10 +805,8 @@ class FigPackCurationSelection(
 class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """A built FigPack curation view (URI) for one ``FigPackCurationSelection``.
 
-    Populating builds the view, publishes it (hosted figpack.org figure when
-    ``upload``, else a durable local bundle), and stores the URI plus the
-    package versions used. A zero-unit sort raises ``ZeroUnitAnalyzerError``
-    (from ``Sorting.get_analyzer``): there is no analyzer to summarize.
+    Stores the URI (hosted figure or local bundle) and package versions. A
+    zero-unit sort raises ``ZeroUnitAnalyzerError``.
     """
 
     definition = """
@@ -859,28 +818,18 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)
     """
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
-    # ``make_compute`` / ``make_insert`` split keep the analyzer resolution,
-    # view build, bundle write and upload OUTSIDE the populate transaction.
-    # The analyzer self-heal (which re-inventories a rebuilt analyzer through
-    # ``SortingAnalyzerVersions.populate``) runs in ``make_fetch``; DataJoint
-    # calls that first outside any transaction, so the second, in-transaction
-    # call finds the analyzer valid and does not populate again. The inherited
-    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
-    # through tri-part dispatch.
+    # Tri-part make keeps analyzer work and upload outside the transaction.
+    # The analyzer self-heal runs in the first, untransacted make_fetch call.
     _parallel_make = True
 
     def make_fetch(self, key) -> FigPackCurationFetched:
         """Validate the selection and resolve every input the view needs.
 
-        Re-validates at the integrity boundary -- ``insert_selection``'s guard
-        is bypassable (``allow_direct_insert``), so the curation namespace and
-        the content-addressed identity are re-checked before any view input is
-        resolved. Resolves (building or repairing as needed) the display
-        analyzer, and the review timeline's inputs.
+        Rechecks the curation and selection identity, since
+        ``allow_direct_insert`` bypasses ``insert_selection``, then resolves
+        the display analyzer and review timeline inputs.
         """
-        # Fail before resolving (and possibly building) an analyzer when the
-        # optional FigPack packages are absent.
+        # Fail before building an analyzer if FigPack is not installed.
         import figpack  # noqa: F401
         import figpack_spike_sorting  # noqa: F401
 
@@ -910,9 +859,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         }
         if review_config is not None:
             figure_config["review"] = review_config
-        # Profile-backed reviews persist their display budget in the review
-        # configuration (part of the selection identity); an expert selection
-        # uses the defaults.
+        # None (the defaults) for selections without a review profile.
         display_options = (review_config or {}).get("display")
         review_table = _review_context_table(curation_key, review_config)
         analyzer_folder, timeline_inputs = _resolve_curation_view_inputs(
@@ -954,10 +901,8 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> FigPackCurationComputed:
         """Build the view and publish it; no DB access.
 
-        Loads the resolved display analyzer, builds the review timeline from
-        its resolved files, composes the view, and publishes it (a hosted
-        figpack.org figure when ``upload``, else a local bundle staged in a
-        private folder that ``make_insert`` moves to the durable path).
+        A local bundle is staged in a private folder that ``make_insert``
+        moves to the durable path.
         """
         import figpack
         import figpack_spike_sorting
@@ -971,8 +916,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             review_timeline_from_inputs,
         )
 
-        # Load under the per-sort cache lock, as the resolver does, so the
-        # load never observes a concurrent atomic publish mid-move.
+        # The lock prevents reading a concurrent publish mid-move.
         with analyzer_cache_lock(curation_key["sorting_id"]):
             analyzer = load_analyzer_folder(analyzer_folder)
         view = build_curation_view(
@@ -1009,9 +953,8 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def make_insert(self, key, *computed) -> None:
         """Record the published view's URI and package versions.
 
-        An offline bundle is moved into its durable folder only after the
-        insert succeeds, so a refused or duplicate populate never replaces
-        the bundle of a committed row.
+        An offline bundle is moved into place only after the insert
+        succeeds, so a failed populate never replaces a committed bundle.
         """
         row = FigPackCurationComputed(*computed)._asdict()
         staged_bundle = row.pop("staged_bundle")
@@ -1032,10 +975,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> str:
         """Insert the selection, populate the view, and return its URI.
 
-        The v2 analog of v1's ``FigURLCurationSelection.generate_curation_uri``:
-        a one-call convenience that creates/inserts the
-        ``FigPackCurationSelection`` row, populates ``FigPackCuration``, and
-        returns the stored ``figpack_uri``.
+        Counterpart of v1's ``FigURLCurationSelection.generate_curation_uri``.
         """
         return cls.build_curation_view_result(
             curation_key,
@@ -1085,17 +1025,10 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def drop_missing_local_bundle(cls, selection: dict) -> "str | None":
         """Forget a built local view whose bundle folder is gone; say so.
 
-        A local bundle can be moved or purged outside Spyglass, leaving a row
-        that points at nothing. Populating again rebuilds it, so the row is
-        dropped and a warning names the missing path and what was lost: draft
-        labels saved only in that bundle. A hosted (``upload``) view is remote
-        and is left alone.
-
-        A bundle outside this machine's :func:`figpack_cache_root` was built
-        under another host's or user's FigPack folder, where it (and its draft
-        labels) may still exist. Its row is kept and only the warning is
-        returned, so two machines never take turns replacing each other's
-        bundle.
+        The row is dropped so populate rebuilds it, with a warning that draft
+        labels saved only in that bundle are lost. Hosted views are skipped.
+        A bundle outside this machine's :func:`figpack_cache_root` may still
+        exist elsewhere, so its row is kept and only the warning is returned.
 
         Parameters
         ----------
@@ -1119,8 +1052,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         if (FigPackCurationSelection & selection).fetch1("upload"):
             return None
-        # The same lock populate takes, so a concurrent run cannot rebuild the
-        # bundle between this check and the delete.
+        # Populate's lock, so a concurrent rebuild cannot race the delete.
         with advisory_key_lock(cls, selection):
             built = cls & selection
             if not built:
@@ -1152,9 +1084,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "in that page are lost; committed curations are unaffected."
             )
             logger.warning(message)
-            # The row only records where the bundle was written and no table
-            # depends on it, so remove just this row: no cascade or
-            # external-file sweep (an added dependent makes this raise).
+            # No table depends on this row; delete_quick raises if one does.
             built._check_delete_permission()
             built.delete_quick()
         return message
@@ -1163,10 +1093,9 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def fetch_curation_from_uri(uri: str) -> tuple[dict, list]:
         """Read edited labels and merge groups back from a FigPack figure.
 
-        Fetches ``<uri>/annotations.json`` (hosted figure or saved bundle) and
-        returns ``({unit_id: [label, ...]}, [[unit_id, ...], ...])`` -- the
-        exact shape ``CurationV2.insert_curation(labels=..., merge_groups=...)``
-        consumes. A never-edited figure yields ``({}, [])``.
+        Returns ``({unit_id: [label, ...]}, [[unit_id, ...], ...])``, the
+        shape ``CurationV2.insert_curation(labels=..., merge_groups=...)``
+        takes. A never-edited figure yields ``({}, [])``.
         """
         return curation_annotations_to_labels_and_merges(
             _load_annotations_json(uri)
@@ -1188,15 +1117,9 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> dict:
         """Import edited FigPack annotations as a child ``CurationV2`` row.
 
-        ``parent_curation_key`` is the curation the browser view was built from
-        (``{"sorting_id": ..., "curation_id": ...}``). Requiring that parent
-        key keeps the import path out of the root-curation default, so a team can
-        safely save several reviewers' edits as sibling child curations and
-        choose which one to commit or merge.
-
-        A figure with no edited labels or merge groups raises by default instead
-        of creating an empty child curation; pass ``allow_empty=True`` to record
-        an explicit "reviewed, no changes" child.
+        ``parent_curation_key`` is the curation the view was built from, so
+        several reviewers' edits can be saved as sibling children. A figure
+        with no edits raises unless ``allow_empty=True``.
         """
         try:
             sorting_id = parent_curation_key["sorting_id"]

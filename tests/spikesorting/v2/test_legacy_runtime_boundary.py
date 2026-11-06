@@ -1,7 +1,4 @@
-"""Validation suite for the SpikeInterface-0.104 legacy-runtime boundary.
-
-Asserts the contract that lets v2 ship under SpikeInterface 0.104 without
-breaking existing v0/v1 query paths:
+"""v0/v1 query paths keep working under SpikeInterface 0.104.
 
 - the project is pinned to SI 0.104,
 - the v0/v1 spike-sorting modules and the shared modules that reference
@@ -12,8 +9,7 @@ breaking existing v0/v1 query paths:
 - v0/v1 DataJoint ``definition`` strings have not drifted,
 - the resolver finds ``mountainsort5`` and the optional matching extra.
 
-These tests run under the resolver-clean SI 0.104 environment; the
-merge-query smoke test additionally needs Docker.
+The merge-query smoke test needs Docker.
 """
 
 from __future__ import annotations
@@ -41,9 +37,8 @@ _LEGACY_SCHEMAS_BASELINE = (
 
 # ---------- Schema-stability test: v0/v1 definitions are unchanged ------------
 
-# Source files whose DataJoint ``definition`` blocks must not drift while the
-# legacy-runtime boundary is in effect. The schemas are byte-identical to the
-# SI-0.99 baseline; any drift here would mean an active migration sneaked in.
+# Source files whose DataJoint ``definition`` blocks must match the SI 0.99
+# baseline.
 _LEGACY_TABLE_FILES = {
     "v0": [
         "spyglass/spikesorting/v0/spikesorting_recording.py",
@@ -72,9 +67,7 @@ def _extract_definition_blocks(path: Path) -> dict[str, str]:
     a preceding ``class Name`` declaration.
     """
     source = path.read_text()
-    # ``class`` can be at column 0 (master tables) or indented (DataJoint Part
-    # tables nested inside a master); both must be captured so a Part-table
-    # drift cannot slip past the snapshot.
+    # ``class`` may be indented (Part tables nested in a master).
     pattern = re.compile(
         r"^\s*class\s+(\w+).*?\n\s+definition\s*=\s*\"\"\"\n(.*?)\"\"\"",
         re.DOTALL | re.MULTILINE,
@@ -87,12 +80,8 @@ def _extract_definition_blocks(path: Path) -> dict[str, str]:
 def test_no_legacy_schema_changes():
     """v0/v1 DataJoint ``definition`` blocks are byte-identical to baseline.
 
-    The SI dependency bump is a runtime change only; any legacy table whose
-    ``definition`` string has drifted would mean a schema migration sneaked
-    in while the boundary contract was meant to be quiescent. The baseline
-    snapshot lives at ``tests/spikesorting/v2/baselines/legacy_schemas.json``;
-    if a definition truly needs to change, the snapshot must be regenerated
-    in the same change so the drift is explicit and reviewable.
+    Baseline: ``tests/spikesorting/v2/baselines/legacy_schemas.json``. A
+    deliberate definition change must regenerate it in the same change.
     """
     assert _LEGACY_SCHEMAS_BASELINE.exists(), (
         f"Missing baseline {_LEGACY_SCHEMAS_BASELINE}; regenerate with the "
@@ -158,12 +147,9 @@ def test_sorter_runtime_resolution():
 def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
     """``get_restricted_merge_ids`` must not force v2 in a v0/v1-only env.
 
-    A literal ``sources=["v0","v1","v2"]`` default made the no-argument
-    path raise wherever the optional v2 layer is unavailable even when the
-    caller never requested v2. The default resolves to only the
-    available sources; an explicit list is still honored verbatim.
-    (``dj_conn`` only because importing the merge module declares its
-    DataJoint schema; the assertions touch no table.)
+    The default resolves to the available sources; an explicit list is
+    honored verbatim. (``dj_conn``: importing the merge module declares its
+    schema.)
     """
     from spyglass.spikesorting import spikesorting_merge as m
 
@@ -213,10 +199,8 @@ _SI_DEPENDENT_IMPORTS_TO_VERIFY = [
 def test_legacy_import_smoke(module_name, dj_conn):
     """v0/v1 + shared SpikeInterface-using modules import under SI 0.104.
 
-    Module-level imports must not crash; runtime guards only fire at call
-    time, so a module can be imported without invoking a removed API. The
-    ``dj_conn`` fixture is requested so the Docker MySQL server has been
-    waited on before schema declaration runs.
+    Runtime guards fire at call time, not import. ``dj_conn`` ensures MySQL is
+    ready before schema declaration.
     """
     importlib.import_module(module_name)
 
@@ -270,16 +254,9 @@ def test_legacy_runtime_guard_raises_under_si_0104(dj_conn, monkeypatch):
     )
     from spyglass.spikesorting.v1.metric_curation import MetricCuration
 
-    # ``UnitWaveformFeatures.make`` is the only guarded entry point whose
-    # legacy-SI guard fires AFTER a source dispatch (waveform_features.py:217,
-    # on the non-v2 ``else`` branch) rather than at the top of ``make``. So
-    # ``make({})`` cannot reach the guard: the empty key matches all
-    # ``WaveformFeaturesParams`` rows and ``fetch1("params")`` raises first.
-    # To exercise the guard we must hand ``make`` a key resolving to exactly
-    # one param row and to a v0/v1 (non-``CurationV2``) merge source. We insert
-    # one param row and stub ``merge_get_parent`` to report a ``CurationV1``
-    # source so ``is_v2`` is False and the v0/v1 guard fires before any
-    # (removed) SI 0.104 waveform call.
+    # UnitWaveformFeatures.make guards only after source dispatch (non-v2
+    # branch), and make({}) fails earlier on fetch1("params"). Insert one
+    # param row and stub merge_get_parent to report a CurationV1 source.
     WaveformFeaturesParams().insert1(
         [
             "legacy_guard_amplitude",
@@ -385,9 +362,7 @@ def test_legacy_merge_query_smoke(dj_conn):
     # Heading describes the merge master and its source-class registry exists.
     heading = SpikeSortingOutput.heading
     assert "merge_id" in heading.attributes
-    # Restricting with an unknown merge_id is a no-op (empty result) and must
-    # not error -- this is the cheapest way to exercise the merge code path
-    # under SI 0.104 without depending on real v0/v1 rows being present.
+    # An unknown merge_id restricts to an empty result without error.
     unknown_uuid = "00000000-0000-0000-0000-000000000000"
     result = (SpikeSortingOutput & {"merge_id": unknown_uuid}).fetch(
         as_dict=True

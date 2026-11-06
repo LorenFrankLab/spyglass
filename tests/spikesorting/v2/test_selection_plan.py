@@ -1,17 +1,7 @@
-"""Unit tests for the pure selection-plan builders.
+"""DB-free tests for the selection-plan builders behind ``insert_selection``.
 
-``SortingSelection.insert_selection`` delegates its pure half to
-``_selection_plan``: validate the request, normalize ids, derive the
-deterministic content-addressed PK, and shape the master + source part rows.
-These tests drive those builders directly -- no
-DataJoint, no transaction -- so the user-misconfiguration paths (bad source
-combinations, missing required keys, supplied-id mismatch, str-vs-UUID
-normalization) are pinned cheaply.
-
-The module under test imports only ``_selection_identity`` (DB-free), so
-this file needs no database fixture; the import-boundary contract is
-separately enforced by ``test_service_import_contracts`` (``_selection_plan`` is
-in ``_DB_FREE_SERVICE_MODULES``).
+The builders validate the request, normalize ids, derive the
+content-addressed PK, and shape the master and source part rows.
 """
 
 from __future__ import annotations
@@ -25,9 +15,6 @@ from spyglass.spikesorting.v2._core.selection_plan import (
     build_sorting_selection_plan,
 )
 
-# Every test in this module drives the pure ``_selection_plan`` builders
-# directly -- no DataJoint connection, no I/O -- so the whole file qualifies as
-# ``unit`` and is collected (not skipped) under ``pytest -m unit``.
 pytestmark = pytest.mark.unit
 
 _REC = "11111111-1111-1111-1111-111111111111"
@@ -41,8 +28,7 @@ _FULL_REC = {
     "preprocessing_params_name": "default",
     "team_name": "test_team",
 }
-# A resolved recording_input_hash (the DB-side resolution is exercised in the
-# integration tests); here any fixed 64-hex value drives the pure shaping.
+# Any fixed resolved recording_input_hash.
 _REC_HASH = "a" * 64
 _REC_HASH_2 = "b" * 64
 
@@ -51,9 +37,8 @@ _REC_HASH_2 = "b" * 64
 
 
 def test_recording_plan_shapes_master_row_and_restriction():
-    """A full FK set + resolved input hash yields the identity restriction
-    (FK set + hash) plus a master row carrying the deterministic recording_id;
-    the FK set + hash IS the find-existing restriction."""
+    """A full FK set and input hash yield that same pair as the find-existing
+    restriction, plus a master row with the deterministic recording_id."""
     plan = build_recording_selection_plan(
         dict(_FULL_REC), recording_input_hash=_REC_HASH
     )
@@ -82,11 +67,8 @@ def test_recording_plan_is_deterministic():
 
 
 def test_recording_plan_input_hash_changes_recording_id():
-    """The resolved-input hash is folded into the identity: a changed input
-    set (a different hash under the SAME FK set) mints a different
-    recording_id, so a recording whose sort-group electrodes or interpolated
-    bad channels changed is never reused under the previous input set's
-    id."""
+    """A different input hash under the same FK set mints a different
+    recording_id."""
     id_a = build_recording_selection_plan(
         dict(_FULL_REC), recording_input_hash=_REC_HASH
     ).recording_id
@@ -166,11 +148,9 @@ def test_sorting_plan_recording_only_shapes_rows():
 
 
 def test_sorting_plan_with_artifact_normalizes_str_to_uuid():
-    """A str ``artifact_detection_id`` is normalized to UUID and threaded into
-    the plan; the artifact-backed id differs from the artifact-free id for the
-    same (recording, sorter). (The ``ArtifactDetectionSource`` part row itself
-    is built DB-side in ``insert_selection`` from the resolved merge id, not in
-    the pure plan.)"""
+    """A str ``artifact_detection_id`` is normalized to UUID; the
+    artifact-backed id differs from the artifact-free id for the same
+    (recording, sorter)."""
     base = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}
     plan = build_sorting_selection_plan({**base, "artifact_detection_id": _ART})
     assert plan.artifact_detection_id == uuid.UUID(_ART)
@@ -180,8 +160,7 @@ def test_sorting_plan_with_artifact_normalizes_str_to_uuid():
 
 
 def test_sorting_plan_str_and_uuid_artifact_id_share_identity():
-    """A str and a UUID ``artifact_detection_id`` produce the same sorting_id
-    (the normalization keeps idempotent re-inserts from forking)."""
+    """A str and a UUID ``artifact_detection_id`` produce the same sorting_id."""
     base = {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "d"}
     as_str = build_sorting_selection_plan(
         {**base, "artifact_detection_id": _ART}
@@ -270,10 +249,8 @@ def test_sorting_plan_concat_id_change_changes_sorting_id():
 
 
 def test_sorting_plan_concat_and_recording_same_uuid_distinct_identity():
-    """A recording source and a concat source with the SAME uuid value resolve
-    to different sorting_ids -- the input source kind participates in the
-    content-addressed identity, so a recording_id can never alias a
-    concat_recording_id."""
+    """A recording source and a concat source with the same uuid value resolve
+    to different sorting_ids."""
     base = {"sorter": "ms5", "sorter_params_name": "d"}
     rec = build_sorting_selection_plan({**base, "recording_id": _REC})
     concat = build_sorting_selection_plan({**base, "concat_recording_id": _REC})
@@ -325,9 +302,8 @@ def test_sorting_plan_requires_sorter_and_params_name():
     "source", [{"recording_id": _REC}, {"concat_recording_id": _CONCAT}]
 )
 def test_sorting_plan_rejects_unknown_fields(source):
-    """A misspelled optional key (here the corrected recording's) is refused
-    by name instead of being dropped, which would select an uncorrected
-    sort; the message lists every accepted field."""
+    """A misspelled optional key is refused by name, listing every accepted
+    field, rather than dropped (which would select an uncorrected sort)."""
     with pytest.raises(ValueError, match="unknown field") as excinfo:
         build_sorting_selection_plan(
             {
@@ -359,17 +335,14 @@ def test_sorting_plan_supplied_id_mismatch_raises_but_match_ok():
     # The correct id is accepted (no raise) and round-trips.
     again = build_sorting_selection_plan({**key, "sorting_id": str(derived)})
     assert again.sorting_id == derived
-    # A wrong id is rejected.
     with pytest.raises(ValueError, match="sorting_id"):
         build_sorting_selection_plan({**key, "sorting_id": _ART})
 
 
 # ---------- motion-corrected sort identity ---------------------------------
 
-# Sorting ids and canonical identities recorded before corrected sorts
-# existed, for the smoke session's shank-0 recording (MS5 franklab row). An
-# uncorrected sort (no motion correction, or only a saved estimate) must keep
-# exactly these.
+# Pinned ids for the smoke session's shank-0 recording (MS5 franklab row);
+# an uncorrected sort must keep exactly these.
 _BASE_RECORDING_ID = "7ec72a85-b8cd-5a57-8977-710fc5b429fe"
 _BASE_ARTIFACT_ID = "33c83cb3-6338-50d3-81b7-41e6dc14fc92"
 _BASE_CONCAT_ID = "84ff3d7f-4bca-5755-8262-f7bc11c7921f"

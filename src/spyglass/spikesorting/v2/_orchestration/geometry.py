@@ -1,9 +1,7 @@
 """Sort-group geometry reporting and plotting.
 
-Holds ``describe_sort_groups`` (one row per sort group) and
-``plot_sort_group_geometry``. ``pipeline.py`` re-exports both. Imports no
-other pipeline submodule. The shared electrode-to-region database join lives
-in ``_recording.unit_metadata``; this module only consumes it for reporting and plotting.
+``pipeline.py`` re-exports ``describe_sort_groups`` and
+``plot_sort_group_geometry``.
 """
 
 from __future__ import annotations
@@ -18,9 +16,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-# Auto-label electrode ids only when each sort group has at most this many
-# contacts (tetrode = 4, stereotrode = 2): sparse groups stay legible, while a
-# dense polymer / Neuropixels column (>= ~16 per group) would be a wall of text.
+# Auto-label electrode ids only for groups this sparse (tetrodes, stereotrodes).
 _AUTO_LABEL_MAX_PER_COLUMN = 8
 
 
@@ -77,13 +73,8 @@ def _probe_key(electrode: dict) -> "tuple[Any, int, int] | None":
 def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     """Return a notebook-friendly summary of v2 sort groups for a session.
 
-    Use this after creating ``SortGroupV2`` rows, before choosing a
-    ``sort_group_id`` for ``run_v2_pipeline``. The table surfaces the
-    scientific context a user normally needs at that decision point:
-    electrode membership, electrode groups, probe shanks, brain regions,
-    bad-channel membership, and reference mode. The helper is read-only:
-    it restricts existing ``SortGroupV2`` / ``Electrode`` / ``BrainRegion``
-    rows and never creates sort groups.
+    Use before choosing a ``sort_group_id`` for ``run_v2_pipeline``.
+    Read-only.
 
     Parameters
     ----------
@@ -236,10 +227,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             row
         )
 
-    # Reference electrodes for 'specific'-reference groups are NOT sort-group
-    # members (membership excludes them), so fetch them directly; the group loop
-    # below appends each as a synthetic row so the is_reference star overlay has
-    # a row to render.
+    # Specific reference electrodes are not group members; fetch them directly.
     reference_ids = {
         _nullable_int(master["reference_electrode_id"])
         for master in master_by_group.values()
@@ -295,12 +283,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             member_rows_by_group.get(sort_group_id, []),
             key=lambda row: int(row["electrode_id"]),
         )
-        # Append the (non-member) specific reference electrode so its row gets
-        # is_reference=True below and renders as the star overlay; it is excluded
-        # from the per-group electrode scatter in plot_sort_group_geometry.
-        # Plot the contacts where the recording stage places them (the
-        # tetrode repair's square, or the plane separating every contact);
-        # a group preflight refuses keeps its registered x-y below.
+        # Plot contacts where the recording stage places them.
         member_ids = [int(row["electrode_id"]) for row in group_electrodes]
         planar_source, planar = (
             sort_group_planar_positions(
@@ -320,6 +303,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             if planar is not None
             else {}
         )
+        # The appended reference row renders as the star overlay only.
         if reference_electrode_id in reference_electrode_by_id:
             group_electrodes = [
                 *group_electrodes,
@@ -336,11 +320,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
                     rel_z = geometry["rel_z"]
                     contact_size = geometry["contact_size"]
 
-            # Pick plot coordinates from a SINGLE source so plot_x/plot_y and
-            # coordinate_source can never disagree (e.g. plot probe rel_x
-            # against electrode y, or label "electrode" while plotting a probe
-            # coord). Probe rel_x/rel_y are populated together, but pairing
-            # here keeps the contract explicit if only one were present.
+            # Take plot_x, plot_y and coordinate_source from one source.
             electrode_x = electrode.get("x")
             electrode_y = electrode.get("y")
             electrode_id = int(electrode["electrode_id"])
@@ -419,8 +399,7 @@ def _layout_probe_contacts(plottable):
     if multi_probe:
         import warnings
 
-        # Gap scales with the overall geometry extent so it is non-zero even
-        # for single-column (linear) probes whose contacts share one rel_x.
+        # Scale by overall extent so single-column probes still get a gap.
         all_x = [row["plot_x"] for row in plottable]
         all_y = [row["plot_y"] for row in plottable]
         scale = max(
@@ -456,8 +435,6 @@ def _layout_probe_contacts(plottable):
 
 def _shade_probe_blocks(ax, multi_probe, gap, probe_ids, by_probe):
     """Shade alternating probe blocks in the display layout."""
-    # Shade alternating probe blocks so the side-by-side layout reads as
-    # per-probe groups rather than one undifferentiated row of columns.
     if multi_probe:
         band_pad = gap * 0.2
         for probe_index, probe_id in enumerate(probe_ids):
@@ -477,13 +454,6 @@ def _annotate_geometry(
     ax, plottable, by_probe, label_electrodes, max_per_column
 ):
     """Label sparse contacts and separate probe captions from their electrodes."""
-    # Electrode-id labels: shown automatically only when each sort group is
-    # sparse enough to stay legible (tetrodes / stereotrodes) -- a dense polymer
-    # or Neuropixels column would be a wall of overlapping text.
-    # ``label_electrodes`` True/False forces the choice; ``None`` (default)
-    # auto-decides on column density. When shown, the specific reference gets its
-    # electrode_id like any other contact (the star already marks it), so no
-    # separate reference label is needed.
     if label_electrodes is None:
         do_label = max_per_column <= _AUTO_LABEL_MAX_PER_COLUMN
     else:
@@ -498,7 +468,6 @@ def _annotate_geometry(
                 fontsize=7,
             )
 
-    # Label each probe's column so the side-by-side layout is interpretable.
     if len(by_probe) > 1:
         for probe_id, probe_rows in by_probe.items():
             center_x = sum(row["display_x"] for row in probe_rows) / len(
@@ -508,9 +477,7 @@ def _annotate_geometry(
             ax.annotate(
                 str(probe_id),
                 (center_x, top_y),
-                # Lifted well above the top contacts so the bold probe_id sits
-                # clear of any electrode-id labels drawn on them (offset (3, 3))
-                # when label_electrodes is on, rather than overlapping.
+                # Clear of the electrode-id labels at offset (3, 3).
                 xytext=(0, 22),
                 textcoords="offset points",
                 ha="center",
@@ -531,33 +498,13 @@ def plot_sort_group_geometry(
 ):
     """Plot a DB-backed geometry view of existing v2 sort groups.
 
-    Use this immediately after ``describe_sort_groups`` and before choosing a
-    ``sort_group_id``. Contacts are colored by ``sort_group_id``; bad-channel
-    members and specific reference electrodes are overlaid when present. The
-    helper reads Spyglass metadata only -- it does not open the raw recording or
-    create SpikeInterface objects.
+    Contacts are colored by ``sort_group_id``, with bad channels and specific
+    references overlaid. Reads Spyglass metadata only.
 
-    Contact marker size auto-shrinks as a sort group gets dense (a linear
-    polymer shank stacks many contacts in a narrow band) so contacts stay
-    separable; a sparse tetrode keeps large markers. Electrode-id labels (the
-    channel numbers) are shown automatically for sparse sort groups (tetrodes /
-    stereotrodes) and hidden for dense probes where they would overlap into a
-    wall of text; ``label_electrodes`` overrides this. Specific reference
-    electrodes are marked with a star -- see ``show_reference`` for where that
-    reference comes from; its channel id is in ``describe_sort_groups``.
-
-    Contacts sit where the recording stage places them, from the registered
-    ``Probe.Electrode`` geometry: a single-group ``tetrode_12.5`` tetrode on
-    the 12.5 um square, any other group in the plane that separates every
-    contact (x-z for a Frank-lab tetrode), with the axis labels naming it. A
-    group the sort would refuse keeps its registered x-y.
-
-    When the session spans **more than one probe**, ``Probe.Electrode``
-    rel_x/rel_y are each probe's own coordinate frame (all near the origin), so
-    the probes are laid out **side-by-side** along x -- each probe's contacts
-    are display-shifted into their own column (annotated with the ``probe_id``)
-    and a ``UserWarning`` is emitted. y depths and within-probe geometry are
-    unchanged; the underlying ``rel_x`` is not mutated.
+    Contacts sit where the recording stage places them: a ``tetrode_12.5``
+    group on the 12.5 um square, any other group in the plane that separates
+    every contact. A group the sort would refuse keeps its registered x-y.
+    Multiple probes are laid out side by side along x.
 
     Parameters
     ----------
@@ -570,24 +517,15 @@ def plot_sort_group_geometry(
         Subset of sort-group ids to display. All sort groups are shown
         when omitted (the default).
     label_electrodes : bool or None, optional
-        Whether to annotate each plotted contact with its ``electrode_id`` (the
-        channel number). ``None`` (the default) auto-decides on column density:
-        labels are shown when every sort group has at most
-        ``_AUTO_LABEL_MAX_PER_COLUMN`` contacts (tetrodes / stereotrodes) and
-        hidden for denser probes where they would overlap. ``True`` / ``False``
-        force labels on / off.
+        Whether to annotate each contact with its ``electrode_id``. ``None``
+        (default) labels only groups with at most
+        ``_AUTO_LABEL_MAX_PER_COLUMN`` contacts.
     show_bad_channels : bool, optional
         If ``True``, overlay bad-channel members with red ``x`` markers.
         Defaults to ``True``.
     show_reference : bool, optional
         If ``True``, overlay ``reference_mode='specific'`` electrodes with a
-        black star marker. Defaults to ``True``. This reference is the one each
-        sort group inherited from ``Electrode.original_reference_electrode``
-        (ultimately the ``trodes_to_nwb`` ``ref_elect_id`` metadata), unless it
-        was overridden via ``set_group_by_shank(references=...)`` or
-        ``reference_mode=...`` when the sort group was created. Groups with
-        ``reference_mode`` of ``'none'`` or ``'global_median'`` have no star.
-        The reference's channel id is available in ``describe_sort_groups``.
+        black star marker. Defaults to ``True``.
     title : str, optional
         Axes title. A default title naming the session is used when
         omitted.
@@ -644,19 +582,11 @@ def plot_sort_group_geometry(
         ax.set_axis_off()
         return ax
 
-    # ``Probe.Electrode`` rel_x/rel_y are each probe's OWN coordinate frame
-    # (every probe starts near the origin), so plotting multiple probes on one
-    # shared axis would overlap them. Lay probes out side-by-side along x by
-    # offsetting each probe's contacts into its own column; y (depth) is left
-    # untouched. ``display_x`` carries the (possibly shifted) plot coordinate so
-    # the raw per-probe ``plot_x`` is preserved on each row.
+    # Each probe has its own coordinate frame, so offset probes along x.
     probe_ids, by_probe, gap = _layout_probe_contacts(plottable)
     multi_probe = len(probe_ids) > 1
 
-    # Marker size shrinks as a column gets dense so stacked contacts don't
-    # overlap: a linear polymer shank packs many contacts into a narrow y band,
-    # while the base size is tuned for a ~4-contact tetrode. Bounded so sparse
-    # groups stay large/readable and dense ones stay separable.
+    # Shrink markers for dense groups so stacked contacts stay separable.
     from collections import Counter
 
     contacts_per_column = Counter(row["sort_group_id"] for row in plottable)
@@ -757,9 +687,7 @@ def plot_sort_group_geometry(
     ax.set_aspect("equal", adjustable="datalim")
     ax.grid(True, alpha=0.25)
 
-    # With many sort groups the in-axes legend covers the contacts; move it
-    # outside to the right. A handful of groups (the tetrode case) reads fine
-    # inside at "best".
+    # Many groups: an in-axes legend would cover the contacts.
     if len(sort_group_ids) > 6:
         ax.legend(
             fontsize="small",

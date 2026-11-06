@@ -1,17 +1,11 @@
-"""``resolve_peak_sign`` maps a sorter params blob to a SI ``peak_sign``.
+"""``resolve_peak_sign`` maps a sorter params blob to a SI ``peak_sign``, so
+unit peak channel and amplitude follow the sorter's detection polarity.
 
-Per-unit attribution (``Sorting.Unit`` peak channel + amplitude) must honor
-the sorter's configured detection polarity instead of hardcoding ``"neg"``
-(v1 makes ``peak_sign`` configurable via the ``peak_channel`` metric params;
-falling back to SpikeInterface's ``"neg"`` default would mis-attribute units
-for positive-going detections).
-
-Sorters express polarity differently: ``clusterless_thresholder`` carries
-``peak_sign`` directly ("neg"/"pos"/"both"); MountainSort 4/5 carry
-``detect_sign`` (-1/0/1); SpykingCircus2 nests ``peak_sign`` under
-``detection.method_kwargs``; Kilosort4 flips the data with ``invert_sign``
-for positive-going spikes; the generic schema carries none and defaults to
-"neg". Hermetic -- no DB.
+- clusterless_thresholder: ``peak_sign``.
+- MountainSort 4/5: ``detect_sign`` (-1/0/1).
+- SpykingCircus2: ``detection.method_kwargs.peak_sign``.
+- Kilosort4: ``invert_sign``.
+- Otherwise: ``"neg"``.
 """
 
 from __future__ import annotations
@@ -99,20 +93,9 @@ def test_non_mapping_defaults_to_neg():
 
 
 def test_peak_sign_pos_attributes_positive_going_channel():
-    """A unit whose template has a POSITIVE peak on one channel and a LARGER
-    NEGATIVE deflection on another is attributed to the positive channel
-    under ``peak_sign='pos'`` and to the negative channel under SI's default
-    ``'neg'``.
-
-    v2 threads the sorter's configured ``peak_sign`` into
-    ``get_template_extremum_channel`` (via ``resolve_peak_sign``) so a
-    positive-going detection lands on its true peak channel; using SI's
-    defaults instead would silently mis-attribute it to the most-negative
-    channel.
-    The existing peak-amplitude test runs on a
-    trough-aligned fixture where ``pos == neg``, so this is the only case
-    that exercises the configured sign actually changing the answer. Hermetic
-    synthetic analyzer -- no DB / full pipeline.
+    """A unit with a positive peak on one channel and a larger negative
+    deflection on another is attributed to the positive channel under
+    ``peak_sign='pos'`` and to the negative one under ``'neg'``.
     """
     from spikeinterface.core import template_tools
 
@@ -129,8 +112,8 @@ def test_peak_sign_pos_attributes_positive_going_channel():
     assert int(neg_chan[0]) == 1, "neg peak_sign attributes the -channel"
     assert int(pos_chan[0]) != int(neg_chan[0])
 
-    # v2 threads the sorter's configured peak_sign through resolve_peak_sign,
-    # so _populate_unit_part uses 'pos' when the sorter params ask for it.
+    # resolve_peak_sign maps the sorter params to the sign used for
+    # attribution.
     assert resolve_peak_sign({"peak_sign": "pos"}) == "pos"
 
 
@@ -146,19 +129,9 @@ def test_peak_sign_pos_attributes_positive_going_channel():
 def test_peak_sign_persists_attributed_electrode(
     sorter_params, expected_electrode_id
 ):
-    """The sorter's configured polarity flows into the persisted
-    ``Sorting.Unit`` row's ``electrode_id``.
-
-    The previous tests cover the two halves in isolation -- ``resolve_peak_sign``
-    (the mapping) and ``get_template_extremum_channel`` (SI picks the channel)
-    -- but nothing connected them through the row that is actually stored. This
-    drives the exact attribution chain ``_populate_unit_part`` runs
-    (``resolve_peak_sign`` -> ``get_template_extremum_channel`` ->
-    ``build_sorting_unit_rows``) so a regression that hardcoded ``"neg"`` or fed
-    the wrong channel mapping into the row builder would change the persisted
-    ``electrode_id``. The synthetic unit peaks +on electrode 0 and -on (larger)
-    electrode 1, so the two polarities attribute to DIFFERENT electrodes.
-    Hermetic -- no DB.
+    """The sorter's polarity determines the ``Sorting.Unit`` row's
+    ``electrode_id``, through ``resolve_peak_sign`` ->
+    ``get_template_extremum_channel`` -> ``build_sorting_unit_rows``.
     """
     from spikeinterface.core import template_tools
 
@@ -166,7 +139,7 @@ def test_peak_sign_persists_attributed_electrode(
 
     analyzer, sorting = _pos_neg_analyzer()
 
-    # Mirror _populate_unit_part's attribution sequence (minus the DB fetches).
+    # The attribution sequence of build_unit_rows_from_analyzer, without DB.
     peak_sign = resolve_peak_sign(sorter_params)
     peak_channels = template_tools.get_template_extremum_channel(
         analyzer, peak_sign=peak_sign, outputs="id"

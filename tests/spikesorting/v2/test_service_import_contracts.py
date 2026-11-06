@@ -1,11 +1,8 @@
 """Import-boundary and facade contracts for the DB-free service modules.
 
-The table-class internals are factored into dependency-light service
-modules. The load-bearing property the whole extraction rests on is that
-the private domain service modules import without pulling in the DB layer
-(``spyglass.common`` or a v2 *schema* module), so a cold import opens no
-DB connection. These tests pin that import boundary and check that the
-typed pipeline contracts are re-exported beside ``run_v2_pipeline``.
+Service modules import without ``spyglass.common`` or a v2 schema module,
+so a cold import opens no DB connection. Typed pipeline contracts are
+re-exported beside ``run_v2_pipeline``.
 """
 
 from __future__ import annotations
@@ -78,14 +75,8 @@ def test_cold_import_probes_cover_all_private_services():
 def test_service_module_imports_without_db_layer(modname):
     """Each private service and package imports with no DB-layer dependency.
 
-    Importing a v2 *schema* module (artifact / sorting / recording /
-    curation) activates ``dj.schema(...)`` and the ``from spyglass.common
-    import ...`` side effect, both of which open a DB connection AT IMPORT.
-    A service module must do neither, so a fresh interpreter (the view a
-    spawned ``n_jobs>1`` worker or a DB-isolated compute node gets) can
-    import it and run its pure / IO logic without a database. Cold-import
-    in a subprocess and assert it pulled in neither ``spyglass.common`` nor
-    any v2 schema module. Hermetic -- no DB, no container.
+    Schema modules connect at import; spawned workers and DB-isolated nodes
+    must be able to import services. Checked by cold import in a subprocess.
     """
     probe = textwrap.dedent(f"""
         import importlib.abc
@@ -193,12 +184,8 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_mode",
         "motion_correction_params_name",
     }
-    # The result/stage contracts mix always-present and mode/opt-in keys: their
-    # NotRequired keys MUST surface as optional in the runtime TypedDict metadata
-    # (codegen + callers inspect __optional_keys__). This silently breaks under
-    # postponed annotations -- ``from __future__ import annotations`` in
-    # _pipeline_types would stringize the ``NotRequired`` wrapper and reclassify
-    # every key as required -- so pin the split here.
+    # NotRequired keys must appear in __optional_keys__; postponed annotations
+    # in _pipeline_types would make every key required.
     assert pipeline_types.PipelineStageSeconds.__required_keys__ == {
         "sorting",
         "curation",
@@ -214,12 +201,9 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
         "motion_corrected_recording",
         "auto_curation",
     }
-    # RunV2PipelineSummary is a single/concat tagged union (discriminated by
-    # ``source_mode``), so pin each arm's keys rather than the alias (a union has
-    # no __required_keys__). The mode-specific source keys are REQUIRED on their
-    # arm -- the whole point of the union is that an illegal mix (e.g. a concat
-    # summary carrying recording_id) is unrepresentable. The flag-gated
-    # auto-curation keys stay optional on both arms.
+    # RunV2PipelineSummary is a union on ``source_mode``, so check each arm.
+    # Mode-specific source keys are required on their arm; auto-curation keys
+    # are optional on both.
     _SUMMARY_BASE_REQUIRED = {
         "pipeline_preset",
         "scientific_config",

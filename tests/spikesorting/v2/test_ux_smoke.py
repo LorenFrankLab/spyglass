@@ -1,23 +1,9 @@
-"""End-to-end UX smoke test: a scientist's first hour on spike sorting v2.
+"""End-to-end smoke test of the single-session user path and user notebook.
 
-The end-to-end check of the single-session user path. It runs the exact first-hour
-sequence -- ``initialize_v2_defaults`` -> sort group -> ``preflight_v2_pipeline``
--> ``run_v2_pipeline`` -> ``summarize_curation`` -> downstream spike-time fetch
--- programmatically against the ``mearec_polymer_smoke`` fixture, and also
-executes the user notebook (``notebooks/10_Spike_SortingV2.ipynb``)
-cell-by-cell against the same fixture.
-
-The test sets up its OWN clean session (rather than reusing the package-scoped
-``populated_sorting``, which is pre-populated) so the ``computed`` -> ``reused``
-idempotency assertions are deterministic. The one expensive MountainSort5 sort
-is paid once in a module-scoped fixture and shared. It skips cleanly when the
-smoke fixture (or, for the notebook-execution test, ``jupytext``) is absent
-locally; CI provides them.
-
-The pipeline discovery/orchestration helpers are safe to import at module
-scope; table imports stay lazy inside the helpers or inside the tests so
-collection does not open a DataJoint connection before the MySQL container is
-ready.
+``initialize_v2_defaults`` -> sort group -> ``preflight_v2_pipeline`` ->
+``run_v2_pipeline`` -> ``summarize_curation`` -> spike-time fetch, on the
+smoke fixture. Uses its own clean session so ``computed`` -> ``reused`` is
+deterministic. Table imports stay lazy so collection opens no DB connection.
 """
 
 from __future__ import annotations
@@ -94,11 +80,8 @@ _SORT_GROUP_COLUMNS = [
 
 @pytest.fixture(scope="module")
 def ux_session(dj_conn, smoke_nwb):
-    """Ingest the smoke fixture under a UX-isolated session and clean it.
-
-    Distinct ``dest_name`` so this session's rows never collide with the
-    package-scoped ``populated_sorting`` or other v2 modules. Cleaned up front
-    so the first ``run_v2_pipeline`` genuinely computes every stage.
+    """Ingest the smoke fixture under its own session name, cleaned first so
+    the first run computes every stage.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -119,12 +102,10 @@ def ux_session(dj_conn, smoke_nwb):
 
 @pytest.fixture(scope="module")
 def first_hour(ux_session):
-    """The first-hour path executed once: preflight (pre-run) + first run.
+    """Preflight, then the first run, once per module.
 
-    Module-scoped so the single expensive MountainSort5 sort is shared across
-    every assertion below. ``report_before`` is computed BEFORE the run (so the
-    preflight -> run_summary ID round-trip is a genuine prediction on rows that do
-    not yet exist); ``run_summary`` is the fresh, all-``computed`` run.
+    ``report_before`` predicts IDs before the rows exist; ``run_summary`` is
+    the fresh, all-``computed`` run.
     """
     inputs = configure_v2_run_inputs(
         ux_session,
@@ -147,11 +128,8 @@ def first_hour(ux_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_ux_smoke_first_hour(first_hour):
-    """The whole first-hour path runs end-to-end with the expected results.
-
-    This is the "does a scientist's first hour work?" gate: defaults ->
-    sort-group -> preflight -> pipeline -> summary -> fetch, asserting at each
-    step.
+    """Defaults -> sort group -> preflight -> pipeline -> summary -> fetch
+    each give the expected results.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -219,11 +197,8 @@ def test_ux_smoke_first_hour(first_hour):
         k: run_summary[k] for k in _STATUS_KEYS
     }
 
-    # 5. summarize_curation accepts the run_summary directly and agrees with the
-    #    minimal curation key.
-    # summarize_curation describes ONE curation, so it keeps the bare
-    # merge_id / curation_id; the run summary names its root curation
-    # root_curation_id / root_merge_id. Build the curation key explicitly.
+    # 5. summarize_curation agrees with the minimal curation key. It uses bare
+    #    merge_id / curation_id; the run summary uses root_* names.
     root_key = {
         "sorting_id": run_summary["sorting_id"],
         "curation_id": run_summary["root_curation_id"],
@@ -251,12 +226,8 @@ def test_ux_smoke_first_hour(first_hour):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_ux_smoke_preflight_predicts_ids(first_hour):
-    """Preflight's ``expected_ids`` equal the PKs the run_summary returns.
-
-    Ties Phases 2 + 3 together at the user surface: the IDs were predicted
-    before the run (the session was cleaned, so they did not yet exist), and
-    the run produced exactly those PKs. ``curation_id`` is intentionally not
-    predicted (it is assigned by ``insert_curation``, not content-addressed).
+    """Preflight's ``expected_ids``, predicted before the rows existed, equal
+    the run's PKs. ``curation_id`` is not content-addressed, so not predicted.
     """
     report = first_hour["report_before"]
     run_summary = first_hour["run_summary"]
@@ -274,7 +245,7 @@ def test_ux_smoke_preflight_predicts_ids(first_hour):
 def test_ux_smoke_idempotent(first_hour):
     """A second identical run is idempotent.
 
-    Equal run_summary modulo ``stage_seconds`` / ``*_status`` (now ``reused``),
+    Equal run_summary modulo ``stage_seconds`` / ``*_status`` (``reused``),
     inserting no duplicate selection rows.
     """
     from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
@@ -315,13 +286,9 @@ def test_ux_smoke_idempotent(first_hour):
 def test_user_notebook_executes(first_hour):
     """The user notebook runs cell-by-cell against the smoke fixture.
 
-    Reads ``notebooks/10_Spike_SortingV2.ipynb`` with ``jupytext`` and executes
-    its code cells in order, in-process, so the test's already-bootstrapped DB
-    connection and the configured session are visible. The notebook's session
-    parameters are injected (overriding the placeholder values) right after its
-    ``parameters``-tagged cell; the pipeline rows already exist from
-    ``first_hour``, so the notebook's ``run_v2_pipeline`` reuses them (fast).
-    Skips cleanly when ``jupytext`` is absent.
+    Executes the code cells in-process, injecting the test session after the
+    ``parameters``-tagged cell; ``first_hour``'s rows are reused. Skips
+    without ``jupytext``.
     """
     jupytext = pytest.importorskip("jupytext")
 
@@ -330,10 +297,7 @@ def test_user_notebook_executes(first_hour):
         "nwb_file_name": inputs["nwb_file_name"],
         "team_name": inputs["team_name"],
         "interval_list_name": inputs["interval_list_name"],
-        # The fixture has multiple sort groups; the notebook requires an
-        # explicit sort_group_id when there is more than one (no positional
-        # default). Inject the same group first_hour sorted so the reused-row
-        # merge_id assertion below holds.
+        # Several sort groups: pass first_hour's so its rows are reused.
         "sort_group_id": inputs["sort_group_id"],
         "pipeline_preset": _PIPELINE_PRESET,
     }
@@ -346,8 +310,7 @@ def test_user_notebook_executes(first_hour):
             continue
         exec(compile(cell.source, "<notebook-cell>", "exec"), namespace)
         if "parameters" in (cell.metadata.get("tags") or []):
-            # Replace the user-facing placeholder session with the test one
-            # so the remaining cells run against the ingested fixture.
+            # Replace the placeholder session with the test one.
             namespace.update(overrides)
             saw_parameters = True
 
@@ -375,9 +338,7 @@ def test_describe_units_reports_sort_time_quality(first_hour):
     assert (units["firing_rate_hz"] > 0).all()
     assert units["peak_electrode_id"].dtype.kind in "iu"
     assert units["brain_region"].map(bool).all()
-    # firing_rate uses ONE shared denominator (the sort's observed seconds), so
-    # n_spikes / firing_rate is the same for every unit -- the property that
-    # makes the rate honest for an artifact-masked sort.
+    # firing_rate shares one denominator (observed seconds) across units.
     from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -503,10 +464,8 @@ def test_plot_sort_group_geometry_empty(dj_conn):
 def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     """Multiple probes are laid out side-by-side (disjoint x) with a warning.
 
-    ``Probe.Electrode`` rel_x/rel_y are per-probe frames, so two probes whose
-    contacts share the same raw rel_x would coincide without an offset. The
-    smoke fixture is single-probe, so the multi-probe layout is exercised by
-    feeding ``plot_sort_group_geometry`` synthetic two-probe geometry rows (no DB).
+    ``Probe.Electrode`` rel_x/rel_y are per-probe, so probes would overlap
+    without an offset. Uses synthetic two-probe rows.
     """
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -534,9 +493,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
                 )
         return rows
 
-    # ``_sort_group_geometry_rows`` lives in (and is looked up from)
-    # ``_pipeline_geometry``; patch it there so the relocated
-    # ``plot_sort_group_geometry`` sees the fake rows.
+    # Patch where ``plot_sort_group_geometry`` looks it up.
     monkeypatch.setattr(
         "spyglass.spikesorting.v2._orchestration.geometry."
         "_sort_group_geometry_rows",
@@ -559,8 +516,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
         )
         for collection in group_collections
     )
-    # Disjoint x-intervals despite identical raw rel_x -> the per-probe offset
-    # was applied (probes do not overlap).
+    # Disjoint x-intervals despite identical raw rel_x.
     assert xranges[0][1] < xranges[1][0]
     assert "offset per probe" in ax.get_xlabel()
     plt.close(fig)
@@ -610,13 +566,8 @@ def _sparse_tetrode_rows(nwb_file_name):
 
 
 def test_plot_sort_group_geometry_legibility(monkeypatch):
-    """Dense columns shrink markers and multi-probe shades separating bands.
-
-    Locks in the legibility fixes: a linear polymer column packs many contacts
-    into a narrow band (markers must shrink below the sparse-tetrode default so
-    they don't overlap), multiple probes get separating background bands, the
-    specific reference is a star, and dense columns auto-suppress the
-    per-contact electrode-id labels (they would be a wall of text).
+    """Dense columns shrink markers and hide electrode-id labels, multiple
+    probes get shaded bands, and the specific reference is a star.
     """
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -704,8 +655,7 @@ def test_plot_sort_group_geometry_auto_label_threshold(
 ):
     """Auto-labeling flips exactly at ``_AUTO_LABEL_MAX_PER_COLUMN`` (8).
 
-    Pins the decision boundary so a regression moving the threshold (to 4 or 16)
-    is caught: a single-shank column of 8 contacts auto-labels, 9 does not.
+    A single-shank column of 8 contacts auto-labels, 9 does not.
     """
     matplotlib = pytest.importorskip("matplotlib")
 
@@ -744,14 +694,9 @@ def test_plot_sort_group_geometry_auto_label_threshold(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sort_group_geometry_specific_reference_star_row(ux_session):
-    """A 'specific'-reference group yields an is_reference=True geometry row.
-
-    The reference electrode is excluded from sort-group membership, so a
-    geometry built from members alone would leave the ``is_reference`` flag
-    (which the star overlay is gated on) structurally always False and the
-    star could never render. Assert the (non-member) reference electrode gets
-    its own row with is_reference=True and plot coordinates, and that the
-    members are NOT flagged.
+    """A 'specific'-reference group yields an is_reference=True geometry row
+    for the non-member reference, with plot coordinates; members are not
+    flagged.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2._orchestration.geometry import (
@@ -812,14 +757,11 @@ def test_sort_group_geometry_specific_reference_star_row(ux_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sort_group_electrode_rejects_reference_as_member(ux_session):
-    """Inserting a group's own 'specific' reference as a member is rejected at
-    insert time, not deferred to an opaque Recording.populate failure.
+    """Manually inserting a group's 'specific' reference as a member is
+    rejected at insert, as the grouping helpers do.
 
-    The reference is subtracted then dropped from the recording, so a reference
-    that is also a member would silently sort one channel short; the write path
-    already rejects it (assert_reference_not_member), and this pins that the
-    manual-insert path fails at the same point a helper (set_group_by_shank)
-    would -- at group construction.
+    The reference is dropped after subtraction, so the group would sort one
+    channel short.
     """
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.recording import SortGroupV2

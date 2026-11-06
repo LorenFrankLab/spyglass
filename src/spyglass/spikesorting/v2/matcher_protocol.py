@@ -1,26 +1,23 @@
 """Plugin interface + registry for cross-session unit matchers.
 
-A *matcher* takes wrapper-prepared bundles, one per matching input,
-and returns pairwise cross-session unit matches. The interface is deliberately
-narrow so backends (UnitMatch ships built in) can be added without touching
-the DataJoint tables:
+A *matcher* takes prepared bundles, one per matching input, and returns
+pairwise cross-session unit matches. Backends (UnitMatch is built in) plug in
+without touching the DataJoint tables:
 
-- :class:`SessionMatcherInput` -- one wrapper-prepared bundle per matching
-  input (a sort of a single recording or of a same-day concatenation). The
-  matcher reads only these directories; it never sees a ``SortingAnalyzer``
-  object, a recording, or a Spyglass table key.
-- :class:`MatchPair` -- one cross-session match, keyed by
+- :class:`SessionMatcherInput`: one prepared bundle per matching input (a
+  sort of one recording or of a same-day concatenation). The matcher reads
+  only these directories, never analyzers, recordings, or table keys.
+- :class:`MatchPair`: one cross-session match, keyed by
   ``(sorting_id, curation_id, unit_id)`` on each side.
-- :class:`MatcherProtocol` -- the ``match(session_inputs, params)`` contract.
-- :class:`MatcherGeometryValidator` -- optional backend geometry preflight.
-- :class:`MatcherInputPreparer` -- the independent preparation contract, from
-  resolved :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
-- :func:`register_matcher` / :func:`get_matcher` -- the name -> backend +
-  input preparer + per-matcher params-schema registry that ``MatcherParameters`` validates
-  against at insert time.
+- :class:`MatcherProtocol`: the ``match(session_inputs, params)`` contract.
+- :class:`MatcherGeometryValidator`: optional backend geometry preflight.
+- :class:`MatcherInputPreparer`: preparation from
+  :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
+- :func:`register_matcher` / :func:`get_matcher`: the registry of name to
+  backend, input preparer, and params schema that ``MatcherParameters``
+  validates against.
 
-This module is pure Python with no DataJoint dependency, so it is importable
-and testable standalone.
+No DataJoint dependency.
 """
 
 from __future__ import annotations
@@ -120,10 +117,8 @@ class SessionMatcherInput:
 class MatchPair:
     """One cross-session unit match, keyed by curated-unit identity per side.
 
-    ``drift_estimate_um`` and ``fdr_estimate`` have no per-pair source in
-    UnitMatch (drift is applied internally per session-pair; FDR is a
-    session-level diagnostic), so they default to ``None`` (unknown) and a
-    backend only sets them if it genuinely produces per-pair values.
+    ``drift_estimate_um`` and ``fdr_estimate`` are ``None`` unless a backend
+    produces per-pair values; UnitMatch does not.
     """
 
     session_a_sorting_id: str
@@ -300,16 +295,11 @@ def register_matcher(
         split-half waveform layout, extracted without UnitMatchPy. Supply a
         preparer for another layout; the matcher still consumes only bundles.
     replace : bool, optional
-        Explicit maintenance override. Registering a name already held by a
-        DIFFERENT backend class raises ``ValueError`` unless ``replace=True`` --
-        ``MatcherParameters`` stores only the matcher name, so silently pointing
-        a name at different code would make existing rows dispatch elsewhere.
-        Re-registering the SAME backend class with the same preparer class is
-        idempotent and needs no flag. Omitting the preparer retains the one
-        already registered. A different preparer class also needs ``replace``.
-        This is how :func:`register_default_matchers` self-heals, so the
-        built-in registration does NOT use ``replace`` -- it is reserved for a
-        deliberate swap to genuinely different code.
+        Allow re-pointing a registered name at a different backend or
+        preparer class. Without it that raises ``ValueError``, because
+        ``MatcherParameters`` stores only the name and existing rows would
+        dispatch to different code. Re-registering the same classes is
+        idempotent; omitting the preparer keeps the registered one.
 
     Raises
     ------
@@ -348,9 +338,8 @@ def register_matcher(
         matcher.name in _BUILTIN_MATCHER_NAMES
         and matcher.name not in _MATCHER_REGISTRY
     ):
-        # A built-in name claimed before its backend was imported would
-        # otherwise bypass the replacement rule below (startup order must
-        # not decide whether persisted MatcherParameters rows re-route).
+        # Load the built-in first so import order cannot bypass the
+        # replacement rule below.
         register_default_matchers()
     existing = _MATCHER_REGISTRY.get(matcher.name)
     existing_preparer = _PREPARER_REGISTRY.get(matcher.name)
@@ -395,26 +384,18 @@ def is_registered(name: str) -> bool:
 
 
 def register_default_matchers() -> None:
-    """Install any built-in matcher backend that is MISSING (fill-only).
+    """Install any built-in matcher backend that is missing.
 
-    The backends register themselves as an import side effect, so the registry
-    is empty until a backend module is imported. This makes that bootstrap
-    explicit -- callers (and the lookups below) can ensure the built-ins are
-    present without depending on import order -- and re-installs a built-in
-    if the registry was cleared (e.g. by a test fixture). A name that is
-    already registered is left alone, so lookups never swap the installed
-    object and an explicit ``register_matcher(..., replace=True)`` of a
-    built-in name survives later lookups.
+    Backends register on import, so lookups call this to avoid depending on
+    import order. A name already registered is left alone, so a
+    ``replace=True`` override of a built-in survives later lookups.
     """
     global _bootstrapping
     if _bootstrapping:  # re-entered from the built-in's own register_matcher
         return
     _bootstrapping = True
     try:
-        # Function-level import avoids an import cycle (the backend imports
-        # this module) and keeps the optional UnitMatchPy import lazy (the
-        # backend only imports UnitMatchPy when its match() path
-        # actually runs).
+        # Lazy import: avoids a cycle and defers optional UnitMatchPy.
         from spyglass.spikesorting.v2._matching import (
             unitmatch_backend as _unitmatch_backend,
         )

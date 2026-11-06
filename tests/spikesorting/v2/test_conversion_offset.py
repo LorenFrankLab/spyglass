@@ -1,14 +1,8 @@
 """``resolve_conversion_and_offset`` preserves gain AND offset, rejects bad gain.
 
-v2 writes traces unscaled, so the persisted ElectricalSeries must carry both
-``conversion`` (gain) and ``offset`` to recover physical volts on readback
-(``volts = raw*conversion + offset``). Writing only ``conversion`` would drop
-the offset -- silently biasing every channel by the DC offset on readback
-(real for Intan / Open Ephys) -- and using ``gains[0]`` without a positivity
-check would accept gain==0 (all-zero recording) or a negative gain (sign
-flip).
-
-Hermetic -- in-memory NumpyRecording, no DB.
+Traces are written unscaled, so readback needs both terms:
+``volts = raw * conversion + offset``. Intan / Open Ephys carry real DC
+offsets. DB-free.
 """
 
 from __future__ import annotations
@@ -101,15 +95,8 @@ def _no_filter_params(operator="median"):
 def test_no_filter_reference_zeroes_channel_offset(
     reference_mode, reference_id
 ):
-    """On the ``no_filter`` preset there is no bandpass to remove DC, so
-    ``common_reference`` re-references DC-laden traces but leaves
-    ``channel_offsets`` at the parent value -- ``resolve_conversion_and_offset``
-    would then persist the parent DC, double-counting it on readback. After
-    referencing the offset must be zeroed (the per-channel constant DC cancels
-    under referencing), matching what the bandpass path already does.
-
-    Fails without the reference-path offset zeroing (offsets stay at
-    1000 uV).
+    """On ``no_filter``, referencing cancels the DC, so the persisted offset
+    is zeroed rather than double-counting the parent offset.
     """
     from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
@@ -129,9 +116,7 @@ def test_no_filter_reference_zeroes_channel_offset(
 
 
 def test_no_filter_no_reference_preserves_offset():
-    """Guard against over-zeroing: with ``reference_mode='none'`` no
-    referencing runs, so a genuine DC offset must be carried through (offsets
-    are zeroed ONLY after a ``common_reference`` branch)."""
+    """With ``reference_mode='none'`` the DC offset is carried through."""
     from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_spatial_preprocessing,
     )
@@ -152,13 +137,9 @@ def test_no_filter_no_reference_preserves_offset():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_offset_round_trips_through_populate(dj_conn, monkeypatch, smoke_nwb):
-    """Recording.make passes the resolver's offset to the ElectricalSeries and
-    get_recording reads it back -- the WIRING, not just the resolver logic.
+    """A resolver offset survives ``Recording.make`` -> ``get_recording``.
 
-    The smoke fixtures carry offset==0, so inject a known non-zero offset by
-    patching the resolver, then assert it survives populate -> get_recording.
-    Patching the resolver also makes the assertion independent of whether the
-    preset's bandpass would have removed a real DC offset.
+    The smoke fixtures have zero offset, so the resolver is patched.
     """
     from pathlib import Path
 

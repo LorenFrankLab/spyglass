@@ -10,12 +10,7 @@ from __future__ import annotations
 def unit_brain_region_df(unit_relation, resolution: str):
     """Join a Unit-part relation against Electrode * BrainRegion.
 
-    Shared implementation of ``Sorting.get_unit_brain_regions`` and
-    ``CurationV2.get_unit_brain_regions``. The Unit relation must
-    carry an ``Electrode`` FK; the join walks it to ``BrainRegion``
-    (non-null FK on ``Electrode``) and returns a DataFrame with the
-    standard column set + a ``region_resolution`` literal label so
-    concat-backed callers can distinguish anchor-member results.
+    Shared by ``Sorting`` and ``CurationV2.get_unit_brain_regions``.
 
     Parameters
     ----------
@@ -48,9 +43,7 @@ def unit_brain_region_df(unit_relation, resolution: str):
     joined = (unit_relation * _Electrode * BrainRegion).fetch(
         *columns, as_dict=True
     )
-    # Pass ``columns=`` so an empty result still carries the full schema;
-    # ``pd.DataFrame([])`` would otherwise drop every column and leave
-    # callers a frame with only ``region_resolution``.
+    # columns= keeps the schema when the result is empty.
     df = pd.DataFrame(joined, columns=columns)
     df["region_resolution"] = resolution
     return df
@@ -61,14 +54,7 @@ def get_spike_sorting_v2_merge_ids(
 ) -> list:
     """Return merge ids for a v2 spike-sorting restriction.
 
-    Notebook-discoverable helper for downstream-analysis handoffs;
-    thin wrapper over ``SpikeSortingOutput()._get_restricted_merge_ids_v2`` so
-    users can do ``get_spike_sorting_v2_merge_ids(restriction)``
-    without poking at the private merge-table method directly.
-
-    ``as_dict=True`` returns ``{"merge_id": uuid}`` dicts; the default
-    ``False`` returns a plain list of UUIDs, matching the v1 helper return
-    shape.
+    Public wrapper over ``SpikeSortingOutput()._get_restricted_merge_ids_v2``.
 
     Parameters
     ----------

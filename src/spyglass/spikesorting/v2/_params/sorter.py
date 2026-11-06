@@ -1,33 +1,14 @@
 """Validated parameter schemas for the sorter parameter table.
 
-One schema per supported sorter, plus a generic ``extra="allow"``
-fallback for any SpikeInterface sorter the installed environment
-exposes but this pipeline does not ship a dedicated default for.
+Strictness:
 
-Strictness policy:
-    MountainSort4Schema, MountainSort5Schema, and
-    ClusterlessThresholderSchema use ``extra="forbid"`` because their
-    field lists come from documented APIs. A typo in one of their kwargs
-    raises at Lookup insert time -- the typo-catching is the value-add
-    over the generic schema.
+- ``extra="forbid"`` (typos raise at insert): MountainSort4,
+  MountainSort5, ClusterlessThresholder.
+- ``extra="allow"`` (SI validates at sort time): Kilosort4 (types common
+  knobs, rejects ``whiten``), SpykingCircus2, Tridesclous2, and the generic
+  fallback for any other SI sorter.
 
-    Kilosort4Schema uses ``extra="allow"``: it types the most-used knobs
-    of KS4's large parameter surface and passes the rest through to SI,
-    rejecting only ``whiten`` (KS4 has no such kwarg) at insert.
-
-    SpykingCircus2Schema and Tridesclous2Schema use ``extra="allow"``
-    because their fields are not curated here; they exist as dedicated
-    dispatch slots for ``_get_sorter_schema``. SI's runtime validates the
-    final kwargs dict at sort time.
-
-    GenericSorterParamsSchema is the ``extra="allow"`` fallback for any
-    SI sorter outside the dedicated set.
-
-Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
-do NOT live on these schemas. They are stored on the per-row
-``job_kwargs`` blob column and resolved by ``_resolved_job_kwargs`` at
-populate time (SpikeInterface globals, then
-``dj.config['custom']['spikesorting_v2_job_kwargs']``, then the row's blob).
+Concurrency settings live in each row's ``job_kwargs`` blob.
 """
 
 from __future__ import annotations
@@ -42,22 +23,14 @@ from pydantic import (
     model_validator,
 )
 
-# A MAD multiplier for peak detection is conventionally ~3-15; a value
-# above this with threshold_unit='mad' and no explicit noise_levels is
-# almost certainly a microvolt threshold left in the wrong unit.
+# Real MAD multipliers are ~3-15; larger is a microvolt value in the wrong unit.
 _MAX_PLAUSIBLE_MAD_MULTIPLIER = 50.0
 
 
 class MountainSort4Schema(BaseModel):
     """Validated schema for MountainSort 4.
 
-    The ``freq_min=600`` / ``freq_max=6000`` schema-level defaults are the
-    Frank-lab tetrode bandpass preset, so a user constructing
-    ``MountainSort4Schema()`` without arguments gets the most-used
-    production preset implicitly. MS4 is not deterministic and the SI 0.104
-    wrapper still lists it even when the runtime is not installed.
-    ``extra="forbid"`` catches typos like ``detect_signe`` against the
-    documented field set.
+    Defaults are the Frank-lab tetrode preset. MS4 is not deterministic.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -99,28 +72,15 @@ class MountainSort4Schema(BaseModel):
 class MountainSort5Schema(BaseModel):
     """Validated schema for MountainSort 5 (SpikeInterface 0.104.3 wrapper).
 
-    Every scientific parameter of SI's ``Mountainsort5Sorter`` is exposed here
-    with the wrapper's own default, except ``filter`` (see below). The one
-    wrapper key that is NOT a field is ``delete_temporary_recording``: it is an
-    execution/scratch detail managed by Spyglass (the sorter scratch dir is
-    always removed by ``run_si_sorter``), so the schema rejects it rather than
-    accepting it as science.
-    ``test_ms5_schema_covers_wrapper`` fails if the pinned wrapper grows a key
-    that is neither a field nor managed. ``extra="forbid"`` catches typos.
+    Every scientific wrapper parameter is a field with the wrapper default,
+    except:
 
-    ``filter`` defaults to ``False`` (the wrapper default is ``True``) because
-    the recording stage already bandpass-filters the input; leaving MS5's
-    internal filter on would double-filter the recording. ``freq_min`` /
-    ``freq_max`` are therefore inert unless ``filter=True`` is set explicitly
-    (a user feeding MS5 an un-preprocessed recording). ``whiten`` stays
-    ``True``: a truthy ``whiten`` routes through the external float64 whitening
-    pin in ``run_si_sorter`` (which then disables MS5's internal whitening so
-    the recording is whitened exactly once), matching the MS4 path.
-
-    Long-recording knobs: ``scheme2_training_duration_sec`` /
-    ``scheme2_training_recording_sampling_mode`` bound the scheme-2 training
-    set, ``scheme3_block_duration_sec`` sets the scheme-3 block length, and
-    ``scheme2_max_num_snippets_per_training_batch`` bounds training memory.
+    - ``delete_temporary_recording`` is rejected; ``run_si_sorter`` manages
+      scratch cleanup.
+    - ``filter`` defaults to ``False`` because the recording stage already
+      bandpass-filters; ``freq_min`` / ``freq_max`` apply only when it is on.
+    - ``whiten=True`` routes through ``run_si_sorter``'s float64 whitening,
+      which disables MS5's own so the data is whitened once.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -150,7 +110,7 @@ class MountainSort5Schema(BaseModel):
 
     @model_validator(mode="after")
     def _check_filter_band(self):
-        """A filter band is only meaningful when ``filter=True``, and ordered."""
+        """Require ``freq_min < freq_max``."""
         if self.freq_min >= self.freq_max:
             raise ValueError(
                 f"MountainSort5Schema: freq_min ({self.freq_min}) must be "
@@ -162,18 +122,9 @@ class MountainSort5Schema(BaseModel):
 class Kilosort4Schema(BaseModel):
     """Validated schema for Kilosort 4.
 
-    KS4 has a large parameter surface; this schema types the most-used
-    knobs but uses ``extra="allow"`` so users who need an undocumented KS4
-    kwarg (``batch_size``, ``nearest_chans``, etc.) can pass it through to
-    SI without an upstream schema PR. KS4 is not a deterministic fallback
-    (CPU/GPU runtime differences can change spike times) and may require
-    GPU for non-trivial recordings.
-
-    Trade-off of ``extra="allow"``: typos in un-listed KS4 kwargs
-    surface at SI sort time, not at Lookup insert time -- this is the
-    accepted cost of not pinning KS4's large, fast-moving parameter
-    surface in the schema. The one exception is ``whiten`` (see
-    ``_reject_whiten``): KS4 has no such kwarg, so it is rejected at insert.
+    Types the common knobs; other KS4 kwargs pass through to SI
+    (``extra="allow"``), so their typos surface at sort time. KS4 is not
+    deterministic across CPU/GPU.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -186,15 +137,10 @@ class Kilosort4Schema(BaseModel):
 
     @model_validator(mode="after")
     def _reject_whiten(self):
-        """Reject a ``whiten`` key -- KS4 whitens internally, no such kwarg.
+        """Reject ``whiten``; KS4 has no such kwarg.
 
-        The SI-wrapper key check (:func:`sorter_wrapper_vocabulary`) can only
-        list KS4's parameters when the ``kilosort`` package is installed, so
-        without it a ``whiten`` key -- which ``extra="allow"`` would otherwise
-        accept -- reaches the SI wrapper and fails at sort time, after the
-        recording stage. Rejecting it here catches it in every environment.
-        Whitening is controlled via ``skip_kilosort_preprocessing`` /
-        ``whitening_range``.
+        The wrapper-vocabulary check misses it when ``kilosort`` is not
+        installed.
         """
         if "whiten" in (self.model_extra or {}):
             raise ValueError(
@@ -210,51 +156,22 @@ class Kilosort4Schema(BaseModel):
 class ClusterlessThresholderSchema(BaseModel):
     """Validated schema for the clusterless-thresholder special case.
 
-    Not a SpikeInterface registered sorter; ``clusterless_thresholder``
-    is a Spyglass-specific peak-detection path built on
-    ``spikeinterface.sortingcomponents.peak_detection.detect_peaks``.
-    ``extra="forbid"`` catches typos against the documented field set.
+    A Spyglass peak-detection path on SI ``detect_peaks``, not an SI sorter.
 
-    ``threshold_unit`` is the primary, self-documenting knob for how
-    ``detect_threshold`` is interpreted:
+    ``threshold_unit`` sets how ``detect_threshold`` is read:
 
-    * ``"uv"`` (default) -- ``detect_threshold`` is a TRUE microvolt
-      threshold. The runtime derives ``noise_levels=[1.0]`` (broadcast
-      across channels) AND scales the recording to microvolts
-      (``scale_to_uV``, using the stored NWB gain) before ``detect_peaks``,
-      so a value of ``100`` means 100 uV. For Frank-lab data (gain == 1
-      uV/count) this equals the raw-count value; for non-unity-gain rigs
-      (e.g. Intan ~0.195 uV/count) it is the corrected behavior. Requires
-      the recording to carry channel gains (it always does after the
-      ElectricalSeries write); otherwise the runtime raises. This is the
-      production Frank-lab default (100 uV).
-    * ``"mad"`` -- the threshold is in MAD multiples; SI estimates
-      per-channel MAD (``noise_levels`` left unset). Tracks the
-      recording's actual noise floor; right for synthetic / low-amplitude
-      fixtures (the MEArec smoke row sets this EXPLICITLY).
+    - ``"uv"`` (default): microvolts. The runtime scales the recording to
+      uV with the stored NWB gain and uses ``noise_levels=[1.0]``.
+    - ``"mad"``: multiples of per-channel MAD estimated by SI; suits
+      synthetic / low-amplitude data.
 
-    ``noise_levels`` stays available as an ADVANCED explicit override.
-    Precedence: if ``noise_levels`` is set, the runtime uses it
-    verbatim; if ``noise_levels is None``, the runtime derives it from
-    ``threshold_unit`` as above. Either way ``"uv"`` scales the recording to
-    microvolts, so an explicit ``noise_levels`` is in microvolts under
-    ``"uv"`` and in native units under ``"mad"``. The runtime strips
-    ``threshold_unit`` before the ``detect_peaks`` call (it is not a
-    ``detect_peaks`` kwarg).
-
-    ``extra="forbid"`` enforces the field set at insert time.
+    An explicit ``noise_levels`` is used verbatim, in uV under ``"uv"`` and
+    native units under ``"mad"``.
     """
 
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[4] = 4
-    # Default 100.0 is the production/real-data clusterless threshold: a
-    # microvolt / native-unit value under the default ``threshold_unit='uv'``
-    # below (which derives noise_levels=[1.0]). Paired with
-    # ``threshold_unit='mad'`` instead, 100 would be a 100x-MAD threshold that
-    # detects almost nothing, so the unit default must stay 'uv' while the
-    # threshold default is 100. The synthetic/smoke fixture sets
-    # ``threshold_unit='mad'`` EXPLICITLY (a ~5x-MAD multiplier suits the
-    # simulation), so it does not rely on this unit default.
+    # 100 uV; must pair with threshold_unit='uv' (100x MAD detects nothing).
     detect_threshold: float = Field(default=100.0, gt=0.0)
     threshold_unit: Literal["uv", "mad"] = Field(
         default="uv",
@@ -278,11 +195,7 @@ class ClusterlessThresholderSchema(BaseModel):
             "is rejected as a microvolt threshold left in the wrong unit."
         ),
     )
-    # Only ``locally_exclusive`` is wired: the runtime always builds
-    # ``radius_um`` into ``method_kwargs`` (spatial exclusion), which the
-    # other SI ``detect_peaks`` methods (e.g. ``by_channel``) reject. A
-    # ``"global"`` option is deliberately not offered -- it is not a valid
-    # SI method and would fail at ``detect_peaks`` time.
+    # The runtime always passes ``radius_um``, which other SI methods reject.
     method: Literal["locally_exclusive"] = "locally_exclusive"
     peak_sign: Literal["neg", "pos", "both"] = "neg"
     exclude_sweep_ms: float = Field(default=0.1, gt=0.0)
@@ -293,14 +206,8 @@ class ClusterlessThresholderSchema(BaseModel):
     def _guard_implausible_mad_threshold(self):
         """Reject a microvolt-scale threshold left in MAD units.
 
-        ``threshold_unit='mad'`` with no explicit ``noise_levels`` makes
-        SpikeInterface estimate per-channel MAD and treat
-        ``detect_threshold`` as a MAD MULTIPLIER. Real multipliers are
-        ~3-15; a value this large (e.g. 100, a microvolt threshold copied
-        into a MAD-mode row) makes the effective threshold absurd and
-        detects almost nothing -- a silent zero-unit sort. Only fires when
-        ``noise_levels`` is None, so the documented explicit-``noise_levels``
-        advanced override is untouched.
+        Such a threshold yields a silent zero-unit sort. Skipped when
+        ``noise_levels`` is explicit.
         """
         if (
             self.threshold_unit == "mad"
@@ -322,10 +229,7 @@ class ClusterlessThresholderSchema(BaseModel):
 class SpykingCircus2Schema(BaseModel):
     """Validated schema for SpykingCircus 2.
 
-    SC2 fields are not curated here; the schema exists so
-    ``_get_sorter_schema('spykingcircus2')`` dispatches to a dedicated
-    class rather than the generic fallback. Users supply SC2-specific
-    kwargs through ``extra="allow"``; SI validates at sort time.
+    A dedicated dispatch slot; fields are uncurated and SI validates them.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -335,8 +239,7 @@ class SpykingCircus2Schema(BaseModel):
 class Tridesclous2Schema(BaseModel):
     """Validated schema for Tridesclous 2.
 
-    Same rationale as ``SpykingCircus2Schema``: dedicated dispatch slot,
-    fields delegated to SI runtime validation.
+    A dedicated dispatch slot; fields are uncurated and SI validates them.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -346,10 +249,7 @@ class Tridesclous2Schema(BaseModel):
 class GenericSorterParamsSchema(BaseModel):
     """Fallback schema for installed SI sorters with no dedicated model.
 
-    Lets a user run any installed SpikeInterface sorter without
-    auto-inserting defaults for every sorter
-    ``spikeinterface.sorters.available_sorters()`` reports. Users supply
-    the full SI kwargs dict; SI validates at sort time.
+    Users supply the full SI kwargs dict; SI validates at sort time.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -359,38 +259,18 @@ class GenericSorterParamsSchema(BaseModel):
 class SorterExecutionParamsSchema(BaseModel):
     """Tracked sorter-execution backend (local vs Docker/Singularity).
 
-    SpikeInterface can run a sorter locally or inside a container via
-    ``run_sorter``'s execution kwargs (``docker_image`` / ``singularity_image``
-    / ``delete_container_files`` plus container-install controls). In v2 these
-    are recorded as **sorter execution provenance** on
-    ``SorterParameters.execution_params`` -- never smuggled through the
-    scientific ``params`` blob or ``job_kwargs`` -- so a containerized row is a
-    first-class, reproducible parameter row rather than an ad-hoc runtime
-    override.
+    Stored on ``SorterParameters.execution_params``, never in ``params`` or
+    ``job_kwargs``, so a containerized row is reproducible provenance.
 
-    Validation:
+    - ``backend="local"``: ``container_image`` is ``None`` and container-only
+      controls keep their defaults.
+    - ``backend`` docker / singularity: requires an explicit image name or
+      ``.sif`` path; SI's ``True`` ("default image") is not provenance.
 
-    * ``backend="local"`` requires ``container_image is None`` and leaves the
-      container-only controls at their defaults (``installation_mode`` ``"auto"``
-      / ``spikeinterface_version`` ``None`` / ``extra_requirements`` ``[]`` /
-      ``delete_container_files`` ``True``). A non-default container-only control
-      on a local row is rejected, not silently ignored.
-    * ``backend in {"docker", "singularity"}`` requires a non-empty
-      ``container_image`` string (a Docker image name/tag/digest, or a local
-      ``.sif`` path for Singularity). SpikeInterface accepts ``docker_image=True``
-      / ``singularity_image=True`` to mean "use my default image", but a bare
-      ``True`` is not tracked provenance, so v2 rows must pin an explicit image.
-
-    Reproducibility note: ``installation_mode="auto"`` with
-    ``spikeinterface_version=None`` lets the container-side SpikeInterface
-    install drift with the host environment, so it is **not** reproducible by
-    row content alone. Shipped / recommended container rows must instead pin the
-    runtime: either ``installation_mode="no-install"`` with an image that already
-    bakes in the intended SpikeInterface + sorter runtime, or
-    ``installation_mode in {"pypi", "github"}`` with an explicit
-    ``spikeinterface_version``. SI's ``folder`` / ``dev`` install modes (which
-    need a mounted ``spikeinterface_folder_source`` tree) are intentionally not
-    exposed here.
+    ``installation_mode="auto"`` without ``spikeinterface_version`` drifts with
+    the host. Reproducible rows use ``"no-install"`` with a baked image, or
+    ``"pypi"`` / ``"github"`` with a pinned version. SI's ``folder`` / ``dev``
+    modes are not exposed.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -413,9 +293,7 @@ class SorterExecutionParamsSchema(BaseModel):
                     "containerized row must set backend='docker' or "
                     "'singularity'."
                 )
-            # The container-only controls only affect the container-side SI
-            # install / cleanup; a non-default value on a local row would be
-            # silently inert, so reject it rather than let it mislead.
+            # Container-only controls would be silently inert on a local row.
             if (
                 self.installation_mode != "auto"
                 or self.spikeinterface_version is not None
@@ -444,11 +322,6 @@ class SorterExecutionParamsSchema(BaseModel):
                     "is not accepted as tracked provenance -- pin an explicit "
                     "image."
                 )
-            # ``installation_mode in {"pypi","github"}`` installs SpikeInterface
-            # into the container at run time, so it MUST pin which version --
-            # otherwise the container-side install floats with the host SI and
-            # the row is not reproducible by content. ``auto`` (SI picks) and
-            # ``no-install`` (baked image) legitimately leave the version unset.
             if (
                 self.installation_mode in ("pypi", "github")
                 and self.spikeinterface_version is None
@@ -474,16 +347,7 @@ _SORTER_SCHEMAS: dict[str, type[BaseModel]] = {
     "clusterless_thresholder": ClusterlessThresholderSchema,
 }
 
-# The params key that switches each sorter's own motion correction, as the
-# SpikeInterface 0.104 wrappers read it: SpykingCircus2
-# ``apply_motion_correction`` (default True, ``sorters/internal/
-# spyking_circus2.py:36``, read at :127 and :167); Tridesclous2
-# ``apply_motion_correction`` (default False, ``tridesclous2.py:33``), read
-# only inside ``if params["apply_preprocessing"]`` (:129-130, :171);
-# Kilosort4 ``do_correction`` (default True, ``sorters/external/
-# kilosort4.py:27``; False sets ``nblocks=0`` at :372-375); Kilosort2.5 /
-# Kilosort3 ``do_correction`` (default True, ``kilosort2_5.py:53`` /
-# ``kilosort3.py:48``, passed to the MATLAB ops at :225 / :219).
+# The params key that switches each sorter's own motion correction (SI 0.104).
 _INTERNAL_MOTION_CORRECTION_KEY: dict[str, str] = {
     "spykingcircus2": "apply_motion_correction",
     "tridesclous2": "apply_motion_correction",
@@ -504,13 +368,9 @@ _NO_INTERNAL_MOTION_CORRECTION: frozenset[str] = frozenset(
 def sorter_applies_internal_motion_correction(sorter: str, params) -> bool:
     """Return whether a sorter corrects motion itself with these params.
 
-    Keys missing from ``params`` take SpikeInterface's defaults
-    (``get_default_sorter_params``). A key missing from both counts as
-    on: Kilosort4's wrapper reports no defaults when the ``kilosort``
-    package is not installed (``kilosort4.py:84-110``) while its own
-    default is ``do_correction=True``. SpykingCircus2 also skips its
-    correction on a probe it deems unsuitable, which depends on the
-    recording, so a truthy key counts as on. ``params`` is not modified.
+    Missing keys take SI's defaults. A key missing from both counts as on,
+    since KS4 reports no defaults without ``kilosort`` installed. A truthy
+    key counts as on even where SC2 may skip correction for the probe.
 
     Parameters
     ----------
@@ -589,19 +449,7 @@ def reject_internal_motion_correction(
         )
 
 
-# Keys that configure sorter EXECUTION (container backend + container-side SI
-# install), not the science of the sort. They are tracked on
-# ``SorterParameters.execution_params`` (validated by
-# ``SorterExecutionParamsSchema``) and must never be smuggled through the
-# scientific ``params`` blob or ``job_kwargs`` -- a global reserved-key rule
-# that holds across strict (``extra="forbid"``) and permissive
-# (``extra="allow"``) sorter schemas alike. ``docker_image`` /
-# ``singularity_image`` are SI's ``run_sorter`` execution kwargs;
-# ``delete_container_files`` / ``installation_mode`` / ``spikeinterface_version``
-# / ``spikeinterface_folder_source`` / ``extra_requirements`` are SI's
-# container-install controls. ``spikeinterface_folder_source`` is reserved even
-# though the schema does not expose ``folder`` / ``dev`` install modes, so a
-# row cannot pre-stage it in ``params``.
+# SI execution / container-install kwargs; only valid in ``execution_params``.
 EXECUTION_RESERVED_KEYS: frozenset[str] = frozenset(
     {
         "docker_image",
@@ -618,14 +466,8 @@ EXECUTION_RESERVED_KEYS: frozenset[str] = frozenset(
 def reject_reserved_execution_keys(params, *, context: str) -> None:
     """Raise if a scientific ``params`` / ``job_kwargs`` blob holds exec keys.
 
-    Container backend + container-install provenance lives ONLY on
-    ``SorterParameters.execution_params`` (see
-    :class:`SorterExecutionParamsSchema`). The permissive ``extra="allow"``
-    sorter schemas (generic, Kilosort4, SpykingCircus2, Tridesclous2) would
-    otherwise pass an ``EXECUTION_RESERVED_KEYS`` member straight through into
-    the scientific blob, so this guard runs at ``SorterParameters`` insert to
-    reject it for every sorter -- the strict schemas already reject the same
-    keys via ``extra="forbid"``.
+    Needed because the ``extra="allow"`` sorter schemas would pass these keys
+    through. Execution provenance belongs in ``execution_params``.
 
     Parameters
     ----------
@@ -657,14 +499,8 @@ def reject_reserved_execution_keys(params, *, context: str) -> None:
 def sorter_wrapper_vocabulary(sorter: str) -> "frozenset[str] | None":
     """Return the scientific parameter names the installed SI wrapper accepts.
 
-    Reads the wrapper class's own default-parameter dict (``_dynamic_params``,
-    the algorithm knobs without SI's global job kwargs). Returns ``None`` when
-    the vocabulary is not knowable here: the name is not an SI-registered
-    sorter (the Spyglass ``clusterless_thresholder`` path validates against its
-    own typed schema), or the wrapper only learns its parameters from a
-    runtime that is not installed (Kilosort4 reads them from the ``kilosort``
-    package). ``None`` means "cannot check", never "anything goes" -- preflight
-    separately fails a selected sorter whose runtime is missing.
+    Reads the wrapper's ``_dynamic_params``. Returns ``None`` ("cannot check")
+    for a non-SI sorter or one whose runtime is not installed (Kilosort4).
 
     Parameters
     ----------
@@ -690,14 +526,9 @@ def sorter_wrapper_vocabulary(sorter: str) -> "frozenset[str] | None":
 def validate_sorter_params_against_wrapper(sorter: str, params) -> None:
     """Raise if ``params`` carries a key the installed SI wrapper rejects.
 
-    The typed ``extra="forbid"`` schemas already catch typos for MS4 / MS5 /
-    clusterless; this guard closes the same gap for the permissive
-    ``extra="allow"`` schemas (Kilosort4, SpykingCircus2, Tridesclous2, and the
-    generic fallback), whose unknown keys would otherwise surface only as an
-    SI ``Invalid parameters`` error after the recording stage -- minutes into
-    a long job. It runs at ``SorterParameters`` insert and again in preflight.
-    Close-name suggestions come from ``difflib``. A ``None`` vocabulary (see
-    :func:`sorter_wrapper_vocabulary`) skips the check.
+    Catches typos for the ``extra="allow"`` schemas at insert and preflight
+    rather than after the recording stage. A ``None`` vocabulary skips the
+    check.
 
     Parameters
     ----------
@@ -735,9 +566,7 @@ def validate_sorter_params_against_wrapper(sorter: str, params) -> None:
 def validate_execution_params(execution_params) -> dict:
     """Validate a ``SorterParameters.execution_params`` blob.
 
-    A ``None`` / missing blob resolves to the schema default (local execution),
-    so callers (the insert validator, ``Sorting.make_fetch``) get a fully
-    populated, normalized dict either way.
+    ``None`` resolves to the default (local execution).
 
     Parameters
     ----------
@@ -757,13 +586,8 @@ def validate_execution_params(execution_params) -> dict:
 def _get_sorter_schema(sorter_name: str) -> type[BaseModel]:
     """Return the Pydantic schema for a sorter name.
 
-    Falls back to ``GenericSorterParamsSchema`` for any sorter outside the
-    dedicated set, so any installed SI sorter can still be run.
-    ``SorterParameters.insert1`` is responsible for the
-    additional check that the sorter name resolves to a known SI sorter or
-    the Spyglass-specific ``clusterless_thresholder`` path; the schema
-    itself does not enforce that, because the dispatch happens before any
-    SpikeInterface import is required.
+    Falls back to ``GenericSorterParamsSchema``. ``SorterParameters.insert1``
+    checks that the sorter name exists.
 
     Parameters
     ----------

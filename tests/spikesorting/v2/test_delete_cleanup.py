@@ -1,12 +1,7 @@
-"""A cancelled Sorting.delete must NOT destroy the analyzer folder.
+"""Deletes clean up files only for rows actually deleted.
 
-Sorting.delete cleans up the 5-50 GB analyzer scratch folder after
-super().delete(). But DataJoint's delete returns normally when the user
-answers "no" to the safemode prompt (the cascade is cancelled, rows stay), so
-removing the folder unconditionally would destroy data for a row the user
-chose to keep. Sorting.delete only removes a folder whose DB row was actually
-deleted. The commit path (folder removed) is covered by
-test_sorting_delete_removes_analyzer_folder.
+DataJoint's delete returns normally when the safemode prompt is declined,
+so cleanup must not assume the rows are gone.
 """
 
 from __future__ import annotations
@@ -25,8 +20,7 @@ from tests.spikesorting.v2._sorter_stub import plant_sorter
 _FIXTURE_PATH = (
     Path(__file__).resolve().parent / "fixtures" / "mearec_polymer_smoke.nwb"
 )
-# The planted sort uses the 'default' preprocessing recipe -> the cortex
-# display analyzer recipe (the cache folder is keyed by that name).
+# 'default' preprocessing maps to the cortex display recipe.
 _DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
@@ -138,15 +132,11 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
     folder = analyzer_path(planted_sort["sorting_id"], _DISPLAY)
     assert folder.exists(), "fixture should have created the analyzer folder"
 
-    # Force a real safemode prompt and answer "no" (cancel the cascade).
-    # user_choice is imported into datajoint.table, so patch it there (the
-    # call site), not datajoint.utils. A clean "no" makes dj cancel the
-    # transaction properly (no EOF, no leaked transaction state).
+    # Answer "no". Patched at the call site, datajoint.table, not utils.
     monkeypatch.setattr("datajoint.table.user_choice", lambda *a, **k: "no")
 
     (Sorting & planted_sort).delete(safemode=True)
 
-    # The cascade was cancelled: the row -- and its analyzer folder -- survive.
     assert Sorting & planted_sort, "cancelled delete removed the DB row"
     assert folder.exists(), (
         "cancelled delete destroyed the analyzer folder for a row the user "
@@ -159,11 +149,10 @@ def test_cancelled_delete_preserves_analyzer_folder_and_row(
 def test_cancelled_artifact_delete_preserves_interval_list(
     planted_sort, monkeypatch
 ):
-    """A cancelled RecordingArtifactDetection.delete must NOT remove the
-    artifact IntervalList rows (the twin of the Sorting.delete cancel guard).
+    """A cancelled RecordingArtifactDetection.delete keeps the artifact
+    IntervalList rows.
 
-    Exercised on an UNREFERENCED detection so the delete reaches the safemode
-    prompt: a detection a sort references is REFUSED outright (a stronger guard).
+    Uses an unreferenced detection; a referenced one is refused outright.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -184,8 +173,7 @@ def test_cancelled_artifact_delete_preserves_interval_list(
     nwb = (RecordingSelection & {"recording_id": rec_id}).fetch1(
         "nwb_file_name"
     )
-    # A fresh detection NO sort references (distinct 'default' params vs the
-    # planted sort's 'none'), so the delete reaches the safemode prompt.
+    # 'default' params, unlike the planted sort's 'none', so unreferenced.
     ArtifactDetectionParameters.insert_default()
     art_pk = RecordingArtifactSelection.insert_selection(
         {"recording_id": rec_id, "artifact_detection_params_name": "default"}
@@ -214,8 +202,7 @@ def test_cancelled_artifact_delete_preserves_interval_list(
             "cancelled artifact delete removed the IntervalList row for a "
             "master the user chose to keep"
         )
-        # The merge registration must also survive the cancel (the delete
-        # docstring's "no orphaned merge row" is symmetric under cancel).
+        # The merge registration survives too.
         assert ArtifactDetectionOutput.get_merge_id(
             {"artifact_detection_id": art_id}
         ), "cancelled delete removed the ArtifactDetectionOutput registration"
@@ -234,10 +221,8 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
     """``RecordingArtifactDetection().delete(restr)`` cleans only
     actually-deleted rows.
 
-    Cleanup must not decide from ``len(self)`` after the cascade: when ``self``
-    is the unrestricted table instance, that length includes unrelated
-    artifact rows, so a ``len(self)`` check would return early and leave the
-    deleted row's artifact-removed IntervalList behind.
+    On the unrestricted instance ``len(self)`` counts unrelated rows, so it
+    cannot decide what was deleted.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -272,10 +257,8 @@ def test_unrestricted_artifact_delete_with_arg_cleans_interval_list(
         ),
     }
 
-    # Clean any leftovers from a prior interrupted run before planting the row.
-    # Use super_delete because the strict ownership invariant means a broken
-    # master without its part row should not be cleaned through the public
-    # delete override.
+    # Clean leftovers with super_delete: a master without its part row is
+    # not deletable through the public override.
     if RecordingArtifactDetection & target_pk:
         (RecordingArtifactDetection & target_pk).super_delete(warn=False)
     (IntervalList & interval_restr).delete_quick()
@@ -324,16 +307,9 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
     planted_sort,
 ):
     """``Sorting().delete(restr)`` treats a leading positional dict as a
-    RESTRICTION, not as cautious-delete's ``force_permission``.
+    restriction, not as ``cautious_delete``'s ``force_permission``.
 
-    ``cautious_delete(self, force_permission=False, ...)`` reads its first
-    positional argument as ``force_permission``. So without a guard,
-    ``Sorting().delete({...}, safemode=False)`` on the UNRESTRICTED instance
-    passes the dict through as a truthy ``force_permission``, bypasses the
-    permission check, and deletes EVERY ``Sorting`` row -- destroying each
-    row's 5-50 GB analyzer folder. Mirrors ``RecordingArtifactDetection.delete``'s
-    positional-restriction guard: a restriction that matches NOTHING must
-    delete nothing, so the planted row and its analyzer folder survive.
+    A restriction matching nothing deletes nothing.
     """
     import uuid
 
@@ -344,9 +320,6 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
     assert Sorting & planted_sort, "fixture should have a planted Sorting row"
     assert folder.exists(), "fixture should have created the analyzer folder"
 
-    # A sorting_id that matches no row. With the shim this restricts the
-    # delete to the empty set (a no-op); without it, the dict is read as
-    # force_permission and the unrestricted instance deletes every row.
     nonexistent = uuid.UUID("00000000-0000-0000-0000-000000000000")
     Sorting().delete({"sorting_id": nonexistent}, safemode=False)
 

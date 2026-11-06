@@ -1,11 +1,5 @@
-"""SortingAnalyzer cache-folder lifecycle.
-
-Covers the zero-unit ``get_analyzer`` guard firing before any path lookup,
-partial-folder cleanup on build failure, rebuild-on-missing (the concat-source
-rebuild is covered in ``test_session_group_concat.py``), analyzer-folder removal
-on ``Sorting.delete``, make_compute discarding its private analyzer on a write
-failure, and cache-miss-plus-rebuild after relocating the analyzer root.
-"""
+"""SortingAnalyzer cache-folder lifecycle: build, rebuild, delete, locks
+and orphan detection."""
 
 from __future__ import annotations
 
@@ -16,10 +10,8 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
     CORTEX_DISPLAY_WAVEFORMS,
 )
 
-# Every sort exercised here uses the 'default' preprocessing recipe, which is
-# not in the region map -> the wide cortex display recipe (see
-# waveform_params_for_preprocessing). The analyzer cache folder is keyed by
-# that recipe name, so the lifecycle assertions resolve it explicitly.
+# The 'default' preprocessing recipe maps to the cortex display recipe,
+# which keys the analyzer cache folder.
 _DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
 
@@ -27,16 +19,10 @@ def _fresh_unit_producing_selection(populated_sorting):
     """Build a fresh MS5 ``SortingSelection`` on the fixture's
     recording+artifact (NOT yet populated); return its ``{"sorting_id"}``.
 
-    The destructive delete / make_compute-failure tests need a sort that
-    actually yields units so ``build_analyzer`` writes an analyzer folder on
-    disk -- the clusterless ``default`` row finds zero peaks on the MEArec smoke
-    fixture (no folder, vacuous assertions). MS5 produces units.
-
-    The selection is ARTIFACT-FREE (no ``artifact_detection_id``) so it is a DISTINCT
-    row from the package fixture's artifact-backed MS5 sort -- otherwise
-    ``insert_selection`` (find-existing-or-insert) would return the shared
-    fixture's sort and a destructive test would delete shared state. The
-    caller owns populate + teardown.
+    MS5 yields units on the smoke fixture, so an analyzer folder is written.
+    Artifact-free, so it is distinct from the shared artifact-backed sort
+    that destructive tests must not delete. The caller owns populate and
+    teardown.
     """
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
@@ -118,8 +104,7 @@ def _current_analyzer_inventory(monkeypatch, recompute, artifact):
 
 
 def test_load_path_acquires_lock(monkeypatch, tmp_path):
-    """The analyzer read/rebuild core acquires the per-sort lock around a load,
-    so the atomic-publish move-aside window is never observed by a reader."""
+    """The analyzer read/rebuild core loads under the per-sort lock."""
     import numpy as np
     import spikeinterface as si
 
@@ -172,12 +157,10 @@ def test_load_path_acquires_lock(monkeypatch, tmp_path):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
-    """``recompute._delete_analyzer_folders`` removes a folder UNDER the lock,
-    so a reclamation never races a concurrent reader/rebuild of the same sort.
+    """``recompute._delete_analyzer_folders`` removes a folder under the lock.
 
-    The authorize/age helpers are patched so the body is logically DB-free, but
-    importing ``recompute`` activates the common schema, so a live connection
-    (``dj_conn``) is required.
+    Importing ``recompute`` activates the common schema, so ``dj_conn`` is
+    required.
     """
     import uuid
 
@@ -196,9 +179,7 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
         lambda *a, **k: ([(artifact, [{"env": "x"}])], None),
     )
     monkeypatch.setattr(rc, "_too_recent_or_unknown", lambda *a, **k: False)
-    # No-op rmtree that leaves the folder in place, so the post-delete DB
-    # update path (which needs the real recompute table) is skipped -- this
-    # test isolates the lock acquisition, not the bookkeeping.
+    # No-op rmtree skips the post-delete DB bookkeeping.
     rmtree_calls = []
 
     def guarded_rmtree(folder, **kwargs):
@@ -226,13 +207,11 @@ def test_recompute_delete_acquires_lock(monkeypatch, tmp_path):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_recompute_extension_deletion_policy(monkeypatch, tmp_path):
-    """Deleting an analyzer cache removes the FULL ``.analyzer`` -- including the
-    derived curation/visualization extensions the recompute does NOT hash --
-    and logs that policy, so the full-folder regeneratable-scratch decision is
-    explicit rather than a silent over-deletion.
+    """Deleting an analyzer cache removes the whole ``.analyzer``, including
+    unhashed derived extensions, and logs that policy.
 
-    The authorize/age helpers are patched (logically DB-free), but importing
-    ``recompute`` activates the common schema, so ``dj_conn`` is required.
+    Importing ``recompute`` activates the common schema, so ``dj_conn`` is
+    required.
     """
     import uuid
 
@@ -280,9 +259,7 @@ def test_add_extensions_and_delete_acquire_lock(populated_sorting, monkeypatch):
     """``Sorting.add_extensions`` (load + in-place extension compute) and
     ``Sorting.delete`` (analyzer-cache removal) both run under the per-sort lock.
 
-    One fresh MS5 sort is populated so its destructive delete leaves the shared
-    fixture untouched; the lock recorder is installed AFTER populate so it
-    observes only the two guarded operations.
+    The lock recorder is installed after populate.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -326,10 +303,7 @@ def test_get_analyzer_validates_recipe_before_filesystem(
     """``get_analyzer`` validates the recipe NAME (path-safety) and ROW before
     any filesystem load/delete.
 
-    ``waveform_params_name`` is embedded in the cache folder path and reaches
-    ``get_analyzer`` as an un-FK'd free string, so a path-like name (``../bad``,
-    ``bad/name``) -- or a path-safe-but-unknown recipe -- must be rejected
-    BEFORE ``_load_analyzer_folder_or_rebuild`` can rmtree or rebuild a folder.
+    ``waveform_params_name`` is a free string embedded in the folder path.
     """
     from spyglass.spikesorting.v2._sorting import analyzer as sa
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -355,10 +329,7 @@ def test_get_analyzer_validates_recipe_before_filesystem(
 def test_get_analyzer_zero_unit_raises_before_path_lookup():
     """A zero-unit sort raises before any analyzer-folder lookup.
 
-    The analyzer cache path is computed from ``sorting_id`` (not a stored
-    column). ``get_analyzer`` checks ``n_units`` FIRST and raises
-    ``ZeroUnitAnalyzerError`` before computing / ``.exists()``-ing the path --
-    so a missing folder never surfaces as a confusing ``FileNotFoundError``.
+    Raises ``ZeroUnitAnalyzerError``, not ``FileNotFoundError``.
     """
     import datetime as dt
     import uuid
@@ -383,9 +354,7 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
         allow_direct_insert=True,
     )
 
-    # A zero-unit Sorting row; its computed analyzer path does NOT exist on
-    # disk. The AnalysisNwbfile FK is bypassed -- the zero-unit guard never
-    # reads the file or the folder.
+    # The guard never reads the file, so the AnalysisNwbfile FK is bypassed.
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
@@ -423,8 +392,6 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
-    # The caller resolves the cache folder (it carries the recipe identity) and
-    # passes it in; build_analyzer does no path lookup of its own.
     analyzer_folder = tmp_path / "partial.analyzer"
 
     recording, sorting = si.generate_ground_truth_recording(
@@ -467,11 +434,8 @@ def test_build_analyzer_cleans_partial_folder_when_create_fails(
 def test_rebuild_publishes_into_temp_not_canonical(
     populated_sorting, monkeypatch
 ):
-    """A rebuild builds into a private HIDDEN SIBLING ``.analyzer`` of the canonical
-    slot and publishes it into the slot -- it NEVER writes the build straight
-    into the canonical path (no ``overwrite=True`` into the live folder a reader
-    might load), and the sibling location keeps the analyzer's recording path
-    valid through the move."""
+    """A rebuild builds into a hidden sibling of the canonical slot and then
+    publishes it; it never writes into the live folder."""
     import shutil
     from pathlib import Path
 
@@ -498,8 +462,6 @@ def test_rebuild_publishes_into_temp_not_canonical(
         Sorting().get_analyzer(populated_sorting)  # rebuild via the publisher
         assert folder.exists(), "rebuild must publish the canonical folder"
         assert built_folders, "rebuild must build an analyzer"
-        # Each build targets a hidden ``.analyzer`` sibling of the canonical slot,
-        # never the canonical path itself.
         for built in built_folders:
             built_path = Path(built)
             assert built_path.name.startswith("."), built
@@ -514,9 +476,7 @@ def test_rebuild_publishes_into_temp_not_canonical(
 
 
 def test_find_orphaned_skips_hidden_staging(dj_conn):
-    """A hidden ``.analyzer`` staging sibling (where the atomic publisher builds /
-    moves-aside) is skipped by the orphan scan -- an in-flight build must not be
-    reported as a stray analyzer folder."""
+    """The orphan scan skips hidden ``.analyzer`` staging siblings."""
     import shutil
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
@@ -540,10 +500,7 @@ def test_find_orphaned_skips_hidden_staging(dj_conn):
 def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
     """``get_analyzer`` rebuilds the analyzer folder when it is gone.
 
-    The analyzer folder is regeneratable scratch; ``get_analyzer`` rebuilds
-    it in place (without deleting the DataJoint row) and the rebuilt analyzer
-    must carry the same ``unit_ids`` as the original. Reuses the fixture
-    (non-destructive -- the folder is restored by the rebuild).
+    The row is kept and the rebuilt analyzer has the same ``unit_ids``.
     """
     import shutil
 
@@ -565,9 +522,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
             list(rebuilt.unit_ids) == original_unit_ids
         ), "rebuilt analyzer unit_ids diverge from the original sort"
     finally:
-        # The folder belongs to the shared package fixture; if anything above
-        # failed after the rmtree, restore it so later fixture consumers do
-        # not cascade-fail on a missing analyzer.
+        # Restore the shared fixture's folder if the test failed.
         if not folder.exists():
             try:
                 Sorting().get_analyzer(populated_sorting)
@@ -575,10 +530,7 @@ def test_rebuild_analyzer_folder_recreates_on_missing(populated_sorting):
                 pass
 
 
-# ``rebuild_analyzer_folder`` also supports a concat source (it loads the
-# materialized ConcatenatedRecording cache); the concat rebuild path is exercised
-# end-to-end by the chronic smoke's get_analyzer call in
-# ``tests/spikesorting/v2/test_session_group_concat.py``.
+# Concat-source rebuild is covered in ``test_session_group_concat.py``.
 
 
 @pytest.mark.slow
@@ -590,10 +542,7 @@ def test_sorting_delete_removes_analyzer_folder(
     """``Sorting.delete`` removes the on-disk analyzer folder for both
     ``safemode=None`` (default) and ``safemode=False`` (explicit pass-through).
 
-    The analyzer cache path is not DataJoint-tracked (computed from
-    ``sorting_id``), so the override must rmtree it after the cascade.
-    Populates a dedicated MS5 sort per parametrization so the shared fixture
-    is untouched.
+    The folder is not DataJoint-tracked.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
@@ -609,7 +558,6 @@ def test_sorting_delete_removes_analyzer_folder(
         ), f"analyzer folder not removed on delete(safemode={safemode_arg})"
         assert len(Sorting & sort_pk) == 0
     finally:
-        # Selection row is independent of the Sorting master; clean it up.
         (SortingSelection & sort_pk).delete(safemode=False)
         if folder.exists():
             import shutil
@@ -656,17 +604,9 @@ def test_make_compute_failure_discards_private_analyzer(
 def test_rebuild_reconstruction_validates_artifact_interval_ownership(
     populated_sorting, monkeypatch
 ):
-    """Analyzer-rebuild recording reconstruction routes the artifact mask through
-    the ownership-validated ``read_artifact_removed_intervals`` -- the same
-    helper ``Sorting.make_fetch`` uses -- not a direct IntervalList-by-name
-    fetch.
-
-    The direct fetch would accept a partially-deleted artifact (no
-    ``ArtifactRemovedInterval`` part rows owning the IntervalList) or a
-    hand-inserted same-name IntervalList that the populate path rejects, so a
-    rebuilt analyzer could be masked with a stale/unowned interval. Patch the
-    helper to a sentinel and assert the rebuild path calls it (proving it routes
-    through the validation, not around it).
+    """Analyzer rebuild reads the artifact mask through the
+    ownership-validated ``read_artifact_removed_intervals``, as
+    ``Sorting.make_fetch`` does, so an unowned IntervalList is rejected.
     """
     from spyglass.spikesorting.v2._artifacts import readers as _artifact_readers
     from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
@@ -694,10 +634,8 @@ def test_rebuild_reconstruction_validates_artifact_interval_ownership(
 def test_changed_analyzer_root_causes_miss_and_rebuild(
     populated_sorting, restore_custom_config, tmp_path
 ):
-    """Relocating the analyzer root (``spikesorting_v2_analyzer_dir``) makes
-    the previously-built folder a cache MISS, and ``get_analyzer`` rebuilds
-    into the NEW root -- never a stale-row inconsistency. Covers the config
-    override and the rebuild-on-miss together, in one flow.
+    """Relocating ``spikesorting_v2_analyzer_dir`` is a cache miss, and
+    ``get_analyzer`` rebuilds into the new root.
     """
     import shutil
 
@@ -720,8 +658,6 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
         analyzer = Sorting().get_analyzer(populated_sorting)
         assert isinstance(analyzer, si.SortingAnalyzer)
         assert relocated.exists(), "get_analyzer must rebuild into the NEW root"
-        # The original folder is untouched: a relocation is a cache miss, not
-        # a row inconsistency.
         assert original.exists()
     finally:
         shutil.rmtree(new_root, ignore_errors=True)
@@ -730,24 +666,15 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
 
 
 # --------------------------------------------------------------------------- #
-# Orphaned-analyzer-folder detection (disk-leak audit).
-#
-# ``Sorting.find_orphaned_analyzer_folders`` reports DB-side orphans (a
-# units-bearing Sorting row whose computed analyzer folder is missing on disk)
-# and disk-side orphans (a stray analyzer folder referenced by no row), and
-# never auto-deletes under ``dry_run``. A zero-unit row whose folder is
-# legitimately absent is carved out.
+# Orphaned-analyzer-folder detection.
 # --------------------------------------------------------------------------- #
 
 
 def _insert_bypassed_sorting_row(sid, *, n_units):
     """Insert a minimal Sorting row via FK-checks-off bypass.
 
-    Building a real Sorting row needs the full sort pipeline; for the
-    disk-leak check we only need rows carrying a ``sorting_id`` +
-    ``n_units`` (the analyzer cache path is computed from ``sorting_id``, not
-    stored), so bypass the AnalysisNwbfile FK. Caller cleans up via the
-    SortingSelection cascade.
+    Only ``sorting_id`` and ``n_units`` matter, so the AnalysisNwbfile FK is
+    bypassed. Caller cleans up via the SortingSelection cascade.
     """
     import datetime as dt
 
@@ -761,9 +688,6 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
     )
 
     SorterParameters.insert_default()
-    # The display-recipe FK target must exist (the row is tracked provenance),
-    # and the bypassed Sorting row records the recipe explicitly rather than
-    # relying on a schema default.
     AnalyzerWaveformParameters.insert_default()
     SortingSelection.insert1(
         {
@@ -797,10 +721,8 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
 def _insert_bypassed_root_curation(sid, *, parent_curation_id=-1):
     """Plant a committed root CurationV2 over the bypassed sort (FK checks off).
 
-    One raw unit (``Sorting.Unit`` 0) mirrored by ``CurationV2.Unit`` 0 so the
-    curation is a committed raw-namespace curation. The caller holds
-    ``SET FOREIGN_KEY_CHECKS=0``; the Electrode / AnalysisNwbfile FK values are
-    stubs.
+    One raw unit mirrored by ``CurationV2.Unit`` 0. The caller holds
+    ``SET FOREIGN_KEY_CHECKS=0``; FK values are stubs.
     """
     import uuid
 
@@ -897,8 +819,8 @@ def test_curation_health_report_is_scoped_to_sorting(dj_conn):
 
 
 def test_find_orphaned_analyzer_folders_db_side(dj_conn):
-    """A Sorting row (n_units > 0) whose analyzer folder is gone on disk
-    is reported as a DB-side orphan -- and nothing is auto-deleted."""
+    """A Sorting row (n_units > 0) with no folder on disk is a DB-side orphan;
+    nothing is deleted."""
     import uuid
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -916,7 +838,6 @@ def test_find_orphaned_analyzer_folders_db_side(dj_conn):
             "a units-bearing row with a missing analyzer folder must be "
             "reported as a DB-side orphan"
         )
-        # dry_run must not delete the row.
         assert Sorting & {"sorting_id": sid}, (
             "find_orphaned_analyzer_folders(dry_run=True) deleted a DB row; "
             "it must only report"
@@ -929,10 +850,7 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
     """A canonical ``{sorting_id}__{recipe}.analyzer`` folder referenced by no
     Sorting row is reported as a disk-side orphan.
 
-    The sweep only considers canonical analyzer-cache folders (it refuses to
-    flag arbitrary directories under a possibly-misconfigured cache root), so
-    the stray is created with the canonical name for a sorting_id that has no
-    Sorting row -- not an arbitrary directory.
+    The sweep only considers canonical names, so the stray uses one.
     """
     import shutil
     import uuid
@@ -955,10 +873,6 @@ def test_find_orphaned_analyzer_folders_disk_side(dj_conn):
 def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
     """A ``{sid}__{other_recipe}.analyzer`` folder for an otherwise-valid sort is
     a disk-side orphan; the sort's own stored display-recipe folder is not.
-
-    This is the orphan case the recipe-keyed cache introduces: deleting/changing
-    a sort can leave a stale recipe folder on disk that no row references, while
-    the sort's stored display recipe folder is still valid.
     """
     import shutil
     import uuid
@@ -967,8 +881,6 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sid = uuid.uuid4()
-    # The bypassed row records the cortex display recipe (_DISPLAY), so its
-    # referenced folder is {sid}__franklab_cortex_actual_waveforms.analyzer.
     _insert_bypassed_sorting_row(sid, n_units=3)
     display_folder = analyzer_path(sid, _DISPLAY)
     stale_folder = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
@@ -996,12 +908,6 @@ def test_find_orphaned_analyzer_folders_stale_recipe(dj_conn):
 def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     """A metric (whitened) folder referenced by a CurationEvaluationSelection is
     retained; an unreferenced metric folder is a disk-side orphan.
-
-    The whitened metric analyzer is built on demand for PC/NN metrics, so its
-    ``{sid}__{metric_recipe}.analyzer`` folder is not a sort's display recipe -- but
-    a referencing curation-evaluation selection means it is in active use and
-    must NOT be swept as an orphan. An identically-shaped folder for a metric
-    recipe no selection references still is an orphan.
     """
     import shutil
     import uuid
@@ -1015,8 +921,7 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    # franklab_default requests PC metrics (skip_pc_metrics=False), so its
-    # selection actually builds a metric analyzer -> its folder is retained.
+    # franklab_default requests PC metrics, so it builds a metric analyzer.
     QualityMetricParameters.insert_default()
     sid = uuid.uuid4()
     _insert_bypassed_sorting_row(sid, n_units=3)  # display recipe = _DISPLAY
@@ -1026,11 +931,8 @@ def test_find_orphaned_analyzer_folders_retains_referenced_metric(dj_conn):
     for folder in (display_folder, referenced, unreferenced):
         folder.mkdir(parents=True, exist_ok=True)
 
-    # Plant a PC-requesting curation-evaluation selection referencing the cortex
-    # metric recipe, over a committed ROOT curation of the bypassed sort (the
-    # reference collector joins the selection to its CurationV2 generation, so
-    # the curation must exist; a root that carries exactly the raw unit ids
-    # is the raw namespace, whose metric folder is the recipe-named one).
+    # The reference collector joins the selection to its CurationV2, so a
+    # raw-namespace root curation must exist.
     conn = dj.conn()
     ceid = uuid.uuid4()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
@@ -1086,14 +988,9 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
     """SortingAnalyzerVersions.key_source = display recipe per sort + metric
     recipes only for PC-requesting curation selections, matched PER SORT.
 
-    Covers three things the per-recipe recompute must get right:
-    - a PC-requesting selection (``skip_pc_metrics=False``) adds its metric
-      recipe as an independent key for ITS sort (display + metric, distinct
-      ``{sid}__{name}.analyzer`` folders);
-    - that metric recipe does NOT leak onto a different sort (``sorting_id`` is
-      part of the match, not just the recipe name);
-    - a skip-PC selection (``skip_pc_metrics=True``) never built a metric
-      analyzer, so its referenced recipe is NOT enumerated.
+    - a PC-requesting selection adds its metric recipe for its own sort;
+    - that recipe does not leak onto a different sort;
+    - a skip-PC selection's metric recipe is not enumerated.
     """
     import uuid
 
@@ -1106,8 +1003,7 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # franklab_default requests PC metrics (skip_pc_metrics=False); minimal does
-    # not (skip_pc_metrics=True).
+    # franklab_default requests PC metrics; minimal does not.
     QualityMetricParameters.insert_default()
     sid_pc = uuid.uuid4()  # a sort with a PC-requesting curation
     sid_skip = uuid.uuid4()  # a sort with only a skip-PC curation
@@ -1162,13 +1058,10 @@ def test_analyzer_recompute_separates_recipes(dj_conn):
                 "KEY", as_dict=True
             )
         }
-        # PC-requesting sort: display + its metric recipe, as distinct keys.
         assert pc_recipes == {
             _DISPLAY,
             "franklab_cortex_metric_waveforms",
         }, pc_recipes
-        # Skip-PC sort: display ONLY. Its metric recipe was never built (skip
-        # PC), and the other sort's metric recipe does not leak onto it.
         assert skip_recipes == {_DISPLAY}, skip_recipes
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
@@ -1192,11 +1085,7 @@ def test_find_orphaned_analyzer_folders_zero_unit_carveout(dj_conn):
     """A zero-unit Sorting row is NOT a DB-side orphan even though its
     computed analyzer cache path does not exist on disk.
 
-    ``build_analyzer`` short-circuits before writing a folder and
-    ``get_analyzer`` raises ``ZeroUnitAnalyzerError`` before reading the path,
-    so a missing folder for a zero-unit row is expected, not a leak. The
-    carve-out is keyed on ``n_units == 0`` (the cache path is computed from
-    ``sorting_id``, not stored, so there is no column value to match on).
+    Zero-unit sorts never write a folder.
     """
     import uuid
 
@@ -1242,9 +1131,8 @@ def test_is_canonical_analyzer_folder_name():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
-    """The disk-side orphan sweep only treats canonical analyzer folders as
-    deletion candidates, so a misconfigured (e.g. shared, non-dedicated)
-    analyzer root cannot lead it to delete unrelated subdirectories."""
+    """The disk-side orphan sweep only flags canonical analyzer folders, so a
+    shared analyzer root cannot lose unrelated directories."""
     import uuid as uuidlib
 
     from spyglass.spikesorting.v2._storage import analyzer_cache as ac
@@ -1252,7 +1140,6 @@ def test_orphan_sweep_ignores_nonmatching_dirs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ac, "analyzer_cache_root", lambda: tmp_path)
 
-    # A canonical-named folder with no DB row -> a real disk-side orphan.
     sid = str(uuidlib.uuid4())
     canonical = tmp_path / f"{sid}__default.analyzer"
     canonical.mkdir()

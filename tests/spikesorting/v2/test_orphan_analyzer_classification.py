@@ -1,10 +1,10 @@
 """Tests for ``_analyzer_cache.classify_orphaned_analyzer_folders``.
 
-Pure classification of analyzer-folder orphans into DB-side (a units-bearing
-row whose computed folder is gone on disk), reclaimed (a missing row-side path
-with a recompute deleted=1 audit trail), and disk-side (an on-disk folder under
-the analyzer root that no row references). No DB, no disk IO -- the folder-
-existence and reference facts are passed in directly.
+- DB-side: a row's folder is missing on disk.
+- Reclaimed: a missing folder with a recompute deleted=1 record.
+- Disk-side: an on-disk folder no row references.
+
+No DB or disk IO.
 """
 
 from __future__ import annotations

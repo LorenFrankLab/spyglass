@@ -1,22 +1,7 @@
 """Pure source-routing classifier behind ``CurationV2.resolve_restriction``.
 
-``CurationV2.resolve_restriction`` interprets a cross-table restriction over
-the v2 part-table convention keys and resolves it to the ``CurationV2`` rows it
-selects. Its work splits cleanly into two halves: a PURE classification +
-normalization half (here) and a DataJoint join-assembly half
-(:func:`._curation.restriction.resolve_restriction`).
-:func:`classify_and_normalize_restriction` validates the restriction keys, maps
-the ``artifact_detection_{uuid}`` ``interval_list_name`` convention back to
-``artifact_detection_id``, normalizes that id to a ``uuid.UUID``, and splits
-the remaining keys into the per-source restriction dicts the join assembly
-consumes -- without touching the database. The join-assembly half emits the
-captured unresolved-name warning, then assembles the joins from the returned
-dicts.
-
-DEPENDENCY-LIGHT BY CONTRACT. This module opens no database connection and
-activates no ``dj.schema`` at import: it imports only the standard library and
-the DB-free ``_artifacts.naming`` parser, so a DB-isolated worker can import it
-and run the classification without a database.
+Splits a restriction into per-source dicts without a database; the join
+assembly is :func:`._curation.restriction.resolve_restriction`.
 """
 
 from __future__ import annotations
@@ -29,11 +14,7 @@ from spyglass.spikesorting.v2._artifacts.naming import (
 )
 from spyglass.utils import logger
 
-# Single-recording-ONLY source restriction keys: route through
-# ``SortingSelection.RecordingSource`` -> ``RecordingSelection``. These columns
-# exist only on the single-recording selection, NOT on
-# ``ConcatenatedRecordingSelection`` (see ``_SHARED_SOURCE_KEYS`` for the
-# preprocessing recipe, which lives on both).
+# Only on ``RecordingSelection`` (via ``SortingSelection.RecordingSource``).
 _REC_KEYS = (
     "nwb_file_name",
     "team_name",
@@ -41,26 +22,16 @@ _REC_KEYS = (
     "interval_list_name",
     "recording_id",
 )
-# Concat-source restriction keys: route through
-# ``SortingSelection.ConcatenatedRecordingSource`` ->
-# ``ConcatenatedRecordingSelection`` -> ``SessionGroup``.
+# Via ``ConcatenatedRecordingSelection`` -> ``SessionGroup``.
 _CONCAT_KEYS = (
     "concat_recording_id",
     "session_group_owner",
     "session_group_name",
 )
-# Cross-source restriction keys: columns present on BOTH ``RecordingSelection``
-# and ``ConcatenatedRecordingSelection`` (the preprocessing recipe is shared by
-# single-recording and concat sources). A shared key filters whichever source
-# family the restriction routes to, and -- with no source-specific key -- must
-# match BOTH families (a broad ``{preprocessing_params_name}`` query must not
-# silently drop concat-backed curations). It NEVER triggers the
-# concat-vs-recording contradiction, since it is not exclusive to either.
+# On both source selections; alone, matches both families.
 _SHARED_SOURCE_KEYS = ("preprocessing_params_name",)
-# Sort-level keys. Artifact dependencies live on the standalone sort's optional
-# part or its concat source's frozen members, and a motion correction on the
-# sort's optional ``MotionCorrectionSource`` part, so the join assembly resolves
-# both separately from the other sort keys.
+# Artifact and motion ids live on optional parts, so the join assembly
+# resolves them separately (``_PART_RESOLVED_SORT_KEYS``).
 _SORT_KEYS = (
     "sorter",
     "sorter_params_name",
@@ -77,37 +48,24 @@ _ALLOWED_KEYS = frozenset(
     _REC_KEYS + _CONCAT_KEYS + _SHARED_SOURCE_KEYS + _SORT_KEYS + _CURATION_KEYS
 )
 
-# Sentinel for an absent ``artifact_detection_id`` (a wildcard), distinct from
-# an explicit ``None`` (no standalone or concat-member detection).
+# Absent-key wildcards, distinct from an explicit ``None``.
 NO_ARTIFACT_RESTRICTION = object()
-
-# The same distinction for ``motion_corrected_recording_id``: absent is a
-# wildcard (corrected and uncorrected sorts both match); ``None`` matches only
-# sorts of their source's own traces; an id matches only sorts of that
-# corrected recording.
 NO_MOTION_CORRECTION_RESTRICTION = object()
 
 
 class RestrictionPlan(NamedTuple):
     """The normalized pieces ``resolve_restriction``'s join assembly consumes.
 
-    Each ``*_restriction`` dict is the subset of the (normalized) restriction
-    routing to that source / sort / curation table; any may be ``{}``.
-    ``shared_restriction`` carries cross-source keys (the preprocessing recipe)
-    present on both source selections: the join assembly applies it to
-    whichever family routes, or matches both families when no source-specific
-    key is given. ``artifact_detection_id`` restricts standalone or frozen
-    concat-member detections: a ``uuid.UUID`` matches either dependency,
-    ``None`` excludes both, and the :data:`NO_ARTIFACT_RESTRICTION` sentinel
-    means the restriction named no artifact id at all (a wildcard -- no
-    artifact restriction). ``motion_corrected_recording_id`` restricts the
-    sort's motion correction the same way: a ``uuid.UUID`` matches sorts of
-    that corrected recording, ``None`` matches sorts that read their source's
-    own traces, and :data:`NO_MOTION_CORRECTION_RESTRICTION` matches both.
-    ``unresolved_name_warning`` is the message
-    ``_curation.restriction.resolve_restriction`` emits via ``logger.warning``
-    when ``restrict_by_artifact`` was requested but the interval name carried
-    no artifact id (``None`` when there is nothing to warn about).
+    - ``*_restriction``: keys routing to that table; may be ``{}``.
+      ``shared_restriction`` applies to whichever source family routes.
+    - ``artifact_detection_id``: a ``uuid.UUID`` matches standalone or
+      concat-member detections, ``None`` excludes both, and
+      :data:`NO_ARTIFACT_RESTRICTION` is a wildcard.
+    - ``motion_corrected_recording_id``: a ``uuid.UUID`` matches that
+      corrected recording, ``None`` uncorrected sorts, and
+      :data:`NO_MOTION_CORRECTION_RESTRICTION` both.
+    - ``unresolved_name_warning``: emitted by the join assembly when
+      ``restrict_by_artifact`` found no artifact id, else ``None``.
     """
 
     rec_restriction: dict
@@ -128,24 +86,14 @@ def classify_and_normalize_restriction(
 ) -> "RestrictionPlan | None":
     """Classify+normalize a user restriction into the per-source dicts.
 
-    Returns the exact per-source restriction dicts the
-    ``CurationV2.resolve_restriction`` join assembly consumes, plus the
-    ``artifact_detection_id`` (``None`` => the existing anti-join,
-    :data:`NO_ARTIFACT_RESTRICTION` => no artifact restriction) and any
-    unresolved-name warning. Returns ``None`` on the lenient (``strict=False``)
-    unrecognized-key bail-out; raises ``ValueError`` on an unrecognized key
-    when ``strict=True`` and on a contradictory concat+recording restriction.
-    A cross-source key (the preprocessing recipe) goes into
-    ``shared_restriction`` and never triggers that contradiction. Pure: no
-    DataJoint, no DB.
+    Returns ``None`` for an unknown key when ``strict=False``. Raises
+    ``ValueError`` for an unknown key when ``strict=True`` or for mixed
+    concat and single-recording keys.
     """
     unknown = set(key) - _ALLOWED_KEYS
     if unknown:
         if not strict:
-            # Lenient multi-source-dispatch path: an unknown key names a column
-            # from another pipeline, so this is not a v2 query. Return ``None``
-            # so the caller contributes no v2 rows. The strict raise is
-            # reserved for a deliberate v2 query, where an unknown key is a typo.
+            # Another pipeline's key: contribute no v2 rows.
             return None
         raise ValueError(
             "CurationV2.resolve_restriction: "
@@ -155,10 +103,7 @@ def classify_and_normalize_restriction(
 
     key = dict(key)
     unresolved_name_warning = None
-    # ``restrict_by_artifact`` maps the artifact-detection IntervalList
-    # convention (``f"artifact_detection_{artifact_detection_id}"``) back to the
-    # ``artifact_detection_id`` master-side column so the v2 join chain
-    # downstream resolves correctly.
+    # Map ``artifact_detection_{uuid}`` interval names to the id column.
     if restrict_by_artifact and "interval_list_name" in key:
         artifact_detection_id = parse_artifact_detection_interval_list_name(
             key["interval_list_name"]
@@ -167,11 +112,7 @@ def classify_and_normalize_restriction(
             key["artifact_detection_id"] = artifact_detection_id
             key.pop("interval_list_name", None)
         elif "artifact_detection_id" not in key:
-            # The caller asked to restrict by artifact, but the interval name is
-            # not the ``artifact_detection_{uuid}`` form and no
-            # artifact_detection_id was supplied, so there is nothing to map.
-            # Capture a warning (emitted at the table boundary) instead of
-            # silently returning unrestricted ids.
+            # Warn rather than silently return unrestricted ids.
             unresolved_name_warning = (
                 "CurationV2.resolve_restriction: "
                 "restrict_by_artifact=True but interval_list_name "
@@ -182,8 +123,7 @@ def classify_and_normalize_restriction(
                 "use the artifact-detection interval to restrict."
             )
 
-    # The parser returns a str and callers may pass a str or UUID; normalize to
-    # ``uuid.UUID`` so a malformed id fails here rather than matching nothing.
+    # A malformed id fails here rather than matching nothing.
     if key.get("artifact_detection_id") is not None:
         key["artifact_detection_id"] = uuid.UUID(
             str(key["artifact_detection_id"])
@@ -193,19 +133,11 @@ def classify_and_normalize_restriction(
             str(key["motion_corrected_recording_id"])
         )
 
-    # Route through the input source the restriction names. A concat
-    # restriction (concat_recording_id / session group) and a
-    # single-recording restriction are mutually exclusive (a sort has exactly
-    # one input source), so mixing them is a contradictory restriction and is
-    # rejected.
     concat_restriction = {k: key[k] for k in _CONCAT_KEYS if k in key}
     rec_restriction = {k: key[k] for k in _REC_KEYS if k in key}
-    # Cross-source keys (the preprocessing recipe) are NOT counted toward the
-    # concat-vs-recording contradiction -- they live on both source selections.
     shared_restriction = {k: key[k] for k in _SHARED_SOURCE_KEYS if k in key}
     if concat_restriction and rec_restriction:
-        # The table boundary that normally emits this warning is never reached
-        # on this raising path, so warn before raising.
+        # The caller never sees the warning on this raising path.
         if unresolved_name_warning is not None:
             logger.warning(unresolved_name_warning)
         raise ValueError(
@@ -215,9 +147,6 @@ def classify_and_normalize_restriction(
             "source. Restrict by one source family."
         )
 
-    # Artifact restrictions resolve through standalone or concat-member
-    # dependencies and motion restrictions through the correction part; only
-    # the other sort keys apply directly to the master.
     sort_restriction = {
         k: key[k]
         for k in _SORT_KEYS
@@ -225,8 +154,6 @@ def classify_and_normalize_restriction(
     }
     curation_restriction = {k: key[k] for k in _CURATION_KEYS if k in key}
 
-    # None excludes both standalone detections and concat member detections;
-    # an absent key is a wildcard. The table boundary assembles those joins.
     if "artifact_detection_id" in key:
         artifact_detection_id = key["artifact_detection_id"]
     else:

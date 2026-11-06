@@ -1,7 +1,6 @@
 """Database-independent value types exchanged by recording stages.
 
-The table module and services share these carrier definitions. Services import
-this module directly so their result contracts do not activate a schema.
+Importing this module does not activate a schema.
 """
 
 from __future__ import annotations
@@ -19,8 +18,7 @@ from spyglass.spikesorting.v2._storage.staged_outputs import StagedOutputs
 class RecordingFetched(NamedTuple):
     """DB-side inputs gathered by :meth:`Recording.make_fetch`.
 
-    Tri-part dispatch unpacks this positionally into ``make_compute``;
-    fields are listed in the order they appear in the compute
+    Unpacked positionally into ``make_compute``; field order matches its
     signature.
 
     Attributes
@@ -31,9 +29,7 @@ class RecordingFetched(NamedTuple):
     raw_valid_times : numpy.ndarray
         Raw data ``valid_times``, shape ``(n_intervals, 2)`` in seconds.
     raw_object_id : str
-        NWB object id of the session's raw acquisition ElectricalSeries
-        (``Raw.raw_object_id``); pins the compute step to the exact raw
-        source the selection lineage points at.
+        ``Raw.raw_object_id`` of the session's raw ElectricalSeries.
     raw_path : str
         Absolute path of the session's raw NWB (``Nwbfile.get_abs_path``).
     """
@@ -79,13 +75,8 @@ class RecordingComputed(NamedTuple):
 class RecordingArtifactResult(NamedTuple):
     """Outputs of :meth:`Recording._compute_recording_artifact`.
 
-    Internal helper result -- NOT a tri-part contract object, so it is never
-    splatted into ``make_*``. ``make_compute`` reads these fields by name to
-    build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
-    ``content_hash`` and ``object_id``. Typed/named so the eight values are not threaded through
-    brittle positional unpacking. Field order intentionally matches
-    ``RecordingComputed``'s first eight fields; consumers read these values
-    by name.
+    Read by name, never splatted into ``make_*``. Field order matches
+    ``RecordingComputed``'s first eight fields.
     """
 
     analysis_file_name: str

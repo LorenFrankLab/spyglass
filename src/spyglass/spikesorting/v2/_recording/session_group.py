@@ -1,21 +1,7 @@
 """Member validation behind ``SessionGroup.create_group`` and
 ``ConcatenatedRecordingSelection.insert_selection``.
 
-:func:`group_member_rows` checks a requested member list -- required keys,
-ingested sessions, no duplicate logical members, and a single recording date
-unless multi-day groups are allowed -- and shapes the ``SessionGroup.Member``
-rows. ``create_group`` then inserts the master and those rows in one
-transaction.
-
-:func:`plan_concat_selection` checks a concat selection request against the
-group's members, freezes each member's populated ``Recording`` and selected
-artifact detection into an ordered snapshot, and mints the deterministic
-``concat_recording_id``. ``insert_selection`` then returns an existing
-selection with that identity, or inserts the master and its snapshot in one
-transaction while holding the artifact detections' advisory locks.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -113,11 +99,7 @@ def group_member_rows(
             }
         )
 
-    # Reject duplicate logical members. The Member PK is member_index only
-    # (order is load-bearing), so two rows with the same
-    # (nwb_file_name, sort_group_id, interval_list_name, team_name) would
-    # insert without a schema error and silently concatenate the same
-    # recording twice -- scientifically suspect. Catch it at create time.
+    # The Member PK is member_index only, so the schema allows duplicates.
     identities = [
         (
             row["nwb_file_name"],
@@ -176,11 +158,7 @@ def plan_concat_selection(
     """Validate a concat selection request and freeze its member snapshot.
 
     The validation half of ``ConcatenatedRecordingSelection.insert_selection``
-    (see its docstring for the request fields and errors): checks the request
-    fields, requires a non-empty group whose members share one electrode
-    space, resolves each member's populated ``Recording`` and selected artifact
-    detection into an ordered snapshot, and mints the deterministic
-    ``concat_recording_id`` from the identity and the member-set hash.
+    (see its docstring for the request fields and errors).
 
     Parameters
     ----------
@@ -244,13 +222,7 @@ def plan_concat_selection(
     }
     preprocessing_params_name = identity["preprocessing_params_name"]
 
-    # Precondition: the group must be non-empty, and every member needs a
-    # populated Recording for the shared preprocessing recipe. A Recording
-    # exists iff its RecordingSelection row exists AND the Computed Recording
-    # populated. The empty-group check is explicit: without it the loop
-    # passes vacuously and make_fetch later fails indexing members[0].
-    # Members are read in member_index order so the frozen snapshot (and its
-    # folded hash) records the concatenation order.
+    # member_index order is the concatenation order the snapshot hashes.
     members = (SessionGroup.Member & group_key).fetch(
         as_dict=True, order_by="member_index"
     )
@@ -274,25 +246,15 @@ def plan_concat_selection(
             "artifact_detection_ids must name every member exactly once: "
             f"expected {sorted(expected_members)}, got {sorted(artifacts)}."
         )
-    # Reject members in different physical electrode spaces (different sort
-    # group electrodes / brain regions). The concat result is read in the
-    # anchor member's electrode frame, so this must hold regardless of
-    # whether the per-member Recording caches are populated yet.
+    # The concat is read in the anchor member's electrode frame.
     assert_members_share_electrode_space(members)
-    # Freeze each member's logical identity + its resolved Recording
-    # (recording_id + content_hash) into an ordered snapshot. The snapshot is
-    # the authority every downstream concat path reads (never the live
-    # SessionGroup.Member set), and its LOGICAL set hash is folded into the
-    # concat id so a different ordered member set is a different concat.
     snapshot_rows: list[dict] = []
     missing: list[dict] = []
     for member in members:
         rec_sel_key = member_recording_selection_key(
             member, preprocessing_params_name
         )
-        # A changed sort group (reference, interpolated bad channels) adds a
-        # selection with a new input hash beside the old one; use the one
-        # built from the current inputs.
+        # A changed sort group leaves the old selection beside the new one.
         input_hash = resolve_recording_input_hash(
             rec_sel_key["nwb_file_name"],
             rec_sel_key["sort_group_id"],
@@ -343,13 +305,7 @@ def plan_concat_selection(
             "member whose sort group changed needs a new Recording."
         )
 
-    # Content-address the concat_recording_id from the logical identity AND
-    # the ordered member-set hash (mirrors RecordingSelection /
-    # SortingSelection): two callers that request the same (group,
-    # preprocessing) over the same ordered member set compute the
-    # same id, so the PK-uniqueness constraint -- not a check-then-insert
-    # dedup race -- is the concurrency guard. A different member set folds to
-    # a different id rather than silently reusing this concat.
+    # Deterministic id: PK uniqueness is the concurrency guard.
     set_hash = member_set_hash(snapshot_rows)
     concat_recording_id = deterministic_id(
         "concat_recording", {**identity, "member_set_hash": set_hash}

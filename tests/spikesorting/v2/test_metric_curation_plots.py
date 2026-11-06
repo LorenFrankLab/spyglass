@@ -1,10 +1,4 @@
-"""DB-free tests for the analyzer-curation QC plot helper.
-
-Exercises ``plot_units_qc_figure`` with synthetic data under the Agg backend
-(no DataJoint, no analyzer): one histogram axis per requested metric, a depth
-scatter, caller-supplied axes, NaN metrics dropped from histograms, and a
-zero-unit empty-but-labeled axes.
-"""
+"""DB-free tests for the analyzer-curation QC plot and burst-pair helpers."""
 
 from __future__ import annotations
 
@@ -91,8 +85,8 @@ def test_validate_unit_pairs_returns_valid_pairs():
 def test_validate_unit_pairs_rejects_unknown_unit():
     """A pair referencing a non-existent unit raises, naming the bad id.
 
-    v2 unit ids are arbitrary (not 1-based), so a stale/typo'd pair id must
-    fail loudly rather than surface as a KeyError deep in the correlogram grid.
+    v2 unit ids are arbitrary, so a bad id must fail before the correlogram
+    grid.
     """
     with pytest.raises(ValueError, match="99"):
         validate_unit_pairs([0, 1], [(0, 99)])
@@ -142,11 +136,10 @@ def synthetic_analyzer():
 
 
 def test_calculate_isi_violation_threshold_is_milliseconds():
-    """The shared legacy utility's threshold is explicitly named in ms.
+    """The shared legacy utility's threshold is named in ms.
 
-    v1 named it ``isi_threshold_s`` while internally treating it as ms (it
-    multiplied by 1e-3); the rename removes that trap. Its legacy denominator
-    remains spike count; v2 pair diagnostics use the unit-QC interval fraction.
+    Its denominator is spike count; v2 pair diagnostics use the unit-QC
+    interval fraction.
     """
     import inspect
 
@@ -165,10 +158,9 @@ def test_calculate_isi_violation_threshold_is_milliseconds():
 
 
 def test_calculate_isi_violation_accepts_deprecated_s_alias():
-    """The old ``isi_threshold_s`` keyword still works (deprecated), unchanged.
+    """The deprecated ``isi_threshold_s`` keyword alias gives the same result.
 
-    ``calculate_isi_violation`` is a shared v0/v1 utility, so the rename keeps a
-    backward-compatible alias rather than breaking external keyword callers.
+    ``calculate_isi_violation`` is shared with v0/v1 callers.
     """
     from spyglass.spikesorting.utils_burst import calculate_isi_violation
 
@@ -223,11 +215,8 @@ def capped_analyzer():
 
 
 def test_peak_amplitudes_aligned_to_waveform_subset(capped_analyzer):
-    """peak_amps and peak_times both follow the waveform (random-spikes) subset.
-
-    The waveforms extension holds only the capped subset; peak_times must be the
-    subset's spike times (not the full train) or the arrays mismatch for units
-    with more spikes than the cap -- which would break ``plot_peak_over_time``.
+    """peak_amps and peak_times both follow the waveform (random-spikes) subset,
+    so their lengths match for ``plot_peak_over_time``.
     """
     from spyglass.spikesorting.v2._curation.metric_plots import (
         peak_amplitudes_from_analyzer,
@@ -247,9 +236,8 @@ def test_peak_amplitudes_sampled_at_waveform_peak(synthetic_analyzer):
     """Per-spike amplitudes are read at the waveform peak (nbefore), per channel.
 
     The asymmetric (1.0 ms before, 2.0 ms after) window puts the trough at
-    ``nbefore``, not the array center, so sampling the center reads ~0.5 ms off
-    the peak. Sampling at ``nbefore`` reads the peak, and the per-channel shape
-    is kept for the burst plots.
+    ``nbefore``, not the array center. The per-channel shape is kept for the
+    burst plots.
     """
     from spyglass.spikesorting.v2._curation.metric_plots import (
         peak_amplitudes_from_analyzer,
@@ -273,8 +261,7 @@ def test_peak_amplitudes_sampled_at_waveform_peak(synthetic_analyzer):
 def sparse_multichannel_analyzer():
     """16-channel sparse analyzer whose per-unit supports are a strict subset.
 
-    Needed to exercise dense-vs-sparse channel alignment: a small (<=4-channel)
-    probe keeps every channel, so sparse == dense and the alignment bug hides.
+    A <= 4-channel probe keeps every channel, so sparse == dense there.
     """
     import spikeinterface.full as si
 
@@ -305,7 +292,7 @@ def test_peak_amplitudes_dense_for_cross_unit_alignment(
 
     analyzer = sparse_multichannel_analyzer
     n_total = analyzer.get_num_channels()
-    # Sanity: sparsity is a real subset here, else the test can't catch the bug.
+    # Precondition: sparsity is a strict subset here.
     sparse_cols = (
         analyzer.get_extension("waveforms")
         .get_waveforms_one_unit(analyzer.unit_ids[0])
@@ -321,8 +308,8 @@ def test_peak_amplitudes_dense_for_cross_unit_alignment(
 
 
 def test_correlograms_from_analyzer_honors_window_bin(synthetic_analyzer):
-    """correlograms_from_analyzer uses the REQUESTED window/bin, not the stored
-    50/1 ms curation extension (which would silently override the burst params).
+    """correlograms_from_analyzer uses the requested window/bin, not the stored
+    50/1 ms curation extension.
     """
     from spyglass.spikesorting.v2._curation.metric_plots import (
         correlograms_from_analyzer,
@@ -446,10 +433,9 @@ def test_burst_pair_isi_ignores_pairs_across_continuity_joins(
 def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
     """The data form of the burst diagnostics is a ``(unit1, unit2)`` frame.
 
-    This is the v2 answer to querying v1's ``BurstPair.BurstPairUnit`` part
-    table: ordered pairs on a MultiIndex matching ``fetch(format="frame")``
-    on that table, one column per leg. Ordered pairs must both appear because
-    ``xcorrel_asymm`` is directional.
+    Matches v1's ``BurstPair.BurstPairUnit`` ``fetch(format="frame")``: one
+    column per leg. Both orders of each pair appear because ``xcorrel_asymm``
+    is directional.
     """
     import pandas as pd
 
@@ -527,7 +513,7 @@ def test_curation_evaluation_get_burst_pair_metrics(
 def test_plot_burst_pair_metrics_renders_from_the_data_path(
     dj_conn, monkeypatch, synthetic_analyzer
 ):
-    """The scatter is drawn from ``get_burst_pair_metrics`` -- one source."""
+    """The scatter is drawn from ``get_burst_pair_metrics``."""
     import matplotlib.pyplot as plt
 
     CurationEvaluation = _patch_evaluation_display_analyzer(
@@ -649,11 +635,9 @@ def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(
 ):
     """``xcorrel_asymm`` classifies lags by bin CENTER, not by right edge.
 
-    ``calculate_ca`` splits a correlogram into ``bins < 0`` and ``bins > 0``.
-    Handing it the right edges puts the innermost negative bin ``[-5, 0)`` on
-    edge ``0`` -- in neither half -- while ``[0, 5)`` lands on the positive
-    side, so a perfectly symmetric burst-shaped correlogram reads as
-    ``+1`` in BOTH directions instead of ``0``.
+    ``calculate_ca`` splits on ``bins < 0`` and ``bins > 0``; with right edges
+    the bin ``[-5, 0)`` falls in neither half, so a symmetric correlogram reads
+    ``+1`` in both directions instead of ``0``.
     """
     from spyglass.spikesorting.v2._curation import metric_plots as mod
 

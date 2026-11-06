@@ -1,8 +1,6 @@
 """Dependency-light references and reads for typed unit annotations.
 
-Table imports stay inside consuming methods so the public pipeline facade can
-export these value objects without activating a DataJoint schema or requiring a
-database connection at import time.
+Table imports are deferred so importing this module needs no database.
 """
 
 from __future__ import annotations

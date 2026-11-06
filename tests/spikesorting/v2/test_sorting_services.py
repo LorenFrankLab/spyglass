@@ -1,10 +1,7 @@
 """Tests for the sorting-stage service helpers.
 
-Covers the sorter dispatch noise-level precedence (``_sorting_dispatch``),
-the artifact-mask complement walker guards (``_sorting_artifact_mask``),
-the ``Sorting.Unit`` row builder (``_sorting_units``), and the analyzer
-zero-unit access guard (``_sorting_analyzer``). All DB-free: pure numpy /
-SpikeInterface objects and in-test relation stubs.
+Covers ``_sorting.dispatch``, ``_sorting.artifact_mask``, ``_sorting.units``
+and ``_sorting.analyzer``. DB-free.
 """
 
 from __future__ import annotations
@@ -62,14 +59,8 @@ def test_apply_artifact_mask_rejects_malformed_valid_times():
 
 
 def test_apply_artifact_mask_rejects_nonmonotonic_recording_times():
-    """The mask binary-searches the recording timeline, so a reversed/corrupt
-    timestamp vector would silently mis-mask. The boundary guard is a bounded
-    two-endpoint tripwire -- interior monotonicity is guaranteed by
-    ``Recording.make`` and re-validated per chunk in ``detect_artifacts``, so the
-    boundary only catches gross corruption (reversed/non-finite endpoints)
-    cheaply, without materializing the timestamp vector. This pins that the
-    endpoint guard is wired into ``apply_artifact_mask`` (not only the pure
-    ``_signal_math`` helpers)."""
+    """``apply_artifact_mask`` checks the timestamp endpoints; interior
+    monotonicity is checked upstream."""
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
     )
@@ -134,8 +125,8 @@ def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
 
 
 def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
-    """A unit whose peak channel is not in the sort group's electrode map is a
-    channel-id mismatch -- raise rather than build an invalid Electrode FK."""
+    """A peak channel outside the sort group raises instead of building an
+    invalid Electrode FK."""
     from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
 
     with pytest.raises(RuntimeError, match="not in sort group"):
@@ -224,11 +215,8 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
     )
-    # The load seam is the package's own memmap-aware loader.
     monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", _raise_load)
-    # The recipe-row validation queries AnalyzerWaveformParameters; this unit
-    # test mocks the rest of the load path, so stub it (the "display" name is a
-    # placeholder, not a real shipped recipe row).
+    # Stub the recipe-row lookup; "display" is a placeholder name.
     monkeypatch.setattr(
         _sorting_analyzer, "fetch_waveform_params", lambda name: {}
     )
@@ -305,8 +293,7 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
     )
     monkeypatch.setattr(_sorting_analyzer, "rebuild_analyzer_folder", _rebuild)
-    # Only the DB recipe lookup and canonical source reconstruction are stubbed;
-    # folder loading, completeness validation and analyzer building are real.
+    # Only the recipe lookup and source reconstruction are stubbed.
     monkeypatch.setattr(
         _sorting_analyzer, "fetch_waveform_params", lambda name: recipe
     )
@@ -326,8 +313,8 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
     np.testing.assert_array_equal(
         analyzer.get_extension("templates").get_data()[0], snippets.mean(axis=0)
     )
-    # The default public load returns a mutable analyzer, so every saved
-    # extension must be loaded (SI's save/select/merge copy only loaded ones).
+    # Every saved extension is loaded: SI's save/select/merge copy only
+    # loaded ones.
     assert set(analyzer.extensions) == set(
         _sorting_analyzer.BASE_ANALYZER_EXTENSIONS
     )

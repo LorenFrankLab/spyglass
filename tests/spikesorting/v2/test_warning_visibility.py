@@ -18,8 +18,8 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
     ],
 )
 def test_unexpected_pipeline_warnings_remain_visible(category):
-    # Preserve the configured filters: pytest.warns() would force "always"
-    # itself and hide a regression back to blanket category suppression.
+    # Not pytest.warns(): it forces "always" and would bypass the configured
+    # filters under test.
     with warnings.catch_warnings(record=True) as seen:
         warnings.warn("Unexpected v2 pipeline validation problem", category)
     assert len(seen) == 1

@@ -1,31 +1,14 @@
-"""Pure reference-resolution helpers for ``SortGroupV2`` grouping.
-
-The ``reference_mode`` / ``reference_electrode_id`` validation and the
-config-or-explicit reference resolution live here, free of DataJoint /
-SpikeInterface, so they import without a DB connection and are
-unit-testable in isolation.
-"""
+"""DB-free reference validation and resolution for ``SortGroupV2``."""
 
 from __future__ import annotations
 
 from typing import Literal, get_args
 
-# How a ``SortGroupV2`` references its channels before sorting:
-#   * ``"none"`` -- no re-referencing.
-#   * ``"global_median"`` -- common-median reference across the group.
-#   * ``"specific"`` -- subtract a single named reference electrode
-#     (``reference_electrode_id``), then drop it from the sorted channel set.
-#
-# Stored as a ``varchar(32)`` on ``SortGroupV2`` validated against this
-# Literal at insert time (NOT a MySQL enum). The set may grow --
-# SpikeInterface also supports ``global_average`` / CAR and local per-group
-# referencing -- and a varchar lets a new mode be added in Python (this
-# Literal and its preprocessing branch) without changing the column
-# definition of a populated table. The Literal gives identical typo
-# protection at the ``insert1`` boundary; ``CurationLabel`` uses the same
-# pattern. v1's ``SortGroup`` instead stores a single
-# ``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
-# global median, >=0 specific) conflate the mode with the channel id.
+# - ``"none"``: no re-referencing.
+# - ``"global_median"``: common-median reference across the group.
+# - ``"specific"``: subtract ``reference_electrode_id``, then drop it.
+# Stored as varchar (not a MySQL enum) so modes can be added without altering
+# a populated table.
 ReferenceMode = Literal["none", "global_median", "specific"]
 
 _VALID_REFERENCE_MODES: frozenset[str] = frozenset(get_args(ReferenceMode))
@@ -34,16 +17,8 @@ _VALID_REFERENCE_MODES: frozenset[str] = frozenset(get_args(ReferenceMode))
 def _validate_reference_fields(row: dict) -> None:
     """Validate a ``SortGroupV2`` row's reference fields before insert.
 
-    Enforces the two invariants the ``reference_mode`` /
-    ``reference_electrode_id`` split must hold:
-
-    1. ``reference_mode`` (defaulting to ``"none"`` when absent) is a
-       member of the ``ReferenceMode`` Literal -- the varchar's typo
-       guard, replacing what a MySQL enum would have done at the DB.
-    2. ``reference_electrode_id`` is non-null **iff**
-       ``reference_mode == 'specific'``: a specific reference needs a
-       channel to subtract, and a non-specific mode must not carry a
-       stray channel id the runtime would silently ignore.
+    - ``reference_mode`` (default ``"none"``) is a ``ReferenceMode``.
+    - ``reference_electrode_id`` is non-null iff the mode is ``'specific'``.
 
     Raises
     ------
@@ -78,11 +53,8 @@ def assert_reference_not_member(
 ) -> None:
     """Reject a ``'specific'`` reference that is also a sort-group channel.
 
-    The write path subtracts the specific reference from every channel and then
-    REMOVES it from the recording. If the reference electrode is itself a member
-    of the sort group, that would silently drop a channel the user meant to sort
-    (a 4-wire tetrode would sort on 3), so this fails loud instead. No-op for
-    non-``'specific'`` modes (which carry no reference electrode).
+    The specific reference is removed after subtraction, which would silently
+    drop that channel from the sort.
 
     Parameters
     ----------
@@ -114,11 +86,7 @@ def assert_reference_not_member(
         )
 
 
-# Private sentinel for "derive the reference from the per-electrode config"
-# in :func:`resolve_group_reference`. A distinct object (not ``None``) so an
-# explicit/configured ``None`` can still mean "no reference" -- ``None`` is a
-# real sentinel value (``original_reference_electrode`` is nullable), so it
-# cannot double as the "auto-derive" marker.
+# "Derive from config"; not ``None``, which means "no reference".
 _AUTO_REFERENCE = object()
 
 
@@ -129,12 +97,6 @@ def resolve_group_reference(
     group_label="",
 ) -> tuple[ReferenceMode, int | None]:
     """Resolve one electrode group's reference to ``(reference_mode, id)``.
-
-    Maps a sort group's configured or explicitly-supplied reference to a
-    validated ``(reference_mode, reference_electrode_id)`` pair that
-    satisfies :func:`_validate_reference_fields`. Emits only the three real
-    ``ReferenceMode`` values -- never ``"auto"`` -- so the resolved pair can
-    be written straight into a ``SortGroupV2`` master row.
 
     Sentinels: ``None`` or ``-1`` -> ``("none", None)``;
     ``-2`` -> ``("global_median", None)``; ``>= 0`` -> ``("specific", id)``.
@@ -147,9 +109,8 @@ def resolve_group_reference(
         (``explicit_ref is _AUTO_REFERENCE``).
     explicit_ref : int, None, or _AUTO_REFERENCE, optional
         A reference electrode id / sentinel from a ``references`` mapping, or
-        the private ``_AUTO_REFERENCE`` sentinel (the default) to derive the
-        reference from ``configured_ref_ids``. An explicit value -- including
-        an explicit ``None`` ("no reference") -- always wins over config.
+        ``_AUTO_REFERENCE`` (default) to derive it from ``configured_ref_ids``.
+        An explicit value, including ``None``, wins over config.
     group_label : str, optional
         Group name used in error messages.
 
@@ -160,17 +121,14 @@ def resolve_group_reference(
     Raises
     ------
     ValueError
-        On the auto path, if the members carry mixed
-        ``original_reference_electrode`` values (cannot pick one reference).
-        For any path, if the resolved sentinel is a negative value other
-        than ``-1`` / ``-2``.
+        On the auto path, if the group has no members or mixed
+        ``original_reference_electrode`` values. On any path, if the sentinel
+        is negative and not ``-1`` / ``-2``.
 
     Notes
     -----
-    Membership validation is intentionally outside this resolver: helpers that
-    support ``omit_ref_electrode_group`` must honor those skips first, then
-    call :func:`assert_reference_not_member` for the groups they actually
-    insert.
+    Callers check membership with :func:`assert_reference_not_member` after
+    applying ``omit_ref_electrode_group`` skips.
     """
     if explicit_ref is not _AUTO_REFERENCE:
         ref = -1 if explicit_ref is None else int(explicit_ref)

@@ -1,11 +1,4 @@
-"""``run_si_sorter`` dispatch invariants.
-
-Covers the MS4 ``numpy.Inf`` global shim teardown, tempdir-cleanup not masking
-the real sort exception, SI global ``job_kwargs`` set/restore, the tracked
-container-execution backend (local vs Docker/Singularity run_sorter kwargs +
-the MATLAB-sorter container policy), and keeping SI job kwargs off the
-run_sorter call.
-"""
+"""``run_si_sorter`` dispatch invariants."""
 
 from __future__ import annotations
 
@@ -13,12 +6,10 @@ import pytest
 
 
 def _tiny_numpy_sorting():
-    """A minimal REAL in-memory sorting for ``run_sorter`` stubs.
+    """A minimal real in-memory sorting for ``run_sorter`` stubs.
 
-    ``run_si_sorter`` now materializes the sorter output via
-    ``NumpySorting.from_sorting`` (sever the temp-dir file backing before
-    cleanup), so a stub must return a real sorting -- a placeholder ``object()``
-    no longer satisfies the materialize contract.
+    ``run_si_sorter`` materializes the output with
+    ``NumpySorting.from_sorting``, so a stub must return a real sorting.
     """
     import numpy as np
     import spikeinterface as si
@@ -34,10 +25,7 @@ def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
     """Drive run_si_sorter with a cheap recording and a patched
     sis.run_sorter, returning (before_global, after_global, result_or_exc).
 
-    Passes a non-empty job_kwargs ({"n_jobs": 2, ...}) so the global
-    set/restore path actually runs (it is gated on ``if sj_kwargs``), and
-    n_jobs=2 differs from SI's default n_jobs=1 so a missing restore would
-    leave the global changed.
+    Uses n_jobs=2, unlike SI's default of 1, so a missing restore is visible.
     """
     import uuid
 
@@ -68,17 +56,10 @@ def _run_si_sorter_with_patched_run_sorter(monkeypatch, run_sorter_impl):
 def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
     """The MS4 ``np.Inf`` shim is scoped and torn down.
 
-    The MS4 wrapper (via spikeextractors) references the numpy-2.0-removed
-    ``np.Inf`` alias, so ``run_si_sorter`` restores it for the MS4 call.
-    The restore must be deleted afterward; a persistent global mutation
-    would leak a different numpy into every later module that probes
-    ``hasattr(np, "Inf")``.
-
-    The shim is set BEFORE ``run_sorter`` is invoked, so the leak is
-    observable whether or not MS4 itself is installed (on the CI SI-0.104
-    image it is not, and ``run_sorter`` raises -- which the test
-    tolerates). ``monkeypatch.delattr`` locks a clean ``np.Inf``-absent
-    baseline so the assertion is order-independent.
+    The MS4 wrapper uses the ``np.Inf`` alias removed in numpy 2.0, so
+    ``run_si_sorter`` restores it for the call and must delete it afterward.
+    The shim is set before ``run_sorter``, so this holds even when MS4 is not
+    installed.
     """
     import numpy as np_mod
     import spikeinterface.core as sc
@@ -100,9 +81,7 @@ def test_run_si_sorter_does_not_leak_numpy_inf(monkeypatch):
             job_kwargs=None,
         )
     except Exception:
-        # MS4 not installed (or sort failure) is fine -- the np.Inf shim
-        # already fired before run_sorter, so the leak invariant still
-        # applies.
+        # MS4 missing or the sort failing is fine; the shim already fired.
         pass
 
     assert not hasattr(np_mod, "Inf"), (
@@ -116,11 +95,9 @@ def test_sorter_tempdir_cleanup_does_not_mask_sort_exception(
 ):
     """A cleanup failure never replaces the real sort exception.
 
-    If the sort raises AND ``sorter_temp_dir.cleanup()`` also raises
-    (e.g. a stale lock on a network FS), the unguarded ``finally`` would
-    propagate the cleanup's ``PermissionError`` and hide the sort's
-    actual failure. The cleanup error must be caught + logged so the
-    caller sees the sort exception.
+    When the sort and ``sorter_temp_dir.cleanup()`` both raise (e.g. a stale
+    lock on a network FS), the cleanup error is logged and the caller sees
+    the sort exception.
     """
     import tempfile
 
@@ -165,12 +142,7 @@ def test_run_si_sorter_restores_global_job_kwargs_on_raise(
 ):
     """SI's global job_kwargs are restored after the sort raises.
 
-    ``run_si_sorter`` installs the per-row job_kwargs into SI's process-global
-    state via ``set_global_job_kwargs`` and restores the prior global in a
-    ``finally`` (reset-then-reapply, so keys absent from the prior global do
-    not leak). A regression removing the restore would leak the mutated global
-    (here n_jobs=2 vs the default 1) into every later populate. Force the sort
-    to raise and assert the global is byte-for-byte the pre-call state.
+    The global after the call equals the pre-call state exactly.
     """
     import spikeinterface as si
     import spikeinterface.sorters as sis
@@ -213,12 +185,9 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
     before, after, result = _run_si_sorter_with_patched_run_sorter(
         monkeypatch, lambda *a, **k: _tiny_numpy_sorting()
     )
-    # run_si_sorter materializes the sorter output, so the result is an
-    # in-memory NumpySorting rather than the stub object identity.
+    # The output is materialized into an in-memory NumpySorting.
     assert isinstance(result, si.NumpySorting)
-    # n_jobs=2 differs from SI's default n_jobs=1, so the sort genuinely
-    # mutates the global mid-run; a removed restore would surface here as
-    # after != before (the leaked n_jobs=2).
+    # The sort sets n_jobs=2 mid-run; the restore must undo it.
     assert after == before, (
         "global job_kwargs were not restored after a successful sort; "
         f"before={before} after={after}"
@@ -229,10 +198,8 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
 def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
     """MATLAB-backed sorters cannot run on a local execution backend.
 
-    ``kilosort2_5`` / ``kilosort3`` / ``ironclust`` ship only as container
-    images, so a default/local execution row raises a clear
-    tracked-container-backend message BEFORE ``run_sorter`` is reached --
-    there is no name-based ``singularity_image=True`` auto-fallback.
+    ``kilosort2_5``, ``kilosort3`` and ``ironclust`` ship only as container
+    images, so a local execution row raises before ``run_sorter``.
     """
     import uuid
 
@@ -251,20 +218,18 @@ def test_matlab_sorters_require_explicit_container_backend(monkeypatch):
         num_channels=4, durations=[1.0], sampling_frequency=30_000.0
     )
     for sorter in ("kilosort2_5", "kilosort3", "ironclust"):
-        # execution_params omitted -> default local -> must raise.
+        # Omitted execution_params defaults to local.
         with pytest.raises(ValueError, match="container"):
             run_si_sorter(sorter, {}, rec, uuid.uuid4(), {})
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_run_si_sorter_passes_container_kwargs(monkeypatch):
-    """Container execution rows pass the right verified-runner kwargs.
+    """Container execution rows pass the right runner kwargs.
 
-    A Singularity row for a MATLAB sorter passes ``singularity_image=<image>`` +
-    the container-install controls, AND strips the container-incompatible
-    ``MATLAB_SORTER_STRIP_KWARGS`` while keeping a real sorter param. A Docker row
-    for MS4 passes ``docker_image=<image>``. A local row passes no container
-    kwargs.
+    A Singularity MATLAB row passes ``singularity_image`` and the install
+    controls and strips ``MATLAB_SORTER_STRIP_KWARGS``; a Docker MS4 row
+    passes ``docker_image``; a local row passes no container kwargs.
     """
     import uuid
 
@@ -317,9 +282,8 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     assert captured["installation_mode"] == "pypi"
     assert captured["spikeinterface_version"] == "0.104.3"
     assert captured["delete_container_files"] is True
-    # The scratch-collision fix: SI's output folder is a per-sort CHILD dir
-    # (``.../sorter_output``), so its fixed-name in_container_* files land in the
-    # unique temp dir (folder.parent), not the shared temp_dir.
+    # SI's output folder is a per-sort child dir, so its fixed-name
+    # in_container_* files land in the unique temp dir, not the shared one.
     import os
 
     assert os.path.basename(captured["folder"]) == "sorter_output"
@@ -327,7 +291,7 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
         assert stripped not in captured, f"{stripped!r} must be stripped"
     assert captured["detect_threshold"] == 6.0
 
-    # Docker MS4 row: docker_image passed (no MATLAB strip -- MS4 is not MATLAB).
+    # Docker MS4 row: docker_image passed, no MATLAB strip.
     captured.clear()
     run_si_sorter(
         "mountainsort4",
@@ -354,16 +318,15 @@ def test_run_si_sorter_passes_container_kwargs(monkeypatch):
     assert "singularity_image" not in captured
     assert "docker_image" not in captured
     assert "installation_mode" not in captured
-    assert captured.get("tempdir") == "/keep/me"  # not a MATLAB sorter -> kept
+    assert captured.get("tempdir") == "/keep/me"  # kept for non-MATLAB sorters
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     """SI job kwargs install via the global; execution kwargs are run kwargs.
 
-    ``n_jobs`` / ``chunk_duration`` must NOT reach ``run_sorter(**...)`` (they
-    would trip strict per-sorter validators); they install via
-    ``set_global_job_kwargs``. Container execution kwargs DO reach ``run_sorter``.
+    ``n_jobs`` and ``chunk_duration`` would trip strict per-sorter validators,
+    so they go through ``set_global_job_kwargs``.
     """
     import uuid
 
@@ -404,7 +367,7 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
     # Job kwargs route through the SI global, never into run_sorter kwargs.
     assert "n_jobs" not in captured
     assert "chunk_duration" not in captured
-    # Execution kwargs DO reach run_sorter.
+    # Execution kwargs reach run_sorter.
     assert captured["singularity_image"] == "img.sif"
     assert captured["installation_mode"] == "no-install"
 
@@ -413,19 +376,11 @@ def test_run_si_sorter_keeps_job_kwargs_out_of_sorter_params(monkeypatch):
 def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
     """The v2 recording wrappers survive ``run_sorter``'s serialize + reload.
 
-    SI's sorter/container runner dumps the recording passed to ``run_sorter``
-    to ``spikeinterface_recording.json`` when ``check_serializability("json")``
-    is truthy (else pickle), then reloads it inside the sorter/container. The
-    v2 sort-time chain wraps the preprocessed recording in an artifact mask
-    (``apply_artifact_mask``) and, for a whitening sorter, external float64
-    whitening (``pinned_whiten``).
-
-    This asserts a real dump -> reload for each wrapper and their composition,
-    NOT merely that ``check_serializability`` returns truthy: a wrapper can
-    report json-serializable yet fail to reload (SI's
-    ``SilencedPeriodsRecording`` stores its ``periods`` as a structured numpy
-    array that cannot survive a JSON round-trip -- the flag-only check missed
-    exactly that). Without Docker or a real sort.
+    SI dumps the recording to JSON (or pickle) and reloads it inside the
+    sorter. This does a real dump and reload of ``apply_artifact_mask``,
+    ``pinned_whiten`` and their composition, since a wrapper can report
+    json-serializable yet fail to reload (e.g. SI's
+    ``SilencedPeriodsRecording`` structured-array ``periods``).
     """
     import numpy as np
     import spikeinterface as si
@@ -437,9 +392,7 @@ def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
     from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
     def _assert_roundtrips(recording, name):
-        # Mirror SI basesorter.setup_recording: JSON when the recording claims
-        # json-serializability, else pickle -- then reload. ``load`` raises if
-        # the dumped form cannot be reconstructed.
+        # Mirror SI basesorter.setup_recording: JSON if serializable, else pickle.
         expected_traces = recording.get_traces().copy()
         folder = tmp_path / name
         folder.mkdir()
@@ -495,12 +448,9 @@ def test_v2_recording_chain_survives_run_sorter_serialization(tmp_path):
 def test_run_si_sorter_output_survives_tempdir_cleanup():
     """A real sorter run's output is readable AFTER run_si_sorter returns.
 
-    ``sis.run_sorter`` returns a sorting that READS from the sorter temp dir,
-    which ``run_si_sorter`` cleans up in its finally; downstream
-    ``build_analyzer`` / ``write_sorting_units_nwb`` would then read freed
-    files. The fix materializes the spike trains into an in-memory
-    ``NumpySorting`` before cleanup. Use a real MountainSort5 run (a stub can't
-    reproduce the file backing).
+    ``sis.run_sorter`` returns a sorting backed by the temp dir that
+    ``run_si_sorter`` cleans up, so the output is materialized in memory
+    first. Uses a real MountainSort5 run to get the file backing.
     """
     import spikeinterface as si
 
@@ -524,14 +474,8 @@ def test_run_si_sorter_output_survives_tempdir_cleanup():
 
 
 def test_whiten_interception_allowlisted():
-    """The external-whitening interception fires only for the curated
-    external-whitening sorters (MountainSort 4/5).
-
-    Those sorters deliberately carry ``whiten=True`` and the dispatcher routes
-    them through the runtime's external float64 whitening. A generic /
-    uncurated sorter's ``whiten`` must be passed through to the sorter
-    unchanged, not silently rewritten.
-    """
+    """External whitening intercepts ``whiten=True`` only for MountainSort 4/5;
+    other sorters receive ``whiten`` unchanged."""
     from spyglass.spikesorting.v2._sorting.dispatch import (
         _should_external_whiten,
     )
@@ -555,11 +499,9 @@ def test_whiten_interception_allowlisted():
 def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
     """Configured MS5 values reach ``run_sorter`` verbatim; whiten is routed.
 
-    The parameter-to-SI forwarding contract: the long-recording knobs are
-    passed through untouched, ``whiten=True`` is intercepted (external float64
-    whitening) and handed to SI as ``whiten=False``, and the dispatcher's
-    kwargs equal ``resolve_sort_config(...).si_sorter_params`` -- the same
-    resolution preflight reports.
+    ``whiten=True`` reaches SI as ``whiten=False`` (whitened externally), and
+    the kwargs equal ``resolve_sort_config(...).si_sorter_params``, which
+    preflight reports.
     """
     import uuid
 
@@ -605,14 +547,10 @@ def test_ms5_non_default_params_reach_run_sorter_unchanged(monkeypatch):
 
 
 def test_remove_excess_spikes_drops_empty_units(caplog):
-    """A unit whose only spikes fall outside the recording window is left
-    with zero spikes by ``sic.remove_excess_spikes``'s window trim; it must
-    then be dropped from the returned sorting entirely (not kept as an empty
-    unit). Other units and their spike trains must be unchanged, and a
-    sorting with no empty units must keep every unit id.
+    """A unit left empty by ``sic.remove_excess_spikes`` is dropped; other
+    units are unchanged.
 
-    Uses sparse, non-contiguous unit ids ([3, 7, 12]) so an index/id mix-up
-    in the drop logic would show up as the wrong unit being removed.
+    Sparse unit ids ([3, 7, 12]) expose an index/id mix-up.
     """
     import numpy as np
     import spikeinterface as si
@@ -626,9 +564,7 @@ def test_remove_excess_spikes_drops_empty_units(caplog):
     n = rec.get_num_samples()
     assert n == 30_000
 
-    # Unit 3: two in-window spikes (unchanged). Unit 7: its only spike is
-    # past the recording window -> left empty by the trim -> must be
-    # dropped. Unit 12: one in-window spike (unchanged).
+    # Unit 7's only spike is past the recording window.
     samples = np.array([100, 200, n + 500, 300], dtype=np.int64)
     labels = np.array([3, 3, 7, 12], dtype=np.int64)
     sorting = si.NumpySorting.from_samples_and_labels(
@@ -648,7 +584,7 @@ def test_remove_excess_spikes_drops_empty_units(caplog):
         "7" in r.message for r in caplog.records
     ), "dropped unit id 7 must be logged"
 
-    # No empty units -> every unit id is kept.
+    # With no empty units, every unit id is kept.
     samples_all_in_window = np.array([100, 200, 300], dtype=np.int64)
     labels_all_in_window = np.array([3, 7, 12], dtype=np.int64)
     sorting_no_empty = si.NumpySorting.from_samples_and_labels(
@@ -737,15 +673,8 @@ def test_pinned_whiten_is_deterministic_across_calls(clean_recording):
     """Two ``pinned_whiten`` calls with the same seed give bit-identical
     results, and match a live seeded SpikeInterface reference.
 
-    Uses a seed distinct from the default (0) and from the other bit-identity
-    test's seed (7), so this exercises ``random_seed`` forwarding rather than
-    a coincidental default. ``pinned_whiten`` forwards ``seed=random_seed`` to
-    SI's ``sip.whiten`` at
-    ``src/spyglass/spikesorting/v2/_sorting_dispatch.py:458`` (and to
-    ``_span_whitening_matrix(..., random_seed=)`` at ``:459-461``); dropping
-    that forwarding would let SI draw its random data-fitting chunks
-    unseeded, so two calls -- and the comparison against the live seeded SI
-    reference -- would no longer match.
+    The seed differs from the default (0) and from the other test's (7), so
+    this checks that ``random_seed`` is forwarded to SI.
     """
     import numpy as np
     import spikeinterface.preprocessing as sip

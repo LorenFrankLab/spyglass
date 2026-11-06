@@ -112,11 +112,10 @@ class ConcatMemberCuration(
 ):
     """Per-member, wall-clock-aligned view of a curated concat sort.
 
-    Each row splits an already-curated concatenated sorting back into one
-    frozen member's local sample frame, then maps those frames onto the
-    member ``Recording`` timestamps. Unit IDs and labels are identical across
-    members; a unit with no spikes in a member is represented by an empty
-    train rather than omitted.
+    Each row splits a curated concat sorting into one member's local frames
+    and maps them onto the member ``Recording`` timestamps. Unit ids and
+    labels are shared across members; a unit with no spikes in a member has
+    an empty train.
     """
 
     definition = """
@@ -139,10 +138,8 @@ class ConcatMemberCuration(
             * SortingSelection.ConcatenatedRecordingSource
             * ConcatenatedRecordingSelection.MemberSnapshot
         )
-        # ``concat_recording_id`` is primary on MemberSnapshot but is
-        # transitively determined by sorting_id through the source part. Keep
-        # the populate key exactly equal to this table's primary key rather
-        # than leaking that implementation detail into AutoPopulate.
+        # Drop concat_recording_id (implied by sorting_id) so the populate
+        # key equals this table's primary key.
         return dj.U("sorting_id", "curation_id", "member_index") & joined
 
     @classmethod
@@ -194,8 +191,7 @@ class ConcatMemberCuration(
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
         master = SpikeSortingOutput()
-        # The migration marker only records that the entry uses true unit
-        # ids; it goes with the entry rather than blocking the delete.
+        # The migration marker cascades with the entry instead of blocking.
         cascaded = {UnitAnnotationPositionalIdMigration.full_table_name}
         schema, table = master.full_table_name.replace("`", "").split(".")
         foreign_keys = master.connection.query(
@@ -230,10 +226,8 @@ class ConcatMemberCuration(
             as_objects=True
         )
         if orphaned:
-            # _delete_and_reclaim refused the delete if any other table used
-            # these masters, so nothing downstream remains. Call DataJoint's
-            # primitive directly because Merge's ``super_delete``
-            # intentionally re-enters cautious deletion.
+            # Nothing downstream remains (_delete_and_reclaim checked). Merge's
+            # super_delete re-enters cautious deletion, so use DataJoint's.
             dj.Table.delete(
                 orphaned,
                 safemode=False,
@@ -245,11 +239,9 @@ class ConcatMemberCuration(
     def _cleanup_deleted_analysis_rows(cls, rows: list[dict]) -> list[str]:
         """Delete orphaned member AnalysisNwbfile rows and external files.
 
-        An ``AnalysisNwbfile`` is upstream of this table, so DataJoint's
-        downstream cascade cannot remove it. Only consider files for member
-        rows that are actually gone (a safemode cancellation leaves them
-        untouched), then restrict cleanup to registry rows with no remaining
-        child reference anywhere in Spyglass.
+        ``AnalysisNwbfile`` is upstream, so the cascade cannot remove it.
+        Only files of member rows that are actually gone and that nothing
+        else references are removed.
         """
         pk = cls.primary_key
         remaining = {
@@ -265,10 +257,8 @@ class ConcatMemberCuration(
         }
         if not deleted_names:
             return []
-        # Removing an external file before an enclosing caller commits would
-        # make a later rollback restore a registry row whose file is gone.
-        # Leave that uncommon administrative case for the documented global
-        # cleanup pass instead of violating transaction safety.
+        # Deleting files before an outer transaction commits would break
+        # rollback; leave them to the global cleanup pass.
         if cls.connection.in_transaction:
             logger.warning(
                 "Concat-member rows were deleted inside an outer transaction; "
@@ -290,10 +280,8 @@ class ConcatMemberCuration(
                 Path(AnalysisNwbfile.get_abs_path(name)).resolve()
                 for name in orphan_names
             }
-            # Calling the cautious AnalysisNwbfile.delete here would run a
-            # second force-masters cascade. These rows are proven orphans, so
-            # use the table's explicit administrative primitive, then reclaim
-            # only the newly-unused external entries whose paths we captured.
+            # Proven orphans: super_delete avoids a second force-masters
+            # cascade. Reclaim only the external entries captured above.
             orphan_candidates = [
                 {"analysis_file_name": name} for name in orphan_names
             ]
@@ -355,11 +343,9 @@ class ConcatMemberCuration(
     ):
         """Run a cascading curation delete, then reclaim what it orphaned.
 
-        The shared body of :meth:`delete` and ``CurationV2.delete``. A dry run
-        only logs the member inventory. Otherwise, after the cascade, merge
-        masters left without a source part and member ``AnalysisNwbfile`` rows
-        left without a reference are removed (a safemode cancellation deletes
-        nothing, so nothing is reclaimed).
+        Shared by :meth:`delete` and ``CurationV2.delete``. A dry run only
+        logs the member inventory. Otherwise the cascade is followed by
+        removing orphaned merge masters and member ``AnalysisNwbfile`` rows.
 
         Parameters
         ----------
@@ -393,9 +379,8 @@ class ConcatMemberCuration(
         if dry_run:
             cls._delete_inventory(member_rows, context=context)
         else:
-            # The merge masters are removed after the confirmation prompt, so
-            # rows that use them (a SortedSpikesGroup, unit annotations,
-            # waveform features) would go without the user seeing them.
+            # Merge masters are removed after the confirmation prompt, so
+            # rows that use them would be deleted unseen.
             referrers = cls._merge_referrers(merge_ids)
             if referrers:
                 raise ValueError(
@@ -405,12 +390,8 @@ class ConcatMemberCuration(
                     "(for example the SortedSpikesGroup that holds the "
                     "curation), then delete the curation."
                 )
-        # ``force_masters=True`` is normally how cautious deletion removes a
-        # merge master through its source part. CurationV2 has nested parts,
-        # though, and DataJoint 0.14 can then revisit/delete CurationV2 through
-        # a grandchild before the outer cascade reaches it. The outer delete
-        # reports zero rows and rolls the whole transaction back. Opt out for
-        # this cascade and remove only proven-orphan merge masters afterwards.
+        # force_masters=True rolls back with CurationV2's nested parts in
+        # DataJoint 0.14; orphaned merge masters are removed afterwards.
         result = delete(
             *args, **{**kwargs, "force_masters": False, "force_parts": True}
         )
@@ -461,20 +442,16 @@ class ConcatMemberCuration(
             & {"member_index": member_index}
         ).fetch1()
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
-    # ``make_compute`` / ``make_insert`` split keep the curated Units read, the
-    # member's full timestamp read and the member Units NWB write OUTSIDE the
-    # populate transaction. The inherited ``AutoPopulate.make`` generator is
-    # left in place so DataJoint routes through tri-part dispatch.
+    # Tri-part make keeps NWB reads and the write outside the populate
+    # transaction.
     _parallel_make = True
 
     def make_fetch(self, key) -> ConcatMemberFetched:
         """Resolve the frozen members, boundaries, files and curation state.
 
-        Rechecks that every frozen member still resolves to the exact
-        ``Recording`` content captured by the concat identity (a member output
-        must never silently bind to replacement recording bytes) and that the
-        stored member boundaries cover exactly the frozen member set.
+        Rechecks that every frozen member resolves to the exact ``Recording``
+        content in the concat identity and that the stored boundaries cover
+        exactly the frozen members.
         """
         curation_key = self._curation_key(key)
         curation_row = (CurationV2 & curation_key).fetch1()
@@ -534,8 +511,7 @@ class ConcatMemberCuration(
             & concat_key
             & {"member_index": member_index}
         ).fetch1("member_valid_times")
-        # Only the kept/contributor unit ids reach the NWB merge lineage, in
-        # the fetched row order.
+        # Only these columns enter the NWB merge lineage, in fetch order.
         merge_group_rows = [
             {
                 "unit_id": int(row["unit_id"]),
@@ -601,9 +577,8 @@ class ConcatMemberCuration(
         """
         sample_indices = read_units_spike_sample_indices(curated_abs_path)
 
-        # This performs the conservation assertion across ALL members before
-        # selecting the requested one. Do not replace it with a one-member
-        # slice: every concat spike must be accounted for exactly once.
+        # Split all members so every concat spike is checked to land in
+        # exactly one member.
         split_trains = split_unit_spike_trains(
             sample_indices,
             boundaries,
@@ -624,11 +599,8 @@ class ConcatMemberCuration(
             int(unit_id): member_obs for unit_id in local_frames
         }
 
-        # The source NWB is already curated. In particular, an applied merge
-        # contains the fresh merged ID and no longer contains its raw
-        # contributors. Copy current units 1:1 and pass raw MergeGroup rows
-        # only as provenance; reapplying those groups would either duplicate
-        # work or index contributor IDs that no longer exist.
+        # The source NWB is already merged, so copy units 1:1; MergeGroup
+        # rows are provenance only (their contributors are gone).
         identity_groups = {
             int(unit_id): [int(unit_id)] for unit_id in local_frames
         }
@@ -719,9 +691,8 @@ class ConcatMemberCuration(
     def get_source_recording(cls, key: dict) -> "si.BaseRecording":
         """Return this member's original source recording.
 
-        The member's own preprocessed ``Recording`` on its acquisition
-        clock: before the concatenation's member masks and before any
-        motion correction of the parent concat sort.
+        The member's preprocessed ``Recording`` on its acquisition clock,
+        without concat masks or motion correction.
 
         Parameters
         ----------
@@ -744,16 +715,10 @@ class ConcatMemberCuration(
     def get_sorting_input_recording(cls, key: dict) -> "si.BaseRecording":
         """Return the traces the parent sorter read over this member's frames.
 
-        The parent curation's ``CurationV2.get_sorting_input_recording``
-        (the concatenation with its member masks, or its
-        ``MotionCorrectedRecording`` when the parent sort was corrected)
-        restricted to this member's frozen frames ``[start, end)`` in the
-        concatenation (``ConcatenatedRecording.MemberBoundary``), with the
-        member ``Recording``'s own timestamps set. Its times therefore line
-        up with this member's spike times (:meth:`get_sorting` frames map to
-        the same timestamps). The timestamps are set in memory
-        (SpikeInterface ``set_times``), so a copy made by serializing the
-        recording does not keep them.
+        The parent's ``CurationV2.get_sorting_input_recording`` sliced to
+        this member's ``[start, end)`` frames, with the member ``Recording``
+        timestamps set so times line up with :meth:`get_sorting`. The
+        timestamps are set in memory, so a serialized copy loses them.
 
         Parameters
         ----------
@@ -793,9 +758,8 @@ class ConcatMemberCuration(
     def _member_frame_span(cls, row: dict) -> tuple[int, int]:
         """This member's frozen ``[start, end)`` frames in the concatenation.
 
-        ``row`` is the member's fetched primary key. Members occupy
-        consecutive frames in ``member_index`` order, so a member starts where
-        the previous ``MemberBoundary.end_sample`` ends.
+        ``row`` is the member's primary key. Members are consecutive in
+        ``member_index`` order.
         """
         member_index = row["member_index"]
         concat_key = {

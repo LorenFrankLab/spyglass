@@ -1,12 +1,7 @@
 """Curated-units NWBs carry per-unit ``obs_intervals``.
 
-The sort-time writer writes a per-unit observation window; the curated writer
-carries it forward (intersection for merged contributors) and the combined
-reader returns it as ``obs``. Without it, any NWB-only firing-rate /
-presence-ratio / duration denominator over a curated export would silently
-assume the full session.
-
-Hermetic NWB-IO tests + one DB integration round-trip.
+Merged units get the intersection of their contributors' windows; the reader
+returns them as ``obs``. NWB-only rate denominators depend on them.
 """
 
 from __future__ import annotations
@@ -121,10 +116,8 @@ def test_reader_returns_obs_intervals(tmp_path):
 def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
     """The curated NWB embeds the kept->contributor merge lineage + a header.
 
-    An applied merge writes the kept-unit->contributors map (matching
-    ``CurationV2.MergeGroup``) flagged applied; a preview curation writes the
-    proposed groups flagged not-applied. A small header records the curation
-    identity/source so the file is interpretable without the DB.
+    Applied and preview merges both match ``CurationV2.MergeGroup``; the
+    header flags which, so the file reads without the DB.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
@@ -141,10 +134,8 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
     unit_ids = sorted(int(u) for u in (Sorting.Unit & sort).fetch("unit_id"))
 
     def _merge_group_pairs(curation_key):
-        # The lineage table records actual MERGES -- kept units with >1
-        # contributor. MergeGroup also stores singleton self-rows
-        # (unit -> itself) for unmerged units, which are identity, not lineage;
-        # exclude them to compare against the merge structure.
+        # Lineage holds only real merges; drop MergeGroup's singleton
+        # self-rows.
         from collections import Counter
 
         units, contribs = (CurationV2.MergeGroup & curation_key).fetch(
@@ -175,8 +166,6 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
     try:
         root = CurationV2.insert_curation(sorting_key=sort)
 
-        # Applied merge: the lineage matches the RAW MergeGroup; the header
-        # flags the merge as applied for this curation.
         merged = CurationV2.insert_curation(
             sorting_key=sort,
             parent_curation_id=root["curation_id"],
@@ -198,8 +187,6 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
             "curation_source"
         )
 
-        # Preview (proposed, not applied): lineage still matches MergeGroup;
-        # the header carries the proposed-vs-applied flag.
         preview = CurationV2.insert_curation(
             sorting_key=sort,
             parent_curation_id=root["curation_id"],
@@ -211,10 +198,8 @@ def test_curated_nwb_carries_merge_lineage(planted_two_unit_sort):
         assert lineage_p == _merge_group_pairs(preview)
         assert header_p["merges_applied"] is False
 
-        # A label-only child of a MERGED parent inherits the merged unit; its
-        # lineage must expand to the raw contributors (matching the child's
-        # MergeGroup), not vanish because the source-namespace map carries only
-        # singletons for an inherited merge.
+        # A label-only child of a merged parent: lineage expands to the raw
+        # contributors.
         child = CurationV2.insert_curation(
             sorting_key=sort, parent_curation_id=merged["curation_id"]
         )
@@ -253,7 +238,6 @@ def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
 
     clear_curations_for(sort)
     try:
-        # Root curation: every unit's curated obs matches the source.
         root = CurationV2.insert_curation(sorting_key=sort)
         root_abs = AnalysisNwbfile.get_abs_path(
             (CurationV2 & root).fetch1("analysis_file_name")

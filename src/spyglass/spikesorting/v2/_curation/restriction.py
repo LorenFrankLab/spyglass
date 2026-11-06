@@ -1,13 +1,7 @@
 """Join assembly behind ``CurationV2.resolve_restriction``.
 
-:func:`resolve_restriction` turns an interpretable v2 restriction into the
-matching ``CurationV2`` rows by joining through the selection tables of the
-input source the restriction names (single recording or concatenation), then
-applying the artifact-detection, motion-correction, sort and curation filters.
-The DB-free key classification it starts from lives in ``_curation.routing``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-function.
+Key classification lives in the DB-free ``_curation.routing``. DataJoint
+tables are imported inside the function.
 """
 
 from __future__ import annotations
@@ -38,10 +32,6 @@ def resolve_restriction(
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.utils import logger
 
-    # Pure key-classification / normalization (unknown-key handling,
-    # artifact-interval-name -> id mapping, uuid normalization, per-source
-    # split) lives in the DB-free ``_curation.routing`` module; this function
-    # owns only the DataJoint join assembly.
     plan = classify_and_normalize_restriction(
         key, restrict_by_artifact=restrict_by_artifact, strict=strict
     )
@@ -50,12 +40,7 @@ def resolve_restriction(
     if plan.unresolved_name_warning is not None:
         logger.warning(plan.unresolved_name_warning)
 
-    # Route through the input source the restriction names. A concat
-    # restriction joins SortingSelection.ConcatenatedRecordingSource ->
-    # ConcatenatedRecordingSelection; a single-recording restriction joins
-    # SortingSelection.RecordingSource -> RecordingSelection. A cross-source
-    # ``shared_restriction`` (the preprocessing recipe) filters whichever
-    # family routes, since it lives on both source selections.
+    # Route through the named source; ``shared_restriction`` filters either.
     if plan.concat_restriction:
         concat_sel = ConcatenatedRecordingSelection & {
             **plan.concat_restriction,
@@ -73,11 +58,7 @@ def resolve_restriction(
         sort_rec_source = SortingSelection.RecordingSource * rec_table.proj()
         sort_master = SortingSelection * sort_rec_source.proj()
     elif plan.shared_restriction:
-        # A cross-source key with NO source-specific key (e.g. a bare
-        # ``{preprocessing_params_name}`` query) must match BOTH families:
-        # sorts whose RecordingSource recipe matches OR whose
-        # ConcatenatedRecordingSource recipe matches. Routing through one
-        # family only would silently drop the other.
+        # A shared key alone must match both source families.
         rec_match = (
             SortingSelection.RecordingSource
             * (RecordingSelection & plan.shared_restriction).proj()
@@ -91,17 +72,10 @@ def resolve_restriction(
             concat_match.proj(),
         ]
     else:
-        # No source-specific or cross-source key (an unrestricted v2 query
-        # or a sort-/curation-only restriction): match BOTH source families.
-        # Every SortingSelection has exactly one input source, so the master
-        # itself IS the recording-source union concat-source set --
-        # restricting through one source part here would silently drop the
-        # other (e.g. omit concat-backed curations from a broad v2 merge
-        # query).
+        # The master already spans both source families.
         sort_master = SortingSelection
-    # Artifact dependencies live on the standalone sort's optional part
-    # or on frozen concat members. None excludes both; a UUID matches any
-    # selected detection; only an absent key leaves the query unrestricted.
+    # Artifact ids: None excludes standalone and concat-member detections;
+    # a UUID matches either.
     sort_master = sort_master & plan.sort_restriction
     if plan.artifact_detection_id is not NO_ARTIFACT_RESTRICTION:
         member_artifacts = ConcatenatedRecordingSelection.MemberSnapshot
@@ -118,14 +92,8 @@ def resolve_restriction(
                 - masked_concats.proj()
             )
         else:
-            # ``ArtifactDetectionSource`` stores the
-            # ``artifact_detection_merge_id`` (the ArtifactDetectionOutput
-            # merge PK), NOT the natural ``artifact_detection_id`` -- a dict
-            # restriction with the natural id would be a dropped (unknown)
-            # key that matches EVERY artifact-backed sort. Resolve the id to
-            # its merge id and restrict on the real column. An id that no
-            # sort registered yields ``None`` -> the non-nullable merge-id
-            # column matches nothing -> the correct empty result.
+            # The part stores the merge id; restricting by the natural id
+            # would be silently dropped. An unknown id (None) matches nothing.
             from spyglass.spikesorting.v2.artifact_output import (
                 ArtifactDetectionOutput,
             )
@@ -151,10 +119,6 @@ def resolve_restriction(
                 artifact_detection_source.proj(),
                 concat_match.proj(),
             ]
-    # A sort reads motion-corrected traces only through its optional
-    # MotionCorrectionSource part. None keeps sorts of their source's own
-    # traces, an id keeps sorts of that corrected recording, and an absent
-    # key keeps both.
     corrected_id = plan.motion_corrected_recording_id
     if corrected_id is not NO_MOTION_CORRECTION_RESTRICTION:
         correction_source = SortingSelection.MotionCorrectionSource

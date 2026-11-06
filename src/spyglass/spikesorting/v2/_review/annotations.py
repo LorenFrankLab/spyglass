@@ -1,14 +1,8 @@
 """DB-free helpers for the FigPack curation tables.
 
-Pure logic kept out of ``figpack_curation`` so it is unit-testable without a
-DataJoint connection or the optional ``figpack`` packages: the content-addressed
-config hash, the default label set, and the translation between FigPack's
-``sorting_curation`` annotation state and v2's ``(labels, merge_groups)`` form,
-and small FigPack config normalization helpers.
-
-DB-FREE BY CONTRACT. Imports only the standard library and dependency-light
-curation helpers; it never imports DataJoint, SpikeInterface, or figpack, and
-opens no database connection at import (mirrors ``_core.selection_identity``).
+Config hashing, default labels, and translation between FigPack's
+``sorting_curation`` state and v2 ``(labels, merge_groups)``. Never imports
+DataJoint, SpikeInterface, or figpack.
 """
 
 from __future__ import annotations
@@ -37,10 +31,8 @@ FIGURE_CONFIG_FILENAME = "spyglass_curation.json"
 def default_label_options() -> list[str]:
     """Return the default FigPack label choices in curation display order.
 
-    The three primary manual labels (``accept`` / ``mua`` / ``noise``) drawn
-    from :class:`CurationLabel`, not the FigURL-era ``"good"``. ``artifact`` /
-    ``reject`` are valid v2 labels but are omitted from the default UI palette;
-    a caller can pass an explicit ``label_options`` to include them.
+    ``accept`` / ``mua`` / ``noise``; pass ``label_options`` to add
+    ``artifact`` or ``reject``.
     """
     return [
         CurationLabel.accept.value,
@@ -62,11 +54,7 @@ def figpack_config_hash(
 ) -> str:
     """Return the sha256 hex digest content-addressing a FigPack UI config.
 
-    Two ``FigPackCurationSelection`` rows are the same configuration iff they
-    target the same curation and request the same label palette, displayed unit
-    table columns, and upload mode. List ORDER is significant (it is the display
-    order), so lists are hashed as-given, not sorted; only the dict keys are
-    sorted for byte-stability.
+    List order is display order, so lists are hashed unsorted.
 
     Parameters
     ----------
@@ -246,11 +234,8 @@ def labels_and_merges_to_annotations(
 ) -> dict:
     """Build a FigPack ``annotations.json`` payload seeding a curation state.
 
-    The inverse of :func:`curation_annotations_to_labels_and_merges`: turns v2's
-    ``{unit_id: [label]}`` labels and ``[[unit_id, ...]]`` merge groups into the
-    ``{"annotations": {"/": {"sorting_curation": "<json>"}}}`` envelope FigPack
-    serves and the curation control reads, so an editable view can open
-    pre-seeded with a curation's existing decisions.
+    Inverse of :func:`curation_annotations_to_labels_and_merges`; returns
+    ``{"annotations": {"/": {"sorting_curation": "<json>"}}}``.
 
     Parameters
     ----------
@@ -290,14 +275,9 @@ def curation_annotations_to_labels_and_merges(
 ) -> tuple[dict, list]:
     """Parse a FigPack ``annotations.json`` payload into ``(labels, merges)``.
 
-    The retrieval half of the curation round trip: reads the
-    ``sorting_curation`` annotation FigPack writes when a user edits and saves a
-    curation, and returns it in the exact shape
-    ``CurationV2.insert_curation(labels=..., merge_groups=...)`` consumes. Unit
-    ids accept integers and integer strings (FigPack stores the ``labelsByUnit``
-    keys as strings); floats and booleans are rejected. A missing/empty payload,
-    a missing ``sorting_curation`` entry, or an empty state all yield
-    ``({}, [])`` rather than raising, so a pristine figure round-trips cleanly.
+    Returns the shape ``CurationV2.insert_curation`` consumes. Unit ids may be
+    integers or integer strings; floats and booleans are rejected. A missing
+    or empty state yields ``({}, [])``.
 
     Parameters
     ----------

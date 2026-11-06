@@ -1,18 +1,7 @@
 """``SortingSelection`` composition with the ``ArtifactDetectionOutput`` merge.
 
-Exercises the seam where a ``SortingSelection`` (recording-source XOR part) links
-an artifact detection through the ``ArtifactDetectionOutput`` merge:
-
-* ``insert_selection`` composition -- the recording-source part and the artifact
-  registration land together in one transaction;
-* lifecycle -- deleting a detection is refused while a sort references it, and a
-  coordinated / cascade delete leaves no dangling ``ArtifactDetectionSource``
-  part;
-* concurrency -- the delete-vs-select advisory lock is fail-closed;
-* merge integrity -- ``get_merge_id`` fails closed on a corrupt registration;
-* an artifact-free ``sorting_id`` is the id of the recording-only payload.
-
-Fast: no sorter and no analyzer are run -- only selections + registrations.
+Covers atomic composition, delete lifecycle, the fail-closed advisory lock,
+and ``get_merge_id`` integrity. No sorter or analyzer runs.
 """
 
 from __future__ import annotations
@@ -36,11 +25,10 @@ _SETUP = {
 
 @pytest.fixture(scope="module")
 def ingested_recording(dj_conn, smoke_nwb):
-    """Ingest the smoke fixture + a Recording + a no-detect artifact detection.
+    """Ingest the smoke fixture, a Recording, and a no-detect artifact detection.
 
-    Module-scoped so the ingest runs once; individual tests build their own
-    cheap ``SortingSelection`` rows on top and clean them up. Yields ``rec_pk``,
-    ``art_pk`` (a populated ``RecordingArtifactDetection``), and ``session``.
+    Yields ``rec_pk``, ``art_pk`` (a populated ``RecordingArtifactDetection``),
+    and ``session``.
     """
     if not _SMOKE.exists():
         pytest.skip(f"smoke MEArec fixture not present ({_SMOKE})")
@@ -98,14 +86,12 @@ def ingested_recording(dj_conn, smoke_nwb):
 def test_insert_selection_composes_xor_and_artifact_atomically(
     ingested_recording,
 ):
-    """One insert_selection lands the recording-source XOR part
-    AND the artifact registration together.
+    """One insert_selection lands the recording-source part and the artifact
+    registration together.
 
-    After a single artifact-backed ``insert_selection`` there is exactly one
-    ``RecordingSource`` part (the recording XOR), no ``ConcatenatedRecordingSource``
-    part, one ``ArtifactDetectionSource`` part carrying an
-    ``artifact_detection_merge_id`` that resolves to the natural artifact id, and
-    the detection is registered once in ``ArtifactDetectionOutput``.
+    There is one ``RecordingSource`` part, no ``ConcatenatedRecordingSource``
+    part, one ``ArtifactDetectionSource`` part whose merge id resolves to the
+    natural artifact id, and one ``ArtifactDetectionOutput`` registration.
     """
     from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -128,7 +114,7 @@ def test_insert_selection_composes_xor_and_artifact_atomically(
             "artifact_detection_merge_id"
         )
         assert len(src) == 1
-        # The part stores the MERGE id, which resolves back to the natural id.
+        # The part stores the merge id, which resolves to the natural id.
         resolved_natural = (
             ArtifactDetectionOutput.resolve_artifact_detection_id(src[0])
         )
@@ -136,7 +122,6 @@ def test_insert_selection_composes_xor_and_artifact_atomically(
         assert str(SortingSelection.resolve_artifact_detection(sort_pk)) == str(
             art_pk["artifact_detection_id"]
         )
-        # The detection is registered exactly once in the merge.
         merge_id = ArtifactDetectionOutput.get_merge_id(
             {"artifact_detection_id": art_pk["artifact_detection_id"]}
         )
@@ -146,15 +131,11 @@ def test_insert_selection_composes_xor_and_artifact_atomically(
 
 
 def test_artifact_output_delete_removes_source_part(ingested_recording):
-    """Deleting the ArtifactDetectionOutput row leaves no
-    dangling ``ArtifactDetectionSource`` part.
+    """Deleting the ArtifactDetectionOutput row leaves no dangling
+    ``ArtifactDetectionSource`` part.
 
-    Builds a SECOND artifact detection (distinct params) + an artifact-backed
-    sort so the shared no-detect fixture is untouched, then deletes the merge row
-    the sort references. The ``ArtifactDetectionSource`` part FK's the merge, so
-    a ``force_masters`` cascade must remove that part -- and, because DataJoint
-    cannot strand a part without its master, the dependent ``SortingSelection``
-    with it. The guarantee under test is that NOTHING is left dangling.
+    The ``force_masters`` cascade removes the part and its ``SortingSelection``
+    master. Uses a second detection so the shared fixture is untouched.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -186,15 +167,11 @@ def test_artifact_output_delete_removes_source_part(ingested_recording):
         assert SortingSelection.ArtifactDetectionSource & sort_pk
         merge_id = ArtifactDetectionOutput.get_merge_id(art2)
 
-        # Delete the merge row the sort's artifact part references.
         (ArtifactDetectionOutput & {"merge_id": merge_id}).super_delete(
             warn=False, force_masters=True
         )
 
-        # The force_masters cascade removes the ArtifactDetectionSource part and,
-        # because a part cannot be stranded without its master, the dependent
-        # SortingSelection (master + its RecordingSource part) too. Nothing is
-        # left dangling.
+        # A part cannot outlive its master, so the SortingSelection goes too.
         assert not (
             SortingSelection.ArtifactDetectionSource & sort_pk
         ), "ArtifactDetectionSource part dangles after ArtifactDetectionOutput delete"
@@ -213,13 +190,8 @@ def test_artifact_output_delete_removes_source_part(ingested_recording):
 def test_artifact_free_sorting_id_matches_recording_only_payload(
     ingested_recording,
 ):
-    """Artifact-free: an artifact-free sort's ``sorting_id`` is the
-    deterministic id of the recording-only payload with ``artifact_detection_id=None``.
-
-    ``_selection_identity`` is byte-stable, so this pins the artifact-free
-    fold: no ArtifactDetectionSource row participates, and the id is not
-    aliased by the merge seam.
-    """
+    """An artifact-free sort's ``sorting_id`` is the deterministic id of the
+    recording-only payload with ``artifact_detection_id=None``."""
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
         sorting_identity_payload,
@@ -252,7 +224,7 @@ def test_artifact_free_sorting_id_matches_recording_only_payload(
 
 
 def _second_detection(rec_pk):
-    """Populate a SECOND ('default'-params) RecordingArtifactDetection."""
+    """Populate a second ('default'-params) RecordingArtifactDetection."""
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         RecordingArtifactDetection,
@@ -272,13 +244,11 @@ def _second_detection(rec_pk):
 
 
 def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
-    """two DIFFERENT sorts on one
-    recording + one artifact detection share a SINGLE merge registration.
+    """Two sorts on one recording and artifact detection share a single merge
+    registration.
 
-    Producer-owned registration means the detection registers itself ONCE at
-    materialization; the two sorts (different sorters) each just resolve that one
-    merge id. There is no per-sort registration and hence no merge-master race:
-    exactly one ArtifactDetectionOutput master backs both sorts.
+    The detection registers itself once at materialization, so there is no
+    per-sort registration race.
     """
     from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -306,7 +276,7 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
                 )
             )
         assert sorts[0]["sorting_id"] != sorts[1]["sorting_id"]
-        # Exactly ONE merge master backs the shared artifact...
+        # One merge master backs the shared artifact...
         assert len(ArtifactDetectionOutput & {"merge_id": merge_id}) == 1
         # ...and both sorts' ArtifactDetectionSource parts point at it.
         for sort_pk in sorts:
@@ -320,13 +290,10 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
 
 
 def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
-    """An artifact-FREE insert_selection is safe under an ambient transaction.
+    """An artifact-free insert_selection is safe under an ambient transaction.
 
-    An artifact-free sort takes no advisory lock and touches no merge, so calling
-    it inside an outer transaction opens no nested transaction and strands no
-    partial rows -- the master and recording source part land together on commit.
-    (An artifact-BOUND selection is refused inside an ambient transaction; see
-    test_insert_selection_rejects_artifact_link_in_ambient_transaction.)
+    It takes no advisory lock and touches no merge, so the master and recording
+    source part land together on commit.
     """
     import datajoint as dj
 
@@ -344,8 +311,7 @@ def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
                     "sorter_params_name": "default",
                 }
             )
-        # After the outer transaction commits, the master + recording part are
-        # present and there is no artifact part.
+        # After commit: master and recording part present, no artifact part.
         assert SortingSelection & sort_pk
         assert SortingSelection.RecordingSource & sort_pk
         assert not (SortingSelection.ArtifactDetectionSource & sort_pk)
@@ -355,8 +321,8 @@ def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
 
 
 def test_delete_detection_refused_when_referenced(ingested_recording):
-    """Deleting an artifact result a
-    sorting references is REFUSED, leaving the detection and sort intact."""
+    """Deleting an artifact result a sorting references is refused, leaving
+    the detection and sort intact."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -378,7 +344,6 @@ def test_delete_detection_refused_when_referenced(ingested_recording):
             ValueError, match="referenced by a SortingSelection"
         ):
             (RecordingArtifactDetection & art).delete(safemode=False)
-        # Nothing was removed.
         assert RecordingArtifactDetection & art
         assert SortingSelection & sort_pk
     finally:
@@ -390,8 +355,8 @@ def test_delete_detection_refused_when_referenced(ingested_recording):
 def test_delete_detection_unreferenced_unregisters_and_removes(
     ingested_recording,
 ):
-    """Deleting an UNREFERENCED artifact result removes it
-    and its ArtifactDetectionOutput registration together."""
+    """Deleting an unreferenced artifact result removes it and its
+    ArtifactDetectionOutput registration together."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -401,13 +366,12 @@ def test_delete_detection_unreferenced_unregisters_and_removes(
     rec_pk = ingested_recording["rec_pk"]
     art = _second_detection(rec_pk)
     art_key = {"artifact_detection_id": art["artifact_detection_id"]}
-    # Registered at materialization (producer-owned).
+    # Registered at materialization.
     merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
     assert ArtifactDetectionOutput & {"merge_id": merge_id}
     try:
         (RecordingArtifactDetection & art).delete(safemode=False)
-        # Both the detection and its merge registration are gone; get_merge_id
-        # now reports it as unregistered.
+        # Detection and registration are gone; get_merge_id reports unregistered.
         assert not (RecordingArtifactDetection & art)
         assert not (ArtifactDetectionOutput & {"merge_id": merge_id})
         with pytest.raises(KeyError):
@@ -417,8 +381,8 @@ def test_delete_detection_unreferenced_unregisters_and_removes(
 
 
 def test_cascade_delete_removes_referencing_sorts(ingested_recording):
-    """cascade_delete removes the artifact result, its
-    registration, AND every sorting that referenced it."""
+    """cascade_delete removes the artifact result, its registration, and every
+    sorting that referenced it."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -452,13 +416,8 @@ def test_cascade_delete_removes_referencing_sorts(ingested_recording):
 def test_insert_selection_lazily_registers_unregistered_detection(
     ingested_recording,
 ):
-    """insert_selection re-registers a
-    materialized-but-unregistered detection before linking it.
-
-    Producer-owned registration means a populated detection is normally already
-    in the merge, so this drops ONLY the ArtifactDetectionOutput registration
-    (keeping the RecordingArtifactDetection row) to reach insert_selection's lazy
-    register-if-absent fallback, then asserts the sort links through it."""
+    """insert_selection re-registers a materialized but unregistered detection
+    before linking it."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -467,11 +426,10 @@ def test_insert_selection_lazily_registers_unregistered_detection(
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_pk = ingested_recording["rec_pk"]
-    art = _second_detection(rec_pk)  # populated -> producer-owned registered
+    art = _second_detection(rec_pk)  # registered at populate
     art_key = {"artifact_detection_id": art["artifact_detection_id"]}
     merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-    # Drop ONLY the merge registration (force_masters removes its source part);
-    # the RecordingArtifactDetection row survives -> get_merge_id now KeyErrors.
+    # Drop only the merge registration; the detection row survives.
     (ArtifactDetectionOutput & {"merge_id": merge_id}).super_delete(
         warn=False, force_masters=True
     )
@@ -507,15 +465,8 @@ def test_insert_selection_lazily_registers_unregistered_detection(
 def test_delete_and_insert_lock_the_same_detection_key(
     ingested_recording, monkeypatch
 ):
-    """Serialization wiring: both insert_selection and
-    the detection delete take the advisory lock keyed on the SAME
-    (ArtifactDetectionOutput, artifact_detection_id).
-
-    A true two-connection race test is a flaky anti-pattern; instead this pins
-    that the two sides contend on ONE lock -- the mechanism that closes the
-    delete-vs-select race -- so a refactor that drops the lock on either side is
-    caught deterministically.
-    """
+    """insert_selection and the detection delete take the advisory lock keyed
+    on the same (ArtifactDetectionOutput, artifact_detection_id)."""
     import contextlib
 
     import spyglass.spikesorting.v2._core.db_locking as db_locking
@@ -585,15 +536,8 @@ def test_delete_and_insert_lock_the_same_detection_key(
 def test_required_lock_failure_aborts_insert_and_delete(
     ingested_recording, monkeypatch
 ):
-    """Fail-closed: when the advisory lock CANNOT be acquired (it raises
-    ``AdvisoryLockError``), neither ``insert_selection`` nor the detection delete
-    mutates the database.
-
-    The wiring test proves both paths CALL the lock; this proves a FAILED
-    acquisition STOPS the operation -- the property that makes "fail-closed" real
-    rather than a label. Simulated by patching the lock to raise, the same way a
-    ``GET_LOCK`` timeout/error surfaces from ``required_advisory_lock``.
-    """
+    """When the advisory lock raises ``AdvisoryLockError``, neither
+    ``insert_selection`` nor the detection delete mutates the database."""
     import spyglass.spikesorting.v2._core.db_locking as db_locking
     from spyglass.spikesorting.v2._core.db_locking import AdvisoryLockError
     from spyglass.spikesorting.v2.artifact import (
@@ -622,7 +566,7 @@ def test_required_lock_failure_aborts_insert_and_delete(
     try:
         monkeypatch.setattr(db_locking, "required_advisory_lock", boom)
 
-        # insert_selection aborts before its transaction -> writes NOTHING.
+        # insert_selection aborts before its transaction and writes nothing.
         with pytest.raises(AdvisoryLockError):
             SortingSelection.insert_selection(sel)
         assert (
@@ -633,7 +577,7 @@ def test_required_lock_failure_aborts_insert_and_delete(
             & {"artifact_detection_merge_id": merge_id}
         ), "insert_selection linked a sort despite a failed lock"
 
-        # delete of the (still unreferenced) detection aborts -> removes NOTHING.
+        # Delete of the unreferenced detection aborts and removes nothing.
         with pytest.raises(AdvisoryLockError):
             (RecordingArtifactDetection & art).delete(safemode=False)
         assert RecordingArtifactDetection & art
@@ -650,18 +594,12 @@ def test_required_lock_failure_aborts_insert_and_delete(
 
 
 def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
-    """Deterministic (no sleeps) proof the exclusion is REAL: while a SEPARATE DB
-    session holds the detection's named lock, ``insert_selection`` and the
-    detection delete both time out and raise ``AdvisoryLockError`` -- a waiting
-    operation cannot slip past a concurrently-held lock. Once the lock is
-    released, both paths acquire it: the blocked ``insert_selection`` commits
-    (creating a referrer), and the delete path then behaves correctly under the
-    now-free lock -- an ordinary delete is refused (referrer present) while
-    ``cascade_delete`` acquires and removes the detection with its sort.
+    """A lock held by a separate DB session blocks insert_selection and delete.
 
-    MySQL named locks are reentrant WITHIN a session, so a same-session check
-    could pass while the lock is a no-op; only an independent second connection
-    that must block proves the serialization actually excludes.
+    Both raise ``AdvisoryLockError`` while the lock is held. After release,
+    insert_selection commits, an ordinary delete is refused, and
+    ``cascade_delete`` removes the detection with its sort. A second
+    connection is needed because MySQL named locks are reentrant per session.
     """
     import datajoint as dj
 
@@ -677,8 +615,7 @@ def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
     from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # Shorten the lifecycle timeout so a blocked acquire fails in ~1s, not 120.
-    # Read at call time inside required_advisory_lock, so the patch takes effect.
+    # Blocked acquire fails in ~1 s (the timeout is read at call time).
     monkeypatch.setattr(db_locking, "LIFECYCLE_LOCK_TIMEOUT_S", 1)
 
     rec_pk = ingested_recording["rec_pk"]
@@ -711,17 +648,14 @@ def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
             SortingSelection.insert_selection(sel)
         with pytest.raises(AdvisoryLockError):
             (RecordingArtifactDetection & art).delete(safemode=False)
-        # The detection survived (its delete never ran past the lock).
+        # The detection survived.
         assert RecordingArtifactDetection & art
 
-        # Release the lock -> the previously-blocked operations acquire it.
-        # The blocked insert_selection commits, creating a referrer.
+        # After release, insert_selection commits and creates a referrer.
         conn_b.query("SELECT RELEASE_LOCK(%s)", args=(lock_name,))
         sort_pk = SortingSelection.insert_selection(sel)
         assert SortingSelection & sort_pk
-        # The delete path acquires the now-free lock too: an ordinary delete
-        # sees the fresh referrer and is REFUSED, while cascade_delete acquires
-        # and removes the detection together with its sort.
+        # Ordinary delete is refused; cascade_delete removes detection and sort.
         with pytest.raises(
             ValueError, match="referenced by a SortingSelection"
         ):
@@ -778,9 +712,8 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
     """``get_merge_id`` raises ``KeyError`` for an unregistered id but
     ``SchemaBypassError`` for a corrupt >1-row registration.
 
-    The distinction is load-bearing: callers catch ``KeyError`` to mean "no
-    existing selection", so collapsing the corrupt case into ``KeyError`` would
-    silently swallow a duplicate registration.
+    Callers treat ``KeyError`` as "no existing selection", so a corrupt
+    registration must not raise it.
     """
     import uuid
 
@@ -791,7 +724,6 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
     )
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
-    # Unregistered id -> KeyError.
     with pytest.raises(KeyError):
         ArtifactDetectionOutput.get_merge_id(
             {"artifact_detection_id": uuid.uuid4()}
@@ -836,16 +768,8 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
 
 
 def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
-    """``get_merge_id`` raises ``SchemaBypassError`` when one id is registered in
-    BOTH source parts -- the cross-part case, distinct from a same-part double.
-
-    Resolution trusts that a detection id lives in exactly one source part. A raw
-    double-insert that puts the same id in ``RecordingSource`` AND
-    ``SharedGroupSource`` is corruption; scanning only the first part would
-    silently resolve to whichever is scanned first, so ``get_merge_id`` must scan
-    both and fail closed. This is the exact condition the same-part corruption
-    test does NOT construct.
-    """
+    """``get_merge_id`` raises ``SchemaBypassError`` when one id is registered
+    in both ``RecordingSource`` and ``SharedGroupSource``."""
     import uuid
 
     import datajoint as dj
@@ -861,8 +785,8 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        # Same artifact_detection_id registered in DIFFERENT source parts, each
-        # under its own merge master (only reachable via a raw insert).
+        # Same id in different source parts, each under its own master (raw
+        # insert only).
         dj.Table.insert(
             ArtifactDetectionOutput(),
             [
@@ -903,15 +827,10 @@ def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
     ingested_recording,
 ):
     """An artifact-bound insert_selection inside a caller-owned transaction is
-    REFUSED, and writes nothing.
+    refused and writes nothing.
 
-    The delete-vs-select advisory lock would be released when insert_selection
-    returns -- before the caller commits -- so it could not serialize a
-    concurrent artifact deletion against the uncommitted selection (and a
-    force_masters detection delete could then consume the sort). So the call
-    fails fast instead of linking the artifact unsafely. An artifact-FREE
-    selection in a transaction is unaffected (see
-    test_insert_selection_safe_inside_outer_transaction).
+    The advisory lock would be released before the caller commits, so it could
+    not serialize a concurrent artifact deletion.
     """
     import datajoint as dj
 
@@ -938,7 +857,7 @@ def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
                 SortingSelection.insert_selection(sel)
         finally:
             conn.cancel_transaction()
-        # The fail-fast fires before any insert, so nothing is written.
+        # Fails before any insert.
         assert len(SortingSelection()) == n_before
     finally:
         (RecordingArtifactDetection & art).cascade_delete(safemode=False)
@@ -946,11 +865,8 @@ def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
 
 
 def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
-    """The ``SortingSelection.ArtifactDetectionSource -> ArtifactDetectionOutput``
-    foreign key rejects a row referencing a non-existent merge -- a database-level
-    integrity net so no committed sort can ever carry an artifact link to a
-    missing/deleted detection, independent of the advisory lock.
-    """
+    """The ``ArtifactDetectionSource -> ArtifactDetectionOutput`` foreign key
+    rejects a row referencing a non-existent merge."""
     import uuid
 
     import datajoint as dj
@@ -958,7 +874,7 @@ def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_pk = ingested_recording["rec_pk"]
-    # An artifact-FREE master to hang a bogus artifact part on.
+    # An artifact-free master to hang a bogus artifact part on.
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],

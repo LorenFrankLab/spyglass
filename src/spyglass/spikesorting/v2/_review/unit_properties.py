@@ -1,19 +1,9 @@
 """Shape a review's official unit properties for SpikeInterface's unit table.
 
-A profile-backed browser review shows its **selected evaluation's** metrics,
-annotation-set columns and label / merge proposals in the same selectable
-``UnitsTable`` that drives unit selection for the curation control (so a
-metric-bearing row IS the unit being curated). SpikeInterface's
-unit-table builder takes those columns as
-one-dimensional NumPy arrays aligned to the analyzer's unit order and accepts
-only integer / unsigned / float / bool / string dtypes -- object arrays
-(including ordinary pandas string columns) are silently dropped with a
-warning. This module performs that alignment and dtype normalization while
-keeping an unavailable value unavailable: numeric gaps stay NaN (SI renders
-them as an empty cell), string gaps stay ``""``, and a boolean column with a
-gap is rendered as text so a missing annotation never becomes ``False``.
-
-DB-free: NumPy + pandas only.
+SI's unit-table builder needs 1-D arrays in analyzer unit order and drops
+object dtypes (including pandas strings), so columns are normalized here.
+Gaps stay unavailable: NaN for numbers, ``""`` for strings, and an incomplete
+boolean column becomes text so a gap never reads ``False``.
 """
 
 from __future__ import annotations

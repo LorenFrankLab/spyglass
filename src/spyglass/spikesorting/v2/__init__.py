@@ -1,15 +1,10 @@
-"""Modern SpikeInterface-based spike sorting pipeline for Spyglass.
+"""SpikeInterface ``SortingAnalyzer``-based spike sorting pipeline for Spyglass.
 
-This package targets the SpikeInterface ``SortingAnalyzer`` API. Table and
-helper modules are imported lazily by callers rather than re-exported here, so
-``import spyglass.spikesorting.v2`` stays free of optional runtime
-dependencies (Pydantic, modern SpikeInterface) until a submodule is used.
+Submodules load lazily, so ``import spyglass.spikesorting.v2`` does not import
+Pydantic or SpikeInterface. Eager names:
 
-The eager symbols are kept dependency-light: ``initialize_v2_defaults``
-installs every default Lookup row the pipeline needs in one call (removing the
-"forgot to call ``insert_default``" first-run friction), and ``CurationLabel``
-is re-exported from the stdlib-only ``_core.enums`` module so notebook users can
-discover the canonical label set without importing a table module.
+- ``initialize_v2_defaults``: installs every default Lookup row in one call.
+- ``CurationLabel``: the canonical curation label set.
 """
 
 from importlib import import_module
@@ -32,12 +27,10 @@ def initialize_v2_defaults() -> None:
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
     ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
-    ``AutoCurationRules``, ``MatcherParameters``, the shipped
-    ``CurationReviewProfile``, and ``MotionCorrectionParameters`` (with the
-    estimation and interpolation recipes it names) -- each accepts
-    duplicate-row noise -- so a notebook user can run one helper instead of
-    remembering the per-table calls before the first ``run_v2_pipeline`` /
-    cross-session match or browser review. Idempotent.
+    ``AutoCurationRules``, ``MatcherParameters``, ``CurationReviewProfile``,
+    and ``MotionCorrectionParameters`` (with the estimation and interpolation
+    recipes it names), then adds the v2 unit-selection policies. Idempotent.
+    Warns when a stored default row differs from the shipped content.
 
     Examples
     --------
@@ -67,19 +60,15 @@ def initialize_v2_defaults() -> None:
     MatcherParameters.insert_default()
     CurationReviewProfile.insert_default()
     MotionCorrectionParameters.insert_default()
-    # Downstream unit-selection policies for the v2 handoff (additive rows in
-    # the shared UnitSelectionParams table; production rows untouched).
+    # Additive rows in the shared UnitSelectionParams table.
     from spyglass.spikesorting.v2.analysis_selection import (
         ensure_v2_unit_selection_policies,
     )
 
     ensure_v2_unit_selection_policies()
 
-    # ``insert_default`` skips existing-PK rows, so a stored same-name default
-    # whose content has diverged from the shipped content (e.g. a hand-edited
-    # blob) is NOT reseeded and goes unnoticed. Audit for that here and WARN
-    # (non-strict) -- an admin can run
-    # ``verify_v2_default_catalog(strict=True)`` to fail hard.
+    # insert_default skips existing keys, so a diverged stored default is
+    # never reseeded; warn about it here.
     from spyglass.spikesorting.v2._orchestration.reporting import (
         verify_v2_default_catalog,
     )
@@ -97,13 +86,7 @@ def initialize_v2_defaults() -> None:
         )
 
 
-# Primary orchestration entrypoints re-exported lazily from the ``.pipeline``
-# facade so ``from spyglass.spikesorting.v2 import run_v2_pipeline`` works from
-# the same package root where ``initialize_v2_defaults`` already lives -- a
-# newcomer should not have to learn the ``.pipeline`` submodule split. These are
-# resolved on first access (not at package import), so a bare
-# ``import spyglass.spikesorting.v2`` stays dependency-light: the DataJoint /
-# Pydantic / SpikeInterface layers load only when an entrypoint is actually used.
+# Entrypoints re-exported lazily from ``.pipeline``, resolved on first access.
 _PIPELINE_REEXPORTS = PACKAGE_ROOT_REEXPORTS
 
 
@@ -116,15 +99,11 @@ __all__ = [
 
 
 def __dir__():
-    # Surface the lazily re-exported names to tab-completion / ``dir()``; the
-    # module globals alone would hide them behind ``__getattr__``.
+    # Expose lazy re-exports to tab-completion.
     return sorted({*globals(), *__all__})
 
 
 def __getattr__(name):
-    # Lazily re-export ``verify_v2_default_catalog`` from the reporting module so
-    # ``from spyglass.spikesorting.v2 import verify_v2_default_catalog`` works
-    # without importing the DataJoint reporting layer at package import.
     if name == "verify_v2_default_catalog":
         from spyglass.spikesorting.v2._orchestration.reporting import (
             verify_v2_default_catalog,

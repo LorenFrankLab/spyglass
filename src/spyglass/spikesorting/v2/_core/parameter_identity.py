@@ -1,24 +1,10 @@
 """Content fingerprints for v2 parameter-Lookup rows.
 
-A *parameter fingerprint* identifies a ``PreprocessingParameters`` /
-``ArtifactDetectionParameters`` / ``SorterParameters`` row by its CONTENT --
-the table, the sorter context (for ``SorterParameters``), the schema
-version, the validated ``params`` blob, and the per-row ``job_kwargs`` --
-with the row NAME deliberately excluded. Two rows with identical content
-under different names therefore share a fingerprint; that collision is the
-signal the duplicate-content guard and ``describe_parameter_rows`` use.
+A fingerprint identifies a parameter row by its content, excluding the row
+name, so two names for the same content collide. Selection identity
+(:mod:`_core.selection_identity`) hashes the names instead.
 
-This is parameter *content* identity, distinct from the selection *logical*
-identity in :mod:`_core.selection_identity` (which hashes a selection's logical
-inputs -- including parameter-row *names* -- into a primary-key UUID). The
-fingerprint hashes the blob the name points at; the selection identity
-hashes the name. They are intentionally separate concerns.
-
-DB-FREE BY CONTRACT. Like :mod:`_core.selection_identity`, this module imports
-neither DataJoint nor SpikeInterface and opens no database connection at
-import. Keep it to the standard library (plus the stdlib-only
-:mod:`_core.selection_identity`) so a spawned HPC worker that re-imports it never
-triggers a connection.
+Stdlib-only so a spawned worker that re-imports it opens no DB connection.
 """
 
 from __future__ import annotations
@@ -31,15 +17,8 @@ _SHORT_FINGERPRINT_LENGTH = 12
 def _normalize_numbers(value):
     """Collapse int-valued floats to ints so ``9`` and ``9.0`` canonicalize alike.
 
-    Recurses through dicts and lists. The ``extra="allow"`` sorter schemas
-    (Kilosort4, SpykingCircus2, Tridesclous2, generic) pass user keys through
-    uncoerced, so a blob may carry ``60000`` under one name and ``60000.0``
-    under another for identical science. ``json.dumps`` renders those
-    differently, which would fork the
-    content fingerprint and defeat the duplicate-content guard. ``bool`` is
-    left untouched (``True`` and ``1`` are distinct JSON types and distinct
-    intent), and non-integer / NaN / Inf floats (``is_integer()`` is False for
-    all of them) pass through so ``allow_nan=False`` can still reject NaN/Inf.
+    ``extra="allow"`` sorter schemas pass user keys through uncoerced. Bools
+    and NaN/Inf pass through unchanged.
     """
     if isinstance(value, bool):
         return value
@@ -65,52 +44,40 @@ def parameter_fingerprint(
 ) -> str:
     """Return a SHA-256 content fingerprint for a parameter row.
 
-    The row NAME is excluded, so two rows whose blobs are identical (same
-    table, sorter, schema version, ``params``, ``job_kwargs``, and -- for
-    ``SorterParameters`` -- ``execution_params``) produce the same fingerprint
-    regardless of what they are called.
+    The row name is excluded.
 
     Parameters
     ----------
     table : str
         The Lookup table the row belongs to (e.g.
-        ``"PreprocessingParameters"``). Part of the identity so a blob that
-        is coincidentally identical across two tables does not collide.
+        ``"PreprocessingParameters"``).
     params : dict
         The schema-validated ``params`` blob.
     params_schema_version : int
-        The row's ``params_schema_version``. A blob means something
-        different under a different schema version, so it is part of the
-        identity. Never bumped to force a new fingerprint -- it is an input
-        only.
+        The row's ``params_schema_version``.
     job_kwargs : dict or None, optional
-        The per-row ``job_kwargs`` blob (concurrency settings). Two rows
-        with the same ``params`` but different ``job_kwargs`` are not
-        duplicates.
+        The per-row ``job_kwargs`` blob.
     sorter : str or None, optional
-        For ``SorterParameters`` rows, the ``sorter`` the params validate
-        against, so duplicate detection is scoped per sorter. ``None`` for
-        the single-key Lookup tables.
+        For ``SorterParameters`` rows, the ``sorter``; ``None`` elsewhere.
     matcher : str or None, optional
-        For ``MatcherParameters`` rows, the ``matcher`` the params dispatch to,
-        so duplicate detection is scoped per matcher (two matchers with
-        identical ``params`` are not duplicates). ``None`` elsewhere.
+        For ``MatcherParameters`` rows, the ``matcher``; ``None`` elsewhere.
     execution_params : dict or None, optional
-        For ``SorterParameters`` rows, the validated ``execution_params`` blob
-        (container backend + install provenance). Included in the identity so a
-        local and a containerized row with identical scientific ``params`` are
-        NOT duplicates and can coexist under different names. ``None`` (the
-        default) omits it entirely, keeping the single-key Lookup tables'
-        fingerprints unchanged.
+        For ``SorterParameters`` rows, the validated ``execution_params`` blob,
+        so local and containerized rows are distinct. ``None`` omits it.
     execution_params_schema_version : int or None, optional
-        The row's ``execution_params_schema_version``; only meaningful (and only
-        folded into the identity) when ``execution_params`` is provided.
+        Used only when ``execution_params`` is given.
 
     Returns
     -------
     str
-        The 64-character lowercase hex SHA-256 digest of the canonical
-        content. Use :func:`short_fingerprint` for a display-length prefix.
+        The 64-character lowercase hex SHA-256 digest.
+
+    Raises
+    ------
+    ValueError
+        If the payload contains NaN or Inf.
+    TypeError
+        If the payload is not JSON-encodable.
     """
     payload = {
         "table": table,
@@ -119,35 +86,18 @@ def parameter_fingerprint(
         "params": params,
         "job_kwargs": job_kwargs,
     }
-    # Fold the matcher dispatch key in ONLY for MatcherParameters rows, so two
-    # matcher rows with coincidentally-identical ``params`` but different
-    # ``matcher`` (e.g. a future deepunitmatch vs unitmatch) are NOT duplicates --
-    # they dispatch different code. Omitting the key elsewhere keeps the other
-    # Lookups' fingerprints unchanged.
+    # Optional keys are omitted when unset so other tables' fingerprints are
+    # stable.
     if matcher is not None:
         payload["matcher"] = matcher
-    # Fold execution provenance in ONLY for the tables that carry it
-    # (SorterParameters). Omitting the key for the single-key Lookups keeps
-    # their fingerprints byte-identical to the pre-execution-params behavior.
     if execution_params is not None:
         payload["execution_params"] = execution_params
         payload["execution_params_schema_version"] = int(
             execution_params_schema_version
         )
-    # The ``params`` blob is assumed already schema-validated (JSON-native
-    # scalars, lists, and nested dicts). Numbers are normalized so ``60000``
-    # and ``60000.0`` in two ``extra="allow"`` blobs fingerprint alike.
-    # ``allow_nan=False`` makes a NaN/Inf value raise ``ValueError`` rather
-    # than emit the invalid-JSON tokens ``NaN``/``Infinity``; a value
-    # ``json.dumps`` cannot encode raises ``TypeError`` rather than being
-    # silently coerced.
     return sha256_json(_normalize_numbers(payload), allow_nan=False)
 
 
 def short_fingerprint(fingerprint: str) -> str:
-    """Return the leading ``_SHORT_FINGERPRINT_LENGTH`` characters of a digest.
-
-    A display-friendly prefix for catalogs and error messages; the full
-    digest stays available for exact comparison.
-    """
+    """Return a display-length prefix of a digest."""
     return fingerprint[:_SHORT_FINGERPRINT_LENGTH]

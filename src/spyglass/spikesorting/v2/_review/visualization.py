@@ -1,34 +1,16 @@
-"""DB-free routing/registry helpers for the v2 visualization facade.
+"""DB-free registry and extension policy for the v2 visualization facade.
 
-The ``@schema`` ``visualization`` facade delegates the dependency-free pieces
-here so the registry, the per-widget required-extension policy, the
-missing-extension error wording, and the Spyglass-owned metric plot stay
-importable and unit-testable without a DataJoint connection or a real
-SortingAnalyzer.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: ``pandas`` is dependency-light and ``matplotlib`` /
-SpikeInterface are imported lazily inside the functions that need them. The
-facade (``visualization.py``) owns the key -> recording / analyzer /
-metric-table resolution that does need the schema classes.
-
-The single load-bearing routing invariant is enforced by the table layer, not
-here: visualization/export helpers read the UNWHITENED display analyzer (real
-waveforms / locations / templates) or the saved preprocessed recording, never
-the whitened metric analyzer. This module only encodes which display-safe
-extensions each SpikeInterface widget needs and how to phrase the read-only
-error when they are absent.
+The facade (``visualization.py``) resolves keys and guarantees helpers read
+the unwhitened display analyzer, never the whitened metric analyzer.
+matplotlib and SpikeInterface are imported lazily.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-# Display-safe extensions each SpikeInterface display widget reads beyond the
-# sort-time base set (``random_spikes`` / ``noise_levels`` / ``templates`` /
-# ``waveforms``), pinned against SI 0.104.3 widget behavior. ``principal_components``
-# is deliberately absent from every list: it is the whitened metric-only
-# extension and must never be computed from a display-only visualization path.
+# Extensions each widget reads beyond the base set (SI 0.104.3). Never
+# ``principal_components``, which belongs to the whitened metric analyzer.
 DISPLAY_WIDGET_EXTENSIONS = {
     "plot_sorting_summary": (
         "correlograms",
@@ -43,22 +25,14 @@ DISPLAY_WIDGET_EXTENSIONS = {
     "plot_suggested_merges": ("spike_amplitudes", "correlograms"),
 }
 
-# SI-native metric widgets read these analyzer extensions directly. They are
-# NOT the official Spyglass routed metric table -- the default missing-extension
-# error points users to ``plot_metrics`` instead.
+# Raw SI extensions, not the routed metric table (see ``plot_metrics``).
 SI_METRIC_WIDGET_EXTENSIONS = {
     "plot_si_quality_metrics": ("quality_metrics",),
     "plot_si_template_metrics": ("template_metrics",),
 }
 
-# SI ``export_report`` unconditionally computes ``unit_locations`` when absent
-# (mutating the on-disk display analyzer), so it is the one extension the
-# read-only (``compute_missing=False``) path must require present. The wider
-# set is exactly the display-safe extensions SI's ``export_report`` actually
-# renders (``spike_amplitudes`` distributions, ``correlograms`` in the per-unit
-# summaries, ``unit_locations`` maps), so ``compute_missing=True`` precomputes
-# only those -- a richer report renders with no SI-side mutation, and nothing
-# unread is computed onto the display analyzer.
+# ``export_report`` computes ``unit_locations`` itself (mutating the analyzer),
+# so read-only mode requires it. ``compute_missing=True`` adds what it renders.
 REPORT_REQUIRED_EXTENSIONS = ("unit_locations",)
 REPORT_DISPLAY_EXTENSIONS = (
     "spike_amplitudes",
@@ -67,11 +41,7 @@ REPORT_DISPLAY_EXTENSIONS = (
 )
 
 
-# One row per visualization/export helper: the discovery surface returned by
-# ``available_visualizations()``. (The ``recording_key_for_sorting`` key resolver
-# is a public facade convenience but not a visualization, so it is not catalogued
-# here.) ``compute_missing`` records whether the helper accepts the explicit
-# opt-in to compute display-safe extensions it is missing.
+# Returned by ``available_visualizations()``.
 _REGISTRY: tuple[dict, ...] = (
     {
         "name": "plot_recording_traces",
@@ -206,22 +176,14 @@ _REGISTRY_COLUMNS = (
 def available_visualizations() -> pd.DataFrame:
     """Return the discoverable catalog of v2 visualization/export helpers.
 
-    Documentation-as-code: one row per ``ssviz`` visualization/export helper
-    (the ``recording_key_for_sorting`` key resolver is a public convenience but
-    not a visualization, so it is intentionally not catalogued here), listing a
-    one-line ``description``, the DataJoint key type it accepts (``recording`` /
-    ``sorting`` / ``curation_evaluation``), the underlying implementation target (a
-    SpikeInterface widget/exporter or the Spyglass-routed
-    ``CurationEvaluation.get_metrics`` table), the default plotting backend
-    (``None`` for the exporters, which take no backend), and whether the helper
-    can compute missing display-safe extensions via an explicit
-    ``compute_missing=True`` opt-in.
-
     Returns
     -------
     pandas.DataFrame
-        One row per helper, columns ``name``, ``key_type``, ``implementation``,
-        ``backend_default``, ``compute_missing``, ``description``.
+        One row per ``ssviz`` helper, columns ``name``, ``key_type``
+        (``recording`` / ``curation`` / ``curation_evaluation``),
+        ``implementation``, ``backend_default`` (``None`` for exporters),
+        ``compute_missing`` (accepts ``compute_missing=True``),
+        ``description``.
     """
     return pd.DataFrame(list(_REGISTRY), columns=list(_REGISTRY_COLUMNS))
 
@@ -229,9 +191,7 @@ def available_visualizations() -> pd.DataFrame:
 def missing_extensions(analyzer, required_extensions) -> list[str]:
     """Return the requested extensions not already present on ``analyzer``.
 
-    Pure: operates on a SortingAnalyzer-like object exposing
-    ``has_extension(name)``; no DB access, no compute. Preserves the input
-    order so the error message and any subsequent compute list are stable.
+    Preserves input order.
     """
     return [
         name for name in required_extensions if not analyzer.has_extension(name)
@@ -245,14 +205,8 @@ def format_missing_extension_error(
 ) -> str:
     """Phrase the read-only missing-extension error.
 
-    Names the absent display-safe extensions and the ``compute_missing=True``
-    opt-in, which computes them on the analyzer the plot actually reads (a
-    committed merged curation has its own analyzer, so adding extensions to
-    the raw sort would not satisfy the next call). When ``recommend_metrics``
-    is set (the SI-native metric widgets), it also points back to the
-    official Spyglass ``plot_metrics`` overview, since the SI quality /
-    template-metric widgets read analyzer extensions directly rather than
-    the routed Spyglass metric table.
+    ``recommend_metrics`` (SI-native metric widgets) also points to
+    ``plot_metrics``.
     """
     missing_list = list(missing)
     lines = [
@@ -274,14 +228,8 @@ def format_missing_extension_error(
 def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     """Render the Spyglass-routed quality-metric table as a histogram grid.
 
-    A Spyglass-owned plot of exactly what ``CurationEvaluation.get_metrics()``
-    persists -- the configured SpikeInterface quality metrics plus the surfaced
-    waveform-shape (template) columns (``trough_half_width`` by default) -- so
-    the displayed values are the routed metric provenance, not a re-derivation
-    off a raw analyzer extension. One histogram per numeric column; non-finite
-    values (the ``None`` sanitized non-finite readback) are coerced to NaN and
-    dropped per-column. A zero-unit / empty table returns a labeled empty
-    figure rather than raising.
+    One histogram per numeric column, non-finite values dropped. An empty
+    table returns a labeled empty figure.
 
     Parameters
     ----------

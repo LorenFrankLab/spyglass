@@ -2,9 +2,9 @@
 
 Each day is one polymer-shank session (one NWB, the Frank-lab daily shape)
 cut into two member intervals separated by an acquisition gap, with a manual
-artifact exclusion inside one member. The same 24 neurons -- identical
-templates at identical locations (``planted_polymer_recordings``) -- are
-planted on both days, each firing on its own Poisson train per day:
+artifact exclusion inside one member. The same 24 neurons (identical
+templates at identical locations, ``planted_polymer_recordings``) are planted
+on both days, each firing on its own Poisson train per day:
 
 - 21 ``shared`` neurons fire in both members of both days;
 - one ``partial`` neuron fires on both days, but on day 1 only in member 1;
@@ -245,7 +245,7 @@ def planted_trains(day: DaySpec) -> list[np.ndarray]:
 def expected_member_frames(day: DaySpec) -> dict[int, list[np.ndarray]]:
     """The spikes a sorter of ``day``'s masked concatenation returns.
 
-    ``{unit_id: [session-clock frames in member 0, in member 1]}`` -- the
+    ``{unit_id: [session-clock frames in member 0, in member 1]}``: the
     planted frames of each present neuron outside the exclusion.
     """
     trains = planted_trains(day)

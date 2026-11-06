@@ -1,30 +1,11 @@
-"""Static dependency-contract checks for the v2 stack.
+"""Static checks that pyproject, conda env files and the ``pytest-legacy`` CI
+job declare consistent dependency pins (no DB, no SpikeInterface import).
 
-These are pure-text checks (no DB, no SpikeInterface import): they parse
-``pyproject.toml``, every conda environment file, and the ``pytest-legacy`` CI
-job and assert the declared pins agree with each other. The one exception is
-the ripple-detection floor, which also imports ``ripple_detection`` to check
-the declared pin against the names the code actually uses.
-
-Three coupled invariants live here:
-
-1. The base ``numpy`` requirement floors at 1.26 so the numpy<2 pipelines
-   still install, while the ``spikesorting-v2`` and
-   ``spikesorting-v2-matching`` extras carry the ``>=2,<3`` baseline the SI
-   0.104 stack needs, ``scipy`` is declared directly rather than pulled in
-   transitively, and the v2 conda env's SpikeInterface spec matches the
-   ``pyproject`` hard pin. A bare ``numpy`` or a drifting SI range silently
-   shifts the resolved stack.
-2. The legacy (v0/v1) lane resolves the SI-0.99 stack by **sed-rewriting**
-   the committed SpikeInterface and probeinterface dependency strings in an
-   ephemeral checkout (``.github/workflows/test-conda.yml`` ``pytest-legacy``
-   job and the local ``environment_spikesorting_legacy.yml`` doc), while
-   ``numpy<2`` is pinned by that env file itself. If the committed pin text
-   changes, those seds silently no-op and the legacy env resolves the 0.104
-   line instead, so the sed source patterns must keep matching the current
-   committed strings.
-3. Every conda environment either declares the modern SciPy >=1.13 contract
-   or documents the complete legacy pre-install pin-relaxation recipe.
+- numpy floors at 1.26 in base; the v2 extras pin ``>=2,<3``; the v2 env's SI
+  spec matches the pyproject pin.
+- The legacy lane sed-rewrites the committed SI/probeinterface strings, so
+  the sed patterns must match them.
+- Every conda env declares SciPy >=1.13 or documents the legacy recipe.
 """
 
 import re
@@ -118,9 +99,8 @@ def test_v2_runtime_extras_declare_reentrant_analyzer_locks():
 
 
 def test_base_numpy_floor_allows_numpy_1x():
-    """The base numpy floor admits the 1.x line the numpy<2 pipelines
-    (DeepLabCut, keypoint-moseq 0.6) need, while keeping the upper bound
-    that holds the resolver off a future numpy 3."""
+    """The base numpy floor admits 1.x (DeepLabCut, keypoint-moseq 0.6) and
+    the upper bound excludes numpy 3."""
     numpy = _base_requirements()["numpy"].specifier
     assert numpy.contains("1.26.4"), (
         f"base numpy is pinned {str(numpy)!r}; it must admit numpy 1.x so "
@@ -190,8 +170,8 @@ def test_spikeinterface_hard_pin_matches_v2_env():
 
 def test_legacy_sed_targets_present():
     """The legacy recipes rewrite exactly the SpikeInterface and
-    probeinterface strings pyproject commits, and nothing about numpy --
-    the legacy env file pins numpy<2 itself."""
+    probeinterface strings pyproject commits, and nothing about numpy (the
+    legacy env file pins numpy<2 itself)."""
     pyproject = PYPROJECT.read_text()
     recipes = {path: path.read_text() for path in (CONDA_CI, LEGACY_ENV)}
 
@@ -216,12 +196,8 @@ def test_legacy_sed_targets_present():
 def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
     """Every environment makes its SciPy/runtime generation explicit.
 
-    Modern Spyglass installs need SciPy >=1.13 alongside the NumPy 2 / SI 0.104
-    package contract. The one deliberate exception is the SI-0.99 legacy
-    environment, whose header must carry the exact pre-install pin-relaxation
-    recipe *and* whose dependency lists must actually pin ``numpy<2``; a stale
-    ``scipy<1.13`` line without that recipe is not sufficient, and neither is a
-    header sentence that merely mentions the numpy pin.
+    Modern envs need SciPy >=1.13. The SI-0.99 legacy env must carry the
+    pre-install pin-relaxation recipe and pin ``numpy<2`` in a dependency list.
     """
     modern_scipy = re.compile(
         r'^\s*-\s*["\']?scipy>=1\.13(?:["\']|\s|$)', re.MULTILINE
@@ -250,14 +226,8 @@ def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
 def test_pyproject_carries_no_si099_dependency_caps():
     """pyproject may not cap a dependency below what its own numpy pin needs.
 
-    The ``spikesorting-v2`` extra pins ``numpy>=2`` for the SI 0.104 stack,
-    and the conda environments pin ``scipy>=1.13`` to match. A ``scipy<1.13``
-    or ``jax<0.7.2`` cap in the base dependencies (both SI-0.99 compatibility
-    bounds) contradicts that: every scipy release capping numpy below 2 is
-    excluded, so the resolver falls back to pre-numpy-2 ancients instead of
-    failing loudly. The conda-env contract test above cannot catch it -- it
-    reads only ``environments/*.yml``, so pyproject can disagree with every
-    one of them while that test stays green.
+    A ``scipy<1.13`` or ``jax<0.7.2`` cap (SI-0.99 bounds) conflicts with
+    ``numpy>=2`` and makes the resolver fall back to old releases silently.
     """
     requirements = _base_requirements()
     numpy = _extra_requirements("spikesorting-v2")["numpy"].specifier
@@ -283,13 +253,8 @@ def test_ripple_detection_floor_covers_normalization_api():
 
     ``src/spyglass/mua/v1/_detection.py`` imports ``normalize_signal`` and
     ``_validate_normalization_params`` from ``ripple_detection.core`` and
-    ``_get_event_stats`` from ``ripple_detection.detectors``. The 1.6 line
-    has neither core name, and its ``multiunit_HSE_detector`` takes no
-    ``normalization_method`` / ``normalization_mask`` /
-    ``normalization_time_range``. Both halves are asserted here so the
-    declared floor and the imported names drift together: if a future
-    release moves one of these names, this fails next to the pin that has
-    to move with it.
+    ``_get_event_stats`` from ``ripple_detection.detectors``; the 1.6 line
+    lacks them.
     """
     from ripple_detection import core, detectors
 

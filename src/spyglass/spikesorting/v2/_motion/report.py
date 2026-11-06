@@ -1,24 +1,11 @@
 """Summary and figure of one saved motion estimate, from its stored arrays.
 
-``motion_report_summary`` condenses a ``MotionEstimate`` row (and optionally
-the ``MotionCorrectedRecording`` made from it) into a dict: displacement size,
-time range, kept peaks per continuity span with the spans that kept none,
-the masked fraction, every gap / member join with its capped length, and the
-contacts the displacement moves past the probe's ends. ``plot_motion_report``
-draws the same inputs as one matplotlib figure. ``MotionEstimate.report``
-fetches the inputs; nothing here reads the database or a file.
+``MotionEstimate.report`` fetches the inputs; nothing here reads the database
+or a file. matplotlib is imported inside the plotting function.
 
-A continuity span that kept no peak is corrected from the estimator's
-temporal prior alone; both the summary and the figure name such spans.
-
-Times are on the source's own acquisition clock (s). Inside continuity span
-``i`` a frame ``s`` is placed at ``t_i + (s - a_i) / fs * r_i``, the affine
-map :func:`._motion.displacement_on_source_clock` uses for the temporal bins
-(``r_i``, :func:`._motion.span_scales`, scales the span's nominal duration
-onto its real extent); the
-timestamps' own jitter inside a span is not shown.
-
-DB-FREE AT IMPORT. matplotlib is imported inside the plotting function.
+Times are source-clock seconds. Inside continuity span ``i``, frame ``s`` sits
+at ``t_i + (s - a_i) / fs * r_i`` (``r_i`` from :func:`._motion.span_scales`);
+timestamp jitter within a span is not shown.
 """
 
 from __future__ import annotations
@@ -727,9 +714,9 @@ def plot_motion_report(
 
     Panels (each axes' ``get_label()`` in brackets):
 
-    - (a) ``[displacement]``: displacement over source time -- a heatmap over
-      depth for a nonrigid estimate, one line for a rigid one; each span is
-      drawn on its own, so gaps stay empty.
+    - (a) ``[displacement]``: displacement over source time, a heatmap over
+      depth (nonrigid) or one line (rigid); spans are drawn separately so
+      gaps stay empty.
     - (b) ``[timeline]``: masked intervals, acquisition gaps and member joins
       (capped gaps hatched and labeled), and the spans without evidence, on
       the same time axis as (a).

@@ -1,11 +1,8 @@
 """Parity: shipped ``_DEFAULT_CONTENTS`` rows match the production recipes.
 
-Each test compares a shipped parameter-row blob against an INDEPENDENT
-hand-written constant in :mod:`_recipe_constants` (not the Pydantic factory
-that built the row), so a schema-default drift that silently changes a
-shipped recipe is caught. Schema modules connect on import, so the imports
-are lazy and the tests are marked ``database`` -- but no fixture or populate
-runs, so they are fast.
+Constants in :mod:`_recipe_constants` are hand-written so schema-default
+drift is caught. Schema modules connect on import, hence lazy imports and
+the ``database`` mark; nothing is populated.
 """
 
 from __future__ import annotations
@@ -24,10 +21,7 @@ def _catalog_by_name(default_contents, name_index=0, params_index=1):
 def test_region_preproc_recipes_match_production(dj_conn):
     """Hippocampus/cortex preproc rows equal the production recipes.
 
-    Region rule: 600 Hz high-pass for hippocampus, 300 Hz for cortex; both
-    6000 Hz low-pass and 1.5 ms min-segment. The high-pass is the preproc
-    ``bandpass_filter`` (the sorter runs ``filter=False``), so the region band
-    is the only difference between the two recipes.
+    The high-pass (600 vs 300 Hz) is the only difference.
     """
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
@@ -54,9 +48,7 @@ def test_region_preproc_recipes_match_production(dj_conn):
 def test_production_artifact_recipes_match(dj_conn):
     """The 100/50 uV @0.7 artifact rows match the production recipes.
 
-    The shipped ``"default"`` row is v2's schema-default 500 uV value, NOT a
-    production recipe; it stays named ``"default"`` (the franklab presets use
-    the 100 uV production row instead) and is asserted unchanged here.
+    The ``"default"`` row keeps the 500 uV schema default.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
 
@@ -81,10 +73,8 @@ def test_production_artifact_recipes_match(dj_conn):
 def test_ms4_rate_keyed_recipes_match(dj_conn):
     """The rate-keyed MS4 rows match the recipes and are region-agnostic.
 
-    ``filter=False`` (the preproc stage filters, not the sorter) is the
-    load-bearing fact: the only difference between the 30 kHz and 20 kHz rows
-    is the rate window (``clip_size`` / ``detect_interval``), with no region
-    or probe-type encoding on the sorter row.
+    With ``filter=False`` the rows differ only in ``clip_size`` /
+    ``detect_interval``.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -102,18 +92,13 @@ def test_ms4_rate_keyed_recipes_match(dj_conn):
     assert ms4_30["adjacency_radius"] == 100.0
     assert (ms4_30["clip_size"], ms4_30["detect_interval"]) == (40, 10)
     assert (ms4_20["clip_size"], ms4_20["detect_interval"]) == (27, 7)
-    # Region-agnostic: the two rate rows differ ONLY by the rate window.
     diff = {k for k in ms4_30 if ms4_30[k] != ms4_20[k]}
     assert diff == {"clip_size", "detect_interval"}
 
 
 @pytest.mark.database
 def test_presets_reference_shipped_rows(dj_conn):
-    """Every pipeline preset references param rows that actually ship.
-
-    This is the invariant a successful preflight depends on -- a preset must
-    not point at a Lookup row that ``insert_default`` does not create.
-    """
+    """Every pipeline preset references param rows that actually ship."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
@@ -211,14 +196,8 @@ def test_default_pipeline_preset_is_native_hippocampus_ms4(dj_conn):
 def test_neuropixels_ks4_recipe_matches_aind(dj_conn):
     """The KS4 Neuropixels row matches the AIND capsule recipe + whitens once.
 
-    The shipped ``franklab_neuropixels_default`` (kilosort4) row mirrors the
-    AIND ``aind-ephys-spikesort-kilosort4`` ``params.json``: its only
-    scientifically-meaningful deviation from stock KS4 is non-rigid drift
-    correction (``nblocks=5`` vs stock ``1``), and it pins the whitening /
-    preprocessing config explicitly. Critically it carries NO ``whiten`` key:
-    v2's external float64 whitening only runs when the sorter params hold
-    ``whiten=True`` on MountainSort 4/5 (``_sorting/dispatch.py``), and KS4
-    rejects the key, so the signal is whitened exactly once -- by KS4.
+    Mirrors AIND's ``aind-ephys-spikesort-kilosort4`` ``params.json``
+    (``nblocks=5``). No ``whiten`` key, so only KS4 whitens.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -239,8 +218,6 @@ def test_neuropixels_ks4_recipe_matches_aind(dj_conn):
     assert params["Th_universal"] == 9.0
     assert params["Th_learned"] == 8.0
 
-    # Whitening-correctness guard: no ``whiten`` key -> v2 does not externally
-    # whiten -> KS4 whitens exactly once.
     assert "whiten" not in params
 
 
@@ -256,8 +233,7 @@ def test_neuropixels_ks4_preset_wiring(dj_conn):
     assert preset.artifact_detection_params_name == "none"
     assert preset.recommendation_status == "experimental"
     assert preset.sampling_rate_hz == 30000
-    # The notes must flag the single-whitening guarantee and the reference
-    # caveat so a user does not double common-reference before KS4.
+    # Notes warn against double common-referencing before KS4.
     assert "whiten" in preset.notes.lower()
     assert "reference_mode" in preset.notes
 
@@ -266,13 +242,8 @@ def test_neuropixels_ks4_preset_wiring(dj_conn):
 def test_shipped_auto_curation_rules_tolerate_low_spike_nan(dj_conn):
     """A legitimately-NaN metric must not abort the shipped rule sets.
 
-    ``franklab_default`` computes ``nn_noise_overlap`` with ``min_spikes: 10``,
-    so a unit with fewer than 10 spikes yields NaN by design (see the
-    ``sanitize_for_json`` docstring). Under the fail-fast ``error`` policy that
-    aborts ``CurationEvaluation`` -- and therefore
-    ``run_v2_pipeline(auto_curate=True)`` -- for the entire sort. Every shipped
-    rule must instead carry an explicit non-error policy, and must leave the
-    unassessable unit unlabelled, matching v1's ``compare(NaN, threshold)``.
+    ``nn_noise_overlap`` is NaN below ``min_spikes: 10``. Every shipped rule
+    needs a non-error NaN policy and leaves the unit unlabelled, as v1 does.
     """
     import numpy as np
     import pandas as pd

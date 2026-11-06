@@ -1,19 +1,15 @@
 """Preprocessed recording materialization for spike sorting.
 
 Tables:
-    SortGroupV2          -- per-session electrode grouping.
-    PreprocessingParameters -- Pydantic-validated preprocessing blob.
-    RecordingSelection   -- one row per (raw, sort group, interval, params).
-    Recording            -- materialized preprocessed recording (NWB-resident).
-    DriftEstimate        -- per-Recording probe-motion QC estimate (never
-                            applied to the traces; populated on demand).
+    SortGroupV2: per-session electrode grouping.
+    PreprocessingParameters: Pydantic-validated preprocessing blob.
+    RecordingSelection: one row per (raw, sort group, interval, params).
+    Recording: materialized preprocessed recording (NWB-resident).
+    DriftEstimate: per-Recording probe-motion QC estimate (never applied to
+        the traces; populated on demand).
 
-``insert1`` on the Lookup tables Pydantic-validates the ``params`` blob.
-``SortGroupV2.set_group_by_*`` constructors,
-``RecordingSelection.insert_selection``, and ``Recording.make`` /
-``get_recording`` are the entry points. The recording write applies bandpass
-filtering + common-reference referencing (no whitening; that is deferred
-to the sort stage so motion correction never sees whitened data).
+The recording applies bandpass filtering and referencing. Whitening happens
+at the sort stage so motion correction never sees whitened data.
 """
 
 from __future__ import annotations
@@ -91,12 +87,9 @@ schema = dj.schema("spikesorting_v2_recording")
 class DeletionPreview(NamedTuple):
     """Read-only summary of what ``SortGroupV2.set_group_by_*`` would delete.
 
-    Returned by :meth:`SortGroupV2.preview_existing_entries`. The
-    ``set_group_by_*`` helpers do not return it -- when called with
-    ``delete_existing_entries=True, confirm=False`` they embed the same
-    preview in the ``ValueError`` they raise. Wraps the dry-run output of
-    ``SpyglassMixin.cautious_delete`` so callers can inspect cascade impact
-    before committing to a destructive overwrite.
+    Returned by :meth:`SortGroupV2.preview_existing_entries`. With
+    ``delete_existing_entries=True, confirm=False`` the ``set_group_by_*``
+    helpers embed the same preview in the ``ValueError`` they raise.
 
     Attributes
     ----------
@@ -115,11 +108,8 @@ class DeletionPreview(NamedTuple):
     cross_team_downstream
         Tuple of per-team dicts (``team_name``, ``recording_selection_rows``,
         ``sorting_rows``, ``curation_rows``) enumerating the downstream rows
-        each team owns that this overwrite would cascade-delete. Sort groups in
-        one session can belong to different teams, so an overwrite can delete
-        *another* team's downstream rows; this surfaces that blast radius. It
-        does not block (in v2, ``team_name`` is a provenance tag, not
-        access enforcement) -- the operator reviews it before confirming.
+        each team owns that this overwrite would cascade-delete. Informational
+        only: ``team_name`` is a provenance tag, not access enforcement.
     """
 
     nwb_file_name: str
@@ -188,18 +178,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     enumerates the Electrode FKs that make up the group.
 
     Public constructors:
-        ``set_group_by_shank``                    -- shank-based grouping.
-        ``set_group_by_electrode_table_column``   -- arbitrary-column grouping.
+        ``set_group_by_shank``: shank-based grouping.
+        ``set_group_by_electrode_table_column``: arbitrary-column grouping.
 
-    Both honor an inspect-before-destroy contract: by default they
-    refuse to overwrite existing sort groups for a session. Callers
-    must either supply non-overlapping ``sort_group_ids`` or opt in
-    explicitly to a cautious delete via
-    ``delete_existing_entries=True, confirm=True`` (after reviewing
-    the ``DeletionPreview``). This prevents a rerun of
-    ``set_group_by_shank`` from silently dropping and re-creating sort
-    groups, which would cascade deletes through every downstream Sorting
-    and Curation row without warning.
+    Both refuse to overwrite a session's existing sort groups unless called
+    with non-overlapping ``sort_group_ids`` or with
+    ``delete_existing_entries=True, confirm=True`` (after reviewing the
+    ``DeletionPreview``), since the delete cascades to downstream rows.
     """
 
     definition = """
@@ -209,13 +194,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     reference_mode = 'none': varchar(32)
     reference_electrode_id = null: int
     """
-    # ``reference_mode`` is validated against the ``ReferenceMode`` Literal
-    # in ``insert`` (varchar, not a MySQL enum -- the mode set
-    # may grow; see ``ReferenceMode``). ``reference_electrode_id`` is
-    # non-null iff ``reference_mode == 'specific'``. v1's ``SortGroup``
-    # instead stores a single ``sort_reference_electrode_id`` int whose magic
-    # sentinels (-1 none, -2 global median, >=0 specific) conflate mode with
-    # channel id.
+    # reference_mode: varchar validated against ReferenceMode in insert, so
+    #   the mode set can grow without a schema change.
+    # reference_electrode_id: non-null iff reference_mode == 'specific'.
 
     class SortGroupElectrode(SpyglassMixinPart):
         """Electrodes belonging to one sort group."""
@@ -228,12 +209,13 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         def insert(self, rows, **kwargs):
             """Insert members, rejecting the group's own 'specific' reference.
 
-            The reference electrode is subtracted then dropped from the
-            recording, so a reference that is also a member would silently sort
-            one channel short. Recording.make already rejects this via
-            assert_reference_not_member; catch it here, at group construction
-            (the manual-insert path -- set_group_by_shank enforces it too),
-            instead of deferring to a late, opaque populate failure.
+            The reference is subtracted then dropped from the recording, so a
+            member reference would silently sort one channel short.
+
+            Raises
+            ------
+            ValueError
+                If a group's 'specific' reference electrode is in ``rows``.
             """
             rows = [dict(r) for r in rows]
             self._assert_no_reference_member(rows)
@@ -283,19 +265,18 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         super().insert(rows, **kwargs)
 
     def update1(self, row):
-        """Validate the MERGED reference state before an in-place edit.
+        """Validate the merged reference state before an in-place edit.
 
-        A reference change is ALLOWED: it mints a distinct recording via the
-        ``recording_input_hash`` folded into ``recording_id``, and re-populating
-        an old ``recording_id`` raises ``RecordingInputDriftError`` rather than
-        serving stale bytes. But the RESULTING state must stay valid: validate the merged
-        (current row + update payload) reference fields, and for a final
-        ``'specific'`` mode reject a reference electrode that is also a group
-        member. ``insert1`` and the part table enforce these at insert; without
-        this override an ``update1`` could persist an invalid ``reference_mode``,
-        a missing/stale ``reference_electrode_id``, or a ``'specific'`` reference
-        that is a member -- state the hash would then content-address and that
-        would only fail late in ``Recording.make_fetch``.
+        Reference changes are allowed: they change ``recording_id`` via the
+        input hash. The merged (current row + ``row``) reference fields must
+        pass the same checks as ``insert``, and a ``'specific'`` reference
+        must not be a group member.
+
+        Raises
+        ------
+        ValueError
+            If the merged reference fields are invalid or the ``'specific'``
+            reference is a group member.
         """
         row = dict(row)
         pk = {k: row[k] for k in self.primary_key}
@@ -420,18 +401,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             and no override resolves them; if a resolved ``"specific"``
             reference electrode does not exist in the session (or its owning
             electrode group is ambiguous); or if it is itself a member of the
-            sort group it would reference (it would be subtracted then dropped,
-            silently shrinking the group -- use ``omit_ref_electrode_group`` or
+            sort group it would reference (use ``omit_ref_electrode_group`` or
             a cross-group reference instead).
         """
-        # Reference resolution inputs. Three mutually-constrained paths:
-        #   * default (references is None, reference_mode is None): auto-derive
-        #     each group's reference from its members' configured
-        #     original_reference_electrode.
-        #   * references mapping: per-group explicit reference id / sentinel,
-        #     keyed by electrode_group_name.
-        #   * call-wide override (reference_mode[/reference_electrode_id]):
-        #     force one mode on every group this call creates.
         if references is not None and reference_mode is not None:
             raise ValueError(
                 "set_group_by_shank: pass either a per-group `references` "
@@ -444,9 +416,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             hint_suffix=", or use a `references` mapping",
         )
 
-        # The reference electrode itself may be a bad channel (and so absent
-        # from the filtered set below); keep the full electrode set so
-        # omit_ref_electrode_group can still find which group it belongs to.
+        # Keep bad channels: the reference electrode may be one.
         all_electrodes = (
             Electrode() & {"nwb_file_name": nwb_file_name}
         ).fetch()
@@ -476,10 +446,6 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             override_pair=override_pair,
         )
 
-        # Pick sort_group_ids. Auto-allocation is only safe on a fresh
-        # session; on rerun the caller must opt in via explicit
-        # sort_group_ids or delete_existing_entries=True (enforced in
-        # ``_recording.sort_groups_insert.handle_existing``).
         explicit_sort_group_ids = sort_group_ids is not None
         if sort_group_ids is None:
             sort_group_ids = _sort_group_insert.next_sort_group_ids(
@@ -520,9 +486,6 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         master_rows, part_rows = _build_sort_group_rows(nwb_file_name, plans)
         cls._insert_sort_group_rows(master_rows, part_rows)
 
-        # Surface the skips as a consolidated summary (not only buried
-        # per-group warnings) and return them so a caller can inspect
-        # what was dropped rather than silently trusting "success".
         if skipped:
             logger.warning(
                 f"set_group_by_shank: created {len(proposed)} sort "
@@ -548,19 +511,11 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
     ) -> list[dict]:
         """Group electrodes by any column on the Electrode table.
 
-        Generalizes ``set_group_by_shank`` for labs whose grouping is
-        keyed off non-shank metadata (e.g. Berke Lab grouping by
-        ``intan_channel_number``). Each entry in ``value_groups`` is a list
-        of values to match against ``electrode_column``; electrodes matching any
-        value in a sublist form one sort group.
+        Electrodes matching any value in one ``value_groups`` sublist form
+        one sort group (e.g. grouping by ``intan_channel_number``).
 
-        Like ``set_group_by_shank``, referencing is resolved **per sort
-        group**: by default each group inherits its members' configured
-        reference (``Electrode.original_reference_electrode``), mapped to a
-        ``reference_mode`` via the sentinels (``-1`` / ``None``
-        -> ``"none"``, ``-2`` -> ``"global_median"``, ``>= 0`` ->
-        ``"specific"``). A per-group ``references`` mapping is intentionally
-        **not** offered here (unlike ``set_group_by_shank``); use the call-wide
+        Referencing is resolved per sort group as in ``set_group_by_shank``.
+        There is no per-group ``references`` mapping; use the call-wide
         ``reference_mode`` override or build per-group rows manually.
 
         Parameters
@@ -615,9 +570,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 f"set_group_by_electrode_table_column: no electrodes "
                 f"found for {nwb_file_name!r}."
             )
-        # Keep the FULL set (before bad-channel filtering) so a resolved
-        # "specific" reference is validated against every session electrode --
-        # a valid reference may itself be a bad channel.
+        # Keep bad channels: the reference electrode may be one.
         all_electrodes = electrodes
 
         column_aliases = {"index", "id", "idx", "electrode_id"}
@@ -703,14 +656,9 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
     @classmethod
     def _insert_sort_group_rows(cls, master_rows, part_rows) -> None:
-        """Insert SortGroupV2 master + SortGroupElectrode part rows.
+        """Insert master and part rows in one transaction.
 
-        Wrap master + part inserts in one transaction so a part-insert
-        failure (e.g., FK violation on a stale Electrode row) rolls back
-        the master rows too. ``_safe_context()`` is a no-op when the
-        caller is already inside a transaction (populate cascade,
-        post-cautious_delete state), avoiding the nested-transaction error
-        DataJoint would otherwise raise.
+        ``_safe_context()`` is a no-op inside an existing transaction.
         """
         with cls._safe_context():
             cls.insert(master_rows)
@@ -721,11 +669,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """Phase-shift + bandpass + bad-channel + reference parameters.
 
-    Whitening is NOT a recording-stage parameter: MS4/MS5 whiten via their
-    ``SorterParameters`` row and the metric analyzer via
-    ``AnalyzerWaveformParameters``. The ``params`` blob is validated by
-    :class:`PreprocessingParamsSchema`.
-    ``insert_default`` bulk-inserts the v2 default presets.
+    Validated by :class:`PreprocessingParamsSchema`. Whitening is set in
+    ``SorterParameters`` and ``AnalyzerWaveformParameters`` instead.
     """
 
     definition = f"""
@@ -736,12 +681,7 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     job_kwargs=null: blob
     """
 
-    # Row-level ``params_schema_version`` must equal the inner
-    # ``PreprocessingParamsSchema.schema_version``. The DataJoint
-    # column default tracks the schema version so a custom row that omits
-    # the column is tagged with the current schema version, not a
-    # mismatched one. The shipped rows are defined in
-    # ``_core.recipe_catalog.preprocessing_default_contents`` (single source).
+    # params_schema_version must equal PreprocessingParamsSchema.schema_version.
     _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
@@ -751,9 +691,6 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         guard (a second name for an existing blob); see
         ``reject_duplicate_parameter_content``.
         """
-        # Validate every row (incl. ``insert_default``'s positional
-        # ``_DEFAULT_CONTENTS``) so a bulk insert can't bypass schema
-        # validation or the params_schema_version drift check.
         _insert_parameter_rows(
             self,
             rows,
@@ -778,16 +715,9 @@ def resolve_recording_input_hash(
 ) -> str:
     """Resolve + content-address a recording's live construction inputs.
 
-    Reads the SAME live inputs ``Recording.make_fetch`` builds the recording
-    from -- the sort group's electrode membership and reference, and (on the
-    ``interpolate`` bad-channel path) the resolved interior bad-channel set --
-    and returns their :func:`recording_input_hash`. Shared by
-    ``RecordingSelection.insert_selection`` and ``preflight_v2_pipeline`` so both
-    derive the identical ``recording_id``. ``make_fetch`` re-reads the same
-    inputs through ``_recording.fetch.resolve_recording_inputs`` to reject a
-    drift; a divergence would mint an id ``make_fetch`` then rejects as a false
-    drift, which ``test_recording_input_hash_matches_make_fetch`` guards
-    against.
+    Hashes the inputs ``Recording.make_fetch`` builds from: the sort group's
+    electrodes and reference, plus the interior bad-channel set on the
+    ``interpolate`` path. ``make_fetch`` recomputes it to detect drift.
 
     Parameters
     ----------
@@ -814,10 +744,7 @@ def resolve_recording_input_hash(
 class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     """One row per (raw, sort group, interval, preprocessing params, team).
 
-    UUID-keyed so downstream FKs (``Recording``, ``SortingSelection``)
-    are single-column. ``insert_selection`` follows the v2 find-existing-
-    or-insert convention: it always returns a single PK-only dict, whether
-    the row already existed or was just inserted.
+    UUID-keyed so downstream FKs are single-column.
     """
 
     definition = """
@@ -835,24 +762,9 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     def insert_selection(cls, key: dict) -> dict:
         """Find-existing-or-insert; returns a single PK-only dict.
 
-        The logical identity of a ``RecordingSelection`` row is its full
-        FK set (Raw, SortGroupV2, IntervalList, PreprocessingParameters,
-        LabTeam); the UUID PK is content-addressed -- derived client-side
-        from that identity (see step 1) so the same selection always maps
-        to the same ``recording_id`` -- and is what the downstream pipeline
-        keys off. The helper:
-
-        1. Derives a deterministic ``recording_id`` from the logical
-           identity (the non-UUID FK fields) so the same selection always
-           maps to the same UUID.
-        2. Returns the matching PK if the row already exists.
-        3. Inserts a new row keyed by the deterministic UUID otherwise; if
-           a concurrent caller wins the race, the duplicate-PK insert is
-           caught and the existing row is returned.
-        4. Raises ``DuplicateSelectionError`` if ANY existing row for this
-           logical identity has a non-deterministic ``recording_id`` (a raw
-           ``dj.insert`` bypass) -- even a single one -- an integrity bug, not
-           user error.
+        ``recording_id`` is a deterministic UUID derived from the FK set
+        (Raw, SortGroupV2, IntervalList, PreprocessingParameters, LabTeam).
+        A concurrent insert of the same row returns the existing row.
 
         Parameters
         ----------
@@ -864,8 +776,15 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Returns
         -------
         dict
-            ``{"recording_id": <uuid>}`` -- never a list, never the full
-            row.
+            ``{"recording_id": <uuid>}``.
+
+        Raises
+        ------
+        ValueError
+            If ``key`` supplies a non-deterministic ``recording_id``.
+        DuplicateSelectionError
+            If an existing row for this identity has a non-deterministic
+            ``recording_id`` (a raw ``insert`` bypass).
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             recording_identity_payload,
@@ -877,12 +796,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             _ensure_lookup_row_exists,
         )
 
-        # Validate the FK set up front (clean errors before any DB read).
         identity = recording_identity_payload(key)
-        # Translate a missing PreprocessingParameters row into the curated
-        # "insert_default()" message BEFORE resolving the input hash: the
-        # resolver fetch1's that row's params, so a missing row would otherwise
-        # surface as a raw empty-fetch error and mask this actionable message.
+        # Before the hash: the resolver's fetch1 would mask this message.
         _ensure_lookup_row_exists(
             PreprocessingParameters,
             {
@@ -893,15 +808,12 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             helper_name="RecordingSelection.insert_selection",
             insert_default_path="PreprocessingParameters.insert_default()",
         )
-        # Resolve the content-addressed input hash from the live sort-group
-        # inputs (membership + reference + interpolate bad-channels) so a changed
-        # input set mints a new recording_id rather than aliasing this one.
+        # Changed inputs mint a new recording_id.
         input_hash = resolve_recording_input_hash(
             identity["nwb_file_name"],
             identity["sort_group_id"],
             identity["preprocessing_params_name"],
         )
-        # Pure half: derive the deterministic recording_id and shape the row.
         plan = build_recording_selection_plan(
             key, recording_input_hash=input_hash
         )
@@ -917,8 +829,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             # allow_direct_insert: this helper IS the validation boundary.
             cls.insert1(new_key, allow_direct_insert=True)
         except dj.errors.DuplicateError:
-            # Lost a concurrent race: another caller inserted the same
-            # deterministic recording_id first. Refetch and return it.
+            # Lost a concurrent race for the same deterministic id.
             logger.debug(
                 "RecordingSelection.insert_selection: lost deterministic-id "
                 "race on %s; returning the existing row.",
@@ -938,19 +849,11 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     ) -> dict | None:
         """Return the canonical PK for this logical selection, or None.
 
-        Looks up rows by the logical-identity (non-UUID) fields and splits
-        them by primary key:
-
-        * the row at ``deterministic_id`` is the canonical, content-
-          addressed selection -> return ``{"recording_id": ...}``;
-        * ANY row with a different ``recording_id`` is non-deterministic
-          (a raw ``insert`` bypass) and violates the
-          content-addressed-identity invariant -> raise
-          ``DuplicateSelectionError`` so it is reset rather than silently
-          returned or ``[0]``-indexed.
-
-        Used by ``insert_selection`` for both the pre-insert lookup and
-        the post-duplicate-key refetch.
+        Raises
+        ------
+        DuplicateSelectionError
+            If any row for this identity has a ``recording_id`` other than
+            ``deterministic_id`` (a raw ``insert`` bypass).
         """
         from spyglass.spikesorting.v2._core.selection_identity import (
             existing_selection_pk,
@@ -977,44 +880,11 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
 
-    The preprocessed ``ElectricalSeries`` lives inside an
-    ``AnalysisNwbfile`` (the canonical artifact). No binary sidecar -- the
-    in-NWB ``ElectricalSeries`` is the sole cached artifact.
-
-    ``make()`` loads the raw NWB and prepares the recording in this order:
-
-    1. select the sort group's channels (``select_sort_group_channels``);
-    2. reduce the 3D contact positions to the plane that keeps every
-       contact distinct (``normalize_channel_locations``) -- before any
-       probe exists, since a probe freezes the locations;
-    3. ``apply_temporal_preprocessing`` (phase shift, bandpass) on the
-       CONTINUOUS source, so each filter's margin is drawn from real
-       neighboring samples;
-    4. restrict to the requested interval (``restrict_recording``) -- after
-       filtering, so an interval edge is signal rather than filter transient;
-    5. ``apply_spatial_preprocessing`` (bad-channel interpolation or
-       removal, then referencing) -- per-sample across channels, so the
-       interval joins cannot affect it;
-    6. ``maybe_apply_tetrode_geometry``, which places every four-channel
-       ``tetrode_12.5`` group on the fixed 12.5 um square (replacing the
-       stored positions, as v1 does);
-    7. ``assert_unique_contact_positions``, so the EFFECTIVE geometry -- what
-       SpikeInterface will build a probe from -- is checked last: distinct
-       positions, and a plane rather than still-3D locations (a dropped
-       ``specific`` reference channel can leave the group unnormalized), so
-       the compute fails here rather than inside the write.
-
-    Whitening is deferred to the sorter for the sorters that need it. It then
-    streams one ``ElectricalSeries`` into a fresh
-    ``AnalysisNwbfile``, validates the saved timestamp range covers the
-    requested ``IntervalList.valid_times``, and records a representation-blind
-    content fingerprint of the persisted file (``content_hash``; see
-    ``_recording.fingerprint``) so a content-identical rebuild can be
-    verified. The populate body is split into ``make_fetch`` /
-    ``make_compute`` / ``make_insert`` so the long-running write does
-    not hold a DB transaction. ``get_recording`` exposes the cached
-    artifact and rebuilds on disk if missing, without deleting the
-    DataJoint row.
+    ``make`` selects the sort group's channels, filters the continuous
+    source, restricts to the interval, then interpolates or removes bad
+    channels and references. It writes one ``ElectricalSeries`` and records
+    a ``content_hash`` fingerprint so a rebuild can be verified.
+    ``get_recording`` rebuilds a missing file without deleting the row.
     """
 
     definition = """
@@ -1029,19 +899,13 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     content_hash: char(64)
     """
 
-    # ``_parallel_make = True`` lets Spyglass's ``PopulateMixin`` populate in
-    # parallel via a non-daemon process pool. The inherited generator
-    # ``AutoPopulate.make`` is left in place so DataJoint routes through the
-    # tri-part ``make_fetch`` / ``make_compute`` / ``make_insert`` methods.
     _parallel_make = True
 
     def make_fetch(self, key):
         """Read every DB input the compute step needs (no SI / NWB I/O).
 
-        The returned value is suitable for DataJoint's tri-part dispatch
-        contract: deterministic byte representations across two
-        successive fetches so the framework's DeepHash integrity
-        check inside the transaction does not raise.
+        Output must hash identically across fetches for DataJoint's
+        tri-part integrity check.
 
         Parameters
         ----------
@@ -1073,13 +937,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> RecordingComputed:
         """Run the preprocessing + streaming write outside any DB transaction.
 
-        The long write (often many minutes) holds no DB lock. Reads only the
-        inputs ``make_fetch`` resolved (the raw NWB path included); the one
-        DB access left is staging the output file (see
-        :mod:`._storage.nwb`). The preprocessing and write are shared with
-        ``_rebuild_nwb_artifact`` via ``_compute_recording_artifact``; this
-        method adds the over-request warning and the save expectation that
-        ``make_insert`` checks.
+        Uses only ``make_fetch`` inputs; the one DB access is staging the
+        output file. Warns when the interval extends past raw coverage.
 
         Parameters
         ----------
@@ -1146,13 +1005,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ),
         )
 
-        # The duration we INTENDED to save: the sort interval intersected
-        # with the raw valid times AND filtered by ``min_segment_length`` --
-        # the SAME filtering ``restrict_recording`` applies to build the
-        # recording. The pure duration / over-request arithmetic (compared
-        # against the saved duration by the ``make_insert`` truncation guard,
-        # so intentionally-dropped slivers are not mis-flagged) lives in
-        # ``compute_recording_save_expectation``.
+        # Same filtering as restrict_recording, so dropped slivers are not
+        # flagged as truncation.
         intended_intervals = intended_save_intervals(
             sort_valid_times,
             raw_valid_times,
@@ -1164,15 +1018,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             preprocessing_params.min_segment_length,
         )
 
-        # A sort interval that runs PAST the raw recording's coverage is clipped
-        # to what exists (the intersect above) rather than erroring -- but the
-        # clip must be surfaced, not silent (#1585). ``over_request`` is the
-        # min_segment_length-filtered REQUEST minus the raw-clipped expectation;
-        # inter-segment gaps and sub-min_segment slivers cancel out (excluded
-        # from both sides), so it fires only on a genuine request-past-coverage.
-        # ``make_insert`` still raises RecordingTruncatedError for TRUE
-        # truncation (saved < expectation, i.e. dropped packets), which this
-        # warning does not mask.
+        # Request past raw coverage is clipped with a warning; true truncation
+        # still raises in make_insert.
         if expectation.over_request > 1.5 / artifact.sampling_frequency:
             logger.warning(
                 f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
@@ -1216,23 +1063,12 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ):
         """Run the truncation check and atomically register the artifact.
 
-        The check compares the saved duration with the intended one (the
-        sort interval intersected with the raw valid times, after
-        ``min_segment_length`` filtering), so it fires on dropped packets or
-        interval misalignment; a request past the raw coverage was already
-        clipped with a warning in ``make_compute``. Tolerance is
-        ``(n_intended_intervals + 1.5)`` sample intervals: the +1.5 covers
-        the off-by-one NWB boundary (``last_ts = (N-1)/fs``, not ``N/fs``),
-        and the per-interval term absorbs the independent sample-grid
-        snapping of each consolidated interval, which otherwise accumulates
-        across disjoint epochs and spuriously trips a fixed 1.5-sample slack.
-
-        The ``_safe_context()`` wrap is a no-op inside ``populate()``'s
-        transaction and keeps the ``AnalysisNwbfile`` registration and the
-        row insert atomic on a direct call. Removing a failed attempt's
-        staged file (a truncation refusal included) is
-        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
-        call leaves that to its caller.
+        Compares the saved duration with the intended one (sort interval
+        intersected with raw valid times, after ``min_segment_length``
+        filtering). Tolerance is ``n_intended_intervals + 1.5`` samples:
+        1.5 for the NWB end boundary (``last_ts = (N-1)/fs``) plus one per
+        interval for independent sample-grid snapping. A direct call (outside
+        ``populate``) must remove a failed attempt's staged file itself.
 
         Parameters
         ----------
@@ -1286,10 +1122,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
-        # Compare with the intended duration, not the requested chunks, so
-        # inter-chunk gaps and intentionally dropped sub-min_segment_length
-        # slivers are not flagged. ``duration_s`` is the persisted span
-        # (``saved_end - saved_start``).
         tolerance = truncation_tolerance(
             n_intended_intervals, sampling_frequency
         )
@@ -1326,9 +1158,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def get_recording(self, key: dict) -> "si.BaseRecording":
         """Return the preprocessed SpikeInterface recording.
 
-        Rebuilds the NWB artifact on demand if missing; the DataJoint
-        row is never deleted by this path -- the content_hash on the row
-        is the source of truth for re-verification.
+        Rebuilds a missing NWB file, verified against the row's
+        ``content_hash``; never deletes the row.
 
         Parameters
         ----------
@@ -1349,9 +1180,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Resolve the cached artifact for a read that needs no DB.
 
         The DB half of :meth:`get_recording`: fetches the row and rebuilds a
-        missing file (the same self-heal). A tri-part ``make_fetch`` calls
-        this and its ``make_compute`` opens the result with
-        ``_storage.nwb.read_stored_traces``.
+        missing file. Open the result with ``_storage.nwb.read_stored_traces``.
 
         Parameters
         ----------
@@ -1371,12 +1200,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     # ---- visualization delegates (see v2.visualization facade) -----------
 
     def plot_traces(self, key, *, backend="matplotlib", **kwargs):
-        """Delegate to ``visualization.plot_recording_traces`` for this key.
-
-        A local-discoverability one-liner; the SI-widget routing over the saved
-        preprocessed recording lives in the ``v2.visualization`` facade, which
-        the notebook/docs teach as the primary surface.
-        """
+        """Delegate to ``visualization.plot_recording_traces`` for this key."""
         from spyglass.spikesorting.v2 import visualization
 
         return visualization.plot_recording_traces(
@@ -1392,12 +1216,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     def _rebuild_nwb_artifact(self, key) -> None:
-        """Rebuild a missing recording artifact -- locked, atomic, reconciled.
+        """Rebuild a missing recording artifact (locked, atomic, reconciled).
 
-        The rebuild is :func:`._storage.rebuilds.rebuild_nwb_artifact`; it calls
-        ``make_fetch`` and ``_compute_recording_artifact`` on this instance.
-        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on every
-        trace-artifact table, and tests patch it, so it stays on the class.
+        Kept on the class because ``ensure_artifact_file`` calls it on every
+        trace-artifact table.
         """
         return _recording_rebuilds.rebuild_nwb_artifact(self, key)
 
@@ -1413,11 +1235,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
-        Shared by ``make_compute`` and ``_rebuild_nwb_artifact``; the pipeline
-        is :func:`._storage.nwb.compute_recording_artifact`. A classmethod
-        so ``RecordingArtifactRecompute.make_compute`` can run it without a
-        table instance (constructing one queries the DB). The writer is an
-        explicit dependency of the service.
+        A classmethod so ``RecordingArtifactRecompute.make_compute`` can run
+        it without a table instance (constructing one queries the DB).
 
         Parameters
         ----------
@@ -1465,11 +1284,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ) -> tuple[str, str, str]:
         """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
-        The streamed (chunk-iterator) NWB write and the post-write
-        content-fingerprint hashing
-        (:func:`spyglass.spikesorting.v2._recording.fingerprint.recording_content_fingerprint`) live
-        in the service module. Returns ``(analysis_file_name,
-        electrical_series_object_id, content_hash)``.
+        Returns ``(analysis_file_name, electrical_series_object_id,
+        content_hash)``.
         """
         return write_nwb_artifact(
             recording,
@@ -1482,7 +1298,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
 
 # --------------------------------------------------------------------------- #
-# Drift / motion QC -- estimate probe motion and store it, never apply it.
+# Drift / motion QC: estimate probe motion and store it, never apply it.
 # --------------------------------------------------------------------------- #
 
 
@@ -1517,47 +1333,30 @@ class DriftComputed(NamedTuple):
 
 @schema
 class DriftEstimate(SpyglassMixin, dj.Computed):
-    """Probe-motion estimate for a ``Recording`` -- QC only, never applied.
+    """Probe-motion estimate for a ``Recording``; QC only, never applied.
 
-    Estimates drift on the cached preprocessed recording with
-    SpikeInterface's ``compute_motion`` and stores the displacement field
-    plus a one-number severity summary. **Nothing in the pipeline consumes
-    this for correction.** It exists so high-drift sessions can be
-    flagged/queried (``max_abs_displacement_um``) without changing any sort
-    output. To correct motion, use the optional motion stage instead
-    (``motion_mode`` on ``run_v2_pipeline``; ``MotionEstimate`` /
-    ``MotionCorrectedRecording`` in :mod:`.motion`).
-
-    Populated **on demand**: a ``dj.Computed`` table fills only when the user
-    calls ``DriftEstimate.populate(recording_key)``, so the expensive
-    estimation never runs eagerly alongside ``Recording``.
+    Runs SpikeInterface's ``compute_motion`` on the cached preprocessed
+    recording so high-drift sessions can be queried by
+    ``max_abs_displacement_um``. To correct motion, use ``motion_mode`` on
+    ``run_v2_pipeline`` (:mod:`.motion`). Populated on demand only.
 
     Columns
     -------
     motion_preset : varchar
-        The ``compute_motion`` preset used (stored for provenance; the
-        module default is ``_DEFAULT_PRESET``). A single default is used --
-        there is deliberately no parameters Lookup.
+        The ``compute_motion`` preset used (``_DEFAULT_PRESET``; there is no
+        parameters Lookup).
     max_abs_displacement_um : float
-        ``max(|displacement|)`` over all segments / temporal bins / spatial
-        windows -- the drift-severity summary (>= 0; ~0 on a drift-free
-        recording). A non-finite estimate raises at populate rather than
-        being stored, so a stored value is always finite.
+        ``max(|displacement|)`` over all segments, temporal bins and spatial
+        windows. Always finite; a non-finite estimate raises at populate.
     n_temporal_bins : int
         Total number of temporal bins in the estimate.
     motion : longblob
-        The serialized ``Motion`` (see
-        :func:`._motion.motion_to_storage_dict` for the exact keys); rehydrate
-        with :meth:`get_motion`.
+        The serialized ``Motion``; rehydrate with :meth:`get_motion`.
 
     Notes
     -----
     The default preset (``dredge_fast``) requires ``torch`` (installed by the
-    ``spikesorting-v2`` extra). ``compute_motion`` consumes the recording's
-    channel locations to localize peaks, so the upstream ``Recording`` must
-    carry probe geometry (it does -- ``get_recording`` returns a recording
-    whose ``get_channel_locations()`` comes from the probe's relative
-    contact coordinates).
+    ``spikesorting-v2`` extra).
     """
 
     definition = """
@@ -1569,23 +1368,14 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     motion: longblob
     """
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
-    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
-    # long ``compute_motion`` call runs OUTSIDE the DB transaction (and so
-    # multiple recordings can be estimated in parallel). The inherited
-    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
-    # through tri-part dispatch.
     _parallel_make = True
     _DEFAULT_PRESET = "dredge_fast"
 
     def make_fetch(self, key) -> DriftFetched:
         """Return the preset and the resolved recording artifact.
 
-        No SpikeInterface or NWB I/O except the self-heal rebuild of a
-        missing recording file (``Recording``'s own verified rebuild). The
-        carrier holds strings only, so the tri-part contract's two
-        ``make_fetch`` calls stay DeepHash-stable (the second finds the file
-        the first rebuilt).
+        No SpikeInterface or NWB I/O except rebuilding a missing recording
+        file. Holds strings only so both tri-part fetches hash identically.
         """
         return DriftFetched(
             preset=self._DEFAULT_PRESET,
@@ -1595,12 +1385,10 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     def make_compute(self, key, preset, traces) -> DriftComputed:
         """Run ``compute_motion`` outside any DB transaction; no DB access.
 
-        Reads the cached preprocessed recording ``make_fetch`` resolved,
-        estimates motion with the given preset, and flattens the resulting
-        ``Motion`` to a storable dict plus the summary metrics. The
-        long-running step (peak detect + localize + estimate) returns before
-        the framework opens its commit transaction, so it never holds a DB
-        lock.
+        Raises
+        ------
+        ValueError
+            If the estimate's max displacement is non-finite.
         """
         import spikeinterface.preprocessing as sip
 
@@ -1610,12 +1398,8 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         recording = read_stored_traces(traces)
-        # The NWB reader keeps the timestamps as a lazy HDF5 dataset, and
-        # DREDge maps every peak frame to time with one fancy index
-        # (sortingcomponents/motion/dredge.py:227), which h5py refuses when two
-        # peaks share a frame. The span view reads those frames from the
-        # stored clock (acquisition gaps included) without loading the full
-        # 8-byte-per-sample time vector.
+        # DREDge fancy-indexes the lazy h5py timestamps by peak frame, which
+        # h5py refuses for repeated frames; the span view avoids that.
         if recording.has_time_vector():
             recording = AcquisitionSpanRecording(
                 recording, 0, recording.get_num_samples()
@@ -1623,12 +1407,8 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         motion = sip.compute_motion(recording, preset=preset)
         max_abs_displacement_um = motion_max_abs_displacement_um(motion)
         if not np.isfinite(max_abs_displacement_um):
-            # compute_motion(raise_error=True, its default) raises on a hard
-            # failure, but a numerically degenerate-but-completed estimate can
-            # still yield non-finite displacement. Refuse to store an unusable
-            # QC metric -- a NaN summary would also slip past a
-            # ``max_abs_displacement_um > x`` filter, so the worst case would
-            # silently go unflagged.
+            # A NaN summary would slip past a `max_abs_displacement_um > x`
+            # filter.
             raise ValueError(
                 f"DriftEstimate: compute_motion(preset={preset!r}) produced a "
                 f"non-finite max displacement ({max_abs_displacement_um}) for "
@@ -1668,10 +1448,7 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         Returns
         -------
         spikeinterface.core.motion.Motion
-            The motion object as ``compute_motion`` produced it (displacement
-            list, temporal/spatial bins, direction). Use this for plotting /
-            inspection so QC code does not re-derive the blob shape from
-            :func:`._motion.motion_to_storage_dict`.
+            The motion object as ``compute_motion`` produced it.
         """
         blob = (self & key).fetch1("motion")
         return motion_from_storage_dict(blob)

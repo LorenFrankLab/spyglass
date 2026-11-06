@@ -1,12 +1,8 @@
 """DB-free unit tests for analyzer-curation transform helpers.
 
-These exercise the pure logic in
-``spyglass.spikesorting.v2._curation.metrics`` -- label-rule application
-(the three #1513 bug-class invariants), NaN sanitization for serialization
-(#1556), the Spyglass ``isi_violation`` fraction, and the classification of
-expected-missing versus failed metric values -- with no DataJoint
-server and no SpikeInterface analyzer. Importing the service module never
-opens a database connection.
+Covers ``spyglass.spikesorting.v2._curation.metrics``: label rules, NaN
+sanitization, the ``isi_violation`` fraction, and expected-missing versus
+failed metric values. No database or analyzer.
 """
 
 from __future__ import annotations
@@ -47,15 +43,13 @@ def _rule(rule_index, metric_name, operator, threshold, label, name=None):
     }
 
 
-# ---------- #1513 invariant 1: loop completion -----------------------------
+# ---------- label rules: loop completion ----------------------------------
 
 
 def test_apply_label_rules_processes_every_rule():
     """Every rule runs; later rules are not dropped by an early return.
 
-    Three rules each add a DISTINCT label to the same single unit; the unit
-    must end with all three. A ``return`` inside the rule loop would silently
-    drop rules 2 and 3.
+    Three rules each add a distinct label to one unit; it gets all three.
     """
     metrics = pd.DataFrame({"snr": [0.5]}, index=[7])
     rules = [
@@ -67,15 +61,14 @@ def test_apply_label_rules_processes_every_rule():
     assert labels[7] == ["noise", "mua", "reject"]
 
 
-# ---------- #1513 invariant 2: per-unit list isolation ---------------------
+# ---------- label rules: per-unit list isolation --------------------------
 
 
 def test_apply_label_rules_per_unit_lists_are_independent():
     """One unit's later label must not contaminate another unit's list.
 
-    Two units are both flagged ``noise`` by rule 1; rule 2 flags only unit A
-    with ``mua``. B must keep just ``["noise"]`` -- a shared list object would
-    leak A's ``mua`` into B.
+    Rule 1 flags A and B ``noise``; rule 2 flags only A ``mua``. B keeps
+    ``["noise"]``.
     """
     metrics = pd.DataFrame(
         {"snr": [0.5, 0.5], "isi_violation": [0.9, 0.0]},
@@ -90,7 +83,7 @@ def test_apply_label_rules_per_unit_lists_are_independent():
     assert labels[2] == ["noise"]
 
 
-# ---------- #1513 invariant 3: per-rule membership dedupe ------------------
+# ---------- label rules: per-rule membership dedupe -----------------------
 
 
 def test_apply_label_rules_dedupes_repeated_label():
@@ -203,9 +196,8 @@ def test_metric_warning_capture_restores_configured_threshold(
 
 
 def test_is_finite_metric_value_warns_on_non_numeric(caplog):
-    """A genuinely non-numeric metric cell (an SI shape/dtype drift) is filtered
-    AND logged -- the swallow must be visible, unlike a legitimate NaN which is
-    a silent low-spike skip."""
+    """A non-numeric metric cell is filtered and logged; a NaN is filtered
+    silently."""
     from spyglass.spikesorting.v2._curation.metrics import (
         _is_finite_metric_value,
     )
@@ -247,8 +239,7 @@ def test_apply_label_rules_empty_rules_returns_empty():
 def test_apply_label_rules_coerces_numpy_int_unit_ids():
     """Label keys are plain python int even from a numpy-int64 index.
 
-    SI unit ids are often ``np.int64``; downstream NWB writers / ``get_labels``
-    consumers expect python ints, so the ``int(unit_id)`` cast must hold.
+    NWB writers and ``get_labels`` consumers expect python ints.
     """
     metrics = pd.DataFrame(
         {"snr": [0.2]}, index=pd.Index(np.array([7], dtype=np.int64))
@@ -259,7 +250,7 @@ def test_apply_label_rules_coerces_numpy_int_unit_ids():
     assert all(type(key) is int for key in labels)  # not np.int64
 
 
-# ---------- #1556 NaN sanitization ------------------------------------------
+# ---------- NaN sanitization ------------------------------------------------
 
 
 def test_sanitize_for_json_replaces_non_finite_with_none():
@@ -290,7 +281,7 @@ def test_isi_violation_fraction_count_over_n_minus_one():
 
 @pytest.mark.parametrize("n", [0, 1])
 def test_isi_violation_fraction_guards_low_spike(n):
-    """0- and 1-spike units yield NaN, not the spurious finite 1.0 artifact."""
+    """0- and 1-spike units yield NaN, not a finite value."""
     frac = isi_violation_fraction(np.array([0]), np.array([n]))
     assert np.isnan(frac[0])
 
@@ -531,8 +522,8 @@ def test_apply_metric_peak_sign_injects_resolved_sign(sorter_params, expected):
     """When ``snr`` is requested, the sorter's resolved peak_sign is injected
     into ``metric_kwargs['snr']`` even if it carried no kwargs yet.
 
-    SNR was hard-coded ``peak_sign='neg'``, so a positive/bidirectional sorter
-    measured SNR on the most-negative channel instead of its true peak.
+    Otherwise a positive or bidirectional sorter's SNR is measured on the
+    most-negative channel.
     """
     out = apply_metric_peak_sign(
         ["snr", "isi_violation"], {}, resolve_peak_sign(sorter_params)
@@ -568,15 +559,10 @@ def test_apply_metric_peak_sign_does_not_mutate_input():
 
 
 def test_snr_peak_sign_follows_sorter_polarity():
-    """End-to-end (hermetic): a positive-going planted sort computes SNR on its
-    POSITIVE-peak channel, and a negative-default sort's SNR is unchanged.
+    """A positive-going sort's SNR uses its positive-peak channel; a sort
+    with no sign keeps the ``'neg'`` SNR.
 
-    The planted unit has a +50 uV peak on channel 0 and a larger -100 uV
-    deflection on channel 1, so peak_sign decides which channel SNR is measured
-    on. Driving SI's ``compute_quality_metrics`` with the kwargs
-    ``apply_metric_peak_sign`` produces for a ``peak_sign='pos'`` sorter must give
-    the smaller (positive-peak) SNR and differ from the ``'neg'`` default,
-    while a sort with no sign keeps the ``'neg'`` SNR.
+    The planted unit has +50 uV on channel 0 and -100 uV on channel 1.
     """
     from spikeinterface.metrics.quality import compute_quality_metrics
 
@@ -604,8 +590,6 @@ def test_snr_peak_sign_follows_sorter_polarity():
     snr_neg = _snr({"peak_sign": "neg"})  # SI default, unchanged
     snr_default = _snr({})  # no sign -> neg fallback
 
-    # The positive peak (+50) is smaller than the negative deflection (-100),
-    # so measuring on the positive channel yields a smaller SNR.
     assert snr_pos < snr_neg
     # A sort with no sign falls back to the same SNR as an explicit 'neg'.
     assert snr_default == pytest.approx(snr_neg)
@@ -614,8 +598,7 @@ def test_snr_peak_sign_follows_sorter_polarity():
 def test_apply_label_rules_pass_is_silent_for_partial_missing(caplog):
     """A legitimate low-spike NaN is skipped without log noise.
 
-    ``min_spikes`` makes NaN an expected, per-unit outcome, so the shipped
-    ``pass`` policy must not warn once per affected unit on every sort.
+    Below ``min_spikes`` NaN is expected, so ``pass`` does not warn per unit.
     """
     metrics = pd.DataFrame({"snr": [np.nan, 0.5, 5.0]}, index=[1, 2, 3])
     rules = [_rule(0, "snr", "<", 1.0, "noise")]
@@ -627,12 +610,10 @@ def test_apply_label_rules_pass_is_silent_for_partial_missing(caplog):
 
 
 def test_apply_label_rules_pass_warns_when_rule_is_wholly_inert(caplog):
-    """An all-missing metric under ``pass`` disables the rule -- say so.
+    """An all-missing metric under ``pass`` disables the rule and warns.
 
-    For example, if ``nn_noise_overlap`` were NaN for every unit, default
-    auto-curation would become silently inert. ``pass`` still must
-    not raise, but a rule that labelled nothing because its metric was missing
-    everywhere is a computation failure, not a low-spike skip.
+    ``pass`` does not raise, but a metric missing for every unit is a
+    computation failure, not a low-spike skip.
     """
     metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
@@ -645,7 +626,7 @@ def test_apply_label_rules_pass_warns_when_rule_is_wholly_inert(caplog):
 
 
 def test_apply_label_rules_rejects_retired_ignore_policy():
-    """``ignore`` was a byte-identical duplicate of ``pass`` and is retired."""
+    """``ignore`` is not a valid missing_policy (use ``pass``)."""
     metrics = pd.DataFrame({"snr": [np.nan]}, index=[1])
     rules = [_rule(0, "snr", "<", 1.0, "noise")]
     rules[0]["missing_policy"] = "ignore"
@@ -838,10 +819,9 @@ def test_apply_label_rules_unexpected_nan_raises_regardless_of_policy(
 ):
     """A non-finite value outside the eligibility set is a computation failure.
 
-    Unit 42's NaN is in the column's expected-missing set (e.g. below
-    min_spikes); unit 99's is not, so it must raise under BOTH ``"pass"`` and
-    ``"fail"``. With only the expected unit missing, the same NaN instead
-    follows missing_policy as usual.
+    Unit 42's NaN is expected-missing; unit 99's is not, so it raises under
+    both ``"pass"`` and ``"fail"``. Expected-missing NaNs follow
+    missing_policy.
     """
     expected_missing = {"nn_noise_overlap": {42}}
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
@@ -865,8 +845,7 @@ def test_apply_label_rules_unexpected_nan_raises_regardless_of_policy(
 def test_apply_label_rules_unregistered_column_nan_fails_closed_with_expected_missing():
     """``expected_missing={col: None}`` fails closed on any non-finite value.
 
-    No eligibility rule is registered for ``trough_half_width``, so a NaN
-    cannot be classified -- even under the lenient ``"pass"`` policy.
+    ``trough_half_width`` has no eligibility rule, so even ``"pass"`` raises.
     """
     expected_missing = {"trough_half_width": None}
     rules = [_rule(0, "trough_half_width", ">", 0.5, "wide")]
@@ -883,11 +862,7 @@ def test_apply_label_rules_unregistered_column_nan_fails_closed_with_expected_mi
 
 
 def test_apply_label_rules_fail_policy_all_missing_warns(caplog):
-    """``"fail"`` is inert (every unit labelled for the same reason) too.
-
-    The existing warning only covered ``"pass"``; ``"fail"`` silently applied
-    its label to every unit with no indication the metric itself was broken.
-    """
+    """An all-missing metric under ``"fail"`` warns, as under ``"pass"``."""
     metrics = pd.DataFrame({"nn_noise_overlap": [np.nan, np.nan]}, index=[4, 5])
     rules = [_rule(0, "nn_noise_overlap", ">", 0.1, "noise")]
     rules[0]["missing_policy"] = "fail"
@@ -900,11 +875,7 @@ def test_apply_label_rules_fail_policy_all_missing_warns(caplog):
 
 
 def test_nan_threshold_rejected():
-    """A non-finite threshold is rejected both at validation and at apply time.
-
-    Today, a NaN threshold silently labels nobody under ``<`` and everybody
-    under ``!=`` instead of surfacing the malformed rule.
-    """
+    """A non-finite threshold is rejected at validation and at apply time."""
     from spyglass.spikesorting.v2._params.metric_curation import (
         AutoCurationRuleSchema,
     )
@@ -930,10 +901,8 @@ def test_nan_threshold_rejected():
 def test_isi_violation_one_spike_unit_follows_missing_policy():
     """The real ``isi_violation_fraction`` NaN is expected-missing, not failed.
 
-    A 1-spike unit's fraction is undefined (NaN); 2- and 50-spike units get a
-    real (zero) value. The shipped isi rule (``isi_violation > 0.02 ->
-    "reject"``) must treat the 1-spike unit's NaN per missing_policy, and must
-    never raise or label the two ordinary units.
+    A 1-spike unit's NaN follows missing_policy under the shipped isi rule;
+    the 2- and 50-spike units are neither labelled nor raise.
     """
     n_spikes_by_unit = {3: 1, 17: 2, 42: 50}
     unit_ids = list(n_spikes_by_unit)
@@ -1065,8 +1034,8 @@ def test_escalate_si_metric_errors_keeps_the_original_error(caplog):
     ],
 )
 def test_assert_merge_preset_metrics(preset, metric_names, raises):
-    """A preset with an ``snr`` step needs the evaluation to compute ``snr``;
-    otherwise SI's step raises a bare ``KeyError: 'snr'`` after the metrics."""
+    """A preset with an ``snr`` step requires ``snr`` in the evaluation
+    (SI otherwise raises a bare ``KeyError``)."""
     if raises:
         with pytest.raises(ValueError, match="'snr'"):
             assert_merge_preset_metrics(preset, metric_names)

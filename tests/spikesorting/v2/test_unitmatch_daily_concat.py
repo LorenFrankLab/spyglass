@@ -1,11 +1,7 @@
 """Known-answer benchmark: matching independently sorted daily concatenations.
 
-The dataset, scoring and gate functions live in
-``tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py``. The
-tests here check that the simulated days are what the benchmark claims (a
-known-answer check of the dataset itself) and that the scoring counts a
-hand-built run exactly. Both need SpikeInterface but neither a database nor
-UnitMatchPy.
+Dataset, scoring and gates live in
+``tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py``.
 """
 
 from __future__ import annotations
@@ -462,9 +458,7 @@ def test_evaluate_gates_compares_pooled_rates_exactly():
     assert by_id["two-day-precision"].passed is None
 
 
-#: When set, the held-out tests keep their bundles, per-run JSON,
-#: ``<scenario>_results.json`` and ``<scenario>_summary.md`` in this
-#: directory instead of pytest's temporary one.
+#: Directory where held-out tests keep bundles, results and summaries.
 HELD_OUT_OUT_DIR_ENV = "SPYGLASS_UNITMATCH_BENCHMARK_OUT"
 
 
@@ -513,26 +507,11 @@ def test_daily_concat_matches_planted_units(tmp_path):
     """Two-day daily concatenations meet every two-day gate on held-out
     seeds 100..139.
 
-    Each day is a same-day concatenation of two independently simulated
-    members, and every neuron's day units are sorted into sparse, unrelated
-    ids. Pooled over the held-out seeds, with real SpikeInterface bundle
-    extraction inside each day's statistics spans, real UnitMatchPy and the
-    production tracked-unit graph, the run must meet every gate in
-    ``GATES["two_day"]``: pair recall through tracked units, recall of
-    neurons firing in only one member of each day, pair precision, the
-    incorrect-identity rate, the distractor false-match rate, every
-    partial-member unit bundled, and zero structural violations (no tracked
-    unit holds two units of one day; production per-recording counts and
-    tracked-unit session / input counts equal the planted truth).
-
-    The full summary is printed (run with ``-s``, or set
-    ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep it with the records). The
-    gates were derived from development seeds 0..39 only, on macOS arm64,
-    with the margin rule in the benchmark module's docstring; they have
-    been checked on the held-out seeds on macOS arm64 only. Do not change
-    the thresholds, seeds, dataset or scoring to make this pass, and do not
-    xfail or skip it: a failure is a result about the matching path, not a
-    test bug. DB-free.
+    Uses real UnitMatchPy and the production tracked-unit graph; gates are
+    in ``GATES["two_day"]``. Run with ``-s`` or set
+    ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep the summary. Gates come from
+    development seeds 0..39 (macOS arm64). Do not tune thresholds, seeds,
+    dataset or scoring to pass, or skip it: a failure is a result.
     """
     pytest.importorskip("UnitMatchPy")
     gates, table = _held_out_gates("two_day", tmp_path)
@@ -544,24 +523,10 @@ def test_three_day_concat_matches_planted_units(tmp_path):
     """Three-day daily concatenations meet every three-day gate on
     held-out seeds 100..139.
 
-    Three concatenated days with stable neurons, neurons absent on day 2,
-    neurons whose templates change gradually, conflicting pairs of
-    near-identical neurons and per-day distractors. Pooled over the held-out
-    seeds, the run must meet every gate in ``GATES["three_day"]``: stable
-    pair recall through tracked units, the day 1 -- day 3 linkage of neurons
-    absent on day 2, pair precision, the incorrect-identity rate, the
-    distractor false-match rate and zero structural violations.
-
-    Gradual-change and conflicting-pair recall are printed (with every
-    other pooled metric; run with ``-s``, or set
-    ``SPYGLASS_UNITMATCH_BENCHMARK_OUT`` to keep the summary and records),
-    not asserted: on the development seeds their derived bounds fell below
-    the 0.50 cut-off (``UNGATED_DIAGNOSTICS``). The gates were derived
-    from development seeds 0..39 only, on macOS arm64; they have been
-    checked on the held-out seeds on macOS arm64 only. Do not change the
-    thresholds, seeds, dataset or scoring to make this pass, and do not
-    xfail or skip it: a failure is a result about the matching path, not a
-    test bug. DB-free.
+    Gates are in ``GATES["three_day"]``. Gradual-change and conflicting-pair
+    recall are printed, not gated (``UNGATED_DIAGNOSTICS``). Gates come from
+    development seeds 0..39 (macOS arm64). Do not tune thresholds, seeds,
+    dataset or scoring to pass, or skip it: a failure is a result.
     """
     pytest.importorskip("UnitMatchPy")
     gates, table = _held_out_gates("three_day", tmp_path)

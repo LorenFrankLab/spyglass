@@ -7,8 +7,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     MotionRecipe,
 )
 
-#: Stated on every motion description: no recipe has passed probe-specific
-#: validation.
+#: No recipe has passed probe-specific validation.
 MOTION_RECIPE_STATUS = (
     "experimental: no motion recipe is validated for a probe; inspect the "
     "saved estimate before relying on a correction"
@@ -84,12 +83,8 @@ def describe_scientific_setup(
 ):
     """Resolve the preprocessing and artifact rows execution uses for display.
 
-    ``concat=True`` (set by the concat entry points, not by the preset)
-    adds where the artifact mask is applied: per member, before
-    concatenation. ``motion`` states the run's motion stage: the mode, the
-    recipe, the SpikeInterface preset its estimation recipe resolves to, the
-    border mode of an applied correction and the recipes' experimental
-    status; a Kilosort4 sort adds its own drift-correction ``nblocks``.
+    ``concat=True`` adds where the artifact mask is applied. ``motion``
+    describes the motion stage; a Kilosort4 sort adds its own ``nblocks``.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import (
@@ -151,14 +146,8 @@ def describe_scientific_setup(
 def resolve_preset_sort_config(bundle) -> "dict | None":
     """Resolve what a preset's sort stage would execute, or ``None`` if unset.
 
-    Fetches the preset's ``SorterParameters`` row and runs the dispatcher's own
-    ``resolve_sort_config`` over it with the ambient job-kwargs layer
-    (``_core.job_config._resolved_job_kwargs``), returning
-    ``EffectiveSortConfig.as_dict()``. Shared by ``preflight_v2_pipeline`` and
-    both run entry points (``run_v2_pipeline`` / ``run_v2_concat_pipeline``,
-    which record it on the run receipt as ``sorter_config``), so preflight,
-    the receipt and execution describe the same thing. ``None`` when the row
-    does not exist.
+    Runs the dispatcher's ``resolve_sort_config`` so preflight, the run
+    receipt and execution agree. Returns ``EffectiveSortConfig.as_dict()``.
     """
     from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
     from spyglass.spikesorting.v2.sorting import SorterParameters

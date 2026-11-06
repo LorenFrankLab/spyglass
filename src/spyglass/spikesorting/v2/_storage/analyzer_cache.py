@@ -1,43 +1,12 @@
 """Path policy for the regeneratable SortingAnalyzer cache.
 
-A SpikeInterface ``SortingAnalyzer`` folder (waveforms, templates, metric
-extensions) is large (5-50 GB) regeneratable SCRATCH, not a canonical
-database artifact: a valid ``Sorting`` row keeps its FK-guaranteed upstream
-``Recording`` / NWB, so the analyzer can always be rebuilt. This module is
-the single place that decides WHERE that cache lives, so the location is a
-pure function of ``sorting_id`` + one configured root rather than an
-absolute path scattered through (or persisted by) the ``Sorting`` table,
-which would go stale when the root or a parent directory moves.
+Analyzer folders (5-50 GB) are rebuildable scratch, so their path is derived
+from ``sorting_id`` and one configured root rather than stored. Changing the
+root turns old folders into cache misses.
 
-Resolution (``analyzer_cache_root``):
-
-1. ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` when set -- point
-   it at shared storage for a persistent cache;
-2. otherwise ``Path(temp_dir) / "spikesorting_v2" / "analyzers"`` -- scratch
-   semantics under Spyglass's configured temp directory (the default).
-
-Changing the root is an explicit cache-relocation choice: old folders simply
-become cache misses (``get_analyzer`` rebuilds into the new root) and can be
-cleaned by the operator -- never a stale-row inconsistency.
-
-Storage format. Every canonical cache folder is a SpikeInterface
-``binary_folder`` analyzer named ``{sorting_id}__{payload}.analyzer``
-(:data:`ANALYZER_FOLDER_SUFFIX`). ``binary_folder`` is the ONLY SI 0.104.3
-format whose waveform extraction writes straight into a memmapped
-``waveforms.npy`` (``zarr`` and ``memory`` extract into a shared-memory buffer
-sized for the whole waveform volume and then copy it), so the extraction peak
-is bounded by the worker chunk buffers rather than
-``n_spikes * n_samples * n_channels``. :func:`load_analyzer_folder` is the one
-loader: it maps ``waveforms.npy`` lazily (``mmap_mode="r"``) instead of SI's
-eager ``np.load``, so opening a cache for review or metrics does not read the
-whole waveform volume either. Analyzer folders in any other format are never
-read.
-
-This module reads ``dj.config`` and ``temp_dir`` but opens no DB connection
-and activates no ``dj.schema``; the reads happen at call time so import stays
-side-effect free. ``find_orphaned_analyzer_folders`` (the audit behind
-``Sorting.find_orphaned_analyzer_folders``) queries the tables it is handed at
-call time.
+Folders are SI ``binary_folder`` analyzers, the only SI 0.104.3 format that
+extracts waveforms straight into a memmap; :func:`load_analyzer_folder` maps
+them lazily. DB-free at import.
 """
 
 from __future__ import annotations
@@ -53,9 +22,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Suffix of every canonical analyzer-cache folder (an SI ``binary_folder``
-#: store). Not ``.zarr``: SI's loader treats a ``.zarr`` suffix as the zarr
-#: format, and the cache is deliberately binary_folder (see the module doc).
+#: Not ``.zarr``: SI would load it as zarr.
 ANALYZER_FOLDER_SUFFIX = ".analyzer"
 ANALYZER_SPARSITY_RECEIPT = "spyglass_sparsity.json"
 
@@ -73,11 +40,7 @@ def assert_analyzer_sparsity_polarity(
 ) -> None:
     """Compare cached polarity with the sorter's already-resolved peak sign.
 
-    Every sparse build records its effective polarity in the sparsity receipt,
-    which derivative copies carry along. A sparse folder without a readable
-    receipt is invalid: the cache loader removes and rebuilds it (or, with
-    ``rebuild=False``, raises ``AnalyzerFolderInvalidError``). Dense caches
-    need no polarity check because no channels were dropped.
+    Dense analyzers dropped no channels and are not checked.
 
     Raises
     ------
@@ -105,13 +68,7 @@ def assert_analyzer_sparsity_polarity(
         )
 
 
-# The recipe name is embedded in the analyzer cache folder
-# ``{sorting_id}__{waveform_params_name}.analyzer`` (see ``analyzer_path``), so it
-# must be path-safe -- no separators, dots, or traversal. Validated both at
-# insert (``AnalyzerWaveformParameters``) and at load (``get_analyzer`` accepts
-# an un-FK'd free-string recipe name). Lives here -- the DB-free owner of the
-# analyzer-path policy -- so the load path can validate without importing the
-# ``sorting`` schema module.
+# The recipe name is part of the folder name, so it must be path-safe.
 _WAVEFORM_PARAMS_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _CURATION_CACHE_RE = re.compile(
@@ -176,12 +133,8 @@ def assert_path_safe_waveform_params_name(name) -> None:
 def is_canonical_analyzer_folder_name(name: str) -> bool:
     """Whether ``name`` is a canonical analyzer-cache folder name.
 
-    Canonical analyzer folders are
-    ``{sorting_id}__{waveform_params_name}.analyzer`` (see :func:`analyzer_path`):
-    a UUID sorting id, a ``__`` separator, a path-safe recipe name, and the
-    ``.analyzer`` suffix. The disk-side orphan sweep
-    uses this to refuse deleting any directory under a (possibly misconfigured)
-    analyzer root that is not a canonical analyzer cache.
+    The orphan sweep deletes only canonical folders, in case the root is
+    misconfigured.
     """
     return analyzer_cache_folder_identity(name) is not None
 
@@ -191,13 +144,9 @@ def analyzer_cache_folder_identity(
 ) -> AnalyzerCacheFolderIdentity | None:
     """Parse a raw- or curation-kind canonical cache folder name.
 
-    Raw cache names have the ``{sorting_id}__{waveform_params_name}.analyzer``
-    shape. Curation cache names use the same outer shape with a structured,
-    path-safe payload carrying the immutable curation generation, analyzer
-    role, recipe-content hash, SpikeInterface-version hash and -- for a
-    derivative carrying extra extensions -- the extension-request hash.
-    Returning a typed identity lets cleanup share one conservative
-    canonical-name gate across both cache kinds.
+    Raw: ``{sorting_id}__{waveform_params_name}.analyzer``. Curation: the same
+    shape with a payload of curation uuid, role, recipe hash, SI-version hash
+    and optional extension-request hash. Returns ``None`` if not canonical.
     """
     if not name.endswith(ANALYZER_FOLDER_SUFFIX) or "__" not in name:
         return None
@@ -256,18 +205,7 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     """Return the analyzer-cache folder for a ``(sorting_id, recipe)`` pair.
 
     ``analyzer_cache_root() / f"{sorting_id}__{waveform_params_name}.analyzer"``.
-    A sort may have more than one analyzer recipe (an unwhitened display recipe
-    and a whitened metric recipe built on demand for PC/NN metrics), so the
-    folder is keyed by both the ``sorting_id`` and the ``waveform_params_name``
-    that produced it -- the two never collide. Deterministic in ``(sorting_id, waveform_params_name)`` +
-    the configured root, so every code path resolves the same folder without
-    the ``Sorting`` row needing to store the path.
-
-    ``waveform_params_name`` is embedded in the folder name, so callers must
-    pass a path-safe name; the ``AnalyzerWaveformParameters`` insert guard
-    validates it (``^[A-Za-z0-9_]+$``) before any row -- and therefore any
-    folder -- can use it. The folder is an SI ``binary_folder`` store (see the
-    module doc); load it with :func:`load_analyzer_folder`.
+    A sort can have display and metric analyzers, hence the recipe name.
 
     Parameters
     ----------
@@ -293,18 +231,8 @@ class AnalyzerRecordingUnavailableError(ValueError):
 def load_analyzer_folder(folder, *, recording=None):
     """Load a cached ``binary_folder`` analyzer with memmapped waveforms.
 
-    The single loader for every analyzer folder this package writes. SI's own
-    ``load_sorting_analyzer`` eagerly ``np.load``s every saved extension, which
-    for ``waveforms`` reads the whole ``n_spikes x n_samples x n_channels``
-    buffer into RAM on every open -- tens of GB for a long, unit-rich sort.
-    This loader opens the analyzer with ``load_extensions=False``, leaves other
-    extensions for SI's on-demand ``get_extension`` loader, and attaches
-    ``waveforms`` as a read-only ``np.memmap`` of ``extensions/waveforms/waveforms.npy``. SI's
-    consumers index the waveform buffer per unit (``get_waveforms_one_unit``,
-    template and PCA fitting), so each of them touches one unit's slice at a
-    time, and SI's binary ``_save_data`` already special-cases a memmapped
-    ``waveforms`` array (it is never re-written). Numerically nothing changes:
-    the same bytes are read, lazily.
+    SI's loader reads all waveforms into RAM (tens of GB for a long sort).
+    Here ``waveforms`` is a read-only memmap; other extensions load on demand.
 
     Parameters
     ----------
@@ -327,15 +255,12 @@ def load_analyzer_folder(folder, *, recording=None):
         format="binary_folder",
     )
     if not analyzer.has_recording():
-        # SI silently loads a recordingless analyzer when recording.json is
-        # invalid or its trace file is gone. Treat that as an invalid cache so
-        # the normal rebuild path reconstructs the exact recording and
-        # artifact exclusions.
+        # SI silently loads without a recording when it cannot open one;
+        # treat that as invalid so the cache is rebuilt.
         raise AnalyzerRecordingUnavailableError(
             f"Analyzer recording could not be loaded: {folder}"
         )
-    # Keep derivative save/select/merge operations on the same pickle contract
-    # as build_analyzer. SI does not persist this flag when loading an extractor.
+    # SI does not persist this flag on load.
     from spyglass.spikesorting.v2._storage.spikeinterface import (
         attach_memmapped_waveforms,
         use_pickle_recording_serialization,
@@ -360,13 +285,10 @@ def load_analyzer_extensions(analyzer):
 def copy_analyzer_folder(analyzer, folder):
     """Copy a published cache, including extensions SI has not loaded.
 
-    SI's save_as copies only loaded extensions. Let SI recreate the small
-    metadata files (rebasing relative extractor paths), then copy extension
-    files directly so waveform/amplitude buffers never need to enter RAM.
-    The copy keeps the analyzer's own sorting, not its provenance: the
-    analyzer holds the recording's sampling rate (estimated from timestamps,
-    e.g. 30000.000000000182 Hz), and the provenance units' 30000.0 would
-    shift every duration and firing rate on the copy in the last bits.
+    SI's ``save_as`` copies only loaded extensions, so extension files are
+    copied directly without entering RAM. Uses the analyzer's own sorting,
+    whose estimated rate (e.g. 30000.000000000182 Hz) differs in the last bits
+    from the provenance units' 30000.0.
     """
     import spikeinterface as si
 
@@ -398,9 +320,8 @@ def copy_analyzer_folder(analyzer, folder):
 def analyzer_extension_array(analyzer, extension_name, data_name):
     """Read a numeric array without loading other data or registering a copy.
 
-    Callers must treat the result as read-only. Keeping this mmap outside SI's
-    extension state also prevents its save methods from overwriting the source
-    of a mapped array while trying to copy that array.
+    Read-only. Kept out of SI's extension state so SI's save cannot overwrite
+    the mapped source.
     """
     import numpy as np
 
@@ -462,14 +383,9 @@ def curation_analyzer_path(
 ) -> Path:
     """Return a per-curation analyzer path keyed by immutable generation.
 
-    The numeric ``curation_id`` is intentionally absent because it may be
-    reused after deletion. Distinct curation generations, recipe content,
-    analyzer roles, and SpikeInterface versions therefore cannot share a cache
-    slot even when their human-readable recipe name is the same.
-    ``extension_request_hash`` (16 hex chars) names a DERIVATIVE of the base
-    cache that carries extra extensions with specific parameters (see
-    ``_curation.analyzer.derived_extension_request_hash``); ``None`` is the
-    base cache itself.
+    Omits ``curation_id``, which may be reused after deletion.
+    ``extension_request_hash`` (16 hex chars) names a derivative with extra
+    extensions; ``None`` is the base cache.
     """
     sorting_uuid = uuid.UUID(str(sorting_id))
     generation_uuid = uuid.UUID(str(curation_uuid))
@@ -504,45 +420,12 @@ def curation_analyzer_path(
 def analyzer_cache_lock(sorting_id):
     """Return a cross-process lock serializing analyzer-cache access per sort.
 
-    Every canonical analyzer-cache folder reader/writer/deleter holds this lock:
-    the populate build, the self-healing read/rebuild path
-    (``Sorting.get_analyzer`` / ``load_or_rebuild_analyzer``), the atomic
-    publish, ``remove_analyzer_cache``, the recompute delete gate, and the
-    ``CurationEvaluation`` raw-sort fast path (which loads the shared analyzer
-    and persists extensions + ``quality_metrics`` into it). Holding the lock
-    around the load/mutate/publish region lets ONE job touch a sort's analyzer
-    at a time, so a concurrent build never corrupts the shared store and a
-    reader never observes the brief move-aside window of an atomic publish.
-
-    The lock is keyed on ``sorting_id`` (which every recipe folder of that sort
-    shares -- both the display and the whitened-metric analyzer), so it
-    serializes one sort's jobs against each other while leaving jobs for
-    DIFFERENT sorts free to run in parallel. The lock file lives under
-    ``analyzer_cache_root()`` next to the folders it guards.
-
-    **Reentrant per process.** The read path acquires this lock while the
-    compute path already holds it for the same sort (the fast path loads inside
-    its own ``with`` block). A fresh ``FileLock`` per call would self-deadlock
-    there, so the lock is created with ``is_singleton=True``: filelock returns
-    the one live instance per lock-file path, and its instance counter makes a
-    same-thread nested acquisition reentrant (instant), while a DIFFERENT
-    thread or a DIFFERENT process still contends on the OS-level lock.
-    ``populate(processes=N)`` (the standard parallel case) uses separate
-    processes, so cross-job serialization is preserved.
-
-    Shared-storage deployments must provide cross-host POSIX file locking on
-    this directory (including the lock files). Validate the server/client mount
-    configuration on the deployment hosts; local-filesystem tests do not prove
-    that contract. Lock-acquisition errors propagate rather than permitting an
-    unprotected write. Scientific result ownership is established separately by
-    the Sorting insert: a duplicate compute cannot publish over its winner.
-
-    The lock blocks indefinitely by default (the intended serialize-don't-fail
-    behavior); it releases when the holding process exits, so a crashed job
-    cannot wedge the next one. A per-call timeout is available via
-    ``analyzer_cache_lock(sorting_id).acquire(timeout=...)`` -- the singleton
-    instance has no constructor-level timeout knob because filelock refuses a
-    second construction with a different value.
+    Every reader, writer and deleter of a sort's analyzer folders holds it, so
+    no one sees a half-built folder or a publish's move-aside window.
+    ``is_singleton=True`` makes nested acquisition in one thread reentrant;
+    other threads and processes still contend. Blocks indefinitely; pass a
+    timeout to ``.acquire`` instead (filelock forbids a second constructor
+    value). Shared storage must support cross-host POSIX locks.
 
     Parameters
     ----------
@@ -567,21 +450,10 @@ def analyzer_cache_lock(sorting_id):
 def artifact_slot_lock(prefix: str, slot_id):
     """Return a cross-process lock serializing one trace artifact's slot.
 
-    A per-artifact ``filelock.FileLock`` so a rebuild (``get_recording``
-    read-repair / ``_rebuild_nwb_artifact``) and a reclamation
-    (``RecordingArtifactRecompute.delete_files``) of the *same* artifact can
-    never interleave -- no unlink racing a write, no reader seeing a
-    half-written HDF5. Different artifacts stay free to run in parallel. The
-    ``prefix`` names the artifact kind, so a single-session, concatenated and
-    motion-corrected recording never share a lock file even if their ids
-    shared a UUID.
-
-    The lock file ``{prefix}_{slot_id}.artifact.lock`` lives under
-    :func:`analyzer_cache_root`, a stable per-install path -- NOT a per-worker
-    temp. On multiple hosts the directory must be shared and its mount must
-    provide cross-host POSIX file locking, as required by
-    :func:`analyzer_cache_lock`. Validate that deployment contract before
-    enabling shared-storage workers; lock-acquisition errors propagate.
+    Keeps a rebuild and a reclamation of the same artifact from interleaving.
+    ``prefix`` keeps artifact kinds from sharing a lock file. Lives under
+    :func:`analyzer_cache_root`, with the same cross-host locking requirement
+    as :func:`analyzer_cache_lock`.
 
     Parameters
     ----------
@@ -594,10 +466,8 @@ def artifact_slot_lock(prefix: str, slot_id):
     Returns
     -------
     filelock.FileLock
-        An unacquired lock; use it as a context manager or call ``.acquire()``.
-        Acquiring blocks indefinitely (serialize-don't-fail); the lock
-        releases when the holding process exits, so a crashed job cannot
-        wedge the next one.
+        An unacquired lock; acquiring blocks indefinitely and the lock is
+        released when the holding process exits.
     """
     from filelock import FileLock
 
@@ -615,11 +485,9 @@ _POPULATING_SORTING_IDS: ContextVar[tuple[str, ...]] = ContextVar(
 def analyzer_population(sorting_id):
     """Keep a sort's publication lock until the framework commits or rolls back.
 
-    Canonical analyzer folders are published before DataJoint commits the
-    Sorting row. An orphan sweep must wait for that transaction to finish
-    before rechecking references. Context-local ownership also distinguishes
-    the framework's transaction from an unsupported direct ``make_insert``
-    inside a caller's transaction, whose eventual commit we cannot observe.
+    Folders are published before the Sorting row commits, so an orphan sweep
+    must wait. Context-local ownership tells the framework's transaction from
+    a caller-owned one, whose commit cannot be observed.
     """
     sid = str(sorting_id)
     with analyzer_cache_lock(sid):
@@ -665,16 +533,8 @@ def analyzer_publication_transaction(table, sorting_id):
 def _publish_sibling(canonical_folder, kind: str) -> Path:
     """Return a hidden sibling of ``canonical_folder`` for staging.
 
-    The build/move-aside folders MUST sit in the SAME directory as the canonical
-    slot (not a sub-directory): a SpikeInterface ``SortingAnalyzer`` folder
-    stores its recording reference as a path RELATIVE to the analyzer folder
-    (``recording.json`` is dumped ``relative_to=folder``), so the publish
-    ``os.replace`` only preserves that reference -- and therefore the ability
-    to (re)compute recording-dependent extensions like ``spike_amplitudes``
-    after a load -- when the temp and the canonical slot are at the same depth
-    relative to the recording. A leading ``.`` distinguishes staging from
-    canonical caches. A UUID avoids collisions between workers on different
-    hosts, where process IDs can coincide.
+    Same directory as the slot because SI stores the recording path relative
+    to the analyzer folder. The UUID avoids collisions across hosts.
     """
     parent = canonical_folder.parent
     return parent / (
@@ -714,11 +574,9 @@ def _sorting_id_from_analyzer_folder(canonical_folder) -> str:
 class StagedAnalyzer:
     """Attempt-owned analyzer, kept private until its Sorting insert succeeds.
 
-    The ownership lock spans compute and insert. Cleanup checks it without
-    blocking, so even a long wait for a database transaction cannot make an
-    active attempt look abandoned. Process death releases the OS lock; the
-    explicit cache audit can then reclaim the directory. ``close`` releases
-    ownership on normal completion or failure, including failed publication.
+    The ownership lock spans compute and insert; cleanup checks it without
+    blocking, so a slow transaction never looks abandoned. Process death
+    releases it.
     """
 
     def __init__(self, canonical_folder):
@@ -749,8 +607,7 @@ class StagedAnalyzer:
         except OSError as exc:
             from spyglass.utils import logger
 
-            # Log the text, not the exception: a kept log record would hold
-            # its traceback and the caller frames (and analyzers) it reaches.
+            # A logged exception would pin its traceback's frames and analyzers.
             logger.warning(
                 "Analyzer staging cleanup failed for %s: %s",
                 self.folder,
@@ -767,38 +624,10 @@ class StagedAnalyzer:
 def publish_analyzer_atomically(canonical_folder, build_into):
     """Build an analyzer into a private temp folder, then move it into the slot.
 
-    The low-level build (``build_into``) writes into a FRESH private folder that
-    is a HIDDEN SIBLING of ``canonical_folder`` (same parent directory, so the
-    move is a rename AND the analyzer's relative recording path survives it --
-    see :func:`_publish_sibling`); only on success is that temp moved into the
-    canonical slot. This is the canonical-cache safety layer that keeps a build
-    from writing straight into (and corrupting) the live folder a reader might be
-    loading -- distinct from ``build_into`` itself, which simply builds wherever
-    it is told (recompute / merged-curation temp analyzers reuse the low-level
-    build directly, never this publisher).
-
-    A directory rename is NOT a clean atomic swap: POSIX ``rename(2)`` requires
-    the destination to be empty (else ``ENOTEMPTY``), so a rebuild over an
-    existing folder cannot ``os.replace`` straight onto it. The publish
-    sequence is therefore:
-
-    - canonical **absent**  -> ``os.replace(temp, canonical)``;
-    - canonical **present** -> ``os.replace(canonical, trash)``,
-      ``os.replace(temp, canonical)``, ``rmtree(trash)``. If the install move
-      fails, the original is moved back from trash so the slot is restored; if
-      THAT restore also fails (a rare double failure), the trash is LEFT on disk
-      (the only surviving copy) for manual recovery -- the slot may be absent
-      but is recoverable.
-
-    The brief window where the canonical slot is moved aside is reader-safe
-    because this publisher acquires ``analyzer_cache_lock(sorting_id)`` (the read
-    path takes the same lock); the directory replace is not itself atomic.
-    Callers that already hold the lock remain safe because the lock is
-    process-reentrant.
-    ``build_into`` that writes no folder (a zero-unit sort short-circuits before
-    building) leaves the slot untouched. The temp is always removed; the trash
-    is removed only after a successful install (never on the failed-rollback
-    path, where it is the surviving copy).
+    The build goes to a hidden sibling (:func:`_publish_sibling`) and is
+    installed with :func:`install_staged_folder` under
+    ``analyzer_cache_lock``, so readers never see a partial folder. A build
+    that writes nothing (zero units) leaves the slot untouched.
 
     Parameters
     ----------
@@ -867,13 +696,9 @@ def cleanup_analyzer_staging(
 ) -> list[str]:
     """Report/remove abandoned build and trash folders, skipping active owners.
 
-    Both locks are nonblocking: a cache publisher holds the sort lock, and a
-    Sorting compute holds its build lock until insertion finishes. No PID or
-    age heuristic is needed, including on supported shared filesystems. Only
-    folders named by ``_publish_sibling`` (a uuid4 hex suffix) are candidates;
-    other hidden directories are never touched. ``candidates`` limits a
-    confirmed deletion to the paths previously presented to the operator;
-    ownership is still rechecked.
+    A folder is active if its sort lock or build lock is held (checked
+    without blocking). Only ``_publish_sibling`` names are candidates.
+    ``candidates`` limits deletion to paths already shown to the operator.
     """
     from filelock import FileLock, Timeout
 
@@ -916,10 +741,8 @@ def cleanup_analyzer_staging(
 def _remove_unless_in_use(folder: Path) -> bool:
     """Remove ``folder``; return False if a still-open file blocks it.
 
-    On NFS, a removed file that a process still maps becomes a ``.nfs``
-    placeholder that cannot be removed (``EBUSY``), and its directory then
-    cannot be removed (``ENOTEMPTY``). Such a folder is still in use, so it is
-    left for a later cleanup. Any other error is raised.
+    On NFS a still-mapped file leaves a ``.nfs`` placeholder (``EBUSY`` /
+    ``ENOTEMPTY``); that folder is left for later. Other errors raise.
     """
     import errno
 
@@ -943,18 +766,8 @@ def _remove_unless_in_use(folder: Path) -> bool:
 def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
-    A sort can have several analyzer folders on disk (the display and metric
-    recipes, per-curation caches and their derivatives), so this removes every
-    ``{sorting_id}__*.analyzer`` folder under the cache root -- deleting the
-    sort orphans every one. The glob is anchored on the full
-    ``sorting_id`` (a fixed-length UUID) followed by the ``__`` separator, so
-    one sort's folders never match another's.
-
-    ``missing_ok=True`` (default) makes the no-folders case a no-op returning
-    ``False`` (the common case: zero-unit sorts never wrote one, and the cache
-    is regeneratable). ``missing_ok=False`` raises ``FileNotFoundError`` when no
-    folder exists. A removal failure (e.g. a permission error) propagates
-    rather than being swallowed.
+    Removes every ``{sorting_id}__*.analyzer`` folder (display, metric and
+    curation caches) and abandoned staging. Removal errors propagate.
 
     Parameters
     ----------
@@ -992,14 +805,10 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
 def remove_previous_sort_analyzer_caches(sorting_id, *, keep) -> None:
     """Remove analyzer folders an earlier sort left under a reused ``sorting_id``.
 
-    Call only once a new ``Sorting`` insert owns ``sorting_id``. Selection ids
-    are deterministic, and a delete that reaches ``Sorting`` through a cascade
-    skips ``Sorting.delete``, so a re-sort can find the old sort's folders.
-    They hold the old spike trains, and the load path checks only extension
-    completeness, so they must not survive. Each is renamed to a trash sibling
-    first, so a folder another process still maps leaves the canonical slot
-    (``cleanup_analyzer_staging`` reclaims it later). Staging folders are
-    untouched.
+    Call only once a new ``Sorting`` insert owns ``sorting_id``. A cascade
+    delete skips ``Sorting.delete``, and a re-sort reuses the deterministic id,
+    so stale folders with old spike trains can remain. Each is renamed to
+    trash first in case another process still maps it.
 
     Parameters
     ----------
@@ -1025,18 +834,10 @@ def remove_previous_sort_analyzer_caches(sorting_id, *, keep) -> None:
 def collect_analyzer_cache_references(sorting_table) -> dict:
     """Collect live analyzer references for the supplied sorting relation.
 
-    This is the single DB-backed reference collector for the analyzer cache.
-    Raw references cover each sort's display recipe and PC-requesting
-    evaluation metric recipes. Curation references cover the per-generation
-    display cache for every live committed curation outside the raw namespace,
-    plus its PC-requesting metric recipes. The caller supplies ``sorting_table``
-    to keep this module free of schema activation at import time. Its
-    restriction applies to all curation, evaluation, and reclamation queries.
-
-    Missing curation folders are not DB-side orphans: they are lazy,
-    regeneratable caches built on first interactive use. ``units_bearing``
-    therefore continues to describe only raw sort display analyzers, whose
-    absence is operationally useful to report.
+    References: each sort's display analyzer, every live committed curation's
+    display cache, and PC-requesting metric analyzers. ``sorting_table``'s
+    restriction scopes every query. ``units_bearing`` reports only raw display
+    analyzers; curation caches are built lazily, so their absence is normal.
     """
     import spikeinterface as si
 
@@ -1062,10 +863,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         if int(row["n_units"]) > 0:
             units_bearing.append((row["sorting_id"], str(path), path.exists()))
 
-    # Join the selection to its CurationV2 row so each PC-requesting
-    # evaluation carries the generation UUID it belongs to: the FK guarantees
-    # a live selection has a curation, and one relational fetch cannot see a
-    # selection and its curation in different states.
+    # One join, so a selection and its curation are read consistently.
     pc_rows = (
         CurationEvaluationSelection.pc_requesting()
         * curations.proj("curation_uuid")
@@ -1103,8 +901,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
             "sorting_id", "curation_id", as_dict=True
         )
     }
-    # Unit-bearing committed curations, also consulted by the PC loop below
-    # (every PC row is joined to one of ``curations``).
+    # Unit-bearing committed curations; the PC loop below also reads it.
     live_committed: set[tuple[str, int]] = set()
     for row in curation_rows:
         sorting_id = str(row["sorting_id"])
@@ -1117,10 +914,8 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         ):
             continue
         live_committed.add((sorting_id, curation_id))
-        # A raw-namespace curation has no base cache of its own (it shares the
-        # sort analyzer), but a parameter-specific DERIVATIVE of it is keyed by
-        # its generation; referencing the would-be base path lets
-        # ``derivative_base_path`` recognize such derivatives as live.
+        # A raw-namespace curation shares the sort analyzer, but its
+        # derivatives are keyed by this would-be base path.
         recipe_name = display_recipe_by_sorting[sorting_id]
         referenced_paths.add(
             str(
@@ -1192,20 +987,11 @@ def classify_orphaned_analyzer_folders(
 ) -> dict:
     """Classify analyzer-folder leaks into DB-side, disk-side, and reclaimed.
 
-    Pure (DB-free) set logic for ``Sorting.find_orphaned_analyzer_folders``; the
-    caller gathers the DB / filesystem facts (which sorting_ids bear units,
-    whether each computed folder exists, which folders sit under the analyzer
-    root, and which missing folders were intentionally reclaimed) and this
-    function classifies them.
+    - DB-side: a units-bearing row whose folder is missing (reported only).
+    - Reclaimed: the same, with a recompute ``deleted=1`` record.
+    - Disk-side: a folder no row references.
 
-    A **DB-side orphan** is a units-bearing ``Sorting`` row whose computed
-    analyzer folder is gone on disk (regeneratable scratch removed out of band);
-    reported only, never auto-deleted. A **reclaimed** folder is the same missing
-    row-side path, but with a recompute ``deleted=1`` audit trail showing the
-    absence was intentional. A **disk-side orphan** is an on-disk folder under
-    the analyzer root that no row references (the row was deleted via a path that
-    bypassed the ``Sorting.delete`` override). Input order of ``units_bearing``
-    and ``disk_dir_paths`` is preserved.
+    Input order is preserved.
 
     Parameters
     ----------
@@ -1244,9 +1030,7 @@ def classify_orphaned_analyzer_folders(
         else:
             db_side.append(row)
     referenced = set(referenced_paths)
-    # A derivative folder (``..._ext_{hash}.analyzer``) is referenced exactly
-    # when its base cache is: derivatives are keyed by the same live curation
-    # generation, so they are never enumerated separately by the collector.
+    # A derivative is referenced exactly when its base cache is.
     disk_side = [
         path
         for path in disk_dir_paths
@@ -1261,10 +1045,8 @@ def find_orphaned_analyzer_folders(
 ) -> dict:
     """Audit analyzer-folder disk leaks; never delete database rows.
 
-    The body of ``Sorting.find_orphaned_analyzer_folders``; see that method
-    for the four classes it reports and the ``dry_run`` contract.
-    ``table_cls`` is the ``Sorting`` class, whose rows (restricted to
-    ``sorting_id`` when given) define the referenced cache folders.
+    The body of ``Sorting.find_orphaned_analyzer_folders``. ``table_cls`` is
+    the ``Sorting`` class.
     """
     import datajoint as dj
 
@@ -1276,18 +1058,13 @@ def find_orphaned_analyzer_folders(
             "so its locked ownership recheck sees newly committed Sorting rows."
         )
 
-    # One collector owns references for BOTH cache kinds. Keeping this out
-    # of the filesystem loop prevents a new curation cache from being
-    # accidentally classified as garbage by a raw-sort-only sweep.
     if sorting_id is not None:
         sorting_id = uuid.UUID(str(sorting_id))
     references = collect_analyzer_cache_references(
         table_cls & ({} if sorting_id is None else {"sorting_id": sorting_id})
     )
     analyzer_root = analyzer_cache_root()
-    # Only typed canonical raw/curation directories are deletion candidates.
-    # Hidden atomic-publisher siblings and unrelated directories are never
-    # considered, even under a misconfigured shared cache root.
+    # Only canonical folders, even under a misconfigured root.
     disk_dir_paths = (
         [
             str(c)
@@ -1346,8 +1123,6 @@ def find_orphaned_analyzer_folders(
             "staging": staging,
         }
 
-    # Confirmation covers disk-side orphans and abandoned staging only;
-    # this audit never deletes database rows.
     msg = (
         f"Delete {len(disk_side)} orphaned analyzer folder(s) and "
         f"{len(staging)} abandoned staging folder(s)? This cannot "
@@ -1364,12 +1139,8 @@ def find_orphaned_analyzer_folders(
             if identity is None:  # pragma: no cover - classified above
                 continue
             with analyzer_cache_lock(identity.sorting_id):
-                # A folder may have acquired a committed owner since the
-                # initial scan or while the operator reviewed the prompt.
-                # Sorting holds this lock through COMMIT/rollback, so this
-                # fresh read cannot mistake an in-flight publication for an
-                # orphan. Existing transactions are refused above because
-                # their repeatable-read snapshot could hide that commit.
+                # Recheck under the lock, which Sorting holds through COMMIT,
+                # in case an owner committed since the scan.
                 live = collect_analyzer_cache_references(
                     table_cls & {"sorting_id": identity.sorting_id}
                 )["referenced_paths"]

@@ -1,9 +1,7 @@
 """Tests for ``_shared_artifact_group.validate_shared_artifact_group_members``.
 
-Pure validation of shared-artifact-group member metadata: members must
-all live in one session (IntervalList is keyed by nwb_file_name) and share
-a sampling frequency (aggregate_channels requires identical fs). No DB --
-member metadata is passed in directly.
+Members must share one session (IntervalList is keyed by nwb_file_name)
+and one sampling frequency (aggregate_channels requires it). DB-free.
 """
 
 from __future__ import annotations
@@ -28,8 +26,7 @@ def test_validate_shared_group_members_returns_single_session():
 
 
 def test_validate_shared_group_members_accepts_one_shot_iterable():
-    """The helper documents an iterable input, so one-shot iterators must work
-    even though validation needs two passes over the member metadata."""
+    """One-shot iterators work although validation makes two passes."""
     from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
@@ -43,8 +40,7 @@ def test_validate_shared_group_members_accepts_one_shot_iterable():
 
 
 def test_validate_shared_group_members_rejects_multiple_sessions():
-    """Members spanning more than one session raise -- a shared artifact pass
-    is meaningless across sessions (IntervalList is keyed by nwb_file_name)."""
+    """Members spanning more than one session raise."""
     from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
@@ -59,8 +55,7 @@ def test_validate_shared_group_members_rejects_multiple_sessions():
 
 
 def test_validate_shared_group_members_rejects_differing_sampling_frequency():
-    """Members with differing sampling frequencies raise -- aggregate_channels
-    requires identical fs."""
+    """Members with differing sampling frequencies raise."""
     from spyglass.spikesorting.v2._artifacts.shared_group import (
         validate_shared_artifact_group_members,
     )
@@ -75,13 +70,8 @@ def test_validate_shared_group_members_rejects_differing_sampling_frequency():
 
 
 # --------------------------------------------------------------------------- #
-# Compute-boundary re-assertion of the channel-aggregation invariants.
-#
-# ``SharedGroupArtifactDetection.make_compute`` aggregates the shared-group
-# members with ``si.aggregate_channels``; a direct ``SharedArtifactGroup.Member``
-# insert can bypass ``insert_group``'s check, so the same invariants (one
-# session, fs, n_samples, dtype, timestamp vector) are re-asserted over the
-# loaded recordings and raise ``SchemaBypassError`` on a corrupted member set.
+# ``make_compute`` re-checks the aggregation invariants on loaded recordings,
+# raising ``SchemaBypassError`` for members inserted around ``insert_group``.
 # --------------------------------------------------------------------------- #
 
 
@@ -124,8 +114,7 @@ def test_assert_shared_group_aggregatable_accepts_matching_members():
     "make_second,nwb_names,match",
     [
         (lambda: _np_recording(100, 20000.0), ["s.nwb", "s.nwb"], "sampling"),
-        # The regression case: a sub-Hz drift NumPy's default np.isclose would
-        # accept must still be rejected (it misaligns the aggregated time axis).
+        # Sub-Hz drift that default np.isclose accepts misaligns the time axis.
         (lambda: _np_recording(100, 30000.3), ["s.nwb", "s.nwb"], "sampling"),
         (lambda: _np_recording(50, 30000.0), ["s.nwb", "s.nwb"], "sample"),
         (

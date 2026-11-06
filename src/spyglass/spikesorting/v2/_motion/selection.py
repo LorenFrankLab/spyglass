@@ -1,16 +1,6 @@
 """Insert paths behind the motion selection tables.
 
-:func:`insert_estimate_selection` is the body of
-``MotionEstimateSelection.insert_selection``: it validates the request,
-derives the deterministic ``motion_estimate_id``, returns an existing row's
-key when one matches (``_find_existing_pk``, reached through the table
-class), and otherwise inserts the master and its parts with
-:func:`insert_estimate_selection_rows`, holding the artifact detection's
-advisory lock. :func:`insert_corrected_selection` is the body of
-``MotionCorrectedRecordingSelection.insert_selection``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -157,17 +147,12 @@ def insert_estimate_selection_rows(
 ) -> dict:
     """Insert the master and its parts atomically, locked against deletion.
 
-    Runs the artifact-bound insert shared with ``SortingSelection``: an
-    artifact-bound selection must own its transaction (the advisory lock
-    that serializes it against the detection's deletion is released when
-    this returns), the artifact's merge id is resolved before the
-    transaction, and a duplicate-key race refetches the winner.
-    ``table_cls`` is the ``MotionEstimateSelection`` class.
+    Uses the artifact-bound insert shared with ``SortingSelection``; a
+    duplicate-key race refetches the winner. ``table_cls`` is the
+    ``MotionEstimateSelection`` class.
 
-    Duplicate-key recovery has no savepoint: it relies on the deterministic
-    primary key colliding on the master insert, the transaction's first
-    statement, before any part row is written. Keep the master insert first,
-    or the recovery would leave part rows inside a caller's transaction.
+    Recovery has no savepoint, so the master insert must stay first: the
+    deterministic key collides there before any part row is written.
     """
     from spyglass.spikesorting.v2.artifact_output import (
         insert_artifact_bound_selection,

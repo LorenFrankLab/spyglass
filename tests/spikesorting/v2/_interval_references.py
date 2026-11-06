@@ -1,12 +1,8 @@
-"""Full-timestamp-vector reference implementations for the interval tests.
+"""Full-timestamp-vector references for the bounded-memory interval code.
 
-Production maps intervals to frames and finds wall-clock gaps without
-materializing the recording's timestamp vector
-(``_recording_restriction._consolidate_regular_intervals``,
-``_signal_math.base_intervals_and_gaps``). These references compute the same
-quantities directly from a whole ``(n_samples,)`` timestamp array with
-``searchsorted`` / ``np.diff``, so tests can check the bounded-memory paths
-against them. DB-free.
+They check ``_consolidate_regular_intervals`` and
+``base_intervals_and_gaps`` against ``searchsorted``/``np.diff`` over the
+whole ``(n_samples,)`` timestamp array. DB-free.
 """
 
 from __future__ import annotations
@@ -23,10 +19,8 @@ def consolidate_intervals(intervals, timestamps):
     """Convert ``(start_time, stop_time)`` second intervals to frame indices.
 
     Sorts and merges overlapping/adjacent intervals, then maps each onto a
-    half-open ``[start_frame, end_frame_exclusive)`` pair. The end uses
-    ``searchsorted(side="right")`` -- the count of timestamps ``<= stop_time``
-    -- which is exactly the exclusive end ``frame_slice`` expects, so the
-    final sample of each interval is retained.
+    half-open ``[start_frame, end_frame_exclusive)`` pair that keeps the
+    final sample of each interval.
 
     Parameters
     ----------
@@ -46,14 +40,13 @@ def consolidate_intervals(intervals, timestamps):
     if intervals.shape[1] != 2:
         raise ValueError("Input array must have shape (N_Intervals, 2).")
 
-    # Sort defensively; stable ordering by start.
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[np.argsort(intervals[:, 0])]
 
     assert_monotonic_timestamps(timestamps, context="consolidate_intervals: ")
     start_indices = np.searchsorted(timestamps, intervals[:, 0], side="left")
-    # Exclusive end: ``side="right"`` returns the count of timestamps <= value,
-    # which is exactly the half-open end ``frame_slice`` expects.
+    # side="right" counts timestamps <= stop: the exclusive end frame_slice
+    # expects.
     stop_indices = np.searchsorted(timestamps, intervals[:, 1], side="right")
 
     consolidated = []
@@ -61,8 +54,7 @@ def consolidate_intervals(intervals, timestamps):
     for next_start, next_stop in zip(start_indices, stop_indices):
         next_start = int(next_start)
         next_stop = int(next_stop)
-        # Overlap / adjacency in exclusive-end form: next_start <= stop
-        # (== means strictly adjacent).
+        # == means adjacent.
         if next_start <= stop:
             stop = max(stop, next_stop)
         else:

@@ -1,19 +1,8 @@
-"""Cross-session unit tracking: schema + matcher validation.
+"""Cross-session unit tracking: schema and matcher validation.
 
-Covers the ten cross-session matching validation goals. The graph-logic goals
-(pair canonicalization, strict-clique tracked-unit derivation, the bounded-search
-cap, unmatched singletons) are exercised as pure ``_matcher_graph`` functions
-with no database; the table-wiring goals (registry-validating insert, the
-explicit per-member curation selection, the ``make()`` provenance recheck, and
-the ``Pair`` foreign-key integrity) drive the real DataJoint tables over a
-two-session synthetic sort. The ground-truth AUC gate runs UnitMatch end to end
-on the polymer two-session fixture; it is verified locally and is not yet
-CI-enforced (the two-session fixtures are unhosted, so it skips in CI).
-
-The pure-logic and external-matcher sections need neither a database nor
-UnitMatchPy. The database sections request ``dj_conn``; the gate additionally
-requires the polymer two-session fixture and the optional UnitMatchPy extra and
-skips cleanly when either is absent.
+Graph logic runs as pure functions; table wiring uses ``dj_conn`` and a
+two-session synthetic sort. The ground-truth AUC gate needs the unhosted
+polymer two-session fixture and UnitMatchPy, so it skips in CI.
 """
 
 from __future__ import annotations
@@ -72,9 +61,8 @@ def test_unitmatch_bundle_rejects_asymmetric_window_before_io():
 
 
 def test_unit_semantics_for_sorter():
-    """unit_semantics is derived from the sorter (single source of truth): the
-    clusterless thresholder emits ONE threshold-crossing pseudo-unit, not a
-    sorted neuron; every real sorter emits sorted units."""
+    """unit_semantics is derived from the sorter: the clusterless thresholder
+    emits threshold crossings; every real sorter emits sorted units."""
     from spyglass.spikesorting.v2._sorting.dispatch import (
         unit_semantics_for_sorter,
     )
@@ -114,7 +102,7 @@ def test_canonicalize_orients_by_ascending_input_index():
         canonicalize_match_pairs,
     )
 
-    # Provide the pair "reversed" (input 1 first); canonicalization flips it.
+    # Input 1 first; canonicalization flips it.
     reversed_pair = _pair(_CUR_B, 7, _CUR_A, 3, prob=0.8)
     out = canonicalize_match_pairs([reversed_pair], _INPUT_INDEX)
     assert len(out) == 1
@@ -166,7 +154,7 @@ def _nodes(*specs):
 
 
 def test_derive_tracked_units_full_triangle_is_one_component():
-    """Three sessions, all pairwise edges high -> one clique of all three."""
+    """Three sessions with all pairwise edges high form one clique."""
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
@@ -184,7 +172,7 @@ def test_derive_tracked_units_full_triangle_is_one_component():
 
 
 def test_derive_tracked_units_open_path_splits():
-    """A<->B and B<->C high but A<->C low -> >=2 components, none with A and C."""
+    """A<->B and B<->C high but A<->C low splits A and C apart."""
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b, c = _nodes(("A", 1), ("B", 1), ("C", 1))
@@ -201,9 +189,8 @@ def test_derive_tracked_units_open_path_splits():
 def test_derive_tracked_units_partition_no_unit_in_two_groups():
     """Overlapping maximal cliques must not assign one unit to two identities.
 
-    Edges A1-B1, A1-B2, A2-B1 form three overlapping size-2 cliques sharing
-    A1/B1. Strict tracking is a partition, so every curated unit appears in
-    exactly one tracked unit (greedy maximal-clique cover), not duplicated.
+    Edges A1-B1, A1-B2, A2-B1 form three overlapping size-2 cliques; each
+    unit lands in exactly one tracked unit.
     """
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
@@ -217,7 +204,7 @@ def test_derive_tracked_units_partition_no_unit_in_two_groups():
     assert len(all_members) == len(
         set(all_members)
     ), "a curated unit was assigned to more than one tracked unit"
-    # Every node is covered exactly once (a true partition of the universe).
+    # Every node is covered exactly once.
     assert set(all_members) == {a1, a2, b1, b2}
     # The strongest edge's clique survives whole.
     assert any(set(tu["members"]) == {a1, b1} for tu in tracked)
@@ -226,9 +213,8 @@ def test_derive_tracked_units_partition_no_unit_in_two_groups():
 def test_derive_tracked_units_partition_prefers_stronger_clique():
     """Among equal-size overlapping cliques, the strongest edge wins the unit.
 
-    A1-B1 (0.80) and A1-B2 (0.95) overlap on A1. The lexically-first clique is
-    {A1,B1}, but the stronger match is {A1,B2}, so the probability-aware
-    tie-break must keep {A1,B2} whole and drop B1 to a singleton.
+    A1-B1 (0.80) and A1-B2 (0.95) overlap on A1: {A1,B2} stays whole and B1
+    becomes a singleton, though {A1,B1} sorts first.
     """
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
@@ -249,7 +235,7 @@ def test_derive_tracked_units_unmatched_singleton():
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b = _nodes(("A", 1), ("B", 1))
-    edges = [(a, b, 0.2)]  # below threshold -> no edge in the graph
+    edges = [(a, b, 0.2)]  # below threshold
     tracked = derive_tracked_units(
         [a, b], edges, threshold=0.5, max_strict_nodes=100
     )
@@ -285,8 +271,7 @@ def test_derive_tracked_units_under_cap_succeeds_strict():
 
 def test_derive_tracked_units_rejects_edge_outside_universe():
     """An edge endpoint absent from the node universe raises (networkx
-    add_edge would otherwise silently create the node, smuggling a unit past
-    the node budget and into the partition)."""
+    add_edge would silently create the node)."""
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     a, b = _nodes(("A", 1), ("B", 1))
@@ -300,10 +285,8 @@ def test_derive_tracked_units_rejects_edge_outside_universe():
 def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
     """Equal-size AND equal-strength overlapping cliques resolve by sorted members.
 
-    {A1,B1} and {A1,B2} are both size 2 with identical 0.90 strength, so the final
-    deterministic tie-break (sorted members) must keep the lexically-first clique
-    {A1,B1} whole and drop B2 to a singleton -- locking the determinism that
-    ``tracked_unit_id`` assignment relies on.
+    {A1,B1} stays whole and B2 becomes a singleton, keeping
+    ``tracked_unit_id`` assignment deterministic.
     """
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
@@ -315,18 +298,15 @@ def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
     )
     assert any(set(tu["members"]) == {a1, b1} for tu in tracked)
     assert any(tu["members"] == [b2] for tu in tracked)
-    # True partition: every node covered exactly once.
+    # Every node covered exactly once.
     all_members = [node for tu in tracked for node in tu["members"]]
     assert sorted(all_members) == sorted([a1, b1, b2])
     assert len(all_members) == len(set(all_members))
 
 
 def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
-    """A tracked unit spanning two sortings from the SAME nwb counts as ONE
-    session. ``n_sessions_detected`` is a cross-session-identity claim, so it
-    must key on the recording session (nwb), not on (sorting_id, curation_id) --
-    otherwise a within-day match across two sort groups inflates to multi-session.
-    """
+    """``n_sessions_detected`` counts recording sessions (nwb), so two
+    sortings from the same nwb count as one session."""
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
     # Sortings "A" and "B" are two sort groups of the SAME day; "C" is another day.
@@ -351,11 +331,9 @@ def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():
 
 
 def test_divergent_electrode_space_members_flags_distinct_probe():
-    """A member with identical channel GEOMETRY but different electrode identity
-    (group / ids / regions) is reported as divergent. The signal is ADVISORY,
-    not a rejection: electrode-group names / ids are taken from each NWB and are
-    not guaranteed stable across labs' ingestion, so UnitMatch warns rather than
-    blocking a legitimate chronic match."""
+    """A member with identical channel geometry but different electrode
+    identity is reported as divergent (advisory only: electrode names and ids
+    are not stable across labs' ingestion)."""
     from spyglass.spikesorting.v2._matching.graph import (
         divergent_electrode_space_members,
     )
@@ -369,8 +347,8 @@ def test_divergent_electrode_space_members_flags_distinct_probe():
 
 
 def test_divergent_electrode_space_members_empty_when_matching():
-    """Members on the same electrode space (identical signature) -> no divergent
-    members; a single-member selection trivially has none."""
+    """Members with identical signatures, or a single member, have no
+    divergent members."""
     from spyglass.spikesorting.v2._matching.graph import (
         divergent_electrode_space_members,
     )
@@ -386,8 +364,8 @@ def test_divergent_electrode_space_members_empty_when_matching():
 
 
 def test_pairs_nwb_round_trip_preserves_missing_drift_and_fdr(tmp_path):
-    """Non-empty + empty pairs round-trip; a None fdr stores as NaN and reads
-    back as None, while a real fdr survives and string ids stay str."""
+    """Non-empty and empty pairs round-trip; a None fdr reads back as None, a
+    real fdr survives, and string ids stay str."""
     from datetime import datetime, timezone
 
     from pynwb import NWBHDF5IO, NWBFile
@@ -464,10 +442,9 @@ def test_pairs_nwb_round_trip_preserves_missing_drift_and_fdr(tmp_path):
 
 
 class _DummyMatcher:
-    """A ten-line external matcher proving the protocol needs no v2 internals.
+    """An external matcher using only public ``matcher_protocol`` types.
 
-    It imports only the public ``matcher_protocol`` data types, matches the
-    first unit of every session pair, and reports a fixed probability.
+    Matches the first unit of every session pair with a fixed probability.
     """
 
     name = "dummy_external"
@@ -527,80 +504,21 @@ def test_external_matcher_satisfies_protocol_and_runs():
 
 @pytest.mark.slow
 def test_driftout_units_recovered_pooled(tmp_path):
-    """The production ``per_unit`` bundle construction
-    (:func:`extract_unitmatch_bundle`) recovers drift-out units without
+    """The ``per_unit`` bundle construction recovers drift-out units without
     degrading healthy units, on seeds 10..19.
 
-    Builds the synthetic control / driftout_A / driftout_AB scenarios (see
-    ``tests/spikesorting/v2/scripts/unitmatch_half_split_experiment.py`` for
-    the dataset, scoring and gate definitions -- this test imports them
-    rather than duplicating them) for seeds 10..19, condition ``per_unit``
-    only, and asserts the pooled acceptance gates for each drift-out
-    scenario:
+    Scenarios, scoring and gates come from
+    ``scripts/unitmatch_half_split_experiment.py``. Gates for driftout_A and
+    driftout_AB:
 
-    - Drift-out recall >= 0.80.
-    - Healthy template bit-identity: every non-S unit's saved
-      cross-validation-half templates are bit-identical to the same seed's
-      control run, pooled over seeds. PASS iff identical == total.
-    - Healthy true-pair probability drop: for each non-S unit, its true
-      cross-session pair's two directed UnitMatch probabilities give ``q_u =
-      min(p(A_u -> B_u), p(B_u -> A_u))``; the drop is the pooled mean
-      ``q_u`` in the control run minus the pooled mean ``q_u`` in the
-      scenario run, over the same paired non-S units, pooled over all seeds.
-      PASS iff drop <= 0.04.
-    - Healthy false-pair rate increase vs control <= 0.005.
+    - drift-out recall >= 0.80;
+    - healthy units' half templates bit-identical to the control run;
+    - healthy true-pair probability drop <= 0.04;
+    - healthy false-pair rate increase <= 0.005.
 
-    The S x S false-pair rate among drift-out units is computed and printed
-    but not asserted. UnitMatch derives its match threshold, prior and score
-    distributions from the units present in each run (UnitMatchPy
-    ``metric_functions.get_threshold``); with about 20 units per session that
-    per-run fit is unstable, and a near-tie in the threshold search can flip
-    on a single redrawn template and admit a burst of false pairs -- observed
-    on one of these ten seeds, independent of how the cross-validation
-    halves are built. Gating on it would fail the construction under test
-    for a limitation of UnitMatch's own calibration, not a defect this test
-    can localize, so it is reported as a diagnostic instead (see
-    ``evaluate_gates`` for the detailed rationale).
-
-    (The excess probability drop over the recording-half ``time_half``
-    construction is not evaluated here because ``time_half`` does not run in
-    this test. The script also prints a count-based paired healthy recall
-    drop as a diagnostic -- it is not asserted here because a few healthy
-    pairs near probability 0.5 can flip between the scenario and control
-    runs by chance: UnitMatch refits its match-probability kernels,
-    candidate threshold and prior on the whole population on every call, so
-    a pair's pass/fail label is not robust to that refit even when its two
-    cross-validation-half templates are bit-identical to the no-drift
-    control. The template bit-identity gate isolates the template side of
-    that comparison directly, and the probability-drop gate replaces the
-    pass/fail count with an average of the underlying probabilities, so
-    neither is sensitive to threshold flips the same way -- this is why
-    healthy units are checked by template identity and mean probability
-    rather than a probability-threshold pass/fail count.)
-
-    Seeds, scenarios and thresholds match the script's default run. A
-    failure here is a result about the current per-unit construction, not
-    a test bug: do not loosen the thresholds, seeds, scenarios or scoring,
-    or xfail/skip it, to make it pass. The checked gates are selected by a
-    positive allowlist of (gate name, scenario) pairs -- the four gates
-    above x driftout_A/driftout_AB (the S x S rate is excluded: it is a
-    printed diagnostic, not an acceptance gate) -- and their presence is
-    asserted before their pass/fail, so a construction that silently drops
-    a scenario (``pooled_counts``, ``pooled_paired_counts`` or
-    ``pooled_true_pair_prob_drop`` returning ``None``) fails loudly instead
-    of passing vacuously on an empty or incomplete selection. The assertion
-    message lists every scenario's gates so a regression elsewhere stays
-    visible.
-
-    DB-free: this test requests no ``dj_conn`` fixture and the functions it
-    imports (:func:`make_dataset`, :func:`make_scenario_sessions`,
-    :func:`run_one`, :func:`evaluate_gates`) reach a database only through
-    ``spyglass.spikesorting.v2._matching.unitmatch_backend`` and ``.matcher_protocol``,
-    neither of which opens a DataJoint connection at import time or at call
-    time here -- ``run_one`` builds bundles on disk and matches them through
-    ``UnitMatchBackend.match``, with no table access. pytest fixtures are
-    resolved per test at setup, not at collection, so the ``dj_conn``-taking
-    tests elsewhere in this module do not force a database for this one.
+    The S x S false-pair rate is a printed diagnostic, not a gate (see
+    ``evaluate_gates``). Do not loosen thresholds, seeds or scoring, or
+    skip, to make this pass. DB-free.
     """
     pytest.importorskip("UnitMatchPy")
     from tests.spikesorting.v2.scripts.unitmatch_half_split_experiment import (
@@ -638,11 +556,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
 
     gates = evaluate_gates(records, condition)
     table = "\n".join(format_gate_line(g) for g in gates)
-    # Positive allowlist: a name-based exclusion would pass vacuously if
-    # evaluate_gates silently dropped a scenario (e.g. pooled_counts,
-    # pooled_paired_counts or pooled_true_pair_prob_drop returning None),
-    # leaving `checked` empty or short. Diagnostics carry a
-    # " (diagnostic, not gated)" suffix, so they never match these names.
+    # Allowlist, so a silently dropped scenario fails instead of passing.
     expected = {
         (gate_name, scenario)
         for gate_name in (
@@ -661,10 +575,7 @@ def test_driftout_units_recovered_pooled(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Table wiring (database): registry-validating insert, the explicit            #
-# per-member selection, the make() provenance recheck, the degenerate           #
-# single-session make, and Pair FK integrity. Built over two synthetic          #
-# single-session sorts on the chronic minirec substrate.                        #
+# Table wiring (database), over two planted sorts on the chronic minirec.     #
 # --------------------------------------------------------------------------- #
 
 _GROUP_NAME = "unitmatch_two_session"
@@ -672,8 +583,7 @@ _SOLO_NAME = "unitmatch_solo"
 
 
 def _ensure_minirec_clusterless_params():
-    """Insert the smoke clusterless sorter row (used only by the clusterless
-    unit-semantics test, NOT the cross-session matching fixtures)."""
+    """Insert the smoke clusterless sorter row for the unit-semantics test."""
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     from tests.spikesorting.v2._smoke_constants import (
@@ -693,11 +603,8 @@ def _ensure_minirec_clusterless_params():
     return SMOKE_CLUSTERLESS_PARAM_NAME
 
 
-#: mountainsort5 params name for the planted minirec sorts. The sorts are
-#: PLANTED (``plant_sorter``), so this row only exists for the
-#: selection FK + identity; the params are never run. A real sorter name gives
-#: the sort ``sorted_units`` semantics -- the right substrate for cross-session
-#: matching, which tracks sorted neurons, not clusterless threshold crossings.
+#: Params row for the planted minirec sorts (never run). A real sorter name
+#: gives ``sorted_units`` semantics, which matching requires.
 _MINIREC_MS5_PARAMS = "franklab_30khz_ms5_2026_06"
 
 
@@ -721,9 +628,7 @@ def _plant_single_unit(
 ):
     """Plant one deterministic sorted unit spread across the recording.
 
-    Enough spikes (and span) for the split-half UnitMatch bundle extraction and
-    the display-analyzer template. Replaces a real sorter run via
-    ``plant_sorter`` -- fast and deterministic.
+    Enough spikes for split-half bundle extraction and the display template.
     """
     import numpy as np
     import spikeinterface as si
@@ -742,13 +647,10 @@ def _plant_single_unit(
 def two_session_curated_group(chronic_2_session_minirec):
     """Two single-session sorts + curations under one SessionGroup.
 
-    Builds on the package-scoped chronic minirec substrate: creates a two-member
-    SessionGroup (and a one-member solo group for the degenerate case), and
-    root-curates each same-day member with a PLANTED single-unit mountainsort5
-    sort (``plant_sorter`` -- fast, deterministic, and
-    ``sorted_units`` semantics, the right substrate for cross-session matching).
-    Yields the group identities plus the per-member curation choices; tears down
-    its own UnitMatch lineage, groups, sorts, and curations afterward.
+    Creates a two-member SessionGroup and a one-member solo group, each member
+    root-curated with a planted single-unit mountainsort5 sort. Yields the
+    group identities and per-member curation choices; tears everything down
+    afterward.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -770,8 +672,7 @@ def two_session_curated_group(chronic_2_session_minirec):
     sorter_params_name = _ensure_minirec_ms5_params()
     MatcherParameters.insert_default()
 
-    # Start clean: drop any leftover groups (and their UnitMatch lineage) for
-    # the owner from a prior interrupted run.
+    # Drop leftovers from an interrupted run.
     clean_session_groups_for_owner(owner)
     SessionGroup.create_group(owner, _GROUP_NAME, members)
     SessionGroup.create_group(owner, _SOLO_NAME, members[:1])
@@ -859,8 +760,7 @@ def test_matcher_parameters_validates_params_per_matcher(dj_conn):
 
 @pytest.mark.slow
 def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
-    """The bulk insert() path (not just insert1) rejects a typo'd
-    matcher -- it must not be a validation bypass."""
+    """The bulk insert() path also rejects a typo'd matcher."""
     from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
@@ -879,9 +779,8 @@ def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
 
 @pytest.mark.slow
 def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
-    """Duplicate-content detection is scoped per matcher: a second matcher with
-    byte-identical params is NOT a duplicate (it dispatches different code), but
-    a second row for the SAME matcher with identical params is rejected."""
+    """Duplicate-content detection is per matcher: identical params under
+    another matcher are allowed, under the same matcher rejected."""
     from pydantic import BaseModel, ConfigDict
 
     from spyglass.spikesorting.v2 import matcher_protocol as mp
@@ -995,11 +894,9 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 ):
     """Final ``CurationEvaluation`` children are valid UnitMatch inputs.
 
-    This pins the downstream object users should select after curation:
-    evaluate each member curation, accept the label verdict with
-    ``use_evaluation_labels``, then pin those committed children in
-    ``UnitMatchSelection``. ``make_fetch`` must see the accepted child
-    curation ids and their frozen matchable unit sets.
+    Children accepted with ``use_evaluation_labels`` can be pinned in
+    ``UnitMatchSelection``, and ``make_fetch`` sees their ids and frozen
+    matchable unit sets.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -1063,11 +960,8 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 
         if pk is not None:
             (UnitMatchSelection & pk).super_delete(warn=False)
-        # The accepted children are curation_evaluation curations of the
-        # shared members; left behind, a later auto_curated plan would find
-        # them. Accepting registers each child on SpikeSortingOutput, so drop
-        # the merge master (it cascades to its CurationV2 part) before the
-        # curation -- DataJoint refuses to delete the part ahead of its master.
+        # Leftover children would leak into later auto_curated plans. Drop
+        # the merge master first; DataJoint will not delete a part before it.
         for child in accepted_children:
             for mid in (SpikeSortingOutput.CurationV2 & child).fetch(
                 "merge_id"
@@ -1081,13 +975,9 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
 def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
     """Plant a deterministic mountainsort5 sort on member 0's recording.
 
-    Unit ``i`` fires at ``samples_by_unit[i]`` (frame indices). A distinct
-    params name gives a distinct content-addressed sort on the SAME recording,
-    so the planted sort shares member 0's identity without colliding with the
-    fixture's single-unit sort. The sort is PLANTED (``plant_sorter``),
-    so the params are never run; a real sorter name keeps the
-    units ``sorted_units``. Returns ``(sort_key, sorted_unit_ids)``; the caller
-    owns teardown (clear_curations_for + dropping the sort/params).
+    Unit ``i`` fires at frames ``samples_by_unit[i]``. A distinct params name
+    keeps it from colliding with the fixture's sort. Returns
+    ``(sort_key, sorted_unit_ids)``; the caller owns teardown.
     """
     import numpy as np
     import spikeinterface as si
@@ -1163,10 +1053,9 @@ def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
 def _plant_two_unit_sort_on_first_member(grp):
     """Plant a deterministic 2-unit mountainsort5 sort on member 0's recording.
 
-    The chronic fixture's sort yields a single unit; a real merge (or a real
-    proposed merge) needs >=2. Returns
-    ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``; the caller owns
-    teardown (clear_curations_for + dropping the sort/params).
+    A merge needs >= 2 units. Returns
+    ``(two_unit_sort_key, sorted_unit_ids, sorter_params_name)``; the caller
+    owns teardown.
     """
     two_unit_params = "minirec_ms5_two_unit"
     two_unit_sort, unit_ids = _plant_sort_on_first_member(
@@ -1182,11 +1071,9 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
 ):
     """A ``CurationEvaluation`` preview child is not a UnitMatch input.
 
-    ``preview_merges`` records proposed merges without applying them;
-    matching that draft would feed oversplit units into the matcher. Both
-    ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch`` must
-    reject it. The fixture's planted sort yields a single unit, so plant a
-    2-unit sort on member 0's recording to host a real proposed merge.
+    Its proposed merges are unapplied, so units would be oversplit. Both
+    ``UnitMatchSelection.insert_selection`` and ``UnitMatch.make_fetch``
+    reject it.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
@@ -1250,11 +1137,8 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
                 unit_policy="v2_unflagged_single_units",
             )
 
-        # Site 2: a direct-insert selection (bypassing insert_selection) is
-        # rejected when UnitMatch.make_fetch validates. Build a valid selection
-        # with the member-0 ROOT, then point input 0 at the preview curation
-        # (its id and generation) and store the matching hash, so the preview
-        # guard -- not the hash or the snapshot check -- fires.
+        # Site 2: make_fetch rejects a direct-insert selection pointing at the
+        # preview, with a matching hash so only the preview guard fires.
         pk = UnitMatchSelection.insert_selection(
             grp["owner"],
             grp["group_name"],
@@ -1296,11 +1180,8 @@ def test_unitmatch_accepts_committed_merged_child_member(
 ):
     """A committed APPLIED-MERGE child is a valid UnitMatch member.
 
-    Coverage otherwise pins label-only committed children (and rejects
-    previews); this pins the production merged shape: plant a 2-unit sort on
-    member 0's recording, COMMIT a merge into a child, pin it, and assert
-    make_fetch's member plan carries the child's MERGED unit set (one unit), not
-    the two pre-merge ids.
+    make_fetch's member plan carries the child's merged unit, not the two
+    pre-merge ids.
     """
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1365,11 +1246,8 @@ def test_unitmatch_accepts_committed_merged_child_member(
 def test_insert_selection_rejects_forged_master_with_mismatched_parts(
     two_session_curated_group,
 ):
-    """A deterministic master whose Input parts no longer realize its
-    input_set_hash (here: every part was dropped) is rejected by
-    insert_selection's _find_existing_pk -- caught up front, not returned as a
-    'valid' PK that only UnitMatch.make_fetch would later reject.
-    """
+    """insert_selection rejects an existing master whose Input parts do not
+    realize its input_set_hash, rather than returning its PK."""
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
@@ -1381,9 +1259,7 @@ def test_insert_selection_rejects_forged_master_with_mismatched_parts(
         grp["choices"],
         unit_policy="v2_unflagged_single_units",
     )
-    # Tear down the consistent selection, then re-insert ONLY the master row
-    # (same deterministic id + input_set_hash, no parts) -- a raw-insert
-    # orphan that DataJoint parts cannot be deleted into directly.
+    # Re-insert only the master row (same id and hash, no parts).
     master_row = (UnitMatchSelection & pk).fetch1()
     (UnitMatchSelection & pk).super_delete(warn=False)
     UnitMatchSelection.insert1(master_row, allow_direct_insert=True)
@@ -1404,11 +1280,8 @@ def test_insert_selection_rejects_forged_master_with_mismatched_parts(
 def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
     two_session_curated_group,
 ):
-    """A forged master whose parts still hash to its input_set_hash but carry
-    an InputRecording row for an input that does not exist is rejected by
-    insert_selection. The hash ignores recording rows without an input, so the
-    structure check -- not the hash -- catches the orphan.
-    """
+    """insert_selection rejects a master whose parts match its hash but carry
+    an InputRecording row for a missing input (the hash ignores such rows)."""
     import uuid
 
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
@@ -1466,7 +1339,7 @@ def test_insert_selection_rejects_wrong_member_curation(
             swapped,
             unit_policy="v2_unflagged_single_units",
         )
-    # Atomic: no master row was created for the rejected selection.
+    # No master row was created.
     assert len(UnitMatchSelection()) == before
 
 
@@ -1483,7 +1356,7 @@ def test_insert_selection_rejects_incomplete_coverage(
             grp["owner"],
             grp["group_name"],
             "unitmatch_default",
-            {0: grp["choices"][0]},  # member 1 missing,
+            {0: grp["choices"][0]},  # member 1 missing
             unit_policy="v2_unflagged_single_units",
         )
 
@@ -1521,7 +1394,7 @@ def test_make_rechecks_input_provenance(two_session_curated_group):
         int(row["input_index"]): row
         for row in (UnitMatchSelection.InputRecording & pk).fetch(as_dict=True)
     }
-    # Swap the two inputs' frozen recordings: each curation now claims the
+    # Swap the two inputs' frozen recordings: each curation claims the
     # other member's recording.
     reforge_selection(
         pk,
@@ -1544,11 +1417,8 @@ def test_make_rechecks_input_provenance(two_session_curated_group):
 
 @pytest.mark.slow
 def test_make_rejects_input_set_hash_mismatch(two_session_curated_group):
-    """A raw-insert master whose stored input_set_hash disagrees with its
-    (otherwise valid) Input / InputRecording rows is rejected by make_fetch.
-    Without the recompute, such a master could claim one input set in its hash
-    while matching on the curations pinned by its parts.
-    """
+    """make_fetch rejects a raw-insert master whose stored input_set_hash
+    disagrees with its otherwise valid parts."""
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchSelectionIntegrityError,
     )
@@ -1696,11 +1566,8 @@ def test_selection_without_inputs_is_rejected(two_session_curated_group):
 
 @pytest.mark.usefixtures("dj_conn")
 def test_unitmatch_computed_matches_make_insert_signature():
-    """The tri-part dispatch splats ``UnitMatchComputed`` POSITIONALLY into
-    ``make_insert(key, *computed)``, so the NamedTuple field order is a wire
-    contract. The per-recording spike counts follow the matchable universe and
-    the three provenance fields close both -- a misalignment would silently
-    mis-bind the list- and str-adjacent slots without a TypeError."""
+    """``UnitMatchComputed`` field order matches ``make_insert``, which
+    receives it positionally."""
     import inspect
 
     from spyglass.spikesorting.v2.unit_matching import (
@@ -1715,11 +1582,8 @@ def test_unitmatch_computed_matches_make_insert_signature():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_unitmatch_fetched_matches_make_compute_signature():
-    """The tri-part dispatch splats ``UnitMatchFetched`` POSITIONALLY into
-    ``make_compute(key, *fetched)``, so the NamedTuple field order is a wire
-    contract. The selection-identity fields were appended to both -- a
-    misalignment would silently mis-bind the str-adjacent slots without a
-    TypeError."""
+    """``UnitMatchFetched`` field order matches ``make_compute``, which
+    receives it positionally."""
     import inspect
 
     from spyglass.spikesorting.v2.unit_matching import (
@@ -1734,9 +1598,8 @@ def test_unitmatch_fetched_matches_make_compute_signature():
 
 @pytest.mark.slow
 def test_unitmatch_records_backend_version(two_session_curated_group):
-    """A populated UnitMatch row records the producer provenance: the SI version,
-    the resolved backend module path, and the backend package version -- resolved
-    from the registry even on the degenerate single-session path."""
+    """A populated UnitMatch row records the SI version, backend module path,
+    and backend package version, even on the single-session path."""
     import importlib.metadata
 
     import spikeinterface as si
@@ -1810,14 +1673,8 @@ def test_matcher_provenance_is_required_for_new_runs(two_session_curated_group):
 def test_clusterless_unit_semantics_derived_and_warned(
     chronic_2_session_minirec, caplog
 ):
-    """A clusterless sort's units are threshold-crossings, not sorted neurons:
-    CurationV2.get_unit_semantics derives that from the sorter, and
-    UnitMatchSelection.insert_selection warns that matching them across sessions
-    is degenerate -- a consuming surface honoring the semantics, not just a
-    column. Built standalone (a real clusterless sort + a solo group) because
-    the matching fixtures deliberately use a sorted-units sorter, exactly so
-    they do NOT match threshold crossings.
-    """
+    """A clusterless sort's unit semantics are threshold crossings, and
+    UnitMatchSelection.insert_selection warns when matching them."""
     import logging
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1895,11 +1752,8 @@ def test_clusterless_unit_semantics_derived_and_warned(
 
 @pytest.mark.slow
 def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
-    """A raw Pair referencing a unit absent from the pinned curation is
-    rejected. The validated ``Pair.insert`` guard fronts the DataJoint foreign
-    key: the bogus pair's second endpoint pins member 1's curation, which is
-    NOT a pinned ``UnitMatchSelection.Input`` of the solo selection, so the
-    guard rejects it (before the FK, which remains as defense-in-depth)."""
+    """``Pair.insert`` rejects a raw pair whose endpoint is not a pinned
+    ``UnitMatchSelection.Input``, before the foreign key check."""
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchPairIntegrityError,
     )
@@ -1971,9 +1825,8 @@ def test_raw_pair_insert_rejects_noninteger_identifiers(dj_conn, field, value):
 
 @pytest.mark.slow
 def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
-    """``TrackedUnit.make`` seeds the node universe from the curated units and,
-    with no matches (the solo group), emits one strict singleton per matchable
-    unit -- exercising the DB wiring of the pure clique derivation."""
+    """With no matches, ``TrackedUnit.make`` emits one strict singleton per
+    matchable unit."""
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
@@ -2008,13 +1861,9 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
 def test_make_runs_full_matcher_table_path(
     two_session_curated_group, monkeypatch
 ):
-    """A registered lightweight matcher drives a real two-member
-    ``UnitMatch.populate()``: the full make() path extracts bundles, runs the
-    matcher, writes ``Pair`` rows + the NWB pairs table, and ``TrackedUnit``
-    groups the matched pair. Proves ``MatcherProtocol`` plugs into the table
-    layer end to end without UnitMatchPy (bundle extraction is stubbed since the
-    fixture matcher reads its pairs from ``params``, not the bundles). The
-    backend recipe omits grouping controls, exercising shared tracking defaults.
+    """A registered lightweight matcher drives a two-member
+    ``UnitMatch.populate()`` that writes ``Pair`` rows and the NWB pairs
+    table, and ``TrackedUnit`` groups the matched pair. Needs no UnitMatchPy.
     """
     from pydantic import BaseModel, ConfigDict, Field
 
@@ -2069,8 +1918,7 @@ def test_make_runs_full_matcher_table_path(
                 for pair_a, pair_b in params.get("pairs", [])
             ]
 
-    # Stub bundle extraction: the fixture matcher reads pairs from params, so it
-    # needs no real waveform bundle (and thus no UnitMatchPy).
+    # The fixture matcher reads pairs from params, not bundles.
     def _noop_extract(session_dir, recording, sorting, **kwargs):
         Path(session_dir).mkdir(parents=True, exist_ok=True)
         return []
@@ -2145,9 +1993,7 @@ def test_make_runs_full_matcher_table_path(
         # make_compute runs on make_fetch's carrier alone.
         fetched = UnitMatch().make_fetch(selection_pk)
         computed = UnitMatch().make_compute(selection_pk, **fetched._asdict())
-        # make_compute staged a fresh analysis NWB (separate from the populated
-        # one); unlink it so the probe leaves no orphan even if the assertion
-        # below fails.
+        # Unlink make_compute's staged NWB before asserting.
         from spyglass.spikesorting.v2._storage.staged_outputs import (
             unlink_staged_analysis_file as _unlink_staged_analysis_file,
         )
@@ -2177,11 +2023,9 @@ def test_make_runs_full_matcher_table_path(
 def test_make_compute_reads_fetched_members_and_only_stages_output(
     two_session_curated_group, monkeypatch
 ):
-    """``make_fetch`` resolves each member's traces file and curated units
-    NWB (its hash is stable across DataJoint's two fetches), and
-    ``make_compute`` builds each bundle from those files with no DB access
-    beyond staging the pairs NWB. The bundle inputs equal what
-    ``CurationV2.get_recording`` / ``get_sorting`` return for the member."""
+    """``make_compute`` builds each bundle from the files ``make_fetch``
+    resolved, with no DB access beyond staging the pairs NWB; the inputs
+    equal ``CurationV2.get_recording`` / ``get_sorting``."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2._storage.staged_outputs import (
@@ -2288,12 +2132,8 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
 def test_full_unitmatch_workflow_with_accepted_evaluation_children(
     two_session_curated_group, curation_evaluation_defaults, monkeypatch
 ):
-    """The user workflow runs end-to-end from accepted eval children.
-
-    Evaluate each member curation, accept the evaluation labels into committed
-    ``CurationV2`` children, pin those exact children in ``UnitMatchSelection``,
-    then run ``UnitMatch.populate`` / ``get_pairs`` / ``TrackedUnit.populate``.
-    """
+    """UnitMatch and TrackedUnit populate end to end from accepted evaluation
+    children."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -2412,10 +2252,8 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
         )
 
         for child in accepted_children:
-            # Accepting an evaluation registers the child curation on the
-            # SpikeSortingOutput merge table, so drop the merge master (it
-            # cascades to its CurationV2 part) BEFORE deleting the curation --
-            # DataJoint refuses to delete the part ahead of its master.
+            # Drop the merge master first; DataJoint will not delete a part
+            # before it.
             for mid in (SpikeSortingOutput.CurationV2 & child).fetch(
                 "merge_id"
             ):
@@ -2431,10 +2269,8 @@ def test_unitmatch_populate_with_committed_merged_child_member(
 ):
     """A committed merged child can run through full ``UnitMatch.populate``.
 
-    This extends the make-fetch coverage: the populate path must load the merged
-    child's ``CurationV2.get_sorting`` result, select the merged unit, write a
-    pair row, and allow ``TrackedUnit`` to group that merged unit with another
-    member's unit.
+    The merged unit gets a pair row and ``TrackedUnit`` groups it with
+    another member's unit.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import (
@@ -2509,8 +2345,7 @@ def test_unitmatch_populate_with_committed_merged_child_member(
         )
         assert int(pair["unit_a_id"]) == merged_uid
         assert int(pair["unit_b_id"]) == unit_b
-        # The fixture matcher reports no drift: stored as NULL (unknown),
-        # never as a fabricated 0 um.
+        # Unknown drift is stored as NULL, not 0 um.
         assert pair["drift_estimate_um"] is None
 
         TrackedUnit.populate(selection_pk, reserve_jobs=False)
@@ -2551,10 +2386,9 @@ def _real_bundle_selection(
 ):
     """A two-member UnitMatch selection built from real bundles.
 
-    Plants ``samples_by_unit`` as member 0's sort (member 1 keeps the fixture's
-    single-unit sort), registers a bundle-reading pairer that emits the listed
-    ``pairs`` only between units present in the bundles, and inserts the
-    selection. Yields ``selection_pk``, member ``choices``, and member 0's
+    Plants ``samples_by_unit`` as member 0's sort and registers a pairer that
+    emits ``pairs`` only between units present in the bundles. Yields
+    ``selection_pk``, member ``choices``, and member 0's
     ``unit_spike_counts``; tears it all down afterwards.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -2639,8 +2473,7 @@ def _units_with_spike_count(unit_spike_counts, n_spikes):
 def _member_identity(grp, member_index, choice):
     """The input identity fields a UnitMatch message must name.
 
-    Member a is recorded before member b, so a member's input_index equals
-    its member_index for this group.
+    For this group, input_index equals member_index.
     """
     return [
         f"input_index {member_index}",
@@ -2656,10 +2489,8 @@ def test_make_logs_exclusions_per_session(
 ):
     """A member whose bundle leaves a unit out gets exactly one warning.
 
-    Member 0 plants a one-spike unit beside a 35-spike unit; member 1's single
-    unit fires 30 times. The real bundle extraction leaves member 0's
-    one-spike unit out, and ``UnitMatch.populate`` warns once, naming member
-    0's identity and the excluded unit id, and never for member 1.
+    Member 0's one-spike unit is left out of its bundle; ``UnitMatch.populate``
+    warns once, naming member 0 and the unit, and never for member 1.
     """
     import logging
 
@@ -2701,10 +2532,8 @@ def test_excluded_bundle_units_stay_in_frozen_universe(
 ):
     """A unit the bundle leaves out stays in the frozen matchable universe.
 
-    Planted correspondence: both of member 0's units match member 1's unit.
-    The pairer reads the real bundles, so only the kept 35-spike unit can pair;
-    the one-spike unit is absent from its bundle, is still a ``MatchableUnit``
-    row, is in no ``Pair`` row, and becomes a singleton ``TrackedUnit``.
+    The one-spike unit cannot pair, but is still a ``MatchableUnit`` row and
+    becomes a singleton ``TrackedUnit``.
     """
     pytest.importorskip("UnitMatchPy")
     from spyglass.spikesorting.v2.unit_matching import (
@@ -2818,12 +2647,9 @@ def test_all_excluded_member_raises_with_member_identity(
 
 
 # --------------------------------------------------------------------------- #
-# Ground-truth AUC gate (slow / heavy). Target: UnitMatch discriminates planted #
-# cross-session correspondences on the polymer probe with AUC > 0.85. Verified  #
-# LOCALLY only: the two-session polymer fixtures are unhosted (their _fetch.py  #
-# URLs are None), so this skips wherever they or UnitMatchPy are absent. The    #
-# nightly / manual CI step that runs it requires both fixtures, so that step    #
-# fails, naming them, until they are uploaded and their URLs set.               #
+# Ground-truth AUC gate: AUC > 0.85 on the polymer probe. Skips without the    #
+# two-session polymer fixtures (unhosted; _fetch.py URLs are None) or         #
+# UnitMatchPy.                                                                 #
 # --------------------------------------------------------------------------- #
 
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
@@ -2882,31 +2708,13 @@ def _bandpassed_polymer_recording(fixture_path):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
-    """Ship-readiness target (verified locally; its CI step fails until the
-    fixtures are hosted -- see the gate banner above): AUC of UnitMatch
-    probability vs ground-truth correspondence on the two-session polymer
-    probe is > 0.85.
+    """UnitMatch probability vs ground-truth correspondence on the
+    two-session polymer probe has AUC > 0.85.
 
-    The two sessions are built from one MEArec template set sharing a
-    ``template_seed`` (so ground-truth unit ``i`` is the same neuron in both
-    sessions -- the planted cross-session correspondences), differing only in
-    spike-train realization and a small inter-session drift. The v2
-    single-session sort + curation pipeline is run on both sessions to prove it
-    ingests and processes the polymer fixture end to end; the matcher's
-    discrimination is then scored against the ground-truth sortings, because the
-    MEArec template amplitudes sit below the production sorter's detection
-    threshold (the same reason the smoke fixture uses a fixture-tuned sorter
-    row), so scoring on the ground-truth isolates cross-session matching from
-    sorter yield. The ROC labels every cross-session unit pair by whether the
-    two sides are the same ground-truth neuron and uses the matcher probability
-    as the score.
-
-    Coverage note (the three validations meet in the middle): this gate proves
-    the matcher SCIENCE (AUC vs ground truth); ``test_make_runs_full_matcher_
-    table_path`` proves the DataJoint TABLE path (selection -> make -> Pair ->
-    get_pairs -> TrackedUnit) on real v2-curated units; and
-    ``test_unitmatch_backend.test_match_recovers_planted_correspondences``
-    proves real-UnitMatchPy bundle extraction + matching on a real recording.
+    Both sessions share a MEArec ``template_seed``, so unit ``i`` is the same
+    neuron in each. The v2 sort and curation run on both sessions, but the
+    matcher is scored on the ground-truth sortings because MEArec amplitudes
+    sit below the production sorter's threshold.
     """
     if not (_POLYMER_S1.exists() and _POLYMER_S2.exists()):
         pytest.skip(
@@ -3007,11 +2815,8 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
             )
             assert len(CurationV2 & curation_key) == 1
 
-        # 2. Score the matcher against ground truth. Build one bundle per
-        #    session from the bandpassed recording + the planted ground-truth
-        #    sorting, run UnitMatch at threshold 0 (so every cross-session pair
-        #    gets a probability), and compute the AUC of probability vs
-        #    same-ground-truth-neuron.
+        # 2. Score the matcher on ground-truth bundles; threshold 0 gives every
+        #    cross-session pair a probability.
         session_inputs = []
         gt_unit_ids = []
         for index, fixture_path in enumerate((_POLYMER_S1, _POLYMER_S2)):
@@ -3063,18 +2868,12 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
 
 @pytest.mark.slow
 def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
-    """A raw ``UnitMatch.Pair.insert`` outside the selection's pinned
-    ``Input`` curations -- an unpinned-curation endpoint, a same-curation edge,
-    a reversed / duplicate edge, or an out-of-range ``match_probability`` --
-    raises ``UnitMatchPairIntegrityError``.
+    """A raw ``UnitMatch.Pair.insert`` raises ``UnitMatchPairIntegrityError``
+    for an unpinned-curation endpoint, a same-curation edge, a reversed or
+    duplicate edge, or an out-of-range ``match_probability``.
 
-    Validates against the pinned ``UnitMatchSelection.Input`` rows (created by
-    ``insert_selection``), so it needs no populated ``UnitMatch`` -- the
-    single-unit chronic fixture is degenerate for the matcher backend. The
-    canonical ``make_insert`` path routes through this same validated
-    ``Pair.insert`` and is covered by the multi-unit end-to-end matcher tests
-    (which populate successfully and would fail here if the guard rejected valid,
-    oriented, deduped pairs).
+    Validation reads the pinned ``UnitMatchSelection.Input`` rows, so no
+    populated ``UnitMatch`` is needed.
     """
     import uuid
 
@@ -3144,14 +2943,12 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
         with pytest.raises(UnitMatchPairIntegrityError, match="outside"):
             UnitMatch.Pair.insert1(pair_row(node0, node1, prob=1.5))
 
-        # Endpoint pinned to a curation NOT among this selection's inputs
-        # (a fake curation: the guard checks the pinned set before the FK fires).
+        # A fake curation not among the inputs (checked before the FK).
         unpinned = (str(uuid.uuid4()), 0, 0)
         with pytest.raises(UnitMatchPairIntegrityError, match="not a pinned"):
             UnitMatch.Pair.insert1(pair_row(unpinned, node1))
 
-        # Same-curation edge (both endpoints pin input 0): a unit cannot match
-        # itself across sessions.
+        # Same-curation edge (both endpoints pin input 0).
         with pytest.raises(UnitMatchPairIntegrityError, match="same input"):
             UnitMatch.Pair.insert1(pair_row(node0, node0))
 
@@ -3173,13 +2970,8 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
 def test_tracked_unit_uses_frozen_universe_after_relabel(
     two_session_curated_group,
 ):
-    """``TrackedUnit`` reads ``UnitMatch``'s FROZEN ``MatchableUnit``
-    snapshot, not current curation labels. Relabeling a singleton (no-``Pair``)
-    member unit to ``noise`` AFTER ``UnitMatch`` populated must NOT drop it from
-    the tracked-unit graph -- the frozen universe keeps it. Fails on pre-change
-    code, where ``TrackedUnit.make`` re-derived the universe from current labels
-    and dropped the relabeled unit.
-    """
+    """``TrackedUnit`` reads ``UnitMatch``'s frozen ``MatchableUnit`` snapshot,
+    so relabeling a unit ``noise`` after populate does not drop it."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
@@ -3196,8 +2988,7 @@ def test_tracked_unit_uses_frozen_universe_after_relabel(
         {0: choice},
         unit_policy="v2_unflagged_single_units",
     )
-    # Solo group -> degenerate make (0 pairs, no matcher backend) but still
-    # freezes the MatchableUnit snapshot.
+    # The solo group has 0 pairs but still freezes the snapshot.
     UnitMatch.populate(pk, reserve_jobs=False)
     frozen = {
         (str(r["sorting_id"]), int(r["curation_id"]), int(r["unit_id"]))
@@ -3233,9 +3024,8 @@ def test_tracked_unit_uses_frozen_universe_after_relabel(
 def test_geometry_preflight_fails_before_extraction(
     two_session_curated_group, monkeypatch
 ):
-    """A cross-probe / cross-day channel-geometry mismatch is rejected at
-    ``UnitMatchSelection.insert_selection`` -- BEFORE any dense bundle extraction
-    runs (extraction lives in ``UnitMatch.make``, which never runs here)."""
+    """A channel-geometry mismatch is rejected at
+    ``UnitMatchSelection.insert_selection``, before bundle extraction."""
     import numpy as np
 
     from spyglass.spikesorting.v2._matching import (
@@ -3256,8 +3046,7 @@ def test_geometry_preflight_fails_before_extraction(
         "_member_channel_positions",
         staticmethod(fake_positions),
     )
-    # Force the new-insert path so the preflight runs even though this selection
-    # may already exist from an earlier test (no shared-state mutation).
+    # Force the new-insert path so the preflight runs even if the row exists.
     monkeypatch.setattr(
         UnitMatchSelection,
         "_find_existing_pk",
@@ -3336,18 +3125,9 @@ def test_selection_geometry_dispatches_without_global_policy(
 def test_unitmatch_nwb_self_describes(two_session_curated_group):
     """The UnitMatch NWB is interpretable standalone.
 
-    The pairs table carries only side ids; without the DB a reader cannot tell
-    which match run, session group, or matcher produced it. Assert the artifact
-    embeds the run/group/matcher header -- re-emitting the same producer
-    provenance stored on the ``UnitMatch`` row (matcher backend, backend
-    version, SpikeInterface version) -- plus the per-input and per-recording
-    maps.
-
-    Uses the single-input (solo) path so the provenance write is exercised
-    without the cross-session matcher (whose ground-truth correctness is the
-    polymer gate's job). The header and both maps are written on this path
-    too: ``write_pairs_table`` runs and the backend is resolved regardless of
-    input count.
+    The file embeds the run, group and matcher header (the same provenance as
+    the ``UnitMatch`` row) and the per-input and per-recording maps. Uses the
+    solo path, which writes them too.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
@@ -3404,11 +3184,9 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
 
 @pytest.mark.slow
 def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
-    """``TrackedUnit.get_unit_brain_regions`` returns the chronic-identity
-    disambiguators resolved at this point -- ``unitmatch_id`` /
-    ``tracked_unit_id`` / ``input_index`` / ``nwb_file_name`` /
-    ``recording_date`` / ``curation_id`` -- not just ``sorting_id`` /
-    ``unit_id`` / ``region_name``."""
+    """``TrackedUnit.get_unit_brain_regions`` includes ``unitmatch_id``,
+    ``tracked_unit_id``, ``input_index``, ``nwb_file_name``,
+    ``recording_date`` and ``curation_id``."""
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
@@ -3460,14 +3238,10 @@ def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
 
 @pytest.mark.slow
 def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
-    """run_v2_unit_match: insert selection -> UnitMatch -> TrackedUnit in one call.
+    """``run_v2_unit_match`` runs selection, UnitMatch and TrackedUnit in one
+    call, idempotently.
 
-    ``describe_unit_match_choices`` surfaces each member's pinned root curation,
-    and ``run_v2_unit_match`` drives the full cross-session chain to a
-    tracked-unit manifest, idempotent on rerun. Uses a registered lightweight
-    fixture matcher (emitting one pair, bundle extraction stubbed) so the match
-    is deterministic without UnitMatchPy's multi-unit metric path -- the same
-    substrate the table-layer matcher tests use.
+    Uses a one-pair fixture matcher, so UnitMatchPy is not needed.
     """
     from pydantic import BaseModel, ConfigDict, Field
 
@@ -3574,9 +3348,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             skip_duplicates=True,
         )
 
-        # Plan-then-run: the members' root curations are pinned by a curation
-        # curation strategy (each member has exactly one root), reviewed, then run --
-        # exercising plan_v2_unit_match + the run_v2_unit_match(plan) overload.
+        # Plan, then run the plan (each member has exactly one root).
         plan = plan_v2_unit_match(
             grp["owner"],
             grp["group_name"],
@@ -3588,13 +3360,9 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         assert set(plan.curation_choices) == set(grp["choices"])
         assert not plan.as_dataframe().empty
 
-        # describe_unit_match_choices surfaces curation_source (the
-        # auto_curated curation strategy keys off it). The fixture members are
-        # 'manual' roots, so
-        # against real fetched data auto_curated resolves nothing -> not ok.
+        # The fixture roots are 'manual', so auto_curated resolves nothing.
         described = describe_unit_match_choices(grp["owner"], grp["group_name"])
-        # every offered curation row carries curation_source (auto_curated keys
-        # off it); rows for a sortless member have a null sorting_id.
+        # Every offered row carries curation_source, which auto_curated reads.
         offered = described[described["sorting_id"].notna()]
         assert offered["curation_source"].notna().all()
         auto_plan = plan_v2_unit_match(
@@ -3617,10 +3385,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         assert summary["n_pairs"] == 1
         assert summary["n_tracked_units"] >= 1
         assert set(summary["stage_seconds"]) == {"unit_match", "tracked_unit"}
-        # describe_run fills the receipt's per-stage status from
-        # ``f"{stage}_status"``, so the summary's status-key stem must match the
-        # stage_seconds key. A regression that renamed one but not the other
-        # would render a blank status here.
+        # describe_run reads f"{stage}_status", so status and stage_seconds
+        # keys must share a stem.
         from spyglass.spikesorting.v2._orchestration.reporting import (
             describe_run,
         )
@@ -3650,8 +3416,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             for warning in summary["warnings"]
         )
 
-        # Surfacing: force a divergence and confirm it reaches the receipt's
-        # warnings on the next run (it is also logged in the selection path).
+        # A forced divergence reaches the receipt's warnings on the next run.
         from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
         monkeypatch.setattr(
@@ -3696,11 +3461,8 @@ def test_run_v2_unit_match_warning_survives_stage_failure(
 ):
     """A UnitMatch-stage failure's partial summary still carries the warning.
 
-    The divergent-electrode advisory is known from the selection, before either
-    populate stage runs. ``_run_stage`` snapshots the run summary into the raised
-    ``PipelineStageError``, so a stage failure must not drop the warning --
-    mirrors the single-session curation-stage invariant where ``warnings`` is
-    known pre-stage (see test_pipeline_observability).
+    The divergent-electrode advisory is known before either populate stage,
+    so the ``PipelineStageError`` snapshot keeps it.
     """
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
@@ -3755,14 +3517,10 @@ def test_describe_unit_match_choices_excludes_other_team(
     two_session_curated_group, monkeypatch
 ):
     """A curation under a different team (same nwb/sort-group/interval) is not
-    offered as a choice.
+    offered as a choice; the member's own curation is.
 
-    ``describe_unit_match_choices`` filters on the FULL member identity including
-    ``team_name``, matching ``UnitMatchSelection``'s ownership validator. A sort
-    of the same session/sort-group/interval under a different team tag must NOT
-    appear as a pickable curation -- otherwise the helper would offer a choice
-    that ``run_v2_unit_match`` then rejects. The member's OWN curation must still
-    be offered.
+    The filter matches ``UnitMatchSelection``'s ownership validator, which
+    includes ``team_name``.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -3788,8 +3546,7 @@ def test_describe_unit_match_choices_excludes_other_team(
         },
         skip_duplicates=True,
     )
-    # Same session/sort-group/interval/preproc as member 0, different team tag --
-    # a distinct recording_id (team is part of the content-addressed identity).
+    # Same as member 0 but another team, so a distinct recording_id.
     other_rec = RecordingSelection.insert_selection(
         {
             **member,
@@ -3849,11 +3606,9 @@ def test_describe_unit_match_choices_unsorted_member_and_multiple_recordings(
     """Discovery offers every curation across a member's recordings and an
     empty choice list for a member with no recording or sort yet.
 
-    A member sorted under two preprocessing recipes (two ``RecordingSelection``
-    rows on the same full member identity) has BOTH sorts' curations offered,
-    ordered by ``(sorting_id, curation_id)``; a member with no recording at all
-    still appears, with no choices (``describe_unit_match_choices`` shows it as
-    one null-curation row so it reads "sort me first").
+    A member sorted under two preprocessing recipes has both sorts'
+    curations, ordered by ``(sorting_id, curation_id)``; a member with no
+    recording appears as one null-curation row.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2._orchestration.matching import (

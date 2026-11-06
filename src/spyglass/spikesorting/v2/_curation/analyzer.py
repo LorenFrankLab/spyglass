@@ -1,24 +1,11 @@
 """Curation-scoped SortingAnalyzer resolution and immutable cache ownership.
 
-Raw-namespace curations reuse the existing sort analyzer. Committed curations
-whose unit set differs from the raw sort build a per-generation analyzer over
-their exact stored spike trains. The cache key includes ``curation_uuid`` plus
-the recipe content and SpikeInterface version, and a manifest validates the
-scientific inputs and every published extension before a folder is reused.
-
-Published merged-curation analyzers are immutable by ownership. Supported
-callers use the private resolver for reads. Extra extensions with specific
-parameters are computed ONCE into a disk-backed DERIVATIVE cache keyed by the
-base identity plus the extension request (``derived_extension_request_hash``)
-and reused on every later request with the same parameters -- never a
-whole-analyzer memory copy. Expert callers that need a mutable SI object get a
-context-managed ``binary_folder`` working copy in a temp dir
-(``open_curation_analyzer``), so no path can mutate a published cache.
-Raw-namespace curations instead share the sort analyzer and persist missing
-extensions through ``Sorting.add_extensions`` under its cache lock.
-
-Every folder is a ``binary_folder`` analyzer loaded through
-``_storage.analyzer_cache.load_analyzer_folder`` (memmapped waveforms).
+- Raw-namespace curations share the sort analyzer.
+- Merged curations get a per-generation ``binary_folder`` cache keyed by
+  ``curation_uuid``, recipe, and SpikeInterface version, validated by a
+  manifest before reuse.
+- Extra extensions go to a disk-backed derivative keyed by the request.
+- ``open_curation_analyzer`` yields a mutable temp working copy.
 """
 
 from __future__ import annotations
@@ -95,10 +82,8 @@ def _content_hash(value) -> str:
 def _folder_storage_fingerprint(folder: Path) -> str:
     """Fingerprint stored files by relative path, size, and mtime.
 
-    Cache validation deliberately avoids decoding multi-GB extension arrays.
-    The manifest itself is excluded because it records this fingerprint and is
-    written only after all analyzer files have been published to the staging
-    directory.
+    Avoids decoding extension arrays. Excludes the manifest, which records
+    this fingerprint.
     """
     return analyzer_folder_storage_fingerprint(
         folder, exclude_names=(CURATION_ANALYZER_MANIFEST,)
@@ -142,8 +127,7 @@ def _resolve_curation_row(curation_ref) -> dict:
 
 
 def _classify_curation_row(row: Mapping) -> str:
-    """Classify an already-resolved CurationV2 row: raw / merged / preview /
-    zero-unit. The caller resolved the row; this does not fetch it again."""
+    """Classify a CurationV2 row as raw, merged, preview, or zero-unit."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
     key = {
@@ -193,11 +177,10 @@ def _resolve_recipe(waveform_recipe: str, role: str) -> dict:
 
 
 def _source_artifact_hashes(sorting_id) -> dict[str, str]:
-    """Resolve the current trace artifact hashes behind one sort.
+    """Return the trace artifact hashes behind one sort, keyed by kind.
 
-    Keyed by artifact kind: the lineage source's ``content_hash`` always, plus
-    the ``MotionCorrectedRecording``'s for a sort of corrected traces, so a
-    cache built from other effective traces never validates.
+    Includes the ``MotionCorrectedRecording`` hash for a sort of corrected
+    traces, so a cache built from other traces never validates.
     """
     from spyglass.spikesorting.v2.sorting import _TRACE_TABLES, SortingSelection
 
@@ -233,12 +216,8 @@ def hash_sorting_spike_content(sorting) -> str:
     import numpy as np
 
     digest = hashlib.sha256()
-    # Sampling frequency is recording metadata, not spike content. SI may
-    # replace a sorting's frequency with the recording's nearly-equal float
-    # while creating an analyzer (for example 100.0 vs 99.99999999999999).
-    # Including it would therefore reject a scientifically identical cache
-    # after its first save/load round-trip. Source recording identity is
-    # validated independently by ``source_artifact_hashes``.
+    # Omit sampling frequency: SI may swap in the recording's nearly-equal
+    # float (100.0 vs 99.99999999999999), breaking reuse after a round-trip.
     digest.update(b"spyglass-curation-spikes-v1\0")
     digest.update(
         int(sorting.get_num_segments()).to_bytes(8, "little", signed=False)
@@ -276,8 +255,7 @@ def _manifest_identity(row, recipe_row, role: str) -> dict:
         "source_artifact_hashes": _source_artifact_hashes(row["sorting_id"]),
         "waveform_recipe_hash": waveform_recipe_hash(recipe_row),
         "spikeinterface_version": _spikeinterface_version(),
-        # The base cache carries no extra extensions; a derivative records the
-        # exact request (names + normalized params) it was built for.
+        # Empty for a base cache; a derivative records its request here.
         "extension_request": {},
     }
 
@@ -300,11 +278,9 @@ def _manifest_prefix(row, sorting, recipe_row, role: str) -> dict:
 
 
 def merged_analyzer_cache_inputs(curation_key, waveform_recipe, role):
-    """Database inputs to publish or reuse a merged curation's analyzer.
+    """Return JSON-native DB inputs for :func:`publish_resolved_merged_analyzer`.
 
-    Returned by ``CurationEvaluation.make_fetch`` so the DB-free compute can
-    publish the per-generation analyzer the merged review page reads (see
-    :func:`publish_resolved_merged_analyzer`). JSON-native.
+    Used by ``CurationEvaluation.make_fetch``.
     """
     row = _resolve_curation_row(curation_key)
     recipe_row = _resolve_recipe(waveform_recipe, role)
@@ -362,13 +338,10 @@ def _extension_inventory(
 ) -> dict[str, str]:
     """Validate the extension set and fingerprint its small parameters.
 
-    ``exact=True`` (a base cache) requires the saved set to equal the role's
-    expected set. ``exact=False`` (a derivative) requires the base extensions
-    plus ``extra`` (the request) to be PRESENT and inventories every saved
-    extension: a derivative copies its source as-is -- the shared raw-sort
-    analyzer carries only the base set plus whatever was persisted on
-    demand, a merged cache carries the full display set -- so the request is
-    the only addition it guarantees.
+    ``exact=True`` (base cache) requires the saved set to equal the role's
+    expected set. ``exact=False`` (derivative) only requires the base
+    extensions plus ``extra``, since a derivative copies whatever its source
+    carries.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_extension_params,
@@ -400,12 +373,8 @@ def _extension_inventory(
 def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
     """Whether ``analyzer`` carries ``name`` with every requested parameter.
 
-    ``requested`` is the caller's (possibly partial) parameter dict; a key it
-    does not name is unconstrained (SI's default is accepted), so an empty
-    request matches any present extension. Values compare JSON-natively
-    (``1`` == ``1.0``). A present extension whose stored ``params`` differ on
-    a requested key does NOT satisfy the request and must be recomputed into
-    a derivative rather than silently reused.
+    Keys absent from ``requested`` are unconstrained. Values compare
+    JSON-natively (``1 == 1.0``).
     """
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
@@ -532,8 +501,8 @@ def _load_valid_cached_analyzer(
     except _AnalyzerSparsityInputsError:
         raise
     except Exception as exc:  # noqa: BLE001 - cache is regeneratable
-        # Log the text, not the exception: a kept log record would hold its
-        # traceback, whose frames hold the rejected (memory-mapped) analyzer.
+        # Log text, not the exception: its traceback would pin the memmapped
+        # analyzer.
         logger.warning(
             "Curation analyzer validation failed at %s: %s.", folder, repr(exc)
         )
@@ -634,13 +603,11 @@ def publish_resolved_merged_analyzer(
     waveform_params,
     statistics_spans,
 ):
-    """Publish (or reuse) a merged curation's analyzer without the database.
+    """Publish or reuse a merged curation's analyzer without the database.
 
-    ``cache_inputs`` comes from :func:`merged_analyzer_cache_inputs`. The
-    published analyzer is the same per-generation cache slot, validated by the
-    same manifest, that :func:`_resolve_curation_analyzer` serves to the
-    review page, so a merge is built once for its evaluation and its page.
-    Returns the PUBLISHED (read-only) analyzer.
+    ``cache_inputs`` comes from :func:`merged_analyzer_cache_inputs`. Uses the
+    cache slot :func:`_resolve_curation_analyzer` serves, so evaluation and
+    review share one build. Returns the published (read-only) analyzer.
     """
     identity = dict(cache_inputs["identity"])
     role = identity["role"]
@@ -679,9 +646,8 @@ def publish_resolved_merged_analyzer(
 def display_analyzer_request(curation_ref) -> dict:
     """Return the resolver kwargs for a curation's DISPLAY analyzer.
 
-    Every display consumer (plots, exports, reviews, expert working copies)
-    uses the sort's stored ``Sorting.display_waveform_params_name``, so they
-    all address the same published cache.
+    Uses the sort's stored ``Sorting.display_waveform_params_name`` so every
+    display consumer shares one published cache.
 
     Parameters
     ----------
@@ -717,14 +683,13 @@ def _resolve_curation_analyzer(
     *,
     extra_extensions: Mapping[str, dict] | None = None,
 ):
-    """Resolve the cache-backed analyzer for controlled internal reads.
+    """Resolve the published, read-only analyzer for internal reads.
 
-    Returns the PUBLISHED analyzer (raw namespace: the shared sort analyzer;
-    merged namespace: the immutable per-generation cache, or -- when
-    ``extra_extensions`` names extensions the base does not carry -- the
-    disk-backed derivative built for exactly that request). Callers must treat
-    the result as read-only; use :func:`open_curation_analyzer` for a mutable
-    working copy.
+    - raw namespace: the shared sort analyzer
+    - merged namespace: the per-generation cache
+    - unmet ``extra_extensions``: a disk-backed derivative for that request
+
+    Use :func:`open_curation_analyzer` for a mutable working copy.
     """
     from spyglass.spikesorting.v2._sorting.analyzer import (
         reconstruct_recording_and_sorting,
@@ -756,8 +721,7 @@ def _resolve_curation_analyzer(
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
 
-    # Fetched only when a cache check or build needs it; shared by the
-    # sparsity validator and both builders.
+    # Lazy: only a cache check or build needs these.
     @functools.cache
     def sorter_inputs() -> tuple[dict, dict]:
         return fetch_sorter_analyzer_inputs({"sorting_id": row["sorting_id"]})
@@ -772,27 +736,19 @@ def _resolve_curation_analyzer(
         return recording
 
     validate_analyzer = analyzer_sparsity_validator(sorter_params)
-    # The COMPLETE normalized request is the derivative's identity and its
-    # required result; the subset that actually needs computing is a separate
-    # local (``needs_compute``) so a later, larger request never reuses a
-    # smaller derivative.
+    # The full request (not ``needs_compute``) keys the derivative, so a
+    # larger request never reuses a smaller derivative.
     request = normalize_extension_request(extra_extensions)
     if any(name in request for name in POLARITY_EXTENSIONS):
-        # Part of the derivative's identity, so a request without the sort's
-        # polarity cannot alias one with it.
+        # Polarity joins the identity so requests with and without it differ.
         request = normalize_extension_request(
             polarity_extension_params(
                 request, resolve_peak_sign(sorter_params()), request
             )
         )
     if namespace == "raw":
-        # Raw curations share the canonical sort analyzer. An ABSENT requested
-        # extension is persisted there under the per-sort cache lock so later
-        # views reuse it. A PRESENT extension whose stored parameters differ
-        # from the request is never overwritten in the shared analyzer
-        # (recomputing would rewrite what every other reader sees); it is
-        # served from a derivative keyed by the request, exactly as for a
-        # merged curation.
+        # Absent extensions persist to the shared analyzer. Present ones with
+        # other params go to a derivative so other readers are unaffected.
         base = Sorting().get_analyzer(
             {"sorting_id": row["sorting_id"]},
             waveform_params_name=waveform_recipe,
@@ -811,9 +767,8 @@ def _resolve_curation_analyzer(
                 waveform_params_name=waveform_recipe,
                 load_extensions=False,
             )
-        # The manifest (spike-content hash + provenance) is only needed if a
-        # derivative must be built; an ordinary read must not scan spike
-        # trains. Resolved lazily below.
+        # Built lazily: the manifest scans spike trains and only a derivative
+        # needs it.
         expected_prefix = None
     else:
         curated_sorting = CurationV2.get_merged_sorting(key)
@@ -829,9 +784,6 @@ def _resolve_curation_analyzer(
         )
 
         def _build_base(staging_folder):
-            # This namespace is committed and non-empty, and ``row``,
-            # ``recipe_row`` and ``curated_sorting`` are already resolved, so
-            # build from them rather than re-resolving them.
             sorter_row, job_kwargs = sorter_inputs()
             analyzer = _build_resolved_merged_analyzer(
                 curated_sorting,
@@ -871,12 +823,8 @@ def _resolve_curation_analyzer(
     if expected_prefix is None:
         expected_prefix = _manifest_prefix(row, base.sorting, recipe_row, role)
 
-    # Disk-backed derivative: the base (shared raw analyzer or immutable
-    # per-generation cache) stays untouched; the derivative is keyed by the
-    # COMPLETE request, carries every requested extension at the requested
-    # parameters, and is reused thereafter. Built by copying the base on disk
-    # (memmapped waveforms stream through np.save) and computing only what the
-    # copy lacks -- plus whatever SpikeInterface invalidates downstream of it.
+    # Derivative: an on-disk copy of the base plus the unmet extensions; the
+    # base stays untouched.
     derived_prefix = dict(expected_prefix)
     derived_prefix["extension_request"] = request
     derived_folder = curation_analyzer_path(
@@ -917,21 +865,16 @@ def _resolve_curation_analyzer(
 def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     """Compute ``needs_compute`` on a working copy, restoring what SI removes.
 
-    SpikeInterface deletes every (transitive) dependent of a recomputed
-    extension (``compute_one_extension`` -> ``_get_children_dependencies``).
-    The required result is the base extension set plus every requested
-    extension, so each required dependent of the computed set is recomputed
-    too -- at the caller's parameters when requested, otherwise at its stored
-    parameters (SI's ``templates`` re-derives its window from the waveforms
-    extension regardless of stored values). ``analyzer.compute`` orders the
-    plan by dependency. Only descendants of the recomputed set are touched, so
-    a correlogram-only change never re-extracts waveforms. The result is
-    checked against the whole request before returning.
+    SpikeInterface deletes every dependent of a recomputed extension, so each
+    required dependent (base set plus request) is recomputed too, at the
+    requested params or else its stored params. Runs inside
+    ``isolated_si_metric_defaults`` because SI otherwise merges stored
+    ``metric_params`` into its class-level defaults.
 
-    The compute runs inside ``isolated_si_metric_defaults``: recomputing
-    ``template_metrics`` (or ``quality_metrics``) passes its stored
-    ``metric_params``, which SpikeInterface would otherwise merge into its
-    class-level metric defaults for the rest of the process.
+    Raises
+    ------
+    ValueError
+        If the result does not satisfy ``request``.
     """
     from spikeinterface.core.sortinganalyzer import _get_children_dependencies
 
@@ -986,14 +929,8 @@ def open_curation_analyzer(
 ):
     """Yield a mutable, disk-backed WORKING COPY of a curation's analyzer.
 
-    For expert SpikeInterface access (widgets that compute, exporters, ad-hoc
-    extensions). The copy is a ``binary_folder`` analyzer in a private temp
-    directory under Spyglass's temp dir; mutating it cannot alter the published
-    cache, and the directory is removed when the context exits. Waveforms are
-    copied on disk (streamed from the memmapped source), not held in memory.
-    Raw-namespace and merged-namespace curations resolve through the same
-    published caches (see :func:`_resolve_curation_analyzer`), so the copy
-    carries the exact curated unit ids and spike trains.
+    The copy lives in a temp dir under Spyglass's temp dir, removed on exit,
+    so mutating it cannot alter the published cache.
     """
     published = _resolve_curation_analyzer(
         curation_ref, waveform_recipe, role, extra_extensions=extra_extensions
@@ -1027,10 +964,8 @@ def analyzer_working_copy(published):
         )
         yield load_analyzer_extensions(working)
     finally:
-        # The caller's ``as`` name still holds the analyzer, so drop the
-        # extension data that maps the copy's files before removing them. On
-        # NFS a still-mapped file leaves a .nfs placeholder and the folder
-        # stays behind.
+        # The caller still holds the analyzer; drop its memmaps before rmtree
+        # or NFS leaves .nfs placeholders behind.
         if working is not None:
             for extension in working.extensions.values():
                 extension.data.clear()
@@ -1050,11 +985,7 @@ def curation_analyzer_with_extensions(
 ):
     """Yield the published (read-only) analyzer carrying ``extra_extensions``.
 
-    Raw namespaces persist missing extensions to their shared sort analyzer;
-    merged namespaces resolve (building once if needed) the disk-backed
-    derivative keyed by the exact extension request. Nothing is copied into
-    memory. The yielded analyzer must not be mutated; use
-    :func:`open_curation_analyzer` for a working copy.
+    Do not mutate it; use :func:`open_curation_analyzer` for a working copy.
     """
     yield _resolve_curation_analyzer(
         curation_ref, waveform_recipe, role, extra_extensions=extra_extensions

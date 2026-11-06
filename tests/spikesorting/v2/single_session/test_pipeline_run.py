@@ -8,18 +8,11 @@ from tests.spikesorting.v2._ingest_helpers import (
     _clean_session_v2,
 )
 
-# ===========================================================================
-# pipeline.py untested branches.
-#
-# list_pipeline_presets enumeration, run_v2_pipeline idempotency (existing-root
-# short-circuit), and pipeline-preset -> run_summary wiring. The franklab MS4
-# pipeline preset is exercised end-to-end with its required native runtime;
-# the MS5 preset also pins the wiring and idempotency.
-# ===========================================================================
+# ---------- run_v2_pipeline presets, idempotency, run_summary wiring -------
 
 
 def _prepare_pipeline_session(session):
-    """initialize defaults + team + a single sort group for the session.
+    """Initialize defaults, a team, and a single sort group for the session.
 
     Returns ``(nwb_file_name, sort_group_id, team_name)`` ready for
     ``run_v2_pipeline``.
@@ -48,11 +41,8 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     """``run_v2_pipeline`` chains recording -> artifact -> sort -> curation
     in one call and is idempotent on rerun.
 
-    Uses the ``franklab_tetrode_hippocampus_30khz_ms5_2026_06`` pipeline preset (matches the
-    ``pipeline_preset=`` argument below). Idempotency on rerun is verified
-    against MS5 by reusing the existing sorting_id rather than
-    re-running the sorter, so MS5's clustering randomness does not
-    affect the rerun assertion.
+    The rerun reuses the existing sorting_id, so MS5 clustering randomness
+    does not affect the idempotency assertion.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
@@ -73,8 +63,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
-    # The display analyzer recipe is a single-session run prerequisite (gated by
-    # preflight), so seed it too -- otherwise this test fails in isolation.
+    # Preflight requires the display analyzer recipe.
     AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {
@@ -97,10 +86,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
         curation_description="pipeline e2e test",
     )
-    # The stable run_summary keys must always be present. The run also adds
-    # additive observability keys (``*_status`` / ``stage_seconds`` /
-    # ``warnings``), asserted in ``test_pipeline_observability.py``; assert a
-    # subset here so this e2e/idempotency test isn't coupled to them.
+    # Observability keys are covered in test_pipeline_observability.py.
     stable_keys = {
         "pipeline_preset",
         "recording_id",
@@ -123,8 +109,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     assert run_summary["auto_labeled_merge_id"] is None
     assert run_summary["auto_labeled_curation_uuid"] is None
     assert run_summary["n_units"] >= 1
-    # The receipt pins the root generation and records what the sort executed;
-    # both agree with preflight (same resolver) and with the stored row.
+    # The receipt agrees with preflight and with the stored row.
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import preflight_v2_pipeline
 
@@ -149,12 +134,6 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     assert run_summary["sorter_config"] == preflight.effective_config
     assert run_summary["sorter_config"]["sorter"] == "mountainsort5"
     assert run_summary["sorter_config"]["si_sorter_params"]["whiten"] is False
-    # The smoke fixture's clusterless 100 uV default IS exercised in
-    # ``test_run_v2_pipeline_clusterless_default_handles_zero_units_
-    # gracefully`` -- it confirms a zero-unit sort still yields an empty
-    # (but real) curation + merge row. MS5 here is the populated-units
-    # path.
-
     # Idempotent: rerun returns the same run_summary, no new rows.
     run_summary2 = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
@@ -172,7 +151,6 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
     assert run_summary2["root_curation_id"] == run_summary["root_curation_id"]
     assert run_summary2["root_merge_id"] == run_summary["root_merge_id"]
 
-    # Unknown pipeline preset raises PipelineInputError.
     with pytest.raises(PipelineInputError, match="unknown pipeline_preset"):
         run_v2_pipeline(
             nwb_file_name=nwb_file_name,
@@ -186,15 +164,7 @@ def test_run_v2_pipeline_end_to_end_and_idempotent(polymer_smoke_session):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
-    """A second ``run_v2_pipeline`` leaves exactly ONE row per stage.
-
-    ``test_run_v2_pipeline_end_to_end_and_idempotent`` checks that the
-    rerun returns the same PKs, but PK-equality alone does not prove the
-    second run inserted no duplicate rows -- a Selection whose insert
-    helper failed to dedup would return the same PK yet leave two rows.
-    This asserts ``len(... & pk) == 1`` on every stage table after the
-    second run, proving the rerun is a true no-op.
-    """
+    """A second ``run_v2_pipeline`` leaves exactly one row per stage."""
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
@@ -218,8 +188,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
     SorterParameters.insert_default()
-    # The display analyzer recipe is a single-session run prerequisite (gated by
-    # preflight), so seed it too -- otherwise this test fails in isolation.
+    # Preflight requires the display analyzer recipe.
     AnalyzerWaveformParameters.insert_default()
     LabTeam.insert1(
         {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
@@ -239,19 +208,13 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
     )
     run_summary = run_v2_pipeline(**kwargs)
-    # Second run must be a pure no-op (MS5 reuses the existing sorting_id
-    # rather than re-clustering, so this does not depend on sorter
-    # determinism).
+    # MS5 reuses the existing sorting_id, so this does not depend on
+    # sorter determinism.
     run_summary2 = run_v2_pipeline(**kwargs)
     assert run_summary2["root_merge_id"] == run_summary["root_merge_id"]
 
-    # Count by LOGICAL identity, not by the generated UUID PK. The PKs
-    # (recording_id, artifact_detection_id, sorting_id, merge_id) are fresh
-    # ``uuid.uuid4()`` values, so ``& {pk: <uuid>}`` is always 1 by
-    # construction and would NOT catch a second logical selection inserted
-    # with a different UUID, nor a second root curation for the sorting.
-    # Each count below uses the same logical key ``insert_selection``
-    # dedups on (and the root-curation identity the orchestrator reuses).
+    # Count by the logical key insert_selection dedups on; counting by the
+    # uuid4 PK is always 1 and would miss a duplicate selection.
     rec_row = (
         RecordingSelection & {"recording_id": run_summary["recording_id"]}
     ).fetch1()
@@ -262,9 +225,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         & {"artifact_detection_id": run_summary["artifact_detection_id"]}
     ).fetch1()
 
-    # sorter / sorter_params_name live on the SortingSelection master; the
-    # recording lives on the RecordingSource part and the artifact on the
-    # ArtifactDetectionOutput merge (resolved via resolve_artifact_detection).
+    # Recording and artifact live on parts/merge, not the SortingSelection master.
     sort_row = (
         SortingSelection * SortingSelection.RecordingSource
         & {"sorting_id": run_summary["sorting_id"]}
@@ -281,10 +242,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
                 ],
             }
         ),
-        # Count SortingSelection rows on this recording (via the XOR source
-        # part) with this sorter recipe, keeping only those whose resolved
-        # artifact matches -- so a re-run that minted a second logical row
-        # under a different sorting_id would push this above 1.
+        # Rows with this recording, sorter recipe, and resolved artifact.
         "SortingSelection": sum(
             1
             for k in (
@@ -298,7 +256,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
             if str(SortingSelection.resolve_artifact_detection(k))
             == str(run_summary["artifact_detection_id"])
         ),
-        # A re-run must NOT mint a second ROOT curation for the sorting.
+        # No second root curation for the sorting...
         "CurationV2_root": len(
             CurationV2
             & {
@@ -326,8 +284,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
 
 @pytest.mark.slow
 def test_initialize_v2_defaults_is_idempotent(dj_conn):
-    """``initialize_v2_defaults()`` can be called repeatedly with no
-    duplicate-row errors and leaves the same Lookup rows in place."""
+    """``initialize_v2_defaults()`` is repeatable and leaves the same Lookup rows."""
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
@@ -339,7 +296,6 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
         len(ArtifactDetectionParameters()),
         len(SorterParameters()),
     )
-    # Second call must not raise and must not duplicate rows.
     initialize_v2_defaults()
     post_counts = (
         len(PreprocessingParameters()),
@@ -350,7 +306,7 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
         f"initialize_v2_defaults duplicated rows: pre={pre_counts}, "
         f"post={post_counts}."
     )
-    # Counts must be > 0 (the defaults actually loaded something).
+    # The defaults actually loaded something.
     assert all(
         c > 0 for c in post_counts
     ), f"initialize_v2_defaults produced zero rows: {post_counts}."
@@ -362,16 +318,10 @@ def test_initialize_v2_defaults_is_idempotent(dj_conn):
 @pytest.mark.slow
 @pytest.mark.smoke
 def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
-    """``run_v2_pipeline`` with the clusterless preset populates the
-    full chain; verifies preset-to-row plumbing for the clusterless
-    branch (peak-detection only, no clustering).
+    """``run_v2_pipeline`` with the clusterless preset populates the full chain.
 
-    The existing ``test_run_v2_pipeline_end_to_end_and_idempotent``
-    only exercises MS5. The clusterless preset uses a different
-    sorter dispatch in ``Sorting._run_sorter`` (``detect_peaks``
-    instead of ``run_sorter``), so it's a meaningfully distinct
-    orchestrator integration path. The native MS4 production preset has
-    its own end-to-end test below.
+    The clusterless preset dispatches to ``detect_peaks`` rather than
+    ``run_sorter``.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -394,44 +344,22 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # The default clusterless ``SorterParameters`` row has a 100 uV
-    # threshold which finds zero peaks on the smoke fixture (template
-    # amplitudes are smaller). Insert a tuned row so the populate
-    # actually produces a unit -- mirrors the standalone clusterless
-    # e2e test.
-    #
-    # CRITICAL: the test mutates the ``default`` row IN PLACE because
-    # the preset bundle in pipeline.py hard-codes
-    # ``sorter_params_name="default"``. We snapshot the original row
-    # before mutating and restore it in a ``finally`` so this test
-    # does not contaminate subsequent ones that expect the 100 uV
-    # default. Without the restore step, every later test in the
-    # same pytest session sees the 5 uV row, which is a real
-    # cross-test ordering hazard.
+    # The 100 uV default finds zero peaks on the smoke fixture. The preset
+    # hard-codes sorter_params_name="default", so lower that row in place
+    # and restore it in ``finally`` for later tests.
     default_key = {
         "sorter": "clusterless_thresholder",
         "sorter_params_name": "default",
     }
     original_default = (SorterParameters & default_key).fetch1()
-    # ``ClusterlessThresholderSchema`` (extra="forbid") rejects ``outputs`` and
-    # ``random_chunk_kwargs``; ``SMOKE_CLUSTERLESS_PARAMS`` is already stripped to
-    # the schema's allowed shape so the stored row stays canonical (the runtime
-    # strip path in ``Sorting._run_sorter`` tolerates either form).
+    # SMOKE_CLUSTERLESS_PARAMS already fits the extra="forbid" schema.
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAMS,
     )
 
-    # Mutate the existing row IN PLACE with update1, NOT insert1(replace=True):
-    # replace deletes then reinserts, and a SortingSelection left by an earlier
-    # test (or by this one) FKs back to (sorter, sorter_params_name), so the
-    # delete half fails with an IntegrityError -- an order-dependent flake in a
-    # full-suite run. update1 edits the secondary attributes without touching the
-    # key, so it is safe regardless of test order. The ``finally`` below restores
-    # the 100 uV default the same way.
-    # ``allow_param_mutation=True``: SorterParameters is an ImmutableParamsLookup
-    # (its name is content-addressed into sorting_id), so an in-place update1 is
-    # rejected by default. This is the documented deliberate-edit escape hatch --
-    # the row is restored in the finally below.
+    # update1, not insert1(replace=True): SortingSelection rows FK to this
+    # row, so replace's delete fails. allow_param_mutation bypasses the
+    # ImmutableParamsLookup guard.
     SorterParameters.update1(
         {
             "sorter": "clusterless_thresholder",
@@ -463,15 +391,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
                 run_summary.get(key) is not None
             ), f"Run summary missing {key!r}; got {run_summary}."
     finally:
-        # Restore the original 100 uV default row so subsequent
-        # tests / sessions are not poisoned by the 5 uV value.
-        # Use update1 rather than insert1(replace=True): the test
-        # populated downstream SortingSelection rows that FK back
-        # to this SorterParameters row, so DJ's replace path
-        # (delete + reinsert) is blocked by the FK constraint.
-        # update1 modifies the secondary attributes in place.
-        # allow_param_mutation=True: the deliberate-restore escape hatch on the
-        # ImmutableParamsLookup guard (see the forward edit above).
+        # Restore the 100 uV default (update1 for the same FK reason).
         SorterParameters.update1(original_default, allow_param_mutation=True)
 
 
@@ -479,15 +399,11 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
 def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     polymer_smoke_session,
 ):
-    """``run_v2_pipeline`` with the SHIPPED ``clusterless_thresholder``
-    default (100 uV ``detect_threshold``) on the smoke fixture
-    finds zero peaks AND completes without crashing.
+    """The shipped 100 uV clusterless default finds zero peaks on the smoke
+    fixture and still completes.
 
-    A zero-unit sort yields an EMPTY (but real) curation + merge row --
-    matching v1's empty Units table -- so the run_summary is complete
-    (``root_curation_id`` + ``root_merge_id`` present, ``n_units=0``) and
-    downstream code can treat it like any other ``SpikeSortingOutput`` row
-    instead of special-casing a ``None`` merge_id.
+    A zero-unit sort yields an empty but real curation and merge row, so the
+    run_summary has ``root_curation_id``, ``root_merge_id`` and ``n_units=0``.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -510,9 +426,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # Use the SHIPPED default (100 uV) which finds zero peaks on
-    # the smoke fixture. NO row mutation -- this is the production-
-    # contract test.
+    # Shipped default, no row mutation.
     run_summary = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
@@ -521,8 +435,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         pipeline_preset="franklab_clusterless_2026_06",
     )
 
-    # A zero-unit sort still produces a COMPLETE, merge-keyable run_summary:
-    # an empty curation + merge row (v1 parity), not a partial None.
+    # Complete, merge-keyable run_summary (v1 parity).
     for key in ("recording_id", "artifact_detection_id", "sorting_id"):
         assert (
             run_summary.get(key) is not None
@@ -537,7 +450,6 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         f"result is merge-keyable; got {run_summary}."
     )
 
-    # Sorting row exists with ``n_units == 0``.
     sort_pk = {"sorting_id": run_summary["sorting_id"]}
     sort_row = (Sorting & sort_pk).fetch1()
     assert sort_row["n_units"] == 0, (
@@ -553,9 +465,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         "insert zero rows."
     )
 
-    # ---- zero-unit loud-but-graceful loader contracts ----
-    # The sort/recording/artifact are already populated, so these reuse
-    # the one expensive clusterless sort above.
+    # ---- zero-unit loader contracts (reuse the sort above) ----
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         ZeroUnitAnalyzerError,
@@ -573,23 +483,16 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
             require_units=True,
         )
 
-    # get_analyzer raises (no analyzer is buildable over zero units) -- it
-    # must not try to load a never-built folder. The analyzer path is
-    # computed from sorting_id (no column), so there is no stale-path row
-    # state; the zero-unit guard lives in get_analyzer.
+    # get_analyzer raises rather than loading a never-built folder.
     assert sort_row["n_units"] == 0
     with pytest.raises(ZeroUnitAnalyzerError):
         Sorting().get_analyzer(sort_pk)
 
-    # get_sorting returns an EMPTY sorting (zero units is valid data),
-    # not a crash on the empty units NWB.
+    # get_sorting returns an empty sorting (zero units is valid data).
     empty_sorting = Sorting().get_sorting(sort_pk)
     assert empty_sorting.get_num_units() == 0
 
-    # The empty curation that run_v2_pipeline created is real and
-    # merge-keyable, with zero Unit rows; CurationV2.get_sorting on it
-    # returns an empty sorting (it builds its OWN extractor, so it needs
-    # the same zero-unit guard).
+    # CurationV2.get_sorting builds its own extractor, so check it separately.
     curation_pk = {
         "sorting_id": run_summary["sorting_id"],
         "curation_id": run_summary["root_curation_id"],
@@ -598,23 +501,14 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     empty_curated = CurationV2().get_sorting(curation_pk)
     assert empty_curated.get_num_units() == 0
 
-    # get_merged_sorting must also handle the zero-unit curation without
-    # reaching the ``max(unit_ids) + 1`` path on an empty unit set; the
-    # root curation (merges_applied=0, no proposed merges) returns the
-    # empty base sorting.
+    # get_merged_sorting must not reach max(unit_ids) + 1 on an empty set.
     empty_merged = CurationV2().get_merged_sorting(curation_pk)
     assert empty_merged.get_num_units() == 0
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_list_pipeline_presets_enumerates_all_pipeline_presets():
-    """``list_pipeline_presets()`` returns exactly the names in ``_PIPELINE_PRESETS``.
-
-    Behavioral (not a signature check): the helper must enumerate every
-    registered pipeline preset so a notebook user can discover them. A
-    pipeline preset added to ``_PIPELINE_PRESETS`` but missing from
-    ``list_pipeline_presets()`` (or vice versa) fails here.
-    """
+    """``list_pipeline_presets()`` returns exactly the names in ``_PIPELINE_PRESETS``."""
     from spyglass.spikesorting.v2.pipeline import (
         _PIPELINE_PRESETS,
         list_pipeline_presets,
@@ -624,9 +518,7 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
     assert set(presets) == set(
         _PIPELINE_PRESETS
     ), "list_pipeline_presets() must enumerate exactly the registered _PIPELINE_PRESETS keys"
-    # Representative shipped pipeline presets (the MS4 production preset, the MS5
-    # default, and the clusterless preset) are present -- guards an accidental
-    # rename of the headline names.
+    # Headline preset names are not accidentally renamed.
     for name in (
         "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
         "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
@@ -640,10 +532,8 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
     """Re-running ``run_v2_pipeline`` returns the same curation via the
     existing-root short-circuit, and a child curation does not divert it.
 
-    The orchestrator looks for a root (``parent_curation_id=-1``) curation and
-    returns it rather than staging a duplicate. The clusterless pipeline
-    preset is the cheapest runnable path; require_units=False so a quiet-shank
-    zero-unit result still yields a (stable) curation row.
+    Uses the cheap clusterless preset; require_units=False so a zero-unit
+    result still yields a curation row.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import RunResult, run_v2_pipeline
@@ -672,7 +562,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
         ), "second run must return the existing root curation, not a duplicate"
         assert second["root_merge_id"] == first["root_merge_id"]
 
-        # A child curation (parent != -1) must NOT divert the short-circuit.
+        # A child curation must not divert the short-circuit.
         CurationV2.insert_curation(
             sorting_key={"sorting_id": first["sorting_id"]},
             parent_curation_id=first["root_curation_id"],
@@ -692,11 +582,8 @@ def test_run_v2_pipeline_pipeline_preset_wiring_to_run_summary(
 ):
     """The chosen pipeline preset's sorter is recorded in SortingSelection.
 
-    Runs the MS5 pipeline preset (a runnable stand-in for the MS4 pipeline
-    preset, whose runtime is unavailable here) and asserts the run_summary's
-    ``sorting_id`` resolves to a SortingSelection whose ``sorter`` /
-    ``sorter_params_name`` match the pipeline-preset bundle -- the
-    pipeline-preset -> Lookup-row -> run_summary wiring.
+    The run_summary's ``sorting_id`` resolves to a SortingSelection whose
+    ``sorter`` and ``sorter_params_name`` match the MS5 preset bundle.
     """
     from spyglass.spikesorting.v2.pipeline import (
         _PIPELINE_PRESETS,
@@ -774,8 +661,7 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
         np.testing.assert_array_equal(
             analyzer.sorting.unit_ids, sorting.unit_ids
         )
-        # Simultaneous spikes from different units can have different tie
-        # ordering in SI's flattened vectors. Preserve every spike per unit.
+        # Compare per unit: tie order of simultaneous spikes varies in SI.
         for unit_id in sorting.unit_ids:
             np.testing.assert_array_equal(
                 analyzer.sorting.get_unit_spike_train(unit_id),
@@ -792,9 +678,10 @@ def test_run_v2_pipeline_mountainsort4_pipeline_preset(polymer_smoke_session):
 
 @pytest.mark.slow
 def test_verify_v2_default_catalog_flags_stale(dj_conn):
-    """``verify_v2_default_catalog`` flags a stored shipped-default row whose
-    content diverged from the shipped content; a freshly-seeded catalog returns
-    ``[]``. ``strict=True`` raises instead of returning."""
+    """``verify_v2_default_catalog`` flags a drifted shipped-default row.
+
+    A freshly seeded catalog returns ``[]``; ``strict=True`` raises instead.
+    """
     from spyglass.spikesorting.v2 import (
         initialize_v2_defaults,
         verify_v2_default_catalog,
@@ -845,9 +732,8 @@ def test_verify_v2_default_catalog_flags_stale(dj_conn):
 
 @pytest.mark.slow
 def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
-    """``initialize_v2_defaults`` invokes ``verify_v2_default_catalog`` (non-strict)
-    and logs a WARNING when a stored default diverged -- the wiring, not just the
-    helper."""
+    """``initialize_v2_defaults`` runs the non-strict catalog audit and logs a
+    WARNING for a drifted default."""
     import logging
 
     from spyglass.spikesorting.v2 import initialize_v2_defaults
@@ -886,9 +772,7 @@ def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
 
 @pytest.mark.slow
 def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
-    """The audit also catches drift in a field filled by validation
-    (``QualityMetricParameters.template_metric_columns``) and in a part row
-    (``AutoCurationRules.Rule``), not just the raw master scalars."""
+    """The audit catches drift in validation-filled fields and in part rows."""
     from spyglass.spikesorting.v2 import (
         initialize_v2_defaults,
         verify_v2_default_catalog,
@@ -901,10 +785,7 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
     initialize_v2_defaults()
     assert verify_v2_default_catalog() == [], "fresh catalog should be clean"
 
-    # QualityMetricParameters.template_metric_columns is filled by validation, so
-    # _default_rows omits it -- the audit must still catch a stored drift.
-    # Other modules can insert custom metric rows; only shipped rows are
-    # covered by this catalog audit.
+    # template_metric_columns is filled by validation, so _default_rows omits it.
     qm_name = "franklab_default"
     assert QualityMetricParameters & {"metric_params_name": qm_name}
     qm_key = {"metric_params_name": qm_name}
@@ -930,8 +811,7 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
         )
     assert verify_v2_default_catalog() == []
 
-    # AutoCurationRules.Rule parts are dropped by _default_payloads' master --
-    # a drifted rule threshold must still be flagged.
+    # Rule parts are not in _default_payloads' master; drift is still flagged.
     ac_name = next(
         master["auto_curation_rules_name"]
         for master, rules in AutoCurationRules._default_payloads()
@@ -959,9 +839,7 @@ def test_verify_v2_default_catalog_flags_validated_and_part_drift(dj_conn):
         )
     assert verify_v2_default_catalog() == []
 
-    # AutoCurationRules MASTER defaulted columns (auto_merge_kwargs etc.) are
-    # filled by validation, not present in _default_payloads' master -- a drift
-    # there must still be flagged.
+    # Validation-filled master columns (auto_merge_kwargs etc.) are also audited.
     master_key = {"auto_curation_rules_name": ac_name}
     kwargs_original = (AutoCurationRules & master_key).fetch1(
         "auto_merge_kwargs"
@@ -993,11 +871,8 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
     """A preset with ``artifact_detection_params_name=None`` sorts off the
     recording directly, with no artifact-detection stage.
 
-    The orchestrator must skip ``ArtifactDetection`` entirely
-    (``artifact_detection_status="skipped"``, no ``artifact_detection_id``) and
-    build a ``SortingSelection`` with no ``ArtifactDetectionSource`` row, then
-    sort as usual. Mirrors the MS5 hippocampus recipe but drops the artifact
-    stage, the shape a concat preset uses.
+    The status is ``"skipped"``, there is no ``artifact_detection_id``, and the
+    ``SortingSelection`` has no ``ArtifactDetectionSource`` row.
     """
     from spyglass.spikesorting.v2 import pipeline as pl
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -1036,13 +911,7 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
 
 
 def test_stage_statuses_vocabulary_includes_skipped():
-    """The status vocabulary covers ``"skipped"`` (the no-artifact-stage value).
-
-    ``run_v2_pipeline`` emits ``artifact_detection_status="skipped"`` for a
-    no-artifact preset, so the closed ``StageStatus`` vocabulary the
-    observability tests validate against must contain it, alongside the
-    populate states.
-    """
+    """The ``StageStatus`` vocabulary includes ``"skipped"``."""
     from typing import get_args
 
     from spyglass.spikesorting.v2._orchestration.types import StageStatus
@@ -1052,11 +921,7 @@ def test_stage_statuses_vocabulary_includes_skipped():
 
 
 def test_run_v2_pipeline_auto_curate_param_defaults_false():
-    """``auto_curate`` is an opt-in flag on both orchestrators, default False.
-
-    The convenience call stays initial-curation-only by default so it never
-    silently commits suggested labels into a new curation; the caller opts in.
-    """
+    """``auto_curate`` is an opt-in flag on both orchestrators, default False."""
     import inspect
 
     from spyglass.spikesorting.v2.pipeline import (
@@ -1070,12 +935,7 @@ def test_run_v2_pipeline_auto_curate_param_defaults_false():
 
 
 def test_run_v2_pipeline_input_typeddicts_carry_auto_curate():
-    """The public input TypedDicts mirror the new ``auto_curate`` keyword.
-
-    The ``*Inputs`` bundles document "optional keys mirror the function
-    defaults" for typed ``run_v2_pipeline(**inputs)`` call sites, so a new
-    optional kwarg must appear there too.
-    """
+    """The public ``*Inputs`` TypedDicts include the ``auto_curate`` keyword."""
     from spyglass.spikesorting.v2._orchestration.types import (
         RunV2PipelineInputs,
         RunV2PipelineSessionInputs,
@@ -1089,16 +949,10 @@ def test_run_v2_pipeline_input_typeddicts_carry_auto_curate():
 def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     """``auto_curate=True`` scores the root curation and commits a labeled child.
 
-    The default run carries no auto-curation keys. Opting in (reusing the same
-    recording / artifact / sorting / root curation) adds the
-    ``CurationEvaluation`` suggestion id plus a materialized child ``CurationV2``
-    -- a real child of the root, registered on the merge table -- whose labels
-    are the evaluation's verdict.
-
-    The status reflects whether the accepted CHILD was (re)created this call,
-    not merely whether the evaluation already existed: a pre-populated
-    evaluation whose acceptance has not happened still reports ``"computed"``,
-    and only a full no-op reports ``"reused"``.
+    The child is registered on the merge table and carries the evaluation's
+    labels. The status is ``"computed"`` when the child is created this call,
+    even if the evaluation already existed, and ``"reused"`` only on a full
+    no-op.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1132,12 +986,7 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     assert base["auto_labeled_curation_id"] is None
     assert base["auto_labeled_merge_id"] is None
 
-    # Pre-populate the evaluation WITHOUT accepting it, so the evaluation
-    # already exists but the child curation does not -- the scenario where a
-    # naive "reused = evaluation exists" classifier would mislabel the run.
-    # Use the preset's OWN evaluation recipe names so this pre-populated
-    # evaluation is the one the auto-curate run resolves (a different rules row
-    # would be a different evaluation identity).
+    # Pre-populate the preset's own evaluation without accepting it.
     from spyglass.spikesorting.v2._orchestration.presets import (
         _PIPELINE_PRESETS,
     )
@@ -1153,8 +1002,7 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     )
     CurationEvaluation.populate(eval_key)
 
-    # Opt in: the evaluation pre-exists, but the child is created THIS call, so
-    # the stage is "computed", not "reused".
+    # The child is created this call, so the stage is "computed".
     curated = run_v2_pipeline(**common, auto_curate=True)
     for key in auto_keys:
         assert key in curated, key
@@ -1165,9 +1013,10 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     assert (
         curated["curation_evaluation_id"] == eval_key["curation_evaluation_id"]
     )  # reused the pre-populated evaluation
-    assert curated["auto_curation_status"] == "computed"  # child created now
-    # The auto-labeled pointer resolves to the materialized child, a NEW
-    # registered output distinct from the uncurated root.
+    assert (
+        curated["auto_curation_status"] == "computed"
+    )  # child created this call
+    # The auto-labeled pointer is the new child, not the root.
     assert curated["auto_labeled_curation_id"] is not None
     assert curated["auto_labeled_curation_id"] != curated["root_curation_id"]
     assert curated["auto_labeled_merge_id"] != curated["root_merge_id"]
@@ -1188,27 +1037,18 @@ def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
         "merge_id": curated["auto_labeled_merge_id"]
     }
 
-    # The child's labels are the RULES applied to the REAL computed metrics,
-    # not just plumbing. The preset's franklab_default_auto_curation_2026_09
-    # set labels nn_noise_overlap > 0.1 "noise" and isi_violation > 0.02
-    # "reject". Recompute the expected labels independently from the
-    # evaluation's own metrics and assert the materialized child carries
-    # exactly that -- this catches an inverted operator or a mis-wired metric
-    # column, which the structural assertions above cannot.
+    # Recompute expected labels from the evaluation's metrics with the
+    # preset's rules (nn_noise_overlap > 0.1 "noise", isi_violation > 0.02
+    # "reject") to catch an inverted operator or mis-wired metric column.
     metrics = CurationEvaluation.get_metrics(eval_key)
     assert "nn_noise_overlap" in metrics.columns
     assert "isi_violation" in metrics.columns
-    # Guard against a silently-inert metric: if every nn_noise_overlap is NaN
-    # (e.g. the templates 'median' operator or the SI sparse fix regressed), the
-    # expected/actual sets below would both be empty and this test would pass
-    # vacuously while auto-curation flags nothing. Require at least one real
-    # (finite) value so the rule is actually exercised.
+    # An all-NaN metric would make the comparison below vacuous.
     assert metrics["nn_noise_overlap"].notna().any()
 
     def _finite_above(column: str, threshold: float) -> set[int]:
-        # Non-finite metrics (None/NaN, e.g. low-spike units) are filtered by
-        # the rule engine (missing_policy='pass'), so they are never flagged
-        # -- mirror that here (``value == value`` is False for NaN).
+        # Mirror missing_policy='pass': non-finite values are never flagged
+        # (``value == value`` is False for NaN).
         flagged = set()
         for uid in metrics.index:
             value = metrics.loc[uid, column]
@@ -1246,12 +1086,8 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
 ):
     """A failure inside the auto-curation stage raises a typed PipelineStageError.
 
-    The auto-curation stage is hand-rolled (it bypasses ``_run_stage`` because
-    the child curation id is only known after acceptance), so its error wrapping
-    is pinned here: a populate failure surfaces as
-    ``PipelineStageError(stage="auto_curation")`` carrying the partial summary of
-    the stages that completed first (sorting + root curation), with the original
-    error type preserved.
+    A populate failure surfaces as ``PipelineStageError(stage="auto_curation")``
+    with the partial summary of completed stages and the original error type.
     """
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
@@ -1264,8 +1100,7 @@ def test_run_v2_pipeline_auto_curate_wraps_stage_error(
     def _boom(*args, **kwargs):
         raise RuntimeError("synthetic curation-evaluation failure")
 
-    # The auto-curation stage calls CurationEvaluation.populate first; force it
-    # to fail so the stage's bespoke try/except is exercised.
+    # The stage calls CurationEvaluation.populate first.
     monkeypatch.setattr(CurationEvaluation, "populate", _boom)
 
     with pytest.raises(PipelineStageError) as excinfo:

@@ -24,7 +24,7 @@ Neurons (per seed; templates from SpikeInterface ``generate_templates`` with
 per-neuron waveform parameters drawn once from SpikeInterface's default
 ranges, drawn locations from ``generate_unit_locations`` at a 20 um minimum
 distance (see "Spacing" below), spikes from ``generate_sorting`` at 10 Hz,
-noise 5 uV, 16 channels in two columns at 20 um pitch, 30 kHz -- the
+noise 5 uV, 16 channels in two columns at 20 um pitch, 30 kHz; the
 half-split experiment's probe, noise and rates):
 
 ``two_day``
@@ -67,8 +67,8 @@ denominator]``:
   (every two days a neuron is present on) emitted by the backend / whose two
   units share one tracked unit; ``<class>`` is a neuron class or ``all``.
   For ``three_day`` the pairs are also split into ``adjacent`` days and the
-  day 1 -- day 3 ``skip`` pair (``pair_tracked:reappear`` IS the day 1 -- day 3
-  linkage of disappear/reappear neurons).
+  day 1 to day 3 ``skip`` pair (``pair_tracked:reappear`` is the day 1 to
+  day 3 linkage of disappear/reappear neurons).
 - ``pair_precision``: emitted pairs that are planted pairs, over emitted
   pairs; ``false_pair:<kind>`` counts the false ones by kind
   (``distractor``, ``conflict_partner``, ``other_neuron``) over emitted pairs.
@@ -88,7 +88,7 @@ denominator]``:
   ``sessions_detected_mismatch`` (a tracked unit's detected-session count
   differs from the value derived from the planted per-member counts) and
   ``matching_inputs_mismatch`` (a tracked unit's input count differs from
-  the number of days among its own members -- a consistency check of the
+  the number of days among its own members; a consistency check of the
   production count, not a comparison with the planted truth).
 
 Benchmark configuration (the gates are derived from the development seeds
@@ -132,7 +132,7 @@ only and checked on a disjoint set of held-out seeds):
   gets two halves; an invariant, 320/320).
 
   ``three_day``: ``pair_tracked:stable >= 0.73`` [949/1200 = 0.791; 0.60 /
-  0.77 / 0.93; 0.061]; ``pair_tracked:reappear >= 0.50`` (day 1 -- day 3
+  0.77 / 0.93; 0.061]; ``pair_tracked:reappear >= 0.50`` (day 1 to day 3
   linkage) [107/160 = 0.669; 0.25 / 0.75 / 1.00; 0.164]; ``pair_precision >=
   0.65`` [1668/2293 = 0.727; 0.51 / 0.76 / 0.97; 0.077]; ``incorrect_identity
   <= 0.09`` [26/699 = 0.037; 0.00 / 0.00 / 0.17; 0.050]; ``distractor_emitted

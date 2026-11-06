@@ -1,10 +1,8 @@
-"""``select_units_for_analysis``: the explicit curation -> analysis handoff.
+"""``select_units_for_analysis``: the curation -> analysis handoff.
 
-Pure policy semantics (DB-free) plus a database round trip on the planted
-three-unit sort: the receipt's verdicts must equal what the downstream
-``SortedSpikesGroup.fetch_spike_data`` actually returns, rejected / artifact /
-noise units can never enter the canonical filtered handoff, and MUA /
-unlabeled handling is explicit per policy.
+- Receipt verdicts equal what ``SortedSpikesGroup.fetch_spike_data`` returns.
+- Rejected, artifact and noise units never enter the filtered handoff.
+- MUA and unlabeled handling is explicit per policy.
 """
 
 from __future__ import annotations
@@ -182,8 +180,8 @@ def test_select_units_for_analysis_round_trip(
             "artifact",
         }
 
-        # What analysis reads is exactly the receipt's included set -- the
-        # rejected and unlabeled units never enter.
+        # Analysis reads exactly the receipt's included set; rejected and
+        # unlabeled units never enter.
         spikes, ids = receipt.fetch_spike_data(return_unit_ids=True)
         assert [d["unit_id"] for d in ids] == list(receipt.included_unit_ids)
         assert all(d["spikesorting_merge_id"] == ref.merge_id for d in ids)
@@ -252,8 +250,8 @@ def test_select_units_for_analysis_round_trip(
         assert metric_selection.selection_provenance["evaluation_id"] == str(
             evaluation.evaluation_id
         )
-        # A direct consumer reads the frozen membership even if the named
-        # policy now excludes everything. Restore the shared default promptly.
+        # A direct consumer reads the frozen membership even after the named
+        # policy is edited to exclude everything. Restore the shared default.
         policy_key = {"unit_filter_params_name": "all_units"}
         try:
             UnitSelectionParams.update1(
@@ -301,9 +299,8 @@ def test_curation_delete_refuses_while_an_analysis_group_uses_it(
 ):
     """A curation that a SortedSpikesGroup uses cannot be deleted.
 
-    The delete removes the curation's merge entry after the confirmation
-    prompt. Without the refusal, that cleanup also dropped the group's unit
-    rows, and left the group (and anything decoded from it) in place.
+    Removing its merge entry would drop the group's unit rows while leaving
+    the group (and anything decoded from it) in place.
     """
     from spyglass.spikesorting.analysis.v1 import group as group_module
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup

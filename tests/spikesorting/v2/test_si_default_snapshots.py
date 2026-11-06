@@ -1,26 +1,16 @@
-"""SpikeInterface sorter-default snapshot pins.
+"""Snapshots of SpikeInterface 0.104.3 sorter defaults.
 
-SI is pinned to ==0.104.3 in pyproject.toml. The KS4/MS5/SC2/TDC2/Generic
-v2 schemas use ``extra="allow"`` (KS4 stays permissive, NOT made strict), so
-every sorter field the schema does not type falls through to SpikeInterface's
-per-version default at sort time. These snapshot tests fail loudly when a SI
-bump shifts those defaults so the diff can be audited against current sort
-outputs before the pin moves.
+The KS4/MS5/SC2/TDC2/Generic schemas use ``extra="allow"``, so untyped fields
+take SI's defaults at sort time. An SI bump that shifts them fails here.
 """
 
 from __future__ import annotations
 
 import pytest
 
-# KS4's install-independent SI-wrapper defaults (Kilosort4Sorter
-# ._si_default_params). The kilosort-ALGORITHM defaults (Th_universal,
-# batch_size, nearest_chans, ...) live in kilosort.parameters.DEFAULT_SETTINGS
-# and require the kilosort4 package to be installed; the CI SI-0.104 image does
-# NOT install KS4 (get_default_sorter_params('kilosort4') then returns only the
-# global job-kwargs + a "not installed" warning -- verified). This snapshot
-# pins the SI-controlled wrapper subset (always readable). The algorithm-level
-# knobs are pinned by the companion skipif test below, which runs only where
-# KS4 is installed.
+# KS4's SI-wrapper defaults (``Kilosort4Sorter._si_default_params``),
+# readable without kilosort4 installed. Algorithm defaults are pinned below
+# where kilosort4 is installed.
 EXPECTED_KS4_SI_DEFAULTS = {
     "do_CAR": True,
     "invert_sign": False,
@@ -37,10 +27,8 @@ EXPECTED_KS4_SI_DEFAULTS = {
 }
 
 
-# MS5's full default surface (minus the global job-kwargs), SI 0.104.3. The
-# v2 MS5 schema types only a subset; the remaining ~8 fields are silently
-# stripped/defaulted at sort time (documented in the migration guide).
-# Snapshotting them here lets that guide name the actual hidden values.
+# MS5 defaults minus job-kwargs. The v2 schema types a subset; the migration
+# guide names the rest from this snapshot.
 EXPECTED_MS5_DEFAULTS = {
     "scheme": "2",
     "detect_threshold": 5.5,
@@ -65,12 +53,8 @@ EXPECTED_MS5_DEFAULTS = {
     "delete_temporary_recording": True,
 }
 
-# SpykingCircus2 / TridesClous2 ship with ``extra="allow"`` (untyped) v2
-# schemas and EMPTY default-row params, so their effective defaults float
-# with the installed SpikeInterface rather than being frozen into the row
-# (as v1 did). These snapshots pin SI 0.104.3's defaults so an SI bump
-# that would silently change either sorter's behavior surfaces as a test
-# failure -- the same guard the KS4/MS5 snapshots give.
+# SC2 / TDC2 default rows have empty params, so their effective defaults come
+# from the installed SpikeInterface.
 EXPECTED_SC2_DEFAULTS = {
     "apply_motion_correction": True,
     "apply_preprocessing": True,
@@ -158,12 +142,8 @@ EXPECTED_TDC2_DEFAULTS = {
 def test_kilosort4_si_defaults_unchanged():
     """SI's install-independent KS4 wrapper defaults match the snapshot.
 
-    Pins ``Kilosort4Sorter._si_default_params`` (the SI-controlled overlay,
-    readable without the kilosort4 package). A SI bump that shifts any of these
-    surfaces as a test failure rather than a silent change to v2 KS4 sort
-    behavior. Diff against the pinned snapshot, decide whether v2's typed-5
-    KS4 subset still expresses the right knobs, then update the snapshot and
-    the CHANGELOG / SI pin together.
+    On failure, check v2's typed KS4 subset, then update the snapshot,
+    CHANGELOG and SI pin together.
     """
     from spikeinterface.sorters.external.kilosort4 import Kilosort4Sorter
 
@@ -175,14 +155,8 @@ def test_kilosort4_si_defaults_unchanged():
     )
 
 
-# The kilosort-ALGORITHM defaults flagged as the silent-drift risk
-# ("a SI upgrade changing batch_size or nearest_chans defaults"). Values read
-# authoritatively from kilosort 4.1.7's parameters.py (MAIN_PARAMETERS) and
-# surfaced top-level by SI's KS4 wrapper. Asserted as a SUBSET (not full-dict
-# equality): KS4 is an optional, UNPINNED package, so the full default dict
-# varies harmlessly across kilosort patch releases -- pinning the full dict
-# would false-fail on unrelated version differences. The subset pins exactly
-# the knobs whose drift changes sort outputs.
+# Kilosort 4.1.7 algorithm defaults whose drift changes sort outputs. A subset,
+# since kilosort4 is unpinned and other defaults vary across patch releases.
 EXPECTED_KS4_ALGORITHM_DEFAULTS = {
     "Th_universal": 9,
     "Th_learned": 8,
@@ -204,15 +178,10 @@ def _kilosort4_installed():
     "install-independent wrapper-overlay snapshot that always runs).",
 )
 def test_kilosort4_algorithm_defaults_unchanged():
-    """KS4's algorithm-level defaults (the drift risk) match.
+    """KS4's ``Th_universal`` / ``Th_learned`` / ``batch_size`` /
+    ``nearest_chans`` defaults match.
 
-    Runs only where kilosort4 is installed (skipped on the CI SI-0.104 image).
-    Pins the specific knobs flagged -- ``Th_universal`` / ``Th_learned``
-    / ``batch_size`` / ``nearest_chans`` -- whose silent drift across a SI/KS4
-    bump changes sort outputs. Subset assertion (not full-dict equality) so an
-    unrelated kilosort patch-version difference does not false-fail; a change
-    to ONE of these knobs surfaces loudly. Note: because this is skipped in the
-    KS4-less CI lane, continuous protection requires a KS4-enabled CI job.
+    Skipped where kilosort4 is not installed, including CI.
     """
     import spikeinterface.sorters as sis
 
@@ -231,11 +200,7 @@ def test_kilosort4_algorithm_defaults_unchanged():
 def test_ms5_si_defaults_unchanged():
     """SI's MountainSort5 defaults match the snapshot.
 
-    MS5 is installed in the SI-0.104 env, so its full default surface is
-    readable. Excludes the global job-kwargs (``job_keys``) so the snapshot
-    is independent of any per-session job-kwargs config and reflects only the
-    MS5 algorithm defaults -- including the fields v2's MS5 schema silently
-    strips (the migration guide names them from this snapshot).
+    Excludes the global job-kwargs so config does not affect it.
     """
     import spikeinterface.sorters as sis
     from spikeinterface.core.job_tools import job_keys
@@ -255,11 +220,7 @@ def test_ms5_si_defaults_unchanged():
 def test_spykingcircus2_si_defaults_unchanged():
     """SI's SpykingCircus2 defaults match the snapshot.
 
-    SC2's v2 schema is ``extra="allow"`` and ships an EMPTY default-row
-    params blob, so its effective defaults come from the installed SI at
-    sort time. This pins SI 0.104.3's defaults so an SI bump that would
-    silently change SC2's behavior surfaces as a test failure (loosen only
-    alongside the SI pin in pyproject.toml + the CHANGELOG).
+    Update only with the SI pin and CHANGELOG.
     """
     import spikeinterface.sorters as sis
     from spikeinterface.core.job_tools import job_keys
@@ -279,10 +240,7 @@ def test_spykingcircus2_si_defaults_unchanged():
 def test_tridesclous2_si_defaults_unchanged():
     """SI's TridesClous2 defaults match the snapshot.
 
-    Same rationale as SpykingCircus2: TDC2's v2 schema is ``extra="allow"``
-    with an empty default-row params blob, so the effective defaults float
-    with the installed SI. Pin SI 0.104.3 here so a bump is a deliberate,
-    audited change.
+    Update only with the SI pin and CHANGELOG.
     """
     import spikeinterface.sorters as sis
     from spikeinterface.core.job_tools import job_keys

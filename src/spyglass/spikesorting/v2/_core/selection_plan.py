@@ -1,25 +1,8 @@
-"""Pure builders for the v2 selection insert plans.
+"""DB-free builders for the v2 selection insert plans.
 
-``RecordingSelection`` / ``SortingSelection`` ``insert_selection`` are split
-into a pure half (here) and a DB half (the orchestrator). The builders validate
-the selection request, normalize ids, compute the deterministic content-
-addressed primary key, and assemble the master + source part rows to
-insert. The orchestrator then runs find-existing, the FK pre-checks, and
-the atomic insert transaction (with duplicate-PK race recovery) on the
-returned plan. (The artifact selections derive their content-addressed
-id inline in ``_insert_artifact_selection``, so they need no plan builder
-here.)
-
-Isolating the pure half makes the input-validation + identity + row-shaping
-logic unit-testable without a DataJoint transaction -- so the
-misconfiguration paths (bad source combinations, supplied-id mismatch,
-missing required keys, str-vs-UUID normalization) are cheap to pin.
-
-Dependency-light: imports only :mod:`_core.selection_identity` (itself DB-free)
--- no v2 schema modules, no ``spyglass.common``.
-
-Naming note: "plan" here (and in :mod:`_curation.plan`) is a domain noun -- the
-computed set of rows to insert, like a query plan.
+The builders validate a request, compute the deterministic primary key, and
+shape the rows to insert. The table's ``insert_selection`` runs the DB half.
+A "plan" is the computed set of rows to insert.
 """
 
 from __future__ import annotations
@@ -35,9 +18,8 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     sorting_identity_payload,
 )
 
-#: Every field ``SortingSelection.insert_selection`` accepts. Anything else
-#: is refused rather than dropped: a misspelled optional key (e.g. the
-#: corrected recording's) would otherwise select a different sort.
+#: Every field ``SortingSelection.insert_selection`` accepts. Others are
+#: refused, since a misspelled optional key would select a different sort.
 SORTING_SELECTION_FIELDS = frozenset(
     {
         "recording_id",
@@ -54,10 +36,8 @@ SORTING_SELECTION_FIELDS = frozenset(
 class RecordingSelectionPlan(NamedTuple):
     """The row + restriction a ``RecordingSelection`` insert needs.
 
-    ``RecordingSelection`` has no source part: its logical identity is the
-    full FK set (Raw, SortGroupV2, IntervalList, PreprocessingParameters,
-    LabTeam), which doubles as ``master_restriction`` for find-existing.
-    ``master_row`` is that FK set plus the content-addressed ``recording_id``.
+    ``master_restriction`` is the logical identity; ``master_row`` adds the
+    ``recording_id``.
     """
 
     recording_id: uuid.UUID
@@ -68,29 +48,13 @@ class RecordingSelectionPlan(NamedTuple):
 class SortingSelectionPlan(NamedTuple):
     """The rows + restrictions a ``SortingSelection`` insert needs.
 
-    ``source_kind`` is ``"recording"`` or ``"concat"``; exactly one of
-    ``recording_source_row`` / ``concat_source_row`` is non-``None`` and the
-    other is ``None``, so the orchestrator inserts the matching source part
-    (``RecordingSource`` xor ``ConcatenatedRecordingSource``) without
-    re-deriving the source shape. ``source_restriction`` carries
-    ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}`` accordingly.
-
-    ``artifact_detection_id`` is the normalized (``uuid.UUID``) value threaded
-    for find-existing; it is ``None`` when no artifact-detection pass was
-    requested at the sorting stage. Concat masks are frozen upstream in
-    the source selection. The ``ArtifactDetectionSource`` part row itself is built by
-    ``insert_selection`` (it carries the merge id resolved DB-side after the
-    detection is registered into ``ArtifactDetectionOutput``), not here.
-
-    ``motion_corrected_recording_id`` is the normalized (``uuid.UUID``) id
-    of the motion-corrected recording the sort reads, or ``None`` for a sort
-    of the source's own traces; ``insert_selection`` writes it as the
-    ``MotionCorrectionSource`` part.
-
-    Note: ``source_kind`` here is ``"concat"`` (the plan/identity vocabulary),
-    which deliberately differs from ``utils.SourceResolution.kind``'s
-    ``"concatenated_recording"`` (the post-insert resolution vocabulary); the
-    two label the same source family at different layers.
+    - Exactly one of ``recording_source_row`` / ``concat_source_row`` is set,
+      matching ``source_kind``.
+    - ``artifact_detection_id`` and ``motion_corrected_recording_id`` are
+      normalized UUIDs or ``None``. ``insert_selection`` builds the
+      ``ArtifactDetectionSource`` row, which needs a DB-side merge id.
+    - ``source_kind`` ``"concat"`` corresponds to
+      ``SourceResolution.kind`` ``"concatenated_recording"``.
     """
 
     sorting_id: uuid.UUID
@@ -109,24 +73,20 @@ def build_recording_selection_plan(
 ) -> RecordingSelectionPlan:
     """Validate a ``RecordingSelection`` request and build its insert plan.
 
-    The logical identity is the full FK set (Raw, SortGroupV2, IntervalList,
-    PreprocessingParameters, LabTeam) PLUS ``recording_input_hash`` -- the
-    content-address of the recording's RESOLVED construction inputs (electrode
-    membership, reference, and the ``interpolate`` bad-channel set) that live
-    outside the FK set but shape the recording's content (see
-    :func:`recording_input_hash`). Folding it into the ``recording_id`` makes a
-    changed input set mint a NEW recording rather than silently aliasing (or
-    later failing to rebuild) an existing ``recording_id``. The caller resolves
-    the hash DB-side (the resolution needs the live ``SortGroupElectrode`` /
-    ``Electrode`` rows) and passes it here so this builder stays DB-free.
+    The identity is the FK set plus ``recording_input_hash``
+    (:func:`recording_input_hash`, resolved DB-side by the caller), so changed
+    construction inputs mint a new recording.
 
-    FK-field validation (unknown-field rejection, required-field checks) is
-    delegated to :func:`recording_identity_payload`, the single source of truth
-    shared with ``preflight_v2_pipeline``; the hash is folded in identically at
-    both sites so the two cannot derive different ids. The hash also enters
-    ``master_restriction`` so find-existing is scoped to the specific input set
-    -- two membership sets under one ``sort_group_id`` are distinct rows, not
-    a false "non-deterministic selection row" error.
+    Parameters
+    ----------
+    key : dict
+        The ``RecordingSelection`` FK fields and optional ``recording_id``.
+    recording_input_hash : str
+        Digest of the resolved construction inputs.
+
+    Returns
+    -------
+    RecordingSelectionPlan
 
     Raises
     ------
@@ -156,18 +116,9 @@ def build_recording_selection_plan(
 def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     """Validate a ``SortingSelection`` request and build its insert plan.
 
-    Reads exactly one of ``recording_id`` (single-session) or
-    ``concat_recording_id`` (concat) from ``key``; ``sorter`` and
-    ``sorter_params_name`` are required. ``artifact_detection_id`` is
-    optional on the recording path and, when present, normalized to a
-    ``uuid.UUID`` so a caller-supplied ``str`` shares one identity with the
-    stored value. A concat source must NOT carry an ``artifact_detection_id``:
-    concat member masks are already materialized in the source and frozen by
-    ``ConcatenatedRecordingSelection``, so there is no additional
-    ``ArtifactDetectionSource`` row at the sorting stage. An optional
-    ``motion_corrected_recording_id`` (either source kind) selects a
-    motion-corrected recording of the source and enters the identity; its
-    agreement with the source is checked DB-side by ``insert_selection``.
+    ``key`` needs exactly one of ``recording_id`` or ``concat_recording_id``,
+    plus ``sorter`` and ``sorter_params_name``. A concat source cannot carry
+    ``artifact_detection_id`` because its member masks are frozen upstream.
 
     Raises
     ------
@@ -206,10 +157,7 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         "sorter_params_name": key["sorter_params_name"],
     }
     artifact_detection_id = key.get("artifact_detection_id")
-    # Normalize a caller-supplied ``artifact_detection_id`` (which may be a
-    # str) so the find-existing comparison is UUID-vs-UUID. A str would
-    # otherwise never equal the stored UUID, so an idempotent re-insert
-    # would miss its match and create a duplicate sort.
+    # A str id would never match the stored UUID in find-existing.
     if artifact_detection_id is not None:
         artifact_detection_id = uuid.UUID(str(artifact_detection_id))
     motion_corrected_recording_id = key.get("motion_corrected_recording_id")
@@ -218,9 +166,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             str(motion_corrected_recording_id)
         )
 
-    # A concat already owns frozen member masks. A single detection here
-    # cannot describe that source; the identity helper enforces the same
-    # invariant for callers that bypass this selection boundary.
     if has_concat and artifact_detection_id is not None:
         raise ValueError(
             "SortingSelection.insert_selection: a concat_recording_id "
@@ -230,13 +175,6 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         )
     source_field = "concat_recording_id" if has_concat else "recording_id"
     source_restriction = {source_field: key[source_field]}
-    # Deterministic, content-addressed sorting_id from the logical identity
-    # (source + sorter + the optional artifact-detection pass, which is
-    # always ``None`` for a concat source). ``artifact_detection_id=None`` is
-    # the single "no artifact-detection pass" form and cannot alias any real
-    # artifact_detection_id, so an artifact-detection-backed and an
-    # artifact-detection-free sort for the same (recording, sorter) are
-    # distinct, idempotent rows.
     identity = sorting_identity_payload(
         **source_restriction,
         sorter=key["sorter"],

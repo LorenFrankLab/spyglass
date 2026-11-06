@@ -1,17 +1,7 @@
 """Tests for committed-curation evaluation and final merged-unit metrics.
 
-``CurationEvaluation`` scores an existing committed ``CurationV2`` row in that
-curation's own unit namespace: merged units get metrics recomputed over their
-merged spike trains/templates, not inherited from a contributor. Preview
-(draft) curations -- ``apply_merge=False`` with a real proposed merge group --
-are rejected at the evaluation boundary.
-
-Tiers:
-
-- ``slow`` / ``integration`` end-to-end tests populate ``CurationEvaluation``
-  on the planted two-unit sort and the shared MEArec smoke sort.
-- hermetic compute-level tests pin the merged-template metric contract with
-  controlled planted templates (no DB populate).
+Merged units get metrics recomputed over their merged spikes and templates.
+Preview curations (``apply_merge=False`` with a proposed merge) are rejected.
 """
 
 from __future__ import annotations
@@ -31,9 +21,7 @@ from tests.spikesorting.v2._sorter_stub import plant_sorter
 def test_is_committed_curation_distinguishes_preview(planted_two_unit_sort):
     """Root, label-only, and applied-merge rows are committed; a preview is not.
 
-    A preview (``apply_merge=False`` with a real >=2-unit proposed merge group)
-    is a draft, not a final downstream curation; ``assert_committed_curation``
-    raises for it and is a no-op for the committed states.
+    A preview has ``apply_merge=False`` and a proposed merge of >=2 units.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -86,10 +74,7 @@ def test_is_committed_curation_distinguishes_preview(planted_two_unit_sort):
 
 # ---------- DB-free resolved reconstruction helpers -------------------------
 #
-# CurationEvaluation.make_compute runs in a parallel worker with no DB access,
-# so it reconstructs the recording / analyzer from inputs make_fetch resolved.
-# These parity tests pin the DB-free helpers against the existing DB-coupled
-# paths: a divergence here would silently feed metrics the wrong recording.
+# make_compute has no DB access; these helpers must match the DB-coupled paths.
 
 
 @pytest.mark.slow
@@ -97,10 +82,8 @@ def test_is_committed_curation_distinguishes_preview(planted_two_unit_sort):
 def test_effective_recording_load_matches_table_accessor(populated_sorting):
     """The DB-free traces load equals the table accessor plus the sort's mask.
 
-    ``load_effective_recording`` reads the cached recording NWB and applies the
-    artifact mask from make_fetch-resolved inputs, with no DB access beyond the
-    file-path lookup; it must reproduce ``Recording().get_recording`` masked by
-    the sort's artifact-removed intervals.
+    ``load_effective_recording`` matches ``Recording().get_recording`` masked
+    by the sort's artifact-removed intervals.
     """
     import numpy as np
 
@@ -148,9 +131,7 @@ def test_effective_recording_load_matches_table_accessor(populated_sorting):
 def test_resolved_analyzer_loader_matches_get_analyzer(populated_sorting):
     """The DB-free analyzer loader reproduces the cached display analyzer.
 
-    ``load_or_rebuild_analyzer_from_resolved`` loads (or rebuilds) the canonical
-    display analyzer from make_fetch-resolved inputs without any DB read; it
-    must return the same unit ids and templates as ``Sorting().get_analyzer``.
+    Same unit ids and templates as ``Sorting().get_analyzer``.
     """
     import numpy as np
 
@@ -218,9 +199,7 @@ def test_curation_evaluation_selection_rejects_preview(
 ):
     """A preview curation is rejected at CurationEvaluationSelection.insert.
 
-    A preview (``apply_merge=False`` with a real proposed merge) is a draft;
-    evaluating it would score the unmerged units. ``insert_selection`` must
-    raise rather than accept it.
+    Evaluating a preview would score the unmerged units.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -299,10 +278,8 @@ def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
 ):
     """Evaluating a merged curation publishes its display analyzer once.
 
-    The merged review page reads the same per-generation display analyzer.
-    Building a temporary one for the evaluation and then the published one
-    for the page doubled the slowest part of committing a merge. The
-    published analyzer must be exactly what the page's own builder makes.
+    The review page reuses it, so it must equal what the page's builder
+    makes.
     """
     import numpy as np
 
@@ -364,9 +341,7 @@ def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
             int(u) for u in (CurationV2.Unit & merged).fetch("unit_id")
         )
         assert sorted(map(int, published.unit_ids)) == merged_units
-        # The review page's waveform view shades templates with SI's default
-        # percentiles; reading them must not change the published cache, or
-        # the next open (or "Inspect selected units") rebuilds it.
+        # Reading template percentiles must not change the published cache.
         import inspect
 
         import spikeinterface.widgets as sw
@@ -399,8 +374,8 @@ def test_merged_evaluation_metrics_do_not_depend_on_the_published_analyzer(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
     """The shipped metric set is identical whether a merged curation's display
-    analyzer is built privately (the old path) or comes from the published
-    cache, which already carries the review page's display extensions."""
+    analyzer is built privately or comes from the published cache (which
+    carries the review page's extensions)."""
     import pynwb
 
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -479,10 +454,8 @@ def test_final_metrics_recomputed_for_merged_unit(
 ):
     """Final metrics over a committed applied-merge curation are recomputed.
 
-    The merged unit appears with metrics computed over its merged spike train;
-    the absorbed contributors are absent, and ``num_spikes`` equals the merged
-    train length (== ``CurationV2.Unit.n_spikes``). Scoring through the raw
-    sort's analyzer would instead score the original contributor units.
+    Contributors are absent and ``num_spikes`` equals
+    ``CurationV2.Unit.n_spikes`` of the merged unit.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -539,11 +512,8 @@ def test_final_metrics_recomputed_for_merged_unit(
 def test_curation_evaluation_records_source_provenance(
     populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
 ):
-    """A fast-path (root-curation) evaluation records the SI version and the
-    canonical raw-sort analyzer's content hash; detect_stale_source is clean in
-    the same environment but flags a library-version drift and an analyzer-
-    content drift. The evaluated curation identity + recipe names live on the
-    selection FK, not duplicated on the row."""
+    """A root-curation evaluation records the SI version and analyzer hash;
+    detect_stale_source flags a version or analyzer-content change."""
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.metric_curation import (
@@ -561,8 +531,7 @@ def test_curation_evaluation_records_source_provenance(
     CurationEvaluation.populate(sel, reserve_jobs=False)
     row = (CurationEvaluation & sel).fetch1()
     assert row["spikeinterface_version"] == si.__version__
-    # Fast path consumes the canonical display analyzer -> recorded as a manifest
-    # ({role: hash}). "minimal" requests no PC metrics, so no metric analyzer.
+    # {role: hash}; "minimal" has no PC metrics, so no metric analyzer.
     assert set(row["source_analyzer_hashes"]) == {"display"}
     assert row["source_analyzer_hashes"]["display"]
     # Evaluated identity is reachable via the selection FK, not duplicated.
@@ -592,8 +561,7 @@ def test_curation_evaluation_records_source_provenance(
     assert "source_analyzer_hash:display" in hash_drift["reasons"]
     monkeypatch.undo()
 
-    # A reclaimed/missing analyzer cache (regeneratable scratch) is reported as
-    # stale, not raised -- the stored metrics can no longer be reproduced.
+    # A missing analyzer cache is reported as stale, not raised.
     from spyglass.spikesorting.v2.exceptions import AnalyzerFolderMissingError
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -611,12 +579,7 @@ def test_curation_evaluation_nwb_carries_inputs(
 ):
     """The CurationEvaluation NWB embeds the evaluation inputs + source provenance.
 
-    Alongside the metric/merge/label result tables, the artifact carries the
-    metric param set + names, the display/metric recipe names, the auto-merge
-    preset, the evaluated sorting/curation, and re-emits the source
-    provenance the row stores (analyzer-hash manifest, SI version) plus the
-    upstream recording content hash -- so the file is interpretable without the
-    DB.
+    The file is interpretable without the DB.
     """
     import spikeinterface as si
 
@@ -692,16 +655,14 @@ def test_curation_evaluation_nwb_carries_inputs(
 def test_curation_evaluation_pc_eval_records_both_roles(
     populated_sorting_with_curation, curation_evaluation_defaults, monkeypatch
 ):
-    """A PC/NN evaluation consumes BOTH the display and whitened metric analyzer,
-    so the provenance manifest records both roles and detect_stale_source flags
-    drift in the metric (PC) analyzer per role -- not just the display role."""
+    """A PC/NN evaluation records both the display and metric analyzer
+    roles, and detect_stale_source flags each role."""
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
     )
 
-    # franklab_default requests PC/NN metrics (skip_pc_metrics=False) -> the
-    # whitened metric analyzer is built + principal_components computed on it.
+    # franklab_default requests PC/NN metrics, so the metric analyzer is built.
     sel = CurationEvaluationSelection.insert_selection(
         {
             **populated_sorting_with_curation,
@@ -714,8 +675,6 @@ def test_curation_evaluation_pc_eval_records_both_roles(
     assert set(row["source_analyzer_hashes"]) == {"display", "metric"}
     assert CurationEvaluation.detect_stale_source(sel)["stale"] is False
 
-    # Perturb only the metric analyzer's hash (the one carrying
-    # principal_components): the metric role is flagged, the display role is not.
     import spyglass.spikesorting.v2._storage.recompute as rc
 
     real_hash = rc.hash_extension_data
@@ -737,14 +696,8 @@ def test_nn_noise_overlap_is_finite_not_silently_all_nan(
 ):
     """nn_noise_overlap must be a real (finite) metric, not silently all-NaN.
 
-    SI 0.104's nearest_neighbors_noise_overlap requires a ``median`` template
-    operator. If the whitened metric analyzer builds ``templates`` without it,
-    SI swallows the per-unit error and every ``nn_noise_overlap`` is NaN -- so
-    the shipped auto-curation noise/reject rules (which threshold
-    ``nn_noise_overlap``) silently fire on nothing. Assert, independent of any
-    persisted/derived value, that at least one unit has a finite
-    ``nn_noise_overlap`` so an all-NaN result fails loudly rather than
-    passing as "no units flagged".
+    SI 0.104 needs a ``median`` template operator; without it SI writes NaN
+    for every unit and the noise rule fires on nothing.
     """
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -891,8 +844,8 @@ def test_evaluation_fails_when_si_swallows_metric_error(
         calls.append(args)
         raise RuntimeError("planted isi failure")
 
-    # ``ISIViolation.metric_function`` is bound when the class is created;
-    # this helper is looked up when the metric runs (misc_metrics.py:422).
+    # metric_function is bound at class creation; this helper is looked up
+    # at run time.
     monkeypatch.setattr(misc_metrics, "isi_violations", planted)
     sel = _franklab_evaluation(populated_sorting_with_curation)
     with pytest.raises(ValueError, match="planted isi failure") as excinfo:
@@ -922,8 +875,7 @@ def test_unreferenced_metric_error_does_not_abort_evaluation(
         calls.append(args)
         raise RuntimeError("planted sd_ratio failure")
 
-    # v2's sd_ratio wrapper looks this up when the metric runs
-    # (_si_metric_patches.py, _sd_ratio_statistics_spans).
+    # Looked up at run time by v2's sd_ratio wrapper.
     monkeypatch.setattr(misc_metrics, "compute_sd_ratio", planted)
     sel = _franklab_evaluation(
         populated_sorting_with_curation,
@@ -950,10 +902,9 @@ def test_shipped_rules_still_label_on_smoke_fixture(
 ):
     """The shipped metrics and rules evaluate a real sort as specified.
 
-    Every stored label equals the rules applied by hand to the stored
-    metrics, and every non-finite rule value belongs to a unit below the
-    metric's spike floor (fewer than 10 spikes for the nn metrics, at most
-    one for the ISI fraction) -- the only NaNs the shipped params allow.
+    Stored labels equal the rules applied by hand, and every non-finite rule
+    value belongs to a unit below the metric's spike floor (10 for nn, 1 for
+    ISI).
     """
     import numpy as np
 
@@ -985,13 +936,9 @@ def test_shipped_rules_pass_units_below_the_nn_spike_floor(
 ):
     """Units too small for ``nn_advanced`` follow the rule's ``"pass"``.
 
-    Each planted unit has 5 spikes, below ``nn_advanced``'s ``min_spikes``
-    of 10, so SpikeInterface leaves ``nn_noise_overlap`` NaN for both. That
-    NaN is expected, not a computation failure: populate succeeds, the
-    ``"pass"`` noise rule labels neither unit and warns that it was inert.
-    ``isi_violation`` is defined for 5 spikes and is 0 for both planted
-    trains (every ISI is 1000 samples, far above the 2 ms threshold), so
-    the reject rule labels neither unit either.
+    5 spikes is below ``min_spikes`` (10), so ``nn_noise_overlap`` is NaN;
+    populate succeeds and the noise rule labels nothing and warns.
+    ``isi_violation`` is 0 (ISIs of 1000 samples), so nothing is rejected.
     """
     import numpy as np
 
@@ -1067,10 +1014,8 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
 ):
     """The spans are visible to both metric computes, then reset.
 
-    The voltage-metric compute (``sd_ratio``'s template correction) and the
-    PC-metric compute (the nn noise cluster) both see the spans passed to
-    ``compute_metrics``; afterwards -- whether the PC compute returned or
-    raised -- the ContextVar is back to ``None``.
+    Both computes see the spans; the ContextVar is ``None`` afterwards even
+    if the PC compute raised.
     """
     import spikeinterface.metrics.quality as sqm
 
@@ -1120,9 +1065,8 @@ def test_compute_metrics_scopes_noise_cluster_spans_to_metric_computes(
 def test_compute_metrics_leaves_si_metric_defaults_unchanged(dj_conn):
     """A row's metric kwargs do not become SI's defaults for later computes.
 
-    Called directly, SI merges ``metric_params`` into its class-level
-    defaults; ``compute_metrics`` must leave them as they were, for both
-    the voltage and the PC/NN compute, while still applying the kwargs.
+    SI merges ``metric_params`` into class-level defaults when called
+    directly.
     """
     import copy
 
@@ -1203,10 +1147,7 @@ def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
 ):
     """A metric SI swallows raises only when a rule thresholds its column.
 
-    SI turns a raising metric into a warning and all-NaN columns. With the
-    column among ``rule_columns`` ``compute_metrics`` raises naming the
-    metric, the column and SI's error; without, it returns the NaN column
-    and logs the failure.
+    Otherwise the NaN column is returned and the failure logged.
     """
     from spikeinterface.metrics.quality import ComputeQualityMetrics
     from spikeinterface.metrics.template import ComputeTemplateMetrics
@@ -1265,11 +1206,9 @@ def test_compute_metrics_escalates_si_metric_errors_on_rule_columns(
 def _sd_ratio_analyzer(fill):
     """In-memory display analyzer over a 30%-masked 10 s, 4-channel recording.
 
-    The excluded frames hold ``fill`` (``"zeros"``, ``"10mV"`` or ``"nan"``).
-    Every spike sits at least 4 ms from an excluded frame, so its waveform
-    and amplitude read only retained frames: only a noise estimate that
-    reads excluded frames can depend on ``fill``. Returns
-    ``(analyzer, spans)``.
+    Excluded frames hold ``fill`` (``"zeros"``, ``"10mV"`` or ``"nan"``);
+    spikes are at least 4 ms from them, so only a noise estimate reading
+    excluded frames depends on ``fill``. Returns ``(analyzer, spans)``.
     """
     import numpy as np
     import spikeinterface as si
@@ -1324,14 +1263,9 @@ def _sd_ratio_analyzer(fill):
 def test_compute_metrics_sd_ratio_ignores_excluded_samples(dj_conn):
     """``sd_ratio``'s noise comes only from the statistics spans.
 
-    With the spans fixed, the excluded frames are filled with zeros, then
-    +/-10 mV, then NaN: ``sd_ratio`` from ``compute_metrics`` must be
-    bit-identical and finite across the three. The std it divides by is
-    the per-channel std of the span samples (SI's default 20 x 500 ms budget,
-    the job's ``random_seed``), cached on the display analyzer's recording,
-    and the template correction is the span-restricted one: the value is
-    the patched metric's under the spans, above SI's own correction (which
-    counts every sample and so leaves it low).
+    Filling excluded frames with zeros, +/-10 mV or NaN gives bit-identical,
+    finite values. The template correction is span-restricted, so the value
+    is above SI's own (which counts every sample).
     """
     import numpy as np
     import spikeinterface.metrics.quality.misc_metrics as mm
@@ -1499,10 +1433,8 @@ def test_evaluation_passes_statistics_spans_to_metric_compute(
 def _two_distinct_template_inputs():
     """A 4-channel recording + two-unit and merged sortings, distinct templates.
 
-    Unit 0 peaks on channel 0, unit 1 on channel 2 (distinct shapes, equal
-    amplitude). The merged unit's template is the spike-count-weighted average,
-    so its extremum (~half) differs from BOTH contributors -- the predictable
-    setup for "merged-unit waveform metrics are recomputed, not inherited".
+    Unit 0 peaks on channel 0, unit 1 on channel 2 (equal amplitude), so the
+    merged template's extremum (~half) differs from both.
     """
     import numpy as np
     import spikeinterface as si
@@ -1555,12 +1487,9 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
     """A waveform metric (snr) on the merged unit is computed over the MERGED
     template, not inherited from a contributor.
 
-    Drives the exact compute path CurationEvaluation uses for an applied-merge
-    curation -- ``build_analyzer`` over the merged sorting, then
-    ``compute_metrics`` -- with two planted contributors whose
-    distinct templates make the merged-template extremum predictable. The merged
-    unit's snr must differ from BOTH contributors' pre-merge snr (it cannot have
-    been inherited) and be smaller (the merged template extremum is diluted).
+    Uses CurationEvaluation's path (``build_analyzer`` then
+    ``compute_metrics``); the merged snr differs from both contributors and
+    is smaller.
     """
     import spikeinterface as si
 
@@ -1589,11 +1518,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
             waveform_params=waveform_params,
         )
         analyzer = si.load_sorting_analyzer(folder)
-        # The planted recording is an in-memory NumpyRecording (not persistable),
-        # so the reloaded analyzer has no recording; reattach it so the
-        # waveform extensions can compute. Production recordings are NWB-backed
-        # and persist into the folder, so the real path needs no reattach (the
-        # DB-backed merged tests cover that).
+        # A NumpyRecording is not persisted with the analyzer; reattach it.
         analyzer.set_temporary_recording(rec)
         df = compute_metrics(
             analyzer,
@@ -1630,12 +1555,7 @@ def test_merged_unit_waveform_metric_recomputed_not_inherited(
 def test_curation_evaluation_rejects_preview_at_make_fetch(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """A preview row planted via allow_direct_insert is rejected at make_fetch.
-
-    insert_selection guards previews, but a row planted directly bypasses it;
-    make_fetch re-asserts the curation is committed so the preview compute path
-    is unreachable.
-    """
+    """A preview row inserted directly is rejected at make_fetch."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2._core.observed_time import (
@@ -1767,10 +1687,6 @@ def test_root_curation_uses_cached_raw_analyzer_fast_path(
     """A root curation evaluates through the DB-free resolved raw-analyzer loader;
     a merged curation builds a temp analyzer instead; neither calls get_analyzer.
 
-    Asserts the committed-state routing: the fast path uses
-    ``load_or_rebuild_analyzer_from_resolved`` (cached canonical analyzer), the
-    merged path does not, and make_compute never reaches ``Sorting.get_analyzer``
-    (a DB read) on either path.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -1847,9 +1763,7 @@ def test_final_snr_peak_sign_uses_sorter_polarity(
 ):
     """make_fetch injects the sorter's resolved peak_sign into snr kwargs.
 
-    Same sorter-polarity SNR handling as CurationEvaluation: the planted MS5
-    sort carries ``detect_sign=-1`` -> ``'neg'``, confirming the helper is
-    wired into CurationEvaluation's DB-fetch stage.
+    The planted MS5 sort has ``detect_sign=-1``, so ``'neg'``.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2032,10 +1946,7 @@ def test_make_compute_rejects_incomplete_units_without_the_db(
 def planted_zero_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with ZERO units (an empty planted sorting).
 
-    Mirrors ``planted_two_unit_sort`` but the planted sorter stand-in
-    returns an empty ``NumpySorting``, so the Sorting row commits with
-    ``n_units=0`` and a root curation has zero units -- the input for the
-    zero-unit CurationEvaluation contract.
+    Like ``planted_two_unit_sort`` with an empty ``NumpySorting``.
     """
     from pathlib import Path
 
@@ -2176,9 +2087,7 @@ def test_zero_unit_curation_evaluation_writes_empty_tables(
         assert CurationEvaluation.get_suggested_merge_groups(sel) == []
         axes = CurationEvaluation().plot_units_qc(sel)
         assert set(axes) == {"empty"}
-        # The zero-unit artifact is still self-describing: the provenance header
-        # is written even though there are no metrics (no analyzer is built, so
-        # the source-analyzer manifest is None).
+        # Provenance is still written; no analyzer, so no manifest.
         from spyglass.common.common_nwbfile import AnalysisNwbfile
         from spyglass.spikesorting.v2._storage.provenance import (
             CURATION_EVALUATION_PROVENANCE,
@@ -2272,10 +2181,8 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
 ):
     """Suggested merges are not silently applied without explicit intent.
 
-    Even when the evaluation HAS a proposed merge,
-    ``accept_evaluation_outputs`` applies it only when the caller passes
-    ``merge_groups`` or
-    ``use_all_suggested_merges=True``; the bare call is labels-only.
+    A proposed merge is applied only with ``merge_groups`` or
+    ``use_all_suggested_merges=True``.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2302,8 +2209,7 @@ def test_evaluation_acceptance_requires_explicit_merge_choice(
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
-        # Substitute a deterministic proposed merge so the acceptance decision
-        # is exercised independently of the auto-merge detector.
+        # Deterministic proposed merge, independent of the auto-merge detector.
         suggestion = [[unit_ids[0], unit_ids[1]]]
         monkeypatch.setattr(
             CurationEvaluation,
@@ -2433,8 +2339,7 @@ def test_analyzer_curation_table_removed(dj_conn):
     """``metric_curation`` exposes no AnalyzerCuration /
     AnalyzerCurationSelection.
 
-    CurationEvaluation is v2's only auto-curation table; those raw-sort
-    auto-curation names must not import, so no caller can depend on them.
+    CurationEvaluation is v2's only auto-curation table.
     """
     import spyglass.spikesorting.v2.metric_curation as mc
 
@@ -2456,13 +2361,9 @@ def test_workflow_evaluate_accept_merge_reevaluate_use_evaluation_labels_final_c
 ):
     """Common curation workflow ends on final metrics for the final child.
 
-    Evaluate the root, accept an explicit merge with
-    ``accept_evaluation_outputs``, re-evaluate the committed merged child,
-    accept the final label verdict with
-    ``use_evaluation_labels``, then re-evaluate that final child. The label-only final
-    child has ``merges_applied=False`` but a merged unit namespace, so routing
-    must key on the actual curation unit set rather than blindly reusing the raw
-    analyzer whenever ``merges_applied`` is false.
+    Evaluate root, accept a merge, re-evaluate, accept labels, re-evaluate.
+    The final child has ``merges_applied=False`` but a merged unit set, so
+    routing keys on the unit set, not ``merges_applied``.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2553,10 +2454,9 @@ def test_label_actions_clear_stale_auto_and_preserve_manual_labels(
 ):
     """The two label-acceptance actions encode distinct user intent.
 
-    ``use_evaluation_labels`` writes the evaluation verdict as the full label state, so
-    a prior auto label the new evaluation does not propose is cleared.
-    ``overlay_evaluation_labels`` preserves the user's current/manual labels
-    and overlays only the evaluation's proposals.
+    ``use_evaluation_labels`` replaces the label state, clearing labels the
+    evaluation does not propose; ``overlay_evaluation_labels`` keeps current
+    labels and adds the proposals.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2586,8 +2486,7 @@ def test_label_actions_clear_stale_auto_and_preserve_manual_labels(
             }
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
-        # use_evaluation_labels writes the empty auto verdict, clearing the stale
-        # reject -- so the unit is not silently excluded downstream.
+        # use_evaluation_labels clears the reject.
         child = CurationEvaluation().use_evaluation_labels(sel)
         child_labels = {
             (int(r["unit_id"]), r["curation_label"])
@@ -2612,8 +2511,7 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
 ):
     """When accepting a merge, an absorbed contributor label is dropped.
 
-    It does not silently attach to the merged unit -- re-evaluate the merged
-    child to label it. The drop is warned, not silent.
+    The drop is warned; re-evaluate the merged child to label it.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2640,10 +2538,7 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
             }
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
-        # A label on unit 0, which the accepted merge absorbs -> dropped; the
-        # merged unit is unlabeled (label it by re-evaluating the merged child).
-        # unit 0 is absorbed by the merge -> its label warn-drops (not a
-        # truly-stray key, so no permissive flag needed).
+        # Unit 0's label is dropped with a warning (no permissive flag needed).
         child = CurationEvaluation().accept_evaluation_outputs(
             sel,
             merge_groups=[[unit_ids[0], unit_ids[1]]],
@@ -2662,9 +2557,8 @@ def test_acceptance_merge_drops_absorbed_contributor_label(
 def test_acceptance_rejects_caller_singleton_merge_group(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """A caller-supplied singleton merge group is rejected (the >=2-member typo
-    guard), not silently degraded into a labels-only child.
-    """
+    """A singleton merge group is rejected, not turned into a labels-only
+    child."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -2707,11 +2601,7 @@ def test_preview_merges_requires_a_merge(
 ):
     """A preview with no merge is rejected, not silently committed.
 
-    ``preview_merges`` is the explicit opt-in for drafting an
-    UNAPPLIED merge for review. Called with no merge it would otherwise produce
-    a normal committed labels-only child (apply_merge=False, no proposed
-    merge), contradicting the "preview/draft" contract -- so it raises and
-    points the caller at use_evaluation_labels/overlay_evaluation_labels.
+    The error points at use_evaluation_labels/overlay_evaluation_labels.
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -2733,8 +2623,7 @@ def test_preview_merges_requires_a_merge(
             }
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
-        # No merge_groups and use_all_suggested_merges defaults False -> raises
-        # before creating any child (no committed labels-only fallback).
+        # Raises before creating any child.
         with pytest.raises(ValueError, match="needs at least one merge"):
             CurationEvaluation().preview_merges(sel)
     finally:
@@ -2924,9 +2813,7 @@ def test_accept_merge_actions_require_a_real_merge(
                 "auto_curation_rules_name": "none",
             }
         )
-        # Populated so the actions reach the "needs a real merge" guard rather
-        # than the populated-evaluation guard (get_suggested_merge_groups is monkeypatched
-        # empty above to drive the no-merge path).
+        # Populated, so the "needs a real merge" guard is what raises.
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
         with pytest.raises(ValueError, match="accept_merges"):
@@ -2998,11 +2885,9 @@ def test_label_action_names_replace_and_overlay(
 def test_acceptance_requires_populated_evaluation(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """Every acceptance entry point rejects a SELECTED-but-not-populated
-    evaluation: minting a ``curation_source='curation_evaluation'`` child from a
-    bare selection (no computed proposals) would be a provenance lie. The
-    ``use_all_suggested_merges`` path raises the SAME friendly error, not an
-    opaque NWB fetch -- it is guarded before resolving persisted suggestions.
+    """Every acceptance entry point rejects a selected but unpopulated
+    evaluation with the same error, including ``use_all_suggested_merges``
+    (checked before reading the NWB).
     """
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
@@ -3030,8 +2915,6 @@ def test_acceptance_requires_populated_evaluation(
         assert not (CurationEvaluation & sel)  # selected, NOT populated
         ev = CurationEvaluation()
         merge = [[unit_ids[0], unit_ids[1]]]
-        # Every public acceptance entry point -- including the all-suggested
-        # path that reads the evaluation NWB -- raises the friendly guard.
         for call in (
             lambda: ev.accept_evaluation_outputs(sel, labels={}),
             lambda: ev.use_evaluation_labels(sel),
@@ -3220,16 +3103,13 @@ def test_evaluation_populate_repairs_partially_built_canonical_analyzer(
         for name in BASE_ANALYZER_EXTENSIONS
     }
 
-    # The backup is a sibling, preserving relative recording paths when it is
-    # restored. Keep the shared planted sort's original cache even if a failed
-    # assertion interrupts the evaluation retry.
+    # Sibling backup keeps relative recording paths; restores the shared
+    # cache if an assertion fails.
     with StagedAnalyzer(folder) as backup:
         cache_modified = False
         with analyzer_cache_lock(root["sorting_id"]):
             copy_analyzer_folder(original, backup.folder)
-        # ``original`` maps files in ``folder``. Unmap them before the
-        # extension folders are removed below: on NFS a still-mapped file
-        # leaves a .nfs placeholder and the removal fails.
+        # Unmap first: on NFS a mapped file leaves a .nfs placeholder.
         del original
         gc.collect()
         try:

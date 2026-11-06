@@ -12,11 +12,8 @@ from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 def isolated_interval_owners(dj_conn):
     """Plant isolated relational metadata; no recording loads are needed.
 
-    The deliberately shared ownership rows model direct inserts or repairs.
-    They exercise both surviving owner tables after the target session's
-    ordinary master/part cascades. Foreign keys are disabled only while
-    planting fake upstream recording/session metadata and during teardown;
-    the cleanup under test runs with foreign-key enforcement enabled.
+    Shared ownership rows model direct inserts or repairs. FK checks are off
+    only while planting and in teardown; the cleanup runs with them on.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -43,8 +40,7 @@ def isolated_interval_owners(dj_conn):
     group_keys = [
         {"shared_artifact_group_name": value} for value in group_names
     ]
-    # Repeated names in a different session are intentional: cleanup must use
-    # the full IntervalList key, and must not infer ownership from names.
+    # Same names in another session: cleanup must match full keys, not names.
     interval_keys = [
         {"nwb_file_name": target, "interval_list_name": name}
         for name in (
@@ -164,8 +160,7 @@ def isolated_interval_owners(dj_conn):
             "expected_times": expected_times,
         }
     finally:
-        # Teardown does not call the helper being tested: a failing helper
-        # cannot leave its planted rows to contaminate later tests.
+        # Teardown does not use the helper under test.
         dj_conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             for table in (

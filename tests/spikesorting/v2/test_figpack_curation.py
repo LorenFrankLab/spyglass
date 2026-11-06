@@ -1,9 +1,5 @@
-"""Hermetic (no-DB, no-figpack) tests for the FigPack curation helpers.
-
-Covers the DB-free logic in ``_figpack_curation``: the default label palette,
-the content-addressed config hash, and the round trip between FigPack's
-``sorting_curation`` annotation state and v2's ``(labels, merge_groups)`` form.
-These need neither a DataJoint server nor the optional ``figpack`` packages.
+"""Tests for the ``_figpack_curation`` helpers (no DB, no figpack): label
+palette, config hash, and annotation <-> ``(labels, merge_groups)`` round trip.
 """
 
 from __future__ import annotations
@@ -50,7 +46,7 @@ def _hash(**overrides):
 
 
 def test_default_label_options_is_curation_order():
-    """Default palette is the three primary labels, not FigURL-era 'good'."""
+    """Default palette is the three primary labels, without 'good'."""
     assert default_label_options() == ["accept", "mua", "noise"]
 
 

@@ -1,10 +1,4 @@
-"""SessionGroup / ConcatenatedRecording schema-shape invariants.
-
-Behavioral / schema-shape only: ``SessionGroup.Member`` primary-key uniqueness
-within a master, the ``ConcatenatedRecording.total_duration_s`` column
-(named differently from ``Recording.duration_s``), and the absence of any
-motion-correction column on the concat tables.
-"""
+"""SessionGroup / ConcatenatedRecording schema-shape invariants."""
 
 from __future__ import annotations
 
@@ -15,10 +9,7 @@ import pytest
 def test_session_group_member_index_unique_within_master():
     """Two members sharing ``(group, member_index)`` collide.
 
-    ``member_index`` is part of the ``Member`` primary key, so a second row
-    with the same group + index raises a duplicate-key error regardless of the
-    other fields. Built via the FK-checks-off bypass (the upstream Session /
-    SortGroupV2 / IntervalList FKs are irrelevant to the PK uniqueness check).
+    Inserted with FK checks off, since upstream FKs are irrelevant here.
     """
     import datajoint as dj
 
@@ -72,12 +63,8 @@ def test_session_group_member_index_unique_within_master():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_concatenated_recording_has_total_duration_s_column():
-    """``ConcatenatedRecording`` declares ``total_duration_s``.
-
-    Semantic check via the heading (not a source-string match). Pairs with the
-    CHANGELOG entry naming the column-name divergence
-    (``total_duration_s`` vs ``Recording.duration_s``).
-    """
+    """``ConcatenatedRecording`` declares ``total_duration_s`` (unlike
+    ``Recording.duration_s``)."""
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     assert "total_duration_s" in ConcatenatedRecording.heading.attributes
@@ -85,9 +72,8 @@ def test_concatenated_recording_has_total_duration_s_column():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_concat_selection_stores_member_set_hash():
-    """``ConcatenatedRecordingSelection`` records the folded member-set hash as a
-    secondary attribute (the hash is also folded into ``concat_recording_id``).
-    """
+    """``ConcatenatedRecordingSelection`` stores the member-set hash as a
+    secondary attribute."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
     )
@@ -102,8 +88,7 @@ def test_concat_selection_member_snapshot_part_shape():
     """The frozen ``MemberSnapshot`` part captures each member's logical identity
     plus its ``Recording`` content hash, keyed by ``member_index``.
 
-    Stored as plain columns (not FKs) so the snapshot is frozen -- a later edit
-    to ``SessionGroup.Member`` / ``RecordingSelection`` cannot cascade into it.
+    Plain columns, not FKs, so later edits upstream cannot cascade into it.
     """
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,

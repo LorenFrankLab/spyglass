@@ -96,12 +96,9 @@ def test_public_epoch_matching_journey(
 ):
     """Carry known cells, changing activity and missing cells through the API.
 
-    A small waveform-bearing raw NWB contains one stable neuron, an early-only
-    neuron, a newly detected neuron, and explicit noise/MUA. Stable unit IDs
-    differ between sorts. Only sorter and pair inference are substituted;
-    preprocessing, evaluations, reviews, waveform extraction and persistence
-    remain real. This tests workflow correctness; native recovery benchmarks
-    establish sorter and matcher accuracy.
+    A small raw NWB contains one stable neuron, an early-only neuron, a newly
+    detected neuron, and explicit noise/MUA; unit IDs differ between sorts.
+    Only the sorter and pair inference are substituted.
     """
     import spikeinterface as si
 

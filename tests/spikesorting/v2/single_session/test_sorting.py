@@ -1,4 +1,4 @@
-"""Sorting.make, get_sorting, analyzer, and sorter tests for the v2 single-session pipeline."""
+"""Sorting.make, get_sorting, analyzer, and sorter tests."""
 
 from __future__ import annotations
 
@@ -11,15 +11,12 @@ from tests.spikesorting.v2._ingest_helpers import _clean_session_v2
 from tests.spikesorting.v2._sorter_stub import plant_sorter
 from tests.spikesorting.v2.single_session._helpers import _build_synthetic_rec
 
-# These sorts use the 'default' preprocessing recipe, which is not in the
-# region map -> the wide cortex display recipe; the analyzer cache folder is
-# keyed by that name.
+# The 'default' preprocessing recipe maps to the cortex display recipe,
+# which keys the analyzer cache folder.
 _DISPLAY = CORTEX_DISPLAY_WAVEFORMS
 
-# A cap-500 display recipe for the seeded-subsample tests: the synthetic
-# fixtures have >500 spikes/unit, so cap=500 forces ``random_spikes`` to
-# actually subsample (the schema-default 20000 would select every spike and
-# the seed would be a no-op, making those reproducibility tests vacuous).
+# Cap 500 forces ``random_spikes`` to subsample (>500 spikes/unit), so the
+# seed is observable.
 _CAP500_DISPLAY = {
     "ms_before": 1.0,
     "ms_after": 2.0,
@@ -30,9 +27,7 @@ _CAP500_DISPLAY = {
     "schema_version": 1,
 }
 
-# The shipped cortex display recipe (1.0/2.0 ms, 20000 spikes) -- build_analyzer
-# requires a resolved recipe (it never picks a default), so the fake-analyzer
-# build tests that capture compute kwargs pass this explicitly.
+# The shipped cortex display recipe; build_analyzer requires an explicit one.
 _DISPLAY_PARAMS = {**_CAP500_DISPLAY, "max_spikes_per_unit": 20000}
 
 
@@ -58,8 +53,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     AnalyzerWaveformParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
 
-    # Ensure a no-op artifact detection is in place so the sort uses
-    # the full recording.
+    # No-op artifact detection so the sort uses the full recording.
     art_pk = RecordingArtifactSelection.insert_selection(
         {
             "recording_id": populated_recording["recording_id"],
@@ -78,7 +72,6 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
         }
     )
 
-    # Clear any prior populate.
     (Sorting & sort_pk).super_delete(warn=False)
     Sorting.populate(sort_pk, reserve_jobs=False)
 
@@ -88,8 +81,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
-    # The analyzer folder is not a column; resolve it from
-    # (sorting_id, display recipe name).
+    # Folder keyed by (sorting_id, display recipe), not a column.
     analyzer_folder = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert isinstance(analyzer_folder, Path)
     assert analyzer_folder.exists()
@@ -97,8 +89,6 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     n_unit_rows = len(Sorting.Unit & sort_pk)
     assert n_unit_rows == row["n_units"]
 
-    # Every Sorting.Unit row's peak electrode_id must belong to the
-    # sort group of the upstream Recording.
     from spyglass.spikesorting.v2.recording import (
         RecordingSelection,
         SortGroupV2,
@@ -117,7 +107,7 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     )
     assert set(unit_electrodes).issubset(sort_group_electrodes)
 
-    # Peak amplitudes are positive (we abs() them in make).
+    # make() takes abs() of peak amplitudes.
     amplitudes = (Sorting.Unit & sort_pk).fetch("peak_amplitude_uv")
     assert (amplitudes > 0).all()
 
@@ -126,21 +116,10 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
 def test_sorting_get_sorting_round_trips(populated_sorting):
     """``Sorting.get_sorting`` returns a v1-style frame-relative sorting.
 
-    ``get_sorting`` returns a ``NumpySorting`` (segment frames,
-    ``t_start=0``), matching v1's ``NumpySorting.from_unit_dict`` shape:
-
     - unit_ids match the row's ``n_units``;
-    - ``return_times=False`` yields the original recording FRAME indices
-      in ``[0, n_samples)`` -- recovered from the stored ABSOLUTE spike
-      times via ``np.searchsorted``, so ``timestamps[frame]`` recovers the
-      stored time (the ``as_dataframe=True`` ``spike_times`` column);
-    - ``return_times=True`` yields frame-relative seconds (``frame / fs``),
-      NOT absolute wall-clock. Absolute times live in the units NWB and
-      the DataFrame path; the SI object is frame-relative like v1's.
-
-    Depends on ``populated_sorting`` (not ``populated_recording``)
-    so the Sorting row this test inspects is guaranteed to exist
-    regardless of test ordering or selection (``-k``, ``--lf``).
+    - ``return_times=False`` yields recording frame indices whose
+      ``timestamps[frame]`` equals the stored absolute spike times;
+    - ``return_times=True`` yields frame-relative seconds, not wall-clock.
     """
     import numpy as np
 
@@ -156,11 +135,8 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
     si_sorting = Sorting().get_sorting(populated_sorting)
     assert len(si_sorting.unit_ids) == row["n_units"]
 
-    # Recording's wall-clock window. Look up the recording via the
-    # source-part: ``recording_id`` is a non-PK FK on
-    # ``SortingSelection.RecordingSource`` (the PK is sorting_id),
-    # so fetch the recording_id explicitly rather than via
-    # ``fetch1("KEY")`` which only returns PK fields.
+    # ``recording_id`` is a non-PK FK on ``SortingSelection.RecordingSource``,
+    # so ``fetch1("KEY")`` would omit it.
     recording_id = (
         SortingSelection.RecordingSource & populated_sorting
     ).fetch1("recording_id")
@@ -169,8 +145,7 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
     n_samples = len(timestamps)
     fs = rec.get_sampling_frequency()
 
-    # The as_dataframe path carries the stored ABSOLUTE spike times
-    # (read straight from the units NWB), indexed by unit_id.
+    # as_dataframe carries the stored absolute spike times.
     df = Sorting().get_sorting(populated_sorting, as_dataframe=True)
 
     for uid in si_sorting.unit_ids:
@@ -180,20 +155,13 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
         if len(frames) == 0:
             continue
         frames = frames.astype(int)
-        # Frames are valid recording sample indices.
         assert frames.min() >= 0
         assert frames.max() < n_samples
-        # searchsorted round-trip: looking the frames up in the
-        # recording timestamps recovers the stored ABSOLUTE spike times.
         abs_times = np.sort(np.asarray(df.loc[int(uid), "spike_times"]))
         recovered = np.sort(timestamps[frames])
-        # Absolute (not relative) tolerance: spike times are seconds that
-        # can be large, so the default ``rtol=1e-5`` would silently allow
-        # ~ms slack on a late spike. Pin to one sample period, absolute.
+        # Absolute tolerance: rtol on large times would allow ~ms slack.
         assert np.allclose(recovered, abs_times, rtol=0.0, atol=1.0 / fs)
-        # return_times=True is frame-relative (t_start=0), v1 shape --
-        # NOT absolute wall-clock. Pins that get_sorting returns a
-        # NumpySorting, not an absolute-t_start NwbSortingExtractor.
+        # Frame-relative (t_start=0), as in v1.
         rel = si_sorting.get_unit_spike_train(unit_id=uid, return_times=True)
         assert np.allclose(
             np.sort(rel), np.sort(frames / fs), rtol=0.0, atol=1.0 / fs
@@ -204,25 +172,12 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     """``make_fetch`` derives obs_intervals from the ArtifactDetectionSource part.
 
-    Regression guard for the artifact-source schema: the artifact pass
-    lives on the zero-or-one ``ArtifactDetectionSource`` part, not a nullable
-    ``artifact_detection_id`` FK on the ``SortingSelection`` master. ``make_fetch`` /
-    ``make_compute`` / ``rebuild_analyzer_folder`` gate artifact masking
-    on ``sel_row["artifact_detection_id"]``; after the column was dropped, that key
-    is absent on the raw ``fetch1()`` row, so ``make_fetch`` must resolve
-    it via ``SortingSelection.resolve_artifact_detection(key)`` and stash it. If it
-    does not, every artifact-backed sort silently skips masking and
-    writes ``obs_intervals=None`` (full-session envelope) -- a silent
-    scientific-correctness regression this test exists to catch.
-
-    ``populated_sorting`` is artifact-backed (it inserts an
-    ``ArtifactDetectionSelection`` + ``ArtifactDetection`` and threads the
-    ``artifact_detection_id`` into the sorting selection), so ``resolve_artifact_detection``
-    must be non-None and ``obs_intervals`` must be populated.
+    ``make_fetch`` must attach the resolved ``artifact_detection_id`` to
+    ``sel_row``; otherwise artifact-backed sorts skip masking and write
+    ``obs_intervals=None``.
     """
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    # The sort is artifact-backed: exactly one ArtifactDetectionSource part row.
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         populated_sorting
     )
@@ -232,11 +187,7 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     )
 
     fetched = Sorting().make_fetch(populated_sorting)
-    # make_fetch must have re-attached the resolved artifact_detection_id onto
-    # sel_row (the dropped master column).
     assert fetched.sel_row.get("artifact_detection_id") == artifact_detection_id
-    # ...and therefore derived the artifact-removed observation window,
-    # not the None full-session fallback.
     assert fetched.obs_intervals is not None, (
         "make_fetch returned obs_intervals=None for an artifact-backed "
         "sort; the ArtifactDetectionSource artifact_detection_id was not resolved, so "
@@ -250,12 +201,8 @@ def test_masked_sort_snr_matches_unmasked_within_tolerance(
 ):
     """Masking ~10% of the recording leaves per-unit SNR within 5%.
 
-    Sorts the smoke recording once unmasked (``populated_sorting``) and once
-    with a manual artifact exclusion over 0.4 s of its 4 s, then compares the
-    ``CurationEvaluation`` SNR of matched units. SNR divides by the
-    ``noise_levels`` extension; estimated over the zero-filled mask,
-    SpikeInterface's MAD drops (inflating SNR by roughly a quarter on this
-    fixture), while the statistics-span estimate matches the unmasked noise.
+    MAD over the zero-filled mask would inflate SNR by ~25% here; the
+    statistics-span noise estimate matches the unmasked noise.
     """
     import numpy as np
 
@@ -371,14 +318,7 @@ def test_masked_sort_snr_matches_unmasked_within_tolerance(
 
 @pytest.mark.slow
 def test_sorting_get_analyzer_loads_folder(populated_sorting):
-    """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder.
-
-    Depends on ``populated_sorting`` so the analyzer folder is
-    guaranteed to exist, eliminating the silent
-    ``IndexError`` on an empty ``sortings[0]`` lookup that the
-    prior ``populated_recording`` dependency exposed under
-    isolated / reordered runs.
-    """
+    """``Sorting.get_analyzer`` loads the SortingAnalyzer from the folder."""
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -393,12 +333,8 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     """Clusterless-thresholder finds peaks and round-trips through the
     pipeline.
 
-    The default ``clusterless_thresholder`` Lookup row uses a 100 uV
-    amplitude threshold that finds zero peaks on the 4-second smoke
-    fixture's amplitudes. This test inserts a custom ``SorterParameters``
-    row with a tuned (lower) threshold and exercises
-    Recording -> Artifact -> Sorting through that row, bypassing the
-    preset bundle but reusing every Selection / make() body.
+    The default 100 uV row finds no peaks on the smoke fixture, so a lower
+    threshold row is inserted.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.artifact import (
@@ -434,11 +370,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # Insert the smoke-fixture sort row from the shared constants
-    # so any future param tweak lands in one place
-    # (tests/spikesorting/v2/_smoke_constants.py) and the v1
-    # baseline-capture + v2 pipeline + parity test all stay in
-    # lockstep.
+    # Shared with baseline capture and the parity test.
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
         SMOKE_CLUSTERLESS_PARAMS,
@@ -487,17 +419,12 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     Sorting.populate(sort_pk, reserve_jobs=False)
 
     row = (Sorting & sort_pk).fetch1()
-    # Clusterless puts every peak into a single unit_id=0.
     assert row["n_units"] == 1
     assert len(Sorting.Unit & sort_pk) == 1
     unit_row = (Sorting.Unit & sort_pk).fetch1()
     assert unit_row["unit_id"] == 0
 
-    # Signal-quality floor: the smoke fixture is 4 s with ~6 planted
-    # units firing at ~5-10 Hz, so the planted spike count is on the
-    # order of ~150-200 across the sort group. ``n_spikes > 0`` would
-    # accept a broken detector that returned a single noise spike, so
-    # require a count consistent with finding most planted peaks.
+    # ~150-200 planted spikes; ``> 0`` would accept a single noise spike.
     assert unit_row["n_spikes"] >= 20, (
         f"Clusterless found only {unit_row['n_spikes']} peaks on the "
         "smoke fixture; expected at least 20 given the planted firing "
@@ -536,18 +463,8 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
 def test_sorting_make_rollback_cleans_units_nwb(
     polymer_smoke_session, monkeypatch
 ):
-    """If ``Sorting.make`` fails between ``AnalysisNwbfile.add()`` and
-    a successful ``Sorting.insert1``, the staged units NWB on disk is
-    cleaned up.
-
-    Patches ``Sorting._populate_unit_part`` to raise so the
-    transaction rolls back AFTER the file is written and registered.
-    The failed populate must unlink the staged NWB so the file system
-    doesn't accumulate orphans on each retry.
-
-    Self-sufficient setup so it doesn't depend on the
-    populated_recording module fixture's row still being live
-    (other tests in the module may have wiped it).
+    """A ``Sorting.make`` failure after ``AnalysisNwbfile.add()`` unlinks
+    the staged units NWB.
     """
     import pathlib
 
@@ -567,7 +484,6 @@ def test_sorting_make_rollback_cleans_units_nwb(
         SortingSelection,
     )
 
-    # Self-sufficient Recording chain setup.
     _clean_session_v2(polymer_smoke_session)
     initialize_v2_defaults()
     LabTeam.insert1(
@@ -609,7 +525,6 @@ def test_sorting_make_rollback_cleans_units_nwb(
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
-    # Ensure no leftover Sorting row.
     (Sorting & sort_pk).super_delete(warn=False)
 
     # Upstream cascades can leave a cache from an earlier committed result.
@@ -626,10 +541,6 @@ def test_sorting_make_rollback_cleans_units_nwb(
         else None
     )
 
-    # Snapshot the analysis-file directory contents before the
-    # broken populate runs so we can detect any orphan file that
-    # appears AFTER the rollback. The failed populate is responsible for
-    # unlinking the staged file.
     from spyglass.settings import analysis_dir as ad
 
     analysis_dir = pathlib.Path(ad)
@@ -639,10 +550,8 @@ def test_sorting_make_rollback_cleans_units_nwb(
         else set()
     )
 
-    # Patch the Unit-part populate to raise AFTER the file is
-    # written and AnalysisNwbfile.add has run inside the transaction.
-    # (_populate_unit_part is a staticmethod taking only unit_rows; replacing it
-    # with a plain function binds self on instance access.)
+    # Raise after the file is written. A plain function binds ``self``,
+    # unlike the original staticmethod.
     unit_part_calls = []
 
     def _broken_unit_part(self, unit_rows):
@@ -651,9 +560,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
 
     monkeypatch.setattr(Sorting, "_populate_unit_part", _broken_unit_part)
 
-    # populate swallows the exception into DataJoint's error
-    # machinery via suppress_errors; assert by checking the
-    # after-state instead.
+    # suppress_errors swallows the exception; check the after-state.
     Sorting.populate(sort_pk, reserve_jobs=False, suppress_errors=True)
     assert len(unit_part_calls) == 1, "injected insert failure was not reached"
     assert unit_part_calls[0], "the rollback fixture must produce unit rows"
@@ -662,8 +569,6 @@ def test_sorting_make_rollback_cleans_units_nwb(
         "the transaction was supposed to roll back."
     )
 
-    # No new orphan units NWB should have appeared in the analysis
-    # directory after the rolled-back populate.
     after = (
         {p.name for p in analysis_dir.rglob("*.nwb")}
         if analysis_dir.exists()
@@ -676,8 +581,7 @@ def test_sorting_make_rollback_cleans_units_nwb(
         "transaction rolls back."
     )
 
-    # Failure precedes publication: only the private attempt existed, and both
-    # it and the staged NWB are discarded. A peer's canonical cache is untouched.
+    # A peer's canonical cache survives the failed attempt.
     cache_after = (
         analyzer_folder_storage_fingerprint(analyzer_folder)
         if analyzer_folder.exists()
@@ -765,9 +669,7 @@ def test_changed_second_fetch_leaves_no_staged_sort_outputs(
         }
     )
     (Sorting & sort_pk).super_delete(warn=False)
-    # The sorting_id is deterministic, so an earlier test of the same sort may
-    # have published its analyzer; ``super_delete`` skips ``Sorting.delete``'s
-    # cache cleanup, so remove the folders here to start from none.
+    # Deterministic sorting_id; ``super_delete`` skips cache cleanup.
     remove_analyzer_cache(sort_pk["sorting_id"], missing_ok=True)
     canonical = analyzer_path(sort_pk["sorting_id"], _DISPLAY)
     assert not canonical.exists()
@@ -804,11 +706,8 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
     """``run_si_sorter`` leaves SI's global job kwargs byte-identical to
     their pre-sort state.
 
-    ``set_global_job_kwargs`` UPDATES the global rather than replacing it,
-    so a job kwarg the sort installs that is absent from the default
-    global set (``chunk_size``/``total_memory``/``chunk_memory``) would
-    otherwise leak into every later populate. The actual sort is stubbed
-    so only the save/restore is exercised.
+    ``set_global_job_kwargs`` updates rather than replaces, so an added key
+    such as ``chunk_size`` would leak into later populates.
     """
     import numpy as np
     import spikeinterface as si
@@ -820,10 +719,7 @@ def test_run_si_sorter_restores_global_job_kwargs(dj_conn, monkeypatch):
     before = dict(si.get_global_job_kwargs())
     assert "chunk_size" not in before  # the key we expect could leak
 
-    # run_si_sorter materializes the sorter output into an in-memory
-    # NumpySorting (severing the temp-dir file backing before the scratch dir is
-    # cleaned), so the stub must return a real SI sorting -- a bare sentinel has
-    # no ``to_spike_vector`` for ``NumpySorting.from_sorting`` to materialize.
+    # A real sorting: ``NumpySorting.from_sorting`` needs ``to_spike_vector``.
     stub_sorting = si.generate_sorting(
         num_units=2, sampling_frequency=30000.0, durations=[0.1]
     )
@@ -854,11 +750,7 @@ def test_clusterless_detect_peaks_strips_random_seed(dj_conn, monkeypatch):
     """``run_clusterless_thresholder`` strips ``random_seed`` from the
     job kwargs before calling ``detect_peaks``.
 
-    ``random_seed`` is a Spyglass-side knob (already threaded into
-    ``random_slices_kwargs``); it is not a valid SI job kwarg, so SI's
-    ``fix_job_kwargs`` raises ``AssertionError`` if it reaches
-    ``detect_peaks``. ``detect_peaks`` is stubbed to capture the job
-    kwargs it receives.
+    SI's ``fix_job_kwargs`` rejects the Spyglass-only ``random_seed``.
     """
     import numpy as np
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
@@ -901,12 +793,8 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
     """``run_clusterless_thresholder`` strips ``threshold_unit`` before
     calling ``detect_peaks``.
 
-    ``threshold_unit`` is a Spyglass-side knob (it selects how
-    ``noise_levels`` is derived); it is NOT a ``detect_peaks`` method
-    kwarg, so leaving it in the params dict would reach SI and raise an
-    unexpected-keyword error at sort time. ``detect_peaks`` is stubbed to
-    capture the method kwargs it receives; assert ``threshold_unit`` is
-    absent while the real detector knobs survive.
+    ``threshold_unit`` is Spyglass-only; SI would raise on the unknown
+    keyword. Real detector knobs survive.
     """
     import numpy as np
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
@@ -941,17 +829,14 @@ def test_clusterless_detect_peaks_strips_threshold_unit(dj_conn, monkeypatch):
     assert (
         "threshold_unit" not in mk
     ), f"threshold_unit leaked into detect_peaks method kwargs: {mk}"
-    # The real detector knobs survive the strip.
     assert mk.get("detect_threshold") == 5.0
 
 
 def _stub_recording_with_2d_probe():
     """Two-channel recording with a planar probe for the tests below.
 
-    These ``build_analyzer`` tests stub the analyzer factory, so the recording
-    only has to pass the checks ``build_analyzer`` runs before building:
-    distinct 2D contact positions (``assert_unique_contact_positions``) and an
-    already-planar probe (``ndim == 2``), so the 2D projection step is skipped.
+    Passes ``build_analyzer``'s pre-build checks: distinct, already-2D
+    contact positions.
     """
     import numpy as np
     import spikeinterface as si
@@ -969,11 +854,7 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
     """``build_analyzer`` strips ``random_seed`` before
     ``SortingAnalyzer.compute``.
 
-    ``random_seed`` is a Spyglass-side knob (consumed by the sorter and
-    the whitening pin); SI's ``compute`` rejects it with
-    ``AssertionError: please remove {'random_seed'}``. The analyzer
-    factory + ``compute`` are stubbed to capture the kwargs without a
-    real sort.
+    SI's ``compute`` rejects the Spyglass-only ``random_seed``.
     """
     import spikeinterface as si
 
@@ -1018,18 +899,8 @@ def test_build_analyzer_strips_random_seed(dj_conn, monkeypatch, tmp_path):
 def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     """``build_analyzer`` requests the right extensions + analyzer kwargs.
 
-    ``test_build_analyzer_strips_random_seed`` captures only the
-    ``compute`` job-kwargs; the analyzer factory kwargs and the extension
-    set it computes are unasserted. A regression dropping ``sparse=True``
-    (dense templates -> wrong peak-channel attribution) or
-    ``return_in_uV=True`` (peak amplitudes in raw counts, not µV) would
-    pass that test. This pins both the ``create_sorting_analyzer`` kwargs
-    and the required ``analyzer.compute`` extensions + per-extension
-    params (the persisted ``peak_amplitude_uv`` / peak channel depend on
-    them). The extension check is a subset, not exact equality, so adding a
-    future extension is not a regression; the downstream correctness of the
-    values they feed is covered by the real-analyzer outcome tests
-    (``test_unit_conventions``, ``test_analyzer_rebuild_is_seeded_reproducible``).
+    ``sparse=True`` and ``return_in_uV=True`` set the persisted peak
+    channel and amplitude. Extensions are checked as a required subset.
     """
     import spikeinterface as si
 
@@ -1066,8 +937,6 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         waveform_params=_DISPLAY_PARAMS,
     )
 
-    # ``create_sorting_analyzer`` kwargs: sparse + µV-return are
-    # correctness-critical for the persisted peak amplitude / channel.
     ck = captured["create_kwargs"]
     assert ck.get("sparse") is True, f"expected sparse=True, got {ck}"
     assert (
@@ -1075,10 +944,7 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
     ), f"expected return_in_uV=True, got {ck}"
     assert ck.get("format") == "binary_folder"
 
-    # ``compute`` extension set (positional first arg). Assert the REQUIRED
-    # extensions are present rather than pinning the exact set: a removal
-    # still fails (it would break the persisted peak channel / amplitude),
-    # but adding a future extension (e.g. metrics) is not a regression.
+    # Required subset of the ``compute`` extensions (positional first arg).
     ca = captured["compute_args"]
     assert ca, "analyzer.compute was called with no positional extension list"
     required_extensions = {
@@ -1092,32 +958,22 @@ def test_build_analyzer_compute_args(dj_conn, monkeypatch, tmp_path):
         f"got {ca[0]}"
     )
 
-    # Per-extension params: the seeded random-spikes subsample (honoring
-    # the per-row random_seed) and the waveform window. Assert the specific
-    # scientific values, not exact-dict equality, so an added SI param does
-    # not break the guard.
+    # Specific values, not dict equality, so added SI params pass.
     ext_params = captured["compute_kwargs"]["extension_params"]
     assert (
         ext_params["random_spikes"]["seed"] == 3
     ), "random_spikes seed must honor the job_kwargs random_seed override"
-    # The explicit display params fixture is the wide cortex window with the
-    # lab's 20000-spike subsample.
     assert ext_params["random_spikes"]["max_spikes_per_unit"] == 20000
     assert ext_params["waveforms"]["ms_before"] == 1.0
     assert ext_params["waveforms"]["ms_after"] == 2.0
-    # The Spyglass-only random_seed knob is still stripped from the
-    # forwarded job kwargs (SI.compute would reject it).
     assert "random_seed" not in captured["compute_kwargs"]
-    # Sparsity: the fixture's empty ``sparsity`` -> SI's radius / 100 um
-    # default, passed EXPLICITLY (every effective value comes from the recipe;
-    # polarity comes from the sorter, neg when unset).
+    # Empty ``sparsity`` -> explicit radius / 100 um; polarity from the sorter.
     assert ck.get("method") == "radius"
     assert ck.get("radius_um") == 100.0
     assert ck.get("peak_sign") == "neg"
     assert ck.get("num_spikes_for_sparsity") == 100
 
-    # A best_channels recipe forwards its own settings; a dense recipe builds
-    # dense (``sparse=False``) with no estimate_sparsity kwargs at all.
+    # best_channels forwards its settings; dense passes no sparsity kwargs.
     for sparsity, expected in (
         (
             {"method": "best_channels", "num_channels": 6},
@@ -1156,23 +1012,8 @@ def test_analyzer_rebuild_is_seeded_reproducible(
 ):
     """``build_analyzer`` seeds ``random_spikes`` so rebuilds are stable.
 
-    The ``random_spikes`` extension uniformly subsamples each unit's
-    spikes down to ``max_spikes_per_unit=500`` before computing
-    templates; the SI 0.104 default is ``seed=None`` (verified against
-    ``ComputeRandomSpikes._set_params``), so without a pinned seed two
-    builds of the same sort pick different subsets and the persisted
-    peak amplitude / peak channel drift. ``build_analyzer`` passes
-    ``seed=0``.
-
-    CRITICAL: the seed only changes anything for units with MORE than
-    500 spikes -- at or below 500 every spike is selected and the build
-    is deterministic regardless of the seed. The MEArec smoke fixture is
-    4 s (~tens of spikes/unit), so it would pass this test even without
-    the pinned seed (false confidence). This test therefore uses a
-    synthetic 40 s, 20 Hz recording whose every unit fires >500 spikes,
-    and asserts subsampling actually fired. It drives the real
-    ``build_analyzer`` (not SI directly) so removing the pinned
-    seed makes it fail.
+    SI 0.104's ``random_spikes`` defaults to ``seed=None``. Every unit here
+    fires >500 spikes so the 500-spike cap subsamples and the seed matters.
     """
     import numpy as np
 
@@ -1204,8 +1045,6 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     )
 
     def _build_and_read(folder):
-        # Pass the explicit cache folder and the cap-500 display recipe so the
-        # build subsamples (the seed is observable only when subsampling fires).
         build_analyzer(
             sorting,
             recording,
@@ -1230,15 +1069,10 @@ def test_analyzer_rebuild_is_seeded_reproducible(
     sel1, chans1, amps1 = _build_and_read(tmp_path / "build_a.analyzer")
     sel2, chans2, amps2 = _build_and_read(tmp_path / "build_b.analyzer")
 
-    # Subsampling actually fired: 500 selected per unit, strictly fewer
-    # than the total available -- otherwise the seed is a no-op and the
-    # test proves nothing.
+    # Subsampling fired, so the seed is observable.
     assert len(sel1) == 500 * len(totals)
     assert len(sel1) < sum(totals.values())
 
-    # The two seeded builds are bit-identical in the quantities the
-    # pipeline persists (peak channel + peak amplitude per unit) and in
-    # the underlying random_spikes selection itself.
     np.testing.assert_array_equal(
         sel1, sel2, err_msg="random_spikes selection differs across builds"
     )
@@ -1257,14 +1091,9 @@ def test_analyzer_random_seed_override_is_honored(
 ):
     """``build_analyzer`` honors the per-row ``random_seed`` override.
 
-    ``random_seed`` in ``job_kwargs`` is the established per-row knob that
-    the whitening / clusterless-noise pins read
-    (``(job_kwargs or {}).get("random_seed", 0)``). The analyzer's
-    ``random_spikes`` subsample must read the SAME knob, not a hardcoded
-    0 -- otherwise a user changing the seed gets a different sort but the
-    same analyzer subsample. Asserts: two builds with ``random_seed=7``
-    agree with each other, and differ from the default (seed 0) build --
-    proving the override flows through to the extension.
+    The ``random_spikes`` subsample reads ``job_kwargs["random_seed"]``,
+    the same knob whitening uses: seed 7 is reproducible and differs from
+    seed 0.
     """
     import numpy as np
 
@@ -1304,26 +1133,19 @@ def test_analyzer_random_seed_override_is_honored(
     seed7_b = _selection_for_seed(tmp_path / "seed7_b.analyzer", 7)
     seed0 = _selection_for_seed(tmp_path / "seed0.analyzer", 0)
 
-    # Subsampling fired (otherwise the seed is a no-op and the override
-    # can't be observed).
     assert len(seed7_a) < totals
-    # The override is deterministic for a fixed seed...
     np.testing.assert_array_equal(
         seed7_a,
         seed7_b,
         err_msg="random_seed=7 is not reproducible across builds",
     )
-    # ...and a different seed selects a different subset, proving the
-    # override is read (not the hardcoded 0).
     assert not np.array_equal(seed7_a, seed0), (
         "random_seed override did not change the analyzer subsample -- the "
         "extension seed is ignoring job_kwargs['random_seed']."
     )
 
 
-# Concatenated-recording sorting is now wired end-to-end; the concat-source
-# insert_selection + Sorting.populate + split round-trip is covered by the
-# chronic smoke in ``tests/spikesorting/v2/test_session_group_concat.py``.
+# Concat-source sorting is covered in ``test_session_group_concat.py``.
 
 
 @pytest.mark.slow
@@ -1332,27 +1154,13 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
 ):
     """No-artifact and artifact-backed selections are distinct identities.
 
-    Regression guard: an earlier ``insert_selection`` lookup omitted
-    ``artifact_detection_id`` from the master restriction whenever it was None,
-    which effectively meant "match any artifact_detection_id." That caused a
-    no-artifact ``insert_selection`` call to alias onto a pre-existing
-    artifact-backed row for the same
-    ``(recording_id, sorter, sorter_params_name)`` triple. Under the
-    ``ArtifactDetectionSource`` part-table design, "no artifact pass" is "no
-    ``ArtifactDetectionSource`` row" and must stay a distinct identity from an
-    artifact-backed selection -- not a wildcard that aliases onto it.
-
-    The ``populated_sorting`` fixture creates an artifact-backed row;
-    we then request a no-artifact row with the same recording/sorter/
-    params and assert the helper creates a NEW ``sorting_id`` rather
-    than returning the artifact-backed one.
+    A no-artifact request with the same recording, sorter and params gets
+    a new ``sorting_id``, not the artifact-backed one.
     """
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     artifact_backed_pk = populated_sorting
-    # Derive recording_id + sorter + params from the fixture row so this
-    # test does not silently drift if ``populated_sorting`` changes its
-    # sorter/params choice.
+    # Derived from the fixture row to track its sorter/params.
     backed_row = (SortingSelection & artifact_backed_pk).fetch1()
     rec_row = (SortingSelection.RecordingSource & artifact_backed_pk).fetch1()
     recording_id = rec_row["recording_id"]
@@ -1379,10 +1187,9 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
         "artifact-backed row; no-artifact must be a distinct identity, "
         "not match any artifact_detection_id."
     )
-    # The fresh row has no ArtifactDetectionSource part row.
     assert SortingSelection.resolve_artifact_detection(no_artifact_pk) is None
     assert len(SortingSelection.ArtifactDetectionSource & no_artifact_pk) == 0
-    # And it's idempotent: a second no-artifact call returns the same row.
+    # Idempotent.
     repeat_pk = SortingSelection.insert_selection(
         {
             "recording_id": recording_id,
@@ -1403,11 +1210,9 @@ def test_sorting_selection_artifact_detection_source_part_shape(
 ):
     """Artifact state lives on the ArtifactDetectionSource part, not a master FK.
 
-    A no-artifact-detection selection has zero ArtifactDetectionSource rows; an
-    artifact-backed selection has exactly one whose artifact_detection_id
-    ``resolve_artifact_detection`` returns. The ArtifactDetectionSource part does NOT leak
-    into ``resolve_source`` -- an artifact-backed sort still resolves to
-    exactly one recording source.
+    No-artifact selections have zero ``ArtifactDetectionSource`` rows,
+    artifact-backed ones exactly one, and ``resolve_source`` still returns
+    one recording source.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -1439,12 +1244,10 @@ def test_sorting_selection_artifact_detection_source_part_shape(
         "sorter_params_name": "franklab_30khz_ms5_2026_06",
     }
 
-    # No-artifact-detection selection: zero ArtifactDetectionSource rows; resolve_artifact_detection None.
     no_art_pk = SortingSelection.insert_selection(dict(sorter_kwargs))
     assert len(SortingSelection.ArtifactDetectionSource & no_art_pk) == 0
     assert SortingSelection.resolve_artifact_detection(no_art_pk) is None
 
-    # Artifact-backed selection: exactly one ArtifactDetectionSource row.
     art_sort_pk = SortingSelection.insert_selection(
         {
             **sorter_kwargs,
@@ -1457,7 +1260,6 @@ def test_sorting_selection_artifact_detection_source_part_shape(
         == art_pk["artifact_detection_id"]
     )
 
-    # ArtifactDetectionSource did NOT leak into the recording-source resolution.
     resolved = SortingSelection.resolve_source(art_sort_pk)
     assert resolved.kind == "recording"
     assert resolved.key == {"recording_id": populated_recording["recording_id"]}
@@ -1471,13 +1273,8 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
     """``write_sorting_units_nwb`` initializes an empty Units NWB
     when the sorter produces zero unit ids.
 
-    The guard at ``sorting.py:1690-1698`` is the sorting-layer analog
-    of the curation-layer guard tested by
+    Sorting-layer analog of
     ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
-    Without this test, a regression in the zero-unit handling at
-    the Sorting layer (e.g., a refactor that adds ``add_unit_column``
-    before the guard, the same failure the CurationV2 test guards)
-    would crash on real datasets where the sorter finds no units.
     """
     import pynwb
     import spikeinterface as si
@@ -1515,13 +1312,10 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
         ),
     )
     try:
-        # Object id is defined (the guard initialized an empty
-        # Units table rather than leaving ``nwbf.units = None``).
+        # An empty Units table, not ``nwbf.units = None``.
         assert isinstance(units_object_id, str)
         assert len(units_object_id) > 0
 
-        # The staged NWB on disk is readable and has an empty Units
-        # table.
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
         with pynwb.NWBHDF5IO(
             path=abs_path, mode="r", load_namespaces=True
@@ -1532,9 +1326,7 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
                 len(nwbf.units.id[:]) == 0
             ), f"Expected empty Units table; got {len(nwbf.units.id[:])} rows."
     finally:
-        # Tidy up the staged file. write_sorting_units_nwb does not register
-        # the file (the caller does so inside a transaction); we
-        # unlink the bare file since no DJ row was registered.
+        # Unregistered staged file (the caller registers it).
         import pathlib
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -1550,12 +1342,8 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
     """Pre-curation NWB carries per-unit ``obs_intervals`` and a
     ``curation_label="uncurated"`` scalar placeholder.
 
-    v1's pre-curation NWB (``v1/sorting.py:583-598``) wrote both;
-    an earlier v2 implementation wrote only ``spike_times`` +
-    ``id``, and a subsequent fix inflated ``curation_label`` to a
-    ragged list which broke v1-style equality checks. v2 now
-    matches v1 exactly: ``obs_intervals`` per-unit + scalar
-    ``"uncurated"`` string in ``curation_label``.
+    Matches v1's pre-curation NWB; a list label would break v1-style
+    equality checks.
     """
     import pynwb
 
@@ -1572,8 +1360,7 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
     assert (
         "obs_intervals" in df.columns
     ), "Units NWB missing per-unit obs_intervals column."
-    # obs_intervals should be a non-empty (n_intervals, 2) array
-    # per unit. Each row should have a valid window.
+    # Non-empty ``(n_intervals, 2)`` per unit.
     for uid, obs in df["obs_intervals"].items():
         assert (
             obs is not None and len(obs) >= 1
@@ -1581,9 +1368,6 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
     assert (
         "curation_label" in df.columns
     ), "Units NWB missing curation_label placeholder column."
-    # Scalar shape: every unit carries the string ``"uncurated"``
-    # -- NOT a list (a list shape would break v1-style equality
-    # checks).
     for uid, lbl in df["curation_label"].items():
         assert lbl == "uncurated", (
             f"Unit {uid} has curation_label={lbl!r}; expected scalar "
@@ -1596,31 +1380,18 @@ def test_sorting_nwb_writes_obs_intervals_and_curation_label_placeholder(
 def test_sorting_delete_removes_analyzer_folder(populated_sorting):
     """``Sorting.delete()`` cleans up the analyzer folder on disk.
 
-    v2's ``analyzer_folder`` is a 5-50 GB scratch path not
-    tracked by DataJoint. Without ``Sorting``'s delete
-    override, the folder leaks every time a Sorting row is
-    dropped. Test populates a sort, asserts the folder exists,
-    deletes the row with ``safemode=False``, then asserts the
-    folder is gone.
+    The folder (5-50 GB) is not tracked by DataJoint.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
 
     folder = analyzer_path(populated_sorting["sorting_id"], _DISPLAY)
-    # ``build_analyzer`` runs at populate time, so the folder is a
-    # precondition of this test. Treat absence as a FAILURE rather than a
-    # vacuous skip: if it is missing, the populate path is broken and the
-    # delete-cleanup assertion below would pass without exercising the
-    # rmtree it is meant to verify.
+    # Missing folder fails rather than letting the check pass vacuously.
     assert folder.exists(), (
         f"precondition: analyzer_folder {folder} should exist after the "
         "populated_sorting fixture; the populate path did not write it."
     )
 
-    # Use cautious_delete with safemode=False so the test runs
-    # non-interactively. Sorting.delete() override is the unit
-    # under test; it runs ``super().delete(safemode=False)`` then
-    # rmtree.
     (Sorting & populated_sorting).delete(safemode=False)
     assert not folder.exists(), (
         f"analyzer_folder {folder} still exists after "

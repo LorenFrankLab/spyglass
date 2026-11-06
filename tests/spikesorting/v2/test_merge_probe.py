@@ -1,13 +1,7 @@
-"""The eager v2 part-table probe in ``spikesorting_merge``.
+"""The v2 part-table import probe in ``spikesorting_merge``.
 
-``spikesorting_merge`` imports its v2 part targets inside broad
-``except Exception`` boundaries so v0/v1-only environments can still load the
-merge table when either optional module fails to import.
-
-Failures are made visible rather than narrowed: the probe logs the captured
-cause via ``logger.warning`` while still tolerating it. These tests
-exercise the probe helper directly (no schema reload, no DB) by forcing the v2
-``curation`` import to raise.
+Any import failure is tolerated, so v0/v1-only environments still load the
+merge table, and logged with ``logger.warning``.
 """
 
 import sys
@@ -60,8 +54,7 @@ def test_unexpected_v2_import_error_is_logged(
     with caplog.at_level("WARNING"):
         curation, captured = _probe_v2_curation()
 
-    # Tolerated, not propagated -- including a non-ImportError, so a v0/v1 env
-    # still loads the merge table even if the v2 layer raises at import.
+    # Tolerated, including a non-ImportError.
     assert curation is None
     assert captured is exc
 

@@ -1,14 +1,10 @@
 """Validated parameter schema for the motion-interpolation parameter table.
 
 A ``MotionInterpolationParameters`` row names every argument of SpikeInterface's
-``interpolate_motion`` that shapes the corrected traces. Each field is required:
-the SpikeInterface signature defaults differ from what the motion presets use
-(``p=1`` in ``interpolate_motion`` against ``p=2`` in every preset,
-``sortingcomponents/motion/motion_interpolation.py:339-353``), so a row that
-left one implicit would silently correct differently from its preset.
+``interpolate_motion`` that shapes the corrected traces. Each field is required
+because SI's signature defaults differ from its presets (``p=1`` vs ``p=2``).
 
-No SpikeInterface import: the default rows are built from this schema at import
-time of the recipe catalog.
+No SpikeInterface import: the recipe catalog builds default rows at import.
 """
 
 from __future__ import annotations
@@ -29,12 +25,10 @@ class MotionInterpolationParamsSchema(BaseModel):
         How channels whose corrected position leaves the probe are handled.
         ``remove_channels`` drops every channel that leaves the probe's depth
         range in any temporal bin; ``force_extrapolate`` keeps all channels
-        and extrapolates the kernel. SpikeInterface's ``force_zeros`` is not
-        allowed: it zeroes whole channels for some time bins, samples that
-        the artifact mask and the statistics spans cannot describe.
+        and extrapolates the kernel. ``force_zeros`` is not allowed: the
+        artifact mask and statistics spans cannot describe its zeroed bins.
     spatial_interpolation_method : {"kriging", "idw", "nearest"}
-        The spatial interpolation kernel
-        (``preprocessing/preprocessing_tools.py``,
+        The spatial interpolation kernel (SI
         ``get_spatial_interpolation_kernel``).
     sigma_um : float
         Kriging length scale (um).

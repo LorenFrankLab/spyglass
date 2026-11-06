@@ -1,14 +1,6 @@
-"""Unit-convention pins for the v2 pipeline.
+"""Unit-convention pins for the v2 pipeline (uV thresholds, spikes/s rates).
 
-Locks the unit conventions a silent error would corrupt:
-* clusterless ``threshold_unit="uv"`` is a TRUE microvolt threshold (the
-  detector's input is scaled to uV via the stored gain), and requires gains;
-* ``firing_rate_from_spike_indicator`` returns spikes/second;
-* the clusterless-runtime threshold-unit validation.
-
-Most tests are hermetic (in-memory SpikeInterface objects); the
-clusterless-runtime and shipped-default-row cases take ``dj_conn`` because
-importing the v2 ``sorting`` schema module activates ``dj.schema``.
+Tests that import the v2 ``sorting`` schema module take ``dj_conn``.
 """
 
 from __future__ import annotations
@@ -44,7 +36,7 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
         run_clusterless_thresholder,
     )
 
-    gain = 0.5  # uV/count, so 200 counts == 100 uV (gain != 1 is the point)
+    gain = 0.5  # uV/count; must differ from 1
     rec = _rec_with_gain(np.full((200, 2), 200.0), gain)
 
     captured = {}
@@ -60,10 +52,8 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
         "spikeinterface.sortingcomponents.peak_detection.detect_peaks", _spy
     )
 
-    # detect_threshold=5 is sane for BOTH units (a 5x-MAD multiplier in 'mad'
-    # mode -- a 100 there would trip the sort-time implausible-MAD guard). The
-    # assertions below check the SCALED INPUT max, not the threshold value, so
-    # the magnitude is irrelevant to what this test pins.
+    # 5 is valid in both units (100 would trip the MAD guard); only the
+    # scaled input is asserted.
     params = {"detect_threshold": 5.0, "threshold_unit": threshold_unit}
     if threshold_unit == "uv":
         params["noise_levels"] = [1.0]
@@ -87,14 +77,10 @@ def test_clusterless_uv_threshold_scales_input_to_microvolts(
 def test_clusterless_runtime_rejects_invalid_threshold_unit(
     monkeypatch, dj_conn
 ):
-    """A clusterless params blob carrying an INVALID ``threshold_unit`` (e.g.
-    "microvolts" or "UV" from an ``update1`` write)
-    raises at sort time rather than silently falling through to MAD behavior.
-    The schema's ``Literal["uv", "mad"]`` enforces this at
-    insert, but make/sort-time consumes the fetched blob WITHOUT re-validating,
-    and ``_clusterless_noise_levels`` returns ``None`` for any non-"uv" value --
-    so without this guard a typo silently changes what ``detect_threshold``
-    means.
+    """An invalid ``threshold_unit`` (e.g. "UV" written via ``update1``) raises
+    at sort time rather than falling through to MAD.
+
+    Sort time does not re-validate the fetched blob against the schema.
     """
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
@@ -125,9 +111,8 @@ def test_clusterless_runtime_rejects_invalid_threshold_unit(
 
 
 def test_clusterless_uv_requires_channel_gains(monkeypatch, dj_conn):
-    """``threshold_unit="uv"`` on a recording with no channel gains RAISES
-    (cannot honor microvolts without the conversion) rather than silently
-    thresholding in counts."""
+    """``threshold_unit="uv"`` on a recording without channel gains raises
+    rather than thresholding in counts."""
     import spikeinterface as si
     import spikeinterface.sortingcomponents.peak_detection as pd_mod
 
@@ -183,12 +168,9 @@ def test_firing_rate_is_spikes_per_second():
 
 
 def test_peak_amplitude_template_extremum_is_microvolts():
-    """``peak_amplitude_uv`` is genuine microvolts: a ``return_in_uV`` analyzer
-    yields a template extremum of counts x gain, while a counts analyzer yields
-    the raw counts. Pins the uV scaling on a gain != 1 recording (the gain == 1
-    fixtures cannot tell counts from uV). This is exactly the mechanism
-    Sorting._populate_unit_part uses (template_tools.get_template_extremum_
-    amplitude on an analyzer built return_in_uV=True)."""
+    """``peak_amplitude_uv`` is microvolts: a ``return_in_uV`` analyzer yields
+    a template extremum of counts x gain on a gain != 1 recording, as
+    ``Sorting._populate_unit_part`` computes it."""
     import probeinterface as pi
     import spikeinterface as si
     from spikeinterface.core import template_tools
@@ -223,8 +205,7 @@ def test_peak_amplitude_template_extremum_is_microvolts():
     amp_counts = _extremum(False)
     amp_uv = _extremum(True)
 
-    # The headline pin is the SCALING (uv == counts * gain); SI reports the
-    # extremum magnitude, so compare magnitudes for the absolute checks.
+    # SI reports the extremum magnitude, so compare magnitudes.
     assert np.isclose(
         abs(amp_counts), 200.0, atol=5.0
     ), f"counts-analyzer extremum should be ~200 counts; got {amp_counts}"
@@ -237,10 +218,6 @@ def test_peak_amplitude_template_extremum_is_microvolts():
 
 # --------------------------------------------------------------------------- #
 # Clusterless thresholder runtime behavior and shipped default row.
-#
-# Covers the singleton ``noise_levels`` broadcast, the shipped
-# ``clusterless_thresholder/default`` row contents, the sort-time MAD-footgun
-# guard.
 # --------------------------------------------------------------------------- #
 
 
@@ -249,11 +226,8 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
     """A singleton ``noise_levels=[1.0]`` is broadcast to length
     ``n_channels`` before ``detect_peaks``.
 
-    SI's ``locally_exclusive`` indexes ``noise_levels[chan] *
-    detect_threshold`` per channel, so a length-1 array would read only
-    channel 0 (the v1 multi-channel clusterless bug). The runtime broadcasts
-    the scalar to one value per channel. We capture the ``method_kwargs``
-    that reach ``detect_peaks`` and assert the length + fill.
+    SI's ``locally_exclusive`` indexes ``noise_levels`` per channel, so a
+    length-1 array would cover only channel 0.
     """
     import numpy as np
     import spikeinterface as si
@@ -269,8 +243,7 @@ def test_clusterless_singleton_noise_levels_broadcast(monkeypatch):
         durations=[1.0],
         sampling_frequency=30_000.0,
     )
-    # threshold_unit="uv" now scales the recording to uV (scale_to_uV),
-    # which requires channel gains/offsets to be set.
+    # threshold_unit="uv" scales to uV, which needs gains and offsets.
     rec.set_channel_gains([1.0] * n_channels)
     rec.set_channel_offsets([0.0] * n_channels)
 
@@ -311,8 +284,7 @@ def test_clusterless_default_row_ships_noise_levels_one():
     """The shipped ``clusterless_thresholder/default`` row carries
     ``noise_levels=[1.0]``.
 
-    v1 reads detect_threshold in raw uV (noise_levels=[1.0]); a drift to None
-    would silently reinterpret it as a MAD multiplier.
+    Without it, detect_threshold would be read as a MAD multiplier, not uV.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
@@ -322,22 +294,15 @@ def test_clusterless_default_row_ships_noise_levels_one():
         & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
     ).fetch1("params")
     assert params["noise_levels"] == [1.0]
-    # The shipped uv row carries detect_threshold=100 (the production
-    # clusterless threshold) via the schema default, paired with its explicit
-    # threshold_unit='uv'.
+    # detect_threshold=100 comes from the schema default.
     assert params["detect_threshold"] == 100.0
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_clusterless_runtime_rejects_bypassed_mad_footgun():
-    """Defense-in-depth at SORT time: a clusterless params blob that bypassed
-    the SorterParameters insert validator (written via ``update1``) is
-    still caught -- a microvolt-scale
-    detect_threshold left in MAD units with no noise_levels raises rather
-    than running a silent ~zero-detection sort. The runtime consumes the
-    fetched blob without re-validating the schema, so the guard must live in
-    ``run_clusterless_thresholder`` too.
-    """
+    """A blob written via ``update1`` with a microvolt-scale detect_threshold
+    in MAD units and no noise_levels raises at sort time rather than running
+    a near-zero-detection sort."""
     import spikeinterface.core as sc
 
     from spyglass.spikesorting.v2._sorting.dispatch import (
@@ -347,7 +312,7 @@ def test_clusterless_runtime_rejects_bypassed_mad_footgun():
     rec = sc.generate_recording(
         num_channels=4, durations=[0.5], sampling_frequency=30000.0
     )
-    # The footgun combo: detect_threshold=100 in MAD units, no noise_levels.
+    # detect_threshold=100 in MAD units, no noise_levels.
     with pytest.raises(ValueError, match="MAD multiplier"):
         run_clusterless_thresholder(
             sorter_params={"detect_threshold": 100.0, "threshold_unit": "mad"},

@@ -571,9 +571,8 @@ def test_failed_validation_does_not_keep_the_analyzer_alive(
 def test_working_copy_is_unmapped_and_removed_at_exit(tmp_path, monkeypatch):
     """The working copy's files are unmapped and its folder removed at exit.
 
-    The caller's ``as`` name still holds the analyzer after the block, so on
-    NFS (the lab's ``temp_dir``) its still-mapped files left the folder in
-    place: the removal ignores errors, so the copy leaked silently.
+    The caller's ``as`` name still holds the analyzer, and on NFS mapped
+    files block removal, which ignores errors.
     """
     import spikeinterface.full as si
 
@@ -778,10 +777,8 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         )
         assert _folder_content_hash(folder) == published_hash
 
-        # A PRESENT extension with different parameters is not "there": the
-        # base carries correlograms at the standard bin; requesting a finer
-        # bin must yield an analyzer whose correlograms use that bin, served
-        # from a derivative, while the base keeps its own.
+        # A present extension with different parameters is served from a
+        # derivative; the base keeps its own.
         base_bin = (
             _resolve_curation_analyzer(merged, recipe)
             .get_extension("correlograms")
@@ -800,12 +797,10 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
             == base_bin
         )
         assert _folder_content_hash(folder) == published_hash
-        # ... and on the RAW (root) curation: an ABSENT extension is persisted
-        # into the shared sort analyzer (SI default bin), while a request with
-        # DIFFERENT parameters is served from a derivative and never rewrites
-        # the shared analyzer's version. The sort analyzer is package-scoped
-        # (an earlier browser review may have persisted display extensions),
-        # so establish the states this block relies on first.
+        # On the root curation, an absent extension is persisted into the
+        # shared sort analyzer; different parameters come from a derivative.
+        # The package-scoped analyzer may already carry extensions, so set
+        # the starting state first.
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
@@ -841,10 +836,8 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
             .params["bin_ms"]
             == raw_base_bin
         )
-        # A LARGER request that includes the same fine bins plus an extension
-        # the shared analyzer did not carry yet must not reuse the smaller
-        # derivative: its identity is the complete request, and the result
-        # carries every requested extension.
+        # A larger request is a different derivative (keyed by the full
+        # request) carrying every requested extension.
         assert (
             not Sorting()
             .get_analyzer(sorting_key)

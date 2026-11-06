@@ -1,9 +1,7 @@
 """Staged-output cleanup around DataJoint's tri-part ``_populate1``.
 
-DB-free: a stand-in table runs DataJoint's real ``AutoPopulate._populate1``
-and generator ``make`` against a fake connection, so these tests exercise the
-pinned DataJoint flow (fetch, compute, second fetch inside the transaction,
-insert) that the cleanup relies on.
+DB-free: a stand-in table runs DataJoint's real ``_populate1`` against a fake
+connection.
 """
 
 from __future__ import annotations
@@ -216,9 +214,7 @@ def test_failed_insert_removes_staged_outputs(tmp_path):
 def test_failure_after_insert_leaves_registered_outputs(tmp_path):
     """Outputs ``make_insert`` registered are never removed.
 
-    DataJoint commits and then marks the job complete; a failure there
-    (after the commit) escapes ``_populate1``, but the file now belongs to a
-    committed row.
+    A failure after the commit still escapes ``_populate1``.
     """
 
     class Jobs:
@@ -480,8 +476,7 @@ def test_analysis_cleanup_failure_preserves_populate_error(
 
     original_error = RuntimeError("insert failed")
     table_cls = _table_class(tmp_path, insert_error=original_error)
-    # Use the production cleanup path rather than this stand-in's normal
-    # direct unlink, so the failure exercises lazy resolution and logging.
+    # Use the production cleanup path, not the stand-in's unlink.
     table_cls._unlink_analysis_file = staticmethod(
         StagedOutputCleanupMixin._unlink_analysis_file
     )

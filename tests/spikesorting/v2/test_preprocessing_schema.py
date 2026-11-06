@@ -1,23 +1,12 @@
-"""Scaffold checks for the modern spike sorting module.
-
-These tests run only in the SpikeInterface 0.104 test environment. They
-exercise the package skeleton, the preprocessing parameter schema, and the
-shared helpers -- none of them require a database connection.
-"""
+"""Preprocessing parameter schema and shared helper tests (no DB)."""
 
 import datajoint as dj
 import pytest
 
 
 def test_preprocessing_params_schema_default():
-    """The preprocessing schema has the expected default shape and guards.
-
-    ``schema_version`` is 4 (the v2 shipping schema): v2 added
-    ``min_segment_length`` and removed the dead ``common_reference.reference``
-    field; v3 made ``bandpass_filter`` optional and added the ``phase_shift``
-    and ``bad_channel_handling`` fields; v4 removed the inert ``whiten`` field
-    (whitening is owned by the sorter / analyzer rows). Defaults below reflect
-    the schema as shipped.
+    """The preprocessing schema (``schema_version`` 4) has the expected
+    defaults and guards.
     """
     import pydantic
 
@@ -71,9 +60,7 @@ def test_preprocessing_params_stage_split():
         "common_reference": {"operator": "median"},
         "bad_channel_handling": "remove",
     }
-    # Recording-stage whitening was an inert field: no recording cache ever
-    # applied it. It is rejected outright so a row cannot claim whitening it
-    # does not perform (the sorter / analyzer rows own whitening).
+    # Sorter and analyzer rows own whitening; the recording stage rejects it.
     import pydantic
 
     with pytest.raises(pydantic.ValidationError, match="whiten"):
@@ -109,10 +96,7 @@ def test_resolved_job_kwargs_merge(restore_custom_config):
 
 
 # ---------------------------------------------------------------------------
-# The two critical recording-timestamp branches (utils.py). Hermetic -- they
-# touch only in-memory SI objects and monkeypatched config, so they live here
-# (no DB fixture) rather than in the dj_conn-marked integrity module, ensuring
-# the coverage runs even in a no-database test slice.
+# Recording-timestamp branches (DB-free)
 # ---------------------------------------------------------------------------
 
 
@@ -120,13 +104,8 @@ def test_get_recording_timestamps_concatenates_multi_segment():
     """``_get_recording_timestamps`` stitches every segment into one
     whole-session timeline.
 
-    SpikeInterface's ``recording.get_times()`` returns only the active
-    segment's times, so a multi-epoch (multi-segment) NWB would silently
-    report just segment 0. The helper must concatenate all segments. We build
-    a two-segment ``NumpyRecording`` with *unequal* frame counts so an
-    off-by-one in the cumulative-sum indexing would corrupt the seam, then
-    assert (a) total length equals the summed frame counts, (b) each segment's
-    slice maps back exactly to ``get_times(segment_index=i)``.
+    SI's ``get_times()`` returns one segment only. Unequal segment lengths
+    expose seam off-by-ones.
     """
     import numpy as np
     import spikeinterface.core as sc
@@ -155,11 +134,8 @@ def test_get_recording_timestamps_concatenates_multi_segment():
 def test_get_recording_timestamps_override_returned_verbatim():
     """A caller-supplied persisted-timestamps vector is returned untouched.
 
-    ``Recording.make`` threads the persisted wall-clock timestamps through
-    ``override`` (the real per-interval times SI's ``frame_slice`` drops);
-    the helper must return it verbatim rather than re-deriving from the
-    recording. The override differs from the recording's native single-
-    segment times, so a regression that ignored ``override`` would be caught.
+    ``Recording.make`` passes the persisted wall-clock times, which SI's
+    ``frame_slice`` drops.
     """
     import numpy as np
     import spikeinterface.core as sc

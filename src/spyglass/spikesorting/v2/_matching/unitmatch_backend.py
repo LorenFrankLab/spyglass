@@ -3,26 +3,12 @@
 Concrete :class:`~spyglass.spikesorting.v2.matcher_protocol.MatcherProtocol`
 implementation wrapping `UnitMatchPy <https://github.com/EnnyvanBeest/UnitMatch>`_.
 
-Two roles live here:
+- :func:`extract_unitmatch_bundle` writes one input's waveform bundle.
+- :meth:`UnitMatchBackend.match` runs inference over bundle directories only;
+  it never sees a recording, analyzer, or Spyglass key.
 
-- :func:`extract_unitmatch_bundle` -- the *wrapper* helper that turns a curated
-  SpikeInterface sorting + recording into a UnitMatch directory bundle (dense
-  per-unit cross-validation-half templates + channel positions + good-unit
-  labels). :func:`._matching.compute.extract_and_match` (run from
-  ``UnitMatch.make_compute``) calls this once per matching input; it reads the
-  traces the input's sorter read but writes only the self-contained bundle.
-- :class:`UnitMatchBackend.match` -- the *matcher*: it reads the prepared bundle
-  directories and runs the UnitMatch inference, returning cross-session pairs.
-  It never touches a recording, a ``SortingAnalyzer``, or a Spyglass key.
-
-UnitMatchPy is an optional dependency (``pip install -e
-".[spikesorting-v2-matching]"``); the import is guarded so a missing install --
-or a Tk-less top-level ``import UnitMatchPy`` -- raises a clear, actionable error
-rather than a cryptic one. UnitMatchPy 3.2.7's metric path is numpy-2 broken
-(``param_functions.get_avg_waveform_per_tp`` calls ``np.arange`` with 1-element
-``np.argwhere`` endpoints, which numpy>=2 rejects and UnitMatch's bare ``except``
-silently swallows -- corrupting the waveform trajectory), so the guard installs
-a numpy-2 ``arange`` shim scoped to its ``param_functions`` module.
+UnitMatchPy is optional (``.[spikesorting-v2-matching]``); see
+:class:`_ArangeProxy` for its numpy-2 shim.
 """
 
 from __future__ import annotations
@@ -55,12 +41,9 @@ _INSTALL_HINT = (
 class _ArangeProxy:
     """numpy proxy that coerces 1-element-array ``arange`` endpoints to scalars.
 
-    UnitMatchPy 3.2.7's ``param_functions.get_avg_waveform_per_tp`` calls
-    ``np.arange`` with ``np.argwhere`` endpoints (1-element arrays). numpy<2
-    accepted those as scalars; numpy>=2 raises ``TypeError``, which UnitMatch's
-    bare ``except`` swallows and silently corrupts the waveform trajectory.
-    Coercing the endpoints (a no-op for true scalars) restores numpy<2 behavior
-    without editing the installed package.
+    UnitMatchPy 3.2.7's ``get_avg_waveform_per_tp`` passes 1-element
+    ``np.argwhere`` arrays to ``np.arange``; numpy>=2 raises, and UnitMatch's
+    bare ``except`` silently corrupts the waveform trajectory.
     """
 
     def arange(self, start, stop=None, *args, **kwargs):
@@ -76,10 +59,9 @@ class _ArangeProxy:
 
 @functools.lru_cache(maxsize=1)
 def _require_unitmatch() -> SimpleNamespace:
-    """Import the UnitMatchPy submodules + install the numpy-2 shim (cached).
+    """Import the UnitMatchPy submodules and install the numpy-2 shim (cached).
 
-    Returns a namespace of the submodules used by the backend. Raises
-    ``ImportError`` with an actionable install hint if UnitMatchPy is absent or
+    Raises ``ImportError`` with an install hint if UnitMatchPy is absent or
     its top-level (GUI) import fails.
     """
     try:
@@ -93,7 +75,6 @@ def _require_unitmatch() -> SimpleNamespace:
     except ImportError as exc:  # missing package or Tk-less GUI import
         raise ImportError(_INSTALL_HINT) from exc
 
-    # numpy-2 compatibility shim (idempotent; only swaps once).
     if not isinstance(param_functions.np, _ArangeProxy):
         param_functions.np = _ArangeProxy()
 
@@ -141,20 +122,14 @@ def extract_unitmatch_bundle(
 def assert_consistent_channel_geometry(named_positions) -> None:
     """Reject sessions that do not share one probe geometry.
 
-    UnitMatch derives geometry from the FIRST session's channel positions and
-    runs per-channel loops that require every session to share that geometry;
-    cross-probe / cross-day geometry matching is not supported. This pure check
-    raises a clear ``ValueError`` on the first session whose positions differ
-    (by shape or value) from the first session's. Shared by the backend
-    ``match()`` (after bundle extraction) and ``UnitMatchSelection.insert_selection``
-    (a preflight BEFORE the expensive dense bundle extraction), so both reject a
-    geometry mismatch the same way.
+    UnitMatch derives geometry from the first session's channel positions
+    and requires every session to share it.
 
     Parameters
     ----------
     named_positions : sequence of (label, ndarray)
         Ordered ``(session_label, channel_positions)`` pairs. Fewer than two
-        sessions trivially passes (nothing to compare against).
+        sessions pass.
 
     Raises
     ------
@@ -225,9 +200,7 @@ class UnitMatchBackend:
     def backend_version() -> str | None:
         """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
 
-        The producing-library provenance the ``UnitMatch`` table records. Kept on
-        the backend (single source of truth) so the table does not hardcode the
-        package name; ``None`` rather than a guess when the package is missing.
+        Recorded as ``UnitMatch`` provenance.
         """
         import importlib.metadata
 
@@ -257,13 +230,7 @@ class UnitMatchBackend:
         )
         param["match_threshold"] = match_threshold
 
-        # UnitMatch assumes ONE probe across the group: it derives geometry from
-        # the first session's channel positions and runs per-channel loops that
-        # require every session to share that geometry. Cross-probe matching is
-        # not supported, so reject mismatched geometry up front with a clear
-        # error rather than letting UnitMatch fail deep in a shape mismatch. The same
-        # check runs as a preflight in UnitMatchSelection.insert_selection (before
-        # bundle extraction); this is the post-extraction backstop.
+        # Backstop for the selection-time preflight.
         self.validate_geometry(
             [
                 (s.curation_key, np.load(s.geometry_path))
@@ -278,8 +245,7 @@ class UnitMatchBackend:
         wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
             session_dirs
         )
-        # get_probe_geometry needs the raw 2-D positions (paths_from_KS prepends
-        # a ones column that would collapse the shanks to one).
+        # paths_from_KS prepends a ones column that collapses the shanks.
         param = um.utils.get_probe_geometry(raw_positions, param)
 
         (
@@ -292,10 +258,7 @@ class UnitMatchBackend:
         ) = um.utils.load_good_waveforms(
             wave_paths, label_paths, param, good_units_only=True
         )
-        # The compact session indexes below assume one loaded entry per
-        # provided session. UnitMatchPy 3.2.7 keeps an entry for every label
-        # path and raises on a bundle it cannot load, so this check guards
-        # against a library change, not a known failure.
+        # Guards against a UnitMatchPy change; 3.2.7 loads one entry per path.
         if len(good_units) != len(session_inputs):
             raise RuntimeError(
                 f"UnitMatch loaded {len(good_units)} session(s) but "
@@ -303,11 +266,7 @@ class UnitMatchBackend:
                 "attributed to the correct session. Check each session bundle's "
                 "RawWaveforms/ and cluster_group.tsv."
             )
-        # No good units across the loaded sessions -> no pairs. Return early
-        # before the prior-probability computation below, which divides by
-        # ``n_units ** 2``. The table layer never reaches this (make_fetch
-        # rejects an empty matchable set), but this backend is a public
-        # MatcherProtocol implementation and must not assume that precondition.
+        # The prior below divides by n_units ** 2.
         if param["n_units"] == 0:
             return []
         clus_info = {
@@ -356,18 +315,10 @@ class UnitMatchBackend:
     ) -> list[MatchPair]:
         """Unflatten the probability matrix into cross-session MatchPairs.
 
-        UnitMatch's probability matrix is asymmetric (one entry per directed
-        cross-validation comparison). Following UnitMatch's own grouping
-        (``assign_unique_id``), a pair is emitted only when BOTH directions
-        ``prob_matrix[i, j]`` and ``prob_matrix[j, i]`` clear the threshold, and
-        the reported ``match_probability`` is their mean -- so a one-sided /
-        borderline match that UnitMatch would reject is dropped, and the
-        probability is orientation-independent.
-
-        Side A is the session that appears first in ``session_inputs`` (the
-        caller owns that ordering); the ``i < j`` loop with the within-session
-        skip emits each unordered cross-session pair exactly once, so reversed
-        duplicates cannot both appear.
+        The matrix is asymmetric. As in UnitMatch's ``assign_unique_id``, a
+        pair needs both directions above threshold, and ``match_probability``
+        is their mean. Each unordered cross-session pair is emitted once, with
+        side A the earlier session in ``session_inputs``.
         """
         boundaries = np.asarray(session_switch).ravel()
         n = prob_matrix.shape[0]
@@ -375,11 +326,6 @@ class UnitMatchBackend:
             return []
         prob = np.asarray(prob_matrix, dtype=float)
 
-        # Build the survivor mask in NumPy rather than looping over every
-        # (i, j): a pair survives iff i < j (each unordered pair once), the two
-        # units are in different sessions, and BOTH directed probabilities clear
-        # the threshold (``min(p_ij, p_ji) > threshold``). Then loop only over
-        # the surviving matches to construct MatchPairs.
         session_ids = (
             np.searchsorted(boundaries, np.arange(n), side="right") - 1
         )
@@ -387,15 +333,12 @@ class UnitMatchBackend:
         cross_session = session_ids[:, None] != session_ids[None, :]
         both_pass = (prob > match_threshold) & (prob.T > match_threshold)
         mask = upper & cross_session & both_pass
-        mean_prob = (prob + prob.T) / 2.0  # symmetric, orientation-independent
+        mean_prob = (prob + prob.T) / 2.0
 
         def unit_of(stacked_index) -> int:
             return int(np.asarray(original_ids[stacked_index]).item())
 
         pairs: list[MatchPair] = []
-        # np.argwhere yields (i, j) in row-major (i then j) order, so each
-        # unordered cross-session pair appears once, side A = the earlier
-        # session block (i < j).
         for i, j in np.argwhere(mask):
             key_a = session_inputs[int(session_ids[i])].curation_key
             key_b = session_inputs[int(session_ids[j])].curation_key
@@ -416,13 +359,9 @@ class UnitMatchBackend:
 def register() -> None:
     """Install the UnitMatch backend + schema if ``"unitmatch"`` is missing.
 
-    Called at import for the usual side-effect path, and re-callable by
-    ``matcher_protocol.register_default_matchers`` so the registry self-heals
-    if it was cleared (e.g. by a test fixture). Fill-only: whatever is
-    already registered under the name -- the built-in instance, or a
-    deliberate ``register_matcher(..., replace=True)`` swap -- is kept, so
-    lookups return one stable object and never raise a collision against
-    an explicit replacement.
+    Called at import and by ``register_default_matchers`` after a cleared
+    registry. Fill-only: an existing registration, including a deliberate
+    replacement, is kept.
     """
     if is_registered(UnitMatchBackend.name):
         return

@@ -1,18 +1,7 @@
 """Readers over a populated ``UnitMatch`` run.
 
-:func:`get_input_provenance` is the body of ``UnitMatch.get_input_provenance``
-(the run's per-input and per-recording provenance, from the frozen selection
-rows or the run's NWB). :func:`tracked_unit_rows` reads a run's frozen
-matchable-unit universe, its ``Pair`` graph and per-recording spike counts
-(:func:`_node_detections`) and derives the rows ``TrackedUnit.make`` inserts.
-:func:`get_unit_brain_regions` and :func:`get_member_spike_times` are the bodies
-of the ``TrackedUnit`` accessors; both first compare each input's live
-curation and source recordings with the frozen rows
-(:func:`_assert_run_input_unchanged`). ``table`` is the ``UnitMatch`` or
-``TrackedUnit`` instance the method was called on.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+Bodies of ``UnitMatch`` / ``TrackedUnit`` methods; ``table`` is the instance
+the method was called on. DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -226,9 +215,7 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     ).fetch1("params")
     tracking = resolve_tracking_params(params)
 
-    # Canonicalize on read to derive_tracked_units' node identity:
-    # MatchableUnit stores (sorting_id uuid, curation_id, unit_id); the graph
-    # keys on (str(sorting_id), int(curation_id), int(unit_id)).
+    # Graph node identity: (str sorting_id, int curation_id, int unit_id).
     matchable_rows = (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
     node_universe = [
         (
@@ -238,11 +225,7 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
         )
         for row in matchable_rows
     ]
-    # A populated UnitMatch always wrote a non-empty MatchableUnit snapshot
-    # (make_fetch rejects an input with zero matchable units), so an empty
-    # snapshot under an existing UnitMatch means the row was written by a
-    # Spyglass version without the MatchableUnit part. Fail loud rather than silently deriving zero tracked
-    # units (or raising obscurely on a Pair edge outside an empty universe).
+    # make_fetch rejects empty inputs, so an empty snapshot is a legacy row.
     if not node_universe:
         raise ValueError(
             "TrackedUnit.make: UnitMatch row "
@@ -499,9 +482,7 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
     members = member_rel * CurationV2.Unit.proj(
         "electrode_group_name", "electrode_id"
     )
-    # Bulk-read everything the member loop looks up: the members' matchable
-    # units, their per-recording spike counts, their inputs' recordings, and
-    # those recordings' sort-group electrode regions.
+    # Bulk-read everything the member loop looks up.
     matchable, input_indices, input_recordings, recordings_by_input = (
         _member_inputs(member_rel)
     )
@@ -779,11 +760,8 @@ def get_member_spike_times(table, tracked_unit_key) -> "pd.DataFrame":
 def _assert_run_input_unchanged(reader: str, input_key: dict) -> None:
     """Refuse to read a run's input whose curation or sources differ.
 
-    Runs the comparison ``UnitMatch.make_fetch`` runs before matching:
-    :func:`_snapshot_mismatches` of the frozen ``Input`` /
-    ``InputRecording`` rows against :func:`_resolve_match_input` now. A
-    single recording's frames are not re-read from its traces (its content
-    hash covers its timestamps). Database reads only.
+    The same comparison ``UnitMatch.make_fetch`` runs. Database reads only:
+    a single recording's content hash covers its frames.
 
     Parameters
     ----------

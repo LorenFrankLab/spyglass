@@ -1,15 +1,9 @@
 """Hermetic tests for membership-aware merge duplicate-spike removal.
 
-When merging contributor units, a single physical spike double-detected
-across two units appears twice in the naive concatenation. A neuron's
-refractory period (~1-2 ms) guarantees a single unit never fires twice
-within the ~0.4 ms window, so any sub-0.4 ms pair from DIFFERENT
-contributors is a double-detection artifact (removed), while a close pair
-from the SAME contributor is a genuine event (kept).
-``_dedup_merged_spike_times_and_frames`` (the stored apply_merge=True path)
-must agree with SpikeInterface's ``get_non_duplicated_events`` (the dedup
-behind the previewed ``get_merged_sorting``) so stored and previewed merged
-trains match, and it must carry each kept spike's sample index along.
+A sub-0.4 ms pair from different contributors is one spike detected twice
+and is removed; a close pair from one contributor is kept. The stored path
+must agree with SpikeInterface's ``get_non_duplicated_events``, which backs
+the lazy ``get_merged_sorting``.
 """
 
 from __future__ import annotations
@@ -45,15 +39,13 @@ def test_dedup_drops_cross_unit_coincident_spike():
     # 0.020 + 0.0001 s (0.1 ms < 0.4 ms) is a cross-unit double-detection.
     unit_b = np.array([0.0201, 0.050])
     out = _dedup([unit_a, unit_b], delta_s)
-    # The 0.0201 duplicate is removed; everything else survives, sorted.
     np.testing.assert_allclose(out, [0.010, 0.020, 0.030, 0.050])
 
 
 def test_dedup_keeps_within_unit_close_pair():
     """A close pair from the SAME contributor is kept (membership-aware)."""
     delta_s = 0.4e-3
-    # Two spikes 0.1 ms apart but BOTH from unit_a -> not a cross-unit
-    # duplicate; a naive time-only dedup would wrongly drop one.
+    # Both from unit_a, so not a cross-unit duplicate.
     unit_a = np.array([0.010, 0.0101])
     unit_b = np.array([0.050])
     out = _dedup([unit_a, unit_b], delta_s)

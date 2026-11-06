@@ -1,8 +1,4 @@
-"""Shared stage execution and sorting/curation steps for v2 orchestration.
-
-Stage timing, failure receipts, and populate concurrency live together here.
-The sorting and curation steps compose table operations without duplicating
-the scientific computations owned by the tables."""
+"""Shared stage execution and sorting/curation steps for v2 orchestration."""
 
 from __future__ import annotations
 
@@ -22,19 +18,12 @@ def _run_stage(
 ) -> tuple[Any, StageStatus, float]:
     """Time a pipeline stage's ``work()``; classify it; wrap failures.
 
-    ``exists`` is the result of a pre-``work`` existence check on the stage's
-    output row, so the status is ``"reused"`` when the row was already present
-    (``work`` no-ops) and ``"computed"`` otherwise. ``work`` is a zero-arg
-    closure over the stage's ``populate`` / ``insert_curation`` call; its
-    return value is passed back (the curation stage needs the returned key).
-    A failure is re-raised as a chained :class:`PipelineStageError` carrying a
-    snapshot of ``partial`` (the run summary accumulated from earlier stages)
-    so
-    the caller sees which stage broke and what was already built.
+    ``exists`` (checked before ``work``) makes the status ``"reused"``, else
+    ``"computed"``. A failure is re-raised as a chained
+    :class:`PipelineStageError` carrying a snapshot of ``partial``.
 
-    Returns ``(work_result, status, seconds)`` where ``seconds`` is monotonic
-    wall-clock spent in ``work`` THIS call (≈0 on a reused no-op), not
-    cumulative compute cost.
+    Returns ``(work_result, status, seconds)``; ``seconds`` is wall-clock
+    time in ``work`` this call.
     """
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
 
@@ -43,10 +32,7 @@ def _run_stage(
     try:
         result = work()
     except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
-        # Broad on purpose: ANY stage failure must become a typed
-        # PipelineStageError so partial_run_summary resume / continue_on_error
-        # work. The original type + message are preserved (``original_type``
-        # + chained ``from exc``); the catch is NOT narrowed.
+        # Broad so continue_on_error and partial summaries see every failure.
         raise PipelineStageError(
             stage,
             dict(partial),
@@ -59,23 +45,12 @@ def _run_stage(
 def _populate_tolerating_concurrent_duplicate(table, key) -> None:
     """Populate ``key``, tolerating a benign concurrent duplicate.
 
-    The pipeline populates with ``reserve_jobs=False`` (no DataJoint ``~jobs``
-    reservation), so an overlapping populate of the same *content-addressed* key
-    -- another kernel, a lab populate worker, or a re-run of a long stage -- can
-    commit the row while this call is still in ``make_compute``, making this
-    call's insert raise ``DuplicateError``. Adopt the committed winner (the
-    stage is effectively "reused"). A sorter may produce different spikes
-    from the same inputs; Sorting keeps each attempt's analyzer private until
-    insertion establishes the winner, so the losing compute cannot replace it.
+    With ``reserve_jobs=False`` an overlapping populate can commit the row
+    first; adopt that winner. A duplicate error with the row still absent is
+    re-raised.
 
-    A duplicate error with the row STILL absent afterward, or any non-duplicate
-    error, is a genuine failure and is re-raised unchanged.
-
-    Precondition: ``key`` must be a single-row primary key. The ``table & key``
-    recovery check proves that THAT specific row now exists; with an
-    under-specified / multi-row restriction a truthy match would no longer prove
-    the failed row committed, and a genuine duplicate could be swallowed. Every
-    call site passes a full selection PK, so this holds.
+    ``key`` must be a full single-row primary key, or the recovery check
+    could swallow a genuine duplicate.
     """
     import datajoint as dj
 
@@ -89,23 +64,9 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
 def _populate_once(table, key) -> None:
     """Populate ``key`` exactly once, even under concurrent/overlapping runs.
 
-    Serializes same-key populate with a self-releasing MySQL advisory lock so
-    the expensive compute (e.g. a 70-minute sort) runs once, not once per racing
-    run -- WITHOUT ``reserve_jobs=True`` and its stale-``~jobs`` bookkeeping. A
-    second run/worker BLOCKS on the lock until the run holding it commits, then
-    -- because the row now exists -- DataJoint's own ``key_source - target``
-    diff makes its ``populate`` a no-op (no re-compute). ``populate`` is always
-    invoked (never short-circuited here), so a genuine stage failure still
-    surfaces; and if the lock cannot be taken (timeout / a non-transactional
-    server), :func:`_populate_tolerating_concurrent_duplicate` keeps the
-    residual insert race from failing the pipeline.
-
-    The "runs once" guarantee is best-effort, not absolute: the lock is bound to
-    the DB session, so if that session drops and reconnects mid-compute the lock
-    is released and a concurrent run could recompute. The duplicate-tolerance
-    still prevents a hard failure -- the worst case degrades to duplicated
-    compute. Correctness relies on each stage's publication/insert contract,
-    independently of this compute-deduplication lock.
+    A MySQL advisory lock serializes same-key populates, so a racing run
+    blocks and then no-ops. Best effort: a dropped session releases the lock,
+    and the worst case is duplicated compute.
     """
     with advisory_key_lock(table, key):
         _populate_tolerating_concurrent_duplicate(table, key)
@@ -254,9 +215,7 @@ def _run_sorting_stage(
     )
     run_summary["sorting_id"] = sorting_key["sorting_id"]
 
-    # Zero units is a legitimate result on a quiet shank. Unless the caller set
-    # require_units=True, proceed to build an empty (but real) curation. A
-    # single-session curation remains merge-keyable; a concat curation is gated.
+    # Zero units is legitimate on a quiet shank.
     n_units = int((Sorting & sorting_key).fetch1("n_units"))
     if n_units == 0:
         sorting_id = sorting_key["sorting_id"]
@@ -267,12 +226,7 @@ def _run_sorting_stage(
                 "detect_threshold / the artifact mask, or call with "
                 "require_units=False to accept the empty result."
             )
-        # Fall through to the normal curation + merge insert. A
-        # zero-unit sort yields an EMPTY (but real) curation + merge row
-        # so downstream consumers treat it like any other
-        # SpikeSortingOutput row instead of special-casing a None
-        # merge_id. The warning is both logged (console) and recorded on
-        # the run summary's ``warnings`` list (programmatic access).
+        # An empty but real curation avoids special-casing a None merge_id.
         zero_unit_warning = (
             f"run_v2_pipeline: zero units for sorting_id={sorting_id}; "
             "writing an EMPTY curation + merge row. Check "
@@ -311,16 +265,7 @@ def _run_root_curation_stage(
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.utils import logger
 
-    # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
-    # With ``reuse_existing=True`` it returns the canonical (lowest
-    # curation_id) existing root if one is present -- deterministically,
-    # and through the same source-part / guard / merge-registration path a
-    # fresh insert uses -- otherwise it stages a fresh root. Routing through
-    # it (rather than a raw fetch-or-insert here) avoids bypassing that
-    # guard and silently reusing a root whose description/labels differ.
-    # ``curation_id`` is not content-addressed, so classify reused/computed
-    # from whether a root curation already exists for this sorting (the same
-    # check insert_curation's root-reuse path uses).
+    # ``curation_id`` is not content-addressed, so "reused" means a root exists.
     curation_exists = bool(
         CurationV2
         & {"sorting_id": sorting_key["sorting_id"], "parent_curation_id": -1}
@@ -350,11 +295,7 @@ def _run_root_curation_stage(
                 )
                 logger.warning(ignored)
                 warnings_list.append(ignored)
-        # A single-session curation is registered atomically. A concat curation
-        # deliberately is not: its synthetic timeline is unsafe for a
-        # session-scoped merge consumer, so its merge id is None and the gate
-        # advisory is recorded in the run summary. Any missing single-session
-        # registration remains a stage-aware failure.
+        # A concat curation's synthetic timeline gets no merge row.
         merge_id = _curation_merge_id(
             curation_key, is_concat=is_concat, warnings_list=warnings_list
         )
@@ -367,8 +308,7 @@ def _run_root_curation_stage(
     stage_seconds["curation"] = curation_seconds
     run_summary["root_curation_id"] = curation_key["curation_id"]
     run_summary["root_merge_id"] = merge_id
-    # Pin the generation: the numeric curation_id is reusable after deletion,
-    # so the receipt records the row UUID the ``root_curation`` accessor checks.
+    # curation_id is reusable after deletion; the UUID pins the generation.
     run_summary["root_curation_uuid"] = (CurationV2 & curation_key).fetch1(
         "curation_uuid"
     )
@@ -380,10 +320,8 @@ def _auto_curation_description(
 ) -> str:
     """Description for the pipeline's auto-labeled child curation.
 
-    The description names the preset that ran. A twin preset (same metric and
-    rule recipes, for example the tetrode and probe labels of one recipe) gives
-    the same child, and child reuse matches on the description, so return an
-    existing twin's description to reuse its child.
+    Child reuse matches on description, so a twin preset (same metric and
+    rule recipes) returns the existing twin's description.
 
     Parameters
     ----------
@@ -460,14 +398,8 @@ def _run_auto_curation_stage(
             "auto_curation_rules_name": bundle.auto_curation_rules_name,
         }
     )
-    # The stage does two things: populate the evaluation AND accept its
-    # labels into a committed child curation. Classify it honestly --
-    # "reused" only when BOTH were already done (the evaluation was
-    # populated and the accepted child already existed), else "computed" --
-    # so a run that (re)created the child is never mislabeled "reused" just
-    # because the evaluation pre-existed. The child id is only known after
-    # acceptance, so ``_run_stage``'s exists-before-work status is discarded
-    # and the status is classified after the work returns.
+    # "reused" only if the evaluation and the child both pre-existed; the
+    # child is known only after the work, so classify afterwards.
     eval_was_populated = bool(CurationEvaluation & eval_key)
     sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
 
@@ -504,8 +436,7 @@ def _run_auto_curation_stage(
         "reused" if eval_was_populated and not child_created else "computed"
     )
     run_summary["curation_evaluation_id"] = eval_key["curation_evaluation_id"]
-    # The auto-curated child is the run's auto-labeled curation: labels
-    # only, every unit still present, no unit selection applied.
+    # Labels only; every unit is still present.
     run_summary["auto_labeled_curation_id"] = child["curation_id"]
     run_summary["auto_labeled_merge_id"] = auto_merge_id
     run_summary["auto_labeled_curation_uuid"] = (CurationV2 & child).fetch1(
@@ -557,8 +488,7 @@ def _run_member_curation_stage(
         for member_index in member_indices
     ]
 
-    # Populate each full member PK separately so the advisory lock and
-    # benign-duplicate recovery retain their single-key guarantee.
+    # One full PK per populate, as _populate_once requires.
     def _populate_member_curations():
         for member_key in member_keys:
             _populate_once(ConcatMemberCuration, member_key)

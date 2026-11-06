@@ -1,11 +1,7 @@
 """DB-free guards in ``build_analyzer``.
 
-``build_analyzer`` checks the geometry once, up front, rather than leaving
-each extension to fail its own way: a recording whose contacts share a 2D
-position cannot produce a probe at all (``probeinterface`` raises "Contact
-positions must be unique within a probe"), and that bare message names
-neither the sort nor the table an operator has to fix. So the build refuses
-first, with an actionable error, before any extension is computed.
+Coincident 2D contacts raise an actionable error before any extension runs,
+instead of ``probeinterface``'s bare uniqueness message.
 """
 
 from __future__ import annotations
@@ -22,11 +18,8 @@ _N_SAMPLES = 3_000
 def _recording_with_locations(locations):
     """A 4-channel in-memory recording carrying ``locations`` and no probe.
 
-    ``location`` is set as a plain property (not via ``set_probe``) because
-    ``set_probe`` itself rejects coincident contacts -- the degenerate case
-    this module drives reaches ``build_analyzer`` exactly this way: read back
-    from the recording artifact's electrodes table, where nothing has yet
-    tried to build a probe from it.
+    A plain property, as read back from the artifact; ``set_probe`` would
+    reject coincident contacts.
     """
     traces = np.zeros(
         (_N_SAMPLES, np.asarray(locations).shape[0]), dtype="float32"
@@ -37,7 +30,7 @@ def _recording_with_locations(locations):
 
 
 def _one_unit_sorting():
-    """A one-unit sorting -- enough to clear the zero-unit short-circuit."""
+    """A one-unit sorting, enough to clear the zero-unit short-circuit."""
     return NumpySorting.from_samples_and_labels(
         [np.array([100, 500, 900])],
         [np.array([1, 1, 1])],
@@ -49,10 +42,7 @@ def _one_unit_sorting():
 def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
     """Coincident 2D contacts raise before ``create_sorting_analyzer`` runs.
 
-    The failure must name the sort and point at ``Probe.Electrode`` -- the
-    table whose ``rel_x``/``rel_y``/``rel_z`` an operator edits to fix it --
-    rather than surfacing probeinterface's bare uniqueness message from
-    somewhere inside the analyzer build.
+    The error names the sort and points at ``Probe.Electrode``.
     """
     from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
 
@@ -64,8 +54,7 @@ def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
 
     monkeypatch.setattr(si, "create_sorting_analyzer", _must_not_be_reached)
 
-    # Contacts 0 and 1 coincide; 2 and 3 are distinct, so the defect is a
-    # duplicate pair rather than a wholly degenerate geometry.
+    # Contacts 0 and 1 coincide; 2 and 3 are distinct.
     recording = _recording_with_locations(
         [[0.0, 0.0], [0.0, 0.0], [12.5, 0.0], [12.5, 12.5]]
     )
@@ -89,8 +78,7 @@ def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
     message = str(excinfo.value)
     assert "Probe.Electrode" in message
     assert sorting_id in message
-    # The offending positions are in the message, so the operator can see
-    # WHICH contacts collapsed without re-running anything.
+    # The message names the offending positions.
     assert "0.0" in message and "12.5" in message
 
 
@@ -98,9 +86,7 @@ def test_build_analyzer_rejects_coincident_contacts(tmp_path, monkeypatch):
 def test_build_analyzer_accepts_distinct_contacts(tmp_path, monkeypatch):
     """The guard is specific: distinct contacts reach the analyzer build.
 
-    Without this, a guard that raised unconditionally would also pass the
-    test above. ``create_sorting_analyzer`` is stubbed with a sentinel so
-    this stays DB- and disk-free.
+    ``create_sorting_analyzer`` is stubbed with a sentinel.
     """
     from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
 
@@ -134,17 +120,11 @@ def test_build_analyzer_accepts_distinct_contacts(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Noise levels (and whitening) from valid samples only.
-#
-# The sort stage silences artifact frames with zeros; the analyzer's
-# ``noise_levels`` must be estimated from samples inside the statistics spans
-# so the zeros do not bias it low. Targets come from the clean twin (see
-# ``_masked_statistics_helpers``).
+# Noise levels and whitening from statistics spans only, so silenced artifact
+# frames do not bias them low. Targets come from the clean twin.
 # ---------------------------------------------------------------------------
 
-# ``build_analyzer`` fetches the SorterParameters row only when ``sorter_row``
-# is None; with ``job_kwargs`` supplied the row is never read further, so a
-# row carrying just its ``job_kwargs`` blob keeps the build DB-free.
+# A row with only ``job_kwargs`` keeps the build DB-free.
 _SORTER_ROW = {"job_kwargs": {}}
 _JOB_KWARGS = {"random_seed": 0}
 
@@ -219,11 +199,9 @@ def test_noise_levels_extension_equals_cached_values(
     """The extension reports exactly the span noise levels cached on the
     recording handed to ``create_sorting_analyzer``.
 
-    The key follows the analyzer's ``return_in_uV`` (``not whiten``): the
-    display recipe caches ``noise_level_mad_scaled``; the metric recipe caches
-    ``noise_level_mad_raw`` computed on the WHITENED traces. The cached value
-    is also recomputed independently from the span samples of that same
-    final recording.
+    Display caches ``noise_level_mad_scaled``; metric caches
+    ``noise_level_mad_raw`` on whitened traces. The value is also recomputed
+    from the span samples.
     """
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
     from spyglass.spikesorting.v2._sorting.artifact_mask import sample_span_data

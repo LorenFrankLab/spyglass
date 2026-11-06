@@ -1,14 +1,7 @@
 """Artifact-detection invariants: shared-group guards and selection branches.
 
-Covers ``SharedArtifactGroup.insert_group`` cross-session / cross-frequency /
-timestamp guards, ``RecordingArtifactSelection.insert_selection``
-missing-Lookup-row diagnostics, the empty sliver-filter return, the
-``RemovedInterval`` ownership delete guards, the shared-group member-set
-freeze, and tolerant delete of an already-gone IntervalList.
-
-The insert_group session/frequency checks all fire BEFORE any recording load,
-so every precondition is built via a contained FK-checks-off raw bypass -- no
-real populate needed.
+The insert_group checks fire before any recording load, so preconditions are
+planted with FK checks off instead of a real populate.
 """
 
 from __future__ import annotations
@@ -20,15 +13,11 @@ from tests.spikesorting.v2._ingest_helpers import _synthetic_artifact_recording
 
 
 def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
-    """Insert a minimal ``Recording`` + ``RecordingSelection`` pair via the
-    FK-checks-off bypass.
+    """Insert a minimal ``Recording`` and ``RecordingSelection`` pair with FK
+    checks off.
 
-    ``SharedArtifactGroup.insert_group`` reads ``RecordingSelection.
-    nwb_file_name`` (session check) and ``Recording.sampling_frequency``
-    (frequency check) and only requires the ``Recording`` row to *exist*
-    for the populated-check -- all before it ever loads the recording. So
-    a fake pair with the right two scalar fields is enough to drive both
-    guards without a real populate. Returns the ``recording_id``.
+    Sets only the ``nwb_file_name`` and ``sampling_frequency`` the
+    insert_group guards read. Returns the ``recording_id``.
     """
     import datajoint as dj
 
@@ -83,13 +72,11 @@ def _drop_fake_recording(recording_id):
 
 
 class _FakeRecording:
-    """Faithful stand-in for an explicit-time_vector SI recording.
+    """Stand-in for an explicit-time_vector SI recording.
 
-    Models the SI public API ``SharedArtifactGroup.insert_group`` uses --
-    ``get_time_info`` (lazy time_vector), ``sample_index_to_time`` (the chunked
-    ``timestamp_fingerprint`` reads), and segment-indexed ``get_num_samples`` --
-    so the insert-group tests exercise the real fingerprint path rather than a
-    frame-bounded shortcut real SI lacks.
+    Implements the SI calls ``insert_group`` uses (``get_time_info``,
+    ``sample_index_to_time``, ``get_num_samples``) so the real fingerprint
+    path runs.
     """
 
     def __init__(self, times, fs=30000.0):
@@ -126,11 +113,8 @@ class _FakeRecording:
 def test_shared_artifact_group_rejects_cross_session_members():
     """Members from two sessions raise, and no master row is left.
 
-    A shared artifact pass writes IntervalList rows keyed by
-    ``(nwb_file_name, interval_list_name)``, so mixing sessions makes the
-    artifact-removed valid times undefined. The guard fires before the
-    master insert, so the table must be empty for this group name after
-    the raise (transactional rollback / pre-insert raise).
+    IntervalList rows are keyed by session, so a mixed-session group has
+    undefined artifact-removed valid times.
     """
     import uuid
 
@@ -160,10 +144,8 @@ def test_shared_artifact_group_rejects_cross_session_members():
 def test_shared_artifact_group_rejects_frequency_mismatch():
     """Members with differing sampling frequencies raise.
 
-    ``si.aggregate_channels`` requires identical fs; a typo in upstream
-    preproc could otherwise produce a mismatch that only crashes opaquely
-    deep inside SI at populate time. Both members share one session so the
-    session guard passes and the frequency guard is the one that fires.
+    ``si.aggregate_channels`` requires identical fs. Both members share one
+    session so only the frequency guard fires.
     """
     import uuid
 
@@ -186,10 +168,8 @@ def test_shared_artifact_group_rejects_frequency_mismatch():
 def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
     """Equal-length same-session members still need equal timestamps.
 
-    The two fake recordings share session, sampling frequency, sample count,
-    and dtype. Only their wall-clock vectors differ. Without the exact
-    timestamp guard, ``si.aggregate_channels`` would stack non-aligned frames
-    and the resulting artifact intervals could mask the wrong times.
+    Only the wall-clock vectors differ; ``si.aggregate_channels`` would
+    otherwise stack misaligned frames.
     """
     import uuid
 
@@ -224,29 +204,14 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
     finally:
         _drop_fake_recording(rid_a)
         _drop_fake_recording(rid_b)
-    # NOTE: the equal-fingerprint *accept* branch
-    # (``fingerprint == reference_fingerprint`` -> continue) is exercised by
-    # ``test_shared_artifact_group_insert_rejects_mismatched_dtypes``
-    # (single_session/test_artifact.py): its two members carry byte-identical
-    # timestamps, so the fingerprints match and the loop continues past the
-    # timestamp check before raising on the dtype divergence. The
-    # fingerprint-equality invariant itself is unit-tested in
-    # ``test_signal_math.test_timestamp_fingerprint_matches_array_equal_semantics``.
-    # A dedicated end-to-end *success* assertion is omitted: it would only cover
-    # a generic two-row DataJoint insert (not the fingerprint logic) and would
-    # require planting a fake ``common_session`` FK chain for the master row.
+    # The equal-fingerprint branch is covered by
+    # test_shared_artifact_group_insert_rejects_mismatched_dtypes.
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_artifact_detection_selection_missing_lookup_row_diagnostic():
-    """A missing ``ArtifactDetectionParameters`` row raises a
-    diagnostic ValueError, not an opaque FK IntegrityError.
-
-    ``_ensure_lookup_row_exists`` pre-checks the params FK target and, when
-    absent, names the Lookup table and the ``insert_default()`` path. The
-    source key has no matching master yet (find returns empty), so control
-    reaches the lookup pre-check.
-    """
+    """A missing ``ArtifactDetectionParameters`` row raises a ValueError naming
+    the Lookup table and ``insert_default()``, not an FK IntegrityError."""
     import uuid
 
     from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
@@ -266,15 +231,7 @@ def test_artifact_detection_selection_missing_lookup_row_diagnostic():
 @pytest.mark.usefixtures("dj_conn")
 def test_detect_artifacts_empty_sliver_filter_returns_empty():
     """When ``min_length_s`` filters out every kept interval,
-    ``detect_artifacts`` returns ``np.empty((0, 2))``.
-
-    Detection finds artifact frames (so the early all-valid return at the
-    zero-frames branch is NOT taken), the complement is built, then a huge
-    ``min_length_s`` drops every surviving valid sliver. The return must be
-    a real (0, 2) float array -- the shape downstream ``_apply_artifact_
-    mask`` expects -- not an empty 1-D array. Pairs with the
-    ``apply_artifact_mask`` empty-valid-times raise.
-    """
+    ``detect_artifacts`` returns a (0, 2) float array, not an empty 1-D one."""
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,
     )
@@ -296,8 +253,7 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
         0,
         2,
     ), f"expected an empty (0, 2) array, got shape {out.shape}"
-    # dtype matches the recording's timestamp dtype (float64); a 1-D
-    # np.empty(0) or an int array would break the downstream mask walker.
+    # The downstream mask walker needs the timestamp dtype.
     assert out.dtype == rec.get_times().dtype
 
 
@@ -306,14 +262,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
     """``RecordingArtifactDetection.delete`` does not raise when the paired
     IntervalList rows were already removed.
 
-    The override deletes the master then cleans up the IntervalList rows it
-    resolved; the ``len(rows) == 0`` guard skips a restriction whose rows
-    are already gone. We pre-delete the IntervalList rows, then delete the
-    detection, and assert no raise + the master is gone.
-
-    Builds a DEDICATED selection on a planted recording (FK-off) and
-    inserts a zero-row ``RecordingArtifactDetection`` master directly, so the
-    shared populated fixture's artifact row is untouched.
+    Uses a dedicated planted selection so the shared fixture is untouched.
     """
     import uuid
 
@@ -367,10 +316,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
     try:
-        # Pre-delete the IntervalList row so delete() hits the already-gone
-        # (len == 0) branch. Disable FK checks here so the ownership part row
-        # remains; this models an out-of-band broken interval row while
-        # preserving the strict RemovedInterval ownership invariant.
+        # Delete the IntervalList row out of band, keeping the ownership part.
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
@@ -383,7 +329,7 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
-        # Must not raise even though the cleanup target is already gone.
+        # Must not raise.
         (RecordingArtifactDetection & {"artifact_detection_id": aid}).delete(
             safemode=False
         )
@@ -407,15 +353,9 @@ def test_artifact_detection_delete_tolerates_already_gone_interval_list():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_artifact_detection_delete_refuses_master_without_part_rows():
-    """Strict ownership: deleting a ``RecordingArtifactDetection`` master that
-    owns NO ``RemovedInterval`` part row raises rather than guessing interval
-    ownership from naming -- the data-loss guard the part-table refactor adds.
-    The refused delete must leave the master in place.
-
-    Builds a DEDICATED selection on a planted recording (FK-off) with a
-    zero-row master and NO part row, so the shared populated fixture is
-    untouched.
-    """
+    """Deleting a ``RecordingArtifactDetection`` master with no
+    ``RemovedInterval`` part row raises rather than guessing interval
+    ownership, and leaves the master in place."""
     import uuid
 
     import datajoint as dj
@@ -470,14 +410,8 @@ def test_artifact_detection_delete_refuses_master_without_part_rows():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_shared_group_member_set_frozen(monkeypatch):
-    """A ``SharedArtifactGroup.Member`` edit after the selection is
-    created cannot silently change the scanned set under a fixed
-    ``artifact_detection_id``. ``insert_selection`` snapshots the ordered member
-    ``recording_id`` set onto ``SharedGroupArtifactSelection.member_set_hash``;
-    ``SharedGroupArtifactDetection.make_fetch`` re-derives it from the live
-    members and raises a member-drift error when they differ. A clean
-    (unedited) selection fetches without error.
-    """
+    """A ``SharedArtifactGroup.Member`` added after selection makes
+    ``make_fetch`` raise a member-drift error; an unedited selection fetches."""
     import uuid
 
     from spyglass.spikesorting.v2._storage.nwb import StoredTraces
@@ -502,12 +436,8 @@ def test_shared_group_member_set_frozen(monkeypatch):
     group_name = "v2_member_freeze_group"
     art_pk = None
     conn = dj.conn()
-    # Build the group + members directly: insert_group loads each member recording
-    # for a strict n_samples/dtype check (the fake recordings are not loadable), but
-    # insert_selection's hash snapshot and make_fetch's drift check only read member
-    # recording_ids -- never the recording. make_fetch resolves each member's file
-    # after the drift check; the fake rows have none, so that resolution is
-    # stubbed. FK checks off because the fake session is not a real Session row.
+    # Bypass insert_group, which loads member recordings; the drift check
+    # reads only recording_ids. The file lookup after it is stubbed.
     monkeypatch.setattr(
         Recording,
         "resolve_stored_traces",
@@ -547,7 +477,7 @@ def test_shared_group_member_set_frozen(monkeypatch):
                 "artifact_detection_params_name": "default",
             }
         )
-        # Clean: the live member set matches the frozen snapshot.
+        # Unedited: the live member set matches the snapshot.
         fetched = SharedGroupArtifactDetection().make_fetch(art_pk)
         assert [t.abs_path for t in fetched.member_traces] == [
             f"/fake/{rid}.nwb" for rid in fetched.member_recording_ids
@@ -583,10 +513,8 @@ def test_shared_group_member_set_frozen(monkeypatch):
 def test_importing_artifact_declares_the_detection_output_merge(tmp_path):
     """Importing ``artifact`` alone declares ``ArtifactDetectionOutput``.
 
-    Detection ``make_insert`` registers its merge row inside the populate
-    transaction, where DataJoint refuses to create a table. A fresh process
-    that imports only ``artifact`` must therefore already have the merge
-    table, or the first populate on a new database fails.
+    DataJoint cannot create a table inside the populate transaction where
+    ``make_insert`` registers the merge row.
     """
     import os
     import subprocess

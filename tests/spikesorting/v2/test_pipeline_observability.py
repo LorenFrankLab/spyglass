@@ -1,13 +1,9 @@
 """Tests for run_v2_pipeline observability: stage status/timing + warnings.
 
-The run summary carries, additively, per-stage ``*_status`` (``"computed"``
-vs ``"reused"``), a ``stage_seconds`` timing dict, and a ``warnings`` list (the
-seven stable keys are untouched), and raises a stage-aware
-    ``PipelineStageError`` (carrying the partial run summary) when a stage's
-populate/insert fails.
-
-The heavy mountainsort5 sort is run ONCE in a module-scoped fixture and reused
-across tests; only the zero-unit test pays a second (fast) clusterless sort.
+The run summary adds per-stage ``*_status`` (``"computed"`` or
+``"reused"``), ``stage_seconds`` and ``warnings`` to the seven stable keys. A
+failed stage raises ``PipelineStageError`` with the partial run summary.
+The mountainsort5 sort runs once per module.
 """
 
 from __future__ import annotations
@@ -79,9 +75,8 @@ def obs_session(dj_conn, smoke_nwb):
 def first_run(obs_session):
     """A single clean (all-``computed``) run; yields ``(run_summary, inputs)``.
 
-    Module-scoped so the one expensive mountainsort5 sort is shared. Cleans
-    the session first (so the first run genuinely computes every stage), then
-    rebuilds the config (the cleanup cascade also drops SortGroupV2).
+    Cleans the session first so every stage computes, then rebuilds the
+    config (the cleanup cascade also drops SortGroupV2).
     """
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
@@ -96,10 +91,8 @@ def first_run(obs_session):
 @pytest.mark.database
 @pytest.mark.slow
 def test_rerun_reports_an_ignored_curation_description(first_run):
-    """A re-run reuses the root curation, so a new description is reported.
-
-    It used to reach only the logger; the run summary looked clean.
-    """
+    """A re-run that reuses the root curation reports the new description
+    in the run summary."""
     _, inputs = first_run
     run_summary = run_v2_pipeline(
         **{**inputs, "curation_description": "a new description"}
@@ -139,9 +132,7 @@ def test_run_summary_has_additive_keys(first_run):
 def test_run_summary_stable_keys_unchanged(first_run):
     """The seven stable keys survive an idempotent re-run byte-for-byte.
 
-    In-test baseline: the selection PKs are deterministic and the reused
-    curation key is stable, so a second run's stable keys must equal the
-    first's (additive instrumentation must not perturb them).
+    Selection PKs are deterministic and the reused curation key is stable.
     """
     first_run_summary, inputs = first_run
     second_run_summary = run_v2_pipeline(**inputs)
@@ -156,8 +147,7 @@ def test_run_summary_stable_keys_unchanged(first_run):
 def test_first_run_computed_second_reused(first_run):
     """First run reports ``computed`` everywhere; a re-run reports ``reused``.
 
-    The reused no-op run is also strictly faster than the computed run (its
-    per-stage seconds sum to less), since populate/insert short-circuit.
+    The reused run's stage seconds sum to less than the computed run's.
     """
     first_run_summary, inputs = first_run
     assert all(first_run_summary[k] == "computed" for k in _STATUS_KEYS), {
@@ -210,10 +200,8 @@ def test_idempotent_run_summary_modulo_timing(first_run):
 def test_stage_error_carries_partial_run_summary(first_run, monkeypatch):
     """A failing stage raises PipelineStageError with the partial run summary.
 
-    Recording/artifact detection are already populated (reused, fast); patch
-    ``Sorting.populate`` to throw so the sorting stage fails with
-    ``recording_id`` + ``artifact_detection_id`` already in the partial run
-    summary and the injected error chained.
+    ``Sorting.populate`` is patched to raise; the summary carries
+    ``recording_id`` and ``artifact_detection_id`` and the error is chained.
     """
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -235,8 +223,7 @@ def test_stage_error_carries_partial_run_summary(first_run, monkeypatch):
     )
     assert "sorting_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
-    # The partial summary carries the timing of stages completed before the
-    # failure, not an empty stage_seconds.
+    # Completed stages keep their timing.
     assert {"recording", "artifact_detection"} <= set(
         err.partial_run_summary["stage_seconds"]
     )
@@ -246,9 +233,7 @@ def test_stage_error_carries_partial_run_summary(first_run, monkeypatch):
 def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
     """A curation failure's partial run summary carries the pre-curation data.
 
-    ``n_units`` (a stable key) and ``warnings`` are known before the curation
-    stage runs, so a ``PipelineStageError`` from ``insert_curation`` must carry
-    them (along with the three selection PKs), not just the pre-sorting keys.
+    ``n_units``, ``warnings`` and the three selection PKs are included.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -272,8 +257,7 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
         "n_units",
     } <= set(err.partial_run_summary)
     assert "warnings" in err.partial_run_summary
-    # The curation stage failed before writing the root id, so neither the root
-    # nor the (always-None-until-curated) analysis id is in the partial summary.
+    # Neither the root id nor the analysis id is set before curation.
     assert "root_curation_id" not in err.partial_run_summary
     assert "auto_labeled_curation_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
@@ -284,10 +268,7 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
 def test_zero_unit_warning_in_run_summary(first_run):
     """A zero-unit sort records its advisory on the run summary ``warnings``.
 
-    The shipped clusterless pipeline preset (100 µV detect_threshold) finds
-    zero peaks on the smoke fixture, so the run completes gracefully
-    (``n_units == 0``) with the zero-unit message captured for programmatic
-    access.
+    The clusterless preset (100 µV) finds no peaks on the smoke fixture.
     """
     _, inputs = first_run
     run_summary = run_v2_pipeline(
@@ -307,11 +288,9 @@ def test_zero_unit_warning_in_run_summary(first_run):
 def test_curation_stage_wraps_missing_merge_registration(first_run):
     """A reused root whose merge registration is gone fails stage-aware.
 
-    The merge_id read-back lives inside the curation stage, so an out-of-band
-    deletion of the ``SpikeSortingOutput.CurationV2`` registration (a realistic
-    edge -- summarize_curation tolerates it too) surfaces as a typed
-    ``PipelineStageError`` carrying the partial run summary, not a raw
-    ``fetch1``.
+    A deleted ``SpikeSortingOutput.CurationV2`` row raises
+    ``PipelineStageError`` with the partial run summary, not a raw ``fetch1``
+    error.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -341,8 +320,7 @@ def test_curation_stage_wraps_missing_merge_registration(first_run):
             "n_units",
         } <= set(err.partial_run_summary)
     finally:
-        # Restore a registered root so the other first_run consumers see a
-        # valid, reusable curation regardless of test order.
+        # Restore it for the other first_run consumers.
         clear_curations_for(sort_pk)
         run_v2_pipeline(**inputs)
 
@@ -352,11 +330,8 @@ def test_populate_tolerating_concurrent_duplicate():
     """A benign concurrent duplicate (row committed by an overlapping run) is
     reused, not raised; a real duplicate/other error still propagates.
 
-    run_v2_pipeline populates with reserve_jobs=False, so an overlapping
-    populate of the same content-addressed key can commit the row mid-compute
-    and make this call's insert raise DuplicateError. Because the id is
-    content-addressed the row is the identical result: adopt it. A duplicate
-    with the row STILL absent, or any non-duplicate error, is a genuine failure.
+    With reserve_jobs=False an overlapping populate can commit the same
+    content-addressed row first; that row is the same result.
     """
     import datajoint as dj
 
@@ -411,12 +386,8 @@ def test_populate_tolerating_concurrent_duplicate():
 def test_populate_once_populates_within_lock(monkeypatch, lock_acquired):
     """``_populate_once`` invokes populate while holding the key's advisory lock.
 
-    No-duplicated-compute comes from serialization + DataJoint's own no-op (a
-    waiter that acquires the lock after the winner commits finds the row done),
-    NOT from short-circuiting here -- populate is always invoked so a genuine
-    stage failure still surfaces. Parametrized over whether the lock was
-    acquired: populate must run in BOTH cases (a lock timeout must not skip the
-    stage), strictly between lock-enter and lock-exit.
+    Populate always runs, even on a lock timeout; a waiter finds the row done
+    through DataJoint's own no-op.
     """
     import contextlib
 
@@ -505,12 +476,8 @@ def test_advisory_key_lock_acquire_error_is_non_fatal():
 def test_advisory_key_lock_excludes_other_session(dj_conn, monkeypatch):
     """A second DB session cannot take the lock while the first holds it.
 
-    This is the property the pipeline's per-key lock relies on and that the
-    single-connection round-trip test CANNOT prove: MySQL named locks are reentrant
-    within a session, so ``IS_FREE_LOCK == 0`` on the holding session is equally
-    consistent with a working lock and a no-op. Here an independent second
-    connection must BLOCK (time out) while the first holds the lock, then
-    acquire once the first releases.
+    Needs a second connection: MySQL named locks are reentrant within a
+    session.
     """
     import datajoint as dj
 
@@ -538,7 +505,7 @@ def test_advisory_key_lock_excludes_other_session(dj_conn, monkeypatch):
     try:
         with _advisory_key_lock(holder, key) as held:
             assert held is True
-            # The OTHER session blocks and times out -- cannot acquire.
+            # The other session times out.
             monkeypatch.setattr(db_locking, "POPULATE_LOCK_TIMEOUT_S", 1)
             with _advisory_key_lock(waiter, key) as while_held:
                 assert while_held is False

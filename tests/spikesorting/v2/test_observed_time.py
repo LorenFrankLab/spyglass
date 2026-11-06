@@ -15,15 +15,11 @@ from spyglass.spikesorting.v2._core.observed_time import (
 
 
 def test_observed_intervals_end_from_timestamps():
-    """The interval end comes from the recording's own timestamps, not the
-    nominal sampling rate -- a clock that actually runs slower than its
-    declared rate must not drop real samples off the end of an interval."""
+    """The interval end comes from the recording's timestamps, not the
+    nominal rate, so a slow clock keeps its last samples."""
     import spikeinterface.core as si
 
-    # A recording declared at 1000 Hz whose clock actually runs at 990 Hz.
-    # Under ``t + n/fs`` (declared-fs) arithmetic the computed end
-    # would fall short of the recording's own last timestamp, excluding samples
-    # that were genuinely recorded.
+    # Declared 1000 Hz, actual 990 Hz: ``t + n/fs`` would end too early.
     n = 1000
     actual_fs = 990.0
     recording = si.NumpyRecording(np.zeros((n, 1)), 1000.0)
@@ -77,9 +73,8 @@ def test_observed_intervals_rejects_overlapping_output():
     recording = si.NumpyRecording(np.zeros((n, 1)), declared_fs)
     times = np.arange(n) / actual_fs
     recording.set_times(times)
-    # Excludes exactly frame 10 (a single missing sample); the actual gap
-    # (2 sample periods at 4000 Hz) is smaller than the 1/1000s pad the
-    # nominal-rate arithmetic would add to the previous interval's end.
+    # Excludes frame 10; the gap (2 samples at 4000 Hz) is smaller than the
+    # 1/1000 s nominal-rate pad on the previous interval's end.
     valid_times = [
         [float(times[0]), float(times[10])],
         [float(times[11]), float(times[-1])],

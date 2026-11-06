@@ -1,21 +1,12 @@
 """Tests for the whole-session preflight + runner in ``v2.pipeline``.
 
-``preflight_v2_pipeline_session`` and ``run_v2_pipeline_session`` loop the
-single-group helpers over every (or selected) ``SortGroupV2`` row in a session.
-Three tiers:
+Tiers:
 
-    * ``unit`` (DB-free): the shared target resolver's preset validation, the
-      per-group aggregation, and the runner's preflight-gate / continue-on-error
-      control flow -- exercised with monkeypatched resolver / preflight / run so
-      they touch no database.
-    * ``database`` (dj_conn, no ingest): the resolver's "no sort groups" path
-      against a never-ingested session name.
-    * ``integration`` (Docker MySQL + SI 0.104): the resolver subset/missing
-      behavior, the real session preflight, and a real 4-shank session run +
-      idempotent re-run on the polymer smoke fixture.
+* ``unit``: DB-free, with monkeypatched resolver / preflight / run.
+* ``database``: the "no sort groups" path.
+* ``integration``: a real 4-shank session run and idempotent re-run.
 
-The module-level imports are DB-free (``pipeline`` and ``exceptions`` import no
-schema); schema tables are imported lazily inside the tests that need them.
+Module-level imports are DB-free; schema tables are imported in the tests.
 """
 
 from __future__ import annotations
@@ -47,8 +38,7 @@ from tests.spikesorting.v2._ingest_helpers import (
     copy_and_insert_nwb,
 )
 
-# A real, fast, rate-agnostic catalog preset (peak detection, no clustering):
-# keeps the integration run cheap and avoids the sampling-rate preflight check.
+# Fast and rate-agnostic, so the sampling-rate preflight check is avoided.
 _PRESET = "franklab_clusterless_2026_06"
 
 _FIXTURE_NAME = "mearec_polymer_smoke"
@@ -485,10 +475,9 @@ def test_session_runner_continue_on_error(monkeypatch):
 
 @pytest.mark.unit
 def test_session_runner_propagates_preflight_warnings(monkeypatch):
-    """Per-group preflight warnings reach EVERY entry -- ok, failed-preflight,
-    and failed-run -- so describe_run / the batch warning count do not
-    under-report. Each OK group runs with preflight=False,
-    so the warnings must come from the session report, not a per-group rerun.
+    """Per-group preflight warnings reach every entry (ok, failed-preflight,
+    failed-run), taken from the session report since groups run with
+    ``preflight=False``.
     """
     monkeypatch.setattr(
         plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1, 2]
@@ -555,13 +544,10 @@ def test_session_runner_propagates_preflight_warnings(monkeypatch):
         continue_on_error=True,
     )
     by_id = {r["sort_group_id"]: r for r in results}
-    # ok group: its preflight warning is folded into the success summary.
     assert by_id[0]["outcome"] == "ok"
     assert "w-ok" in by_id[0]["warnings"]
-    # failed-preflight group: its warning rides on the failed entry.
     assert by_id[1]["outcome"] == "failed"
     assert "w-failpre" in by_id[1]["warnings"]
-    # failed-run group: its preflight warning rides on the failed entry.
     assert by_id[2]["outcome"] == "failed"
     assert "w-failrun" in by_id[2]["warnings"]
 
@@ -595,19 +581,13 @@ def test_session_runner_fail_fast(monkeypatch):
             pipeline_preset=_PRESET,
             continue_on_error=False,
         )
-    # Fail-fast re-raises the original exception unwrapped: the partial run
-    # summary it carries survives intact (not reconstructed or dropped).
+    # The original exception is re-raised with its partial summary.
     assert exc.value.partial_run_summary == {"recording_id": "r1"}
 
 
 @pytest.mark.unit
 def test_session_runner_continue_on_error_zero_units(monkeypatch):
-    """A per-group ``ZeroUnitSortError`` becomes a failed entry (no partial).
-
-    Exercises the third arm of the per-group catch tuple and the
-    ``getattr(exc, "partial_run_summary", None)`` fallback for an exception that
-    carries no partial summary.
-    """
+    """A per-group ``ZeroUnitSortError`` becomes a failed entry (no partial)."""
     monkeypatch.setattr(
         plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
     )
@@ -706,10 +686,8 @@ def test_resolve_no_sort_groups(dj_conn):
 def session_inputs(dj_conn, smoke_nwb):
     """Ingest + configure the smoke fixture (defaults + team + sort groups).
 
-    Distinct ``nwb_file_name`` so this module's rows never collide with the
-    other v2 pipeline modules. ``configure_v2_run_inputs`` builds one sort group
-    per shank (the polymer fixture yields several), which is exactly what the
-    batch runner targets. No ``populate`` here.
+    A distinct ``nwb_file_name`` avoids collisions with other modules. One
+    sort group per shank; no ``populate``.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -818,10 +796,7 @@ def test_session_runner_all_groups(session_run, session_inputs):
         # A successful entry is a full single-group run summary.
         assert "root_merge_id" in entry and "n_units" in entry
         assert entry["pipeline_preset"] == _PRESET
-        # Fresh session: the first run computes every stage. Paired with the
-        # idempotent test's all-"reused" assertion, this makes the
-        # computed/reused distinction load-bearing (a bug that always reported
-        # "reused" would fail here).
+        # First run computes every stage; the idempotent test expects "reused".
         for status_key in (
             "recording_status",
             "artifact_detection_status",

@@ -1,15 +1,11 @@
 """Immutable, persisted browser-curation review profiles.
 
-``_PipelinePreset`` already binds the metric and auto-curation recipe names in
-memory, while ``CurationEvaluationSelection`` binds those names for one
-curation.  Neither is a durable user-facing review configuration.  This lookup
-therefore persists the recipe pair together with the ordered display columns,
-label palette, and label-import policy under one immutable, content-addressed
-name.  Runtime delivery settings and curation-specific annotation selections
-remain inputs to a review invocation and are intentionally absent.
+A profile stores the metric and auto-curation recipe names with the ordered
+display columns, label palette, and label-import policy under one
+content-addressed name. Delivery settings and annotation selections are
+per-review inputs, not profile content.
 
-This is a database-only module: it reuses dependency-light FigPack config
-helpers but never imports the optional FigPack runtime.
+Does not import the optional FigPack runtime.
 """
 
 from __future__ import annotations
@@ -53,10 +49,10 @@ _PROFILE_CONTENT_FIELDS = (
 class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     """One immutable recipe + display contract for browser curation.
 
-    Insert through :meth:`insert`; a repeated name/content pair is
-    idempotent, changed content requires a new name, and duplicate content under
-    a second name is refused (reuse the existing profile name instead).
-    List order is semantic and is preserved in both storage and ``profile_hash``.
+    - Re-inserting the same name and content is a no-op.
+    - Changed content needs a new name.
+    - The same content under a second name is refused.
+    - List order is semantic and included in ``profile_hash``.
     """
 
     definition = """
@@ -176,8 +172,7 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 "nn_noise_overlap",
                 "trough_half_width",
             ],
-            # Start from the existing FigPack default palette and add the
-            # Frank-lab rule verdict that curators must be able to inspect.
+            # Curators must see the Frank-lab rule verdict ``reject``.
             "label_options": [
                 *default_label_options(),
                 CurationLabel.reject.value,

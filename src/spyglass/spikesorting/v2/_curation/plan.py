@@ -1,25 +1,6 @@
-"""Pure builders for the v2 curation insert plan and read summary.
+"""Pure halves of ``CurationV2.insert_curation`` and ``summarize_curation``.
 
-``CurationV2.insert_curation`` is split into a pure planning half (here)
-and a DB half (the table method). :func:`build_curation_insert_plan`
-resolves the post-merge curated ``Unit`` rows (via
-:func:`._curation.transforms.build_curated_unit_rows`) and validates the
-supplied labels against the source/written unit sets. The table method
-allocates the auto-increment ``curation_id`` (a DB query) before calling it,
-then stages the curated-units NWB and runs the atomic insert transaction on
-the plan.
-
-``CurationV2.summarize_curation`` is split the same way:
-:func:`build_curation_summary` assembles its return dict (including the
-``is_merge_preview`` derivation) from the already-fetched fields, while
-the table method keeps the PK guard and the DB fetches.
-
-Isolating the pure halves makes the row-shaping + stray-label decision
-matrix (truly-stray raise vs warn-and-drop, absorbed-contributor drop) and
-the summary formatting unit-testable without a DataJoint transaction.
-
-Dependency-light: imports only :mod:`_curation.transforms` (DB-free) and the
-shared spyglass logger.
+The table methods keep the DB queries, NWB staging, and transaction.
 """
 
 from __future__ import annotations
@@ -37,14 +18,11 @@ from spyglass.utils import logger
 class CurationInsertPlan(NamedTuple):
     """The curated rows a ``CurationV2`` insert needs.
 
-    ``unit_rows`` are the post-merge ``CurationV2.Unit`` rows (each with its
-    peak Electrode FK + amplitude); ``kept_unit_to_contributors`` maps each
-    kept unit_id to the source unit_ids it absorbed (a 1-element self-entry
-    for a pass-through unit), in the SOURCE namespace (raw sort for a root,
-    the parent curation for a child). ``labels`` is the effective
-    ``{unit_id: [label, ...]}`` after inheritance/override composition (so a
-    child inherits its parent's labels by default). ``curation_id`` is the
-    auto-increment id the caller resolved, threaded through for row keying.
+    - ``unit_rows``: post-merge ``CurationV2.Unit`` rows.
+    - ``kept_unit_to_contributors``: kept unit_id to absorbed source
+      unit_ids (self-entry for pass-through), in the source namespace.
+    - ``labels``: effective ``{unit_id: [label, ...]}`` after composition.
+    - ``curation_id``: the id the caller allocated.
     """
 
     curation_id: int
@@ -102,21 +80,11 @@ def validate_label_unit_ids(
 ) -> None:
     """Validate label keys against the source-union-written unit sets.
 
-    Labels are written by iterating the final (written) unit_ids, so a key
-    that is not written is dropped. Two kinds of unwritten key are handled
-    differently:
+    Warns or raises only; the caller drops unwritten keys.
 
-    * TRULY stray (typo): keys in neither the source sorting nor the
-      written curated set -- nothing they could ever refer to. Raises
-      ``ValueError`` by default (typo protection); ``allow_unknown_unit_ids=True``
-      restores warn-and-drop.
-    * ABSORBED-source: keys that exist in the source sorting but are
-      contributors absorbed into a merge (so not written). Always
-      warn-and-drop -- the label cannot attach to the merged unit, but a
-      caller passing original-id labels should not break.
-
-    Side-effect only (warns / raises); the caller drops the unwritten keys
-    by iterating ``written_unit_ids`` when inserting ``UnitLabel`` rows.
+    - Stray keys (in neither set): raise ``ValueError``, or warn when
+      ``allow_unknown_unit_ids=True``.
+    - Absorbed merge contributors: always warn.
     """
     label_keys = set(labels)
     truly_stray = label_keys - (source_unit_ids | written_unit_ids)
@@ -159,20 +127,10 @@ def build_curation_insert_plan(
 ) -> CurationInsertPlan:
     """Build the curated ``Unit`` rows, compose labels, and validate them.
 
-    ``curation_id`` is resolved by the caller (an auto-increment DB query)
-    and threaded in. ``sorting_units`` are the SOURCE units the curation
-    composes from -- the raw ``Sorting.Unit`` rows for a root curation, or the
-    parent curation's ``CurationV2.Unit`` rows for a child. Row shaping is
-    delegated to :func:`._curation.transforms.build_curated_unit_rows`, label
-    inheritance/override to
-    :func:`._curation.transforms.compose_curation_labels`, and label-key
-    validation to :func:`validate_label_unit_ids`.
-
-    ``parent_labels`` (``{parent_unit_id: [label, ...]}``, empty/None for a
-    root) and ``label_policy`` (``"inherit"`` default / ``"replace"``) drive
-    label composition: a child inherits its parent's labels by default, with a
-    committed merge inheriting the union of its contributors' labels. The
-    returned plan carries the EFFECTIVE (composed) labels.
+    ``sorting_units`` are the source units: raw ``Sorting.Unit`` rows for a
+    root, the parent's ``CurationV2.Unit`` rows for a child.
+    ``parent_labels`` (empty for a root) and ``label_policy`` drive
+    :func:`._curation.transforms.compose_curation_labels`.
 
     Raises
     ------
@@ -226,11 +184,7 @@ def build_curation_summary(
 ) -> dict:
     """Assemble the ``summarize_curation`` return dict.
 
-    Pure formatter: given the already-fetched curation fields, build the
-    notebook-printable summary. ``is_merge_preview`` is derived here from the
-    values in hand (:func:`._curation.transforms.is_merge_preview`, which
-    ``has_unapplied_proposed_merges`` also uses) rather than re-fetching. No
-    database access.
+    Pure formatter over already-fetched fields.
 
     Parameters
     ----------

@@ -1,24 +1,10 @@
 """DB-free NWB (de)serialization for cross-session match output.
 
-``UnitMatch.make`` writes the pairs table into an ``AnalysisNwbfile``, next to
-the run's provenance tables (``_storage.provenance``: the run header, one row per
-matching input, one row per constituent recording):
-
-``unit_match_pairs``
-    a long table, one row per match pair between two matching inputs, carrying
-    both sides' ``(sorting_id, curation_id, unit_id)`` (``session_a_*`` is the
-    input with the lower ``input_index``) plus the match probability and the
-    optional drift / FDR columns. UnitMatch has no per-pair source for either,
-    so a missing value is stored as a native HDF5 NaN (HDF5 cannot store
-    ``None`` in a numeric column) and surfaced back as ``None`` on read.
-
-The structured, FK-validated copy of the same pairs lives in the
-``UnitMatch.Pair`` DataJoint part table; this NWB table is the exportable
-analysis artifact (it travels with DANDI / kachery / recompute like every other
-v2 analysis NWB). A single-input run writes an empty table.
-
-This module touches no DataJoint connection: the builder is pure and the write /
-read functions take an absolute file path the ``@schema`` table layer resolves.
+``unit_match_pairs`` has one row per match pair, with both sides'
+``(sorting_id, curation_id, unit_id)`` (``session_a_*`` has the lower
+``input_index``). Missing drift / FDR values are stored as NaN and read back
+as ``None``. ``UnitMatch.Pair`` holds the FK-validated copy; this table is the
+exportable artifact. A single-input run writes an empty table.
 """
 
 from __future__ import annotations
@@ -80,8 +66,6 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
                 float("nan") if value is None else float(value)
             )
 
-    # Concrete dtypes so even an empty (zero-pair) table writes: object for the
-    # uuid strings, int64 / float64 for the numeric columns.
     dtype_for = dict.fromkeys(_STR_COLUMNS, object)
     dtype_for.update(dict.fromkeys(_INT_COLUMNS, np.int64))
     dtype_for.update(dict.fromkeys(_FLOAT_COLUMNS, np.float64))
@@ -104,12 +88,8 @@ def write_pairs_table(
 ) -> str:
     """Append the pairs table to an existing analysis NWB; return its object id.
 
-    Registering the file in the DataJoint ``AnalysisNwbfile`` table is the
-    caller's responsibility (done inside the insert transaction).
-
-    ``provenance_tables`` (optional, from :mod:`._storage.provenance`) are embedded
-    as scratch in the same write so the artifact is self-describing; ``None``
-    leaves only the pairs table.
+    The caller registers the file in ``AnalysisNwbfile``. Optional
+    ``provenance_tables`` are added as scratch in the same write.
     """
     table = build_pairs_table(pairs)
     with pynwb.NWBHDF5IO(path=abs_path, mode="a", load_namespaces=True) as io:
@@ -126,8 +106,6 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
     """Read the pairs table back to a list of dicts (NaN drift / FDR -> None)."""
     (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
     rows: list[dict] = []
-    # itertuples(index=False) is faster + cleaner than iterrows (no per-row
-    # Series). Pair columns are valid identifiers, so attribute access works.
     for row in frame.itertuples(index=False):
         drift = float(row.drift_estimate_um)
         fdr = float(row.fdr_estimate)
@@ -151,10 +129,6 @@ def read_pairs(abs_path: str, object_id: str) -> list[dict]:
 def read_input_provenance(abs_path: str) -> tuple[list[dict], list[dict]]:
     """Read a match run's per-input and per-recording provenance tables.
 
-    ``UnitMatch.make_compute`` writes the two tables next to the pairs table
-    (:data:`~spyglass.spikesorting.v2._storage.provenance.UNITMATCH_INPUTS` and
-    :data:`~spyglass.spikesorting.v2._storage.provenance.UNITMATCH_INPUT_RECORDINGS`).
-
     Parameters
     ----------
     abs_path : str
@@ -164,9 +138,8 @@ def read_input_provenance(abs_path: str) -> tuple[list[dict], list[dict]]:
     -------
     tuple of (list of dict, list of dict)
         The input rows sorted by ``input_index`` and the recording rows sorted
-        by ``(input_index, recording_index)``, with the columns of
-        ``UNITMATCH_INPUT_COLUMNS`` / ``UNITMATCH_INPUT_RECORDING_COLUMNS`` as
-        written (the layout's ``provenance_schema_version`` column dropped).
+        by ``(input_index, recording_index)``, without the
+        ``provenance_schema_version`` column.
     """
     from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUT_COLUMNS,

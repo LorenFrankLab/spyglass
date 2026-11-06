@@ -1,34 +1,13 @@
 """Resolve which source a sort came from and which traces it reads.
 
-A sort answers "what did it run on?" in two separate ways:
+- :class:`SourceLineage`: the sort's original ``Recording`` or
+  ``ConcatenatedRecording`` plus its pinned artifact detection. Metadata
+  consumers read this.
+- :class:`EffectiveTraces`: the persisted artifact every trace consumer
+  reads, either the lineage source or a ``MotionCorrectedRecording``, and
+  whether the artifact mask must still be applied.
 
-- :class:`SourceLineage` is the sort's original source. It is the
-  ``Recording`` or ``ConcatenatedRecording`` selected on ``SortingSelection``,
-  plus the artifact detection pinned to the sort. Metadata consumers (anchor
-  NWB, brain regions, curation routing) read lineage.
-- :class:`EffectiveTraces` is the persisted artifact that holds the traces
-  every trace consumer must read: the sorter input, analyzer builds and
-  rebuilds, metric curation, the recompute audit, and the curation recording
-  accessor. It also says whether the consumer must still apply the sort's
-  artifact mask.
-
-The effective traces are the lineage source itself, or a derived artifact:
-a ``MotionCorrectedRecording`` (kind ``"motion_corrected_recording"``), which
-is persisted already masked. Keeping the two apart lets metadata consumers
-read the original source without inferring it from the derived artifact.
-
-``SortingSelection.resolve_effective_source`` performs the DB reads and builds
-the result with :func:`effective_source_from_base` or
-:func:`effective_source_from_correction`; :func:`correction_lineage_mismatch`
-checks that a corrected recording was made from the sort's own source and mask,
-and :func:`sorting_parts_mismatch` that the parts still give the stored
-``sorting_id``.
-:func:`read_effective_recording` opens the traces from an already-resolved
-path; :func:`read_persisted_traces` opens them as persisted, with no mask at
-load.
-
-DB-FREE. This module activates no ``dj.schema`` and opens no DB connection;
-SpikeInterface and the NWB reader are imported lazily.
+DB-free; SpikeInterface and the NWB reader are imported lazily.
 """
 
 from __future__ import annotations
@@ -170,10 +149,8 @@ def correction_lineage_mismatch(
 ) -> list[str]:
     """Describe how a corrected recording's source differs from a sort's.
 
-    A sort may read a motion-corrected recording only if its motion was
-    estimated on the sort's own source (same kind and key) under the same
-    artifact mask (both ``None`` for a concatenated recording, which carries
-    its member masks).
+    The correction must come from the sort's own source under the same
+    artifact mask.
 
     Parameters
     ----------
@@ -229,12 +206,8 @@ def sorting_parts_mismatch(
 ) -> str | None:
     """Describe why a sort's current parts do not give its ``sorting_id``.
 
-    ``sorting_id`` is derived from the source, the artifact detection, the
-    motion-corrected recording and the sorter row when the selection is
-    inserted. Recomputing it from the parts present now detects a part
-    inserted or deleted around ``SortingSelection.insert_selection``, which
-    would otherwise change the traces a sort's consumers read without
-    changing the sort.
+    Recomputing ``sorting_id`` from the current parts detects a part
+    inserted or deleted outside ``SortingSelection.insert_selection``.
 
     Parameters
     ----------
@@ -294,11 +267,8 @@ def check_corrected_channel_map(
 ) -> None:
     """Check a loaded corrected recording against its row's channel map.
 
-    Every consumer of a motion-corrected recording must see the channels the
-    correction wrote, in order, at the positions it recorded. With
-    ``border_mode="remove_channels"`` that is a subset of the source's
-    channels; nothing may pad, reorder or drop channels to restore the
-    source's set.
+    Channels must match the row exactly, in order; with
+    ``border_mode="remove_channels"`` they are a subset of the source's.
 
     Parameters
     ----------
@@ -433,11 +403,8 @@ def read_persisted_traces(
 ) -> si.BaseRecording:
     """Open the effective traces as persisted: no artifact mask at load.
 
-    A single-recording source's cache comes back unmasked (a consumer that
-    needs the mask applies it itself, e.g. through ``artifact_frame_ranges``),
-    while a concat artifact keeps its member masks and a motion-corrected
-    artifact keeps the sort's mask, both of which are written into the file.
-    No DB access.
+    A single-recording cache comes back unmasked; concat and
+    motion-corrected artifacts have their masks written in. No DB access.
 
     Parameters
     ----------
@@ -461,12 +428,7 @@ def read_persisted_traces(
 class SourceResolution:
     """Result of ``SortingSelection.resolve_source(key)``.
 
-    Used by ``Sorting.make_fetch`` and the sorting / curation / unit-matching
-    readers to dispatch on which source-part row backs a ``SortingSelection``.
-    ``kind`` is the source enum; ``key`` is the source-row PK fields
-    (``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``) so the
-    caller can pass it straight into the upstream table's ``get_*`` / fetch
-    helpers.
+    ``key`` is ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``.
     """
 
     kind: Literal["recording", "concatenated_recording"]

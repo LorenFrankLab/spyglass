@@ -1,8 +1,6 @@
 """DB-free tests for the SpikeInterface nn_noise_overlap sparse-analyzer shim.
 
-These build tiny in-memory SI analyzers (no database, no fixtures) and exercise
-the vendored fix directly, so the SI bug and its correction are guarded cheaply
-and in isolation from the heavy end-to-end curation-evaluation test.
+Tiny in-memory analyzers exercise the patches directly; no database.
 """
 
 import numpy as np
@@ -17,8 +15,7 @@ _SI_COMPUTE_ISOLATION = _pm._compute_isolation
 def _sparse_whitened_analyzer(num_channels, num_units):
     """A sparse, spatially-whitened analyzer with median templates + PCA.
 
-    Mirrors how the v2 metric analyzer is built (sparse + whitened + the pinned
-    PCA params), which is the configuration that trips SI's bug.
+    Built like the v2 metric analyzer, the configuration that trips SI.
     """
     import spikeinterface.full as sf
     import spikeinterface.preprocessing as spre
@@ -55,10 +52,8 @@ def test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel(
 ):
     """The vendored fix returns a finite value where upstream raises (-> NaN).
 
-    Unpatched SI derives the peak channel from the dense median template but
-    indexes the sparse noise cluster with it, so on a sparse analyzer whose peak
-    channel exceeds the sparse channel count it raises IndexError (swallowed as
-    NaN by SI's per-unit ``except``). The fix sparsifies the median first.
+    SI indexes the sparse noise cluster with a dense peak channel and raises
+    IndexError (reported as NaN). The fix sparsifies the median first.
     """
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         _nn_noise_overlap_sparse_fixed,
@@ -91,9 +86,8 @@ def test_patch_is_idempotent_and_installs_the_fix():
 def test_isolation_patch_matches_spikeinterface(n_neighbors, n_workers):
     """The installed isolation score is SI's, on any number of threads.
 
-    SI's single-threaded scikit-learn k-d tree took ~20 of a 28 min
-    auto-curation on a real 20 min epoch. ``n_neighbors`` beyond the two
-    clusters' size exercises SI's adjustment to ``n_spikes - 1``.
+    ``n_neighbors`` beyond the two clusters' size exercises SI's adjustment
+    to ``n_spikes - 1``.
     """
     import spikeinterface.metrics.quality.pca_metrics as pm
 
@@ -330,8 +324,8 @@ def test_nn_noise_cluster_unchanged_when_spans_cover_recording(cover):
 
 def test_nn_noise_cluster_warns_when_no_span_fits_a_snippet(caplog):
     """No span long enough for one snippet: a warning names the snippet
-    length and the longest span, then the error propagates (SI's caller
-    turns it into a silent NaN, so the warning is the only trace)."""
+    length and the longest span, then the error propagates (SI reports it
+    as NaN)."""
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         _draw_noise_cluster,
         noise_cluster_spans,
@@ -675,10 +669,8 @@ def sd_ratio_twins():
     ISIs >= 5 ms so a unit's waveforms never overlap). Every spike sits at
     least 4 ms from an excluded frame, so the two analyzers share their
     waveforms, templates and spike amplitudes: only the noise estimate can
-    differ. Each recording caches its ``std`` noise from every frame it is
-    measured on -- the clean twin over every frame, the masked twin over
-    every retained frame (the span sampler's 10 s budget covers all 9.8 s
-    of them, so the estimate is deterministic).
+    differ. The masked twin's noise covers every retained frame (the 10 s
+    span budget exceeds the 9.8 s retained), so it is deterministic.
 
     Returns
     -------
@@ -809,9 +801,8 @@ def test_sd_ratio_unchanged_when_spans_cover_recording(sd_ratio_twins, cover):
 def test_template_correction_reproduces_spikeinterface(sd_ratio_twins):
     """Over SI's own spike population the correction is SI's, to rounding.
 
-    Given every spike and every sample -- SI's ``p`` -- the correction
-    applied to SI's uncorrected ratio reproduces SI's corrected ratio, so
-    the noise level, extremum channel and template it reads are SI's.
+    Given every spike and sample (SI's ``p``), the correction reproduces
+    SI's corrected ratio.
     """
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         _template_corrected_sd_ratio,

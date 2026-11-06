@@ -43,12 +43,8 @@ def close_nwb_recording(recording) -> None:
 def saved_extension_metadata(analyzer, name: str):
     """Load a saved extension's params and run status without its data.
 
-    SI 0.104.3 writes ``params.json`` when a compute starts, the data while it
-    runs (``waveforms.npy`` is a memmap filled in place), and ``run_info.json``
-    only once it finishes, so an extension without run info is an interrupted
-    or still-running compute. Only analyzers saved by a SpikeInterface that
-    predates run info legitimately lack it, and every v2 analyzer is built by
-    the pinned SI.
+    SI 0.104.3 writes ``run_info.json`` only when a compute finishes, so an
+    extension without it is interrupted or still running.
 
     Parameters
     ----------

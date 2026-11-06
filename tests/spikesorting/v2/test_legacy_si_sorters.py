@@ -1,12 +1,7 @@
 """DB-gated test for the opt-in legacy-sorter back-compat helper.
 
-``SorterParameters.insert_default_legacy_si_sorters()`` replicates v1's
-auto-insert of ``('<sorter>', 'default')`` rows for SI sorters outside
-v2's curated set, so v1 workflows that name a non-curated sorter via
-``('kilosort2_5', 'default')`` keep resolving after porting.
-
-This test requests ``dj_conn`` directly (function-scoped) so the rest of
-the migration tests stay hermetic / DB-free.
+``SorterParameters.insert_default_legacy_si_sorters()`` inserts v1-style
+``('<sorter>', 'default')`` rows for SI sorters outside v2's curated set.
 """
 
 from __future__ import annotations
@@ -17,11 +12,8 @@ import pytest
 def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
     """The call is safe, idempotent, and lands a back-compat row.
 
-    Asserts that after the opt-in call, an installed non-curated SI
-    sorter has a ``('<sorter>', 'default')`` row, that the call raises
-    nothing even though ``available_sorters()`` includes uninstalled
-    sorters (those are caught + logged + skipped), and that a second
-    call is a no-op (idempotent via ``skip_duplicates=True``).
+    Uninstalled sorters in ``available_sorters()`` are skipped without
+    raising.
     """
     import spikeinterface.sorters as sis
 
@@ -36,7 +28,6 @@ def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
             "the legacy back-compat helper"
         )
 
-    # First call populates; second call must be a no-op (idempotent).
     SorterParameters.insert_default_legacy_si_sorters()
     SorterParameters.insert_default_legacy_si_sorters()
 
@@ -66,11 +57,8 @@ def test_insert_default_legacy_si_sorters_skips_not_installed(
 ):
     """An available-but-not-installed sorter gets no 'default' row.
 
-    A wrapper class exposes its defaults even when its binary is absent,
-    so the helper must gate on ``installed_sorters()`` (mirroring
-    ``insert_default``) -- otherwise it would ship a row that fails at
-    ``Sorting.populate`` time. A fictitious sorter name proves the gate
-    fires *before* the wrapper lookup (that name is in no registry).
+    The helper gates on ``installed_sorters()`` before the wrapper lookup;
+    a fictitious sorter name proves the order.
     """
     import spikeinterface.sorters as sis
 
@@ -93,12 +81,8 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
 ):
     """A legacy back-compat row inserts and backfills local execution_params.
 
-    The helper builds its row WITHOUT execution_params, so the insert hook must
-    backfill the default (local) execution blob. Driven deterministically with a
-    fake INSTALLED non-curated sorter so the test does not depend on which SI
-    sorters happen to be installed -- which is also why the happy-path test above
-    can skip. A regression that built a wrong-length positional row (e.g. omitting
-    the execution_params columns) would fail the validated insert here.
+    Uses a fake installed sorter so the result does not depend on which SI
+    sorters are installed.
     """
     import spikeinterface.sorters as sis
 
@@ -117,8 +101,7 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
 
     monkeypatch.setattr(sis, "available_sorters", lambda: [fake])
     monkeypatch.setattr(sis, "installed_sorters", lambda: [fake])
-    # The helper reads the wrapper class out of ``sis.sorter_dict``, so the
-    # fake must be registered there for this path to run at all.
+    # The helper reads wrappers from ``sis.sorter_dict``.
     monkeypatch.setitem(sis.sorter_dict, fake, FakeSorter)
     request.addfinalizer(
         lambda: (
@@ -138,14 +121,10 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
 
 
 def test_legacy_default_rows_exclude_job_kwargs(dj_conn, monkeypatch, request):
-    """Seeded rows carry wrapper params only -- no SI global job kwargs.
+    """Seeded rows carry wrapper params only, no SI global job kwargs.
 
-    SpikeInterface's ``default_params()`` folds ``get_global_job_kwargs()``
-    into the returned dict for any wrapper with
-    ``requires_binary_data=True``, so a row built from it carries
-    ``n_jobs`` / ``chunk_duration`` / ... -- keys the wrapper-vocabulary
-    guard (built from ``_dynamic_params()``) rejects at insert, aborting
-    the whole batch. The helper must seed the algorithm knobs alone.
+    SI's ``default_params()`` adds global job kwargs when
+    ``requires_binary_data=True``; the insert guard would reject them.
     """
     import spikeinterface.sorters as sis
     from spikeinterface.sorters import sorterlist

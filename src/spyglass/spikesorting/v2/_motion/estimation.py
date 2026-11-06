@@ -1,32 +1,16 @@
 """SpikeInterface motion estimation: parameters, serialization, summaries.
 
-``motion_to_storage_dict`` / ``motion_from_storage_dict`` round-trip a
-``Motion`` through a DataJoint-blob-safe dict; ``motion_max_abs_displacement_um``
-and ``motion_n_temporal_bins`` summarize one for a stored row.
+- ``motion_to_storage_dict`` / ``motion_from_storage_dict``: blob-safe
+  ``Motion`` round trip.
+- ``resolve_estimation_params`` / ``resolved_params_hash``: the fully
+  resolved, content-addressed configuration.
+- ``build_estimation_clock`` / ``EstimationClockRecording``: every
+  continuity span on one clock, gaps capped.
+- ``estimate_motion_in_spans``: SI's ``compute_motion`` on valid samples.
+- ``apply_motion_on_estimation_clock``: interpolate a saved estimate on the
+  same clock.
 
-``resolve_estimation_params`` turns a ``MotionEstimationParameters`` blob into
-the fully resolved configuration the estimator passes to SpikeInterface, and
-``resolved_params_hash`` content-addresses it.
-
-``build_estimation_clock`` places a source's continuity spans on one
-*estimation clock* (real gaps between spans kept up to a cap), and
-``EstimationClockRecording`` presents a recording on that clock, so one
-estimation covers every span in a single reference frame.
-
-``estimate_motion_in_spans`` estimates motion from the valid samples of one
-recording: it reproduces SpikeInterface's ``compute_motion`` with explicit
-noise levels from the statistics spans and keeps only peaks whose localization
-window lies inside one statistics span.
-
-``resolve_interpolation_params`` canonicalizes a
-``MotionInterpolationParameters`` blob, and
-``apply_motion_on_estimation_clock`` interpolates a saved estimate onto the
-recording it was estimated from, on the same estimation clock.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection. Only ``spikeinterface.core`` is imported at module level (the
-clock view subclasses its recording classes); the rest of SpikeInterface is
-imported inside the functions that need it.
+Only ``spikeinterface.core`` is imported at module level.
 """
 
 from __future__ import annotations
@@ -48,29 +32,21 @@ from spyglass.spikesorting.v2._sorting.dispatch import (
     STATISTICS_SAMPLE_NUM_CHUNKS,
 )
 
-#: Version of the motion-estimation algorithm this module implements (the
-#: input calibration and masking, SpikeInterface call sequence, peak filter,
-#: noise estimate and resolution rules). Part of every estimate's identity;
-#: bump it when any of those change in a way that can change a stored
-#: estimate.
+#: Part of every estimate's identity; bump when a change to this module can
+#: change a stored estimate.
 MOTION_ALGORITHM_VERSION = 3
 
-#: Version of the motion-application algorithm
-#: (:func:`apply_motion_on_estimation_clock`: masking, clock, interpolation
-#: call). Part of every corrected recording's identity; bump it when a change
-#: can change stored corrected traces.
+#: Part of every corrected recording's identity; bump when
+#: :func:`apply_motion_on_estimation_clock` can change stored traces.
 MOTION_INTERPOLATION_ALGORITHM_VERSION = 2
 
-#: Peak waveform window (ms) used to localize peaks. SpikeInterface 0.104.3's
-#: ``compute_motion`` extracts exactly this window in its detect-and-localize
-#: pipeline (``preprocessing/motion.py:387``), which the estimator reproduces.
-#: A peak is kept only when this whole window lies inside one statistics span.
+#: Peak localization window (ms), as in SI 0.104.3's ``compute_motion``
+#: (``preprocessing/motion.py:387``).
 LOCALIZATION_MS_BEFORE = 0.1
 LOCALIZATION_MS_AFTER = 0.3
 
-#: SpikeInterface methods the estimator supports for each step. Every shipped
-#: preset uses exactly these; others would need their own resolution rules
-#: (for example, a torch detection device) before they could be pinned.
+#: Supported SI methods per step; others need their own resolution rules
+#: (e.g. a torch device).
 _DETECT_METHODS = ("locally_exclusive",)
 _LOCALIZE_METHODS = (
     "center_of_mass",
@@ -79,8 +55,7 @@ _LOCALIZE_METHODS = (
 )
 _ESTIMATE_METHODS = ("dredge_ap",)
 
-#: Signature parameters the estimator binds itself, per step: never persisted
-#: as configuration.
+#: Parameters the estimator binds itself; never persisted.
 _DETECT_BOUND = frozenset(
     {"self", "recording", "noise_levels", "return_output"}
 )
@@ -102,10 +77,8 @@ _ESTIMATE_BOUND = frozenset(
 #: ``dredge_ap``'s ``post_transform`` defaults to ``numpy.log1p``.
 _NAMED_CALLABLES = {"numpy.log1p": np.log1p}
 
-#: Random-chunk budget of the noise estimate, taken from the span sampler
-#: (``_sorting.dispatch._sample_statistics_spans``) so the resolved
-#: configuration -- and hence the estimate's identity -- follows any change
-#: to that sampler.
+#: Noise chunk budget from the span sampler, so a sampler change changes the
+#: estimate's identity.
 _NOISE_METHOD = "mad"
 _NOISE_NUM_CHUNKS = STATISTICS_SAMPLE_NUM_CHUNKS
 _NOISE_CHUNK_DURATION = f"{STATISTICS_SAMPLE_CHUNK_MS}ms"
@@ -128,9 +101,8 @@ def _with_motion_arrays(stored: dict) -> dict:
 def motion_to_storage_dict(motion) -> dict:
     """Flatten a SpikeInterface ``Motion`` to a DataJoint-blob-safe dict.
 
-    ``Motion.to_dict()`` with the per-segment containers normalized to lists
-    of NumPy arrays, so the rehydrate side is deterministic regardless of how
-    the codec returns nested lists. Keys: ``displacement`` (per segment,
+    ``Motion.to_dict()`` with per-segment containers as lists of NumPy
+    arrays. Keys: ``displacement`` (per segment,
     ``(n_temporal_bins, n_spatial_bins)`` um), ``temporal_bins_s`` (per
     segment, 1-D bin centers in s), ``spatial_bins_um`` (``(n_spatial_bins,)``
     window centers shared across segments), ``direction``,
@@ -142,12 +114,9 @@ def motion_to_storage_dict(motion) -> dict:
 def motion_from_storage_dict(blob: dict):
     """Rebuild a SpikeInterface ``Motion`` from a stored blob.
 
-    Inverse of :func:`motion_to_storage_dict` via ``Motion.from_dict``, which
-    ignores the ``object`` tag (blobs written without it read the same).
-    Coerces each array entry back to a clean NumPy array first so a blob codec
-    that returns the per-segment lists as object arrays still rehydrates to
-    the 2-D / 1-D shapes ``Motion`` asserts on. A missing key raises: it
-    means a corrupt blob, not a default motion axis.
+    Inverse of :func:`motion_to_storage_dict`. Arrays are coerced first since
+    a blob codec may return object arrays. A missing key raises (corrupt
+    blob).
     """
     from spikeinterface.core.motion import Motion
 
@@ -157,9 +126,7 @@ def motion_from_storage_dict(blob: dict):
 def motion_max_abs_displacement_um(motion) -> float:
     """Largest absolute displacement (um) over all segments / bins / windows.
 
-    The single-number drift-severity summary used to flag high-drift
-    sessions. NaNs are NOT masked -- a non-finite estimate surfaces in the
-    stored metric rather than being silently hidden by a ``nan``-aware max.
+    NaNs propagate so a non-finite estimate is not hidden.
     """
     flat = np.concatenate([np.asarray(d).ravel() for d in motion.displacement])
     return float(np.max(np.abs(flat)))
@@ -257,17 +224,10 @@ def _resolve_step(
 def resolve_estimation_params(params: dict) -> dict:
     """Return the fully resolved motion-estimation configuration.
 
-    SpikeInterface merges a user's per-step overrides one level deep over the
-    preset step, ``dict(preset_step, **user_step)``
-    (``preprocessing/motion.py:260-268``, ``_update_motion_kwargs``), and
-    leaves every argument the preset does not name at the called function's
-    own default. ``get_motion_parameters_preset`` does not report all of those
-    defaults: ``dredge_ap``'s live only in its own signature
-    (``sortingcomponents/motion/dredge.py:139-175``; the registration class's
-    ``run`` has none, ``dredge.py:92-108``). This function applies the same
-    merge and then writes every default out explicitly, so the stored
-    configuration is exactly what the estimator passes and no SpikeInterface
-    default stays implicit:
+    Applies SI's one-level per-step merge over the preset
+    (``preprocessing/motion.py:260-268``), then writes every default
+    explicitly, including ``dredge_ap``'s signature-only defaults
+    (``sortingcomponents/motion/dredge.py:139-175``):
 
     - ``detect_kwargs``: the detection class's ``__init__`` defaults, then the
       merged preset/user step. ``noise_levels`` is supplied at run time.
@@ -467,14 +427,13 @@ def spans_without_evidence(
 ) -> list[dict]:
     """The continuity spans that kept no peak.
 
-    The estimate over such a span rests on the estimator's temporal prior
-    only (dropped-frame gaps can leave spans too short to hold a peak).
+    The estimate over such a span rests on the temporal prior only.
 
     Parameters
     ----------
     peaks_per_continuity_span : numpy.ndarray
         ``(n_spans,)`` kept peaks per continuity span
-        (:attr:`EstimateDiagnostics.peaks_per_continuity_span`).
+        (:attr:`MotionDiagnostics.peaks_per_continuity_span`).
     clock : EstimationClock
         The estimate's time map.
 
@@ -575,19 +534,12 @@ def peaks_clear_of_joins(
 ) -> np.ndarray:
     """Mark peaks whose detection did not read across an internal join.
 
-    SpikeInterface's ``locally_exclusive`` detector drops a peak when a larger
-    one on a neighbouring channel lies within ``exclude_sweep_size`` frames
-    (``sortingcomponents/peak_detection/locally_exclusive.py:150-183``), and a
-    peak is itself a local extremum of its neighbouring frames (``:127-143``),
-    so whether a peak at frame ``s`` is detected depends on frames
-    ``[s - margin, s + margin]`` with ``margin = exclude_sweep_size + 1``, the
-    detector's ``get_trace_margin`` (``:86-88``). Across a boundary between
-    continuity spans (an acquisition gap or a concatenation join) those frames
-    are adjacent in the recording but not in time, so a peak on one side can
-    suppress a peak on the other. A peak is kept only when that window stays
-    inside its own continuity span. The recording's first start and last end
-    are not joins (the detector reads no frames past them), so a single span
-    keeps every peak.
+    SI's ``locally_exclusive`` detector reads frames ``[s - margin, s +
+    margin]`` around a peak (``get_trace_margin``,
+    ``sortingcomponents/peak_detection/locally_exclusive.py:86-88``). Across
+    a continuity join those frames are not adjacent in time, so a peak is
+    kept only when its window stays in its own span. The recording's outer
+    edges are not joins.
 
     Parameters
     ----------
@@ -642,12 +594,8 @@ def unfiltered_source_problem(
 ) -> "str | None":
     """Say why a source's preprocessing recipe cannot feed motion estimation.
 
-    Motion is estimated on filtered, unwhitened traces: peaks are detected
-    where a trace crosses a multiple of its noise level, and localized from
-    their waveforms, which assumes the traces carry no DC or slow drift of
-    their own. A recipe with ``bandpass_filter=None`` (the shipped
-    ``no_filter`` row) applies no temporal filter at all, so its traces keep
-    the acquisition's DC and low-frequency content.
+    Detection and localization assume no DC or slow drift, which
+    ``bandpass_filter=None`` (the ``no_filter`` row) keeps.
 
     Parameters
     ----------
@@ -799,15 +747,11 @@ def estimation_noise_levels(
 ) -> np.ndarray:
     """Per-channel noise the detection threshold is scaled by.
 
-    With spans that exclude samples, the MAD of seeded random samples drawn
-    only inside the statistics spans (``_sorting.dispatch.
-    cache_span_noise_levels``, the estimate the analyzer noise levels use),
-    so masked zeros and joins do not lower the threshold. With one span
-    covering the recording, SpikeInterface's own ``get_noise_levels`` -- the
-    call ``compute_motion`` makes (``preprocessing/motion.py:359``) -- with
-    its random chunks seeded, since the unseeded call is not repeatable
-    (``core/recording_tools.py:461-468``). ``n_jobs=1`` keeps the chunk
-    average in a fixed order.
+    - Spans that exclude samples: seeded MAD inside the spans
+      (``_sorting.dispatch.cache_span_noise_levels``), so masked zeros do
+      not lower the threshold.
+    - One covering span: SI's ``get_noise_levels``, as ``compute_motion``
+      calls it, but seeded. ``n_jobs=1`` fixes the chunk order.
 
     Parameters
     ----------
@@ -919,22 +863,10 @@ def build_estimation_clock(
     """Place continuity spans on one estimation clock.
 
     ``e_0 = t_0`` and ``e_{i+1} = e_i + (b_i - a_i) / fs + min(g_i,
-    max_gap_s)``, where ``g_i = t_{i+1} - (u_i + 1 / fs)`` is the real gap
-    after span ``i``: from one sample after its last timestamp ``u_i`` to the
-    next span's first timestamp. Inside a span the clock uses the nominal
-    duration ``(b_i - a_i) / fs``; the gap is measured on the real timestamps
-    because a span whose timestamps run slightly off ``fs`` (SpikeInterface
-    derives ``fs`` from a timestamped series' first 1000 steps,
-    ``extractors/nwbextractors.py:369``) drifts from its nominal end by
-    ``ppm * duration``, which would otherwise swamp a gap of a few dropped
-    frames. A next span starting after the last timestamp but less than one
-    sample after it is adjacent (``g_i`` is clamped to 0): float rounding of
-    the timestamps and of ``fs`` makes a true zero gap come out slightly
-    negative. A gap longer than ``max_gap_s`` is shortened to it; a shorter
-    gap keeps its real length. Every span thus shares one clock (and one
-    estimation), while the unobserved time between spans stays bounded: the
-    estimator's temporal bins, and its dense bin-by-bin correlation matrices,
-    grow with the clock's total length.
+    max_gap_s)``, where ``g_i = t_{i+1} - (u_i + 1 / fs)``, clamped at 0, is
+    the real gap after span ``i`` (``u_i`` its last timestamp). Gaps use real
+    timestamps because a nominal ``fs`` drifts over long spans; the cap
+    bounds the estimator's cost.
 
     Parameters
     ----------
@@ -1006,10 +938,8 @@ def build_estimation_clock(
     for i in range(len(spans) - 1):
         duration = (spans[i, 1] - spans[i, 0]) / fs
         gap = starts[i + 1] - (ends[i] + 1.0 / fs)
-        # Adjacent spans (a member join with no real gap) can compute a gap a
-        # rounding error below zero: the timestamps, and fs itself, are
-        # floats. Only a next start at or before the last timestamp is an
-        # overlap; anything between is a zero gap.
+        # Float rounding can make a zero gap slightly negative; only a start
+        # at or before the last timestamp is an overlap.
         if starts[i + 1] <= ends[i]:
             raise ValueError(
                 f"Estimation clock: continuity span {i + 1} (frames "
@@ -1133,18 +1063,11 @@ def displacement_on_source_clock(
 ) -> SourceClockDisplacement:
     """Map a single-segment estimate's temporal bins to source time.
 
-    A bin belongs to the continuity span whose estimation-clock interval
-    ``[e_i, e_i + (b_i - a_i) / fs)`` holds its center. That interval is
-    mapped affinely onto the span's real extent ``[t_i, u_i + 1 / fs)``
-    (first timestamp to one sample after the last), so the source time is
-    ``t_i + (center - e_i) * (u_i + 1 / fs - t_i) / ((b_i - a_i) / fs)``:
-    when the timestamps run at a rate other than the nominal ``fs`` (which
-    SpikeInterface derives from a series' first 1000 steps), inspection
-    times do not inherit that scale error. A center between two spans lies
-    in a capped gap and is reported there, not assigned to a span. A center
-    before the first span or past the last span's end belongs to that span
-    (extrapolated): those are the outer histogram bins that hold its first /
-    final samples.
+    A bin belongs to the span whose estimation interval ``[e_i, e_i + (b_i -
+    a_i) / fs)`` holds its center, mapped affinely onto the span's real
+    extent ``[t_i, u_i + 1 / fs)`` so a timestamp rate off nominal ``fs``
+    does not skew times. Centers between spans are reported as in a gap;
+    centers outside the first or last span extrapolate from it.
 
     Parameters
     ----------
@@ -1225,18 +1148,9 @@ class EstimationClockRecordingSegment(BaseRecordingSegment):
 class EstimationClockRecording(BaseRecording):
     """A single-segment recording presented on its estimation clock.
 
-    Traces, channels, properties and probe are the parent's; only the time
-    lookups follow the :class:`EstimationClock`, computed per call from the
-    span table, so no ``n_samples`` time vector is materialized (a float64
-    vector would cost 8 bytes per frame, about 0.86 GB per hour at 30 kHz).
-    SpikeInterface's motion estimator reads peak times through
-    ``recording.sample_index_to_time`` (``sortingcomponents/motion/dredge.py:
-    227``, ``motion_utils.py:230-236``), and the parent's HDF5-backed NWB time
-    vector is never indexed, so repeated peak frames are safe.
-
-    Preprocessors built on top of this view see a plain ``1 / fs`` clock of
-    their own; only code that asks this view (or its segment) for times sees
-    the estimation clock.
+    Everything but time is the parent's. Times are computed per call, never
+    materialized as a time vector. Preprocessors stacked on this view see a
+    plain ``1 / fs`` clock.
 
     Parameters
     ----------
@@ -1327,27 +1241,11 @@ def estimate_motion_in_spans(
        and whose detection did not read across a join between continuity
        spans (:func:`peaks_clear_of_joins`) are kept.
     4. ``estimate_motion`` reads peak times on the estimation clock
-       (:class:`EstimationClockRecording`), so every continuity span is
-       estimated in one call and shares one reference frame. DREDge centres
-       its displacement on the bins that hold data (``sortingcomponents/
-       motion/dredge.py:853-870``), so estimating spans separately would give
-       each span its own arbitrary offset.
+       (:class:`EstimationClockRecording`), so all spans share one reference
+       frame.
 
-    Detection and localization run as ``compute_motion``'s own pipeline for an
-    empty ``select_kwargs`` (``motion.py:373-412``): the detector node, an
-    ``ExtractDenseWaveforms`` node with the 0.1/0.3 ms window (``motion.py:
-    387``) and the localization node, in one ``run_node_pipeline`` pass on
-    the microvolt view itself (these steps read traces, never times).
-    ``compute_motion``'s other branch (``motion.py:413-432``) is not used: its
-    ``localize_peaks`` defaults to a 0.5/0.5 ms window and, for
-    ``grid_convolution``, replaces the Gaussian prototype with one built from
-    the detected peaks (``sortingcomponents/peak_localization/main.py:44-56``),
-    so it would not reproduce what the presets run. Each peak is localized
-    from its own waveform, so dropping peaks after localization keeps the
-    other peaks' locations unchanged. ``estimate_motion`` then receives every
-    resolved argument explicitly. On one span covering the recording with no
-    peak dropped, the result equals ``compute_motion`` run with the same
-    seeded noise levels on a recording whose clock is ``t_0 + i / fs``.
+    Detection and localization follow ``compute_motion``'s
+    empty-``select_kwargs`` pipeline (``motion.py:373-412``).
 
     Parameters
     ----------
@@ -1413,9 +1311,8 @@ def estimate_motion_in_spans(
     statistics = normalize_spans(statistics_spans)
     _check_estimation_spans(n_samples, clock, statistics)
     check_estimation_eligibility(recording, resolved_params)
-    # Detection thresholds traces against a multiple of their noise and
-    # silenced samples are zeros: both are physical only on microvolts with
-    # zero offset, so calibrate first and silence the calibrated traces.
+    # Thresholds and silenced zeros are physical only in zero-offset
+    # microvolts, so calibrate before silencing.
     recording = silence_frame_ranges(
         recording_in_microvolts(recording),
         complement_frame_ranges(statistics, n_samples),
@@ -1502,10 +1399,8 @@ def estimate_motion_in_spans(
             "Motion estimation: the estimated displacement has "
             f"{int((~np.isfinite(displacement)).sum())} non-finite values."
         )
-    # Count against the histogram bins dredge_ap estimated on
-    # (``np.arange(t0, t_last + bin_s, bin_s)``, ``motion_utils.py:230-233``),
-    # recovered from the bin centers; ``Motion.temporal_bin_edges_s`` instead
-    # clips the outer edges to the outer centers (``core/motion.py:302-305``).
+    # Rebuild dredge_ap's bin edges from the centers; ``Motion.
+    # temporal_bin_edges_s`` clips the outer edges (``core/motion.py:302-305``).
     centers = np.asarray(motion.temporal_bins_s[0], dtype=float)
     half_bin = float(estimate["bin_s"]) / 2.0
     edges = np.append(centers - half_bin, centers[-1] + half_bin)
@@ -1579,24 +1474,10 @@ class AppliedMotion(NamedTuple):
 def recording_in_microvolts(recording):
     """Present a recording as float microvolts with a unit calibration.
 
-    Estimation thresholds each trace against a multiple of its noise and
-    treats silenced samples as zeros, which is physical only for traces in
-    microvolts with zero offset: on raw counts with a nonzero offset, the
-    offset moves every sample away from the threshold's zero and a silenced
-    sample reads as the offset voltage.
-
-    Interpolation mixes channels with weights that need not sum to 1 (the
-    extrapolated contacts at the probe's ends), so it must act on physical
-    voltages: interpolating raw counts and keeping the source's gains and
-    offsets changes the physical value of every weighted sum whose weights do
-    not sum to 1, and of any mix of channels with different gains.
-
-    A float recording whose gains are all 1 and offsets all 0 (or that has
-    neither, a synthetic one) is already in its physical units and is
-    returned unchanged. Any other recording goes through SpikeInterface's
-    ``scale_to_uV`` (``preprocessing/scale.py:68-102``), which computes
-    ``raw * gain + offset`` per channel in float32 and sets gains 1 and
-    offsets 0 (``preprocessing/normalize_scale.py:21-34``).
+    Noise thresholds, silenced zeros and interpolation weights are physical
+    only in zero-offset microvolts. A float recording with unit gains and
+    zero offsets (or neither) is returned unchanged; others go through SI's
+    ``scale_to_uV`` (float32, gains 1, offsets 0).
 
     Parameters
     ----------
@@ -1639,30 +1520,11 @@ def apply_motion_on_estimation_clock(
 ) -> AppliedMotion:
     """Interpolate a saved motion estimate onto the recording it came from.
 
-    The recording is silenced outside its statistics spans (the samples the
-    estimate treated as masked), presented on the estimate's estimation clock
-    (:class:`EstimationClockRecording`), interpolated with SpikeInterface's
-    ``interpolate_motion`` and silenced again. The clock view is the direct
-    parent of the ``InterpolateMotionRecording``, whose segments read each
-    frame's time from their parent segment
-    (``sortingcomponents/motion/motion_interpolation.py:504``) and bin it
-    against the motion's temporal bins (``:175-180``): every frame therefore
-    looks up the displacement at exactly the time it had during estimation.
-    A preprocessor between the two would present a plain ``1 / fs`` clock
-    (``preprocessing/basepreprocessor.py:27-29``) and silently shift the
-    lookups after the first acquisition gap.
-
-    The recording is first converted to microvolts
-    (:func:`recording_in_microvolts`), so the corrected traces are float
-    microvolts with gains 1 and offsets 0. Interpolation is frame-local (one
-    kernel per temporal bin applied to each frame), so a silenced frame stays
-    exactly zero and the sample count, frame order and sampling frequency are
-    unchanged; the second silencing states that contract rather than relying
-    on it. Every interpolation
-    argument is passed explicitly from ``resolved_interpolation``; the
-    motion's own temporal bins are the interpolation bins. The output's
-    channel locations are the unmoved positions of the kept channels
-    (``BasePreprocessor`` copies the parent's metadata).
+    Converts to microvolts, silences outside the statistics spans, presents
+    the estimation clock, runs SI's ``interpolate_motion`` and silences
+    again. The clock view must be the interpolator's direct parent, or frame
+    times after the first gap would shift. Output channel locations are the
+    kept channels' unmoved positions.
 
     Parameters
     ----------
@@ -1727,9 +1589,7 @@ def apply_motion_on_estimation_clock(
         interpolation_time_bin_centers_s=None,
         interpolation_time_bin_edges_s=None,
         interpolation_time_bin_size_s=None,
-        # Stated rather than left to ``dtype=None``, which inherits the input
-        # dtype and raises for an integer one (``sortingcomponents/motion/
-        # motion_interpolation.py:397-401``).
+        # ``dtype=None`` raises for integer inputs.
         dtype=in_uv.get_dtype(),
     )
     kept = set(corrected.channel_ids.tolist())
@@ -1867,12 +1727,8 @@ def motion_estimate_parts_mismatch(
 ) -> str | None:
     """Describe why a selection's current parts do not give its id.
 
-    ``motion_estimate_id`` is derived from the source, the artifact
-    detection and the master's identity columns when the selection is
-    inserted. Recomputing it from the parts present now (with the stored
-    master columns, so a later SpikeInterface or recipe change is not a
-    mismatch) detects a part inserted or deleted around
-    ``MotionEstimateSelection.insert_selection``.
+    Recomputes the id from the current parts and stored master columns, so
+    only a part inserted or deleted outside ``insert_selection`` mismatches.
 
     Parameters
     ----------
@@ -1946,10 +1802,8 @@ def motion_estimate_selection_identity(
 ) -> MotionSelectionIdentity:
     """Derive a ``MotionEstimateSelection`` id without touching the database.
 
-    Resolves the recipe blob against the installed SpikeInterface and stamps
-    the SpikeInterface and algorithm versions, exactly as
-    ``MotionEstimateSelection.insert_selection`` does, so a planner can
-    preview the id the insert will mint.
+    Same derivation as ``MotionEstimateSelection.insert_selection``, so a
+    planner can preview the id.
 
     Parameters
     ----------

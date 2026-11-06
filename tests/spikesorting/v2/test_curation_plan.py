@@ -1,16 +1,6 @@
-"""Unit tests for the pure curation insert-plan builder.
-
-``CurationV2.insert_curation`` delegates its pure half to ``_curation_plan``:
-shape the post-merge ``Unit`` rows (via ``_curation_transforms``) and
-validate the supplied label keys against the source/written unit sets.
-These tests drive the builder + the stray-label decision matrix directly --
-no DataJoint, no transaction -- so the misconfiguration paths (truly-stray
-vs absorbed-contributor labels, raise vs warn-and-drop) are pinned cheaply.
-
-``_curation_plan`` imports only ``_curation_transforms`` plus stdlib logging,
-so this file needs no database fixture; the import-boundary contract is
-separately enforced by ``test_service_import_contracts`` (``_curation_plan`` is
-in ``_DB_FREE_SERVICE_MODULES``).
+"""Tests for ``_curation_plan``, the DB-free half of
+``CurationV2.insert_curation``: post-merge ``Unit`` rows and label-key
+validation against the source and written unit sets.
 """
 
 from __future__ import annotations
@@ -157,7 +147,7 @@ def test_truly_stray_label_warn_and_drop_when_permissive(caplog):
 
 
 def test_absorbed_contributor_label_warns_not_raises(caplog):
-    """A key in the source but absorbed (not written) warns, never raises --
+    """A key in the source but absorbed (not written) warns, never raises,
     even with allow_unknown_unit_ids=False."""
     with caplog.at_level("WARNING", logger="spyglass"):
         _validate({1: ["mua"]}, source={0, 1}, written={0}, permissive=False)

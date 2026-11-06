@@ -1,4 +1,4 @@
-"""Ground-truth accuracy and v1-parity tests on real MEArec fixtures for the v2 single-session pipeline."""
+"""Ground-truth accuracy and v1-parity tests on MEArec fixtures."""
 
 from __future__ import annotations
 
@@ -17,12 +17,8 @@ from tests.spikesorting.v2.single_session._helpers import (
 def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     """MS5 on the 60s polymer fixture finds the planted units.
 
-    Primary correctness gate: per-unit accuracy >= 0.7 for at least
-    half of planted units, computed via
-    ``spikeinterface.comparison.compare_sorter_to_ground_truth``
-    against the sidecar ground-truth units table written by
-    ``mearec_to_spyglass_nwb`` and read via
-    ``get_ground_truth_units_table``.
+    Per-unit accuracy >= 0.7 for at least half of planted units, via
+    ``compare_sorter_to_ground_truth`` against the sidecar GT units table.
     """
     from spikeinterface.comparison import compare_sorter_to_ground_truth
 
@@ -63,9 +59,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     if not (SortGroupV2 & polymer_60s_session):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-    # Sort each of the 4 shanks; aggregate the per-shank SI sortings
-    # by shifting unit ids so MS5's overlapping local ids do not
-    # collide across shanks.
+    # Sort each shank; per-shank unit ids are made disjoint below.
     sort_group_ids = sorted(
         int(g)
         for g in (SortGroupV2 & polymer_60s_session).fetch("sort_group_id")
@@ -100,13 +94,8 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         Sorting.populate(sort_pk, reserve_jobs=False)
         sortings_by_shank.append(Sorting().get_sorting(sort_pk))
 
-    # Combine the per-shank sortings into one BaseSorting for the
-    # ground-truth comparison. SI's ``aggregate_units`` produces a
-    # single sorting with shank-disjoint unit ids -- but the result's
-    # unit_ids dtype is ``uint64``, which SI 0.104's
-    # ``compare_sorter_to_ground_truth`` Hungarian matcher rejects
-    # (it only accepts dtype kinds 'i' or 'U'). Rename the units to
-    # contiguous signed-int ids to round-trip through the matcher.
+    # ``aggregate_units`` yields uint64 ids, which SI 0.104's Hungarian
+    # matcher rejects (dtype kind 'i' or 'U' only); rename to signed ints.
     import numpy as np
     from spikeinterface import aggregate_units
 
@@ -115,11 +104,8 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
 
-    # Ground truth: the planted MEArec units stored in the sidecar
-    # ``ProcessingModule("ground_truth")["units"]`` table. We don't
-    # use ``ImportedSpikeSorting`` (its merge-table dispatch raises
-    # NotImplementedError for v0/v1/imported sources); we read the
-    # NWB directly via the sidecar helper and build a NumpySorting.
+    # Ground truth from the sidecar ``ground_truth`` units table;
+    # ``ImportedSpikeSorting`` merge dispatch raises NotImplementedError.
     import pynwb
     import spikeinterface as si
 
@@ -132,9 +118,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     with pynwb.NWBHDF5IO(raw_nwb_path, "r", load_namespaces=True) as io:
         gt_nwb = io.read()
         es = gt_nwb.acquisition["e-series"]
-        # MEArec writes a fixed-rate ElectricalSeries (no timestamps
-        # array). Read ``rate`` directly; fall back to the timestamps
-        # diff only if rate is missing.
+        # MEArec writes a fixed-rate series without timestamps.
         if es.rate is not None:
             fs = float(es.rate)
         else:
@@ -169,22 +153,15 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         exhaustive_gt=True,
     )
 
-    # Per-unit performance is a DataFrame indexed by GT unit_id.
-    # SI 0.104's ``get_performance(method='by_unit')`` exposes:
-    #   accuracy  = tp / (tp + fn + fp)
-    #   recall    = tp / (tp + fn)
-    #   precision = tp / (tp + fp)
-    #   false_discovery_rate
-    #   miss_rate
-    # Each is keyed by GT unit_id (Hungarian-matched to a detected unit).
+    # Indexed by GT unit_id. accuracy = tp / (tp + fn + fp),
+    # recall = tp / (tp + fn), precision = tp / (tp + fp).
     perf = comparison.get_performance(method="by_unit", output="pandas")
     accuracies = perf["accuracy"].values
     recall = perf["recall"].values
     precision = perf["precision"].values
     n_planted = len(accuracies)
 
-    # ---- Diagnostic summary so a failure (or a soft regression) surfaces
-    # the distribution rather than a single pass/fail bit. Always logged.
+    # Always logged so a failure shows the distribution.
     summary = (
         f"\n[MS5 vs 60s polymer GT] n_planted={n_planted}, "
         f"n_detected={len(tested_sorting.unit_ids)}\n"
@@ -202,19 +179,13 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
     )
     print(summary)
 
-    # Guard against a vacuous pass: ``n_planted // 2 == 0 >= 0`` would
-    # silently approve a fixture that produced zero ground-truth units
-    # (e.g., MEArec generation half-failed). The polymer 60s fixture is
-    # built with 24 planted units; require well over half so a half-run
-    # generation surfaces.
+    # The fixture plants 24 units; a half-failed generation must not pass.
     assert n_planted >= 12, (
         f"60s polymer fixture has only {n_planted} planted units; expected "
         f"around 24. Regenerate the fixture before trusting this gate."
         f"{summary}"
     )
 
-    # Detection-count floor: at least half the planted units must have
-    # accuracy >= 0.7. This is the primary correctness gate.
     n_well_detected = int((accuracies >= 0.7).sum())
     threshold_half = n_planted // 2
     assert n_well_detected >= threshold_half, (
@@ -224,10 +195,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         f"{summary}"
     )
 
-    # Precision floor: the well-detected units must also have
-    # precision >= 0.5. Otherwise a sorter that emits many spurious
-    # spikes alongside each true unit (e.g., a buggy duplicate-spike
-    # bug) could clear the accuracy gate by coincidence.
+    # Precision floor: spurious extra spikes must not pass the accuracy gate.
     well_detected_mask = accuracies >= 0.7
     well_detected_precision = precision[well_detected_mask]
     assert (well_detected_precision >= 0.5).all(), (
@@ -236,12 +204,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         f"unit with accuracy >= 0.7.{summary}"
     )
 
-    # Recall floor on well-detected units. accuracy is symmetric in fn
-    # and fp; a unit can have accuracy=0.7 with recall=0.7/precision=1.0
-    # (missing real spikes) or recall=1.0/precision=0.7 (spurious extra
-    # spikes). The precision floor above bounds the second mode; this
-    # bounds the first so a well-detected unit must actually find most
-    # of its planted spikes.
+    # Recall floor: accuracy is symmetric in fn and fp, so bound misses too.
     well_detected_recall = recall[well_detected_mask]
     assert (well_detected_recall >= 0.5).all(), (
         f"Well-detected GT units have low recall: min="
@@ -250,10 +213,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
         f"if it's missing more than half its planted spikes).{summary}"
     )
 
-    # Distribution-shape floor: well-detected units should have HIGH
-    # accuracy, not barely-passing accuracy. A pipeline regression that
-    # drives every accuracy from ~0.95 down to ~0.71 should fail this
-    # test even though the count gate above still passes.
+    # Mean-accuracy floor: catches every unit dropping to barely passing.
     well_detected_accuracy = accuracies[well_detected_mask]
     assert well_detected_accuracy.mean() >= 0.85, (
         f"Mean accuracy of well-detected units is "
@@ -265,10 +225,7 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
 
 
 # =========================================================================
-# Real-data correctness gates (scaffolded; skip when fixtures absent).
-# These activate when the user generates the fixture or sets the gating
-# env var; the scaffolding documents the contract and guarantees the test
-# surface exists for future CI gating.
+# Real-data correctness gates; skip when fixtures are absent.
 # =========================================================================
 
 
@@ -277,21 +234,10 @@ def test_mountainsort5_ground_truth_polymer_60s(polymer_60s_session):
 def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     """MS5 on the 60s Neuropixels fixture finds the planted units.
 
-    Dense-probe informational correctness coverage. Mirrors
-    ``test_mountainsort5_ground_truth_polymer_60s`` but with the
-    informational dense-probe correctness coverage. Primary count
-    gate is the ``accuracy >= 0.7`` acceptance gate for at least
-    three-quarters of planted units, plus precision / recall /
-    mean-accuracy floors on the well-detected subset (matching
-    the polymer gate's secondary floors). The threshold may only
-    be loosened with committed calibration evidence in
-    ``fixtures_manifest.json`` showing the MS5 distribution this
-    dense-probe fixture actually produces; until then a failure
-    here is a signal that MS5 settings need tuning, NOT that the
-    threshold should be relaxed silently. The upstream
-    ``neuropixels_60s_session`` fixture skips cleanly when the
-    MEArec NWB is not on disk, so this test runs only when the
-    fixture has been generated.
+    Accuracy >= 0.7 for at least three quarters of planted units, plus
+    the polymer gate's precision / recall / mean-accuracy floors. Loosen
+    only with calibration evidence in ``fixtures_manifest.json``. Skips
+    when the fixture is not on disk.
     """
     import numpy as np
     import pynwb
@@ -372,9 +318,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         sortings_by_shank.append(Sorting().get_sorting(sort_pk))
 
     aggregated = aggregate_units(sortings_by_shank)
-    # uint64 unit_ids reject the Hungarian matcher's accepted dtypes;
-    # rename to contiguous signed ints. Same trick
-    # ``test_mountainsort5_ground_truth_polymer_60s`` uses.
+    # The Hungarian matcher rejects uint64 unit ids.
     tested_sorting = aggregated.rename_units(
         np.arange(len(aggregated.unit_ids), dtype=np.int64)
     )
@@ -444,21 +388,11 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
     )
     print(summary)
 
-    # Non-vacuous-pass guard: the fixture must actually have
-    # planted units. A half-failed MEArec generation would
-    # silently produce zero GT units.
     assert n_planted >= 1, (
         f"Neuropixels 60s fixture has only {n_planted} planted units; "
         f"regenerate the fixture before trusting this gate.{summary}"
     )
 
-    # Informational threshold: at least three
-    # quarters of planted units detected at accuracy >= 0.7. The
-    # threshold may only be loosened with calibration evidence
-    # committed to ``fixtures_manifest.json`` showing the actual
-    # MS5 distribution this fixture produces; a failure here is a
-    # signal that MS5 settings need tuning, not a license to relax
-    # the gate.
     import math
 
     n_well_detected = int((accuracies >= 0.7).sum())
@@ -471,10 +405,7 @@ def test_mountainsort5_ground_truth_neuropixels_60s(neuropixels_60s_session):
         f"{summary}"
     )
 
-    # Secondary floors on the well-detected subset. Mirror the
-    # polymer gate so a sorter that explodes the false-positive
-    # rate, misses most planted spikes, or produces barely-passing
-    # accuracies cannot clear the count gate by coincidence.
+    # Secondary floors mirror the polymer gate.
     well_detected_mask = accuracies >= 0.7
     well_detected_precision = precision[well_detected_mask]
     well_detected_recall = recall[well_detected_mask]
@@ -518,73 +449,37 @@ _PARITY_FIXTURE_CASES = [
 def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     """v1 ↔ v2 ``clusterless_thresholder`` parity on the polymer matrix.
 
-    **NOT a per-PR CI gate.** This is a manual / nightly baseline-verification
-    matrix: all parametrized cases SKIP unless ``SPIKESORTING_V2_BASELINE_ROOT``
-    (or the legacy single-case ``SPIKESORTING_V2_BASELINE_DIR``) points at
-    operator-captured v1 baselines. The ``pytest-v2`` workflow does not set
-    either, so reviewers should not count these cases as per-PR coverage --
-    they activate only under the capture workflow described in "Env vars" below.
+    Manual / nightly only: every case skips unless a baseline env var
+    below points at captured v1 baselines.
 
-    **Referencing scope.** This v1↔v2 spike-parity contract holds only for
-    *order-invariant* referencing -- the parity fixtures use the inherited
-    default, which is ``reference_mode="none"`` here, and ``specific`` (and a
-    global *average* reference) are also linear and commute with the filter.
-    It does NOT hold for ``reference_mode="global_median"``: v2 bandpass-
-    filters BEFORE referencing while v1 referenced first, and the per-sample
-    median is non-linear, so global-median output intentionally diverges from
-    v1. Do not add a global-median case to this matrix expecting a match; that
-    divergence is guarded instead by
-    ``test_recording_make_global_median_reference`` and documented in
-    the migration guide. (``baseline_capture.py --reference-mode global_median``
-    can capture a v1 reference-first global-median baseline for manual
-    divergence inspection.)
+    Holds only for linear referencing. ``global_median`` diverges from v1
+    by design (v2 filters before referencing); see
+    ``test_recording_make_global_median_reference``.
 
-    The deterministic threshold sorter SHOULD detect the same peaks
-    under SI 0.104 as it did under SI 0.99. The test enforces a
-    ±1.5-sample asymmetric per-spike contract: every v1 spike must
-    match a v2 spike within 1.5 samples (``unmatched_v1 > 0`` FAILs);
-    v2 may have bounded extras (50 % + 5 detections budget; see the
-    in-test comment near ``extra_spike_ratio = 0.50`` for the SI
-    PR #4341 calibration evidence) attributed to documented cross-
-    SI-version ``detect_peaks`` drift. Both ``unmatched_v1`` and
-    ``unmatched_v2`` are reported per case.
+    Every v1 spike must match a v2 spike within 1.5 samples; v2 may have
+    bounded extras from SI ``detect_peaks`` drift (see
+    ``extra_spike_ratio``).
 
-    **Invariant fingerprint contract:** before any spike-time
-    comparison runs, the v2 side reconstructs its own state and
-    asserts each fingerprint (``nwb_sha256``, ``sort_group_electrode_ids``,
+    Input fingerprints (``nwb_sha256``, ``sort_group_electrode_ids``,
     ``bad_channel_by_electrode_id``, ``canonical_preproc_params``,
     ``canonical_artifact_params``, ``artifact_valid_times``,
-    ``canonical_sorter_params``) matches the v1 baseline. A
-    fingerprint mismatch FAILs with a path-tagged diff so an
-    input-layer skew never gets conflated with an output-layer
-    regression. (Documented rule: assert every input-layer invariant
-    matches the v1 baseline BEFORE comparing spike outputs, so an
-    input skew is never mistaken for an output regression.)
+    ``canonical_sorter_params``) must match the v1 baseline before spike
+    times are compared, so input skew is not mistaken for output drift.
 
-    The smoke parity row (``smoke_clusterless_5uv``)
-    must NOT carry ``noise_levels`` -- that lets SI compute its own
-    per-channel MAD and the threshold is interpreted as a MAD
-    multiplier, matching how ``baseline_capture._ensure_smoke_sorter_param_row``
-    inserts the v1 row. If ``noise_levels=[1.0]`` is forwarded
-    (the production default for the 100 uV ``default_clusterless``
-    row), the smoke threshold becomes raw uV and produces ~1,400x
-    more detections than v1. The schema v3 ``threshold_unit`` field and
-    the tolerance-aware matcher keep the two rows equivalent; the
-    canonical-sorter fingerprint check asserts that equivalence.
+    The smoke row (``smoke_clusterless_5uv``) omits ``noise_levels`` so
+    the threshold is a MAD multiplier on both sides; ``noise_levels=[1.0]``
+    makes it raw uV (~1,400x more detections).
 
     Env vars:
       ``SPIKESORTING_V2_BASELINE_ROOT`` -> directory tree
           ``$ROOT/<fixture_stem>/clusterless/shank<N>/``
           containing ``baseline_v1_spike_times.pkl`` and
-          ``baseline_v1_recording_meta.json``. The matrix-verification
-          entrypoint -- when set, missing baselines FAIL (a broken
-          capture must not skip silently) unless the
-          ``(fixture_stem, sorter, sort_group_id)`` triple is in
-          ``EXPECTED_DEGENERATE_CASES`` (then SKIP).
+          ``baseline_v1_recording_meta.json``. When set, missing
+          baselines FAIL unless the ``(fixture_stem, sorter,
+          sort_group_id)`` triple is in ``EXPECTED_DEGENERATE_CASES``.
 
-      ``SPIKESORTING_V2_BASELINE_DIR`` -> legacy single-dir shim
-          for ``(mearec_polymer_smoke, 0)`` only; other
-          parametrizations skip with a clear message.
+      ``SPIKESORTING_V2_BASELINE_DIR`` -> single-dir form for
+          ``(mearec_polymer_smoke, 0)`` only; other cases skip.
     """
     import json
     import os
@@ -595,11 +490,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
     from tests.spikesorting.v2._smoke_constants import EXPECTED_DEGENERATE_CASES
 
-    # The NWB lives in the v2 checkout's fixtures directory; the
-    # capture-side ran from the v1 worktree but wrote spike times +
-    # meta under SPIKESORTING_V2_BASELINE_ROOT, so the v2 test reads
-    # from the v2 fixture directly and verifies sha256 against the
-    # baseline meta below.
+    # Read from the v2 fixtures dir; sha256 is checked against the meta.
     fixture_path = fixture_nwb_path(fixture_stem)
     if not fixture_path.exists():
         pytest.skip(
@@ -633,12 +524,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
 
     triple = (fixture_stem, "clusterless_thresholder", sort_group_id)
     if triple in EXPECTED_DEGENERATE_CASES:
-        # Under active matrix verification (ROOT set), require an
-        # operator-written DEGENERATE_MARKER file in the per-case
-        # baseline dir so a broken capture (no run, no marker)
-        # can't masquerade as an intentional skip. The marker must
-        # exist alongside the missing baseline files; absence is a
-        # FAIL not a SKIP.
+        # With ROOT set, a missing baseline skips only if the case dir has
+        # an operator-written DEGENERATE_MARKER; otherwise FAIL.
         if baseline_root_env:
             marker = baseline_dir / "DEGENERATE_MARKER"
             if not marker.exists():
@@ -664,11 +551,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             "capture_polymer_clusterless.sh` under the v1 conda env."
         )
         if baseline_root_env:
-            # SPIKESORTING_V2_BASELINE_ROOT is set: the operator opted
-            # into matrix verification, so a missing baseline is a
-            # capture-side regression, not a skip. To intentionally
-            # skip a known-degenerate case, add the triple to
-            # ``EXPECTED_DEGENERATE_CASES`` with evidence.
+            # To skip a degenerate case, add it to EXPECTED_DEGENERATE_CASES.
             pytest.fail(msg)
         pytest.skip(msg)
 
@@ -740,21 +623,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
     AnalyzerWaveformParameters.insert_default()
-    # Mirror baseline_capture's smoke-row insertion: if the v1
-    # baseline used a non-default clusterless threshold (e.g.
-    # ``smoke_clusterless_5uv`` for the MEArec smoke fixture),
-    # pre-insert the corresponding row in v2 so the FK check in
-    # ``SortingSelection.insert_selection`` resolves. Without
-    # this guard the test fails opaquely with a missing-row
-    # ValueError instead of producing the spike-count signal the
-    # parity comparison is supposed to expose.
-    # Map v1's row-name conventions to v2's equivalents. v1 ships
-    # ``preproc_param_name="default"`` / ``sorter_param_name=
-    # "default_clusterless"``; v2 ships ``preprocessing_params_name=
-    # "default"`` / ``sorter_params_name="default"``. The
-    # smoke row (``smoke_clusterless_5uv``) is consistently named
-    # across both pipelines. Custom names that the lab user picks
-    # are honored verbatim (fall-through in the mapping helpers).
+    # Pre-insert the smoke sorter row as baseline_capture does, and map
+    # v1 param names to v2 (custom names pass through).
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
         SMOKE_CLUSTERLESS_PARAMS,
@@ -766,12 +636,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         meta.get("sorter_param_name", "default_clusterless")
     )
     if sorter_params_name == SMOKE_CLUSTERLESS_PARAM_NAME:
-        # Use delete-then-insert (not skip_duplicates=True) because a
-        # stale row left over from an earlier test run could silently
-        # shadow this insert and flip the threshold's semantic meaning
-        # (the historical noise_levels=[1.0] regression injected raw-uV
-        # semantics; a delete-then-insert guarantees the row matches
-        # the schema version this test was written for).
+        # Delete-then-insert: a stale row with noise_levels set would make
+        # the threshold raw uV.
         (
             SorterParameters
             & {
@@ -783,9 +649,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             {
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": sorter_params_name,
-                # Smoke params shared with baseline_capture via
-                # _smoke_constants; ``noise_levels`` is omitted so
-                # SI computes per-channel MAD on both sides.
+                # ``noise_levels`` omitted: SI uses per-channel MAD.
                 "params": dict(SMOKE_CLUSTERLESS_PARAMS),
                 "params_schema_version": 4,
                 "job_kwargs": None,
@@ -819,13 +683,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         }
     )
     Recording.populate(rec_pk, reserve_jobs=False)
-    # Honor the baseline's artifact-detection params. If v1 ran
-    # with ``"default"`` (which detects + masks above-threshold
-    # peaks) and v2 ran with ``"none"`` (skip artifact scanning),
-    # v2 would be sorting unmasked data and the per-spike drift
-    # check below would compare different pipelines. v2 ships the
-    # same ``"default"`` artifact-params name with the same
-    # semantics.
+    # Use the baseline's artifact params so both sides sort the same data.
     artifact_name_meta = meta.get("artifact_param_name", "default")
     art_pk = RecordingArtifactSelection.insert_selection(
         {
@@ -835,15 +693,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     )
     RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
 
-    # --- v1↔v2 invariant fingerprint check ---
-    # Reconstruct the same fingerprints from v2 tables and assert
-    # each matches what v1 baseline_capture wrote. Done BEFORE the
-    # sort so an input-layer skew (different electrodes, different
-    # bad-channel mask, schema-incompatible params, divergent
-    # artifact valid_times) is never silently absorbed into the
-    # downstream spike-time comparison. (Documented rule: assert every
-    # input-layer invariant matches the v1 baseline before comparing
-    # spike outputs.)
+    # --- v1/v2 input fingerprint check, before the sort ---
     import hashlib
 
     from spyglass.common import Electrode, IntervalList
@@ -874,11 +724,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             f"field(s) {missing_fp}; baseline was captured before "
             f"the invariant-fingerprint schema landed. {regen_hint}"
         )
-        # Under SPIKESORTING_V2_BASELINE_ROOT (active matrix
-        # verification), a stale baseline is an invalid input -- not
-        # an acceptable skip. Match the missing-baseline-files
-        # policy: FAIL when ROOT is set, SKIP under the legacy
-        # BASELINE_DIR shim only.
+        # Stale baseline: FAIL when ROOT is set, SKIP under BASELINE_DIR.
         if baseline_root_env:
             pytest.fail(msg)
         pytest.skip(msg)
@@ -892,9 +738,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             ),
         }
     ).fetch1("valid_times")
-    # Canonicalize to ``(n_intervals, 2)`` and round to 1 ms -- see
-    # baseline_capture._compute_invariant_fingerprints for why
-    # (1-sample-at-end convention difference between v1 and v2).
+    # ``(n_intervals, 2)`` rounded to 1 ms: v1 and v2 differ by one end
+    # sample (see baseline_capture._compute_invariant_fingerprints).
     v2_valid_times = np.round(
         np.ascontiguousarray(v2_valid_times_raw, dtype="<f8").reshape(-1, 2),
         decimals=3,
@@ -929,12 +774,8 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 & {"artifact_detection_params_name": artifact_name_meta}
             ).fetch1("params")
         ),
-        # Stored as the canonical (shape-aware) array rather than a
-        # sha256 hash: bit-level float drift between the v1 (SI 0.99)
-        # and v2 (SI 0.104) ``IntervalList.valid_times`` round-trips
-        # would otherwise FAIL even when the two intervals are
-        # semantically identical. ``assert_canonical_dict_equal``
-        # compares element-wise with ``math.isclose(rel_tol=1e-9)``.
+        # An array, not a hash, so float drift between SI versions is
+        # compared with isclose.
         "artifact_valid_times": _normalize(v2_valid_times),
         "canonical_sorter_params": canonical_sorter(
             "clusterless_thresholder",
@@ -964,9 +805,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
     curation_pk = CurationV2.insert_curation(sorting_key=sort_pk, labels={})
     merge_id = (SpikeSortingOutput.CurationV2 & curation_pk).fetch1("merge_id")
 
-    # Pull v2 spike times in seconds via the merge dispatcher --
-    # same surface a v1 consumer would hit; if v1 and v2 use the
-    # same units list the per-unit arrays line up by index.
+    # Via the merge dispatcher, the surface a v1 consumer uses.
     v2_per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
     v2_unit_ids = (Sorting.Unit & sort_pk).fetch("unit_id", order_by="unit_id")
     v2_spike_times = {
@@ -984,10 +823,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         "should match exactly. A mismatch indicates a real "
         "regression in detection / labeling."
     )
-    # Non-vacuous-pass guard: if both unit sets are empty (e.g.
-    # the baseline was captured on a recording with no above-
-    # threshold peaks), the loop below iterates zero times and
-    # the test passes without verifying any spike times.
+    # Empty unit sets would make the loop below vacuous.
     assert len(v1_keys) >= 1, (
         "v1 baseline has zero units; the per-unit drift check "
         "below would pass vacuously. Regenerate "
@@ -995,30 +831,11 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         "threshold activity."
     )
 
-    # Per-unit asymmetric per-spike comparison.
-    #
-    # Clusterless contract (documented v2 divergence: every v1 spike
-    # must match a v2 spike within
-    # ±1.5 samples, with a bounded v2-extras budget). Budgets account
-    # for the SI 0.99 → 0.104
-    # ``locally_exclusive`` numba kernel rewrite ([SI PR #4341](
-    # https://github.com/SpikeInterface/spikeinterface/pull/4341)
-    # "more accurate for corner cases: ratio not raw amplitude;
-    # neighbour peak-to-peak not trace-value"), which the SI author
-    # classifies as v1-wrong. Empirically v2 detects ~25–30% more
-    # near-threshold peaks on contacts adjacent to v1 peaks (757/3392
-    # of v2 peaks on shank 0 of the 60 s polymer, 100% within
-    # ±30 samples and 99.5% within ``radius_um=100`` of a v1 peak).
-    # plus a small residual unmatched_v1 (≤ 6 / 2652 = 0.2% after
-    # decoupling from the [PR #3359](
-    # https://github.com/SpikeInterface/spikeinterface/pull/3359)
-    # ``noise_levels`` ``seed=None`` change). The budgets below
-    # cover both verified mechanisms.
+    # Budgets cover two SI 0.99 -> 0.104 changes: the ``locally_exclusive``
+    # rewrite (SpikeInterface PR 4341) adds ~25-30% near-threshold peaks next
+    # to v1 peaks, and the ``noise_levels`` seed change (SpikeInterface PR
+    # 3359) leaves <= 0.2% unmatched v1 spikes.
     threshold_samples = 1.5
-    # v2 extras allowed up to 50% + 5 (PR #4341 v1-wrong adjacent
-    # peaks). A 1,400x explosion (what forwarding noise_levels=[1.0]
-    # into the smoke row produces) is far outside this budget and fails
-    # loud.
     extra_spike_ratio = 0.50
     tol_s = threshold_samples * one_sample_s
     diagnostic_rows: list[tuple[int, int, int, int, int, int]] = []
@@ -1030,11 +847,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             f"unit {uid}: v1 baseline has zero spikes -- per-unit "
             "drift check is meaningless. Regenerate baseline."
         )
-        # Defend against ``v2_arr.size == 0`` (a regression that
-        # drops every detection); ``np.searchsorted`` would yield
-        # ``idx_left = idx_right = 0`` and the indexed read would
-        # raise ``IndexError`` with a stack trace instead of the
-        # diagnostic message this assertion is supposed to surface.
+        # An empty v2 array would make the searchsorted read IndexError.
         if v2_arr.size == 0:
             diagnostic_rows.append(
                 (uid, int(v1_arr.size), 0, 0, int(v1_arr.size), 0)
@@ -1046,10 +859,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             )
             continue
 
-        # v1 -> v2 nearest neighbor: each v1 spike's distance to the
-        # closest v2 spike. Two candidates per v1 spike (searchsorted
-        # gives the insertion index; left/right neighbors), take
-        # the minimum.
+        # v1 -> v2 nearest-neighbor distance.
         idx = np.searchsorted(v2_arr, v1_arr)
         idx_left = np.clip(idx - 1, 0, v2_arr.size - 1)
         idx_right = np.clip(idx, 0, v2_arr.size - 1)
@@ -1061,10 +871,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
         n_matched = int(v1_matched.sum())
         unmatched_v1 = int(v1_arr.size - n_matched)
 
-        # v2 -> v1 nearest neighbor: each v2 spike's distance to the
-        # closest v1 spike. ``unmatched_v2`` is a triage signal (the
-        # 50%+5 budget on v2_arr.size is the assertion that catches a
-        # blow-up; per-spike unmatched_v2 surfaces a quieter drift).
+        # v2 -> v1 distance; ``unmatched_v2`` is reported, not asserted.
         idx2 = np.searchsorted(v1_arr, v2_arr)
         idx2_left = np.clip(idx2 - 1, 0, v1_arr.size - 1)
         idx2_right = np.clip(idx2, 0, v1_arr.size - 1)
@@ -1085,10 +892,6 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             )
         )
 
-        # unmatched_v1 budget: max(2, 1% of v1 peaks). Covers the
-        # PR #3359 noise_levels stochastic drift residual (6/2652 =
-        # 0.2% observed on shank 0 after the control experiment
-        # decoupled algorithm- vs noise-level mechanisms).
         unmatched_v1_budget = max(2, int(0.01 * v1_arr.size))
         if unmatched_v1 > unmatched_v1_budget:
             failures.append(
@@ -1099,9 +902,6 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 f"{float(v1_to_v2_diff[~v1_matched].max() * fs):.2f} samples."
             )
 
-        # Cap v2's excess detections; a 1,400x explosion (what
-        # injecting ``noise_levels=[1.0]`` into the smoke row
-        # produces) fails this assertion loud and clear.
         max_v2 = int(v1_arr.size * (1.0 + extra_spike_ratio)) + 5
         if v2_arr.size > max_v2:
             failures.append(
@@ -1112,9 +912,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 "threshold reads in raw uV instead of MAD multiples)."
             )
 
-    # Diagnostic block: one line per unit, then a summary line.
-    # Printed unconditionally so a passing run still records the
-    # per-unit unmatched counts for the next reviewer.
+    # Printed even on pass to record per-unit unmatched counts.
     print(f"\n[parity] {fixture_stem} shank{sort_group_id} clusterless")
     print(
         f"  {'unit':>5} {'v1_n':>6} {'v2_n':>6} {'matched':>8} "
@@ -1143,24 +941,13 @@ def test_v2_real_data_v1_parity_mountainsort4(
 ):
     """v1 ↔ v2 MountainSort4 parity on the polymer 60s fixture.
 
-    MS4 is stochastic (no seed control -- ``MountainSort4Sorter.default_params()``
-    has no ``seed`` field in either SI 0.99.1 or 0.104.3, confirmed
-    empirically). The C++ MS4 1.0.7 binary is byte-identical across
-    envs; any v1↔v2 divergence comes from SI's wrapping (preproc,
-    chunking, parameter forwarding) layered on top.
-
-    Contract: aggregate bands (NOT per-spike, unlike clusterless),
-    sourced from
-    :data:`tests.spikesorting.v2._smoke_constants.MS4_BANDS`. After
-    calibration on shanks 0 and 2 (two repeats per side)
-    these are:
+    MS4 has no seed parameter, so the contract is aggregate bands from
+    :data:`tests.spikesorting.v2._smoke_constants.MS4_BANDS`, not per-spike:
 
     * ``|v2_n_units - v1_n_units| ≤ max(10% of v1_n_units, 2)``
     * ``|v2_median_fr - v1_median_fr| / v1_median_fr ≤ 10%`` (rel)
 
-    See :data:`MS4_VARIANCE_TABLE` for the calibration measurements
-    (v1v1 drift = 0 on both shanks → MS4 deterministic on v1; v2v2
-    drift ≤ 1 unit / 0.74 Hz ≤ 3% of median_fr).
+    Calibration is in :data:`MS4_VARIANCE_TABLE`.
 
     Env vars / SKIP semantics: same as :func:`test_v2_real_data_v1_parity`.
     Native MS4 is required by the v2 extra; a missing installation fails.
@@ -1179,7 +966,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         MS4_BANDS,
     )
 
-    # MS4 install gate (v2 side; v1 install is checked at capture time).
+    # v2-side MS4 install check; v1 is checked at capture.
     import spikeinterface.sorters as ss
 
     assert "mountainsort4" in ss.installed_sorters()
@@ -1274,10 +1061,6 @@ def test_v2_real_data_v1_parity_mountainsort4(
 
     AnalyzerWaveformParameters.insert_default()
 
-    # v2-side insert of the polymer-60s MS4 row. Owned end-to-end by
-    # this test pair (parity_canonical also strips schema_version, so
-    # the canonical fingerprint matches v1's row even though v2's
-    # Pydantic schema stamps it).
     sorter_params_name = MS4_60S_POLYMER_PARAM_NAME
     (
         SorterParameters
@@ -1429,7 +1212,6 @@ def test_v2_real_data_v1_parity_mountainsort4(
         v1_fingerprints, v2_fingerprints, path="fingerprints"
     )
 
-    # Now run the MS4 sort and compute aggregate metrics.
     sort_pk = SortingSelection.insert_selection(
         {
             "recording_id": rec_pk["recording_id"],
@@ -1448,14 +1230,8 @@ def test_v2_real_data_v1_parity_mountainsort4(
         int(uid): np.asarray(times) for uid, times in v1_spike_times.items()
     }
 
-    # Use ``artifact_valid_times`` duration (the interval the SORTER
-    # actually saw) as the firing-rate denominator, not
-    # ``approx_last_spike_s`` from the v1 meta, which is the last v1
-    # spike time and would make both v1 and v2 firing rates
-    # NORMALIZED BY v1's OUTPUT (not the fixed input window). The
-    # fingerprint check above has already asserted v1's and v2's
-    # ``artifact_valid_times`` match, so using v1's stored array is
-    # equivalent to v2's reconstructed one.
+    # Firing-rate denominator is the sorted interval, not v1's last spike
+    # time; the fingerprint check already matched both sides' intervals.
     v1_avt = meta["artifact_valid_times"]
     v1_intervals = np.asarray(v1_avt["_array_data"]).reshape(
         v1_avt["_array_meta"]["shape"]
@@ -1489,9 +1265,6 @@ def test_v2_real_data_v1_parity_mountainsort4(
         f"  v2: n_units={v2_n}, median_fr={v2_fr:.3f} Hz"
     )
 
-    # MS4_BANDS = MS4_CALIBRATED (n_units ± 10% or
-    # ± 2, median_fr ± 10% rel). See MS4_VARIANCE_TABLE for the
-    # calibration measurements.
     n_band = max(
         v1_n * MS4_BANDS["n_units_rel_band"],
         MS4_BANDS["n_units_abs_band"],
@@ -1516,16 +1289,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         )
 
 
-# MS4 GT is polymer-only. A tetrode case was tried and removed: MS4 with
-# default Frank-lab tetrode params cannot resolve the 5 planted units on a
-# 4-channel synthetic MEArec tetrode regardless of detect_threshold. Verified
-# with pure SpikeInterface (no Spyglass code in the path) by sweeping
-# detect_threshold ∈ {3, 4, 5, 6}: every threshold recovers at most 1/5 GT
-# units at accuracy ≥ 0.5 (GT unit 4 is 96 % recovered but split across 4 MS4
-# output units; GT units 0, 2, 3 missed entirely). This is a sorter
-# limitation on low-channel-count probes, not a v2 bug — v2 byte-parity with
-# v1 on the polymer MS4 path (test_v2_real_data_v1_parity_mountainsort4) is
-# the canonical v2-correctness gate for MS4.
+# Polymer only: MS4 cannot resolve the synthetic 4-channel tetrode units.
 _MS4_GT_CASES = [
     ("polymer_60s", "franklab_30khz_ms4_2026_06"),
 ]
@@ -1543,23 +1307,8 @@ def test_mountainsort4_ground_truth(
 ):
     """MS4 recovers planted units on the polymer MEArec fixture.
 
-    Correctness gate independent of v1 parity. Uses SI's
-    ``compare_sorter_to_ground_truth`` against the sidecar GT units
-    table written by ``mearec_to_spyglass_nwb``.
-
-    Parametrization:
-      * ``polymer_60s`` -- 128-channel polymer probe (4 shanks),
-        ``franklab_30khz_ms4_2026_06`` params (MS4 runs ``filter=False``;
-        the 300-6000 Hz band comes from the ``default`` preproc row).
-
-    Tetrode coverage was attempted and removed (see comment above
-    ``_MS4_GT_CASES``): MS4 fundamentally cannot resolve a 4-channel
-    synthetic tetrode regardless of detect_threshold, so the case was
-    measuring a sorter limitation rather than v2 correctness.
-
-    Threshold: at least 1/2 of planted units detected at accuracy
-    >= 0.5 (looser than the MS5 polymer gate's 1/2 >= 0.7 because
-    MS4 is a less-accurate sorter).
+    At least half of planted units at accuracy >= 0.5 (looser than MS5's
+    0.7; MS4 is less accurate).
     """
     import numpy as np
     import pynwb
@@ -1710,10 +1459,6 @@ def test_mountainsort4_ground_truth(
         f"regenerate before trusting this gate.{summary}"
     )
 
-    # Looser MS4 threshold (half of planted at acc >= 0.5) than the
-    # MS5 polymer gate (1/2 >= 0.7) because MS4 is a less-accurate
-    # sorter. Tightening this threshold without committed calibration
-    # evidence is regression-prone.
     n_well_detected = int((accuracies >= 0.5).sum())
     threshold = max(1, n_planted // 2)
     assert n_well_detected >= threshold, (
@@ -1741,44 +1486,13 @@ def test_clusterless_thresholder_ground_truth(
 ):
     """Clusterless detector recovers planted-unit spikes (shank-aware recall).
 
-    Correctness gate for the clusterless path. Unlike MS4/MS5, the
-    clusterless detector emits unsorted peaks (not units), so SI's
-    ``compare_sorter_to_ground_truth`` doesn't apply. We compute a
-    shank-aware recall metric: per planted unit, compute the
-    ±0.4-ms time-recall against each shank's v2 peak stream
-    independently and take the max. The match constraint is "v2
-    peaks from a SINGLE shank must explain the planted spikes" --
-    cross-shank peaks can no longer satisfy a planted spike. Best-
-    shank-per-unit (rather than nearest-shank-by-soma-position) is
-    robust to cells placed between shanks or off the probe edge:
-    such cells fire most strongly on whichever shank actually picks
-    them up, which is an electrical question, not a Euclidean one.
-
-    Shank-aware matching closes the false-recall window that
-    time-only-across-all-shanks opens: with ~17 K peaks across
-    4 shanks and 60 s, uniform-cross-channel time-only matching at
-    a 0.4 ms tolerance could inflate recall by ~20 percentage points
-    from unrelated peaks. Best-shank routing eliminates that
-    inflation while keeping the rigorous time tolerance.
-
-    ``delta_time = 0.4 ms`` matches SI's
-    ``compare_sorter_to_ground_truth`` default and the sibling MS4/
-    MS5 GT gates; the natural physical offset between a planted
-    intracellular fire moment and the detected extracellular trough
-    (filter group delay + propagation) is empirically ~1-3 samples
-    at 32 kHz, so a sub-sample tolerance would reject valid
-    detections.
-
-    Threshold: mean recall ≥ 0.80 across planted units. Clusterless
-    detect_threshold = 5 (a MAD multiplier, not 5σ or 5 µV -- with
-    ``noise_levels`` omitted SI scales the threshold by per-channel
-    MAD) should catch all well-isolated spikes; higher recall bars
-    risk flake from near-threshold borderline spikes (PR #4341
-    algorithm change).
+    Clusterless emits peaks, not units, so per planted unit the test takes
+    the best single-shank recall within 0.4 ms (SI's GT default). Mean
+    recall must be >= 0.80.
 
     Parametrization:
-      * ``polymer_60s`` -- 4 shanks, planted units distributed across them
-      * ``tetrode_60s`` -- 1 shank, 4 channels (trivially per-shank)
+      * ``polymer_60s``: 4 shanks, planted units spread across them
+      * ``tetrode_60s``: 1 shank, 4 channels
     """
     import numpy as np
     import pynwb
@@ -1825,10 +1539,7 @@ def test_clusterless_thresholder_ground_truth(
             },
         )
 
-    # Pre-insert the smoke clusterless row (detect_threshold=5, a MAD
-    # multiplier -- not µV; doesn't ship as a v2 default; needs
-    # delete-then-insert for the same noise_levels-semantics safety
-    # reason as the v1↔v2 parity test).
+    # Delete-then-insert the smoke row, as in the parity test.
     if sorter_params_name == SMOKE_CLUSTERLESS_PARAM_NAME:
         (
             SorterParameters
@@ -1854,9 +1565,7 @@ def test_clusterless_thresholder_ground_truth(
         int(g) for g in (SortGroupV2 & session).fetch("sort_group_id")
     )
 
-    # Per-shank: populate clusterless sorting and keep v2 peak times
-    # separate per shank so the recall matcher below can constrain
-    # each planted unit's matches to a single shank's v2 peaks.
+    # Peak times kept per shank for single-shank matching.
     v2_times_s_by_shank: dict[int, np.ndarray] = {}
     sampling_frequency = None
     for sg_id in sort_group_ids:
@@ -1891,9 +1600,7 @@ def test_clusterless_thresholder_ground_truth(
             "merge_id"
         )
         per_unit = SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
-        # Clusterless collapses all peaks into one synthetic unit per
-        # shank. Concatenate (in case > 1 entry from get_spike_times)
-        # and keep this shank's spike-times tagged by sort_group_id.
+        # One synthetic unit per shank; concatenate in case of more.
         arrays = [np.asarray(a) for a in per_unit if np.asarray(a).size]
         if arrays:
             v2_times_s_by_shank[int(sg_id)] = np.sort(
@@ -1910,7 +1617,6 @@ def test_clusterless_thresholder_ground_truth(
         a.size == 0 for a in v2_times_s_by_shank.values()
     ):
         pytest.fail(f"v2 clusterless produced no peaks on {session_label}.")
-    # Aggregate copy for the false-positive sanity bound (counts only).
     v2_times_s = np.sort(
         np.concatenate([a for a in v2_times_s_by_shank.values() if a.size])
     ).astype(np.float64)
@@ -1934,28 +1640,8 @@ def test_clusterless_thresholder_ground_truth(
 
     sorted_sgs = sorted(v2_times_s_by_shank.keys())
 
-    # Shank-aware time-recall: for each planted unit, compute the
-    # ±0.4-ms time-recall against EACH shank's v2 peak stream
-    # separately, then take the max. The match constraint is "v2
-    # peaks from a single shank must explain the planted spikes" --
-    # cross-shank peaks no longer satisfy a planted spike. Compared
-    # to assigning each unit to its nearest shank by soma position,
-    # the max-over-shanks form is robust to cells placed between
-    # shanks or off the probe edge in the shank-spanning axis: such
-    # cells fire most strongly on whichever shank actually picks
-    # them up (which is an electrical question, not a Euclidean-
-    # nearest-shank question). Empirically on the polymer 60s
-    # fixture, soma-position routing mis-routed 18/24 cells (z
-    # extent [-570, +583] vs shanks at z=0/350/774/1124); empirical
-    # best-shank routing gives every unit its true assignment.
-    #
-    # ``delta_time = 0.4 ms`` matches SI's
-    # ``compare_sorter_to_ground_truth`` default (also used by the
-    # sibling MS4/MS5 GT gates). At 32 kHz that is 12.8 samples; the
-    # empirical (detected_peak - planted_spike) distribution on the
-    # polymer 60s fixture has IQR ~1-2 samples (post-PR-#4341), so
-    # 0.4 ms accepts every physically valid detection without
-    # admitting unrelated noise peaks.
+    # Best shank, not nearest-by-soma: soma routing mis-assigned 18/24
+    # polymer cells. All-shank matching would inflate recall ~20 points.
     tol_s = 0.4 / 1000.0
 
     def _recall_against(peaks_s: np.ndarray, gt_sorted: np.ndarray) -> float:
@@ -1985,10 +1671,7 @@ def test_clusterless_thresholder_ground_truth(
         gt_unit_to_shank[uid] = best_sg
 
     n_planted = len(per_unit_recall)
-    # Non-vacuity check FIRST: with n_planted == 0 the recall_values
-    # array is empty and ``recall_values.mean()`` would raise inside
-    # the summary string, masking the intended "no planted GT units"
-    # error. Fail with a clear message before any aggregate stats.
+    # Checked first: an empty mean would raise inside the summary string.
     assert n_planted >= 1, (
         f"{session_label} clusterless GT: no planted units recovered "
         "from sidecar (per_unit_recall is empty -- either the fixture "
@@ -2011,38 +1694,20 @@ def test_clusterless_thresholder_ground_truth(
     )
     print(summary)
 
-    # Threshold: mean recall >= 0.80 across planted units. Loosely
-    # justifiable: well-isolated spikes should always be detected
-    # by a detect_threshold of 5 (a MAD multiplier, not 5σ); missing
-    # some is expected for near-threshold planted units (especially on
-    # the sparse-coverage tetrode).
+    # Near-threshold units may be missed, especially on the tetrode.
     assert recall_values.mean() >= 0.80, (
         f"Clusterless mean time-recall {recall_values.mean():.3f} < 0.80 "
         f"on {session_label}; v2 detector missing planted spikes.{summary}"
     )
 
-    # Per-fixture calibrated false-positive bound: clusterless emits
-    # unsorted peaks (not units), so SI's precision metric doesn't
-    # apply, but a regression that emits substantially more peaks than
-    # the planted population must not pass this gate by virtue of high
-    # recall alone. Bounds are set with ~2x headroom over empirical
-    # observation so SI minor-version drift does not cause flake, but
-    # tight enough to flag real false-positive regressions (a loose
-    # 10x bound would only catch a 1,400x ``noise_levels=[1.0]``
-    # explosion, missing smaller regressions).
-    #
-    # Observed v2_peaks/planted_spike ratios (full GT gate runs):
-    #   * polymer_60s  -- ~1.5x (4 shanks aggregated)
-    #   * tetrode_60s  -- ~1.4x (single shank, 5 planted)
-    # Bound is ``3 x observed`` so legitimate background MEArec
-    # activity + adjacent-channel duplicates still pass.
+    # False-positive bound, ~2x over observed peaks/planted ratios
+    # (polymer ~1.5x, tetrode ~1.4x), so high recall alone cannot pass.
     extras_ratio_max = {
         "polymer_60s": 3.0,
         "tetrode_60s": 3.0,
     }.get(session_label)
     if extras_ratio_max is None:
-        # New fixture without committed calibration evidence; fall
-        # back to the smoke-guard 10x bound and surface the gap.
+        # Uncalibrated fixture: loose 10x bound.
         extras_ratio_max = 10.0
         print(
             f"WARNING: no per-fixture extras-ratio calibration for "

@@ -1,12 +1,7 @@
 """Recording truncation guard fires only on TRUE truncation.
 
-A sort interval may contain a chunk shorter than ``min_segment_length``;
-``_restrict_recording`` intentionally drops such slivers (same as v1). The
-truncation guard must compare the saved duration against the
-``min_segment_length``-filtered intended duration, NOT the raw requested
-chunks -- otherwise the intentionally-dropped sliver is mis-flagged as
-truncation and ``Recording.populate`` crashes (and deletes the written file)
-on a perfectly valid multi-epoch request.
+The guard compares the saved duration against the intended duration after
+``min_segment_length`` drops slivers, not the raw requested chunks.
 """
 
 from __future__ import annotations
@@ -104,14 +99,10 @@ def test_sub_min_segment_length_sliver_is_not_false_truncation(
         }
     )
 
-    # The sliver min_segment_length drops is not counted as missing samples,
-    # so populate succeeds without RecordingTruncatedError.
     Recording.populate(rec_pk, reserve_jobs=False)
     assert Recording & rec_pk, "Recording.populate did not create a row"
 
-    # Only the surviving ~1.9 s chunk is saved (sliver dropped), not the raw
-    # ~2.4 s -- proving the sliver was filtered, not that the guard was
-    # simply removed.
+    # ~1.9 s saved, not ~2.4 s: the sliver was filtered, the guard kept.
     duration_s = float((Recording & rec_pk).fetch1("duration_s"))
     kept = chunk_end - chunk_start
     assert abs(duration_s - kept) < 0.1, (
@@ -124,13 +115,8 @@ def test_sub_min_segment_length_sliver_is_not_false_truncation(
 def test_truncation_tolerance_scales_with_interval_count():
     """The truncation tolerance grows with the consolidated-interval count.
 
-    Each kept interval's ``[start, end]`` snaps to the raw sample grid
-    INDEPENDENTLY, so the per-boundary quantization error (up to ~1 sample
-    each) accumulates across disjoint epochs. A fixed ``1.5 / fs`` slack
-    would false-positive on legitimate multi-epoch sorts and then delete the
-    just-written file. The scaled
-    tolerance must accept that legitimate slop while still flagging a
-    genuine packet drop. Deterministic (no populate) guard for the policy.
+    Each interval snaps to the sample grid independently, so up to ~1
+    sample of error per boundary accumulates across epochs.
     """
     from spyglass.spikesorting.v2._recording.restriction import (
         truncation_tolerance,
@@ -142,21 +128,15 @@ def test_truncation_tolerance_scales_with_interval_count():
 
     for n in (1, 2, 3, 5, 10, 20):
         tol = truncation_tolerance(n, fs)
-        # Pin the exact coefficient so a silent change of 1.5 -> e.g. 1.2 is
-        # caught, not just the inequality bounds below. Use the SAME
-        # operation order as production ((n+1.5)/fs, not *T) for bit-equality.
+        # Exact coefficient, with production's operation order for bit-equality.
         assert tol == (n + 1.5) / fs
-        # Worst-case legitimate "missing" from grid snapping is bounded by
-        # ~(n + 1) samples: n interval boundaries + the (N-1)/fs concat
-        # off-by-one. (Numerically the observed worst is even smaller.)
+        # n boundaries plus the (N-1)/fs off-by-one.
         worst_legit_missing = (n + 1.0) * T
         assert worst_legit_missing <= tol, (
             f"n={n}: legitimate missing {worst_legit_missing:.3e}s exceeds "
             f"scaled tolerance {tol:.3e}s -- a valid multi-epoch sort would "
             "falsely raise RecordingTruncatedError"
         )
-        # A fixed 1.5-sample slack would raise on that same legitimate
-        # slop -- the false positive the scaled tolerance avoids.
         assert worst_legit_missing > fixed_slack, (
             f"n={n}: expected the legitimate slop to exceed a fixed "
             "1.5-sample tolerance (otherwise this test proves nothing)"
@@ -171,19 +151,10 @@ def test_truncation_tolerance_scales_with_interval_count():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_make_insert_raises_on_genuine_truncation():
-    """The FIRING side: a saved recording shorter than the intended duration
-    by more than the sample-grid tolerance raises ``RecordingTruncatedError``
-    and reports the missing seconds.
+    """A shortfall beyond the grid tolerance raises
+    ``RecordingTruncatedError`` reporting the missing seconds.
 
-    The no-false-positive tests above only assert the guard stays SILENT on
-    legitimate sliver / disjoint requests; none assert it still FIRES on a
-    genuine shortfall (dropped raw packets or interval misalignment), so a
-    regression that quietly stopped raising would pass every other test in
-    this module. This drives the real ``make_insert`` decision directly with a
-    deliberate expected-vs-saved mismatch: the truncation check runs before
-    any DB write or file registration, so the production method, the
-    production tolerance, and the production message are exercised without a
-    populate.
+    The check runs before any DB write, so ``make_insert`` is called directly.
     """
     from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
     from spyglass.spikesorting.v2._recording.restriction import (
@@ -195,8 +166,6 @@ def test_make_insert_raises_on_genuine_truncation():
     saved_start, saved_end = 0.0, 5.0  # 5.0 s actually saved
     expected_saved_total = 10.0  # 10.0 s intended -> 5.0 s genuinely missing
     n_intended_intervals = 1
-    # The shortfall must exceed the (n + 1.5)/fs grid tolerance to fire; a
-    # 5.0 s shortfall dwarfs the sub-millisecond tolerance.
     tolerance = truncation_tolerance(n_intended_intervals, fs)
     assert (expected_saved_total - (saved_end - saved_start)) > tolerance
 
@@ -221,9 +190,6 @@ def test_make_insert_raises_on_genuine_truncation():
         )
 
     message = str(excinfo.value)
-    # The message must surface the quantitative shortfall (5.0 s missing of the
-    # 10.0 s intended) so an operator can distinguish truncation from a
-    # misconfigured interval.
     assert "Missing: 5.000000s" in message
     assert "10.000000s" in message  # intended duration
     assert "saved 5.000000s" in message
@@ -236,11 +202,8 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
     without a false ``RecordingTruncatedError``, and the saved duration
     matches the summed kept-epoch durations within sample-level slop.
 
-    Exercises the ``n_intended_intervals >= 2`` wiring end-to-end (the
-    sliver / over-request tests only reach ``n == 1``): the consolidated
-    interval count must be threaded make_compute -> make_insert so the
-    tolerance scales, otherwise the grid-snapping slop accumulates across
-    the two epochs and the guard spuriously fires.
+    Exercises the ``n_intended_intervals >= 2`` path through
+    make_compute -> make_insert.
     """
     from spyglass.common.common_interval import IntervalList
     from spyglass.spikesorting.v2.recording import (
@@ -259,11 +222,8 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
     if (t_end - t0) < 2.7:
         pytest.skip("smoke fixture too short for a 2-epoch disjoint test")
 
-    # The smoke fixture is rate-based at 30 kHz. Put each requested boundary
-    # 0.1 frame inside an integer sample line: each epoch then contains 35,999
-    # samples, while its continuous requested duration spans 35,999.8 sample
-    # periods. Across two epochs the saved (N-1)/fs span is 2.6 samples short,
-    # which must exceed the old interval-count-blind 1.5-sample allowance.
+    # Boundaries 0.1 frame inside the 30 kHz grid leave the saved span 2.6
+    # samples short over two epochs, beyond a fixed 1.5-sample allowance.
     fs = 30_000.0
     c1 = (t0 + 1500.1 / fs, t0 + 37499.9 / fs)
     c2 = (t0 + 43500.1 / fs, t0 + 79499.9 / fs)
@@ -291,7 +251,6 @@ def test_disjoint_multichunk_not_false_truncation(truncation_session):
         }
     )
 
-    # Must NOT raise RecordingTruncatedError on a valid disjoint request.
     Recording.populate(rec_pk, reserve_jobs=False)
     assert Recording & rec_pk, "disjoint multi-epoch Recording.populate failed"
 

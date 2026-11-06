@@ -2,27 +2,13 @@
 
 ``CurationEvaluation`` writes three scratch tables into one AnalysisNwbfile:
 
-``quality_metrics``
-    a wide table, one row per unit, one column per quality metric. NaN is
-    preserved on disk as a native HDF5 float (HDF5 cannot store ``None`` in a
-    numeric column); ``None`` is surfaced on the read path (and for the
-    FigPack JSON export) by ``sanitize_for_json``.
+- ``quality_metrics``: one row per unit; NaN on disk, ``None`` on read.
+- ``merge_suggestions``: one row per ``(merge_group_index, unit_id)``.
+- ``proposed_labels``: one row per unit; the ragged ``curation_label`` column
+  exists only if some unit is labeled, since HDMF cannot infer the dtype of
+  an all-empty ragged column.
 
-``merge_suggestions``
-    a long table ``(merge_group_index, unit_id)`` -- one row per (group,
-    member). Empty when no merges are proposed.
-
-``proposed_labels``
-    a wide table, one row per unit, plus a ragged ``curation_label`` column
-    that is added ONLY when at least one unit is labeled (mirrors the
-    curated-units writer, sidestepping the #1625 "cannot infer dtype of empty
-    list" crash for the all-clean-units case).
-
-This module touches no DataJoint connection: builders are pure, and the write
-/ read functions take an absolute file path that the ``@schema`` table layer
-resolves. A zero-unit curation writes three empty tables: the quality-metrics
-and proposed-labels tables are column-less, while the merge-suggestions table
-keeps its two columns (``merge_group_index``, ``unit_id``) with zero rows.
+With zero units, ``quality_metrics`` and ``proposed_labels`` are column-less.
 """
 
 from __future__ import annotations
@@ -46,10 +32,8 @@ PROPOSED_LABELS_TABLE = "proposed_labels"
 def _scalar_or_nan(value, *, context: str = "") -> float:
     """Return one numeric scalar, rejecting metric shape or dtype drift.
 
-    A legitimate scalar NaN remains valid: it represents metrics that cannot
-    be computed for a low-spike unit.  Array-valued and object-valued cells are
-    unsupported because silently replacing them with NaN would change the
-    scientific output consumed by auto-curation rules.
+    Scalar NaN is valid (a metric not computable for a low-spike unit). Array
+    or object cells raise rather than silently becoming NaN.
     """
     from spyglass.spikesorting.v2.exceptions import (
         UnsupportedMetricValueError,
@@ -76,9 +60,8 @@ def _scalar_or_nan(value, *, context: str = "") -> float:
 def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
     """Wide quality + waveform-shape metrics table (one row per unit).
 
-    ``metrics_df`` is indexed by ``unit_id`` and carries the quality metrics
-    plus any surfaced template (waveform-shape) columns. NaN is preserved. A
-    zero-row frame yields an empty, column-less table (the zero-unit case).
+    ``metrics_df`` is indexed by ``unit_id``. A zero-row frame yields a
+    column-less table.
     """
     table = DynamicTable(
         name=QUALITY_METRICS_TABLE,
@@ -134,8 +117,7 @@ def build_proposed_labels_table(
 ) -> DynamicTable:
     """Wide proposed-labels table; ragged label column only when ≥1 label.
 
-    The ``curation_label`` column is omitted entirely when no unit is labeled,
-    so a clean sort never writes an all-empty list-of-lists (#1625).
+    HDMF cannot infer the dtype of an all-empty ragged column.
     """
     table = DynamicTable(
         name=PROPOSED_LABELS_TABLE,
@@ -169,15 +151,9 @@ def write_analyzer_curation_tables(
 ) -> tuple[str, str, str]:
     """Write the three curation tables into an existing analysis NWB file.
 
-    Opens ``abs_path`` once in append mode, adds the three scratch tables, and
-    returns their object IDs ``(quality_metrics, merge_suggestions,
-    proposed_labels)``. Registering the file in the DataJoint
-    ``AnalysisNwbfile`` table is the caller's responsibility (done inside the
-    insert transaction).
-
-    ``provenance_tables`` (optional, from :mod:`._storage.provenance`) are embedded
-    as scratch in the same write so the artifact is self-describing; ``None``
-    leaves only the result tables.
+    Returns the object IDs ``(quality_metrics, merge_suggestions,
+    proposed_labels)``. The caller registers the file in ``AnalysisNwbfile``.
+    Optional ``provenance_tables`` are added as scratch in the same write.
     """
     qm_table = build_quality_metrics_table(metrics_df)
     ms_table = build_merge_suggestions_table(merge_groups)
@@ -235,8 +211,7 @@ def _proposed_labels_from_frame(frame: pd.DataFrame) -> dict[int, list[str]]:
 def read_quality_metrics(abs_path: str, object_id: str) -> pd.DataFrame:
     """Read the quality-metrics table; returns a DataFrame indexed by unit_id.
 
-    Non-finite values are coerced to ``None`` (the on-disk representation is
-    NaN). An empty table yields an empty DataFrame.
+    Non-finite values become ``None``.
     """
     (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
     return _quality_metrics_from_frame(frame)

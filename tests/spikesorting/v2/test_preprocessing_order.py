@@ -1,12 +1,8 @@
 """Pre-motion preprocessing applies bandpass filter BEFORE referencing.
 
-v2 bandpass-filters (temporal) before common-referencing (spatial) -- the
-signal-processing-preferred order, an intentional divergence from v1's
-reference-first order. The order is only numerically observable on the
-global-median branch (the per-sample median is non-linear); on the
-``specific`` / ``none`` paths the steps commute. These tests pin the *apply
-order* directly by recording the sequence of SpikeInterface calls against a
-fake recording -- DB-free and fast, no SpikeInterface signal math run.
+v1 references first. The order only matters for the global median, which is
+non-linear. Tests record the SpikeInterface call sequence on a fake
+recording; no DB.
 """
 
 from __future__ import annotations
@@ -32,10 +28,8 @@ def _apply_preprocessing(
 ):
     """Compose the two preprocessing halves the way ``make_compute`` does.
 
-    ``make_compute`` runs ``apply_temporal_preprocessing`` on the continuous
-    recording, restricts time, then runs ``apply_spatial_preprocessing``. The
-    time restriction between them cannot reorder SpikeInterface calls, so
-    composing them directly pins the same apply order these tests are about.
+    ``make_compute`` restricts time between the two, which does not change
+    the call order.
     """
     recording, temporal_steps = apply_temporal_preprocessing(
         recording, validated
@@ -54,11 +48,8 @@ def _apply_preprocessing(
 class _FakeRecording:
     """Minimal recording stub: tracks channel ids, properties, removes.
 
-    ``properties`` maps a property key (e.g. ``inter_sample_shift``) to its
-    value; ``get_property`` returns ``None`` for an absent key, matching
-    SpikeInterface's ``BaseExtractor.get_property`` so the phase-shift gate
-    (``recording.get_property("inter_sample_shift") is not None``) can be
-    exercised both ways.
+    ``get_property`` returns ``None`` for an absent key, as SpikeInterface
+    does, so the ``inter_sample_shift`` gate can be exercised both ways.
     """
 
     def __init__(self, channel_ids, calls, tag="rec", properties=None):
@@ -71,9 +62,7 @@ class _FakeRecording:
         return list(self._ids)
 
     def get_sampling_frequency(self):
-        # 30 kHz: well above 2x the default bandpass freq_max (6 kHz), so the
-        # Nyquist guard in apply_temporal_preprocessing is a no-op here. The
-        # dedicated above-Nyquist test uses a real low-rate NumpyRecording.
+        # Above 2x freq_max, so the Nyquist guard does not fire.
         return 30000.0
 
     def get_num_segments(self):
@@ -89,10 +78,7 @@ class _FakeRecording:
         return self._properties.get(key)
 
     def set_channel_offsets(self, offsets):
-        # SI 0.104.3 mutates IN PLACE and returns None; the offset-zeroing step
-        # (``apply_spatial_preprocessing`` after referencing on every branch)
-        # calls this as a bare statement. Record nothing -- the order-signature
-        # tests assert the SI preprocessing-call sequence, not channel offsets.
+        # SI mutates in place and returns None; not part of the order.
         self._offsets = offsets
 
     def remove_channels(self, ids):
@@ -109,11 +95,7 @@ class _FakeRecording:
 def _patch_sip(monkeypatch, calls):
     """Patch ``sip.phase_shift`` / ``bandpass_filter`` / ``common_reference``.
 
-    Both ``apply_*_preprocessing`` functions do ``import
-    spikeinterface.preprocessing as sip`` internally, so patching the module
-    attributes intercepts its calls. Each stub records its kind (and the
-    order-distinguishing kwargs) and passes the recording through so the
-    downstream ref-channel drop still sees it.
+    Each stub records its kind and kwargs and passes the recording through.
     """
 
     def fake_phase_shift(recording, **kwargs):
@@ -200,8 +182,7 @@ def test_global_median_filters_then_references(monkeypatch):
 def test_global_median_single_channel_raises(monkeypatch):
     calls: list = []
     _patch_sip(monkeypatch, calls)
-    # A global reference on a unitrode (1-channel) group would subtract the
-    # channel from itself -> all zeros. The helper must fail loud instead.
+    # A global reference on one channel would zero it.
     rec = _FakeRecording([0], calls)
 
     with pytest.raises(ValueError, match="zeroes the signal"):
@@ -237,8 +218,6 @@ def test_invalid_reference_mode_raises(monkeypatch):
     _patch_sip(monkeypatch, calls)
     rec = _FakeRecording([0, 1, 2], calls)
 
-    # The internal defensive guard (distinct from the SortGroupV2 insert-time
-    # ReferenceMode validator) rejects an unknown mode.
     with pytest.raises(ValueError, match="invalid reference_mode"):
         _apply_preprocessing(rec, "banana", None, _validated())
 
@@ -246,10 +225,7 @@ def test_invalid_reference_mode_raises(monkeypatch):
 def test_specific_reference_absent_after_referencing_raises(monkeypatch):
     calls: list = []
     _patch_sip(monkeypatch, calls)
-    # The reference id (99) is NOT a channel of the recording, so the drop
-    # step cannot find it -- the invariant (select_sort_group_channels slices
-    # the ref in) is broken and the helper must fail loud, not silently keep
-    # it.
+    # select_sort_group_channels should have sliced the reference (99) in.
     rec = _FakeRecording([0, 1, 2], calls)
 
     with pytest.raises(RuntimeError, match="absent after referencing"):
@@ -273,7 +249,6 @@ def test_phase_shift_runs_before_bandpass(monkeypatch):
         rec, "none", None, _validated(phase_shift=100.0)
     )
 
-    # phase-shift precedes the bandpass (the deliberate AIND ordering).
     assert [c[0] for c in calls] == ["phase_shift", "bandpass_filter"]
     ps = next(c for c in calls if c[0] == "phase_shift")
     assert ps[1] == 100.0  # margin_ms forwarded
@@ -284,9 +259,7 @@ def test_phase_shift_runs_before_bandpass(monkeypatch):
 def test_phase_shift_skipped_when_property_absent(monkeypatch, caplog):
     """No ``inter_sample_shift`` property -> skip (loudly), bandpass still runs.
 
-    Enabling phase-shift on non-multiplexed acquisition is a safe no-op: the
-    runtime logs a warning, makes no ``sip.phase_shift`` call, reports
-    ``phase_shift=False``, and the bandpass still runs.
+    Reports ``phase_shift=False`` and makes no ``sip.phase_shift`` call.
     """
     calls: list = []
     _patch_sip(monkeypatch, calls)
@@ -325,10 +298,8 @@ def test_phase_shift_off_by_default_ignores_property(monkeypatch):
 
 
 def test_bandpass_freq_max_at_or_above_nyquist_raises():
-    """``freq_max`` >= Nyquist (fs/2) passes the Pydantic schema (which cannot
-    know the recording's sampling rate) but must be rejected at materialization
-    with a clear message, instead of failing deep inside scipy's filter design
-    far from the misconfiguration."""
+    """``freq_max`` >= Nyquist is rejected at materialization (the schema
+    does not know the sampling rate)."""
     import numpy as np
     import spikeinterface as si
 
@@ -343,8 +314,7 @@ def test_bandpass_freq_max_at_or_above_nyquist_raises():
     validated.bandpass_filter.freq_max = 12000.0  # above the 10 kHz Nyquist
     with pytest.raises(ValueError, match="Nyquist"):
         _apply_preprocessing(rec, "none", None, validated)
-    # The boundary itself: freq_max EXACTLY AT Nyquist must also raise (the
-    # guard is ``freq_max >= fs/2``; scipy needs strictly ``< fs/2``).
+    # scipy needs freq_max < fs/2.
     validated.bandpass_filter.freq_max = fs / 2.0  # == 10 kHz Nyquist
     with pytest.raises(ValueError, match="Nyquist"):
         _apply_preprocessing(rec, "none", None, validated)

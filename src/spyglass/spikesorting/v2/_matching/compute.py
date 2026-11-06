@@ -1,15 +1,7 @@
-"""Compute steps of ``UnitMatch.make_compute`` that need no database.
+"""DB-free compute steps of ``UnitMatch.make_compute``.
 
-:func:`extract_and_match` is called by ``UnitMatch.make_compute``: it
-extracts a waveform bundle per matching input from the files ``make_fetch``
-resolved, runs the matcher in chronological input order and canonicalizes the
-pairs. :func:`_input_recording_spike_counts` counts each matchable unit's
-spikes per constituent recording, and :func:`unit_match_provenance_tables`
-builds the provenance tables written beside the pairs table.
-``make_compute`` stays on ``UnitMatch`` and keeps staging the pairs NWB.
-
-Imports without the DB layer, and no function queries the database or stages
-a file: the only files read are those named in ``UnitMatchFetched.input_plan``.
+Reads only the files named in ``UnitMatchFetched.input_plan``; never queries
+the database or stages a file.
 """
 
 from __future__ import annotations
@@ -24,25 +16,16 @@ def extract_and_match(
 ):
     """Extract per-input bundles, run the matcher, canonicalize the pairs.
 
-    Returns ``(oriented_pairs, runtime_s)``. The wrapper extracts dense
-    split-half waveform bundles from each input's curated, matchable
-    sorting + recording (resolving ``MatcherParameters.job_kwargs`` into the
-    analyzer compute calls) and feeds the matcher self-contained directories
-    in ``input_index`` order, which is chronological; the matcher never sees
-    a recording, analyzer, or Spyglass key.
+    Returns ``(oriented_pairs, runtime_s)``. Inputs are fed to the matcher
+    in ``input_index`` (chronological) order; the matcher never sees a
+    recording, analyzer, or Spyglass key.
 
-    Only spikes whose whole waveform window lies inside one of the sort's
-    statistics spans are sampled, so no window runs across a
-    concatenation join, an acquisition gap or an artifact exclusion. A
-    matchable unit with fewer than two sampled spikes is left out of its
-    input's bundle, so it gets no match pair; one warning per input names
-    those units. They stay in the frozen matchable universe
-    (``make_insert`` writes ``MatchableUnit`` from the plan, not the
-    bundles) and become unmatched tracked units.
-
-    ``sortings`` (optional) maps each plan's ``input_index`` to its curated
-    units already read from ``plan["units"]`` (``make_compute`` reads them
-    once for the spike counts too); default reads them here.
+    - Only spikes whose waveform window lies inside one statistics span are
+      sampled.
+    - Units the preparer excludes get no pairs but stay in the matchable
+      universe as unmatched units; one warning per input names them.
+    - ``sortings`` optionally maps ``input_index`` to curated units already
+      read from ``plan["units"]``; default reads them here.
 
     Raises
     ------
@@ -93,11 +76,7 @@ def extract_and_match(
         (str(plan["sorting_id"]), int(plan["curation_id"])): plan["input_index"]
         for plan in input_plan
     }
-    # Feed the matcher in input_index order, the chronological order frozen
-    # at selection: UnitMatch's drift correction aligns each session to the
-    # previous one, so an out-of-chronology order would mis-align drift.
-    # Pair orientation (side a = lower input_index) is applied by
-    # canonicalize_match_pairs below.
+    # UnitMatch drift correction aligns each session to the previous one.
     ordered_plan = sorted(input_plan, key=lambda plan: plan["input_index"])
     with tempfile.TemporaryDirectory(
         prefix="unitmatch_", dir=spyglass_temp_dir
@@ -105,17 +84,7 @@ def extract_and_match(
         session_inputs = []
         eligible_unit_ids_by_curation = {}
         for plan in ordered_plan:
-            # Build the SI objects (NWB I/O) here from the files make_fetch
-            # resolved; the matchable unit set was already resolved +
-            # validated there and threaded in via the plan, so compute does
-            # not re-derive curation-label state. The recording is the
-            # traces the sorter read, opened by the DB-free half of
-            # CurationV2.get_sorting_input_recording: the sort's effective
-            # traces (a selected motion-corrected recording included, as
-            # the plan's ``waveform_traces`` records), silenced over the
-            # sort's artifact periods by the same mask the sorter input and
-            # every analyzer rebuild use; the sorting is
-            # CurationV2.get_sorting's.
+            # The traces the sorter read, artifact periods silenced.
             recording = read_canonical_recording(plan["sorting_input"])
             full_sorting = (
                 read_stored_units(plan["units"])
@@ -197,9 +166,8 @@ def extract_and_match(
 def _input_recording_spike_counts(plan: dict, sorting) -> list[dict]:
     """Count each matchable unit's spikes per constituent recording; no DB.
 
-    Splits every matchable unit's spikes (sort frames) by the recordings'
-    frozen ``[start_sample, end_sample)`` spans (:func:`._matching.graph.
-    count_recording_spikes`), which conserves every spike.
+    Splits spikes (sort frames) by the recordings' frozen
+    ``[start_sample, end_sample)`` spans.
 
     Parameters
     ----------
@@ -269,9 +237,8 @@ def unit_match_provenance_tables(
 ) -> list:
     """Provenance tables that make a run's pairs NWB self-describing.
 
-    The run/group/matcher header (re-emitting the producer provenance the
-    ``UnitMatch`` row stores), the per-input map and the per-recording map,
-    so the pairs table -- side ids only -- is interpretable without the DB.
+    A run header, a per-input map and a per-recording map, so the pairs
+    table (side ids only) is interpretable without the DB.
 
     Parameters
     ----------
@@ -339,8 +306,7 @@ def unit_match_provenance_tables(
                     "source_id": str(plan["source_id"]),
                     "input_start_time": str(plan["input_start_time"]),
                     "waveform_traces": str(plan["waveform_traces"]),
-                    # Empty for an input whose waveforms come from its
-                    # source's own traces (typed column: no None).
+                    # Typed column: "" instead of None.
                     "motion_corrected_recording_id": str(
                         plan["motion_corrected_recording_id"] or ""
                     ),

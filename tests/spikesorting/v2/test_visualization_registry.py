@@ -1,10 +1,6 @@
 """DB-free unit tests for the visualization registry / routing helpers.
 
-Exercises ``_visualization`` with synthetic inputs under the Agg backend (no
-DataJoint, no real SortingAnalyzer): the discovery catalog, the missing-display-
-extension policy + error wording, and the Spyglass-owned metric histogram plot.
-The key -> recording/analyzer resolution (which needs the schema classes) is
-covered by the ``db_unit`` facade tests in ``test_visualization_facade.py``.
+Key resolution is covered in ``test_visualization_facade.py``.
 """
 
 from __future__ import annotations
@@ -22,9 +18,7 @@ import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-# The ``ssviz`` visualization facade is taught in the curation walkthrough,
-# where inspecting units is the task at hand (the main notebook only shows the
-# sort-group geometry helper).
+# The curation walkthrough teaches the ``ssviz`` facade.
 _NOTEBOOK = _REPO_ROOT / "notebooks" / "10_Spike_SortingV2_Curation.ipynb"
 
 from spyglass.spikesorting.v2._review.visualization import (
@@ -60,7 +54,6 @@ def test_available_visualizations_lists_documented_helpers():
         "compute_missing",
         "description",
     }
-    # The discovery surface is self-documenting: every row has a description.
     assert all(d for d in table["description"])
     names = set(table["name"])
     expected = {
@@ -79,10 +72,7 @@ def test_available_visualizations_lists_documented_helpers():
         "export_to_phy",
     }
     assert expected <= names
-    # The catalog records each helper's ACTUAL default backend (not a blanket
-    # "matplotlib"): most plot helpers are matplotlib, but the two SI widgets
-    # with no matplotlib backend are recorded honestly, and the exporters take
-    # no plotting backend at all (None).
+    # Each helper's actual default backend; exporters have none.
     indexed = table.set_index("name")
     matplotlib_helpers = [
         "plot_recording_traces",
@@ -106,9 +96,7 @@ def test_available_visualizations_lists_documented_helpers():
     )
     assert indexed.loc["export_si_report", "backend_default"] is None
     assert indexed.loc["export_to_phy", "backend_default"] is None
-    # Key types are constrained to the three resolvable kinds. Unit-level
-    # plots / exports take an exact CURATION (never a bare sorting key), so the
-    # units shown are the curation's -- merged children included.
+    # Unit-level helpers take a curation key, never a bare sorting key.
     assert set(table["key_type"]) == {
         "recording",
         "curation",
@@ -263,10 +251,7 @@ def test_plot_metrics_figure_rejects_unknown_columns():
 def test_plot_metrics_figure_coerces_none_and_drops_non_finite():
     """``None`` / non-numeric / inf values coerce to NaN and drop per-column.
 
-    Mirrors the on-disk metric readback, where non-finite values surface as
-    ``None`` (object dtype) rather than float NaN. The coercion path
-    (``pd.to_numeric(errors='coerce')`` + ``np.isfinite``) must drop them and
-    annotate the count, not raise.
+    On-disk metric readback returns non-finite values as ``None``.
     """
     metrics = pd.DataFrame(
         {
@@ -277,7 +262,6 @@ def test_plot_metrics_figure_coerces_none_and_drops_non_finite():
     )
     fig = plot_metrics_figure(metrics)
     snr_ax = next(ax for ax in fig.axes if ax.get_title() == "snr")
-    # None and +inf both dropped -> 2 finite of 4.
     assert any("2 NaN dropped" in txt.get_text() for txt in snr_ax.texts)
     # The all-NaN column still gets a (empty) titled axis, not a crash.
     assert any(ax.get_title() == "all_nan" for ax in fig.axes)
@@ -299,13 +283,7 @@ def test_plot_metrics_figure_respects_explicit_columns():
 
 @pytest.mark.unit
 def test_notebook_uses_visualization_facade():
-    """The user notebook teaches the discoverable ``ssviz`` facade.
-
-    Asserts the walkthrough imports the single ``visualization`` namespace and
-    drives it (``available_visualizations`` + at least one ``ssviz`` plot call),
-    so users tab-complete one module rather than hunting plot methods across the
-    ``Recording`` / ``Sorting`` / ``CurationEvaluation`` table classes.
-    """
+    """The user notebook teaches the discoverable ``ssviz`` facade."""
     if not _NOTEBOOK.exists():
         pytest.skip(f"notebook {_NOTEBOOK.name} not found")
     notebook = json.loads(_NOTEBOOK.read_text())

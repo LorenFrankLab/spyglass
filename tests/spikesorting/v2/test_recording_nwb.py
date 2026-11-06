@@ -1,22 +1,17 @@
 """Persisted-geometry and semantic round-trip contracts for the v2 writer.
 
-``write_nwb_artifact`` streams the preprocessed recording into an
-``AnalysisNwbfile``. SpikeInterface rebuilds a reloaded recording's channel
-locations from that file's electrodes rows (``rel_x``/``rel_y``/``rel_z`` --
-see ``NwbRecordingExtractor._fetch_locations_and_groups``), so the geometry the
-writer persists IS the geometry every later stage sees. These tests pin that
-the writer writes the recording's *normalized 2D* geometry (constant z) into
-exactly the rows the ElectricalSeries references, and that a reload -- including
-one served by ``_rebuild_nwb_artifact`` -- reproduces the recording the writer
-was handed.
+SpikeInterface rebuilds a reloaded recording's locations from the electrodes
+rows, so the writer must persist the normalized 2D geometry on exactly the
+rows the ElectricalSeries references, and a reload or rebuild must reproduce
+the recording.
 
-The fixtures here are built to discriminate rather than to be convenient:
-contacts lie in the x-z plane (so an un-normalized x-y projection would
-collapse them), electrode ids are non-contiguous AND out of row order (so an
-id-as-row-index bug mis-points the region), the raw series carries a uniform
-non-unit gain with a non-zero offset (so a dropped conversion shows up in
-microvolts), the sort interval has two disjoint pieces, and the artifact is
-long enough that the writer streams it in several chunks.
+Fixtures are built to discriminate:
+
+- contacts in the x-z plane, so an x-y projection collapses them
+- non-contiguous, out-of-order electrode ids
+- non-unit gain with a non-zero offset
+- two disjoint sort intervals
+- an artifact long enough to stream in several chunks
 """
 
 from __future__ import annotations
@@ -34,11 +29,8 @@ from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
 # Fixture construction
 # ---------------------------------------------------------------------------
 
-# Deliberately non-Frank-lab probe types: ``maybe_apply_tetrode_geometry``
-# patches only 4-channel ``tetrode_12.5`` groups, and these fixtures must
-# exercise the plane-normalization path rather than the tetrode repair. One
-# name per fixture -- ``ProbeType`` is keyed on the name and its shank count
-# differs between them.
+# Not ``tetrode_12.5``, so plane normalization runs instead of the tetrode
+# repair. One name per fixture: ``ProbeType`` is keyed on the name.
 _SMALL_PROBE_TYPE = "v2_xz_test_probe_1shank"
 _ROUNDTRIP_PROBE_TYPE = "v2_xz_test_probe_2shank"
 _CONTACT_PITCH_UM = 30.0
@@ -49,26 +41,16 @@ _SAMPLING_FREQUENCY = 1000.0
 _GAIN_UV_PER_COUNT = 0.195
 _OFFSET_UV = 5.0
 
-# Electrode ids: non-contiguous and NOT in electrodes-table row order, so the
-# id -> row mapping the writer performs is load-bearing (row ``k`` does not
-# hold electrode ``k``, and the ids skip values).
-#
-# The ids a sort group uses must still land on ASCENDING rows: SpikeInterface
-# 0.104.3 reads an ElectricalSeries' electrode columns with a single h5py
-# fancy index (``NwbRecordingExtractor._fetch_locations_and_groups``), and
-# h5py rejects a non-monotonic one ("Indexing elements must be in increasing
-# order"). That is a reader limitation independent of anything here, so the
-# fixtures put each exercised group's ids on increasing rows while keeping the
-# table as a whole permuted.
+# Electrode ids are non-contiguous and out of row order. Each group's ids still
+# sit on ascending rows: SI reads them with one h5py fancy index, which must
+# increase.
 _SMALL_ELECTRODE_IDS = (3, 30, 5, 40, 9, 12, 17, 21)
-# Rows 0, 2, 4, 5 -- ascending rows, non-contiguous ids, and id != row for
-# every one of them.
+# Rows 0, 2, 4, 5: ascending rows, non-contiguous ids, id != row.
 _SMALL_GROUP_IDS = (3, 5, 9, 12)
 _SMALL_CONTACTS = tuple((eid, 0) for eid in _SMALL_ELECTRODE_IDS)
 
-# The full-pipeline fixture: two shanks interleaved row by row, so the table's
-# ids run 5, 60, 9, 61, ... -- permuted and non-contiguous -- while each
-# shank's own ids still ascend with its rows.
+# Two shanks interleaved by row (ids 5, 60, 9, 61, ...); each shank's ids
+# ascend with its rows.
 _ROUNDTRIP_GROUP_IDS = (5, 9, 14, 22, 30, 38, 47, 55)
 _ROUNDTRIP_OTHER_IDS = (60, 61, 62, 63, 64, 65, 66, 67)
 _ROUNDTRIP_CONTACTS = tuple(
@@ -88,11 +70,8 @@ _ROUNDTRIP_PARAMS_NAME = "_pytest_xz_roundtrip"
 def _xz_geometry(contacts) -> dict:
     """Map each electrode id to its ``(rel_x, rel_y, rel_z)`` micrometres.
 
-    ``rel_y`` is constant (0) and ``rel_x`` repeats every other contact within
-    a shank, so the x-y projection SpikeInterface reaches for first collapses
-    the contacts into coincident pairs while the x-z projection separates all
-    of them. This is the real Frank-lab tetrode failure mode, reproduced
-    without a tetrode. Shanks are offset along ``rel_x`` so they never overlap.
+    The x-y projection collapses contacts into pairs (the Frank-lab tetrode
+    failure mode); x-z separates them. Shanks are offset along ``rel_x``.
 
     Parameters
     ----------
@@ -131,11 +110,8 @@ def _write_xz_probe_nwb(
 ):
     """Write an ingestible Spyglass NWB whose contacts lie in the x-z plane.
 
-    Mirrors the ``trodes_to_nwb`` layout Spyglass ingestion expects (one
-    ``ndx_franklab_novela`` probe device, one electrode group, the novela
-    electrode columns) but takes explicit, unordered electrode ids and writes
-    the raw series with a uniform non-unit ``conversion`` and a non-zero
-    ``offset``.
+    ``trodes_to_nwb`` layout with explicit, unordered electrode ids and a
+    non-unit ``conversion`` with non-zero ``offset``.
 
     Parameters
     ----------
@@ -151,9 +127,8 @@ def _write_xz_probe_nwb(
     fixture_name : str
         Recorded as the NWB ``session_id`` / identifier stem.
     probe_type : str
-        ``Probe.probe_type`` for the synthetic device. Distinct per fixture:
-        Spyglass keys ``ProbeType`` on the name, so two fixtures sharing one
-        name but differing in shank count collide on ingestion.
+        ``Probe.probe_type`` for the synthetic device. Distinct per fixture,
+        since ``ProbeType`` is keyed on the name.
 
     Returns
     -------
@@ -280,13 +255,7 @@ def _write_xz_probe_nwb(
 
 
 def _ingest_synthetic_nwb(path) -> str:
-    """Ingest a freshly synthesized NWB, replacing any earlier copy of it.
-
-    ``copy_and_insert_nwb`` skips the copy when the raw directory already holds
-    a file of that name. These fixtures are synthesized per run (not downloaded
-    assets), so a stale copy from an earlier run would silently be ingested
-    instead of the file the test just built.
-    """
+    """Ingest a freshly synthesized NWB, replacing any earlier copy of it."""
     from spyglass.settings import raw_dir
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
@@ -320,9 +289,7 @@ def xz_probe_session(dj_conn, tmp_path_factory):
 def xz_roundtrip_session(dj_conn, tmp_path_factory):
     """Ingest the long two-shank x-z session the round-trip test sorts.
 
-    Long enough that the writer streams the artifact in several chunks (see
-    ``test_recording_semantic_round_trip``), which is why it is session-scoped:
-    synthesizing and ingesting it is the heaviest step in this module.
+    Long enough to stream in several chunks, hence session-scoped.
     """
     path = _write_xz_probe_nwb(
         tmp_path_factory.mktemp("xz_roundtrip") / "v2_xz_roundtrip.nwb",
@@ -344,9 +311,7 @@ def xz_roundtrip_session(dj_conn, tmp_path_factory):
 def _analysis_electrodes(analysis_file_name):
     """Return the analysis file's ``(rel_x, rel_y, rel_z)`` by electrode id.
 
-    Reads the persisted electrodes table directly (h5py, no SpikeInterface) so
-    the assertion is about the bytes on disk rather than about any reader's
-    interpretation of them.
+    Reads with h5py, so assertions are about the bytes on disk.
     """
     import h5py
 
@@ -372,7 +337,7 @@ def _drop_analysis_file(analysis_file_name) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. The writer persists the recording's 2D geometry -- and only its own rows
+# 1. The writer persists the recording's 2D geometry on its own rows only
 # ---------------------------------------------------------------------------
 
 
@@ -382,10 +347,6 @@ def test_persist_geometry_writes_series_rows_only(xz_probe_session):
     """The writer stamps the recording's 2D locations onto the electrodes rows
     the ElectricalSeries references, leaves every other row at its raw value,
     and the geometry it writes reaches the content fingerprint.
-
-    Without this the reloaded recording is rebuilt from the PARENT file's x-z
-    coordinates: SpikeInterface projects those to x-y, the contacts collapse,
-    and the in-memory normalization the sort ran with is lost.
     """
     import spikeinterface.core as si_core
 
@@ -393,17 +354,13 @@ def test_persist_geometry_writes_series_rows_only(xz_probe_session):
 
     nwb_file_name = xz_probe_session["nwb_file_name"]
     raw_geometry = _xz_geometry(_SMALL_CONTACTS)
-    # A recording over four of the eight electrodes, in ascending id order
-    # (what ``select_sort_group_channels`` produces) -- which is neither the
-    # electrodes-table row order nor a contiguous id run. The locations are
-    # the x-z plane those four rows normalize to.
+    # Four of eight electrodes in ascending id order (not row order), at
+    # their normalized x-z locations.
     channel_ids = list(_SMALL_GROUP_IDS)
     locations = np.array(
         [[0.0, 0.0], [0.0, -30.0], [0.0, -60.0], [30.0, -60.0]], dtype=float
     )
-    # One trace array, reused by both writes: the second write differs from
-    # the first ONLY in channel locations, so a hash difference can come from
-    # nothing else.
+    # Both writes share traces and differ only in locations.
     traces = np.random.default_rng(0).integers(
         -500, 500, size=(500, len(channel_ids)), dtype=np.int16
     )
@@ -473,8 +430,7 @@ def test_float64_traces_are_stored_as_float32(xz_probe_session):
     """Preprocessing runs in float64, but the artifact stores float32 traces
     (half the bytes on disk and per read); integer traces keep their dtype.
 
-    float32's rounding is far below the raw int16 step: on a real 32-channel
-    epoch it was ~3e-7 uV rms against a 1 uV/count raw step and ~10 uV noise.
+    float32 rounding (~3e-7 uV rms) is far below the 1 uV/count raw step.
     """
     import h5py
     import spikeinterface.core as si_core
@@ -558,21 +514,11 @@ def _replay(recording, requests, *, return_in_uV=True):
 @pytest.mark.database
 @pytest.mark.pipeline
 def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
-    """The artifact reproduces the recording the writer was handed -- and so
-    does the rebuild that replaces a deleted artifact.
+    """The artifact and its rebuild reproduce the recording the writer was
+    handed: timestamps, channel order, 2D geometry and microvolts.
 
-    Pins the whole persisted surface, not just the traces: the wall-clock
-    timestamps, the channel-id order, the normalized 2D geometry, and the
-    microvolt values. SpikeInterface rebuilds channel locations from the
-    persisted electrodes rows, so an un-persisted normalization shows up here
-    as an x-y collapse.
-
-    The microvolt reference is read from the pre-write lazy recording at the
-    writer's OWN chunk boundaries. A single whole-recording request is not a
-    valid reference: the lazy bandpass filters each request over a short margin
-    of context, so its interior values depend on where the request boundaries
-    fall. The test asserts that too, so the reason for the chunked reference is
-    documented rather than assumed.
+    The reference is read at the writer's own chunk boundaries, because the
+    lazy bandpass makes values depend on request boundaries.
     """
     from spyglass.common import IntervalList
     from spyglass.common.common_lab import LabTeam
@@ -598,8 +544,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
         },
         skip_duplicates=True,
     )
-    # A 1 kHz fixture cannot use the shipped 300-6000 Hz default (6000 Hz is
-    # past Nyquist). Everything else is the schema default.
+    # 6000 Hz is past Nyquist at 1 kHz; the rest is the schema default.
     PreprocessingParameters().insert1(
         {
             "preprocessing_params_name": _ROUNDTRIP_PARAMS_NAME,
@@ -689,9 +634,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
         source_timestamps
     ), "the persisted timestamps must cover every written sample"
 
-    # The selection's two disjoint pieces survive as one gap in the persisted
-    # wall clock: the artifact's samples are contiguous, its timestamps are
-    # not.
+    # Contiguous samples, one gap in the timestamps.
     sample_period = 1.0 / _SAMPLING_FREQUENCY
     first_interval, second_interval = _ROUNDTRIP_INTERVALS
     gaps = np.flatnonzero(np.diff(source_timestamps) > 1.5 * sample_period)
@@ -757,9 +700,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
     first_load = Recording().get_recording(pk)
     _assert_matches(first_load, "first load")
 
-    # A whole-recording request is NOT a valid reference: the lazy bandpass
-    # pulls only a short margin of context around each request, so its interior
-    # values move when the request boundaries move.
+    # A whole-recording request differs: the bandpass margin moves.
     whole = first_load.get_traces(return_in_uV=True)
     unchunked = source.get_traces(return_in_uV=True)
     assert np.max(np.abs(whole - unchunked)) > 1e-6, (
@@ -798,10 +739,8 @@ def test_specific_reference_physical_units_oracle(
     """Reloaded microvolts must equal the reference subtraction done in
     PHYSICAL units, not in raw counts.
 
-    The oracle is built from the raw counts and the per-channel calibration --
-    ``(raw_i * gain_i + offset_i) - (raw_ref * gain_ref + offset_ref)`` -- not
-    from the preprocessed in-memory recording. Unequal offsets are rejected
-    before preprocessing can erase the calibration mismatch.
+    Oracle: ``(raw_i * gain_i + offset_i) - (raw_ref * gain_ref +
+    offset_ref)``. Unequal offsets are rejected before preprocessing.
     """
     import spikeinterface.core as si_core
 
@@ -893,16 +832,9 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     """The writer's persistence step works on an electrodes table that never
     carried ``rel_x``/``rel_y``/``rel_z``.
 
-    ``AnalysisNwbfile().create`` exports the parent's electrodes table
-    verbatim, so a parent written without probe-relative positions leaves the
-    normalized geometry nowhere to land. hdmf accepts a new column on a table
-    that is already on disk (the file is open in append mode), which is what
-    the writer relies on; this pins that, and that only the referenced rows
-    end up with a position at all -- every other row stays ``NaN``.
-
-    Exercises the two file-level helpers directly: they touch no database, and
-    the branch is unreachable from the Frank-lab-shaped fixtures above (their
-    parents all carry the columns).
+    The writer adds the columns in append mode; unreferenced rows stay
+    ``NaN``. Calls the file-level helpers directly, since the fixtures above
+    all carry the columns.
     """
     import pynwb
 
@@ -945,12 +877,10 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
     np.testing.assert_array_equal(
         persisted[rows], np.column_stack([locations, np.zeros(len(rows))])
     )
-    # Rows the series does not reference stay NaN: the created columns record
-    # "no geometry known here", not a contact sitting at the origin.
+    # NaN, not the origin, for unreferenced rows.
     untouched = [i for i in range(len(_SMALL_ELECTRODE_IDS)) if i not in rows]
     assert np.isnan(persisted[untouched]).all()
-    # Created columns are double precision, so a coordinate that is not
-    # exactly representable in float32 survives them unchanged.
+    # Created columns are float64.
     with h5py.File(path, "r") as handle:
         group = handle["/general/extracellular_ephys/electrodes"]
         for column in ("rel_x", "rel_y", "rel_z"):
@@ -961,9 +891,8 @@ def test_geometry_columns_are_created_when_absent(tmp_path):
 # 4b. A parent whose rel_* columns are narrower than float64
 # ---------------------------------------------------------------------------
 
-# Coordinates chosen so that none of them is exactly representable in
-# float32: 1000.1 lands on 1000.0999755859375 there (an error of 2.4e-5 um,
-# 24x the writer's 1e-6 um read-back tolerance).
+# Not exact in float32: 1000.1 -> 1000.0999755859375 (24x the writer's
+# 1e-6 um tolerance).
 _NARROW_ELECTRODE_IDS = (3, 5, 9, 12)
 _NARROW_LOCATIONS = np.array(
     [
@@ -978,11 +907,7 @@ _NARROW_LOCATIONS = np.array(
 def _write_narrow_geometry_nwb(path):
     """Write an NWB whose ``rel_x``/``rel_y`` are float32, ``rel_z`` float64.
 
-    Real files carry mixed-precision ``rel_*`` columns, and
-    ``AnalysisNwbfile().create`` exports the parent's electrodes table
-    verbatim -- a pynwb export preserves each column's on-disk dtype -- so the
-    analysis file the writer stamps inherits that float32 destination. An x-z
-    sort group then projects its float64 ``rel_z`` into the float32 ``rel_y``.
+    Real files mix precisions, and the analysis file inherits them.
     """
     import pynwb
 
@@ -1020,8 +945,7 @@ def _write_narrow_geometry_nwb(path):
     with pynwb.NWBHDF5IO(str(path), mode="w") as io:
         io.write(nwbfile)
 
-    # pynwb writes every rel_* column float64; narrow two of them the way a
-    # writer that declared float32 would have.
+    # pynwb writes float64; narrow two columns.
     with h5py.File(path, "a") as handle:
         group = handle["/general/extracellular_ephys/electrodes"]
         for column in ("rel_x", "rel_y"):
@@ -1041,13 +965,8 @@ def _write_narrow_geometry_nwb(path):
 def test_geometry_is_persisted_at_double_precision(tmp_path):
     """A float32 destination column must not truncate the sort's geometry.
 
-    ``group[column][:] = values`` casts to the destination dtype, so an x-z
-    group whose float64 ``rel_z`` is projected into a float32 ``rel_y`` lost
-    2.4e-5 um per coordinate -- 24x the 1e-6 um the writer verifies against --
-    and the read-back check failed the whole write on a perfectly valid file.
-    The persisted geometry is what SpikeInterface rebuilds a reloaded
-    recording's channel locations from, so it has to hold the coordinates the
-    sort actually ran with, not a truncation of them.
+    Assignment casts to the destination dtype, so an x-z group's float64
+    ``rel_z`` written into a float32 ``rel_y`` would be truncated.
     """
     import pynwb
 
@@ -1083,9 +1002,7 @@ def test_geometry_is_persisted_at_double_precision(tmp_path):
         atol=1e-6,
     )
 
-    # The widened columns are still a readable DynamicTable: pynwb resolves
-    # the table (and the series' region through it), and SpikeInterface
-    # rebuilds the recording's locations from it.
+    # The widened columns still read through pynwb and SpikeInterface.
     with pynwb.NWBHDF5IO(str(path), mode="r", load_namespaces=True) as io:
         table = io.read().electrodes
         assert {"rel_x", "rel_y", "rel_z"}.issubset(table.colnames)
@@ -1116,12 +1033,9 @@ def test_write_refuses_unnormalized_3d_geometry(xz_probe_session):
     write, rather than having SpikeInterface's default x-y projection
     persisted for it.
 
-    ``get_channel_locations()`` defaults to ``axes="xy"``, so a 3D recording
-    does not fail -- it silently loses z. For the x-z geometry these fixtures
-    carry, that projection is exactly the contact collapse normalization
-    exists to prevent, and the concatenated-recording writer has no upstream
-    ``assert_unique_contact_positions`` to catch it. The refusal is what makes
-    the writer safe for that second caller.
+    ``get_channel_locations()`` defaults to ``axes="xy"`` and silently
+    drops z. The concatenated-recording writer has no upstream
+    ``assert_unique_contact_positions``.
     """
     import spikeinterface.core as si_core
 
@@ -1171,12 +1085,8 @@ def test_artifact_path_reverified_outside_transactions_reused_inside(
 ):
     """The in-transaction re-fetch reuses this process's check of a file.
 
-    DataJoint runs a tri-part ``make_fetch`` twice: once before compute and
-    once inside the insert transaction. ``AnalysisNwbfile.get_abs_path``
-    checksums the whole file each time. A resolution outside a transaction
-    always goes through it; inside one, a file this process already checked
-    and whose size and modification time have not changed since is not
-    checksummed again. A changed file is checked again even in a transaction.
+    DataJoint runs ``make_fetch`` twice. Outside a transaction the file is
+    always checksummed; inside, only if its size or mtime changed.
     """
     import datajoint as dj
 

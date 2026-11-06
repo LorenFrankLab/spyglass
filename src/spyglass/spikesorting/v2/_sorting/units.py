@@ -1,19 +1,6 @@
 """``Sorting.Unit`` row construction behind ``Sorting``.
 
-``build_unit_rows_from_analyzer`` loads the analyzer ``Sorting.make_compute``
-just built and resolves each unit's peak channel, peak amplitude and spike
-count; ``build_sorting_unit_rows`` turns that per-unit peak metadata into the
-``Sorting.Unit`` rows; ``_to_int_unit_id`` coerces a sorter's unit id to the
-int PK v2 stores (raising the typed ``NonIntegerUnitIDError`` when it cannot).
-Pure (DB-free) row construction -- the sort-group/electrode fetches
-(``_sorting.fetch.fetch_unit_electrode_metadata``) and the
-``Sorting.Unit.insert`` live outside this module.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: ``build_unit_rows_from_analyzer`` imports
-SpikeInterface and the analyzer loader inside the function, and
-``_to_int_unit_id`` lazy-imports the typed ``NonIntegerUnitIDError``. No
-function touches the DB at call time.
+DB-free at import and at call time.
 """
 
 from __future__ import annotations
@@ -22,10 +9,7 @@ from __future__ import annotations
 def _to_int_unit_id(unit_id):
     """Coerce a sorter unit id to int, or raise the typed NonIntegerUnitIDError.
 
-    v2's ``Sorting.Unit`` PK stores int unit ids; a sorter that emits a
-    non-convertible id (e.g. a string label like ``"noise_3"``) must be
-    remapped before insertion. Raising the typed error -- not a bare
-    ``int()`` ValueError -- lets callers and tests discriminate this case.
+    ``Sorting.Unit`` stores int unit ids.
     """
     from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
 
@@ -52,13 +36,8 @@ def build_sorting_unit_rows(
 ) -> list[dict]:
     """Build the ``Sorting.Unit`` rows from per-unit peak metadata.
 
-    Pure (DB-free) row construction, called by
-    :func:`build_unit_rows_from_analyzer` with the peak metadata it resolved;
-    the sort-group / electrode fetches and the ``Sorting.Unit.insert`` live
-    outside this module. Each unit becomes one row carrying the peak channel's
-    Electrode FK fields (resolved through ``electrode_by_id``), the peak
-    template amplitude in microvolts, and the precomputed spike count, merged
-    onto ``key``.
+    Each row carries the peak channel's Electrode FK fields, the peak
+    template amplitude in µV, and the spike count, merged onto ``key``.
 
     Parameters
     ----------
@@ -136,22 +115,10 @@ def build_unit_rows_from_analyzer(
 ):
     """Build the ``Sorting.Unit`` rows from the freshly built analyzer.
 
-    Run once in ``make_compute`` after upstream inputs are resolved in
-    ``make_fetch``; this helper performs no DB writes. The analyzer folder
-    :func:`._sorting.analyzer.build_analyzer` just wrote is loaded here, each unit's peak channel
-    + amplitude is resolved under the sorter's configured detection
-    polarity (clusterless ``peak_sign`` / MountainSort ``detect_sign``, not
-    SI's ``"neg"`` default, so a positive-going detection attributes each
-    unit to its true peak channel), and the rows are assembled by
-    ``build_sorting_unit_rows`` (which raises on a sort-group/recording
-    channel-id mismatch). The resulting rows are reused for BOTH the NWB
-    unit columns and the ``Sorting.Unit`` insert, so the file and the DB
-    cannot drift.
-
-    Empty for a zero-unit sort: ``build_analyzer`` skips the
-    ``create_sorting_analyzer`` call when ``sorting.get_num_units() == 0``
-    (SI's ``estimate_sparsity`` crashes on empty sortings), so the analyzer
-    folder does not exist; there is nothing to load or insert.
+    Peak channel and amplitude use the sorter's detection polarity, not
+    SI's ``"neg"`` default. The rows feed both the NWB unit columns and the
+    ``Sorting.Unit`` insert. Empty for a zero-unit sort, which has no
+    analyzer folder.
     """
     if sorting.get_num_units() == 0:
         return []
@@ -168,12 +135,7 @@ def build_unit_rows_from_analyzer(
     peak_channels = template_tools.get_template_extremum_channel(
         analyzer, peak_sign=peak_sign, outputs="id"
     )
-    # ``mode="extremum"`` measures the amplitude at the template PEAK
-    # (matching ``get_template_extremum_channel`` above), not SI's
-    # ``mode="at_index"`` default which reads the alignment-sample value
-    # -- that under-reports the peak AND can land on a different channel
-    # than the attributed electrode. ``abs_value=True`` (SI default)
-    # returns the non-negative magnitude ``peak_amplitude_uv`` stores.
+    # SI's default mode="at_index" under-reports the peak.
     peak_amplitudes = template_tools.get_template_extremum_amplitude(
         analyzer, peak_sign=peak_sign, mode="extremum"
     )

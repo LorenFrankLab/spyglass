@@ -1,8 +1,7 @@
 """Execution configuration and reproducible seed resolution.
 
-This module owns the ambient configuration boundary. Resolved-input compute
-helpers receive its output rather than resolving database-backed parameters.
-No runtime configuration or SpikeInterface dependency is loaded at import.
+Compute helpers receive this module's output rather than reading config.
+Nothing heavy is imported at module load.
 """
 
 from __future__ import annotations
@@ -11,8 +10,7 @@ import functools
 import numbers
 from collections.abc import Mapping
 
-#: Most threads an exact nn-metric neighbor search uses by default (see
-#: ``resolve_search_threads``).
+#: Default thread cap for the nn-metric neighbor search.
 _DEFAULT_SEARCH_THREADS_CAP = 16
 
 
@@ -29,11 +27,8 @@ def _usable_cpus() -> int:
 def _repair_openblas_after_fork() -> None:
     """Rebuild each OpenBLAS thread pool in the parent after a fork.
 
-    SciPy's bundled OpenBLAS (0.3.30) shuts its pool down in its fork handler,
-    and its next parallel single-precision LU then deadlocks rebuilding it,
-    blocked on ``server_lock``: MountainSort5's float32 PCA hung after
-    SpikeInterface's forked workers. Setting a pool's thread count again
-    rebuilds it cleanly, in ~2 ms.
+    SciPy's bundled OpenBLAS 0.3.30 otherwise deadlocks on its next float32 LU
+    (e.g. MountainSort5 PCA). Resetting the thread count rebuilds the pool.
     """
     try:
         from threadpoolctl import ThreadpoolController
@@ -48,13 +43,8 @@ def _repair_openblas_after_fork() -> None:
 def install_openblas_fork_repair() -> None:
     """Run :func:`_repair_openblas_after_fork` after every fork (once per process).
 
-    A Python-level hook covers ``os.fork`` and multiprocessing's fork start
-    method, which SpikeInterface's process pools use. It repairs only the
-    parent: multithreaded BLAS inside forked workers hangs even in float64 and
-    without this hook, and the same repair in the child did not help, so
-    workers must stay single-threaded (SpikeInterface's default
-    ``max_threads_per_worker=1``). ``subprocess`` forks below both Python and
-    OpenBLAS's fork handler and leaves the pool intact.
+    Repairs only the parent; forked workers must stay single-threaded
+    (SpikeInterface's default ``max_threads_per_worker=1``).
     """
     import os
 
@@ -82,15 +72,10 @@ def _explicit_n_jobs(*row_job_kwargs: dict | None):
 def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
     """Threads for the exact neighbor searches of the nn_advanced metrics.
 
-    An ``n_jobs`` set by a layer (per-row blobs, then
-    ``dj.config['custom']['spikesorting_v2_job_kwargs']``, then a changed SI
-    global) sets it. Otherwise a quarter of the usable cores, at most
-    ``_DEFAULT_SEARCH_THREADS_CAP``: the search is ~75% of curation-evaluation
-    metrics and its threads add no memory (on 11 real searches 1 / 4 / 16
-    threads took 8.9 / 2.7 / 0.74 s). ``n_jobs`` itself stays at
-    SpikeInterface's one worker unless a layer sets it: on a real 20 min epoch
-    four worker processes saved only ~6 s, and sorting and the evaluation did
-    not get faster.
+    An explicit ``n_jobs`` (per-row blobs, then
+    ``dj.config['custom']['spikesorting_v2_job_kwargs']``, then a non-default SI
+    global) wins. Otherwise a quarter of the usable cores, at most
+    ``_DEFAULT_SEARCH_THREADS_CAP``.
 
     Parameters
     ----------
@@ -113,12 +98,7 @@ def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
 def _ambient_job_kwargs() -> dict:
     """Return the ambient job-kwargs layer: SI globals then dj.config custom.
 
-    The process-global precedence stack beneath any per-row blob -- the
-    SpikeInterface global defaults overlaid with
-    ``dj.config['custom']['spikesorting_v2_job_kwargs']``. Single source of this
-    merge so :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`
-    (which needs the ambient layer in isolation to attribute a seed) cannot
-    drift.
+    Shared by :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`.
     """
     import datajoint as dj
 
@@ -158,13 +138,7 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
 
 @functools.lru_cache(maxsize=None)
 def _warn_ambient_seed_once(seed: int) -> None:
-    """Emit the ambient-seed warning at most once per distinct seed value.
-
-    Deduped per ``seed`` value so a repeated populate (or several sort groups
-    sharing one ambient seed) does not spam the log, while a genuinely new
-    ambient seed is still surfaced. ``cache_clear()`` resets the dedup (used by
-    the unit tests).
-    """
+    """Emit the ambient-seed warning at most once per distinct seed value."""
     from spyglass.utils import logger
 
     logger.warning(
@@ -183,21 +157,10 @@ def resolve_effective_seed(
 ) -> int:
     """Return the ``random_seed`` actually used by a v2 compute stage.
 
-    Resolves the seed through the same precedence the dispatch reads --
-    SpikeInterface globals, then ``dj.config['custom']['spikesorting_v2_job_kwargs']``,
-    then the per-row ``job_kwargs`` blob(s) -- so the value stored on a computed
-    row equals the value the sorter / analyzer consumed. The resolution bottoms
-    out on :func:`_resolved_job_kwargs`, the exact merge the seed sites read, so
-    the stored seed cannot drift from the used seed. Defaults to ``0``.
-
-    Emits a one-time warning (per distinct seed value) when a ``random_seed``
-    arrives via the ambient SI-global / ``dj.config`` layer rather than a
-    per-row blob -- a process-global ambient seed already takes effect, but it
-    is not pinned to a parameter row, so surfacing it keeps a non-reproducible
-    ambient seed visible rather than silent. At the sort-identity boundary
-    (``reject_ambient_seed=True``) the same ambient-only seed is a hard error
-    instead: a ``Sorting`` whose seed is not folded into its identity (via
-    ``sorter_params_name``) could be silently reused after a later seed change.
+    Uses the same merge as :func:`_resolved_job_kwargs`, so the stored seed is
+    the seed the sorter or analyzer consumed. Defaults to ``0``. Warns once per
+    value when the seed comes only from the ambient SI-global / ``dj.config``
+    layer, since that seed is not pinned to a parameter row.
 
     Parameters
     ----------
@@ -206,11 +169,9 @@ def resolve_effective_seed(
         precedence order (a later argument wins). ``None`` / empty entries are
         skipped, matching :func:`_resolved_job_kwargs`.
     reject_ambient_seed : bool, optional
-        When ``True``, an ambient-only ``random_seed`` (present in the SI-global
-        / ``dj.config`` layer but not in any per-row blob) raises ``ValueError``
-        instead of warning. The sorting stage passes this so a stochastic sort
-        cannot be created with a seed absent from ``sorting_id``. Default
-        ``False`` (warn), for stages where the seed is captured as provenance.
+        Raise instead of warning on an ambient-only ``random_seed``. The sorting
+        stage passes this because an ambient seed is absent from
+        ``sorting_id``. Default ``False``.
 
     Returns
     -------
@@ -221,18 +182,11 @@ def resolve_effective_seed(
     ------
     ValueError
         If the resolved ``random_seed`` is not a non-negative integer (e.g.
-        ``"7"``, ``7.9``, or ``-1``). The seed sites consume this resolved value
-        directly, so a bad seed is rejected here -- BEFORE compute -- rather than
-        silently ``int()``-coerced (which would store ``7`` while the sorter saw
-        the original object) or deferred to a later SI/NumPy RNG failure. This is
-        the call that runs first in ``make_compute``, so a bad seed aborts the
-        populate before any row is written. Mirrors the ``seed >= 0`` constraint
-        on the UnitMatch bundle-seed schema.
+        ``"7"``, ``7.9``, or ``-1``), or if ``reject_ambient_seed`` and the seed
+        is ambient-only.
     """
     resolved = _resolved_job_kwargs(*row_job_kwargs).get("random_seed", 0)
-    # ``bool`` is an ``int`` subclass but never a valid seed; ``numbers.Integral``
-    # accepts Python and numpy integers (which are seed-equivalent to ``int``).
-    # SI/NumPy RNG seeds must be non-negative, so reject ``< 0`` here too.
+    # Reject bool (an int subclass); accept numpy integers.
     if (
         isinstance(resolved, bool)
         or not isinstance(resolved, numbers.Integral)

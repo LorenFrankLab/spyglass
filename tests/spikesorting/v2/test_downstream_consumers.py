@@ -1,28 +1,7 @@
-"""Downstream-consumer smoke tests for v2 spike-sorting outputs.
+"""Downstream-consumer smoke tests on a v2 ``merge_id``.
 
-It runs on its own with
-``pytest tests/spikesorting/v2/test_downstream_consumers.py -q`` and exercises
-the downstream consumer surfaces that a Frank-lab decoding / ripple-detection
-workflow would hit on a v2 ``merge_id``:
-
-- ``SpikeSortingOutput.get_recording`` / ``get_sorting`` /
-  ``get_sort_group_info`` (the merge-dispatch entrypoints).
-- ``SpikeSortingOutput.get_spike_times`` / ``fetch_nwb``
-  (the NWB round-trip path that decoding consumers depend on).
-- ``SpikeSortingOutput.get_spike_indicator`` / ``get_firing_rate``
-  (per-bin consumer APIs).
-- ``SortedSpikesGroup`` (analysis-side group surface that decoding
-  and ripple-detection construct from a v2 merge_id).
-
-Mishandling sparse unit_ids in any of these surfaces silently
-breaks clusterless decoding; this module tests them together. All
-tests are integration-tier (require ``populated_sorting`` from
-conftest.py) and marked ``slow + integration``.
-
-The ``SortedSpikesGroup`` MUA test exercises
-``firing_rate_from_spike_indicator`` with ``multiunit=True``, the
-v1-MultiUnitActivity-parity invariant (the analysis-side equivalent
-of v1's per-bin multi-unit firing rate).
+Covers the ``SpikeSortingOutput`` merge-dispatch and per-bin APIs and
+``SortedSpikesGroup``, including sparse unit ids.
 """
 
 from __future__ import annotations
@@ -30,29 +9,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# The ``populated_sorting`` fixture (a full Recording -> Artifact ->
-# Sorting populate on the smoke fixture) lives in conftest.py so the
-# integrity tests can resolve it directly instead of importing it from
-# this module (a cross-module import passes vacuously when a CI shard
-# split collects the two modules separately).
-
 
 def _make_v2_root_curation(populated_sorting):
     """Clear prior curations + insert a fresh root for the smoke sort.
 
-    Returns ``(pk, merge_id)``. Reused across most tests in this
-    module so each test starts from a clean curation row. The
-    cleanup walks merge -> curation -> sorting in master-before-part
-    order because DataJoint refuses to drop a part-table row before
-    its master (the same cascade rule ``_clean_session_v2`` follows
-    in the ``single_session/`` suite).
+    Returns ``(pk, merge_id)``. Deletes merge masters before curations,
+    as DataJoint requires.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
 
-    # Step 1: drop the SpikeSortingOutput master rows whose
-    # ``CurationV2`` part points at any curation derived from this
-    # sorting. Master-first.
     curation_keys = (CurationV2 & populated_sorting).fetch("KEY", as_dict=True)
     if curation_keys:
         merge_ids = (SpikeSortingOutput.CurationV2 & curation_keys).fetch(
@@ -60,7 +26,6 @@ def _make_v2_root_curation(populated_sorting):
         )
         for mid in merge_ids:
             (SpikeSortingOutput & {"merge_id": mid}).super_delete(warn=False)
-    # Step 2: drop the curation rows.
     (CurationV2 & populated_sorting).super_delete(warn=False)
 
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
@@ -74,11 +39,7 @@ def test_get_recording_returns_filtered_recording(populated_sorting):
     """``SpikeSortingOutput.get_recording`` on a v2 merge_id returns
     an SI BaseRecording with ``is_filtered=True``.
 
-    The annotation guards downstream sorters from re-bandpassing an
-    already-filtered preprocessed recording. Without the
-    ``is_filtered`` annotation + the merge-dispatch get_recording
-    wiring, the merge dispatcher raises AttributeError on every v2
-    merge_id.
+    The annotation stops downstream sorters from re-bandpassing.
     """
     import spikeinterface as si
 
@@ -96,8 +57,7 @@ def test_get_sort_group_info_returns_multi_electrode_relation(
     populated_sorting,
 ):
     """``SpikeSortingOutput.get_sort_group_info`` returns a relation
-    with rows for EVERY electrode in the sort group (not the v1
-    ``fetch(limit=1)`` single-row bug).
+    with rows for every electrode in the sort group.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.recording import (
@@ -119,8 +79,7 @@ def test_get_sort_group_info_returns_multi_electrode_relation(
     assert len(expected) > 1, "fixture must distinguish all electrodes from one"
     assert {row["electrode_id"] for row in rows} == expected
     assert len(rows) == len(expected)
-    # Spot-check that the relation joined to BrainRegion, so every
-    # electrode's region is reported (v1 under-reports multi-region groups).
+    # Joined to BrainRegion, so every electrode's region is reported.
     assert "electrode_id" in rows[0]
     assert "region_name" in rows[0]
 
@@ -155,10 +114,6 @@ def test_consumer_api_shape_contract(populated_sorting, method_name):
     """The two time-binned consumer APIs return ``(n_time, n_units)``
     arrays that are non-negative and finite wherever the units were
     observed, and ``np.nan`` in the bins they were not.
-
-    Parametrized so the same shape contract is verified on both
-    with identical setup; a v2 merge-dispatch error in
-    ``get_spike_times`` (which both call under the hood) trips here.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -185,14 +140,9 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
     """Per-unit ``get_spike_indicator`` column sums equal each unit's
     in-window ``get_spike_times`` count.
 
-    The shape/sign/finite contract in ``test_consumer_api_shape_contract``
-    passes even if column ``j`` of the indicator is wired to a DIFFERENT
-    unit than ``get_spike_times()[j]`` (a sparse-unit_id misalignment that
-    silently corrupts clusterless decoding). This pins the exact per-unit
-    correspondence: ``get_spike_indicator`` bins each unit's spikes that
-    fall in ``[time[0], time[-1]]`` and inside the population's observed
-    time, so the column sum over the observed bins MUST equal the count of
-    that same unit's spikes that survive both filters.
+    Catches column ``j`` being wired to a different unit than
+    ``get_spike_times()[j]``. Counts only spikes in ``[time[0], time[-1]]``
+    and in observed time.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
@@ -210,8 +160,7 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
 
     observation = SpikeSortingOutput.get_observation_intervals(merge_key)
     min_t, max_t = time_array[0], time_array[-1]
-    # Unobserved bins hold NaN, so the counted evidence lives in the valid
-    # rows; a spike that falls in an unobserved bin is not counted anywhere.
+    # Unobserved bins hold NaN and count nothing.
     column_sums = indicator[valid].sum(axis=0)
 
     def counted(arr):
@@ -226,9 +175,7 @@ def test_consumer_spike_indicator_count_alignment(populated_sorting):
             "indicator is misaligned with get_spike_times "
             "(sparse unit_ids mishandled)."
         )
-    # Total spikes in-window across all units must also agree (catches a
-    # misalignment that happens to permute counts between equal-count
-    # units).
+    # Totals must agree too.
     total_in_window = sum(counted(arr) for arr in spike_times)
     assert int(column_sums.sum()) == total_in_window
 
@@ -240,13 +187,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     populated_sorting,
 ):
     """A ``SortedSpikesDecodingSelection`` row keyed on a v2 ``merge_id``
-    can be INSERTED -- the FK chain resolves end-to-end.
+    can be inserted, so the FK chain resolves end to end.
 
-    Without this test, a broken FK (e.g. ``SpikeSortingOutput.
-    CurationV2`` missing or ``SortedSpikesGroup.Units.
-    spikesorting_merge_id`` not resolving to v2) would surface only
-    when a downstream user tried to populate a decoder on a v2
-    sort. The chain this exercises is::
+    Chain::
 
         SortedSpikesDecodingSelection
           -> SortedSpikesGroup
@@ -255,11 +198,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
                 -> SpikeSortingOutput.CurationV2 (v2 dispatch part)
                   -> CurationV2 (v2 master)
 
-    The test is INSERT-only. ``SortedSpikesDecodingV1.populate`` is
-    not exercised here -- the compute step requires position data
-    + non_local_detector weights that the smoke fixture lacks; the
-    populate surface is exercised in tests/decoding/ on real
-    position data.
+    Insert only: populate needs position data the smoke fixture lacks.
     """
     pytest.importorskip(
         "non_local_detector",
@@ -279,8 +218,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
 
     _, merge_id = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
-    # ``contents`` became an instance property upstream (it short-circuits on a
-    # populated table); ``insert_default`` inserts ``_default_contents()``.
+    # ``contents`` short-circuits on a populated table; use insert_default.
     DecodingParameters.insert_default()
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
@@ -311,9 +249,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     }
     if existing_pos:
         existing_pos.super_delete(warn=False)
-    # The decoding selection FK lands on PositionGroup, not
-    # PositionGroup.Position, so the parts are not required to
-    # satisfy the chain we're proving here.
+    # The FK targets PositionGroup, so no parts are needed.
     PositionGroup.insert1(
         {
             "nwb_file_name": actual_nwb,
@@ -353,11 +289,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
         "not retrievable -- FK chain landed in an inconsistent state."
     )
 
-    # Explicit join across every hop of the FK chain back to the v2
-    # ``CurationV2`` master, restricted to the merge_id we just
-    # inserted. A non-empty result PROVES every FK in the chain is
-    # consistent; a broken hop would either reject the join or drop
-    # the row.
+    # A non-empty join across every hop proves the chain is consistent.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -383,10 +315,8 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
     """``SortedSpikesGroup`` built from a v2 merge_id supports both
     per-unit and multiunit (MUA) firing-rate readouts.
 
-    The v1-MultiUnitActivity-parity invariant: the MUA path must
-    compose with v2 sparse-unit_id sortings without misindexing.
-    Per-unit shape is ``(n_time, n_units)``; MUA collapses to
-    ``(n_time, 1)``.
+    Per-unit shape is ``(n_time, n_units)``; MUA is ``(n_time, 1)``, with
+    sparse unit ids.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
@@ -444,20 +374,9 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
 def test_filter_units():
     """``SortedSpikesGroup.filter_units`` include/exclude/empty semantics.
 
-    This is the label-filtering algorithm that ``fetch_spike_data`` applies
-    in production. The ``fetch_spike_data`` invocation is intentionally
-    bypassed under pytest (the ``not test_mode`` guard in
-    ``analysis/v1/group.py``) because the shared base-env fixtures build
-    ``default_exclusion`` groups over noise/mua-labeled curations, so
-    running the filter there would empty the group and break unrelated
-    tests (verified: dropping the guard makes ``test_fetch_data`` /
-    sorted-spikes decoding fail on ``np.concatenate([])``). The filtering
-    logic itself is therefore pinned here, directly and exactly, rather
-    than through that bypassed integration path.
-
-    Not slow: importing ``SortedSpikesGroup`` declares its DataJoint
-    schema (hence ``dj_conn``), but the test calls the pure static method
-    with no populate.
+    Tested directly because ``fetch_spike_data`` skips the filter under
+    pytest (``not test_mode`` in ``analysis/v1/group.py``), which keeps the
+    shared fixtures' ``default_exclusion`` groups non-empty.
     """
     import numpy as np
 
@@ -465,22 +384,19 @@ def test_filter_units():
 
     f = SortedSpikesGroup.filter_units
 
-    # No include/exclude -> every unit kept (the ``all_units`` preset).
+    # ``all_units`` preset.
     np.testing.assert_array_equal(
         f([["noise"], ["accept"], []], [], []),
         np.array([True, True, True]),
     )
 
-    # Exclude noise/mua (the ``default_exclusion`` preset): units carrying
-    # either label are dropped; unlabeled / other-labeled units survive.
+    # ``default_exclusion`` preset.
     np.testing.assert_array_equal(
         f([["noise"], ["accept"], ["mua"], []], [], ["noise", "mua"]),
         np.array([False, True, False, True]),
     )
 
-    # A group whose every unit is noise/mua collapses to all-False -- this
-    # is exactly why filtering the shared base-env fixtures empties the
-    # group and the production guard keeps it off under pytest.
+    # All noise/mua -> all False.
     np.testing.assert_array_equal(
         f([["noise"], ["mua"]], [], ["noise", "mua"]),
         np.array([False, False]),
@@ -492,8 +408,7 @@ def test_filter_units():
         np.array([True, False, True]),
     )
 
-    # Include + exclude combined: exclude wins for a unit that carries both
-    # an include and an exclude label.
+    # Exclude wins over include.
     np.testing.assert_array_equal(
         f([["accept"], ["accept", "noise"]], ["accept"], ["noise"]),
         np.array([True, False]),
@@ -512,12 +427,8 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
     """An include/exclude filter applies even when the curated NWB
     omits the label column (every unit unlabeled).
 
-    An all-unlabeled curated export drops the ``curation_label`` column, so the
-    column-present filter path is skipped; without labels an include-only
-    selection would return ALL units. The consumer synthesizes empty per-unit
-    label lists:
-    ``include_labels=["accept"]`` returns NO units; ``exclude_labels=["noise"]``
-    returns ALL units.
+    ``include_labels=["accept"]`` returns no units;
+    ``exclude_labels=["noise"]`` returns all.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
@@ -574,9 +485,7 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
     try:
         n_total = _n_units("all_units")
         assert n_total > 0, "baseline curation must contribute units"
-        # All units are unlabeled -> none carry "accept" -> none returned.
         assert _n_units("cnep2_include_accept") == 0
-        # None carry "noise" -> all kept.
         assert _n_units("cnep2_exclude_noise") == n_total
     finally:
         for filter_name in (
@@ -597,22 +506,11 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
 def test_labeled_curation_fetch_keeps_accept_drops_noise(
     planted_two_unit_sort, monkeypatch
 ):
-    """The production label-filter path on a GENUINELY labeled curation.
+    """The label filter on a labeled curation (one ``accept``, one ``noise``).
 
-    A curation with one ``accept`` and one ``noise`` unit, exported downstream:
-    ``include_labels=['accept']`` keeps ONLY the accepted unit;
-    ``exclude_labels=['noise']`` drops the noise unit and keeps the rest. This
-    is the labeled complement to
-    ``test_all_unlabeled_curation_include_label_filters`` (which covers the
-    no-label-column path). Uses ``planted_two_unit_sort`` because the smoke sort
-    yields only one unit -- two distinctly-labeled units are needed to tell the
-    include/exclude filters apart.
-
-    ``fetch_spike_data``'s column-present filter is guarded off under pytest (the
-    load-bearing ``not test_mode`` at ``analysis/v1/group.py`` -- it exists so a
-    default-exclusion filter can't empty the SHARED base-env fixtures). This test
-    owns its group + curation, so it locally flips ``test_mode`` off to exercise
-    the real filter without touching those fixtures.
+    ``include_labels=['accept']`` keeps only the accepted unit;
+    ``exclude_labels=['noise']`` drops the noise unit. The test owns its
+    group, so it turns ``test_mode`` off to run the real filter.
     """
     import spyglass.spikesorting.analysis.v1.group as group_mod
     from spyglass.spikesorting.analysis.v1.group import (
@@ -624,8 +522,6 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
-    # Run the column-present label filter this test relies on (isolated to this
-    # test's own group, so it cannot empty another test's fixtures).
     monkeypatch.setattr(group_mod, "test_mode", False)
 
     sorting_key = dict(planted_two_unit_sort)
@@ -635,7 +531,6 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
     assert len(unit_ids) >= 2, "planted sort must yield >=2 units"
     accept_id, noise_id = unit_ids[0], unit_ids[1]
 
-    # Clear + root, then a labeled child (the production curate-the-root path).
     root_pk, _ = _make_v2_root_curation(sorting_key)
     child = CurationV2.save_manual_curation(
         sorting_key,
@@ -706,9 +601,7 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
     try:
         all_units = _fetch_units("all_units")
         assert set(all_units) == set(unit_ids)
-        # include=accept -> ONLY the accept-labeled unit.
         assert set(_fetch_units("lbl_include_accept")) == {accept_id}
-        # exclude=noise -> everything except the noise-labeled unit.
         assert set(_fetch_units("lbl_exclude_noise")) == set(unit_ids) - {
             noise_id
         }
@@ -734,11 +627,6 @@ def test_downstream_consumer_reads_applied_merge_unit_set(
 ):
     """An APPLIED-MERGE committed child reaches the decoding consumer surfaces
     with its MERGED unit set (not the pre-merge ids), via SpikeSortingOutput.
-
-    The rest of this module builds ROOT curations; this pins that the committed
-    merged unit set -- the production curation shape -- flows through the
-    merge-dispatch ``get_sorting`` / ``get_spike_times`` path a decoding consumer
-    keys off ``merge_id``.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -753,8 +641,7 @@ def test_downstream_consumer_reads_applied_merge_unit_set(
     assert len(unit_ids) >= 2, "need >=2 units to form a merge"
 
     def _drop_output_and_curations():
-        # Master-first: drop SpikeSortingOutput rows pointing at this sort's
-        # curations before clearing the curations (the merge master FK-pins them).
+        # Merge masters before curations.
         keys = (CurationV2 & sorting_key).fetch("KEY", as_dict=True)
         if keys:
             for mid in (SpikeSortingOutput.CurationV2 & keys).fetch("merge_id"):
@@ -778,12 +665,10 @@ def test_downstream_consumer_reads_applied_merge_unit_set(
 
         merge_id = (SpikeSortingOutput.CurationV2 & merged).fetch1("merge_id")
 
-        # get_sorting dispatches on the merge_id and yields the MERGED unit set.
         sorting = SpikeSortingOutput().get_sorting({"merge_id": merge_id})
         assert sorted(int(u) for u in sorting.get_unit_ids()) == merged_unit_ids
 
-        # get_spike_times: one per-unit array; its length is the merged unit's
-        # stored n_spikes (the authoritative post-merge, post-dedup count).
+        # Length equals the stored post-merge n_spikes.
         spike_times = SpikeSortingOutput().get_spike_times(
             {"merge_id": merge_id}
         )

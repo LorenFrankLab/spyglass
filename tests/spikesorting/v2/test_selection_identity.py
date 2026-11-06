@@ -1,21 +1,11 @@
 """Deterministic, content-addressed selection identities.
 
-Two layers:
-
-* **Pure-helper unit tests** (no DB, no Docker) pin the canonicalization
-  footgun the ``_selection_identity`` module exists to kill -- a ``str``
-  vs ``uuid.UUID`` ``artifact_detection_id`` must hash to the SAME id, a numpy
-  ``sort_group_id`` must match the plain int, "no artifact-detection pass"
-  must never alias a real id, and the table ``kind`` + ``source_kind`` must
-  participate so the three selection tables (and the
-  artifact-detection/no-artifact-detection sorts) never collide.
-* **DB-tier integration tests** (``slow`` + ``integration``) prove the
-  deterministic id is the actual primary key written by
-  ``insert_selection``, that repeated calls are idempotent, that a
-  caller-supplied mismatched id is rejected, that the duplicate-PK race
-  loser refetches the winner's row instead of raising, and that an
-  artifact-detection-backed and an artifact-detection-free sort for the same
-  (recording, sorter) get distinct ids.
+- Pure-helper tests (no DB): canonicalization (``str`` vs ``uuid.UUID``,
+  numpy vs int), ``None`` never aliasing a real id, and table ``kind`` /
+  ``source_kind`` separating ids.
+- DB-tier tests: the id is the written PK, repeated calls are idempotent, a
+  mismatched supplied id is rejected, and a duplicate-PK race loser
+  refetches the winner's row.
 """
 
 from __future__ import annotations
@@ -37,16 +27,14 @@ from spyglass.spikesorting.v2._core.selection_identity import (
 )
 
 # --------------------------------------------------------------------------
-# Pure-helper unit tests -- no database, run without Docker.
+# Pure-helper unit tests (no database).
 # --------------------------------------------------------------------------
 
 
 def test_namespace_is_frozen_literal():
     """The v2 namespace is the frozen uuid5(DNS, seed) literal.
 
-    Pinning the value guards against an accidental edit to the seed string
-    silently re-homing every selection id (which would orphan all
-    previously-computed ids).
+    Changing the seed would change every selection id.
     """
     assert V2_SELECTION_NAMESPACE == uuid.uuid5(
         uuid.NAMESPACE_DNS, "spyglass.spikesorting.v2.selection"
@@ -102,9 +90,8 @@ def test_numpy_int_matches_plain_int():
 
 
 def test_int_and_str_int_are_distinct():
-    """A bare int and its string form are NOT conflated (only UUID-ish
-    strings are normalized); the table stores ``sort_group_id`` as an int,
-    so callers pass an int and this distinction never bites in practice."""
+    """A bare int and its string form are not conflated; only UUID-like
+    strings are normalized."""
     assert deterministic_id(
         "recording", {"sort_group_id": 3}
     ) != deterministic_id("recording", {"sort_group_id": "3"})
@@ -212,16 +199,8 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
     """A cold import of ``_selection_identity`` pulls in neither
     ``spyglass.common`` nor any v2 *schema* module.
 
-    Those are the modules that open a DB connection at import (``dj.schema``
-    activation / ``from spyglass.common import ...``); the leaf module
-    itself imports only ``json`` + ``uuid``. This is the precise,
-    checkable claim -- it does NOT assert "no datajoint anywhere", because
-    importing the top-level ``spyglass`` package (via ``settings``)
-    legitimately imports the DataJoint *library*, which does not connect on
-    its own. The guarantee that matters: an HPC job array computing a
-    selection id in a ``spawn`` worker re-imports only this DB-free leaf,
-    so it never opens a connection. Mirrors the ``_artifact_compute``
-    kernel guard.
+    Those open a DB connection at import; the DataJoint library alone does
+    not. A ``spawn`` worker computing an id therefore never connects.
     """
     import subprocess
     import sys
@@ -293,8 +272,7 @@ def test_populate_recovery_classifies_translated_errors(
 
 
 def test_bool_not_collapsed_to_int_in_identity():
-    """``bool`` must not canonicalize to the equivalent ``int`` (the
-    bool-before-int branch ordering in _canonical_scalar is load-bearing)."""
+    """``bool`` does not canonicalize to the equivalent ``int``."""
     assert deterministic_id("recording", {"x": True}) != deterministic_id(
         "recording", {"x": 1}
     )
@@ -312,10 +290,8 @@ def test_assert_supplied_id_matches_non_uuid_string_gives_curated_error():
 
 
 # --------------------------------------------------------------------------
-# recording_input_hash -- content-address a recording's RESOLVED construction
-# inputs (membership + reference + interpolate bad-channel set) so a changed
-# input mints a new recording_id. Order-independent over the two id sets;
-# sensitive to every field. Pure + DB-free (fed already-resolved values).
+# recording_input_hash: membership, reference and interpolate bad channels.
+# Order-independent over the id sets; no DB.
 # --------------------------------------------------------------------------
 
 
@@ -340,8 +316,7 @@ def test_recording_input_hash_is_stable_hex():
 
 
 def test_recording_input_hash_membership_order_independent():
-    """Electrode membership is a SET: a re-query in a different row order
-    yields the same hash (the ids are sorted before hashing)."""
+    """Electrode membership order does not change the hash."""
     assert _rih(electrode_ids=[0, 1, 2]) == _rih(electrode_ids=[2, 1, 0])
 
 
@@ -422,8 +397,7 @@ def test_existing_selection_pk_rejects_any_non_deterministic_master():
     from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
 
     canonical, first, second = (uuid.UUID(int=i) for i in (1, 2, 3))
-    # ``second`` is collected before ``first``, so a helper that sorted the
-    # bypassed ids would produce a different message.
+    # ``second`` is collected before ``first``.
     for found in ([first], [canonical, second, first]):
         with pytest.raises(DuplicateSelectionError) as exc_info:
             existing_selection_pk(
@@ -437,7 +411,7 @@ def test_existing_selection_pk_rejects_any_non_deterministic_master():
 
 
 # --------------------------------------------------------------------------
-# DB-tier integration tests -- need the Docker MySQL + populated fixture.
+# DB-tier integration tests.
 # --------------------------------------------------------------------------
 
 
@@ -445,12 +419,8 @@ def test_existing_selection_pk_rejects_any_non_deterministic_master():
 def fresh_recording_identity(populated_sorting):
     """A RecordingSelection logical identity guaranteed absent from the DB.
 
-    Reuses the populated recording's existing FK targets (Raw,
-    SortGroupV2, IntervalList, PreprocessingParameters) but a UNIQUE
-    ``team_name`` so no prior row -- even one left by an earlier run --
-    can exist for this exact identity. That lets the determinism /
-    race assertions below check ``insert_selection`` from a known-empty
-    starting point. Tears down the row(s) and the team it created.
+    Reuses the populated recording's FK targets with a unique ``team_name``.
+    Tears down its rows and team.
     """
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -553,12 +523,7 @@ def test_recording_selection_duplicate_pk_race_refetches(
 ):
     """The duplicate-PK race loser refetches the winner's row.
 
-    Simulate the TOCTOU window deterministically: the row already exists,
-    but the pre-insert lookup is forced to "miss" once (as if a concurrent
-    caller inserted between our check and our insert). The insert then
-    hits the deterministic-PK uniqueness constraint, the narrowed
-    duplicate-key catch fires, and the refetch returns the existing row --
-    no new row, no error.
+    The row exists but the pre-insert lookup is forced to miss once.
     """
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
@@ -574,9 +539,7 @@ def test_recording_selection_duplicate_pk_race_refetches(
         raced = RecordingSelection.insert_selection(dict(identity))
 
     assert raced == pk
-    # The pre-check missed, the insert collided, the refetch returned it.
     assert patched.call_count == 2
-    # No duplicate row was created by the losing insert.
     assert len(RecordingSelection & identity) == 1
 
 
@@ -585,9 +548,8 @@ def test_recording_selection_duplicate_pk_race_refetches(
 def test_sorting_selection_artifact_detection_vs_none_distinct(
     populated_sorting,
 ):
-    """An artifact-detection-backed and no-artifact-detection sort for the same
-    (recording, sorter) get DISTINCT deterministic ids, and each matches
-    the id computed directly from its logical identity."""
+    """Sorts with and without artifact detection on the same recording and
+    sorter get distinct ids, each matching its derived id."""
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
@@ -658,10 +620,6 @@ def test_recording_selection_rejects_single_nondeterministic_row(
     """A SINGLE raw-inserted row with a random recording_id for this logical
     identity is rejected, not returned.
 
-    The invariant is that the logical identity maps to ONE
-    content-addressed id. A raw-insert (non-content-addressed) row with a
-    different (random) recording_id violates that, so insert_selection
-    raises instead of silently adopting it as canonical.
     """
     from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
     from spyglass.spikesorting.v2.recording import (
@@ -670,12 +628,7 @@ def test_recording_selection_rejects_single_nondeterministic_row(
     )
 
     identity = fresh_recording_identity
-    # One raw row with the SAME logical identity (FK set + resolved input hash)
-    # but a random PK. The hash must match so the row shares the logical
-    # identity find-existing scopes to; without it the raw row would sit under a
-    # different identity axis and go undetected. The master insert guard requires
-    # allow_direct_insert=True for this deliberate bypass (all FK targets exist,
-    # so no FK-checks-off needed).
+    # Same logical identity (including the input hash), random PK.
     input_hash = resolve_recording_input_hash(
         identity["nwb_file_name"],
         identity["sort_group_id"],
@@ -692,7 +645,6 @@ def test_recording_selection_rejects_single_nondeterministic_row(
 
     with pytest.raises(DuplicateSelectionError, match="non-deterministic"):
         RecordingSelection.insert_selection(dict(identity))
-    # The helper did NOT converge a second (deterministic) row on top.
     assert len(RecordingSelection & identity) == 1
     # (fixture teardown removes the planted row.)
 
@@ -701,11 +653,11 @@ def test_recording_selection_rejects_single_nondeterministic_row(
 @pytest.mark.integration
 def test_make_fetch_rejects_input_hash_drift(fresh_recording_identity):
     """``make_fetch`` raises ``RecordingInputDriftError`` when the live
-    sort-group inputs no longer match the ``recording_input_hash`` the row
-    carries -- the membership/reference/bad-channel set changed after the id was
-    minted. Exercised by planting a row with a deliberately wrong fingerprint
-    (a real drift produces the same mismatch), so the guard is proven without
-    mutating the shared sort group."""
+    sort-group inputs differ from the row's ``recording_input_hash``.
+
+    A wrong stored hash stands in for drift, so the shared sort group is not
+    mutated.
+    """
     from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -730,11 +682,8 @@ def test_make_fetch_rejects_input_hash_drift(fresh_recording_identity):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_recording_input_hash_matches_make_fetch(populated_sorting):
-    """The hash ``insert_selection`` stored equals the one ``make_fetch``
-    re-derives for the SAME unchanged recording, so a normal populate never
-    false-drifts. Guards the ``resolve_recording_input_hash`` <-> ``make_fetch``
-    lock-step: if their input-reading logic diverged, this equality would
-    break (and a real recording would raise a spurious drift)."""
+    """The hash ``insert_selection`` stores equals the one ``make_fetch``
+    re-derives for an unchanged recording."""
     from spyglass.spikesorting.v2.recording import (
         RecordingSelection,
         resolve_recording_input_hash,
@@ -759,10 +708,9 @@ def test_recording_input_hash_matches_make_fetch(populated_sorting):
 def test_recording_selection_missing_params_gives_curated_error(
     fresh_recording_identity,
 ):
-    """A missing ``preprocessing_params_name`` yields the curated
-    ``insert_default()`` message, not the raw empty-fetch error from the
-    input-hash resolver (which ``fetch1``'s that params row). The curated
-    lookup check must run BEFORE the resolver."""
+    """A missing ``preprocessing_params_name`` yields the
+    ``insert_default()`` message, not the input-hash resolver's fetch1
+    error."""
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     bogus = {
@@ -779,10 +727,6 @@ def test_recording_selection_missing_params_gives_curated_error(
 def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
     """A direct insert into a selection master is rejected with a pointer to
     insert_selection; allow_direct_insert=True is the explicit escape hatch.
-
-    (RecordingSelection covers the reject + happy-path pair with real FKs;
-    test_direct_master_insert_rejected_all_masters covers the reject path for
-    all three masters.)
     """
     import datajoint as dj
 
@@ -850,11 +794,8 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
     ],
 )
 def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
-    """All SIX selection masters reject a no-flag direct insert. The guard
-    is a shared mixin, but a per-class regression (a class dropping the mixin
-    from its MRO, or a future per-class insert override that forgets to
-    forward allow_direct_insert) must surface. The guard raises BEFORE any DB
-    write, so the bogus-FK row never reaches MySQL.
+    """Every selection master rejects a no-flag direct insert, before any
+    DB write.
     """
     import importlib
     import uuid
@@ -957,10 +898,9 @@ def test_sorting_selection_orphan_master_raises_schema_bypass(
 def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
     populated_sorting,
 ):
-    """``SharedGroupArtifactSelection.insert_selection`` (the cross-recording
-    source branch) writes the deterministic PK, is idempotent, and does NOT
-    alias the recording-source id for the same params + recording (source_kind
-    disambiguates)."""
+    """``SharedGroupArtifactSelection.insert_selection`` writes the
+    deterministic PK, is idempotent, and differs from the recording-source id
+    for the same params and recording."""
     from spyglass.spikesorting.v2.artifact import (
         SharedArtifactGroup,
         SharedGroupArtifactSelection,
@@ -997,8 +937,6 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
             SharedGroupArtifactSelection.insert_selection(dict(select_key))
             == pk
         )
-        # source_kind keeps it distinct from the recording-source id for the
-        # same params + the member recording.
         rec_source_id = deterministic_id(
             "artifact_detection",
             {
@@ -1018,13 +956,8 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
 
 
 # --------------------------------------------------------------------------
-# Master-row identity immutability: in-place ``update1`` is rejected on every
-# selection master AND on the ``CurationV2`` / ``SessionGroup`` factory masters
-# (their columns are identity / provenance roots that dependents reference).
-# Mirrors ``test_direct_master_insert_rejected_all_masters`` (the insert side)
-# and ``test_sorter_parameters_update1_rejected_in_place`` (the param-Lookup
-# side). The guard raises BEFORE any DB write, so a synthetic PK row never
-# reaches MySQL -- no fixture rows needed for the reject path.
+# In-place ``update1`` is rejected on every selection master and on the
+# ``CurationV2`` / ``SessionGroup`` factory masters, before any DB write.
 # --------------------------------------------------------------------------
 
 _MASTER_UPDATE1_CASES = [
@@ -1046,10 +979,7 @@ _MASTER_UPDATE1_CASES = [
 def _synthetic_master_pk(cls):
     """Build a syntactically valid PK dict for a master (no DB row needed).
 
-    UUID-keyed selection masters get a random ``uuid4`` PK; the composite-key
-    factory masters (``CurationV2`` / ``SessionGroup``) get plausible literals.
-    The guard rejects before any PK lookup, so the values need only fill the
-    primary-key columns.
+    The guard rejects before any lookup, so the values only fill the PK.
     """
     pk = {}
     for field in cls.primary_key:
@@ -1088,13 +1018,8 @@ def test_update1_rejected_all_masters(module, cls_name):
     ],
 )
 def test_factory_master_direct_insert_rejected(module, cls_name):
-    """``CurationV2`` and ``SessionGroup`` are identity/provenance roots, not
-    selection masters, but a direct ``insert1`` is blocked just the same (write
-    them through ``insert_curation`` / ``create_group``). The guard fires before
-    the FK checks, so a synthetic row never reaches MySQL. The factory paths
-    themselves are covered by the ``single_session/test_curation_*`` and
-    ``test_session_group_concat`` regression suites (which would break if the
-    bypass were mis-wired)."""
+    """A direct ``insert1`` into ``CurationV2`` or ``SessionGroup`` is
+    rejected; use ``insert_curation`` / ``create_group``."""
     import importlib
 
     import datajoint as dj
@@ -1108,10 +1033,8 @@ def test_factory_master_direct_insert_rejected(module, cls_name):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_master_update1_bypass_allows_mutation(fresh_recording_identity):
-    """``allow_master_mutation=True`` forwards to the real ``update1`` so a
-    deliberate maintenance edit of a row with no live references goes through --
-    proving the escape hatch is wired, not just the reject path. Uses
-    ``RecordingSelection`` (cheapest real-FK master)."""
+    """``allow_master_mutation=True`` forwards to the real ``update1`` for
+    a row with no live references."""
     import datajoint as dj
 
     from spyglass.common import LabTeam

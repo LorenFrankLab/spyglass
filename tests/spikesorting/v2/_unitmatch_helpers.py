@@ -18,8 +18,8 @@ def reforge_selection(
     """Re-insert a selection's rows directly, with edits, bypassing insert_inputs.
 
     Deletes the selection (master and parts), then inserts the master with
-    ``allow_direct_insert`` and the edited parts -- the shape a raw insert or
-    an out-of-band edit leaves behind.
+    ``allow_direct_insert`` and the edited parts, as a raw insert or an
+    out-of-band edit would.
 
     Parameters
     ----------
@@ -96,8 +96,8 @@ def install_fixture_pairer(
     ``(unit_a, unit_b)`` pair. With ``read_bundles=True`` the real
     shared waveform extraction runs, the matcher reads each session's bundle
     ``cluster_group.tsv`` (appending its unit ids to ``seen_unit_ids``), and it
-    emits only the listed pairs whose units are both in the bundles -- so the
-    pairs follow what the bundles contain, as UnitMatchPy's loader does.
+    emits only the listed pairs whose units are both in the bundles, as
+    UnitMatchPy's loader does.
     With ``later_first=True`` each listed pair is emitted with the SECOND fed
     session as side a (``(unit in second, unit in first)``), so side a does
     not follow feed order. ``fed``, when given, collects ``(bundle directory

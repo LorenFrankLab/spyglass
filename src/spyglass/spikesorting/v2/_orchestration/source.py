@@ -1,7 +1,5 @@
 """Build and validate the recording source shared by sorting and motion runs.
 
-Owns input-mode validation, the read-only preflight adapter, and construction
-of single-session or concatenated recordings with their artifact masks.
 Schema tables are imported only when their stage is requested."""
 
 from __future__ import annotations
@@ -41,10 +39,9 @@ def _validate_run_request(
 ) -> tuple[Any, Any, dict]:
     """Validate a run request without touching the database.
 
-    Checks the source inputs, the preset name and the motion request,
-    and folds manual exclusions into the preset's artifact recipe. Runs before
-    any DataJoint table import (importing them activates ``@schema`` and needs
-    a live connection), so a bad request fails fast even offline.
+    Checks the source inputs, preset name and motion request, and folds
+    manual exclusions into the preset's artifact recipe. Runs before table
+    imports, so a bad request fails even offline.
 
     Parameters
     ----------
@@ -87,8 +84,6 @@ def _validate_run_request(
     """
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Each public entry point supplies only its own mode's fields; a ``None``
-    # among them was passed explicitly.
     single_named = {
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
@@ -157,9 +152,8 @@ def _run_preflight(
 ) -> list[str]:
     """Run the mode's read-only preflight; return its advisories.
 
-    A single-session run gets :func:`preflight_v2_pipeline`; a concat run gets
-    :func:`assert_concat_preflight`, its per-member and group equivalent (the
-    single-session rows do not apply to a SessionGroup).
+    :func:`preflight_v2_pipeline` for single-session,
+    :func:`assert_concat_preflight` for concat.
 
     Parameters
     ----------
@@ -206,18 +200,10 @@ def _run_preflight(
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
-        # Non-blocking advisories are not errors, but dropping them hides real
-        # configuration smells. Log each and thread them into the run summary's
-        # ``warnings`` (programmatic access) alongside the per-stage warnings.
         warnings = list(report.warnings)
         for warning in warnings:
             logger.warning(f"{caller} preflight: {warning}")
         return warnings
-    # Concat preflight: the SessionGroup + members + each member's
-    # raw/valid-times/sort-group/rate prerequisites (+ the preset's
-    # auto-curation rows when opted in) + the compute-time param rows and
-    # sorter binary, all BEFORE the heavy member / concat populate. Raises
-    # PreflightError with the exact fix on the first missing prerequisite.
     return assert_concat_preflight(
         source_inputs["concat_session_group_owner"],
         source_inputs["concat_session_group_name"],
@@ -238,10 +224,9 @@ class _RunSource(NamedTuple):
     Attributes
     ----------
     selection_fields : dict
-        The source fields of both ``MotionEstimateSelection`` and
-        ``SortingSelection`` (a sort and its motion estimate read one source
-        under one mask): ``recording_id`` and ``artifact_detection_id``
-        (``None`` without artifact detection), or ``concat_recording_id``.
+        Source fields shared by ``MotionEstimateSelection`` and
+        ``SortingSelection``: ``recording_id`` and ``artifact_detection_id``,
+        or ``concat_recording_id``.
     concat_key : dict or None
         The ``ConcatenatedRecordingSelection`` PK in concat mode.
     """
@@ -261,11 +246,8 @@ def _build_run_source(
 ) -> _RunSource:
     """Select and populate the source stages a sort reads.
 
-    Single-session: the ``Recording`` and (unless the preset runs none) its
-    artifact detection. Concat: each member's ``Recording`` and artifact
-    detection, then the ``ConcatenatedRecording``. Records each stage's id,
-    status and seconds in ``run_summary`` / ``stage_seconds`` as it goes, so a
-    failure's partial summary carries every stage that completed.
+    Records each stage's id, status and seconds as it goes, so a failure's
+    partial summary carries every completed stage.
 
     Parameters
     ----------
@@ -330,7 +312,6 @@ def _build_single_session_source(
 
     nwb_file_name = source_inputs["nwb_file_name"]
     sort_group_id = source_inputs["sort_group_id"]
-    # Single-session: recording (+ optional artifact detection).
     run_summary["source_mode"] = "single_session"
     recording_key = RecordingSelection.insert_selection(
         {
@@ -353,9 +334,6 @@ def _build_single_session_source(
     )
     run_summary["recording_id"] = recording_key["recording_id"]
 
-    # A None artifact name means the preset runs no artifact detection: skip
-    # the RecordingArtifactSelection/populate stage and sort straight off the
-    # recording (no ArtifactDetectionSource row), the form concat also uses.
     if bundle.artifact_detection_params_name is None:
         artifact_detection_id = None
         run_summary["artifact_detection_status"] = "skipped"
@@ -403,7 +381,6 @@ def _build_concat_source(
     """
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
-    # Member detections are inputs to the masked concat.
     run_summary["source_mode"] = "concat"
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -417,14 +394,7 @@ def _build_concat_source(
         "session_group_owner": concat_session_group_owner,
         "session_group_name": concat_session_group_name,
     }
-    # ConcatenatedRecordingSelection requires every member's Recording to be
-    # populated under the preset's preprocessing recipe; build them here so a
-    # single concat call is as self-contained as a single-session run. The
-    # member-recording build is its own stage so a member populate failure
-    # surfaces as a PipelineStageError with timing + partial run summary,
-    # the same contract as every other stage. Order by member_index so
-    # member_recording_ids is deterministic and matches the concat
-    # identity/snapshot ordering, not the implicit DB fetch order.
+    # Order matches the concat identity and snapshot ordering.
     members = (SessionGroup.Member & group_key).fetch(
         as_dict=True, order_by="member_index"
     )
@@ -548,8 +518,7 @@ def _build_member_artifacts(
     """Select and populate every member's artifact detection as one stage.
 
     Records each member's detection id, status and masked duration in
-    ``run_summary["member_artifacts"]``. The stage is ``"skipped"`` when the
-    preset runs no artifact detection.
+    ``run_summary["member_artifacts"]``.
 
     Parameters
     ----------

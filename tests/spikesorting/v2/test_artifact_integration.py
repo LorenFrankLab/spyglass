@@ -1,18 +1,8 @@
-"""Slow, end-to-end + parallel artifact-detection integration tests.
+"""End-to-end and parallel artifact-detection integration tests.
 
-Two integration seams the rest of the suite covers only in disconnected
-pieces:
-
-* the full detect -> persist -> mask -> sort chain, where a *detected*
-  artifact actually removes frames from the recording handed to the sorter
-  (``test_detected_artifact_is_masked_out_of_the_sorted_recording``,
-  ``test_artifact_masking_preserves_clean_gt_spikes``); and
-* parallel (``n_jobs>1``) artifact detection works on a REAL cached recording
-  and matches the serial scan, exercising the cross-process ``to_dict()`` ->
-  ``si.load`` worker re-hydration path
-  (``test_parallel_artifact_detection_matches_serial``,
-  ``test_chunk_seam_detection_is_deterministic_serial_vs_parallel``,
-  ``test_artifact_compute_kernels_import_without_db``).
+- detect -> persist -> mask -> sort: a detected artifact removes frames from
+  the sorter's input.
+- Parallel (``n_jobs>1``) detection on a cached recording matches serial.
 """
 
 from __future__ import annotations
@@ -44,10 +34,8 @@ def _synth_recording_with_transient():
     """Synthetic preprocessed recording: constant background + one transient
     on all channels (gain 1.0 so counts == uV).
 
-    A linear probe is attached because ``Sorting.make_compute`` ->
-    ``build_analyzer`` -> ``estimate_sparsity`` requires probe geometry;
-    the artifact-detection path does not, but Sorting (which loads the same
-    monkeypatched recording) does.
+    A linear probe is attached because Sorting's ``estimate_sparsity`` needs
+    geometry.
     """
     import probeinterface as pi
     import spikeinterface as si
@@ -161,12 +149,8 @@ def artifact_e2e_session(dj_conn, smoke_nwb):
 def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     artifact_e2e_session, monkeypatch, tmp_path
 ):
-    """detect=True -> IntervalList gap -> masked frames in the sorter's input.
-
-    Closes the integration seam between real detection and real masking:
-    a planted transient is detected, persisted as a valid-times gap, and
-    that gap zeros the corresponding frames in the recording handed to the
-    sorter.
+    """A detected transient becomes a valid-times gap that zeros those frames
+    in the sorter's input.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2.artifact import (
@@ -187,15 +171,9 @@ def test_detected_artifact_is_masked_out_of_the_sorted_recording(
     from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2._recording import source as _source_resolution
 
-    # Substitute the loaded preprocessed recording with the synthetic one
-    # carrying a known transient at both seams: RecordingArtifactDetection
-    # reads the resolved artifact via _recording_nwb.read_stored_traces, and
-    # Sorting reads the sort's effective traces via
-    # _source_resolution.read_effective_recording (patched below, before the
-    # sort). Save it to disk first: production recordings are file-backed, and the
-    # sorting analyzer stores a reloadable reference to its recording. An
-    # in-memory NumpyRecording is not pickle-serializable, so SI would build
-    # a recordingless analyzer that the cache loader rejects as invalid.
+    # Substitute the synthetic recording at both reads (detection here,
+    # sorting below). Saved to disk: an in-memory NumpyRecording is not
+    # picklable, so SI would build a recordingless analyzer.
     synthetic_folder = tmp_path / "synthetic_recording"
     _synth_recording_with_transient().save(folder=synthetic_folder, n_jobs=1)
     monkeypatch.setattr(
@@ -390,16 +368,8 @@ def gt60_recording(dj_conn):
 def test_artifact_masking_preserves_clean_gt_spikes(
     gt60_recording, monkeypatch
 ):
-    """Artifacts injected at known GT-spike times are removed from the
-    recording, while GT spikes outside the artifact windows are preserved.
-
-    Uses the MEArec ground-truth spike times to probe the detect->mask path:
-    inject large transients into the real recording at windows centered on a
-    handful of GT spikes, run real detect=True + persist, apply the real
-    mask, then assert (a) GT spikes well inside an artifact window are zeroed,
-    and (b) GT spikes far from any window keep their original signal. This is
-    the deterministic core of "masking removes corrupted spikes without
-    destroying clean ones" -- no stochastic sort involved.
+    """Artifacts injected at known GT-spike times are zeroed by the mask,
+    while GT spikes far from them keep their signal. No sort is run.
     """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -497,10 +467,8 @@ def test_artifact_masking_preserves_clean_gt_spikes(
             "interval_list_name": f"artifact_detection_{art_pk['artifact_detection_id']}",
         }
     ).fetch1("valid_times")
-    # Detection fired on every injected window: each window's center time is
-    # excluded from valid_times. (Asserting on the centers rather than the
-    # interval count is robust to a center landing near a recording edge,
-    # where a window contributes no leading/trailing valid interval.)
+    # Each window center is excluded from valid_times (centers, not interval
+    # counts, so a window at an edge still checks).
     for c in centers:
         ct = c / fs
         covered = any(s <= ct <= e for s, e in valid_times)
@@ -600,9 +568,7 @@ def test_parallel_artifact_detection_matches_serial(dj_conn, smoke_nwb):
         if not (Recording & rec_pk):
             Recording.populate(rec_pk, reserve_jobs=False)
 
-        # The cached recording must be pickle-serializable, else the spawned
-        # worker pool can't re-hydrate it from to_dict() and the n_jobs=2 run
-        # errors out instead of running in parallel.
+        # Spawned workers re-hydrate the recording via to_dict().
         rec_obj = Recording().get_recording(rec_pk)
         serializable = rec_obj.check_serializability(
             "json"
@@ -630,14 +596,8 @@ def test_parallel_artifact_detection_matches_serial(dj_conn, smoke_nwb):
                 }
             ).fetch1("valid_times")
 
-        # n_jobs=2 completed (no cross-process re-hydration crash) AND the
-        # flagged valid_times are identical to the serial scan. This run
-        # exercises the cross-process re-hydration of a REAL cached NWB-backed
-        # recording; the smoke fixture is artifact-free so both sides return a
-        # single whole-recording interval. The non-vacuous chunk-seam
-        # determinism (an artifact straddling a chunk boundary, detected
-        # identically serial vs parallel) is pinned by
-        # ``test_chunk_seam_detection_is_deterministic_serial_vs_parallel``.
+        # The smoke fixture is artifact-free, so both return one interval;
+        # the chunk-seam test below makes the comparison non-vacuous.
         np.testing.assert_array_equal(
             results["v2_njobs_serial"], results["v2_njobs_parallel"]
         )
@@ -663,22 +623,8 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     """A real artifact straddling a chunk boundary is detected identically by
     a single-pass serial scan and a small-chunk multi-process scan.
 
-    The production scan is frame-local (each frame's flag depends only on that
-    frame's across-channel values), so the chunked output is meant to be
-    frame-identical to a single pass regardless of where chunk boundaries
-    fall. The fixture-based test above can only confirm this on artifact-free
-    data, where both sides trivially return one whole-recording interval. This
-    test makes the comparison non-vacuous: a 200 uV transient spans frames
-    1000-1199, and a ``chunk_size`` of 1100 frames places a chunk boundary at
-    frame 1100 -- INSIDE the transient. A seam bug (a chunk dropping or
-    double-counting its boundary frame, or mis-concatenating per-chunk flags)
-    would shift the assembled valid-time boundary and break the equality.
-
-    The recording is saved to disk so it is pickle-serializable. An in-memory
-    ``NumpyRecording`` is memory-serializable (so ``ensure_n_jobs`` admits
-    ``n_jobs>1``) but cannot round-trip into a spawned worker via
-    ``to_dict()`` -> ``si.load``, so the multi-process scan needs a
-    file-backed recording.
+    A transient spans frames 1000-1199 and ``chunk_size=1100`` puts a chunk
+    boundary inside it. Saved to disk so spawned workers can load it.
     """
     import numpy as np
     import spikeinterface as si
@@ -699,8 +645,7 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
     rec_mem = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
     rec_mem.set_channel_gains([1.0] * n_channels)  # gain 1 -> traces are uV
     rec_mem.set_channel_offsets([0.0] * n_channels)
-    # Persist to disk so the recording round-trips cross-process into spawned
-    # workers (an in-memory NumpyRecording is not pickle-serializable).
+    # Persist so spawned workers can load it.
     rec_disk = rec_mem.save(folder=str(tmp_path / "rec"), overwrite=True)
     rec_disk.set_channel_gains([1.0] * n_channels)
     rec_disk.set_channel_offsets([0.0] * n_channels)
@@ -733,8 +678,7 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
         rec_disk, params, job_kwargs={"chunk_size": 1100, "n_jobs": 2}
     )
 
-    # Non-vacuity: the transient actually split the timeline into two valid
-    # windows -- otherwise "equal" would compare two whole-recording intervals.
+    # Non-vacuity: the transient split the timeline into two valid windows.
     assert reference.shape == (2, 2), (
         "expected the planted transient to split the recording into two valid "
         f"intervals; got {reference.shape} -- comparison would be vacuous"
@@ -743,19 +687,11 @@ def test_chunk_seam_detection_is_deterministic_serial_vs_parallel(
 
 
 def test_artifact_compute_kernels_import_without_db():
-    """The parallel-artifact worker kernels import with NO DataJoint-schema /
-    ``spyglass.common`` dependency, so a spawned ``n_jobs>1`` worker (macOS
-    ``spawn`` re-imports the kernel's DEFINING module) never opens a DB
-    connection just to run the DB-free chunk computation.
+    """The artifact worker kernels import without ``spyglass.common`` or the
+    ``artifact`` schema module.
 
-    Guards against a ``BrokenProcessPool``: if the kernels lived in the
-    DataJoint *schema* module (``artifact.py``), every spawned worker would
-    activate ``dj.schema`` / ``from spyglass.common import ...`` at import, so
-    a config/port mismatch -- or a DB-isolated compute node -- would kill the
-    worker before any computation ran. Cold-import the kernel module
-    in a fresh subprocess (the spawn worker's view) and assert it pulled in
-    neither ``spyglass.common`` nor the ``artifact`` schema module. Hermetic --
-    no DB, no container.
+    Spawned workers re-import the kernel's module; a DB connection there can
+    kill the worker (``BrokenProcessPool``). Checked in a fresh subprocess.
     """
     import subprocess
     import sys
@@ -860,14 +796,9 @@ def test_make_fetch_heals_recording_and_compute_needs_no_db(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
-    """Sorting.make_fetch resolves artifact-removed intervals via the
-    strict ownership helper (read_artifact_removed_intervals, as_dict=True).
-
-    The prior direct ``IntervalList & reconstructed_name`` fetch would accept a
-    partially-deleted artifact whose ownership RemovedInterval part rows
-    are gone (the IntervalList row itself still resolves by name). Routing
-    through the helper makes that case fail loudly instead of feeding a stale /
-    foreign same-name interval list into the sort.
+    """Sorting.make_fetch resolves artifact-removed intervals through the
+    ownership helper, so a missing ``RemovedInterval`` part raises even when
+    the same-name IntervalList row remains.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -907,12 +838,8 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
         fetched = Sorting().make_fetch(sort_pk)
         assert fetched.obs_intervals is not None
 
-        # Simulate a partially-deleted artifact: drop ONLY the ownership part
-        # row (delete_quick -> no cascade, so the RecordingArtifactDetection
-        # master, the SortingSelection, and the IntervalList row all survive --
-        # a fetch of the IntervalList row by name alone would still
-        # "succeed"). make_fetch resolves through the ownership parts, so it
-        # must raise on the missing one.
+        # Drop only the ownership part row (delete_quick, no cascade); the
+        # IntervalList row survives.
         (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         with pytest.raises(ValueError, match="RemovedInterval"):
             Sorting().make_fetch(sort_pk)
@@ -923,9 +850,7 @@ def test_make_fetch_routes_through_ownership_helper(artifact_e2e_session):
 
         (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         (SortingSelection & sort_pk).super_delete(warn=False)
-        # Drop the ArtifactDetectionOutput merge master (force_masters) before
-        # its RecordingArtifactDetection part-parent, else the detection delete
-        # cascades to the merge part before its master.
+        # force_masters: delete the merge master before its part.
         try:
             _art_mid = ArtifactDetectionOutput.get_merge_id(art_pk)
             (ArtifactDetectionOutput & {"merge_id": _art_mid}).super_delete(
@@ -981,10 +906,8 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
-    # Helper returns a dict for a DIFFERENT nwb (e.g. a shared-group source that
-    # lost this member's row): make_fetch must raise, not feed a dict to the
-    # mask. make_fetch re-imports the helper from _artifact_readers at call
-    # time, so patch it on the SOURCE module (not on `sorting`).
+    # The helper returns another nwb's entry. make_fetch imports it at call
+    # time, so patch the source module.
     monkeypatch.setattr(
         "spyglass.spikesorting.v2._artifacts.readers."
         "read_artifact_removed_intervals",
@@ -1000,9 +923,7 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
 
         (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
         (SortingSelection & sort_pk).super_delete(warn=False)
-        # Drop the ArtifactDetectionOutput merge master (force_masters) before
-        # its RecordingArtifactDetection part-parent, else the detection delete
-        # cascades to the merge part before its master.
+        # force_masters: delete the merge master before its part.
         try:
             _art_mid = ArtifactDetectionOutput.get_merge_id(art_pk)
             (ArtifactDetectionOutput & {"merge_id": _art_mid}).super_delete(

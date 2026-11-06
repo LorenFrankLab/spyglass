@@ -7,7 +7,7 @@ own tiny in-memory analyzers. Their computes are forced to overlap if the
 code allows it: A blocks inside a SpikeInterface metric until B has either
 reached its own metric or asked for Spyglass's SpikeInterface metric lock
 (recorded by the instrumented lock below). Every wait has a timeout, so a
-regression fails instead of hanging. No database is used.
+failure does not hang. DB-free.
 """
 
 from __future__ import annotations
@@ -158,7 +158,7 @@ def test_concurrent_metric_computes_keep_their_own_defaults(
             _wait_any(b_inside, b_waiting)
         else:
             b_inside.set()
-            # B finishes last, as in the reported leak.
+            # B finishes last.
             _wait(a_done, "A to finish its compute")
         return compute_presence_ratios(*args, **kwargs)
 

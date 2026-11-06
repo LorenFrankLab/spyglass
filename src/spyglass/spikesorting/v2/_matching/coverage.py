@@ -23,14 +23,8 @@ _AMBIGUOUS_CLOCK_ERROR = (
     "choose epochs with unambiguous timestamps."
 )
 
-#: Coverage computed outside a transaction, by ``(recording path, electrical
-#: series path, raw path, raw object id)`` -> ``(file identities, coverage)``.
-#: DataJoint runs a tri-part ``make_fetch`` twice, the second time inside the
-#: insert transaction; the scan reads every selected and raw timestamp (19 s
-#: for a 20-minute epoch when measured), so that second fetch reuses the first
-#: one's result while both files are unchanged. See ``_storage.rebuilds``.
-#: Entries live for the process and are never evicted; each holds only one
-#: recording's small range and time lists.
+#: Process-lifetime memo reused by the in-transaction second ``make_fetch``.
+#: Key: (recording path, series path, raw path, raw object id).
 _SCANNED_COVERAGE: dict[tuple, tuple[tuple, dict]] = {}
 
 
@@ -215,8 +209,7 @@ def _base_artifact(recording_row, *, allow_rebuild):
             "Matching source coverage no longer matches its pinned recording."
         )
     if allow_rebuild:
-        # Reuse the transaction's verified-path memo. A direct get_abs_path
-        # would checksum large traces again during populate's second fetch.
+        # Reuses the verified-path memo; get_abs_path would re-checksum.
         path = Recording().resolve_stored_traces(key).abs_path
     else:
         path = stored_analysis_path(row["analysis_file_name"])

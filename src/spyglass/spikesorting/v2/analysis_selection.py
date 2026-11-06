@@ -1,41 +1,30 @@
 """Explicit unit selection: the handoff from a curation to downstream analysis.
 
-A curation -- root, auto-labeled, or manually curated -- holds EVERY unit with
-its labels; its ``SpikeSortingOutput`` merge id is a registered output, not a
-filtered population. ``SpikeSortingOutput.get_spike_times`` returns all units.
-The supported handoff is :func:`select_units_for_analysis`: it applies a named
-``UnitSelectionParams`` label policy and optional evaluation-based criteria,
-freezes membership, builds the
-``SortedSpikesGroup`` downstream analyses read (``fetch_spike_data`` and the
-decoding / firing-rate consumers), and returns a receipt naming the exact
-curation generation, the policy content, and every included / excluded unit
-with its reason.
+A curation holds every unit with its labels; its ``SpikeSortingOutput`` merge
+id is not a filtered population. :func:`select_units_for_analysis` applies a
+named ``UnitSelectionParams`` label policy and optional evaluation criteria,
+freezes membership, builds the ``SortedSpikesGroup`` downstream analyses read,
+and returns a receipt listing every included and excluded unit with its
+reason.
 
-Four v2 policies are shipped (``V2_UNIT_SELECTION_POLICIES``); they are new
-rows and never alter the production ``all_units`` / ``exclude_noise`` /
-``default_exclusion`` rows:
+Shipped v2 policies (``V2_UNIT_SELECTION_POLICIES``), added alongside the
+existing ``all_units`` / ``exclude_noise`` / ``default_exclusion`` rows:
 
-* ``v2_accepted_single_units`` (default) -- require ``accept``; deny ``mua``,
-  ``noise``, ``reject``, ``artifact``. Unlabeled units are excluded: a unit
-  is in the analysis only because a reviewer accepted it.
-* ``v2_accepted_neural_units`` -- require ``accept`` or ``mua``; deny
+* ``v2_accepted_single_units`` (default): require ``accept``; deny ``mua``,
   ``noise``, ``reject``, ``artifact``. Unlabeled units are excluded.
-* ``v2_unflagged_units`` -- deny ``noise``, ``reject``, ``artifact``; every
-  other unit, MUA and unlabeled included. This is the auto-label-only
-  handoff: the shipped rule sets only FLAG bad units (they never write
-  ``accept``), so without a browser review the two accepted policies select
-  nothing. Choosing it states explicitly that rule-passing, never-reviewed
-  units count as analysis units.
-* ``v2_unflagged_single_units`` -- the same auto-label-only handoff with
-  ``mua`` denied too. Cross-session matching tracks single units, so it
-  accepts only policies that deny ``mua``; this is its auto-only choice.
+* ``v2_accepted_neural_units``: require ``accept`` or ``mua``; deny
+  ``noise``, ``reject``, ``artifact``. Unlabeled units are excluded.
+* ``v2_unflagged_units``: deny ``noise``, ``reject``, ``artifact``; keep
+  everything else, including MUA and unlabeled units. For auto-label-only
+  workflows, since the shipped rules never write ``accept``.
+* ``v2_unflagged_single_units``: as above, also denying ``mua``.
+  Cross-session matching requires a policy that denies ``mua``.
 
-``all_units`` remains available as an explicit expert choice; the receipt
-always reports which included units were unlabeled so the choice is visible.
+``all_units`` remains an explicit expert choice; the receipt reports which
+included units were unlabeled.
 
-Concat sorts: the curation has one session-timeline output per frozen member
-(``CurationRef.member_merge_ids``), and a ``SortedSpikesGroup`` is per session,
-so the handoff builds one group per member and the receipt lists them.
+A concat sort has one output per member and ``SortedSpikesGroup`` is per
+session, so the handoff builds one group per member.
 """
 
 from __future__ import annotations
@@ -54,9 +43,8 @@ from spyglass.spikesorting.v2._curation.unit_selection import (
     unit_selection_hash,
 )
 
-#: A read-only label policy: ``include_labels`` / ``exclude_labels`` tuples
-#: behind a mapping proxy, so neither the shipped catalog nor a receipt's
-#: policy snapshot can be edited through a shallow copy.
+#: Read-only ``include_labels`` / ``exclude_labels`` tuples behind a mapping
+#: proxy.
 LabelPolicy = Mapping[str, tuple[str, ...]]
 
 
@@ -69,8 +57,7 @@ def _label_policy(include, exclude) -> LabelPolicy:
     )
 
 
-# The v2 policies (see the module doc). Inserted into ``UnitSelectionParams``
-# on first use by ``ensure_v2_unit_selection_policies`` -- additive only.
+# Inserted by ``ensure_v2_unit_selection_policies``.
 V2_UNIT_SELECTION_POLICIES: Mapping[str, LabelPolicy] = MappingProxyType(
     {
         "v2_accepted_single_units": _label_policy(
@@ -133,8 +120,7 @@ class UnitSelectionReceipt:
 
     @property
     def included_unlabeled_unit_ids(self) -> tuple[int, ...]:
-        """Included units that carry no label (visible only under an
-        exclude-only policy such as ``v2_unflagged_units`` / ``all_units``)."""
+        """Included units that carry no label (exclude-only policies only)."""
         return tuple(
             u for u in self.included_unit_ids if u in self.unlabeled_unit_ids
         )
@@ -167,13 +153,11 @@ class UnitSelectionReceipt:
         return self.groups[0].fetch_spike_data(**kwargs)
 
     def summary(self) -> str:
-        """Compact notebook-friendly summary of this handoff.
+        """Compact summary of this handoff.
 
-        Derived from the receipt's own verdicts and the curation's labels:
-        the source generation, the policy and its content, included /
-        excluded counts, how many included units are MUA or unlabeled, and --
-        when nothing was selected -- why, with the relevant next step. An
-        empty selection is a valid result; nothing is raised or changed.
+        Reports the source generation, policy, included/excluded counts, MUA
+        and unlabeled counts, and, for an empty selection, why and what to
+        do next.
         """
         labels = (
             self.selection_snapshot.labels_by_unit
@@ -270,11 +254,10 @@ class UnitSelectionReceipt:
 
 
 def ensure_v2_unit_selection_policies() -> None:
-    """Insert the v2 ``UnitSelectionParams`` rows if absent (additive).
+    """Insert the v2 ``UnitSelectionParams`` rows if absent.
 
-    Also seeds the table's own production defaults (``all_units`` /
-    ``exclude_noise`` / ``default_exclusion``) through its ``insert_default``
-    so the explicit ``all_units`` expert choice resolves on a fresh database.
+    Also inserts the table's own defaults so ``all_units`` resolves on a
+    fresh database.
     """
     from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
@@ -324,10 +307,9 @@ def apply_unit_selection_policy(
 ) -> tuple[tuple[int, ...], dict[int, str]]:
     """Apply a label policy to units; return (included, {excluded: reason}).
 
-    Uses ``filter_units_by_labels`` -- the exact function
-    ``SortedSpikesGroup.fetch_spike_data`` applies downstream -- so the
-    receipt cannot disagree with what analysis reads. Pure: no database
-    access.
+    Uses ``filter_units_by_labels``, the function
+    ``SortedSpikesGroup.fetch_spike_data`` applies, so the receipt matches
+    what analysis reads. No database access.
     """
     from spyglass.spikesorting.analysis.v1._unit_filter import (
         filter_units_by_labels,
@@ -368,13 +350,11 @@ def resolve_unit_selection(
 ) -> UnitSelectionSnapshot:
     """Read and freeze a label/metric population without writing anything.
 
-    Takes the same selection arguments as ``select_units_for_analysis``.
-    Defaults must already be initialized. The exact committed generation,
-    policy contents, criteria, evaluation and annotation pins, labels, IDs and
-    exclusion reasons enter the snapshot hash. No downstream output registration
-    is required: this also resolves a concatenation's parent curation for matching.
-    No groups, evaluations, analyzers or recording caches are created or rebuilt.
-    Mutable values exposed by the snapshot are defensive copies.
+    Takes the same selection arguments as ``select_units_for_analysis``;
+    defaults must already be initialized. The curation generation, policy,
+    criteria, evaluation and annotation pins, labels, unit ids and exclusion
+    reasons enter the snapshot hash. Does not require a registered output, so
+    it also resolves a concat parent curation for matching.
     """
     import pandas as pd
 
@@ -427,8 +407,7 @@ def resolve_unit_selection(
         properties = read_unit_properties(
             ref, evaluation=evaluation, annotation_sets=annotations
         )
-    # Apply the same operators as legacy analysis groups; only the source of
-    # the columns differs (an explicit evaluation instead of the Units NWB).
+    # Same operators as v1 analysis groups; columns come from the evaluation.
     for column, criterion in criteria.items():
         mask = filter_units_by_criteria(properties, {column: criterion})
         for unit_id, passed in zip(properties.index, mask):
@@ -515,9 +494,8 @@ def select_units_for_analysis(
         ``"all_units"`` is the explicit expert choice.
     group_name : str, optional
         ``SortedSpikesGroup`` name. Default
-        ``"v2_{policy}_{curation_uuid_hex[:12]}"`` -- unique per curation
-        generation, so re-running is idempotent and a recreated curation
-        never reuses a stale group.
+        ``"v2_{policy}_{curation_uuid_hex[:12]}"``, unique per curation
+        generation so re-running is idempotent.
     evaluation : EvaluationResult, optional
         Exact evaluation of this curation supplying metric columns.
     unit_criteria : mapping, optional
@@ -538,8 +516,7 @@ def select_units_for_analysis(
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # Preserve the existing analysis API's additive default setup. The shared
-    # resolver itself is strictly read-only and is also used by matching plans.
+    # resolve_unit_selection is read-only, so default rows are inserted here.
     ensure_v2_unit_selection_policies()
     selection = resolve_unit_selection(
         curation,
@@ -564,8 +541,7 @@ def select_units_for_analysis(
         normalize_observation_provenance,
     )
 
-    # Preserve the existing group-naming contract. The full selection snapshot
-    # hash additionally includes frozen verdicts and is used by matching.
+    # Group names hash provenance only, not the full snapshot hash.
     selection_hash = sha256_json(provenance, separators=(", ", ": "))[:12]
 
     if group_name is None:

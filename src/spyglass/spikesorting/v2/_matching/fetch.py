@@ -1,16 +1,6 @@
-"""DB inputs for a ``UnitMatch`` populate.
+"""DB inputs for a ``UnitMatch`` populate (``UnitMatch.make_fetch``).
 
-:func:`fetch_unit_match_inputs` is the body of ``UnitMatch.make_fetch``. It
-re-runs the selection checks on the frozen ``UnitMatchSelection.Input`` /
-``InputRecording`` rows, compares each input's live curation, source and
-session times with them, and builds the ``input_plan`` ``make_compute`` reads:
-each input's frozen recordings and matchable units, the traces its waveforms
-are extracted from (:func:`_member_waveform_traces`) and the files compute
-opens without the DB (:func:`_member_match_files`, or for a single input only
-its curated units, :func:`_input_stored_units`).
-
-Imports without the DB layer: the DataJoint tables are imported inside the
-functions.
+DataJoint tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -40,7 +30,7 @@ if TYPE_CHECKING:
 
 
 def fetch_unit_match_inputs(key) -> UnitMatchFetched:
-    """Fetch + re-validate a match run's frozen inputs (DB reads + checks).
+    """Fetch and re-validate a match run's frozen inputs.
 
     The body of ``UnitMatch.make_fetch`` (see its docstring for the checks).
 
@@ -83,9 +73,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             f"InputRecording parts ({'; '.join(structure_errors)}). A "
             "direct insert bypassed UnitMatchSelection.insert_inputs()."
         )
-    # Check each pinned curation before its population snapshot: no valid
-    # snapshot can exist for a missing or uncommitted (preview) curation, so
-    # the snapshot check would otherwise hide the real cause.
+    # Before the snapshot check, which would mask a missing/preview curation.
     for row in input_rows:
         _check_input_curation(
             row["sorting_id"], int(row["curation_id"]), exc_class
@@ -127,14 +115,9 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             "one input set while matching on another). Use "
             "UnitMatchSelection.insert_inputs()."
         )
-    # Bundles are extracted only for two or more inputs; only then are a
-    # single recording's frames and kept intervals (which bound the
-    # bundle windows) re-read from its traces and compared. A single
-    # input reads no traces file.
+    # A single input extracts no bundle and reads no traces file.
     extracts_bundles = len(input_rows) >= 2
-    # The frozen session times order the inputs and decide whether a
-    # concatenation spans days; a live time that differs refuses the run
-    # but never re-orders it.
+    # A changed live session time refuses the run; it never re-orders it.
     live_start_times = _session_start_times(
         {row["nwb_file_name"] for row in recording_rows}
     )
@@ -180,12 +163,8 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         MatcherParameters & {"matcher_params_name": sel["matcher_params_name"]}
     ).fetch1("matcher", "params", "job_kwargs")
 
-    # Resolve the correctness-sensitive DB state HERE (in fetch) and thread
-    # it into compute, so a curation relabel between the fetch and compute
-    # stages can't change which units are matchable. Times are the frozen
-    # ones, stored as UTC ISO strings (DeepHash-stable), and
-    # ``matchable_unit_ids`` as a sorted int list. compute builds the SI
-    # objects from the files resolved here and does not re-derive state.
+    # Resolved here so a relabel before compute cannot change matchable
+    # units. Times are UTC ISO strings for a stable DeepHash.
     input_plan = []
     input_curation_keys = []
     for row in input_rows:
@@ -253,15 +232,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
             }
         )
         input_curation_keys.append(curation_key)
-    # Resolve the files last, once every input passed its checks. The
-    # checks above can still rebuild a file: for two or more inputs, a
-    # single recording's frames are read through open_base_recording
-    # (allow_rebuild=True), which rebuilds a missing traces file,
-    # so a fetch that raises on a later input may already have rebuilt
-    # an earlier input's file. A single input writes zero pairs without
-    # extracting a bundle, so it reads (and heals) no traces file; only
-    # its curated units file is resolved, for the per-recording spike
-    # counts.
+    # Resolve files only after every input passed its checks.
     for plan, curation_key in zip(input_plan, input_curation_keys, strict=True):
         if len(input_plan) >= 2:
             plan.update(_member_match_files(curation_key))
@@ -281,11 +252,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
 def _member_waveform_traces(traces) -> dict:
     """Name the traces an input's matcher waveforms are extracted from.
 
-    The bundle is extracted from the sort's effective traces
-    (``SortingSelection.resolve_effective_source``), the traces the sorter
-    read: the sort's ``Recording`` or ``ConcatenatedRecording``, or the
-    ``MotionCorrectedRecording`` it selected. Recording which one makes a
-    match run state whether its waveforms came from corrected or original
+    Records whether the waveforms came from motion-corrected or original
     traces.
 
     Parameters
@@ -311,18 +278,10 @@ def _member_waveform_traces(traces) -> dict:
 def _member_match_files(curation_key: dict) -> dict:
     """Resolve the files an input's bundle is read from, for a DB-free read.
 
-    The sort's input traces are resolved as every analyzer rebuild resolves
-    them, by the DB half of ``CurationV2.get_sorting_input_recording``
-    (``resolve_canonical_recording``): the effective traces file,
-    rebuilt if missing, plus the artifact valid times when the sort's pinned
-    artifact detection must be applied at load (a single recording's cache is
-    persisted unmasked; a concatenation or a motion-corrected recording is
-    persisted masked). The curated units NWB is resolved with the sampling
-    rate and timestamps ``CurationV2.get_sorting`` reads it against, and the
-    sort's persisted statistics spans (``Sorting.get_statistics_spans``: the
-    artifact-free frame ranges that never cross a selection join, a
-    concatenation member join or an acquisition gap) bound the bundle's
-    waveform windows.
+    - Traces: the sort's effective traces as every analyzer rebuild resolves
+      them (``resolve_canonical_recording``), rebuilt if missing.
+    - Units: the curated units NWB, read against the sort's clock.
+    - Statistics spans: bound the bundle's waveform windows.
 
     Parameters
     ----------
@@ -359,10 +318,8 @@ def _member_match_files(curation_key: dict) -> dict:
 def _input_stored_units(curation_key: dict):
     """Resolve an input's curated units NWB without touching its traces.
 
-    For an input that extracts no bundle (a single-input selection): the
-    curated units file stores each spike's sort frame
-    (``spike_sample_index``), so the traces file is neither rebuilt nor
-    checksummed.
+    For a single-input selection: the units file stores each spike's sort
+    frame, so the traces file is neither rebuilt nor checksummed.
 
     Parameters
     ----------

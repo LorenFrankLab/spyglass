@@ -1,12 +1,7 @@
 """Safety-guard tests for the standalone test-environment bootstrap.
 
-The fixture generator and v1 baseline-capture scripts call
-``bootstrap_v2_test_environment`` before importing Spyglass, so its refusals
-are the only thing preventing those scripts from writing to a production
-``SPYGLASS_BASE_DIR`` or schema. These tests exercise each refusal directly.
-
-They are static-tier (no database, no Docker); pytest collects them under
-``--no-docker --no-dlc`` along with the other scaffold tests.
+Its refusals are what keep the fixture and baseline scripts from writing to
+a production base dir or schema. No database or Docker needed.
 """
 
 from __future__ import annotations
@@ -16,9 +11,7 @@ from pathlib import Path
 
 import pytest
 
-# Import the bootstrap helper by path -- the same way the scripts do -- so
-# the v2 conftest's ``collect_ignore`` of ``test_env.py`` does not break the
-# test's import.
+# Import by path, as the scripts do; conftest collect_ignores test_env.py.
 _TEST_ENV_PATH = Path(__file__).resolve().parent / "test_env.py"
 _spec = importlib.util.spec_from_file_location("v2_test_env", _TEST_ENV_PATH)
 _test_env = importlib.util.module_from_spec(_spec)
@@ -33,8 +26,7 @@ def test_assert_safe_base_dir_rejects_shared_storage():
 
 def test_assert_safe_base_dir_rejects_out_of_bounds(tmp_path_factory):
     """A base_dir outside tests/_data/ and /tmp is refused."""
-    # /var/log exists, is outside the allowlist, and contains no production
-    # marker -- it triggers only the allowlist guard.
+    # Outside the allowlist with no production marker.
     with pytest.raises(RuntimeError, match="permitted test locations"):
         _test_env._assert_safe_base_dir("/var/log/spyglass_test")
 
@@ -103,11 +95,7 @@ def test_assert_safe_prefix_accepts_test_prefixes():
 
 
 def test_bootstrap_production_smoke_requires_env_gate(tmp_path, monkeypatch):
-    """``allow_production_smoke=True`` without the env-var gate is refused.
-
-    The bootstrap is called with a safe base_dir and prefix; only the
-    production-smoke argument should trigger the refusal.
-    """
+    """``allow_production_smoke=True`` without the env-var gate is refused."""
     monkeypatch.delenv("SPYGLASS_ALLOW_PRODUCTION_SMOKE", raising=False)
     with pytest.raises(RuntimeError, match="SPYGLASS_ALLOW_PRODUCTION_SMOKE"):
         _test_env.bootstrap_v2_test_environment(

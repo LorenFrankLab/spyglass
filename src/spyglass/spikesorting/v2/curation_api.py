@@ -1,10 +1,9 @@
 """Public, identity-safe facade for Spike Sorting V2 curation.
 
-The table classes remain the expert layer.  This module provides the smaller
-scripted surface used by notebooks and automation: a generation-pinned
-``CurationRef``, evaluation snapshots, merge/evaluate receipts, and lifecycle
-inspection.  Browser review entry points are added by the FigPack review layer;
-this module deliberately has no optional FigPack imports.
+The table classes are the expert layer. This module is the scripted surface
+for notebooks and automation: a generation-pinned ``CurationRef``, evaluation
+snapshots, merge/evaluate receipts, and lifecycle inspection. It has no
+optional FigPack imports; browser review lives in ``review_api``.
 """
 
 from __future__ import annotations
@@ -30,10 +29,7 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
     get_spike_sorting_v2_merge_ids as get_spike_sorting_v2_merge_ids,
 )
 
-# Whether THIS call materialized a row ("computed") or found it already
-# present ("reused"). Distinct from the pipeline-level ``StageStatus`` in
-# ``_orchestration.types`` (which adds "skipped") and from the review layer's
-# ``ReviewStageState`` (which adds "complete").
+# Whether this call materialized a row ("computed") or found it ("reused").
 MaterializationStatus = Literal["computed", "reused"]
 CommitStatus = Literal["preview", "committed"]
 
@@ -373,8 +369,7 @@ class CurationRef:
         from spyglass.spikesorting.v2.curation import CurationV2
 
         self._current_row()
-        # One fetch carries each child's generation UUID; building the refs
-        # from these rows pins exactly the generations seen in this read.
+        # Pin each child to the generation seen in this one read.
         rows = (
             CurationV2
             & {
@@ -569,17 +564,13 @@ class CurationRef:
         )
 
     def open_analyzer(self, *, extra_extensions=None):
-        """Context manager: a disk-backed WORKING COPY of this curation's
-        display analyzer.
+        """Context manager yielding a working copy of the display analyzer.
 
-        Expert SpikeInterface access over exactly this generation's units (a
-        merged child's merged units), in real microvolts. The copy lives in a
-        temp directory under Spyglass's temp dir and is removed on exit;
-        mutating it cannot touch the published cache. ``extra_extensions``
-        (``{name: params}``) are resolved into the published cache /
-        parameter-keyed derivative first, so repeated calls with the same
-        parameters reuse them. The whitened metric analyzer is an
-        evaluation-internal object and is not exposed here.
+        Covers exactly this generation's units, in microvolts. The copy lives
+        in Spyglass's temp dir and is removed on exit, so mutating it cannot
+        touch the published cache. ``extra_extensions`` (``{name: params}``)
+        are computed into the published cache first, so repeated calls reuse
+        them.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             display_analyzer_request,
@@ -938,11 +929,9 @@ class EvaluationResult:
     def burst_pair_metrics(self, pairs=None, **kwargs) -> pd.DataFrame:
         """Burst-merge diagnostics per ordered unit pair, as a DataFrame.
 
-        The data twin of ``plots.burst_pair_metrics()``. A method rather than
-        a property like ``metrics`` because it loads the display analyzer on
-        demand instead of being part of the frozen snapshot. See
-        ``CurationEvaluation.get_burst_pair_metrics`` for the columns and
-        keyword arguments.
+        The data behind ``plots.burst_pair_metrics()``. Loads the display
+        analyzer on demand; not part of the frozen snapshot. See
+        ``CurationEvaluation.get_burst_pair_metrics`` for the columns.
 
         Parameters
         ----------

@@ -30,9 +30,8 @@ class _SpanTimestamps(_LazyRecordingTimestamps):
 class AcquisitionSpanRecording(BaseRecording):
     """Keep a continuous acquisition span without loading its time vector.
 
-    Unlike SI's FrameSliceRecording, constructing this view does not eagerly
-    slice an explicit HDF5 clock. Reconstruction in workers retains the same
-    bounded-memory behavior and the same filter boundaries.
+    Unlike SI's FrameSliceRecording, it does not eagerly slice an explicit
+    HDF5 clock, including when rebuilt in workers.
     """
 
     def __init__(self, parent_recording, start_frame, end_frame):

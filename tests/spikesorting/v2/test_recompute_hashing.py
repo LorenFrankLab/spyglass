@@ -119,7 +119,6 @@ def test_production_role_hash_keeps_memmap_allocation_bounded(tmp_path, dtype):
     finally:
         tracemalloc.stop()
     assert result["display"].startswith(hashes.ANALYZER_CONTENT_HASH_PREFIX)
-    # The old rounding + tobytes path allocated twice the complete volume.
-    # Allow multiple chunk buffers and fixed overhead, never a volume copy.
+    # Allow chunk buffers and fixed overhead, never a volume copy.
     assert peak < 8 * hashes._HASH_CHUNK_BYTES, peak
     assert peak < volume / 4, peak

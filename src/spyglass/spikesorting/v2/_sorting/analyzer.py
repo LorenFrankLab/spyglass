@@ -1,20 +1,7 @@
 """``SortingAnalyzer`` cache access/build/rebuild behind ``Sorting``.
 
-``build_analyzer`` builds the binary-folder ``SortingAnalyzer`` and its base
-extensions (``random_spikes`` / ``noise_levels`` / ``templates`` /
-``waveforms``) for ``Sorting.make_compute`` and the rebuild path -- with the
-deterministic-seed pins, the 3D->2D probe projection, the zero-unit
-short-circuit, and partial-folder cleanup on failure. The table threads the
-fetched ``SorterParameters`` row and resolved job kwargs in (the tri-part
-``make_fetch``/``make_compute``/``make_insert`` contract forbids DB I/O inside
-compute). ``load_or_rebuild_analyzer`` and ``rebuild_analyzer_folder`` hold the
-cache-miss / reconstruction policy.
-
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: all SpikeInterface / spyglass dependencies except the
-DB-free ``_storage.recompute`` extension tuple are imported lazily inside the
-functions. ``build_analyzer`` accepts resolved inputs only;
-the explicit rebuild adapter fetches its inputs before invoking computation.
+DB-free at import. ``build_analyzer`` takes resolved inputs only; the rebuild
+adapters fetch theirs first.
 """
 
 from __future__ import annotations
@@ -28,10 +15,7 @@ from spyglass.spikesorting.v2._storage.recompute import (
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._recording.source import EffectiveSource
 
-# Complete immutable extension set published for an interactive display
-# analyzer. Evaluation, curation plots, and the curation-scoped resolver import
-# this one tuple so a cached merged analyzer cannot be missing an extension a
-# supported display helper expects and then be mutated in place on first use.
+# One shared set, so no display helper mutates a cached analyzer on first use.
 STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
     "spike_amplitudes",
     "correlograms",
@@ -46,11 +30,9 @@ POLARITY_EXTENSIONS = ("spike_amplitudes", "spike_locations")
 
 
 def polarity_extension_params(names, peak_sign, extension_params=None):
-    """``extension_params`` with the sort's ``peak_sign`` on every polarity
-    extension in ``names``.
+    """``extension_params`` with the sort's ``peak_sign`` on polarity extensions.
 
-    The sort's polarity overrides a requested ``peak_sign``: a cached
-    analyzer with another polarity fails validation and is rebuilt.
+    The sort's polarity overrides a requested ``peak_sign``.
     """
     params = {name: dict(p) for name, p in (extension_params or {}).items()}
     for name in POLARITY_EXTENSIONS:
@@ -62,15 +44,9 @@ def polarity_extension_params(names, peak_sign, extension_params=None):
 def ensure_review_template_percentiles(analyzer) -> None:
     """Store the template percentiles the review's waveform view shades with.
 
-    SI's waveform widgets (``plot_unit_templates`` on the review page) shade
-    templates with their default percentiles and, when absent, compute and
-    SAVE them into the analyzer -- the published cache the page reads. In a
-    sort's shared analyzer that rewrites ``templates`` in place under any
-    other reader; in a manifest-validated merged-curation cache the changed
-    folder fails validation, so the next open rebuilt the whole analyzer.
-    :func:`build_analyzer` computes them for every display build, so the page
-    only reads. The recompute content hash covers only the average
-    templates, so they do not change it.
+    SI's waveform widgets otherwise compute and save them into the shared
+    cache on first plot, invalidating it. The recompute hash covers only the
+    average templates.
     """
     import inspect
 
@@ -103,11 +79,8 @@ def ensure_extensions(
 ):
     """Compute only the SortingAnalyzer extensions not already present.
 
-    Idempotent: an already-present extension is never recomputed (recomputing a
-    parent cascade-deletes its children and rewrites template-derived values).
-    ``random_seed`` is stripped from ``job_kwargs``
-    (:func:`._sorting.dispatch.without_random_seed`) because it is an extension
-    param, not a ``ChunkRecordingExecutor`` job kwarg.
+    Recomputing a parent would cascade-delete its children. ``random_seed``
+    is stripped from ``job_kwargs``.
 
     Parameters
     ----------
@@ -121,12 +94,8 @@ def ensure_extensions(
     job_kwargs : dict, optional
         Resolved concurrency kwargs forwarded to ``analyzer.compute``.
     extension_params : dict, optional
-        Per-extension parameter dicts (e.g. ``{"principal_components": {...}}``),
-        passed through to ``analyzer.compute(extension_params=...)``. Filtered to
-        the extensions actually being added, so a param for an already-present
-        extension is dropped (SI rejects params for extensions it isn't
-        computing). Use to PIN an extension's params explicitly rather than rely
-        on SI's defaults.
+        Per-extension parameter dicts for ``analyzer.compute``, filtered to
+        the extensions being added (SI rejects the rest).
 
     Returns
     -------
@@ -168,10 +137,7 @@ def _zero_unit_error(caller: str, sorting_id, *, hint: str = ""):
 def resolve_display_waveform_params_name(sorting_table, sorting_id) -> str:
     """Return a sort's stored display ``waveform_params_name``.
 
-    Reads ``Sorting.display_waveform_params_name`` -- resolved from the source
-    preprocessing recipe and persisted once at sort time, never re-derived --
-    so every later rebuild / cache-miss load of the display analyzer resolves
-    the SAME recipe (and the same ``peak_amplitude_uv``).
+    Persisted at sort time, so every rebuild resolves the same recipe.
     """
     return (sorting_table & {"sorting_id": sorting_id}).fetch1(
         "display_waveform_params_name"
@@ -181,18 +147,8 @@ def resolve_display_waveform_params_name(sorting_table, sorting_id) -> str:
 def fetch_waveform_params(waveform_params_name: str) -> dict:
     """Resolve a waveform-recipe NAME to its tracked, validated params blob.
 
-    The single resolver every name-aware path uses (``Sorting.make_fetch`` and
-    the cache-miss rebuild / recompute paths) -- ``build_analyzer`` itself never
-    resolves a bare name to params (no DB I/O per the tri-part contract).
-
-    Resolution is **strict**: the params come from the tracked
-    ``AnalyzerWaveformParameters`` DB row, so a sort can never build / rebuild
-    an analyzer whose waveform parameters are not recorded and queryable in the
-    database (the same provenance v1 keeps in ``WaveformParameters``). A
-    missing row raises a clear, actionable error rather than silently falling
-    back to hardcoded / catalog defaults -- run ``initialize_v2_defaults()`` (or
-    ``AnalyzerWaveformParameters.insert_default()``) to install the shipped
-    region rows, or insert the custom row, first.
+    Strict: a missing ``AnalyzerWaveformParameters`` row raises rather than
+    falling back to defaults, so every analyzer's parameters are tracked.
     """
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
@@ -200,9 +156,7 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
         "waveform_params_name": waveform_params_name
     }
     if not row:
-        # ValueError (not KeyError): KeyError.__str__ wraps its arg in repr(),
-        # which mangles this multi-line actionable message at the moment a user
-        # needs to read it.
+        # Not KeyError, whose str() repr-wraps the message.
         raise ValueError(
             "AnalyzerWaveformParameters: no row named "
             f"{waveform_params_name!r}. The analyzer waveform parameters must "
@@ -227,21 +181,12 @@ def _load_analyzer_folder_or_rebuild(
 ):
     """Load an analyzer folder; rebuild via ``rebuild_fn`` on missing/invalid.
 
-    The shared folder load/invalid-rebuild/missing-rebuild policy behind both
-    :func:`load_or_rebuild_analyzer` (DB-coupled rebuild that re-fetches the
-    sorting) and :func:`load_or_rebuild_analyzer_from_resolved` (DB-free rebuild
-    from already-resolved inputs). ``rebuild_fn`` is the zero-arg callable that
-    (re)builds ``folder`` from the canonical sorting; the two callers differ
-    only in how they source that build, not in the load/clean/raise policy.
-
-    ``recipe_label`` identifies the analyzer recipe in error messages (the
-    recipe name for the DB-coupled path, the folder for the resolved path);
-    ``sorting_id`` is for the same messages. ``rebuild=False`` raises
-    ``AnalyzerFolderMissingError`` / ``AnalyzerFolderInvalidError`` instead of
-    rebuilding (the recompute audit observes the reclaimed/corrupt state).
-    ``restore_recording`` is an optional zero-arg callable that restores the
-    sort's trace file; a folder that loads without its recording is retried
-    once after calling it, before the folder is treated as invalid.
+    - ``rebuild_fn``: zero-arg callable that builds ``folder``.
+    - ``recipe_label``, ``sorting_id``: for error messages.
+    - ``rebuild=False`` raises ``AnalyzerFolderMissingError`` /
+      ``AnalyzerFolderInvalidError`` instead of rebuilding.
+    - ``restore_recording``: optional zero-arg callable restoring the trace
+      file; a folder missing only its recording is retried once after it.
     """
     import shutil
 
@@ -262,12 +207,8 @@ def _load_analyzer_folder_or_rebuild(
         except AnalyzerRecordingUnavailableError:
             if restore is None:
                 raise
-            # A reclaimed trace file leaves a valid cache without its
-            # recording; restoring the file is cheaper than a full rebuild and
-            # keeps extensions added after the sort. Reload in a fresh frame:
-            # pyparsing's packrat cache can pin this one during the restore's
-            # DataJoint queries, and a pinned local analyzer keeps its
-            # memmapped waveforms open.
+            # Cheaper than a rebuild. Reload in a fresh frame: pyparsing's
+            # packrat cache can pin this one and its memmapped waveforms.
             restore()
             return load(restore=None)
         _assert_complete_base_extensions(analyzer)
@@ -277,12 +218,7 @@ def _load_analyzer_folder_or_rebuild(
             load_analyzer_extensions(analyzer) if load_extensions else analyzer
         )
 
-    # Hold the per-sort lock around the whole load / invalid-cleanup / rebuild
-    # region: a reader must not observe the brief move-aside window of a
-    # concurrent atomic publish, and an invalid-folder rmtree + rebuild must not
-    # race another job. The lock is reentrant, so a caller that already holds it
-    # (the CurationEvaluation fast path loads inside its own lock) does not
-    # self-deadlock.
+    # Covers a concurrent publish's move-aside window; the lock is reentrant.
     with analyzer_cache_lock(sorting_id):
         if folder.exists():
             try:
@@ -335,11 +271,8 @@ def _load_analyzer_folder_or_rebuild(
 def assert_analyzer_matches_recipe(analyzer, waveform_params) -> None:
     """Raise if a cached sort analyzer was built from other recipe content.
 
-    The sort-level cache folder is keyed by recipe NAME
-    (``{sorting_id}__{waveform_params_name}.analyzer``). A recipe row deleted
-    and re-inserted under its name with another window, spike budget or
-    whitening leaves the old folder behind, which must be rebuilt rather
-    than served under the new recipe.
+    The cache folder is keyed by recipe name, so a recipe re-inserted under
+    the same name leaves a stale folder.
 
     Raises
     ------
@@ -388,9 +321,7 @@ def sort_analyzer_validator(waveform_params, sorter_params_fn):
 def analyzer_sparsity_validator(sorter_params_fn):
     """Check a cached analyzer's polarity against its sorter's.
 
-    Covers the sparse channel selection and every computed
-    :data:`POLARITY_EXTENSIONS` member; the sorter polarity is resolved once,
-    on the first analyzer that needs it.
+    Covers sparsity and every computed :data:`POLARITY_EXTENSIONS` member.
     """
     peak_sign = None
 
@@ -437,11 +368,8 @@ def analyzer_sparsity_validator(sorter_params_fn):
 def _assert_complete_base_extensions(analyzer) -> None:
     """Reject interrupted canonical builds without eagerly loading arrays.
 
-    SI lists an extension as saved as soon as ``params.json`` exists, before
-    computation finishes. Validate both its run status and required arrays so
-    a killed build cannot look like a usable cache. The mmap reads inspect
-    array headers without registering extensions or reading their payloads.
-    Low-level loaders still allow intentionally partial expert analyzers.
+    SI lists an extension as saved once ``params.json`` exists, before it
+    finishes. Checks run status and array headers without reading payloads.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_extension_array,
@@ -497,35 +425,24 @@ def load_or_rebuild_analyzer(
     Parameters
     ----------
     sorting_table
-        ``Sorting`` table/relation instance. Passed in so this service module
-        does not import the schema module at import time.
+        ``Sorting`` table/relation instance.
     key : dict
         Restriction selecting a single ``Sorting`` row.
     waveform_params_name : str, optional
-        The analyzer recipe to load. ``None`` (the default) resolves the sort's
-        stored DISPLAY recipe (``Sorting.display_waveform_params_name``) -- a
-        deterministic, well-defined default (the sort's OWN display analyzer),
-        not a silent cross-recipe reuse. A caller needing the whitened metric
-        recipe passes its name explicitly.
+        The analyzer recipe to load. ``None`` (the default) uses the sort's
+        stored display recipe.
     rebuild : bool, optional
-        If ``True`` (the default), a missing or invalid analyzer folder is
-        rebuilt in place from the canonical stored sorting (the self-healing
-        cache). If ``False``, a missing folder raises
-        ``AnalyzerFolderMissingError`` and an unloadable folder raises
-        ``AnalyzerFolderInvalidError`` -- the recompute audit uses this so it can
-        OBSERVE a missing/reclaimed/corrupt analyzer rather than silently
-        rebuild-then-hash it.
-
+        If ``True`` (the default), a missing or invalid folder is rebuilt
+        from the canonical stored sorting. If ``False``, it raises (see
+        Raises), so the recompute audit can observe the state.
     load_extensions : bool, optional
-        Load all extensions by default, including their data validation inside
-        the rebuild boundary. Internal read-only views can pass False and load
-        individual arrays on demand.
+        Load all extensions by default; read-only views can pass False and
+        load arrays on demand.
 
     Returns
     -------
     spikeinterface.SortingAnalyzer
-        Loaded analyzer. With ``rebuild=True`` a missing or invalid folder is
-        rebuilt in place from the canonical stored sorting first.
+        Loaded analyzer.
 
     Raises
     ------
@@ -555,12 +472,7 @@ def load_or_rebuild_analyzer(
             sorting_table, sorting_id
         )
 
-    # Validate the recipe BEFORE computing the cache path or touching/rmtree-ing
-    # any folder: ``waveform_params_name`` is embedded in the folder name and
-    # reaches ``get_analyzer`` as an un-FK'd free string, so a path-like name
-    # (``../bad``, ``bad/name``) must be rejected up front, and resolving the
-    # params row here fails fast on an unknown recipe rather than mid-rebuild
-    # after a folder delete. Both checks run for ``rebuild=True`` and ``False``.
+    # Before any folder is touched: the name is an un-FK'd string in a path.
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
         assert_path_safe_waveform_params_name,
@@ -609,9 +521,8 @@ def load_or_rebuild_analyzer(
 def load_analyzer_folder_no_rebuild(folder, *, recipe_label, sorting_id):
     """Load a resolved analyzer folder without rebuilding it; no DB access.
 
-    The ``rebuild=False`` policy of :func:`load_or_rebuild_analyzer` for a
-    folder the caller already resolved, so the recompute inventory can
-    observe a missing or corrupt analyzer inside a tri-part ``make_compute``.
+    The ``rebuild=False`` policy of :func:`load_or_rebuild_analyzer` for an
+    already-resolved folder.
 
     Parameters
     ----------
@@ -658,27 +569,17 @@ def load_or_rebuild_analyzer_from_resolved(
 ):
     """Load (or rebuild) a canonical analyzer folder from resolved inputs.
 
-    The DB-FREE counterpart of :func:`load_or_rebuild_analyzer`: the caller's
-    ``make_fetch`` already resolved ``sorting_id`` / ``n_units`` / the analyzer
-    cache folder / the recipe params blob, plus the recording + canonical
-    ``sorting`` + ``SorterParameters`` row + job kwargs a cache-miss rebuild
-    needs, so this runs inside a tri-part ``make_compute`` with NO DB access.
-    Same folder load / invalid-rebuild / missing-rebuild policy as the
-    DB-coupled loader (the shared :func:`_load_analyzer_folder_or_rebuild`), but
-    the rebuild path calls :func:`build_analyzer` with the passed
-    recording/sorting instead of re-fetching them through
-    ``rebuild_analyzer_folder``.
+    The DB-free counterpart of :func:`load_or_rebuild_analyzer`, for use
+    inside ``make_compute``.
 
     Parameters
     ----------
     sorting_id : str
         The sort whose analyzer is loaded (folder identity + messages).
     n_units : int
-        The sort's unit count; ``0`` raises ``ZeroUnitAnalyzerError`` (SI cannot
-        build an analyzer over zero units), mirroring the DB-coupled loader.
+        The sort's unit count; ``0`` raises ``ZeroUnitAnalyzerError``.
     analyzer_folder : pathlib.Path
-        The canonical cache folder (``analyzer_path(sorting_id, recipe_name)``)
-        resolved by the caller -- carries the recipe identity.
+        The canonical cache folder (``analyzer_path(sorting_id, recipe_name)``).
     waveform_params : dict
         The resolved ``AnalyzerWaveformParameters`` blob for the recipe.
     recording : si.BaseRecording
@@ -691,12 +592,10 @@ def load_or_rebuild_analyzer_from_resolved(
     job_kwargs : dict
         Resolved job kwargs for the rebuild.
     statistics_spans : list[tuple[int, int]]
-        The sort's persisted statistics spans (``Sorting.get_statistics_spans``,
-        resolved by the caller), so a rebuild estimates noise and whitening
-        from the same samples as the sort-time build.
+        The sort's persisted statistics spans, so a rebuild samples noise
+        and whitening as the sort-time build did.
     rebuild : bool, optional
-        ``True`` (default) rebuilds a missing/invalid folder; ``False`` raises
-        (parity with ``load_or_rebuild_analyzer``).
+        ``True`` (default) rebuilds a missing/invalid folder; ``False`` raises.
 
     Returns
     -------
@@ -753,10 +652,8 @@ class CanonicalRecording(NamedTuple):
 def resolve_canonical_recording(key) -> CanonicalRecording:
     """Resolve a sort's canonical (artifact-masked) recording; reads the DB.
 
-    Resolves the sort's effective traces
-    (``SortingSelection.resolve_effective_source``), reads the artifact
-    valid times when the traces require the mask (an artifact-backed single
-    recording), and rebuilds a missing traces file.
+    Reads the artifact valid times when the traces require the mask, and
+    rebuilds a missing traces file.
 
     Parameters
     ----------
@@ -770,18 +667,11 @@ def resolve_canonical_recording(key) -> CanonicalRecording:
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # The effective source carries the artifact-detection id from the
-    # ArtifactDetectionSource part (the master has no artifact_detection_id
-    # FK); without it an artifact-backed sort's recording would omit the mask,
-    # diverging from what Sorting.make wrote. A concat cache already holds its
-    # member masks, so its traces are never masked again here.
     source = SortingSelection.resolve_effective_source(key)
     lineage, traces = source
     valid_times = None
     if traces.apply_artifact_mask:
-        # Route the artifact mask through the ownership-validated helper -- the
-        # same one Sorting.make_fetch uses -- so a rebuilt analyzer never
-        # diverges from what Sorting.make wrote.
+        # Same helper as Sorting.make_fetch, so rebuilds match the sort.
         from spyglass.spikesorting.v2._artifacts.readers import (
             read_recording_artifact_valid_times,
         )
@@ -828,29 +718,20 @@ def read_canonical_recording(canonical: CanonicalRecording):
 def reconstruct_recording_and_sorting(sorting_table, key):
     """Reconstruct the canonical (artifact-masked) recording + sorting for a sort.
 
-    The recording is :func:`resolve_canonical_recording` opened by
-    :func:`read_canonical_recording` (effective traces, rebuilt if missing,
-    masked when they require it), and the sorting is the canonical one from
-    the units NWB -- exactly the ``(recording, sorting)`` pair
-    ``build_analyzer`` starts from (it then 2D-projects + whitens per recipe).
-    Touches NO analyzer cache, so the recompute audit can source sorting +
-    recording without loading a (possibly reclaimed) analyzer folder -- the
-    recording halves are shared with the audit and with
-    ``rebuild_analyzer_folder`` (the cache-rebuild path) so all stay in
-    lockstep. ``key`` must carry a literal ``sorting_id``.
+    The ``(recording, sorting)`` pair ``build_analyzer`` starts from. Touches
+    no analyzer cache.
 
     Parameters
     ----------
     sorting_table
-        ``Sorting`` table/relation instance (passed so this module imports no
-        schema module at import time).
+        ``Sorting`` table/relation instance.
     key : dict
         Restriction carrying a literal ``sorting_id``.
 
     Returns
     -------
     tuple
-        ``(recording, sorting)`` -- the artifact-masked SI recording and the
+        ``(recording, sorting)``: the artifact-masked SI recording and the
         canonical SI sorting.
     """
     recording = read_canonical_recording(resolve_canonical_recording(key))
@@ -862,19 +743,10 @@ def rebuild_analyzer_folder(
 ) -> None:
     """Rebuild an analyzer folder for an existing ``Sorting`` row.
 
-    Reloads the canonical sorting from the units NWB so the rebuilt analyzer is
-    bit-equivalent to the one ``Sorting.make`` wrote -- not a fresh, possibly
-    nondeterministic, sort. Resolves the recipe NAME to its params dict here
-    (outside ``make_compute``, where a DB read is allowed) and threads BOTH the
-    resolved cache folder and the params dict into :func:`build_analyzer` so the
-    rebuilt analyzer is byte-comparable to the cached one for the same recipe.
-
-    ``key`` must carry a literal ``sorting_id`` because the path policy and
-    selection fetches are keyed by that id. Public callers should resolve a
-    general restriction through :func:`load_or_rebuild_analyzer` first.
-
-    ``waveform_params_name`` is the recipe to rebuild; ``None`` resolves the
-    sort's stored display recipe (``Sorting.display_waveform_params_name``).
+    Uses the canonical sorting from the units NWB, not a fresh sort, so the
+    rebuild matches what ``Sorting.make`` wrote. ``key`` must carry a
+    literal ``sorting_id``. ``waveform_params_name=None`` uses the stored
+    display recipe.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_cache_lock,
@@ -886,14 +758,9 @@ def rebuild_analyzer_folder(
         repopulate_sorting_analyzer_inventory,
     )
 
-    # The canonical (artifact-masked) recording + sorting -- the exact pair the
-    # recompute audit reconstructs too (shared resolver), so a rebuilt analyzer
-    # and a fresh audit build start from identical inputs.
     recording, sorting_obj = reconstruct_recording_and_sorting(
         sorting_table, key
     )
-    # The spans persisted at sort time, so the rebuilt noise levels and
-    # whitening match the build being replaced.
     statistics_spans = sorting_table.get_statistics_spans(key)
     if waveform_params_name is None:
         waveform_params_name = resolve_display_waveform_params_name(
@@ -906,20 +773,11 @@ def rebuild_analyzer_folder(
 
     sorter_row, job_kwargs = fetch_sorter_analyzer_inputs(key)
     folder = analyzer_path(key["sorting_id"], waveform_params_name)
-    # A Versions row and every dependent verdict describe the generation that
-    # is about to be replaced. Retire them before publishing so an old
-    # verdict can never remain attached to new bytes. If an
-    # inventory existed, restore it immediately for whichever folder survives
-    # the atomic publish (new on success, old on failure).
+    # Retire verdicts first so none attaches to new bytes; restore after.
     had_inventory = invalidate_sorting_analyzer_inventory(
         key["sorting_id"], waveform_params_name
     )
-    # Publish atomically under the per-sort lock: build into a private temp
-    # folder, then move it into the canonical slot. A build failure leaves the
-    # existing canonical folder untouched (the publisher cleans only its own
-    # temp), so an interrupted rebuild can never replace a valid cache with a
-    # half-built one. The lock is reentrant, so a rebuild invoked from the
-    # (already-locked) load path does not self-deadlock.
+    # A failed build leaves the existing folder untouched; lock is reentrant.
     try:
         with analyzer_cache_lock(key["sorting_id"]):
             publish_analyzer_atomically(
@@ -937,9 +795,6 @@ def rebuild_analyzer_folder(
             )
     except Exception:
         if had_inventory:
-            # Restore the surviving old folder's inventory, or record MISSING
-            # when the load path had already removed an invalid folder, before
-            # propagating the original build failure.
             try:
                 repopulate_sorting_analyzer_inventory(
                     key["sorting_id"], waveform_params_name
@@ -974,20 +829,10 @@ def build_analyzer(
 ):
     """Build the ``binary_folder`` SortingAnalyzer + base extensions.
 
-    ``binary_folder`` is deliberate (see ``_storage.analyzer_cache``): it is the only
-    SI 0.104.3 format whose waveform extraction writes straight into a
-    memmapped ``waveforms.npy`` instead of a shared-memory buffer sized for
-    the whole waveform volume, so the extraction peak is bounded by the
-    worker chunk buffers. The recipe's ``sparsity`` block selects the
-    channel-sparsity estimation (or a dense analyzer). Its polarity comes from
-    the tracked sorter params, matching unit attribution; the other settings,
-    including SI defaults, come from the waveform recipe.
-
-    Inside ``make_compute`` (no DB reads) the caller passes the fetched
-    ``sorter_row`` and resolved ``job_kwargs``. The rebuild adapter resolves
-    the same inputs before calling this function. ``analyzer_folder`` and ``waveform_params``
-    are always required, so the folder's recipe name and the params built
-    into it cannot disagree.
+    ``binary_folder`` is the only SI 0.104.3 format whose waveform
+    extraction memmaps instead of allocating the whole volume. Sparsity
+    comes from the recipe, with the sorter's polarity. No DB or ambient
+    configuration is read.
 
     Parameters
     ----------
@@ -1000,22 +845,15 @@ def build_analyzer(
     sorter_row : dict
         Keyword-only. Required pre-fetched ``SorterParameters`` row.
     job_kwargs : dict
-        Keyword-only. Required pre-resolved execution kwargs. An empty mapping
-        is valid; ``None`` is rejected rather than consulting ambient settings.
+        Keyword-only. Required pre-resolved execution kwargs; may be empty.
     analyzer_folder : pathlib.Path, optional
-        Keyword-only. Resolved cache folder to write, carrying the recipe
-        identity. Required; ``None`` raises ``ValueError``. Default ``None``.
+        Keyword-only. Resolved cache folder to write. Required.
     waveform_params : dict, optional
-        Keyword-only. Resolved analyzer-waveform params blob. Required;
-        ``None`` raises ``ValueError`` (a caller must pass the sort's resolved
-        recipe, never let the build pick a default). Default ``None``.
+        Keyword-only. Resolved analyzer-waveform params blob. Required.
     statistics_spans : list[tuple[int, int]], optional
-        Keyword-only. Artifact-free frame spans of ``recording`` (probe
-        projection and whitening preserve frames). The metric recipe's
-        whitening covariance and the ``noise_levels`` extension are then
-        estimated only from samples inside them, so artifact-masked zeros do
-        not bias either. ``None`` (default) or one span covering the
-        recording keeps SpikeInterface's own estimators unchanged.
+        Keyword-only. Artifact-free frame spans of ``recording``; whitening
+        and ``noise_levels`` sample only inside them. ``None`` (default)
+        keeps SpikeInterface's own estimators.
 
     Returns
     -------
@@ -1060,14 +898,9 @@ def build_analyzer(
             "default window."
         )
 
-    # ``whiten`` is part of the recipe identity: display=False, metric=True
-    # (PC/NN cluster-separation metrics).
+    # Display recipe: False. Metric recipe (PC/NN metrics): True.
     whiten = bool(waveform_params.get("whiten"))
-    # Channel sparsity comes from the tracked recipe (``SparsityParams``). Its
-    # polarity is the sorter's, resolved before estimating sparsity while all
-    # channels are still available: a mismatched polarity can discard a
-    # positive/bidirectional sort's actual peak, which later unit attribution
-    # cannot recover from sparse templates.
+    # A mismatched polarity can drop a positive sort's peak channel.
     from spyglass.spikesorting.v2._params.analyzer_waveform import (
         SparsityParams,
     )
@@ -1082,11 +915,7 @@ def build_analyzer(
             sorter_row.get("params")
         )
 
-    # SI's sparse analyzer build crashes on an empty sorting
-    # (``np.concatenate([])`` in ``random_spikes_selection``). The folder is
-    # never built; ``Sorting.get_analyzer`` raises ZeroUnitAnalyzerError.
-    # Checked before the folder's parent is created, so a zero-unit sort does
-    # no filesystem I/O here.
+    # SI's sparse build crashes on an empty sorting.
     if sorting.get_num_units() == 0:
         logger.warning(
             "build_analyzer: sorting_id="
@@ -1098,12 +927,7 @@ def build_analyzer(
 
     folder.parent.mkdir(parents=True, exist_ok=True)
 
-    # Check contacts before ``get_probe()``: probeinterface's own duplicate-
-    # position error names neither the sort nor the table to fix. The check
-    # reads channel locations without building a probe, and also catches
-    # contacts distinct in 3D that collapse under ``to_2d()`` below.
-    # ``require_2d=False`` because a reloaded artifact always carries a 3D
-    # location (``rel_z`` is persisted) and is projected here on purpose.
+    # Before get_probe(), whose error names neither the sort nor the fix.
     from spyglass.spikesorting.v2._recording.geometry import (
         assert_unique_contact_positions,
     )
@@ -1120,16 +944,11 @@ def build_analyzer(
             f"({exc})"
         ) from exc
 
-    # Project the probe to 2D: ``unit_locations`` and the spikeinterface-gui
-    # probe view raise a (3,)-into-(2,) broadcast error on a 3D probe. Done
-    # here, not at recording materialization, so the sort sees the recording
-    # untouched.
+    # unit_locations and the GUI probe view fail on a 3D probe.
     probe = recording.get_probe()
     if probe.ndim == 3:
         import numpy as np
 
-        # Dropping a non-constant z shifts channel distances (and sparsity);
-        # Frank-lab probes are planar, so warn.
         z = np.asarray(probe.contact_positions)[:, 2]
         if z.size and not np.allclose(z, z[0]):
             logger.warning(
@@ -1142,7 +961,6 @@ def build_analyzer(
         recording = recording.set_probe(probe.to_2d())
 
     if whiten:
-        # Same seeded whitening as the sorter path.
         from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
 
         recording = pinned_whiten(
@@ -1151,12 +969,7 @@ def build_analyzer(
             spans=statistics_spans,
         )
 
-    # Span noise levels are cached on the FINAL object handed to
-    # ``create_sorting_analyzer``: every preprocessor (probe projection,
-    # whitening) drops SI's ``noise_level_*`` properties, and the
-    # ``noise_levels`` extension reads the cache matching the analyzer's
-    # ``return_in_uV`` (``not whiten``; the metric recipe estimates on the
-    # whitened traces). Same seed as the extension's own pin below.
+    # On the final object: preprocessors drop the cached property.
     from spyglass.spikesorting.v2._sorting.dispatch import (
         cache_span_noise_levels,
     )
@@ -1169,10 +982,8 @@ def build_analyzer(
     )
 
     try:
-        # SI 0.104 loses structured preprocessing parameters (notably artifact
-        # periods) in JSON. Set this AFTER probe projection/whitening: cloning
-        # an extractor reconstructs it and resets its serialization flags.
-        # Analyzer provenance is local, trusted Python data, like its sorting.
+        # SI 0.104 loses artifact periods in JSON. Set after projection and
+        # whitening, which reset the flag.
         from spyglass.spikesorting.v2._storage.spikeinterface import (
             use_pickle_recording_serialization,
         )
@@ -1184,9 +995,7 @@ def build_analyzer(
             format="binary_folder",
             folder=folder,
             **sparsity_kwargs,
-            # Display: real uV. Metric: False, because ``sip.whiten`` keeps
-            # per-channel gains and a uV readback would partly un-whiten
-            # channels with non-uniform gains.
+            # sip.whiten keeps gains, so a uV readback would un-whiten.
             return_in_uV=not whiten,
             overwrite=True,
         )
@@ -1195,10 +1004,7 @@ def build_analyzer(
         )
 
         analyzer_job_kwargs = without_random_seed(job_kwargs)
-        # Window and subsample come from the tracked recipe row. The random
-        # extensions (random_spikes, noise_levels) are seed-pinned so a rebuild
-        # is identical, which the recompute check
-        # (``ANALYZER_RECOMPUTE_EXTENSIONS``) relies on.
+        # Seeds make rebuilds identical, as the recompute check requires.
         base_extensions = list(
             extensions if extensions is not None else BASE_ANALYZER_EXTENSIONS
         )
@@ -1208,15 +1014,10 @@ def build_analyzer(
                     waveform_params["max_spikes_per_unit"]
                 ),
                 "method": "uniform",
-                # SI 0.104 defaults seed=None; unseeded, the subset (and the
-                # persisted peak_amplitude_uv / peak channel derived from its
-                # templates) drifts between rebuilds. Same row seed as the
-                # sort's whitening / noise pins.
+                # SI 0.104 defaults to seed=None.
                 "seed": seed,
             },
             "noise_levels": {
-                # SI samples unseeded random chunks by default, so noise (and
-                # SNR-based curation) would drift between builds.
                 "random_slices_kwargs": {"seed": seed},
             },
             "waveforms": {
@@ -1226,8 +1027,7 @@ def build_analyzer(
         }
         analyzer.compute(
             base_extensions,
-            # Only pass params for extensions actually being computed (a subset
-            # rebuild may omit some); SI rejects params for absent extensions.
+            # SI rejects params for extensions not being computed.
             extension_params={
                 name: params
                 for name, params in extension_params.items()
@@ -1236,7 +1036,6 @@ def build_analyzer(
             **analyzer_job_kwargs,
         )
         if not whiten:
-            # Display analyzers back the review page; see the helper.
             ensure_review_template_percentiles(analyzer)
         if sparsity_kwargs["sparse"]:
             from spyglass.spikesorting.v2._storage.analyzer_cache import (

@@ -1,25 +1,10 @@
 """Export-safety tests for the v2 spike-sorting pipeline.
 
-A paper export over a v2 ``merge_id`` must capture every analysis file
-needed to reproduce it -- the curated units NWB and the upstream
-preprocessed-recording cache -- exactly as the v1 pipeline does. v1 and
-v2 both achieve this through the upward foreign-key cascade run inside
-``Export.populate_paper`` (NOT through per-fetch accessor logging: the
-``get_sorting`` / ``get_recording`` accessors on both pipelines read
-their files directly via ``AnalysisNwbfile.get_abs_path`` and log
-nothing). These tests pin that the standard supported path
-(``start_export`` -> ``SpikeSortingOutput.fetch_nwb`` -> ``stop_export``
--> ``Export.populate_paper``) leaves the v2 recording cache in the final
-``Export.File``, and that the zero-unit curation exports without error.
-
-Each test asserts a two-sided invariant -- the recording cache is ABSENT
-from the selection-stage ``ExportSelection.File`` but PRESENT in the
-post-populate ``Export.File`` -- so the test exercises (and would fail if
-it broke) the cascade that actually does the capture, rather than
-trivially passing.
-
-All tests are ``slow``: each runs a full sort plus an ``Export``
-populate against the Docker MySQL container.
+A paper export over a v2 ``merge_id`` captures the units NWB and the
+recording cache. As in v1, the recording cache comes from the foreign-key
+cascade in ``Export.populate_paper``, not from accessor logging, so tests
+assert it is absent from ``ExportSelection.File`` but present in
+``Export.File``.
 """
 
 from __future__ import annotations
@@ -49,11 +34,7 @@ def export_smoke_session(dj_conn, smoke_nwb):
 
 
 def _run_pipeline(session, pipeline_preset):
-    """Run ``run_v2_pipeline`` end-to-end and return its run summary.
-
-    Cleans every v2 row for the session first so the sort is rebuilt
-    deterministically regardless of test order.
-    """
+    """Run ``run_v2_pipeline`` on a cleaned session and return its run summary."""
     from spyglass.common.common_lab import LabTeam
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -108,7 +89,7 @@ def _export_and_populate(merge_id, paper_id, *, also_spike_times=False):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
     es = ExportSelection()
-    # Idempotent clean of any prior run for this paper.
+    # Clean any prior run for this paper.
     (es & {"paper_id": paper_id}).super_delete(warn=False, safemode=False)
     (Export() & {"paper_id": paper_id}).super_delete(warn=False, safemode=False)
 
@@ -116,8 +97,7 @@ def _export_and_populate(merge_id, paper_id, *, also_spike_times=False):
     try:
         SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
         if also_spike_times:
-            # Exercised for the zero-unit case: must not raise
-            # KeyError: 'spike_times' on the empty (no-column) units table.
+            # Must not raise KeyError on an empty units table.
             SpikeSortingOutput().get_spike_times({"merge_id": merge_id})
     finally:
         es.stop_export()
@@ -171,8 +151,7 @@ def test_export_helper_stops_logging_when_fetch_fails(monkeypatch):
         def fetch_nwb(self, key):
             raise RuntimeError("injected fetch failure")
 
-    # Stub the DB endpoints, retaining the real helper's try/finally control
-    # flow. The successful export/cascade behavior is covered below with DB IO.
+    # Stub the DB endpoints, keeping the helper's try/finally.
     monkeypatch.setitem(
         sys.modules,
         "spyglass.common.common_usage",
@@ -191,8 +170,8 @@ def test_export_helper_stops_logging_when_fetch_fails(monkeypatch):
 @pytest.mark.slow
 @pytest.mark.smoke
 def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
-    """A v2 ``merge_id`` export captures the units NWB AND the recording
-    cache in the final ``Export.File`` (v1 parity, via the FK cascade)."""
+    """A v2 ``merge_id`` export captures the units NWB and the recording cache
+    in the final ``Export.File``."""
     paper_id = "v2_export_complete"
     run_summary = _run_pipeline(
         export_smoke_session, "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
@@ -206,7 +185,6 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
             run_summary["root_merge_id"], paper_id
         )
 
-        # The supported path captures BOTH analysis files in the final export.
         assert units_nwb in final, (
             f"curated units NWB {units_nwb!r} missing from Export.File "
             f"{sorted(final)}"
@@ -217,10 +195,7 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
             "reach the v2 Recording table (v1 parity broken)."
         )
 
-        # Two-sided invariant: the recording cache is captured by the
-        # cascade at populate time, NOT by selection-stage fetch logging.
-        # This pins the mechanism so the test fails if the cascade breaks
-        # rather than passing trivially.
+        # The recording cache comes from the populate cascade, not selection.
         assert recording_nwb not in selection, (
             f"recording cache {recording_nwb!r} unexpectedly logged at the "
             "selection stage; the capture mechanism changed -- revisit "
@@ -236,8 +211,8 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
 
 @pytest.mark.slow
 def test_v2_zero_unit_export_path(export_smoke_session):
-    """A zero-unit curation exports without error and its empty-but-real
-    units NWB is captured; the recording cache is still captured too."""
+    """A zero-unit curation exports without error, capturing its empty units
+    NWB and the recording cache."""
     paper_id = "v2_export_zero_unit"
     run_summary = _run_pipeline(
         export_smoke_session, "franklab_clusterless_2026_06"
@@ -252,16 +227,13 @@ def test_v2_zero_unit_export_path(export_smoke_session):
     units_nwb, recording_nwb = _file_names(run_summary)
 
     try:
-        # also_spike_times exercises get_spike_times on the empty units
-        # table -- must not raise KeyError: 'spike_times'.
+        # get_spike_times must not raise on the empty units table.
         selection, final = _export_and_populate(
             run_summary["root_merge_id"], paper_id, also_spike_times=True
         )
 
-        # The empty-but-real units NWB is logged at the selection stage:
-        # fetch_nwb records the curation's analysis file regardless of unit
-        # count. The recording cache is captured only by the populate
-        # cascade (same two-sided invariant as the completeness test).
+        # fetch_nwb logs the units NWB regardless of unit count; the
+        # recording cache comes only from the populate cascade.
         assert units_nwb in selection, (
             f"empty units NWB {units_nwb!r} should be logged by fetch_nwb at "
             f"the selection stage; got {sorted(selection)}"

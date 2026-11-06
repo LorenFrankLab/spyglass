@@ -58,9 +58,8 @@ def _raising_check(
 ) -> "Callable[[str, Any, str], bool]":
     """A check callback that raises ``PreflightError`` on the first failure.
 
-    Lets the raising concat preflight run the same ``_check_*`` helpers as the
-    report-building :func:`preflight_v2_pipeline`. The failing check's fix is
-    the message, prefixed with ``"{caller}: "`` when ``caller`` is given.
+    Lets the concat preflight reuse the ``_check_*`` helpers. The message is
+    the failing check's fix, prefixed with ``"{caller}: "`` when given.
     """
     from spyglass.spikesorting.v2.exceptions import PreflightError
 
@@ -95,10 +94,7 @@ def _check_session_rows(
         f"session {nwb_file_name!r} is not ingested. Ingest it with "
         "insert_sessions(...) first.",
     )
-    # ``RecordingSelection`` FKs ``Raw`` (not ``Session``), so a session whose
-    # ``Raw`` row is missing (e.g. a partial ingestion) would pass
-    # ``session_exists`` yet fail the recording insert with an opaque
-    # foreign-key error. Check ``Raw`` explicitly so preflight stays honest.
+    # ``RecordingSelection`` references ``Raw``, which a partial ingest can miss.
     check(
         "raw_exists",
         Raw & {"nwb_file_name": nwb_file_name},
@@ -117,11 +113,7 @@ def _check_session_rows(
         f"{nwb_file_name!r}. A full-session sort typically uses "
         "'raw data valid times'.",
     )
-    # The recording build reads BOTH the sort interval (above) and the raw
-    # 'raw data valid times' interval -- for the raw sample bounds -- even when
-    # the sort interval differs. A partial ingest can have the sort interval but
-    # miss 'raw data valid times', which would otherwise surface late as a bare
-    # fetch1 error deep in Recording.make_fetch. Check it up front.
+    # The recording build also reads 'raw data valid times' for sample bounds.
     check(
         "raw_valid_times_exists",
         IntervalList
@@ -164,11 +156,7 @@ def _check_sort_group(
         f"{nwb_file_name!r}. Create sort groups first with "
         "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
     )
-    # A SortGroupV2 master row can exist with ZERO electrode members (created
-    # then partially deleted, or a shank that resolved to an empty group);
-    # Recording.populate then raises "has zero electrodes" minutes into the
-    # run. Checking the master alone is a false-green. Only run this when the
-    # master exists, to avoid a confusing second failure when it is absent.
+    # A master row can exist with zero members after a partial delete.
     if sort_group_exists:
         check(
             "sort_group_has_electrodes",
@@ -182,9 +170,7 @@ def _check_sort_group(
             "zero electrodes'. Recreate it with "
             "SortGroupV2.set_group_by_shank(nwb_file_name=...).",
         )
-        # Geometry the sort would actually see: a group whose contacts
-        # coincide cannot produce a probe, and the failure otherwise lands
-        # minutes into Recording.populate (or later, at the analyzer build).
+        # Coincident contacts cannot produce a probe.
         geometry_problem = sort_group_geometry_problem(
             nwb_file_name, sort_group_id
         )
@@ -216,7 +202,6 @@ def _check_source_param_rows(
         f"PreprocessingParameters row {bundle.preprocessing_params_name!r}"
         " is missing. Run initialize_v2_defaults().",
     )
-    # An explicit no-mask preset has no artifact parameter row to require.
     if bundle.artifact_detection_params_name is not None:
         check(
             "artifact_detection_params_exist",
@@ -236,9 +221,8 @@ def _check_sorter_param_rows(
 ) -> tuple:
     """Check the preset's ``SorterParameters`` row and its parameters.
 
-    The row's params are re-checked against the installed SI wrapper's
-    parameter vocabulary (a custom row inserted before the wrapper changed, or
-    under a different SI, would otherwise fail minutes into the sort).
+    Re-checks the params against the installed SI wrapper, which may differ
+    from the one present at insert.
 
     Returns
     -------
@@ -283,12 +267,8 @@ def _check_display_waveform_params(
 ) -> str:
     """Check the display analyzer recipe's row; return the recipe name.
 
-    The display analyzer recipe is region-resolved from the preprocessing
-    recipe and FK-required on the Sorting row, so Sorting.make_fetch fails if
-    its AnalyzerWaveformParameters row is missing. Gate it here (up front)
-    rather than crashing deep in populate, matching the other params checks.
-    The name is returned even when ``sort_checks`` is False, for the
-    resource notes.
+    The recipe is resolved from the preprocessing recipe. The name is returned
+    even when ``sort_checks`` is False, for the resource notes.
     """
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         waveform_params_for_preprocessing,
@@ -316,11 +296,7 @@ def _check_auto_curation_rows(
 ) -> None:
     """Check the rows ``auto_curate=True`` scores the root curation with.
 
-    CurationEvaluation scores the root curation with the preset's metric +
-    auto-curation rule rows on the whitened (metric) analyzer recipe, so a
-    missing one of those would otherwise fail only after the upstream compute.
-    The metric waveform row is the [1] element of the same source-resolved
-    (display, metric) pair.
+    The preset's metric and rule rows plus the metric analyzer recipe.
     """
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         waveform_params_for_preprocessing,
@@ -368,14 +344,9 @@ def _check_sampling_rate(
 ) -> None:
     """Check the recording samples at the rate the preset is tuned for.
 
-    The MS4/MS5 snippet window (clip_size / detect_interval on the rate-keyed
-    sorter row) assumes a specific acquisition rate, so a 30 kHz preset on a
-    20 kHz recording (or the reverse) silently sorts with a mistuned window.
-    The clusterless preset is rate-agnostic (sampling_rate_hz is None) and is
-    skipped; the check is also skipped if Raw is not ingested yet (raw_exists
-    already reports that, so this would only add a confusing second failure).
-    A ``pipeline_preset`` of ``None`` (a caller holding only the resolved
-    bundle, e.g. the concat preflight) names "the preset" instead.
+    The sorter row's snippet window is in samples, so a rate mismatch
+    silently mistunes it. Skipped for rate-agnostic presets and when ``Raw``
+    is missing.
     """
     from spyglass.common import Raw
 
@@ -413,13 +384,9 @@ def _check_motion_stage(
 ) -> "MotionRecipe | None":
     """Check a motion stage (estimate / apply) can run; return its recipe.
 
-    The recipe must exist and resolve, the preset's preprocessing recipe must
-    filter (motion is estimated on filtered, unwhitened traces;
-    MotionEstimateSelection.insert_selection refuses the same source), each
-    sort group's effective geometry must support the estimation recipe
-    (checked here on the registered positions, before any populate; the
-    estimator re-checks the actual recording), and a sort of a corrected
-    recording must not run the sorter's own motion correction.
+    Checks that the recipe resolves, preprocessing filters, each group's
+    registered geometry supports the estimation recipe, and an ``"apply"``
+    sort does not run the sorter's own motion correction.
 
     Parameters
     ----------
@@ -494,17 +461,9 @@ def assert_preset_compute_rows(
     """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
     are missing.
 
-    The mode-independent half of ``preflight_v2_pipeline``: the preset's
-    preprocessing / (optional) artifact / sorter / display-analyzer-waveform
-    Lookup rows plus the sorter binary/runtime. :func:`assert_concat_preflight`
-    (run by ``run_v2_concat_pipeline`` / ``estimate_concat_motion``) calls
-    this, including its member artifact recipe, so a concat run fails fast on a
-    missing row instead of deep in the member/concat populate, matching the
-    single-session preflight. The checks run ``preflight_v2_pipeline``'s own
-    ``_check_*`` helpers through :func:`_raising_check`, so the first failing
-    check raises with its fix prefixed by ``caller``. ``sort_checks=False``
-    stops after the preprocessing and artifact rows (a caller that builds the
-    source without sorting it).
+    The mode-independent half of ``preflight_v2_pipeline``, used by
+    :func:`assert_concat_preflight`. Raises on the first failing check.
+    ``sort_checks=False`` stops after the preprocessing and artifact rows.
 
     Returns
     -------
@@ -518,10 +477,7 @@ def assert_preset_compute_rows(
         return None
     sorter_row = _check_sorter_param_rows(check, bundle, sort_checks=True)[1]
     _check_display_waveform_params(check, bundle, sort_checks=True)
-    # The sorter binary/runtime on the row's execution backend, through the
-    # single-session check (the row exists: the check above raised otherwise).
-    # The bundle carries no preset name, so the messages name none, and a
-    # runnable container backend's advisory is dropped.
+    # No preset name; the container advisory is dropped.
     _check_sorter_execution(
         check,
         [],

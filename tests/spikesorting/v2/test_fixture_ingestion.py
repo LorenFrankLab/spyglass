@@ -23,15 +23,8 @@ _FIXTURE_PATH = (
 def mearec_smoke_ingested(dj_conn, smoke_nwb):
     """Ingest the generated MEArec smoke fixture into the isolated DB.
 
-    The ground-truth units live in a sidecar
-    ``ProcessingModule("ground_truth")["units"]`` (NOT in
-    ``nwbfile.units``) so the canonical units slot stays free for
-    real sorter outputs and v1↔v2 parity baselines can be captured
-    without HDMF "units already set" errors. ``ImportedSpikeSorting``
-    only reads ``nwbfile.units``, so it is intentionally NOT invoked
-    here.
-
-    Skips cleanly if the generator has not been run on this machine.
+    Ground truth is in the sidecar module, so ``ImportedSpikeSorting``
+    is not run. Skips if the generator has not been run.
     """
     if not _FIXTURE_PATH.exists():
         pytest.skip(
@@ -91,10 +84,7 @@ def test_mearec_fixture_writes_sidecar_ground_truth_units(
 ):
     """Planted ground-truth units land in the sidecar processing module.
 
-    Re-opens the source NWB and verifies the sidecar
-    ``ProcessingModule("ground_truth")["units"]`` table exists with the
-    expected per-unit columns. ``nwbfile.units`` MUST be empty so the
-    canonical slot stays free for real sorter outputs.
+    ``nwbfile.units`` stays empty.
     """
     import pynwb
 
@@ -137,13 +127,8 @@ def test_mearec_fixture_gain_required(monkeypatch, dtype):
     """The fixture writer raises (does not silently write native units as
     microvolts) when the MEArec extractor lacks a microvolt conversion.
 
-    Covers BOTH dtypes: for ``int16`` SpikeInterface raises on
-    ``get_traces(return_in_uV=True)``, but for ``float32`` it does NOT --
-    it returns the native floats unchanged as if already-uV. The writer
-    must reject both via an explicit ``has_scaleable_traces()`` check, or
-    a gainless float fixture would silently poison downstream
-    ground-truth tests. No DB or real fixture needed: a tiny in-memory SI
-    recording with no gain set stands in for the extractor.
+    Covers ``float32``, where SI does not raise and returns unscaled
+    values, as well as ``int16``.
     """
     import neuroconv.datainterfaces as ndi
     import numpy as np
@@ -202,9 +187,8 @@ class _FakeRecGen:
 def _patch_load_recordings(monkeypatch, recgen):
     """Make ``MEArec.load_recordings`` return ``recgen``.
 
-    ``_read_ground_truth`` does a lazy ``import MEArec`` inside the
-    function, so the patch must target the real ``MEArec`` module (what
-    that import binds to), not an attribute on ``mearec_to_nwb``.
+    Patches the ``MEArec`` module because ``_read_ground_truth`` imports
+    it at call time.
     """
     import MEArec
 

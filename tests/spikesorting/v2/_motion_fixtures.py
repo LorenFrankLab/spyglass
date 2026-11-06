@@ -386,7 +386,7 @@ def common_frame_error(motion, displacement, channel_depths):
     bin centers; the truth is the mean ground-truth displacement over each
     temporal bin. DREDge centres its estimate on its own data (an arbitrary
     reference), so one offset over all bins and depths is removed before the
-    error is summarized -- the same metric as the development benchmark.
+    error is summarized, as in the development benchmark.
 
     Returns
     -------
@@ -431,8 +431,8 @@ def plant_artifact_bursts(
     si.BaseRecording
         The recording with the bursts injected (lazy).
     list[tuple[int, int]]
-        Half-open frame ranges covering each burst plus 5 ms either side --
-        the ranges an artifact mask would silence.
+        Half-open frame ranges covering each burst plus 5 ms either side
+        (what an artifact mask would silence).
     """
     from spikeinterface.core import NumpySorting
     from spikeinterface.core.generate import InjectTemplatesRecording

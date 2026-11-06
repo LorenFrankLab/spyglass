@@ -1,24 +1,10 @@
 """Convert MEArec ground-truth simulations into Spyglass-ingestible NWB files.
 
-The output is structurally identical to a ``trodes_to_nwb``-produced NWB so that
-Spyglass's ``insert_sessions`` ingests it end to end: one ``ndx_franklab_novela``
-``Probe`` device, one ``NwbElectrodeGroup`` for the whole probe, an electrode
-table carrying the novela columns ``Electrode.make()`` consumes, and an
-``ElectricalSeries`` named ``"e-series"``. A ground-truth ``Units`` table -- not
-part of normal ``trodes_to_nwb`` output -- is added in a SIDECAR
-``ProcessingModule("ground_truth")`` so the simulation's planted spikes are
-readable via :func:`get_ground_truth_units_table` for sort-accuracy oracles.
-Keeping planted units OUT of ``nwbfile.units`` leaves the canonical units slot
-free for real sorter outputs: code that writes a sorting to ``nwbfile.units``
-directly would otherwise fail HDMF's "units already set" guard.
-
-The electrode/probe layout mirrors the Frank-lab reference probe metadata
-(``trodes_to_nwb`` ``device_metadata/probe_metadata``). The recording traces are
-read through ``neuroconv``'s ``MEArecRecordingInterface``; the ground-truth
-spike trains and unit metadata are read through ``MEArec`` directly. The NWB is
-assembled with ``pynwb`` rather than written by ``neuroconv`` because
-``neuroconv``'s generic ecephys writer cannot emit the ``ndx_franklab_novela``
-probe structure Spyglass ingestion requires.
+The output matches ``trodes_to_nwb``'s structure so ``insert_sessions``
+ingests it. Planted units go in a sidecar ``ProcessingModule("ground_truth")``
+(see :func:`get_ground_truth_units_table`). The NWB is assembled with
+``pynwb`` because ``neuroconv``'s writer cannot emit the
+``ndx_franklab_novela`` probe structure.
 """
 
 from __future__ import annotations
@@ -30,11 +16,8 @@ from typing import Literal
 
 import numpy as np
 
-# Polymer probe constants, from the trodes_to_nwb reference probe metadata
-# ``device_metadata/probe_metadata/128c-4s6mm6cm-15um-26um-sl.yml``: a
-# 128-channel LLNL polyimide probe, 4 shanks x 32 contacts, 26 um within-shank
-# vertical pitch, 15 um contacts. The shank x-offsets are the irregular spacing
-# recorded in that metadata file.
+# From trodes_to_nwb ``probe_metadata/128c-4s6mm6cm-15um-26um-sl.yml``:
+# 4 shanks x 32 contacts, 26 um pitch, irregular shank x-offsets.
 POLYMER_PROBE_TYPE = "128c-4s6mm6cm-15um-26um-sl"
 _POLYMER_DESCRIPTION = "128 channel polyimide probe"
 _POLYMER_CONTACT_SIZE_UM = 15.0
@@ -52,11 +35,8 @@ _NP_N_CONTACTS = 128
 _NP_COLUMN_X_UM = (0.0, 32.0)
 _NP_ROW_PITCH_UM = 20.0
 
-# Single-tetrode probe matching the Frank-lab ``tetrode_12.5`` metadata
-# at https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/device_metadata/probe_metadata/tetrode_12.5.yml :
-# 4 wires in a square, ±6.25 µm in x and z (rel_y = 0). One shank,
-# one sort group, 4 channels. Used as the "sparse-probe sorter
-# coverage" axis (vs the polymer 128c-4s).
+# Frank-lab ``tetrode_12.5`` (trodes_to_nwb probe_metadata): 4 wires in a
+# ±6.25 µm square; sparse-probe sorter coverage.
 TETRODE_PROBE_TYPE = "tetrode_12.5"
 _TETRODE_DESCRIPTION = "four wire electrode"
 _TETRODE_CONTACT_SIZE_UM = 12.5
@@ -93,10 +73,8 @@ class ProbeContact:
 class ProbeLayout:
     """Geometry of a simulated probe shared by fixture generation and conversion.
 
-    The fixture generator turns this into a ``probeinterface`` probe for MEArec;
-    the converter turns the same object into the ``ndx_franklab_novela`` probe
-    structure written to NWB. Keeping one definition guarantees the MEArec
-    channel order matches the NWB electrode order.
+    One definition keeps the MEArec channel order equal to the NWB
+    electrode order.
     """
 
     probe_type: str
@@ -131,17 +109,9 @@ class ProbeLayout:
 def polymer_probe_layout() -> ProbeLayout:
     """Return the 128-channel Frank-lab polymer probe layout.
 
-    **Axis convention note** (mirrors :func:`tetrode_probe_layout`):
-    the probe is laid out in the XY plane with ``rel_z=0`` for every
-    contact, the frame MEArec/MEAutility require (probe normal = +Z; a
-    contact with ``rel_z≠0`` raises ``TypeError: 'NoneType' object is
-    not subscriptable`` deep inside MEAutility because
-    ``electrode.normal`` is never computed). Within that plane the four
-    shanks are offset along ``rel_x`` (``_POLYMER_SHANK_X_UM``) and the
-    32 contacts of each shank run down ``rel_y`` at the 26 µm
-    within-shank pitch (negative-going so contact 0 is the most
-    superficial). Spyglass reads ``rel_x``/``rel_y``/``rel_z``
-    symmetrically, so the committed NWB stores these positions verbatim.
+    Contacts lie in the XY plane (``rel_z=0``), as MEAutility requires.
+    Shanks are offset along ``rel_x``; contacts run down ``rel_y`` so
+    contact 0 is the most superficial.
 
     Returns
     -------
@@ -204,27 +174,10 @@ def neuropixels_probe_layout() -> ProbeLayout:
 def tetrode_probe_layout() -> ProbeLayout:
     """Return the Frank-lab ``tetrode_12.5`` probe layout.
 
-    Mirrors the canonical metadata at
-    https://github.com/LorenFrankLab/trodes_to_nwb/blob/main/src/trodes_to_nwb/device_metadata/probe_metadata/tetrode_12.5.yml :
-    one shank with 4 wire-electrode contacts arranged in a square
-    at ±6.25 µm pitch. 12.5 µm contact size, ``contact_side_numbering = true``.
-
-    **Axis convention note**: trodes_to_nwb's YAML uses ``rel_y=0`` with
-    varying ``rel_z`` (probe in XZ plane, normal = +Y). MEArec/MEAutility
-    expect probes in the XY plane (``rel_z=0``, normal = +Z) -- e.g.
-    :func:`polymer_probe_layout` and :func:`neuropixels_probe_layout`
-    both follow this. A probe with ``rel_z≠0`` raises
-    ``TypeError: 'NoneType' object is not subscriptable`` deep inside
-    MEAutility because ``electrode.normal`` is never computed. We
-    therefore swap the YAML's ``rel_y`` and ``rel_z``: same 2D square
-    geometry, axes renamed to MEArec's expected frame. The committed
-    NWB writes the same channel positions either way (Spyglass reads
-    ``rel_x``/``rel_y``/``rel_z`` symmetrically).
-
-    Single sort group (sort_group_id = 0), 4 channels. The narrow
-    spatial extent means only units within ~30 µm of the tetrode
-    contribute spikes, which is the realistic Frank-lab tetrode-
-    drive behavior.
+    One shank, 4 contacts in a ±6.25 µm square (trodes_to_nwb
+    ``probe_metadata/tetrode_12.5.yml``). The YAML's ``rel_y`` and ``rel_z``
+    are swapped because MEAutility requires ``rel_z=0`` (a nonzero
+    ``rel_z`` raises ``TypeError`` there).
 
     Returns
     -------
@@ -232,9 +185,7 @@ def tetrode_probe_layout() -> ProbeLayout:
         1 shank × 4 contacts, square geometry in the XY plane.
     """
     half = _TETRODE_HALF_PITCH_UM
-    # Order matches the YAML's id sequence: 0 (+x, +y), 1 (-x, +y),
-    # 2 (-x, -y), 3 (+x, -y). rel_z=0 to put the probe in the XY plane
-    # (MEArec convention) -- see docstring's "Axis convention note".
+    # YAML id order: 0 (+x, +y), 1 (-x, +y), 2 (-x, -y), 3 (+x, -y).
     positions = [
         (+half, +half, 0.0),
         (-half, +half, 0.0),
@@ -260,14 +211,7 @@ def tetrode_probe_layout() -> ProbeLayout:
     )
 
 
-# MEArec's ground-truth ``cell_type`` annotation vocabulary.
-#
-# MEArec tags each ground-truth spiketrain with ``cell_type`` in
-# ``{"E", "I"}`` (excitatory / inhibitory; the single-letter codes are what
-# MEArec writes into the recording ``.h5``, verified across every committed
-# fixture). v2 types the ground-truth column against this set and normalizes
-# case/whitespace drift via :func:`_normalize_cell_type` so a stray
-# ``"e "`` cannot silently become a distinct category.
+# MEArec ``cell_type`` codes (excitatory / inhibitory).
 CellType = Literal["E", "I"]
 
 _VALID_CELL_TYPES: frozenset[str] = frozenset({"E", "I"})
@@ -276,10 +220,8 @@ _VALID_CELL_TYPES: frozenset[str] = frozenset({"E", "I"})
 def _normalize_cell_type(raw: object) -> CellType:
     """Normalize a MEArec ``cell_type`` annotation to the canonical set.
 
-    Strips surrounding whitespace and upper-cases (MEArec writes ``"E"`` /
-    ``"I"``), then validates against ``{"E", "I"}``. Raises ``ValueError``
-    on a value outside the set (annotation drift / typo) rather than
-    silently coercing it to a fallback.
+    Strips whitespace and upper-cases. Raises ``ValueError`` outside
+    ``{"E", "I"}``.
     """
     normalized = str(raw).strip().upper()
     if normalized not in _VALID_CELL_TYPES:
@@ -334,11 +276,8 @@ def _read_recording_traces(mearec_h5_path: Path) -> tuple[np.ndarray, float]:
     interface = MEArecRecordingInterface(file_path=str(mearec_h5_path))
     recording = interface.recording_extractor
     sampling_frequency = float(recording.get_sampling_frequency())
-    # ``has_scaleable_traces()`` is False exactly when neither gain_to_uV
-    # nor offset_to_uV is set. Check it explicitly: for a FLOAT extractor
-    # with no gain, ``get_traces(return_in_uV=True)`` does NOT raise (it
-    # returns the floats as if already microvolts), so relying on a raise
-    # would let gainless float fixtures through as mislabeled uV.
+    # A gainless float extractor does not raise on return_in_uV=True; it
+    # returns unscaled values, so check explicitly.
     if not recording.has_scaleable_traces():
         raise RuntimeError(
             f"MEArec extractor for {mearec_h5_path.name!r} has no "
@@ -369,13 +308,8 @@ def _read_ground_truth(mearec_h5_path: Path) -> _GroundTruth:
     """
     import MEArec
 
-    # ``templates`` brings in ``template_locations`` (the per-unit soma
-    # x/y/z) without loading the heavy waveform array (``load_waveforms=
-    # False``). Required so the GT sidecar can carry real position_x/y/z
-    # columns; loading only ``spiketrains`` leaves
-    # ``recgen.template_locations is None`` and all positions write as
-    # NaN. ``load_waveforms=False`` keeps memory bounded -- only the
-    # locations array is needed.
+    # ``templates`` loads the soma positions (otherwise NaN);
+    # ``load_waveforms=False`` skips the waveform array.
     recgen = MEArec.load_recordings(
         str(mearec_h5_path),
         return_h5_objects=False,
@@ -507,13 +441,10 @@ def _add_probe_and_electrodes(
         ingestion turns this into the default ``BrainRegion`` for every
         electrode.
     channel_names : list of str, optional
-        When given, inject a ``channel_name`` electrodes column with these
-        strings (one per contact, in electrode order). Production Frank-lab
-        NWBs carry this column and SpikeInterface 0.104's
-        ``read_nwb_recording`` then uses it as the channel id (see
-        ``_recording_geometry.spikeinterface_channel_ids``); the MEArec fixtures omit
-        it by default and fall through to the integer ``electrode_id`` path.
-        Must have exactly ``layout.n_contacts`` entries.
+        When given, add a ``channel_name`` electrodes column (one per
+        contact, electrode order), which SpikeInterface uses as the channel
+        id as in Frank-lab NWBs. Omitted by default, so ids fall back to
+        ``electrode_id``. Must have ``layout.n_contacts`` entries.
     """
     from ndx_franklab_novela import (
         NwbElectrodeGroup,
@@ -599,8 +530,6 @@ def _add_probe_and_electrodes(
         data=[-1] * layout.n_contacts,
     )
 
-    # Optional ``channel_name`` column: production Frank-lab NWBs carry it,
-    # so SI uses the string as the channel id; the default fixtures omit it.
     if channel_names is not None:
         if len(channel_names) != layout.n_contacts:
             raise ValueError(
@@ -640,8 +569,7 @@ def _add_raw_ephys(nwbfile, traces: np.ndarray, sampling_frequency: float):
         compression="gzip",
         chunks=(min(16384, n_samples), n_channels),
     )
-    # MEArec traces are in microvolts; conversion maps the stored values to
-    # volts, matching the trodes_to_nwb convention.
+    # Traces are in µV; conversion to volts follows trodes_to_nwb.
     eseries = ElectricalSeries(
         name="e-series",
         data=wrapped,
@@ -653,10 +581,7 @@ def _add_raw_ephys(nwbfile, traces: np.ndarray, sampling_frequency: float):
     nwbfile.add_acquisition(eseries)
 
 
-#: Name of the sidecar ``ProcessingModule`` that holds the planted
-#: ground-truth ``Units`` table in fixtures generated by this module.
-#: Kept here as a module-level constant so test code reads from the
-#: same name without hard-coding string literals.
+#: Sidecar ``ProcessingModule`` holding the planted ground-truth ``Units``.
 GROUND_TRUTH_PROCESSING_MODULE = "ground_truth"
 
 #: Name of the ``Units`` table within the sidecar processing module.
@@ -666,10 +591,7 @@ GROUND_TRUTH_UNITS_NAME = "units"
 def get_ground_truth_units_table(nwbfile):
     """Return the sidecar ground-truth ``Units`` table, or ``None``.
 
-    Centralises the read path so consumers (parity tests, GT-accuracy
-    tests, baseline-capture) never have to know the sidecar layout.
-    Returns ``None`` if the fixture has no ground-truth (a real lab
-    NWB, or a synthetic fixture written by older code).
+    ``None`` when the file has no ground truth (e.g. a real lab NWB).
 
     Parameters
     ----------
@@ -693,22 +615,13 @@ def get_ground_truth_units_table(nwbfile):
 def _add_ground_truth_units(nwbfile, ground_truth: _GroundTruth) -> None:
     """Add the planted ground-truth units in a sidecar processing module.
 
-    The planted units are *simulation metadata*, not a real spike-sorting
-    output, so they live in a ``ProcessingModule`` named
-    ``"ground_truth"`` containing a ``Units`` table named ``"units"``.
-    This keeps the top-level ``nwbfile.units`` attribute free, which
-    matters because:
+    Keeps ``nwbfile.units`` free:
 
-    - A sorter that assigns ``nwbf.units = pynwb.misc.Units(...)`` on an
-      analysis NWB inherited from the source fails with
-      ``AttributeError: can't set attribute 'units' -- already set`` when
-      the source already ships planted units.
-    - Code that reads ``nwbfile.units`` to ingest a sorting would treat
-      planted ground-truth rows as if they were real sorter output.
+    - writing a sorting to ``nwbfile.units`` fails if it is already set
+    - readers of ``nwbfile.units`` would mistake planted units for sorter
+      output
 
-    Consumers read via :func:`get_ground_truth_units_table` rather than
-    poking the processing module directly so the sidecar layout can
-    evolve in one place.
+    Read them with :func:`get_ground_truth_units_table`.
 
     Parameters
     ----------
@@ -767,22 +680,9 @@ def _add_behavior_stub(
 ) -> None:
     """Add a minimal ``behavior`` processing module + flat ``Position``.
 
-    Spyglass's ``populate_all_common`` runs ``PositionSource.make`` which
-    calls ``get_position_obj``: that helper unconditionally accesses
-    ``nwbfile.processing["behavior"]`` and crashes with ``KeyError`` if
-    the module is absent. Even a behavior module that contains no
-    ``SpatialSeries`` would satisfy the dict-access; we go a step
-    further and add a flat (constant) position trace so downstream
-    interval-list generation (``raw data valid times``) has something
-    to bind against without giving the simulator a real trajectory it
-    never had.
-
-    The trace is ``(n_samples, 2)`` at the recording's sampling rate,
-    matching the ephys time-base byte for byte. Constant x=0, y=0
-    explicitly signals "no real trajectory" to anyone reading the
-    file. Spyglass parses this through its standard Position path, so
-    the fixture ingests under both older (SpikeInterface 0.99) and
-    current Spyglass environments.
+    ``PositionSource.make`` raises ``KeyError`` without
+    ``processing["behavior"]``. The constant x=0, y=0 trace marks "no real
+    trajectory" and gives interval-list generation timestamps to use.
 
     Parameters
     ----------
@@ -799,12 +699,8 @@ def _add_behavior_stub(
     behavior_mod = nwbfile.create_processing_module(
         name="behavior", description="Synthetic behavior stub"
     )
-    # Downsample to ~100 Hz to avoid duplicating the ephys time-base
-    # at every sample; downstream Spyglass position parsing only
-    # needs a sane (timestamps, x, y) shape, not ephys-resolution
-    # position. Master spyglass also reads ``timestamps[0]`` directly
-    # (it does NOT honor ``starting_time``+``rate``) so explicit
-    # timestamps are required for compatibility.
+    # ~100 Hz is enough. Explicit timestamps: master spyglass reads
+    # ``timestamps[0]`` and ignores ``starting_time``+``rate``.
     target_hz = 100.0
     decim = max(1, int(round(sampling_frequency / target_hz)))
     n_pos = n_samples // decim
@@ -884,16 +780,11 @@ def mearec_to_spyglass_nwb(
         Probe geometry the recording was simulated against. The MEArec
         channel count must match ``layout.n_contacts``.
     targeted_location : str, optional
-        Brain region recorded as the single ``NwbElectrodeGroup.location``
-        and used at ingestion as every electrode's default region. The
-        ``trodes_to_nwb``-compatible NWB cannot encode per-shank regions;
-        multi-region tracing is set up after ingestion by overriding
-        ``Electrode.region_id`` per ``probe_shank``.
+        Brain region for the single ``NwbElectrodeGroup.location``, used as
+        every electrode's default region. Per-shank regions are set after
+        ingestion via ``Electrode.region_id``.
     channel_names : list of str, optional
-        Optional per-contact ``channel_name`` electrodes column (one per
-        contact). When set, SpikeInterface resolves channel ids from these
-        strings rather than the integer ``electrode_id`` fallback -- the shape
-        production Frank-lab NWBs carry. Passed through to
+        Per-contact ``channel_name`` electrodes column; see
         ``_add_probe_and_electrodes``.
 
     Raises

@@ -1,18 +1,15 @@
 """Memory contract of the analyzer cache: extraction and load stay out of core.
 
-Real measurements (peak RSS of a fresh subprocess: ``ru_maxrss`` on macOS,
-``VmHWM`` on Linux, where ``ru_maxrss`` inherits the parent's peak), not
-mocks. The subprocess builds a dense analyzer whose waveform volume is a few hundred MB
-and reports the peak-RSS growth of (a) waveform extraction and (b) a later
-load + per-unit read through ``load_analyzer_folder``. On this SpikeInterface
-pin the ``zarr`` path extracts into a whole-volume shared-memory buffer and
-copies it (>= 2x the volume) and its eager load decompresses into RAM again;
-the ``binary_folder`` path writes the memmap directly and the package loader
-maps it lazily. File-backed dirty pages still count toward RSS during
-extraction, so the extraction bound is ~1.5x (not 1x); the load bound is the
-sharper contract (a fraction of the volume, versus >= 1x for an eager load).
+Measures peak RSS of a fresh subprocess (``VmHWM`` on Linux, where
+``ru_maxrss`` inherits the parent's peak; ``ru_maxrss`` on macOS) while it
+extracts a few-hundred-MB waveform volume and later loads it through
+``load_analyzer_folder``.
 
-DB-free; no schema import. Marked ``regression_gate`` for its runtime.
+- Extraction stays under ~1.5x the volume (file-backed dirty pages count
+  toward RSS); SI's ``zarr`` path peaks at >= 2x.
+- Load + one unit's read is a fraction of the volume (an eager load is >= 1x).
+
+DB-free. Marked ``regression_gate`` for its runtime.
 """
 
 from __future__ import annotations
@@ -219,6 +216,5 @@ def test_unitmatch_bundle_extraction_is_out_of_core(tmp_path):
     assert result["volume"] > 200 * 1024**2, result
     assert result["is_memmap"] is True, result
     assert result["scratch_remaining"] is False, result
-    # Dirty file-backed pages still contribute to RSS. The old memory format
-    # also copied the whole extraction volume and exceeded this bound.
+    # Dirty file-backed pages still contribute to RSS.
     assert result["peak_delta"] < 1.8 * result["volume"], result

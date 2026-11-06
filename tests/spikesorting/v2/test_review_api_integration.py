@@ -145,9 +145,8 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert figure_config["review"]["profile_hash"] == (
             review.profile.profile_hash
         )
-        # The display budget is persisted with the review, resumes with it,
-        # and is part of its identity: different display options are a
-        # DIFFERENT review of the same parent/profile, not a silent reuse.
+        # The display budget is part of the review's identity and resumes
+        # with it.
         assert figure_config["review"]["display"] == (
             review.display_options.as_dict()
         )
@@ -178,8 +177,7 @@ def test_browser_review_preview_commit_resume_and_continue(
             },
         )
         assert bounded_again.review_id == bounded.review_id
-        # Committing (no edits, confirmed) and CONTINUING the bounded review
-        # carries its display budget onto the child's review.
+        # Continuing carries the display budget onto the child's review.
         continued = (
             bounded.preview_import()
             .commit(confirm_no_changes=True)

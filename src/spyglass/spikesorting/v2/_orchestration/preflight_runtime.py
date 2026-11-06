@@ -10,19 +10,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 
-# SpikeInterface's MS4 installed check only calls find_spec, so it cannot
-# detect a present but broken package or its compiled dependencies. Import the
-# actual runtime as well. mountainsort4 bundles ms4alg; the separate historical
-# ml_ms4alg distribution is not used by SI 0.104's MS4 wrapper.
+# SI's installed check only calls find_spec, which misses broken packages.
 _SORTER_RUNTIME_BACKENDS: dict[str, tuple[str, ...]] = {
     "mountainsort4": ("mountainsort4",),
 }
 
 
-# Per container backend: the SpikeInterface probes ``run_sorter`` itself checks
-# before dispatching to a container (the engine, then its Python package), each
-# with the detail reported when it fails, and the detail reported when both
-# pass.
+# The engine and Python-package probes ``run_sorter`` checks, with messages.
 _CONTAINER_RUNTIME_PROBES: dict[
     str, tuple[tuple[tuple[str, str], ...], str]
 ] = {
@@ -54,11 +48,8 @@ _CONTAINER_RUNTIME_PROBES: dict[
 def _container_runtime_available(backend: str) -> tuple[bool, str]:
     """Return ``(ok, detail)`` for a container execution backend's runtime.
 
-    A container-backed preset needs both the container engine (Docker, or
-    Singularity/Apptainer) and its Python package (``docker`` / ``spython``)
-    -- the two things SpikeInterface's ``run_sorter`` itself checks before
-    dispatching to a container. Defined as a module-level function so tests
-    can monkeypatch the runtime probe without a real container install.
+    Requires the container engine and its Python package, as ``run_sorter``
+    does.
 
     Parameters
     ----------
@@ -81,11 +72,8 @@ def _container_runtime_available(backend: str) -> tuple[bool, str]:
     return True, available_detail
 
 
-# The sorter names ``spikeinterface.sorters.installed_sorters()`` returned
-# within an :func:`_installed_sorters_reused` block, so a multi-group preflight
-# probes the installs once rather than once per group (the probe takes
-# seconds). ``None`` outside such a block: every call probes afresh, because
-# installs can change in a long-lived kernel.
+# Memo for :func:`_installed_sorters_reused` (the probe takes seconds). ``None``
+# outside a block, since installs can change in a long-lived kernel.
 _installed_sorters_memo: ContextVar["dict[str, frozenset[str]] | None"] = (
     ContextVar("_installed_sorters_memo", default=None)
 )
@@ -120,10 +108,6 @@ def _installed_sorters(sis) -> frozenset[str]:
 def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     """Run the LOCAL-execution sorter checks (installed + runtime backend).
 
-    Called by :func:`_check_sorter_execution`, whose execution-backend
-    dispatch is a flat three-arm choice (MATLAB-local error / local checks /
-    container runtime).
-
     Parameters
     ----------
     bundle : _PipelinePreset
@@ -131,15 +115,11 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     sis : module
         ``spikeinterface.sorters``, imported lazily by each caller.
     non_si_sorters : Container[str]
-        ``SorterParameters._NON_SI_SORTERS`` -- never gated on an SI binary.
+        ``SorterParameters._NON_SI_SORTERS``, never gated on an SI binary.
     check : Callable[[str, Any, str], bool]
         The report's check-recording closure.
     """
-    # sorter_installed. Reuse the SAME strict gate insert_default uses: the
-    # internal clusterless_thresholder (_NON_SI_SORTERS) is never an SI binary
-    # and is always available; otherwise the sorter must be in
-    # installed_sorters(), distinguishing "known but not installed" from
-    # "misspelled / unknown" for the fix message.
+    # Same gate as insert_default; non-SI sorters are always available.
     sorter_installed_ok = (
         bundle.sorter in non_si_sorters
         or bundle.sorter in _installed_sorters(sis)
@@ -166,10 +146,7 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
             "or the preset.",
         )
 
-    # Import the runtime, not just find_spec: installed packages can still
-    # fail to import because a compiled dependency is missing or incompatible.
-    # Only runs when sorter_installed passed to avoid duplicate missing-package
-    # failures.
+    # Installed packages can still fail to import a compiled dependency.
     backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
     if sorter_installed_ok and backend_modules:
         import importlib
@@ -205,16 +182,9 @@ def _check_sorter_execution(
 ) -> None:
     """Check the sorter can execute on the row's execution backend.
 
-    The selected backend (local vs container) is read ONLY from the
-    SorterParameters row's execution_params (the single source of truth --
-    never the preset). ``sorter_row`` is the row fetched by
-    ``_check_sorter_param_rows``, or ``None`` when it is absent. When the row
-    is absent, sorter_params_exist already reported the blocking error and
-    the backend is unknowable, so the container / MATLAB-policy checks are
-    skipped; the sorter NAME is still validated as a local sorter so a
-    misspelled sorter keeps its spelling hint. A runnable container backend appends an advisory to ``warnings``.
-    A ``pipeline_preset`` of ``None`` (a caller holding only the resolved
-    bundle) names no preset in the container messages.
+    The backend comes only from the row's ``execution_params``. With no row,
+    the sorter name is still checked locally for its spelling hint. A
+    runnable container backend appends an advisory to ``warnings``.
     """
     import spikeinterface.sorters as sis
 
@@ -240,10 +210,7 @@ def _check_sorter_execution(
         container_image = execution_params["container_image"]
 
         if execution_backend == "local":
-            # MATLAB-backed sorters (Kilosort 2.5/3, IronClust) ship only as
-            # container images; a local row for one of them cannot run. Surface
-            # the SAME tracked-container-backend message the dispatch raises,
-            # rather than the local-install checks.
+            # MATLAB sorters ship only as container images.
             if bundle.sorter.lower() in MATLAB_SORTERS:
                 check(
                     "sorter_execution_backend",
@@ -255,12 +222,7 @@ def _check_sorter_execution(
                     bundle, sis, SorterParameters._NON_SI_SORTERS, check
                 )
         else:
-            # Container backend: verify the container RUNTIME (engine + Python
-            # package), not the local sorter install. The sorter runtime lives
-            # in the image, so a missing LOCAL runtime is irrelevant here. A
-            # missing CONTAINER runtime is an actionable, blocking
-            # selected-preset error -- preflight never silently falls back to
-            # local execution.
+            # The sorter runtime lives in the image; check the container runtime.
             runtime_ok, runtime_detail = _container_runtime_available(
                 execution_backend
             )
@@ -279,10 +241,6 @@ def _check_sorter_execution(
                 "runtime and its Python package, or pick a local-execution "
                 "preset. Preflight does not fall back to local execution.",
             )
-            # Informational advisory (only when the container is actually
-            # runnable, so it never sits next to a blocking runtime failure):
-            # the host can stay on numpy>=2 -- the sorter runtime lives in the
-            # container, not on the host.
             if runtime_ok:
                 warnings.append(
                     f"{preset_label} runs sorter "

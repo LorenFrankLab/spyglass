@@ -1,10 +1,6 @@
 """NWB / recording-metadata helpers for the v2 spike-sorting tables.
 
-ElectricalSeries conversion/offset resolution, the electrode-table-region
-builder, and the AnalysisNwbfile content hash. The heavy dependencies
-(numpy, pynwb/HDMF, spyglass.common, spyglass.utils.nwb_helper_fn) are
-imported lazily inside the functions, so the module itself imports light --
-no DataJoint / SpikeInterface / spyglass.common at import.
+Heavy dependencies are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -13,18 +9,9 @@ from __future__ import annotations
 def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
 
-    Traces are written UNSCALED (``return_in_uV=False``), so the persisted
-    ElectricalSeries must carry BOTH the gain (as ``conversion``) and the
-    per-channel offset (as ``offset``) to recover physical volts on readback:
-    ``volts = raw * conversion + offset``. SpikeInterface stores per-channel
-    gain/offset in microvolts (``uV = raw*gain + offset``); a single NWB
-    ``conversion``/``offset`` scalar can only represent a UNIFORM gain/offset,
-    so heterogeneous values are rejected rather than silently mis-scaled.
-
-    The offset must be carried because recordings with a non-zero DC offset
-    (e.g. Intan / Open Ephys) would otherwise be biased by ``offset`` uV per
-    channel on readback. A non-positive gain (``0`` -> all-zero recording,
-    negative -> sign flip) is also rejected.
+    Traces are written unscaled, so readback uses
+    ``volts = raw * conversion + offset``. NWB holds one scalar of each, so
+    per-channel differences are rejected rather than mis-scaled.
 
     Returns
     -------
@@ -35,8 +22,7 @@ def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     ------
     ValueError
         If the recording has heterogeneous channel gains, a non-positive
-        channel gain, or heterogeneous channel offsets -- none of which a
-        single scalar ``conversion``/``offset`` can represent.
+        channel gain, or heterogeneous channel offsets.
     """
     import numpy as np
 
@@ -67,15 +53,8 @@ def resolve_conversion_and_offset(recording) -> tuple[float, float]:
 def electrode_table_region(nwbf, electrode_ids, description: str):
     """Build an ElectricalSeries electrode-table region from electrode ids.
 
-    ``pynwb.NWBFile.create_electrode_table_region(region=...)`` interprets
-    ``region`` as ROW INDICES into the electrodes table, NOT electrode ids.
-    Passing spyglass ``electrode_id`` values directly is correct only when
-    ``electrode.id == row position``; for an electrodes table whose ids are
-    non-contiguous or reordered it silently points the ElectricalSeries at the
-    wrong electrode rows -- wrong channel locations and brain-region
-    attribution on readback. Map ids -> row indices via
-    ``get_electrode_indices`` so the region is correct for any electrodes
-    table, and fail loud on an unknown id rather than aliasing it.
+    pynwb's ``region`` takes row indices, not electrode ids, so ids are mapped
+    to rows; passing ids would silently mislabel channels when they differ.
 
     Parameters
     ----------
@@ -91,6 +70,11 @@ def electrode_table_region(nwbf, electrode_ids, description: str):
     hdmf.common.table.DynamicTableRegion
         Region over the NWB ``electrodes`` table rows that correspond to
         ``electrode_ids``, for attaching to the ElectricalSeries.
+
+    Raises
+    ------
+    ValueError
+        If an id is not in the electrodes table.
     """
     from spyglass.utils.nwb_helper_fn import (
         get_electrode_indices,
@@ -119,11 +103,8 @@ def write_buffer_gb(
 ) -> float:
     """Streaming-write buffer size (GB) bounded to ~30 s of data.
 
-    A fixed 5 GB buffer would hold the WHOLE recording for narrow sort
-    groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
-    HDMF streaming write and spiking RAM under parallel per-group workers.
-    Scale the buffer with channel count so every group buffers ~the same
-    bounded duration, capped at 5 GB so wide groups are unchanged.
+    A fixed 5 GB buffer would hold a whole tetrode recording and spike RAM
+    under parallel workers. Capped at 5 GB.
 
     Parameters
     ----------
@@ -137,8 +118,7 @@ def write_buffer_gb(
     Returns
     -------
     float
-        Buffer size in GB, in ``[0, 5]`` (``0`` only for the degenerate
-        ``n_channels == 0``; ``> 0`` for any real recording).
+        Buffer size in GB, in ``[0, 5]``.
     """
     seconds_gb = (
         float(n_channels) * float(sampling_frequency) * 30.0 * itemsize / 1e9

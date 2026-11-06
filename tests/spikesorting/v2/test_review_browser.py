@@ -1,13 +1,8 @@
 """The review figure in a real browser (DB-free).
 
-Builds the production review figure (``_review_view.build_curation_view``)
-over an in-memory SpikeInterface analyzer and an official-property unit table,
-saves a real FigPack bundle, serves it with
-the production local delivery (``_review_delivery``), and drives headless
-Chromium through the local sequence: select units in the unit table, add /
-remove labels, propose a merge, **Save draft**, reload. Assertions are on the
-``annotations.json`` the
-frontend wrote and Spyglass's own parser reads.
+Serves a real FigPack bundle over an in-memory analyzer and drives headless
+Chromium: select units, add/remove labels, propose a merge, save, reload.
+Assertions read the ``annotations.json`` the frontend wrote.
 """
 
 from __future__ import annotations

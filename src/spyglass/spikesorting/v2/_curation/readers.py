@@ -1,13 +1,6 @@
 """Spike-train readers behind ``CurationV2``.
 
-:func:`get_sorting` and :func:`get_merged_sorting` are the bodies of
-``CurationV2.get_sorting`` / ``get_merged_sorting``: they read a curation's
-curated-units NWB using stored sample frames and the upstream sampling rate
-(:func:`load_curation_units_meta`) and, for an unapplied proposed merge,
-rebuild the merged sorting lazily.
-``table_cls`` is ``CurationV2``.
-
-Imports without the DB layer: the DataJoint tables are imported inside the
+``table_cls`` is ``CurationV2``. DataJoint tables are imported inside the
 functions.
 """
 
@@ -44,13 +37,8 @@ def get_sorting(
     row = (table_cls & key).fetch1()
     fs, abs_path = load_curation_units_meta(row)
 
-    # A curation created with apply_merge=False records PROPOSED merges in
-    # MergeGroup but does NOT apply them: get_sorting (what consumers such
-    # as SortedSpikesGroup / decoding read via SpikeSortingOutput) returns
-    # the UNMERGED preview units. Warn here so ad-hoc inspection is not
-    # silently misled; the decoding CONSUMERS additionally RAISE via
-    # SpikeSortingOutput.assert_decoding_merge_ids_ok so a preview curation
-    # never reaches a decode.
+    # Previews return unmerged units; decoding raises separately via
+    # SpikeSortingOutput.assert_decoding_merge_ids_ok.
     if table_cls.has_unapplied_proposed_merges(
         key, merges_applied=row["merges_applied"]
     ):
@@ -64,9 +52,6 @@ def get_sorting(
         )
 
     if len(table_cls.Unit & key) == 0:
-        # Zero-unit curations are valid (a user may curate a
-        # zero-unit sort; the Empty/Boundary invariant allows an
-        # empty ``CurationV2.Unit``).
         logger.warning(
             "CurationV2.get_sorting: curation "
             f"(sorting_id={row['sorting_id']}, "
@@ -83,11 +68,6 @@ def get_sorting(
         return sorting_from_units_nwb(abs_path, fs)
 
     abs_times = read_units_abs_spike_times(abs_path)
-    # Reuse the shared spike-times DataFrame builder (the same one
-    # Sorting.get_sorting(as_dataframe=True) uses) so the base spike_times
-    # column + unit_id index cannot drift between the two, then join the
-    # ``curation_label`` lists from ``UnitLabel`` so external notebook code
-    # reading ``df["curation_label"]`` works without poking the part table.
     labels_by_unit = table_cls._labels_by_unit(key)
     df = abs_spike_times_dataframe(abs_times)
     df["curation_label"] = [labels_by_unit.get(u, []) for u in df.index]
@@ -99,9 +79,6 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
 
     The body of ``CurationV2.get_merged_sorting`` (see its docstring).
     """
-    # merges_applied OR no multi-contributor group -> the base sorting
-    # already IS the result; delegate to get_sorting (its read is
-    # unavoidable in those cases).
     row = (table_cls & key).fetch1()
     if bool(row["merges_applied"]):
         return table_cls.get_sorting(key)
@@ -114,15 +91,9 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
     if not units_to_merge:
         return table_cls.get_sorting(key)
 
-    # Read the curated units NWB once, then rebuild the merged sorting via
-    # the pure compute core. v2-written units NWBs carry stored sample
-    # frames and avoid the recording timeline. Calling get_sorting here
-    # would re-open the units NWB and emit a spurious "merges NOT applied"
-    # warning -- we ARE applying them. The merge is deduplicated in ABSOLUTE time
-    # (gap-correct on disjoint recordings); see the helper docstrings.
+    # Not get_sorting: it would warn that merges are unapplied. Dedup uses
+    # absolute times; frames are reused directly.
     fs, abs_path = load_curation_units_meta(row)
-    # Both columns are needed (dedup is in absolute time, frames are reused
-    # directly) -- read them from a single NWB open.
     abs_times, sample_indices, _obs = read_units_abs_times_and_sample_indices(
         abs_path
     )
@@ -149,9 +120,7 @@ def load_curation_units_meta(row) -> tuple[float, str]:
         The upstream recording's sampling frequency (matching the
         ``Sorting.get_sorting`` round-trip convention).
     abs_path : str
-        The curated-units NWB path. The file itself is NOT read here --
-        callers read it lazily so ``get_sorting`` can short-circuit a
-        zero-unit curation without touching the filesystem.
+        The curated-units NWB path; not read here.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
@@ -163,9 +132,7 @@ def load_curation_units_meta(row) -> tuple[float, str]:
 def _source_sampling_frequency(sorting_id) -> float:
     """Return the sampling frequency of a sort's recording source.
 
-    For a concat-backed sort this is the ``ConcatenatedRecording`` (the
-    timeline the curated spike times were written against), NOT a
-    per-member ``Recording``.
+    For a concat-backed sort, the ``ConcatenatedRecording``'s rate.
     """
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (

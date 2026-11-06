@@ -1,9 +1,4 @@
-"""Pure helper tests and DB-free NWB integration tests for concatenation.
-
-Drive ``_recording.concat`` directly -- the sample-boundary / spike-train
-back-mapping math is pure. Synthetic recordings exercise in-memory stitching;
-NWB integration cases exercise persisted clocks, scaling, masking, and stitching.
-"""
+"""DB-free tests for ``_recording.concat`` helpers and persisted-NWB stitching."""
 
 from __future__ import annotations
 
@@ -32,7 +27,7 @@ def test_cumulative_boundaries_basic():
 
 @pytest.mark.unit
 def test_cumulative_boundaries_empty():
-    """No members -> no boundaries."""
+    """No members give no boundaries."""
     assert cumulative_member_boundaries([]) == []
 
 
@@ -41,8 +36,8 @@ def test_cumulative_boundaries_empty():
 
 @pytest.mark.unit
 def test_split_maps_to_local_member_frames():
-    """Each member's spikes are shifted into that member's local frame and the
-    boundary frame (== end) belongs to the NEXT member."""
+    """Each member's spikes are shifted into its local frame; a boundary frame
+    belongs to the next member."""
     # Two members of 100 samples each; boundaries [100, 200].
     trains = {
         7: np.array([0, 50, 99, 100, 150, 199]),
@@ -90,8 +85,7 @@ def test_member_spike_times_rejects_frames_outside_the_member():
 @pytest.mark.unit
 def test_member_split_key_disambiguates_same_spatial_member():
     """The split key is the full member identity (nwb, sort_group, interval,
-    team), so two members sharing nwb+interval but differing in sort group OR
-    team get distinct keys -- a lossy (nwb, interval) key would collide them."""
+    team), so members differing only in sort group or team get distinct keys."""
     member = {
         "nwb_file_name": "day1_.nwb",
         "sort_group_id": 0,
@@ -107,8 +101,7 @@ def test_member_split_key_disambiguates_same_spatial_member():
     # Same NWB + interval, different sort group -> distinct.
     other_group = {**member, "sort_group_id": 1}
     assert member_split_key(member) != member_split_key(other_group)
-    # Same NWB + interval + sort group, different team (allowed mixed-team
-    # member) -> still distinct, not silently overwritten.
+    # Same NWB + interval + sort group, different team -> distinct.
     other_team = {**member, "team_name": "team_b"}
     assert member_split_key(member) != member_split_key(other_team)
     assert (
@@ -136,9 +129,9 @@ def test_split_preserves_unit_ids_with_empty_arrays():
 
 @pytest.mark.unit
 def test_split_conserves_every_spike_per_unit():
-    """Per-spike conservation: every input (unit, frame) lands in exactly one
-    member and back-maps to its original frame -- not just matching summed counts
-    (which a simultaneous drop + duplicate could satisfy)."""
+    """Every input (unit, frame) lands in exactly one member and back-maps to
+    its original frame (summed counts alone could hide a drop plus duplicate).
+    """
     boundaries = [100, 250, 400]
     trains = {
         7: np.array([0, 99, 100, 249, 250, 399]),
@@ -163,8 +156,7 @@ def test_split_conserves_every_spike_per_unit():
 
 @pytest.mark.unit
 def test_split_raises_when_a_spike_is_past_the_final_boundary():
-    """A frame at/after the final boundary belongs to no member; rather than
-    silently dropping it, the split raises ``ConcatSplitError``."""
+    """A frame at or after the final boundary raises ``ConcatSplitError``."""
     trains = {7: np.array([0, 50, 200])}  # 200 == final boundary, out of range
     with pytest.raises(ConcatSplitError, match="outside"):
         split_unit_spike_trains(trains, [100, 200])
@@ -180,8 +172,7 @@ def test_split_raises_on_negative_spike_frame():
 
 @pytest.mark.unit
 def test_split_raises_on_non_strictly_increasing_boundaries():
-    """Equal/decreasing boundaries make the member intervals overlap or empty,
-    so a spike could land in two members (or none); reject them."""
+    """Equal or decreasing boundaries are rejected."""
     trains = {7: np.array([10, 120])}
     with pytest.raises(ConcatSplitError, match="strictly increasing"):
         split_unit_spike_trains(trains, [100, 100, 200])
@@ -217,8 +208,8 @@ def _snap(member_index, recording_id, content_hash="c" * 64, **over):
 
 @pytest.mark.unit
 def test_member_set_hash_is_a_stable_sha256_hex():
-    """The folded member-set hash is a deterministic 64-char hex digest, stable
-    across calls and insertion order (canonicalized by member_index)."""
+    """The member-set hash is a deterministic 64-char hex digest, independent
+    of insertion order."""
     rows = [
         _snap(0, "11111111-1111-1111-1111-111111111111"),
         _snap(1, "22222222-2222-2222-2222-222222222222"),
@@ -232,8 +223,7 @@ def test_member_set_hash_is_a_stable_sha256_hex():
 
 @pytest.mark.unit
 def test_member_set_hash_changes_with_member_identity():
-    """A different member (different recording_id) yields a different hash --
-    this is what makes a different member SET a different concat id."""
+    """A different member (recording_id) yields a different hash."""
     base = [
         _snap(0, "11111111-1111-1111-1111-111111111111"),
         _snap(1, "22222222-2222-2222-2222-222222222222"),
@@ -247,8 +237,7 @@ def test_member_set_hash_changes_with_member_identity():
 
 @pytest.mark.unit
 def test_member_set_hash_changes_with_member_order():
-    """Re-assigning member_index (changing the concatenation order) changes the
-    hash -- order is load-bearing for the stitched timeline."""
+    """Changing member_index (concatenation order) changes the hash."""
     rid_a = "11111111-1111-1111-1111-111111111111"
     rid_b = "22222222-2222-2222-2222-222222222222"
     forward = [_snap(0, rid_a), _snap(1, rid_b)]
@@ -277,8 +266,8 @@ def test_member_set_hash_changes_with_other_frozen_logical_fields(field, value):
 
 @pytest.mark.unit
 def test_member_set_hash_ignores_content_hash():
-    """Per-member ``recording_content_hash`` is verification, not identity, so it
-    must NOT change the folded set hash (content drift is caught separately)."""
+    """Per-member ``recording_content_hash`` is verification, not identity, so
+    it does not change the set hash."""
     rid_a = "11111111-1111-1111-1111-111111111111"
     rid_b = "22222222-2222-2222-2222-222222222222"
     rows = [
@@ -294,8 +283,8 @@ def test_member_set_hash_ignores_content_hash():
 
 @pytest.mark.unit
 def test_member_set_hash_normalizes_uuid_and_int_forms():
-    """A UUID object vs its str form, and a numpy-like sort_group_id vs int,
-    collapse to one hash so a fetched row and a freshly built row agree."""
+    """UUID vs str and numpy-like vs int sort_group_id give one hash, so fetched
+    and freshly built rows agree."""
     import uuid
 
     rid = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -309,9 +298,8 @@ def test_member_set_hash_normalizes_uuid_and_int_forms():
 
 @pytest.mark.unit
 def test_build_concatenated_recording_returns_members_traces_unchanged():
-    """The members are stitched into one segment whose traces are exactly the
-    members' traces in order: the sample count is the sum, the channels are
-    preserved, and no motion correction (or any other transform) runs."""
+    """Members are stitched into one segment whose traces are exactly the
+    members' traces in order, with no transform applied."""
     import spikeinterface as si
 
     fs = 30_000.0
@@ -608,8 +596,8 @@ def test_timestamp_rate_roundoff_is_bounded_by_both_member_durations(
 
 @pytest.mark.unit
 def test_assert_concat_compatible_rejects_channel_id_mismatch():
-    """A member with different channel ids (or count) is rejected early with a
-    clear message instead of failing deep in SI's concatenate_recordings."""
+    """A member with different channel ids or count is rejected before SI's
+    concatenate_recordings."""
     from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
@@ -628,8 +616,7 @@ def test_assert_concat_compatible_rejects_channel_id_mismatch():
 @pytest.mark.unit
 def test_assert_concat_compatible_rejects_geometry_mismatch():
     """Members with matching channel ids but different probe geometry are
-    rejected -- cross-session waveforms must align channel-for-channel. This is
-    the case SI's id-only check would let through silently."""
+    rejected (SI checks ids only)."""
     from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
@@ -654,14 +641,12 @@ def test_assert_concat_compatible_rejects_mismatched_fs():
     with pytest.raises(ValueError, match="sampling frequency"):
         assert_concat_compatible([a, b])
 
-    # A sub-Hz drift that NumPy's default np.isclose (rtol=1e-5) would
-    # silently accept must still be rejected (it mis-times every spike).
+    # Sub-Hz drift that np.isclose's default rtol would accept.
     near = _rec_with_locations(50, [1, 2], locs, fs=30_000.3)
     with pytest.raises(ValueError, match="sampling frequency"):
         assert_concat_compatible([a, near])
 
-    # Supplied rates have no timestamp-inference uncertainty, even when the
-    # difference is tiny enough to permit for an offset explicit clock.
+    # Supplied rates have no inference uncertainty, so any difference fails.
     for fs in (30_000.000001, 29_999.999999):
         tiny = _rec_with_locations(50, [1, 2], locs, fs=fs)
         with pytest.raises(ValueError, match="sampling frequency"):
@@ -684,8 +669,7 @@ def _rec_with_dtype(n_samples, channel_ids, locations, dtype):
 @pytest.mark.unit
 def test_assert_concat_compatible_rejects_mismatched_dtype_gain():
     """Members with mismatched sample dtype, channel gains, or channel offsets
-    are rejected -- concatenation would silently combine differently-scaled
-    traces into one recording."""
+    are rejected."""
     from spyglass.spikesorting.v2._recording.concat import (
         assert_concat_compatible,
     )
@@ -777,12 +761,8 @@ def test_assert_concat_compatible_propagates_metadata_read_errors(
 
 @pytest.mark.unit
 def test_electrode_signature_distinguishes_reused_ids_across_groups():
-    """Two members whose sort groups carry the SAME electrode ids and regions
-    but on DIFFERENT electrode groups (ids reused across probes -- a documented
-    hazard, since the Electrode PK is (nwb, electrode_group_name, electrode_id))
-    must get DIFFERENT signatures. Dropping the group name would collapse two
-    physically distinct electrode spaces into one and let the concat read one
-    member in the other's frame."""
+    """Same electrode ids and regions on different electrode groups give
+    different signatures (the Electrode PK includes electrode_group_name)."""
     from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
@@ -806,9 +786,8 @@ def test_electrode_signature_distinguishes_reused_ids_across_groups():
 
 @pytest.mark.unit
 def test_electrode_signature_matches_for_identical_physical_electrodes():
-    """Identical electrode group / id / region across members -> equal
-    signature, regardless of fetched-row order (signature is order-invariant).
-    """
+    """Identical electrode group, id and region give equal signatures,
+    regardless of row order."""
     from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )
@@ -826,8 +805,7 @@ def test_electrode_signature_matches_for_identical_physical_electrodes():
 
 @pytest.mark.unit
 def test_electrode_signature_marks_missing_region_as_none():
-    """An electrode absent from the region map maps to None (best-effort
-    region), not a KeyError."""
+    """An electrode absent from the region map maps to None, not a KeyError."""
     from spyglass.spikesorting.v2._recording.concat import (
         electrode_signature_from_rows,
     )

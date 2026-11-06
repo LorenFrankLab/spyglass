@@ -112,9 +112,8 @@ def test_offset_members_concatenate_in_microvolts_with_masks_at_zero():
 
 
 def test_members_with_different_offsets_are_refused_before_conversion():
-    """Converting members to microvolts would put members with different
-    offsets on one scale; the members themselves must still share offsets,
-    gains and dtype, as the unconverted concatenation required."""
+    """Members must share offsets, gains and dtype, even though conversion to
+    microvolts would put different offsets on one scale."""
     from spyglass.spikesorting.v2._recording.concat import (
         mask_member_recordings,
     )
@@ -152,10 +151,8 @@ def test_members_with_nearly_equal_offsets_are_converted_together():
     "dtype, gain", [("float32", 1.0), ("float64", 0.25)], ids=["uv", "counts"]
 )
 def test_zero_offset_members_are_masked_in_their_stored_units(dtype, gain):
-    """Members whose offsets are 0 -- every filtered or referenced
-    recording -- are masked in their stored units: the masked members and
-    their concatenation keep the members' dtype, calibration and bytes, so
-    those concat artifacts (and their content hashes) are unchanged."""
+    """Zero-offset members (every filtered or referenced recording) are
+    masked in their stored units: dtype, calibration and bytes are kept."""
     import spikeinterface.preprocessing as sip
 
     from spyglass.spikesorting.v2._recording.concat import (

@@ -1,18 +1,8 @@
 """Tests for the friendly curation writers + summarize_curation.
 
-``create_initial_curation`` / ``save_manual_curation`` and the public merge
-functions (``preview_merges`` / ``commit_merges``) are thin sugar over the
-expert ``insert_curation``; these tests pin that they pre-fill the right
-arguments, inherit its validation (not re-implement it), and branch merges off
-the parent curation. ``summarize_curation`` is a pure read accessor whose
-fields are checked against the underlying parts/registration.
-
-All DB-tier; the single-unit checks reuse the shared package-scoped
-``populated_sorting`` fixture, while the merge checks use a module-scoped sort
-that yields several well-isolated units (``polymer_60s_sort``). Each test clears
-curations first so it is order-independent. ``CurationV2`` (a ``@schema`` table)
-is imported INSIDE each test, not at module top level, so pytest collection does
-not open a DB connection before the conftest's MySQL container is ready.
+The wrappers pre-fill ``insert_curation`` arguments, inherit its validation,
+and branch merges off the parent. ``CurationV2`` is imported inside each test
+so collection does not connect before the MySQL container is ready.
 """
 
 from __future__ import annotations
@@ -24,9 +14,8 @@ import pytest
 from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
 _TEAM = "curation_wrappers_team"
-# The smoke sort yields a single unit -- too few to form a merge. The 60s
-# polymer shank reliably yields several (a nightly-tier fixture, like the
-# waveform tests use); the merge tests skip when it is absent (per-PR CI).
+# The smoke sort yields one unit; merge tests need the nightly 60s fixture
+# and skip without it.
 _POLYMER_60S_PATH = (
     Path(__file__).resolve().parent
     / "fixtures"
@@ -38,13 +27,8 @@ _POLYMER_60S_PATH = (
 def polymer_60s_sort(dj_conn):
     """A MountainSort5 sort that yields several well-isolated single units.
 
-    The merge tests operate on distinct single units (e.g. merging an
-    oversplit cluster back together), so they need a sort with at least two
-    units. The smoke sort yields only one; the 60s polymer shank reliably
-    yields several. Module-scoped so the one 60s sort is shared across the
-    merge tests; each clears curations first, so they stay order-independent.
-    Ingested under a distinct session name to avoid colliding with other
-    modules that use the same 60s polymer fixture.
+    Module-scoped; ingested under a distinct session name so other modules
+    using the 60s fixture do not collide.
     """
     if not _POLYMER_60S_PATH.exists():
         pytest.skip(f"Fixture {_POLYMER_60S_PATH.name} not found.")
@@ -91,8 +75,7 @@ def test_create_initial_curation_equiv(populated_sorting):
 
     clear_curations_for(populated_sorting)
     wrapper_key = CurationV2.create_initial_curation(populated_sorting)
-    # insert_curation is idempotent on a default root, so the expert call
-    # returns the very row the wrapper created.
+    # Idempotent default root: same row.
     expert_key = CurationV2.insert_curation(
         sorting_key=populated_sorting, parent_curation_id=-1
     )
@@ -117,10 +100,8 @@ def test_preview_merges_records_not_applies(polymer_60s_sort):
         int((CurationV2 & key).fetch1("parent_curation_id")) == root.curation_id
     )
     assert bool((CurationV2 & key).fetch1("merges_applied")) is False
-    # Preview keeps every original unit (no contributors absorbed).
     units_after = {int(u) for u in (CurationV2.Unit & key).fetch("unit_id")}
     assert {a, b} <= units_after
-    # The proposed merge is recorded as a >1-contributor group.
     groups = CurationV2.get_unit_contributor_groups(key)
     assert any(len(c) > 1 for c in groups.values())
     assert CurationV2.summarize_curation(key)["is_merge_preview"] is True
@@ -143,7 +124,6 @@ def test_commit_merges_commits(polymer_60s_sort):
     )
     assert bool((CurationV2 & key).fetch1("merges_applied")) is True
     assert CurationV2.summarize_curation(key)["is_merge_preview"] is False
-    # Two contributors collapse into one merged unit: count drops by one.
     assert len(CurationV2.Unit & key) == n_sort_units - 1
 
 
@@ -174,10 +154,8 @@ def test_commit_merges_reuses_matching_child(polymer_60s_sort):
     }
     n_children = len(child_restriction)
 
-    # Same scientific merge, different list order: reuse the existing child
-    # instead of creating a new curation / merge_id on notebook re-run.
-    # Enum and string labels are semantically equivalent at insert time, so
-    # reuse_existing compares them through the same canonicalization.
+    # Same merge in a different order, with enum vs string labels, reuses
+    # the existing child.
     second = root.commit_merges(
         [[b, a]],
         labels={merged_unit_id: ["accept"]},
@@ -191,10 +169,7 @@ def test_commit_merges_reuses_matching_child(polymer_60s_sort):
 def test_merge_facade_forwards_to_insert_curation(planted_two_unit_sort):
     """``preview_merges`` / ``commit_merges`` forward apply_merge and parent.
 
-    Pins the forwarding contract -- the only thing that distinguishes a
-    preview from a commit, plus the parent threading -- on the planted
-    two-unit sort, so it runs without the 60s fixture; the merge BEHAVIOR on
-    real units is covered by the 60s-fixture tests above.
+    Runs on the planted two-unit sort, so it needs no 60s fixture.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import (
@@ -364,10 +339,8 @@ def test_save_manual_curation_commit_merge_keeps_edited_contributor_labels(
 ):
     """A committed merge labels the merged unit from the edited labels.
 
-    A FigPack import carries every unit's label keyed by the parent's unit ids,
-    so a reviewer who relabels a contributor and merges it supplies labels on
-    units the commit absorbs; the merged unit must not fall back to the
-    parent's labels.
+    A FigPack import supplies labels on absorbed contributors; the merged
+    unit must use them, not the parent's.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -453,10 +426,7 @@ def test_summarize_curation_fields(populated_sorting):
     expected_merge = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
     assert summary["merge_id"] == expected_merge
 
-    # summarize_curation ignores extra, non-PK keys (normalizing to the
-    # (sorting_id, curation_id) PK), so a caller can splat a key carrying extra
-    # metadata. (A run_v2_pipeline summary names its curation root_curation_id,
-    # so a caller builds the PK from that -- see summarize_curation's docstring.)
+    # Extra non-PK keys are ignored.
     key_with_extras = {
         **key,
         "pipeline_preset": "irrelevant",
@@ -477,16 +447,11 @@ def test_summarize_unregistered_merge_id_none(populated_sorting):
     clear_curations_for(populated_sorting)
     key = CurationV2.create_initial_curation(populated_sorting)
     merge_id = (SpikeSortingOutput.CurationV2 & key).fetch1("merge_id")
-    # Drop the merge registration but leave the CurationV2 row in place.
     (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
 
     assert CurationV2.summarize_curation(key)["merge_id"] is None
 
 
-# Either PK field alone is a partial key (neither is globally unique on its
-# own), so the guard must reject both a ``curation_id``-only and a
-# ``sorting_id``-only key -- parametrized so a regression on either branch is
-# caught.
 _PARTIAL_CURATION_KEYS = [{"curation_id": 0}, {"sorting_id": "s"}]
 
 
@@ -495,8 +460,7 @@ _PARTIAL_CURATION_KEYS = [{"curation_id": 0}, {"sorting_id": "s"}]
 def test_summarize_curation_requires_full_pk(dj_conn, partial_key):
     """summarize_curation rejects a key lacking sorting_id or curation_id.
 
-    The guard prevents a partial key (neither field is globally unique alone)
-    from silently restricting to the wrong rows; it raises before any DB access.
+    Raises before any DB access.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -511,10 +475,8 @@ def test_summarize_curation_pk_guard_runs_before_schema_access(
 ):
     """The full-PK guard raises before importing ``SpikeSortingOutput``.
 
-    The merge import activates its ``dj.schema``, so the guard must run first --
-    for EITHER missing PK field. Replace the merge module with a sentinel that
-    explodes on any attribute access: a guard that ran AFTER the import would
-    surface that ``AssertionError`` instead of the ``ValueError``.
+    The merge import activates its ``dj.schema``. A sentinel module that
+    fails on any attribute access catches a guard that runs too late.
     """
     import sys
 
@@ -556,8 +518,7 @@ def test_commit_merges_forwards_allow_custom_labels(planted_two_unit_sort):
             labels={unit_ids[0]: ["my_custom"]},
             allow_custom_labels=True,
         )
-        # Merging [0, 1] inherits unit 0's custom label onto the merged unit;
-        # without forwarding the flag the child insert re-rejects it.
+        # The merged unit inherits unit 0's custom label.
         with pytest.raises(ValueError, match="not in CurationLabel"):
             root.commit_merges([[unit_ids[0], unit_ids[1]]])
         merged = root.commit_merges(

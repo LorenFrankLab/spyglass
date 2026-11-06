@@ -1,12 +1,8 @@
 """get_sorting warns when a curation has unapplied (preview) merges.
 
-A curation created with apply_merge=False records PROPOSED merges in MergeGroup
-but does not apply them. Consumers (SortedSpikesGroup / decoding) read units
-through CurationV2.get_sorting, which returns the UNMERGED units for such a
-curation -- silently using oversplit units unless warned. get_sorting warns
-(and its docstring documents the preview semantics). get_merged_sorting still applies
-the proposal. A plain root curation (no real merge, only 1-element self-entries)
-must NOT warn.
+An ``apply_merge=False`` curation's get_sorting returns the unmerged units;
+get_merged_sorting applies the proposal. A root curation with only
+single-unit self-entries does not warn.
 """
 
 from __future__ import annotations
@@ -14,9 +10,6 @@ from __future__ import annotations
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import clear_curations_for
-
-# ``planted_two_unit_sort`` lives in conftest.py (shared across the merge-aware
-# test modules; see that fixture's docstring).
 
 
 @pytest.mark.slow
@@ -115,10 +108,9 @@ def test_assert_decoding_merge_ids_raises_on_preview_merge(
 def test_get_spike_times_warns_on_preview_merge(
     planted_two_unit_sort, monkeypatch
 ):
-    """get_spike_times WARNS when a consumed merge_id is
-    a preview (apply_merge=False) curation with unapplied proposed merges; an
-    applied-merge curation does NOT warn. Warning (not raising) keeps v0/v1
-    consumers working; the strict raise stays on the decoding boundary.
+    """get_spike_times warns on a preview curation with unapplied merges and
+    not on an applied one. It warns rather than raises so v0/v1 consumers
+    keep working.
     """
     import spyglass.spikesorting.spikesorting_merge as merge_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -161,9 +153,8 @@ def test_get_spike_times_warns_on_preview_merge(
         assert not any(
             "apply_merge=False" in s for s in seen
         ), f"applied-merge curation must not warn; got {seen}"
-        # The warning must follow the merges fetch_nwb actually consumes,
-        # including a restriction stored on ``self`` with an empty key (the
-        # form the classmethod-on-key warning ignored).
+        # Warn for the merges fetch_nwb consumes, including a restriction
+        # stored on ``self`` with an empty key.
         seen.clear()
         (SpikeSortingOutput & {"merge_id": preview_id}).get_spike_times({})
         assert any(

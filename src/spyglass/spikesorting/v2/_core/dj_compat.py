@@ -8,9 +8,8 @@ STAGED_POPULATE_DATAJOINT_VERSION = "0.14.9"
 def require_staged_populate_support() -> None:
     """Refuse an unverified lifecycle before declaring staged-output tables.
 
-    StagedOutputCleanupMixin relies on the tri-part transaction and return
-    contracts of AutoPopulate._populate1. Expanding this version requires
-    exercising its real fetch/compute/insert, commit and rollback tests.
+    StagedOutputCleanupMixin relies on AutoPopulate._populate1 internals, so
+    widen this pin only after rerunning its commit and rollback tests.
     """
     installed = version("datajoint")
     if installed != STAGED_POPULATE_DATAJOINT_VERSION:

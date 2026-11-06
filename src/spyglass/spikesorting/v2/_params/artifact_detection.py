@@ -12,52 +12,24 @@ ARTIFACT_DETECTION_SCHEMA_VERSION = 2
 class ArtifactDetectionParamsSchema(BaseModel):
     """Validated schema for the artifact-detection parameter blob.
 
-    The recording stage materializes the preprocessed ``ElectricalSeries``
-    once; this stage scans that recording for stretches where the signal
-    exceeds an amplitude or z-score threshold on a sufficient fraction of
-    channels, then writes the artifact-removed valid times into
-    ``common.IntervalList`` for the sorter to read.
+    Flags stretches where the preprocessed signal exceeds an amplitude or
+    z-score threshold on enough channels; the artifact-removed valid times go
+    to ``common.IntervalList`` for the sorter.
 
-    The threshold fields are ``zscore_threshold``,
-    ``amplitude_threshold_uv``, and ``proportion_above_threshold``.
-    ``detect`` makes the ``"none"`` preset a typed ``detect=False`` rather
-    than an absent-fields blob, and ``join_window_ms`` merges artifact
-    intervals closer than this into one.
-
-    Detector note: ``zscore_threshold`` is a per-frame *cross-channel*
-    z-score (across channels within a frame), so it flags single-channel
-    outliers but is BLIND to pure common-mode events -- when every
-    channel jumps together the shift cancels in the across-channel mean
-    and the z-score stays ~0. Use ``amplitude_threshold_uv`` to catch
-    common-mode (e.g. EMG) artifacts; the two thresholds OR together
-    when both are set (a frame is flagged if it exceeds the amplitude
-    threshold OR the z-score threshold). This is an intentional mode,
-    not a configuration error -- setting both is supported.
-
-    ``detect=False`` skips detection entirely and ignores both
-    thresholds, so leaving stale threshold values on a ``detect=False``
-    row is harmless. When ``detect=True`` at least one threshold is
-    required (enforced by ``_check_thresholds``).
-
-    Concurrency parameters (``n_jobs``, ``chunk_duration``, ``progress_bar``)
-    are not part of this schema. They live in the per-row ``job_kwargs``
-    blob and are resolved at populate time by ``_resolved_job_kwargs``.
+    - ``zscore_threshold`` is computed across channels within a frame, so it
+      misses common-mode events. Use ``amplitude_threshold_uv`` for those.
+    - When both thresholds are set they OR together.
+    - ``detect=False`` skips detection and ignores both thresholds;
+      ``detect=True`` requires at least one.
+    - ``amplitude_threshold_uv`` is in microvolts, not raw counts.
+    - ``min_length_s`` drops valid-time slivers shorter than this.
+    - Concurrency settings live in the row's ``job_kwargs`` blob.
     """
 
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[ARTIFACT_DETECTION_SCHEMA_VERSION] = (
         ARTIFACT_DETECTION_SCHEMA_VERSION
     )
-    # ``min_length_s``: the artifact-removed valid_times are filtered to
-    # drop slivers shorter than this many seconds before the sorter sees
-    # them. Default ``1.0``.
-    #
-    # ``amplitude_threshold_uv=500.0`` is a true-microvolt threshold and
-    # ``proportion_above_threshold`` is ``1.0`` (the principled "all
-    # channels must exceed" default). The threshold is interpreted in uV,
-    # so a workflow migrating from a raw-count threshold should translate
-    # ``raw_count_value * probe_gain_uV_per_count`` to the equivalent uV
-    # value (e.g. for an Intan ~0.195 uV/count probe).
     detect: bool = True
     amplitude_threshold_uv: float | None = Field(default=500.0, ge=0.0)
     zscore_threshold: float | None = Field(

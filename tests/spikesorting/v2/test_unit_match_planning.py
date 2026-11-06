@@ -1,10 +1,8 @@
 """DB-free tests for cross-session unit-match curation-choice planning.
 
-``build_unit_match_plan`` turns the per-member curation lists (from
-``describe_unit_match_choices``) into a pinned ``curation_choices`` dict via a
-named curation strategy, producing a reviewable ``UnitMatchPlan`` (with
-warnings / errors) BEFORE the expensive match. No database -- exercised
-directly.
+``build_unit_match_plan`` resolves per-member curations to pinned
+``curation_choices`` through a named strategy, giving a reviewable
+``UnitMatchPlan`` before the expensive match.
 """
 
 from __future__ import annotations
@@ -116,9 +114,7 @@ def test_member_choices_to_dataframe_one_row_per_choice():
     assert len(member1) == 1
     assert member1["sorting_id"].isna().all()
 
-    # Integer id columns stay nullable-integer (Int64), NOT float64: the None
-    # placeholder row would otherwise upcast valid ids to e.g. 0.0, reintroducing
-    # the copy-paste footgun this table exists to prevent.
+    # Int64, not float64, so the None placeholder row cannot turn ids into 0.0.
     for col in (
         "member_index",
         "sort_group_id",
@@ -269,8 +265,7 @@ def test_manual_pin_ids_are_normalized_losslessly():
                     0: {"sorting_id": _S0, "curation_id": bad}
                 },
             )
-    # Mapping KEYS obey the same rule: True / 1.0 hash equal to 1 and would
-    # otherwise silently pin member 1.
+    # Mapping keys too: True and 1.0 hash equal to 1.
     two = [
         _member(0, "day1.nwb", [_cur(_S0, 0, -1)]),
         _member(1, "day2.nwb", [_cur(_S1, 0, -1)]),
@@ -288,9 +283,7 @@ def test_manual_pin_ids_are_normalized_losslessly():
 
 
 def test_manual_rejects_extra_member_indices():
-    # A manual_curation_choices entry for a member index that is not in the group
-    # (stale / mistyped) is a blocking error -- exact coverage, not silently
-    # dropped.
+    # A pin for a member index not in the group is a blocking error.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
     plan = _plan(
         members,
@@ -305,8 +298,7 @@ def test_manual_rejects_extra_member_indices():
 
 
 def test_manual_curation_choices_rejected_with_a_non_manual_strategy():
-    # Explicit pins with an automatic curation strategy would be silently ignored
-    # -> the planner rejects the combination up front.
+    # Explicit pins would be ignored by an automatic strategy, so reject them.
     members = [_member(0, "day1.nwb", [_cur(_S0, 0, -1)])]
     with pytest.raises(ValueError, match="curation_strategy='manual'"):
         _plan(
@@ -336,9 +328,8 @@ def test_unknown_curation_strategy_raises():
 
 
 def test_final_curated_ambiguous_across_two_sortings_errors():
-    # A re-sorted member: TWO separate sortings, each with its own curated leaf.
-    # "single leaf" spans all the member's curations, so this is ambiguous
-    # across sortings -> error (not a silent pick of one sorting).
+    # A re-sorted member has a curated leaf in each of two sortings, which is
+    # ambiguous.
     members = [
         _member(
             0,
@@ -357,8 +348,7 @@ def test_final_curated_ambiguous_across_two_sortings_errors():
 
 
 def test_run_v2_unit_match_rejects_plan_plus_explicit_args():
-    # Passing a plan AND an explicit arg would silently override one -> reject.
-    # DB-free: the guard fires before any table access.
+    # A plan plus an explicit arg is rejected before any table access.
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 
@@ -378,8 +368,7 @@ def test_run_v2_unit_match_rejects_plan_plus_explicit_args():
 
 
 def test_run_v2_unit_match_rejects_a_not_ok_plan():
-    # The plan overload short-circuits a not-ok plan with the collected errors
-    # BEFORE any database access -- so this is DB-free.
+    # A not-ok plan raises its collected errors before any table access.
     from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.pipeline import run_v2_unit_match
 

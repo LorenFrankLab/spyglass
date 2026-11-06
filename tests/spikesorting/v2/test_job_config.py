@@ -1,11 +1,8 @@
 """Default worker count for v2's parallel stages.
 
-v2 keeps SpikeInterface's default of one worker process unless a layer sets
-``n_jobs``: on a real 20 min, 32-channel epoch four forked workers saved only
-~6 s (artifact detection and the display analyzer) while sorting and curation
-evaluation did not get faster; the evaluation's speedup comes from the
-neighbor-search threads, which have their own default. Forked workers must
-also leave SciPy's OpenBLAS usable. Hermetic -- no DB.
+One worker process unless a layer sets ``n_jobs`` (four workers saved ~6 s
+on a 20 min, 32-channel epoch). Neighbor-search threads have their own
+default. Forked workers must leave SciPy's OpenBLAS usable. No DB.
 """
 
 from __future__ import annotations
@@ -75,9 +72,8 @@ def test_a_changed_spikeinterface_global_n_jobs_is_honored(
 def test_default_search_threads_are_a_quarter_of_usable_cores_at_most_16(
     monkeypatch, no_v2_job_config, cpus, expected
 ):
-    """The exact nn-metric neighbor search runs on threads, which add no
-    memory: on 11 real searches, 4 / 16 threads took 2.7 / 0.74 s. Its
-    default therefore does not follow the one-worker n_jobs default."""
+    """The nn-metric neighbor search thread default is independent of
+    ``n_jobs``; threads add no memory (4 / 16 threads: 2.7 / 0.74 s)."""
     from spyglass.spikesorting.v2._core.job_config import (
         resolve_search_threads,
     )
@@ -125,11 +121,11 @@ if __name__ == "__main__":
 
 
 def test_forked_workers_leave_scipy_float32_lu_usable(tmp_path):
-    """SciPy's bundled OpenBLAS (0.3.30) deadlocks its next parallel
-    single-precision LU after the process forks: OpenBLAS's fork handler
-    shuts its thread pool down and the rebuild blocks on ``server_lock``.
-    SpikeInterface's process pools fork, and MountainSort5's float32 PCA
-    then hung forever. Importing v2 must leave that LU usable."""
+    """Importing v2 keeps float32 LU usable after a fork.
+
+    SciPy's bundled OpenBLAS 0.3.30 otherwise deadlocks on ``server_lock``
+    (hit by MountainSort5's PCA in SpikeInterface workers).
+    """
     import subprocess
     import sys
 

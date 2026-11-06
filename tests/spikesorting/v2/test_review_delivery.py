@@ -1,10 +1,9 @@
 """Local HTTP delivery of a saved review bundle (DB-free).
 
-Serves a stand-in bundle directory and exercises the contract the browser
-relies on: the bundle is readable at ``http://localhost:<port>/bundles/<id>/``, only its
-``annotations.json`` accepts a PUT (so a browser save lands in the exact
-durable file the importer reads), every bundle shares one server port,
-and a missing bundle fails with a recovery hint.
+- the bundle is readable at ``http://localhost:<port>/bundles/<id>/``
+- only ``annotations.json`` accepts a PUT, the file the importer reads
+- every bundle shares one server port
+- a missing bundle fails with a recovery hint
 """
 
 from __future__ import annotations

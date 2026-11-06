@@ -1,9 +1,7 @@
 """Route the v2 CI suite from one list of expensive integration modules.
 
-The ``unit`` workload shard automatically gets every other test, including
-light database tests. This is independent of the database-free ``unit`` test
-tier (``pytest tests/spikesorting/v2 --v2-tier unit``). New integration modules
-are listed once here, rather than repeated as inclusions and exclusions in CI.
+The ``unit`` shard gets every other test, including light database tests;
+it is unrelated to the database-free ``--v2-tier unit``.
 """
 
 from __future__ import annotations

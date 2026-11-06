@@ -1,13 +1,8 @@
 """DB-free checks of the metric eligibility classifier against real SI output.
 
-Each fixture is a tiny in-memory SpikeInterface analyzer whose units are
-subsampled from a ground-truth recording to hit one NaN condition (below the
-``nn_advanced`` spike or rate floor, shorter than a presence bin, silent unit,
-below the amplitude-cutoff histogram floor, one-spike unit, and a gapped time
-vector). SpikeInterface's real ``compute_quality_metrics`` runs with the
-shipped metric kwargs and Spyglass's patched ``nn_noise_overlap``; the set of
-units SI leaves non-finite must equal the classifier's expected set exactly.
-No database is used.
+Each tiny analyzer hits one NaN condition; the units SI's real
+``compute_quality_metrics`` leaves non-finite must equal the classifier's
+expected set.
 """
 
 from __future__ import annotations

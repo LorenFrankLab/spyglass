@@ -1,10 +1,7 @@
 """A 'specific' reference that is also a sort-group channel is rejected.
 
-For reference_mode='specific' the write path subtracts the reference from every
-channel and then REMOVES it. If the reference electrode is itself a member of
-the sort group, that silently drops a channel the user meant to sort (a 4-wire
-tetrode silently sorts on 3). v1 silently dropped it via setdiff1d; v2 should
-fail loud. Hermetic -- pure guard, no DB.
+The write path removes the reference after subtracting it, which would drop
+a channel the user meant to sort. No DB.
 """
 
 from __future__ import annotations
@@ -36,8 +33,7 @@ def test_specific_reference_outside_group_ok():
 
 @pytest.mark.parametrize("mode", ["none", "global_median"])
 def test_non_specific_modes_ignore_membership(mode):
-    # Only 'specific' subtracts+removes a named channel; other modes never
-    # carry a reference_electrode_id, so membership is irrelevant.
+    # Only 'specific' removes a named channel.
     assert_reference_not_member(
         reference_mode=mode,
         reference_electrode_id=None,

@@ -1,27 +1,12 @@
 """Single source of truth for the shipped spike-sorting v2 recipes.
 
 Owns the dated Frank-lab recipe row names, their parameter blobs, and the
-pipeline-preset bundles + UX metadata. The per-stage parameter Lookup
-tables derive their ``_DEFAULT_CONTENTS`` from the builders here
-(:func:`preprocessing_default_contents` / :func:`artifact_default_contents`
-/ :func:`sorter_default_contents`), and ``_orchestration.presets`` builds
-``_PIPELINE_PRESETS`` from :func:`pipeline_preset_specs` -- so a recipe is
-defined in exactly one place. The metric-curation defaults
-(:func:`quality_metric_default_rows` / :func:`auto_curation_default_payloads`)
-are returned by ``QualityMetricParameters._default_rows`` and
-``AutoCurationRules._default_payloads``.
+pipeline presets. Lookup tables derive ``_DEFAULT_CONTENTS`` from the builders
+here. Opens no DB connection at import, so schema modules import it without a
+cycle.
 
-No DB connection or ``dj.schema`` activation at import: it builds the
-blobs from the ``_params`` Pydantic schemas only, so it imports without a
-database connection and the schema modules import it without a cycle.
-("No DB" means no connection/activation -- NOT "no DataJoint installed":
-like every spyglass module it still transitively pulls DataJoint /
-SpikeInterface via the framework's package ``__init__``.)
-
-``tests/spikesorting/v2/_recipe_constants.py`` keeps an INDEPENDENT
-hand-written copy of these recipe values that the parity tests compare
-against -- do not derive those literals from this module, or the parity
-check becomes a tautology.
+``tests/spikesorting/v2/_recipe_constants.py`` keeps an independent copy of
+these values; do not derive it from this module.
 """
 
 from __future__ import annotations
@@ -47,9 +32,8 @@ from spyglass.spikesorting.v2._params.sorter import (
 )
 from spyglass.spikesorting.v2._core.lookup_validation import _validate_params
 
-# ---- Dated recipe row names (single source for the cross-references) -------
-# Preprocessing: region high-pass (filtering happens at the preproc stage; the
-# sorter runs ``filter=False``, so the region band lives on the preproc row).
+# ---- Dated recipe row names ------------------------------------------------
+# Sorters run ``filter=False``, so the region band lives on the preproc row.
 HIPPOCAMPUS_PREPROC = "franklab_hippocampus_2026_06"
 CORTEX_PREPROC = "franklab_cortex_2026_06"
 NEUROPIXELS_PREPROC = "default_neuropixels"
@@ -61,25 +45,9 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
-# Containerized MS4 (probe / polymer, 30 kHz): a first-class, reproducible
-# execution option alongside the native NumPy-2 runtime. This row runs the
-# SAME scientific params as the local 30 kHz MS4 row inside a pinned Singularity
-# container. The local MS4 row and this containerized row are
-# DISTINCT named rows (different sorter_params_name); the container backend is
-# tracked provenance, not a runtime override.
-#
-# Singularity/Apptainer is the Frank-lab HPC target, so it is the one shipped
-# container path; a Docker row (and other rates) is a user-insertable
-# SorterParameters row away, using the same tracked execution_params mechanism.
-#
-# Two DISTINCT version spaces, pinned independently for reproducibility:
-#   * the image TAG versions SpikeInterface's published ``mountainsort4-base``
-#     image by its baked MountainSort4 algorithm runtime (Docker Hub tags are
-#     1.0.x, NOT SpikeInterface release numbers); and
-#   * ``MS4_CONTAINER_SI_VERSION`` pins the SpikeInterface that
-#     ``installation_mode="pypi"`` pip-installs INTO that image at run time.
-# Do not conflate them -- tagging the image with the SI release (e.g. 0.104.3)
-# references a non-existent tag and the pull fails.
+# Containerized MS4: same science as the local 30 kHz row in a pinned
+# Singularity image. The image tag is the MountainSort4 runtime version, not a
+# SpikeInterface release; MS4_CONTAINER_SI_VERSION is the SI installed into it.
 MS4_CONTAINER_IMAGE_TAG = "1.0.5"
 MS4_CONTAINER_IMAGE = (
     f"spikeinterface/mountainsort4-base:{MS4_CONTAINER_IMAGE_TAG}"
@@ -88,16 +56,13 @@ MS4_CONTAINER_SI_VERSION = "0.104.3"
 MS4_SINGULARITY_30KHZ = (
     "franklab_probe_hippocampus_30khz_ms4_singularity_2026_06"
 )
-# Analyzer waveform recipes (region-specific window; display=unwhitened,
-# metric=whitened). Hippocampal spikes are denser/tighter, so they take a
-# narrower 0.5/0.5 ms window; cortical waveforms are broader, so they take the
-# wider 1.0/2.0 ms window. Both subsample 20000 spikes.
+# Analyzer waveforms: display unwhitened, metric whitened. Hippocampus uses
+# 0.5/0.5 ms (narrower spikes), cortex 1.0/2.0 ms.
 HIPPOCAMPUS_DISPLAY_WAVEFORMS = "franklab_hippocampus_actual_waveforms"
 HIPPOCAMPUS_METRIC_WAVEFORMS = "franklab_hippocampus_metric_waveforms"
 CORTEX_DISPLAY_WAVEFORMS = "franklab_cortex_actual_waveforms"
 CORTEX_METRIC_WAVEFORMS = "franklab_cortex_metric_waveforms"
-# Missing-metric behavior is scientific recipe content. Keep historical rules
-# untouched; current presets and reviews use these dated replacements.
+# Missing-metric behavior is recipe content, so changes ship as new dated rows.
 FRANKLAB_CURATION_RULES = "franklab_default_auto_curation_2026_09"
 V1_NOISE_CURATION_RULES = "v1_default_nn_noise_2026_09"
 
@@ -111,10 +76,7 @@ def _params_schema_version(params: dict) -> int:
 
 
 def _lookup_row(name: str, params: dict) -> tuple:
-    """Build a parameter-lookup row with the version copied from ``params``.
-
-    Shipped rows carry no ``job_kwargs`` (NULL).
-    """
+    """Build a parameter-lookup row (no ``job_kwargs``)."""
     return (name, params, _params_schema_version(params), None)
 
 
@@ -126,13 +88,8 @@ def _sorter_row(
 ) -> tuple:
     """Build a sorter-lookup row with versions copied from the blobs.
 
-    Each row is ``(sorter, sorter_params_name, params_blob,
-    params_schema_version, job_kwargs, execution_params_blob,
-    execution_params_schema_version)`` -- matching the ``SorterParameters``
-    heading order. ``params`` is the raw payload; the stored blob is its
-    validation against ``sorter``'s schema. Shipped rows carry no
-    ``job_kwargs`` (NULL). A row that omits ``execution_params`` gets the
-    schema-default local-execution blob.
+    Validates ``params`` against ``sorter``'s schema. Without
+    ``execution_params`` the row gets the default local-execution blob.
     """
     params = _validate_params(_get_sorter_schema(sorter), params)
     exec_blob = (
@@ -152,11 +109,7 @@ def _sorter_row(
 
 
 def _waveform_row(name: str, params: dict) -> tuple:
-    """Build an analyzer-waveform lookup row (no ``job_kwargs`` column).
-
-    Each row is ``(waveform_params_name, params_blob, params_schema_version)``;
-    the version is copied from the validated blob.
-    """
+    """Build an analyzer-waveform lookup row (no ``job_kwargs`` column)."""
     return (name, params, _params_schema_version(params))
 
 
@@ -169,22 +122,12 @@ def preprocessing_default_contents() -> tuple:
     return (
         _lookup_row(
             "default",
-            # v2's schema-default preproc (300 Hz / 6000 Hz bandpass, median
-            # reference, 1.0 s min-segment). Not a production recipe -- the
-            # franklab production presets use the dated region rows below; this
-            # is the generic default the clusterless preset and ad-hoc callers
-            # use. Whitening is not a recording-stage parameter (the sorter /
-            # analyzer rows own it), so the default schema needs no override.
+            # Generic schema default, used by the clusterless preset.
             PreprocessingParamsSchema().model_dump(),
         ),
         _lookup_row(
-            # Production hippocampus recipe (June 2026): 600 Hz high-pass
-            # (hippocampal spikes are denser/narrower than cortical ones),
-            # 6000 Hz low-pass, 1.5 ms min-segment (production keeps the
-            # short interval slivers the 1.0 s shipped default drops). Filtering
-            # happens at this preproc stage; the MS4 sorter runs ``filter=False``
-            # (see _params/sorter.py), so the region high-pass lives on the
-            # preproc row, never the sorter row.
+            # 600 Hz high-pass for narrower hippocampal spikes; 1.5 ms
+            # min-segment keeps short interval slivers.
             HIPPOCAMPUS_PREPROC,
             PreprocessingParamsSchema.model_validate(
                 {
@@ -194,9 +137,7 @@ def preprocessing_default_contents() -> tuple:
             ).model_dump(),
         ),
         _lookup_row(
-            # Production cortex recipe (June 2026): identical to the
-            # hippocampus recipe with a 300 Hz high-pass (cortical waveforms
-            # are wider).
+            # Hippocampus recipe with a 300 Hz high-pass (wider waveforms).
             CORTEX_PREPROC,
             PreprocessingParamsSchema.model_validate(
                 {
@@ -207,11 +148,7 @@ def preprocessing_default_contents() -> tuple:
         ),
         _lookup_row(
             NEUROPIXELS_PREPROC,
-            # Blessed Neuropixels recipe: bandpass + ADC phase-shift. The
-            # phase-shift is a safe no-op until the recording carries an
-            # ``inter_sample_shift`` property (the runtime logs a skip and
-            # never fails), so selecting this preset never breaks a
-            # non-multiplexed recording.
+            # Phase shift is skipped without ``inter_sample_shift``.
             PreprocessingParamsSchema.model_validate(
                 {
                     "bandpass_filter": {"freq_min": 300.0, "freq_max": 6000.0},
@@ -221,9 +158,6 @@ def preprocessing_default_contents() -> tuple:
         ),
         _lookup_row(
             "no_filter",
-            # ``bandpass_filter=None`` is a real disable: the runtime
-            # skips the filter step entirely, so "no_filter" applies no
-            # bandpass at all.
             PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": None}
             ).model_dump(),
@@ -249,9 +183,6 @@ def artifact_default_contents() -> tuple:
             ArtifactDetectionParamsSchema().model_dump(),
         ),
         _lookup_row(
-            # Production artifact recipe (June 2026): 100 uV amplitude
-            # threshold, 0.7 proportion-above-threshold, 1.0 ms removal window
-            # -- far more aggressive than the 500 uV shipped "default".
             ARTIFACT_100UV,
             ArtifactDetectionParamsSchema(
                 amplitude_threshold_uv=100.0,
@@ -259,8 +190,6 @@ def artifact_default_contents() -> tuple:
             ).model_dump(),
         ),
         _lookup_row(
-            # More aggressive 50 uV production variant (same proportion-above
-            # and removal window).
             ARTIFACT_50UV,
             ArtifactDetectionParamsSchema(
                 amplitude_threshold_uv=50.0,
@@ -270,23 +199,15 @@ def artifact_default_contents() -> tuple:
     )
 
 
-#: Cap (s) on the unobserved time kept between continuity spans in the
-#: shipped motion-estimation rows. Development measurement (simulated 32-contact
-#: polymer shank, two 30 s spans around a 600 s gap holding a 30 um rigid jump,
-#: seeds 0-2): with ``dredge`` / ``dredge_fast`` (1 s bins) the common-frame
-#: error stops changing from a 5 s cap on (it is higher at 0 s and 1 s), and
-#: 30 s is within 0.03 um of the uncapped gap for ``rigid_fast`` (5 s bins).
-#: Each capped gap adds at most ``max_gap_s / bin_s`` temporal bins.
+#: Cap (s) on unobserved time kept between continuity spans in motion
+#: estimation. Each capped gap adds at most ``max_gap_s / bin_s`` bins.
 MOTION_MAX_GAP_S = 30.0
 
 
 def motion_estimation_default_contents() -> tuple:
     """Return ``MotionEstimationParameters._DEFAULT_CONTENTS``.
 
-    Each row is ``(motion_estimation_params_name, params_blob,
-    params_schema_version, job_kwargs)``. Only the two DREDge presets ship as
-    rows; ``rigid_fast`` stays an allowed preset that a user inserts
-    explicitly. None of these recipes is validated for a probe.
+    Only the DREDge presets ship. None is validated for a probe.
     """
     return (
         _lookup_row(
@@ -304,23 +225,14 @@ def motion_estimation_default_contents() -> tuple:
     )
 
 
-#: Shipped motion-interpolation rows. ``kriging_force_extrapolate_v1`` is the
-#: interpolation SpikeInterface 0.104.3's ``dredge`` and ``dredge_fast`` presets
-#: apply (``preprocessing/motion.py:41-43, 78-80``: ``force_extrapolate``,
-#: kriging, ``sigma_um=20``, ``p=2``); the presets leave ``num_closest`` to
-#: ``interpolate_motion``'s default of 3
-#: (``sortingcomponents/motion/motion_interpolation.py:347``).
-#: ``kriging_remove_channels_v1`` is the same kernel with ``remove_channels``.
+#: ``kriging_force_extrapolate_v1`` matches SpikeInterface 0.104.3's DREDge
+#: preset interpolation; ``kriging_remove_channels_v1`` swaps the border mode.
 KRIGING_FORCE_EXTRAPOLATE = "kriging_force_extrapolate_v1"
 KRIGING_REMOVE_CHANNELS = "kriging_remove_channels_v1"
 
 
 def motion_interpolation_default_contents() -> tuple:
-    """Return ``MotionInterpolationParameters._DEFAULT_CONTENTS``.
-
-    Each row is ``(motion_interpolation_params_name, params_blob,
-    params_schema_version)``.
-    """
+    """Return ``MotionInterpolationParameters._DEFAULT_CONTENTS``."""
 
     def _row(name: str, border_mode: str) -> tuple:
         params = MotionInterpolationParamsSchema(
@@ -341,10 +253,8 @@ def motion_interpolation_default_contents() -> tuple:
 def motion_correction_default_contents() -> tuple:
     """Return ``MotionCorrectionParameters._DEFAULT_CONTENTS``.
 
-    Each row is ``(motion_correction_params_name,
-    motion_estimation_params_name, motion_interpolation_params_name)``: a
-    DREDge estimation recipe with the interpolation its SpikeInterface preset
-    applies. Neither is validated for a probe.
+    Each pairs a DREDge estimation row with its preset's interpolation.
+    Neither is validated for a probe.
     """
     return (
         ("dredge_v1", "dredge_v1", KRIGING_FORCE_EXTRAPOLATE),
@@ -366,13 +276,7 @@ def _waveform_params(
 
 
 def waveform_params_default_contents() -> tuple:
-    """Return ``AnalyzerWaveformParameters._DEFAULT_CONTENTS``.
-
-    Region-specific display (unwhitened) and metric (whitened) recipes:
-    hippocampus 0.5/0.5 ms (denser/tighter spikes), cortex 1.0/2.0 ms (broader
-    waveforms); both subsample 20000 spikes. Each row is
-    ``(waveform_params_name, params_blob, params_schema_version)``.
-    """
+    """Return ``AnalyzerWaveformParameters._DEFAULT_CONTENTS``."""
     return (
         _waveform_row(
             HIPPOCAMPUS_DISPLAY_WAVEFORMS,
@@ -401,13 +305,8 @@ def waveform_params_default_contents() -> tuple:
     )
 
 
-# Rate-keyed MS4 scientific params, shared by the local rate-keyed rows AND the
-# containerized rows so a containerized row is byte-identical science to its
-# local sibling -- the container backend is the only difference. The sorter runs
-# ``filter=False`` (the preproc stage already bandpassed), so the only
-# rate-dependent knobs are ``clip_size`` / ``detect_interval`` (they hold the
-# same ~1.33 ms physical window across rates); ``adjacency_radius`` is set
-# explicitly to 100 um (also the schema default).
+# Shared by local and containerized MS4 rows. ``clip_size`` and
+# ``detect_interval`` hold a ~1.33 ms window across rates.
 _MS4_RATE_PARAMS: dict[int, dict] = {
     30000: {"adjacency_radius": 100.0},
     20000: {"adjacency_radius": 100.0, "clip_size": 27, "detect_interval": 7},
@@ -417,10 +316,7 @@ _MS4_RATE_PARAMS: dict[int, dict] = {
 def _ms4_singularity_execution_params() -> dict:
     """Validated Singularity execution provenance for the containerized MS4 row.
 
-    Singularity backend with the pinned image, and container-side SpikeInterface
-    pinned to an explicit version (``installation_mode="pypi"``) so the runtime
-    install is reproducible by row content -- not floating via
-    ``installation_mode="auto"``.
+    Pins the container's SpikeInterface version for reproducibility.
     """
     return SorterExecutionParamsSchema(
         backend="singularity",
@@ -431,14 +327,7 @@ def _ms4_singularity_execution_params() -> dict:
 
 
 def _ms4_singularity_sorter_row() -> tuple:
-    """Build the containerized (Singularity, 30 kHz) MS4 ``SorterParameters`` row.
-
-    Scientific params are IDENTICAL to the local 30 kHz MS4 row (shared
-    ``_MS4_RATE_PARAMS[30000]`` source); the only difference is the tracked
-    Singularity execution backend. The distinct ``sorter_params_name`` (and the
-    duplicate-content guard folding ``execution_params`` in) lets it coexist with
-    its local sibling instead of forking provenance.
-    """
+    """Build the containerized (Singularity, 30 kHz) MS4 ``SorterParameters`` row."""
     return _sorter_row(
         "mountainsort4",
         MS4_SINGULARITY_30KHZ,
@@ -452,52 +341,28 @@ def sorter_default_contents() -> tuple:
 
     Each row is ``(sorter, sorter_params_name, params_blob,
     params_schema_version, job_kwargs, execution_params_blob,
-    execution_params_schema_version)``. The local sorter rows (MS4 rate-keyed,
-    MS5, KS4, SC2/TDC2, clusterless) plus the containerized MS4 row
-    (:func:`_ms4_singularity_sorter_row`).
+    execution_params_schema_version)``.
     """
     return (
         _sorter_row(
-            # Production MountainSort4 recipe (June 2026), 30 kHz. Rate-keyed:
-            # the sorter runs ``filter=False`` (the preproc stage already
-            # bandpassed), so the sorter band is inert and the only
-            # rate-dependent knobs are ``clip_size`` / ``detect_interval``. The
-            # tetrode/probe/region distinction lives on the preproc row + the
-            # preset, not here. ``adjacency_radius`` is set explicitly to 100
-            # um (also the schema default).
             "mountainsort4",
             MS4_30KHZ,
             _MS4_RATE_PARAMS[30000],
         ),
         _sorter_row(
-            # 20 kHz variant: ``clip_size=27`` / ``detect_interval=7`` hold the
-            # same ~1.33 ms physical window at the lower rate; everything else
-            # matches the 30 kHz row.
             "mountainsort4",
             MS4_20KHZ,
             _MS4_RATE_PARAMS[20000],
         ),
         _sorter_row(
-            # MS5 is region-agnostic (filter=False, like MS4), so the row is
-            # rate-keyed; 30 kHz uses the schema-default snippet window.
+            # 30 kHz uses the schema-default snippet window.
             "mountainsort5",
             MS5_30KHZ,
             {},
         ),
         _sorter_row(
-            # Kilosort4 Neuropixels recipe matched to the AIND
-            # aind-ephys-spikesort-kilosort4 capsule params.json (and
-            # int-brain-lab/ibl-sorter): the only scientifically-meaningful
-            # deviation from stock KS4 is non-rigid drift correction
-            # (``nblocks=5`` vs the stock ``1``); the rest pins KS4's stock
-            # whitening/preprocessing config explicitly. KS4 does its own
-            # high-pass + common-reference + ZCA whitening internally
-            # (``skip_kilosort_preprocessing=False``, ``whitening_range=32``).
-            # There is deliberately NO ``whiten`` key: KS4 has no such param,
-            # and the v2 runtime only runs its external float64 whitening when
-            # the sorter params carry ``whiten=True`` (see
-            # ``_sorting/dispatch.py``), so omitting it keeps the signal
-            # whitened exactly once (by KS4) -- adding ``whiten=True`` here
+            # Matches the AIND KS4 capsule: stock KS4 except ``nblocks=5``.
+            # No ``whiten`` key: KS4 whitens internally, so ``whiten=True``
             # would double-whiten.
             "kilosort4",
             KS4_NEUROPIXELS,
@@ -515,28 +380,8 @@ def sorter_default_contents() -> tuple:
         _sorter_row(
             "clusterless_thresholder",
             "default",
-            # ``threshold_unit="uv"`` makes the shipped
-            # ``detect_threshold=100`` a TRUE 100 microvolt threshold:
-            # the runtime scales the recording to uV (via the stored
-            # NWB gain) before detection, rather than treating it as a
-            # MAD multiplier. (For Frank-lab data gain==1 uV/count so
-            # 100 "uv" == 100 counts == 100 uV either way.) The
-            # explicit ``noise_levels=[1.0]`` is the equivalent
-            # advanced override, kept as a belt-and-suspenders guard:
-            # without it, a row whose ``threshold_unit`` were lost would
-            # read the 100 as a MAD multiplier. The runtime uses it
-            # verbatim (explicit noise_levels take precedence over
-            # ``threshold_unit``).
-            # The smoke / synthetic-fixture rows set
-            # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
-            # computes per-channel MAD and the threshold tracks the
-            # recording's noise floor -- they do not rely on the 'uv'
-            # default unit.
-            #
-            # THIS shipped ``default`` row sets ``threshold_unit="uv"``
-            # explicitly and takes detect_threshold from the schema
-            # default (100); the runtime ``scale_to_uV`` makes that a
-            # true 100 uV threshold.
+            # The schema-default detect_threshold (100) in true uV.
+            # ``noise_levels=[1.0]`` keeps it uV even if threshold_unit is lost.
             {"threshold_unit": "uv", "noise_levels": [1.0]},
         ),
         _ms4_singularity_sorter_row(),
@@ -544,19 +389,13 @@ def sorter_default_contents() -> tuple:
 
 
 # ---- Pipeline presets ------------------------------------------------------
-# Production region preproc + rate-keyed MS4 sorter rows the franklab MS4
-# presets bundle. probe_type is informational (the recipe is region + rate),
-# so the tetrode- and probe-hippocampus-30 kHz presets resolve identically.
+# probe_type is informational: the recipe is region + rate.
 _REGION_PREPROC = {
     "hippocampus": HIPPOCAMPUS_PREPROC,
     "cortex": CORTEX_PREPROC,
 }
 
-# A sort's analyzer waveform window is region-specific, resolved from the SAME
-# signal that sets the region filter cutoff: the source preprocessing recipe.
-# This maps each region preprocessing recipe to its ``(display, metric)``
-# waveform-params row pair. Lives here (not on ``_PipelinePreset``, which is
-# ``extra="forbid"``) so no preset-schema change is needed.
+# Region preprocessing recipe -> (display, metric) waveform-params rows.
 _PREPROC_WAVEFORM_PARAMS = {
     HIPPOCAMPUS_PREPROC: (
         HIPPOCAMPUS_DISPLAY_WAVEFORMS,
@@ -571,15 +410,9 @@ def waveform_params_for_preprocessing(
 ) -> tuple[str, str]:
     """Return the ``(display, metric)`` waveform-params row names for a recipe.
 
-    Only hippocampus and cortex have region-tuned analyzer windows; every other
-    preprocessing recipe -- custom, multi-region, AND the shipped non-tetrode
-    recipes (e.g. ``default``, ``default_neuropixels``, ``no_filter``) -- falls
-    back to the wider cortex pair (1.0/2.0 ms). This is deliberate: the analyzer
-    window is tuned for hippocampal vs cortical tetrode waveforms, and adding a
-    tuned window for another region is a tracked-row-and-mapping change, not a
-    silent default. The fallback never mixes windows within a sort. A row that
-    ``clone_pipeline_preset`` forked from a recipe keeps that recipe's pair
-    through ``PreprocessingWaveformParameters``.
+    Recipes other than hippocampus and cortex use the
+    ``PreprocessingWaveformParameters`` row if one exists, else the wider
+    cortex pair.
 
     Parameters
     ----------
@@ -606,10 +439,7 @@ def waveform_params_for_preprocessing(
     return CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS
 
 
-# Drift guard: every region in ``_REGION_PREPROC`` must have a waveform-params
-# mapping, so a future region added to the preset map cannot silently inherit
-# the cortex fallback. (Non-region shipped recipes -- neuropixels / no_filter --
-# intentionally fall back; see ``waveform_params_for_preprocessing``.)
+# A new region must not silently inherit the cortex fallback.
 assert set(_REGION_PREPROC.values()) <= set(_PREPROC_WAVEFORM_PARAMS), (
     "every _REGION_PREPROC recipe needs a _PREPROC_WAVEFORM_PARAMS mapping; "
     f"missing: {set(_REGION_PREPROC.values()) - set(_PREPROC_WAVEFORM_PARAMS)}"
@@ -659,14 +489,8 @@ def _franklab_ms4_spec(probe_type: str, region: str, rate_hz: int) -> dict:
 def _franklab_ms4_singularity_spec() -> dict:
     """Build the ``_PipelinePreset`` field dict for the containerized MS4 preset.
 
-    Reuses the probe-hippocampus-30 kHz MS4 spec (same preproc / artifact /
-    scientific sorter params), then points the sorter row at the containerized
-    Singularity row and rewrites the notes/intended-use for the container path.
-    The execution backend itself is NOT carried on the
-    preset -- it is read from the referenced ``SorterParameters.execution_params``
-    row (the single source of truth); ``describe_pipeline_preset(name)`` surfaces
-    it. ``recommendation_status`` stays ``"production"`` (the recommended-science
-    MS4 path on modern hosts); ``run_v2_pipeline`` defaults to native MS4.
+    The probe-hippocampus-30 kHz MS4 spec pointed at the containerized sorter
+    row. The backend lives on that row's ``execution_params``, not the preset.
     """
     spec = _franklab_ms4_spec("probe", "hippocampus", 30000)
     spec.update(
@@ -693,13 +517,10 @@ def _franklab_ms4_singularity_spec() -> dict:
     return spec
 
 
-# MS5 hippocampus-30 kHz presets. probe_type is informational (the recipe is
-# region + rate), so the tetrode- and probe-labeled MS5 presets resolve to the
-# SAME preprocessing / artifact / sorter parameter rows; only the provenance
-# label differs. These are alternatives to the native MS4 hippocampus default.
+# MS5 alternatives; the tetrode and probe labels resolve to the same rows.
 MS5_TETRODE_HIPPOCAMPUS_30KHZ = "franklab_tetrode_hippocampus_30khz_ms5_2026_06"
 MS5_PROBE_HIPPOCAMPUS_30KHZ = "franklab_probe_hippocampus_30khz_ms5_2026_06"
-# The shipped run_v2_pipeline / preflight default (single source of truth).
+# The run_v2_pipeline / preflight default.
 DEFAULT_PIPELINE_PRESET = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 
 _MS5_NOTES = (
@@ -715,13 +536,7 @@ _MS5_NOTES = (
 
 
 def _franklab_ms5_spec(probe_type: str) -> dict:
-    """Build the ``_PipelinePreset`` field dict for a hippocampus-30 kHz MS5 preset.
-
-    The tetrode- and probe-labeled MS5 presets differ only in ``probe_type`` and
-    their ``intended_use`` text -- they bundle the identical preprocessing /
-    artifact / sorter rows, so this single builder keeps them from drifting.
-    Both are alternatives to the native MS4 hippocampus default.
-    """
+    """Build the ``_PipelinePreset`` field dict for a hippocampus-30 kHz MS5 preset."""
     if probe_type == "probe":
         intended_use = (
             "Frank-lab hippocampal probes at 30 kHz, MountainSort5 alternative. "
@@ -758,9 +573,7 @@ def _franklab_ms5_spec(probe_type: str) -> dict:
 def pipeline_preset_specs() -> dict[str, dict]:
     """Return ``{preset_name: _PipelinePreset field dict}`` for every preset.
 
-    ``_orchestration.presets`` constructs the validated ``_PipelinePreset`` objects
-    from these specs; keeping them as plain dicts here lets the catalog stay
-    free of any dependency on the preset model (no import cycle).
+    Plain dicts so the catalog does not import the preset model.
     """
     return {
         "franklab_tetrode_hippocampus_30khz_ms4_2026_06": _franklab_ms4_spec(
@@ -778,7 +591,6 @@ def pipeline_preset_specs() -> dict[str, dict]:
         "franklab_probe_cortex_20khz_ms4_2026_06": _franklab_ms4_spec(
             "probe", "cortex", 20000
         ),
-        # Tetrode- and probe-labeled MS5 alternatives use the same parameter rows.
         MS5_TETRODE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("tetrode"),
         MS5_PROBE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("probe"),
         "franklab_clusterless_2026_06": dict(
@@ -786,9 +598,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
             artifact_detection_params_name="default",
             sorter="clusterless_thresholder",
             sorter_params_name="default",
-            # Clusterless peak detection produces no clustered units to merge,
-            # so it pairs the minimal metric set with the inert auto-curation
-            # rule set ("none").
+            # No clustered units to curate.
             metric_params_name="minimal",
             auto_curation_rules_name="none",
             target_region="hippocampus",
@@ -845,12 +655,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "do not substitute for artifact rejection."
             ),
         ),
-        # Containerized (Singularity, 30 kHz) MS4 -- the one shipped container
-        # path; its execution backend lives on the referenced
-        # SorterParameters.execution_params row, not on this preset.
         MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
-        # Same-day chronic sort: detect/mask each member before concatenation;
-        # otherwise the single-session MS5 recipe.
         "franklab_concat_hippocampus_30khz_ms5_2026_09": {
             **_franklab_ms5_spec("probe"),
             "recommendation_status": "experimental",
@@ -879,8 +684,7 @@ def quality_metric_default_rows() -> list[dict]:
     (including the ``nn_advanced`` PCA metric); ``minimal`` computes only
     ``snr``, ``isi_violation`` and ``firing_rate``.
     """
-    # nn_advanced is a PCA metric -> these rows set skip_pc_metrics=False so
-    # the nn_noise_overlap column exists for the default auto-curation rule.
+    # nn_advanced is a PCA metric, so the full rows set skip_pc_metrics=False.
     nn_kwargs = {
         "n_components": 7,
         "n_neighbors": 5,
@@ -898,9 +702,6 @@ def quality_metric_default_rows() -> list[dict]:
         "amplitude_cutoff",
         "nn_advanced",
     ]
-    # franklab and neuropixels share the same full metric set today; build
-    # both from one payload so they cannot silently drift (a probe-specific
-    # divergence would be expressed as an explicit override here).
     full_metric_kwargs = {
         "snr": {"peak_sign": "neg"},
         "isi_violation": isi_kwargs,
@@ -973,15 +774,9 @@ def auto_curation_default_payloads() -> list[tuple[dict, list[dict]]]:
             [],
         ),
         (
-            # Frank-lab default labeling set: thresholds the lab's ~2% ISI
-            # refractory policy in addition to nn_noise_overlap. ISI-violation
-            # units are labeled ``reject`` (not ``mua``) so every v2 unit
-            # selection policy, analysis and matching alike, denies them.
-            # Merges stay a manual step, so
-            # this set runs no auto-merge (auto_merge_preset='none'). The
-            # metric-params row it pairs with must compute nn_advanced (for
-            # the nn_noise_overlap column) and isi_violation -- the shipped
-            # ``franklab_default`` QualityMetricParameters row does both.
+            # ISI violators are ``reject`` (not ``mua``) so every unit
+            # selection policy denies them. Merges stay manual. Needs a metric
+            # row computing nn_advanced and isi_violation.
             {
                 "auto_curation_rules_name": FRANKLAB_CURATION_RULES,
                 "auto_merge_preset": "none",

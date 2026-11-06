@@ -1,11 +1,7 @@
 """Content-fingerprint identity for the v2 preprocessed recording cache.
 
-The fingerprint is the representation-blind scientific identity of a persisted
-recording: it is read back entirely from the on-disk ElectricalSeries (traces,
-timestamps, persisted geometry, scaling metadata) and must be deterministic for
-a given file yet discriminate any scientifically-meaningful perturbation. These
-tests are DB-free -- they synthesize tiny analysis-style NWBs and never touch
-DataJoint.
+Read from the stored ElectricalSeries (traces, timestamps, geometry,
+scaling); deterministic per file and sensitive to meaningful changes. No DB.
 """
 
 from __future__ import annotations
@@ -52,8 +48,7 @@ def _aggregate(path, es_path):
 
 
 def test_recording_content_fingerprint_deterministic(tmp_path):
-    """The same persisted file yields an identical component dict AND aggregate
-    across repeated reads -- the fingerprint is a pure function of the bytes."""
+    """Repeated reads of one file give identical components and aggregate."""
     from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
@@ -120,8 +115,7 @@ def test_timestamp_hash_is_bounded_and_matches_whole_vector(
 def test_timestamp_hash_reads_contiguous_slices(tmp_path, monkeypatch):
     """Each timestamp chunk is read as one slice, not as a list of points.
 
-    h5py reads a fancy index point by point; on a 20 min, 30 kHz recording
-    that made hashing the timestamps take ~47 s of a ~3 min fingerprint.
+    h5py reads a fancy index point by point (~47 s on a 20 min recording).
     """
     import h5py
 
@@ -190,11 +184,8 @@ def test_recording_content_fingerprint_discriminates(tmp_path):
     p, e = _baseline(tmp_path / "geom.nwb", rel_positions=moved)
     assert _aggregate(p, e) != base, "perturbed geometry must change the hash"
 
-    # Sub-rounding noise is absorbed. Use integer-valued traces (exact in
-    # float32, a clean 5e-5 from any 4-decimal rounding boundary) and noise
-    # that is representable in float32 yet an order of magnitude below
-    # TRACE_ROUNDING, so it perturbs the stored bytes but never flips a rounding
-    # decision -- isolating that the ROUNDING (not float32 storage) absorbs it.
+    # Integer traces sit 5e-5 from any rounding boundary, so this float32
+    # noise changes the bytes but not the rounded values.
     clean = rng.integers(-100, 100, size=(50, 4)).astype("float32")
     noise = 2.0 * 10.0 ** (-(TRACE_ROUNDING + 1))  # 2e-5 µV, < 5e-5 boundary
     noisy = (clean.astype("float64") + noise).astype("float32")
@@ -246,16 +237,11 @@ def test_fingerprint_discriminates_metadata_without_signal_changes(
 
 
 def test_fingerprint_geometry_parity(tmp_path):
-    """The persisted-region geometry hash equals one recomputed from
-    SpikeInterface ``get_channel_locations`` for an unperturbed file -- pinning
-    the SI readback surface as parity, not as the canonical fingerprint source.
+    """The persisted geometry hash equals one from SpikeInterface
+    ``get_channel_locations``.
 
-    Note that the parity holds here because this fixture's electrodes table
-    carries only ``rel_x``/``rel_y``. A real artifact written by
-    ``write_nwb_artifact`` always carries all three ``rel_*`` columns, so its
-    fingerprint geometry is ``(n_channels, 3)`` (with a constant ``rel_z = 0``)
-    while SI's reload projects to ``(n_channels, 2)``; the two are then
-    equivalent geometries, not equal arrays.
+    Holds only for 2-D electrodes; real artifacts store ``(n_channels, 3)``
+    while SI reloads ``(n_channels, 2)``.
     """
     import spikeinterface.extractors as se
 
@@ -283,9 +269,7 @@ def test_fingerprint_geometry_parity(tmp_path):
 def test_fingerprint_components_match_canonical_set(tmp_path):
     """The producer emits exactly the canonical ``FINGERPRINT_COMPONENTS`` keys.
 
-    ``content_hash`` is ``combined_hash`` of this dict, so a silently dropped or
-    renamed component would yield a stable-but-wrong scalar; pinning the key set
-    guards that identity contract.
+    ``content_hash`` combines this dict, so a dropped key changes identity.
     """
     from spyglass.spikesorting.v2._recording.fingerprint import (
         FINGERPRINT_COMPONENTS,
@@ -300,9 +284,8 @@ def test_fingerprint_components_match_canonical_set(tmp_path):
 
 
 def test_geometry_component_hash_rejects_empty_coords():
-    """A persisted region with no coordinate columns (no probe geometry) is a
-    structural impossibility -- hashing it would fold an empty array into a
-    content-free constant, so it raises instead."""
+    """A region with no coordinate columns raises rather than hashing an
+    empty array."""
     from spyglass.spikesorting.v2._recording.fingerprint import (
         geometry_component_hash,
     )
@@ -312,9 +295,8 @@ def test_geometry_component_hash_rejects_empty_coords():
 
 
 def test_geometry_component_hash_distinguishes_rel_z():
-    """A 3-D layout (rel_x/rel_y/rel_z) does not collide with the 2-D layout of
-    the same in-plane coordinates -- ``rel_z`` is folded into the geometry hash,
-    so a depth change cannot pass as identical geometry."""
+    """A 3-D layout does not collide with the 2-D layout of the same
+    in-plane coordinates."""
     from spyglass.spikesorting.v2._recording.fingerprint import (
         geometry_component_hash,
     )
@@ -332,9 +314,7 @@ def test_geometry_component_hash_distinguishes_rel_z():
 
 
 def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
-    """A degenerate readback (zero segments) is refused, not hashed to a
-    content-free constant -- two distinct broken/truncated readbacks must never
-    report 'no drift' on traces that were never actually read."""
+    """A zero-segment readback raises rather than hashing to a constant."""
     from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
     from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
@@ -358,11 +338,8 @@ def test_fingerprint_rejects_zero_segment_recording(tmp_path, monkeypatch):
 class TestRecordingArtifactLock:
     """Per-``recording_id`` lock serializing one recording's artifact slot.
 
-    A rebuild (``get_recording`` read-repair / ``_rebuild_nwb_artifact``) and a
-    reclamation (``RecordingArtifactRecompute.delete_files``) of the SAME
-    recording must never interleave; different recordings stay free to run
-    concurrently. Mirrors the ``analyzer_cache_lock`` contention contract.
-    DB-free: only ``analyzer_cache_root`` resolves (via the custom config dir).
+    A rebuild and a reclamation of the same recording never interleave;
+    different recordings run concurrently. No DB.
     """
 
     def test_same_recording_is_mutually_exclusive(

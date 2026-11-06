@@ -3,15 +3,8 @@
 A sort that selected a ``MotionCorrectedRecording`` must be analyzed,
 rebuilt, evaluated, audited, exported and matched on exactly the traces its
 sorter read, with the same channels, while metadata consumers keep the
-original lineage. The fixtures here make that discriminating: the corrected
-recording of the planted-drift session uses ``remove_channels`` (so it has
-fewer channels than its source) and its traces differ from the source's by
-more than 10 uV in the compared window, so a consumer that silently read the
-source would fail both the channel and the trace comparison.
-
-Spies only record what a consumer received; the planted sorter stands in for
-a sorting algorithm (it records its input and returns two fixed units, so a
-merged curation exists).
+original lineage. The corrected recording drops channels and differs from
+its source by more than 10 uV, so reading the source fails both checks.
 """
 
 from __future__ import annotations

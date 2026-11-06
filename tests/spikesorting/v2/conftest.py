@@ -1,17 +1,8 @@
-"""Fixtures for the modern spike sorting test suite.
+"""Fixtures for the v2 spike sorting tests.
 
-The repository-wide ``tests/conftest.py`` defines a session-scoped, autouse
-``mini_insert`` fixture that starts a Docker MySQL server and ingests the
-shared sample NWB file. The scaffold and pure-helper tests in this package
-exercise Pydantic models and pure helpers only -- they need neither a
-database connection nor sample data. This module overrides ``mini_insert``
-with a no-op so those tests run without Docker. Database-tier tests
-(the MEArec fixture ingestion round-trip) request ``dj_conn`` directly
-and expect Docker to be available.
-
-The fixture/baseline generator scripts and the standalone bootstrap helper
-are filtered out of collection so pytest does not try to import them as test
-modules (their ``test_`` prefixes are coincidental component names).
+- Overrides the repo-wide autouse ``mini_insert`` with a no-op so pure-helper
+  tests run without Docker; database tests request ``dj_conn``.
+- Excludes generator scripts and the bootstrap helper from collection.
 """
 
 import copy
@@ -47,10 +38,7 @@ from tests.spikesorting.v2._test_tiers import (
     load_manifest,
 )
 
-# These files are scripts and helper modules, not pytest test modules; the
-# leading ``test_`` is part of the component name (the standalone test
-# environment bootstrap). Excluding them keeps ``--doctest-modules`` from
-# importing them outside the bootstrap.
+# Scripts and helpers, not test modules (``test_env`` is a component name).
 collect_ignore = [
     "test_env.py",
     "baseline_capture.py",
@@ -196,12 +184,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session", autouse=True)
 def mini_insert():
-    """No-op override of the repository-wide sample-data ingestion fixture.
-
-    Tests that need the database request ``dj_conn`` directly; the scaffold
-    and helper tests do not touch DataJoint, so no server or sample data is
-    needed.
-    """
+    """No-op override of the repo-wide sample-data ingestion fixture."""
     yield
 
 
@@ -218,11 +201,8 @@ def _guard_unit_tier_database_access(request, monkeypatch):
             "Move this test to a database tier or isolate its DB boundary."
         )
 
-    # Patch on the test's own ``monkeypatch``, not a separate context: a test
-    # that also patches ``dj.Connection.query`` saves ``refuse`` as the value
-    # to restore, and only one shared undo stack restores the real method
-    # after it. Undone separately, the guard restored first and the test's
-    # undo then left ``refuse`` installed for every later test.
+    # Use the test's own ``monkeypatch``: one shared undo stack restores the
+    # real ``dj.Connection.query`` even if the test also patches it.
     monkeypatch.setattr(dj.Connection, "connect", refuse)
     monkeypatch.setattr(dj.Connection, "query", refuse)
     yield
@@ -232,20 +212,9 @@ def _guard_unit_tier_database_access(request, monkeypatch):
 def _disable_datajoint_safemode(request):
     """Force ``dj.config['safemode']`` to boolean False for v2 tests.
 
-    The Docker MySQL credentials configured in ``tests/container.py`` set
-    ``safemode`` to the *string* ``"false"``, which Python evaluates as
-    truthy. DataJoint then prompts ``"Commit deletes? [yes, No]"`` on every
-    non-empty delete; under pytest's captured stdin that becomes an
-    ``EOFError`` which surfaces as a misleading "Delete cannot use a
-    transaction within an ongoing transaction" error on the next call.
-
-    Forcing the boolean before each test is the smallest fix that keeps
-    the v2 cleanup pattern (``super_delete`` between tests) working
-    without per-call ``safemode=False`` boilerplate. Per-test scope
-    (rather than session) because the session-scoped ``dj_conn`` fixture
-    calls ``dj.config.load(...)`` which overwrites our setting; depending
-    on ``dj_conn`` directly would force every v2 test to require Docker
-    even when none of its assertions touch the DB.
+    ``tests/container.py`` sets the truthy string ``"false"``, so deletes
+    would prompt and fail under captured stdin. Per-test because the
+    session ``dj_conn`` fixture reloads the config.
     """
     dj.config["safemode"] = False
     yield
@@ -255,25 +224,11 @@ def _disable_datajoint_safemode(request):
 def _isolate_si_metric_defaults():
     """Keep SpikeInterface's metric defaults from leaking between tests.
 
-    A direct ``compute_quality_metrics`` / ``compute_template_metrics`` call
-    merges its ``metric_params`` into the metric classes' shared default
-    dicts, so a kwarg one test sets would silently apply to every later
-    compute in the process, and a test reading SI's defaults would depend on
-    test order. Each test sees (and may change) a copy of every quality-
-    and template-metric class's defaults, and the original dicts are
-    restored afterwards.
+    SI merges a call's ``metric_params`` into shared class default dicts.
+    Each test gets a copy, restored afterwards. No lock is held, so worker
+    threads computing metrics are not blocked.
 
-    The copies are made without ``isolated_si_metric_defaults``'s lock:
-    holding that lock on the main thread for a whole test would block every
-    worker thread the test starts that computes metrics through Spyglass.
-
-    No-op under SpikeInterface < 0.101. The legacy (v0/v1) CI job installs
-    SI 0.99 and collects one file from this directory,
-    ``test_clusterless_waveform_features.py`` (for its v0/v1 guard test), so
-    this autouse fixture also runs there. ``_si_metric_patches`` imports
-    ``spikeinterface.metrics`` at module scope, which does not exist before
-    SI 0.101, and legacy tests never call SI's quality/template metric
-    computes, so skipping the copy changes nothing they exercise.
+    No-op under SI < 0.101 (the legacy CI job collects one file here).
     """
     import spikeinterface as si
     from packaging.version import Version
@@ -296,25 +251,17 @@ _SMOKE_FIXTURE = "mearec_polymer_smoke"
 
 @pytest.fixture(scope="session")
 def smoke_nwb():
-    """Ensure the canonical smoke NWB before any consuming fixture runs.
-
-    An unavailable or corrupt download is a setup failure, so a targeted
-    regression run cannot turn green by skipping its required input.
-    Pure-helper tests never request this fixture and never download it.
-    """
+    """Ensure the smoke NWB; a failed or corrupt download errors, not skips."""
     from tests.spikesorting.v2.fixtures._fetch import ensure_fixture
 
     return ensure_fixture(_SMOKE_FIXTURE, required=True)
 
 
 def _eager_fetch_names():
-    """Fixture stems to download at *session start*, before collection.
+    """Fixture stems to download at session start.
 
-    Only fixtures the required-fixture check will require (so they are present
-    when that check runs below) -- plus every fixture when
-    ``SPYGLASS_V2_FETCH_FULL=1``, an explicit developer opt-in. The per-PR smoke
-    fixture is deliberately NOT in this set: a pure-helper unit run needs no
-    fixture. Smoke consumers request the session-scoped ``smoke_nwb`` fixture.
+    The required fixtures, or all under ``SPYGLASS_V2_FETCH_FULL=1``. The
+    smoke fixture is fetched lazily by ``smoke_nwb``.
     """
     import os
 
@@ -329,17 +276,9 @@ def _eager_fetch_names():
 def _missing_required_fixtures(required):
     """Names from ``SPYGLASS_V2_REQUIRE_FIXTURES`` that no file satisfies.
 
-    A name ``_fetch.py`` knows is satisfied ONLY by
-    ``tests/spikesorting/v2/fixtures/<name>.nwb`` -- the file it downloads and
-    sha256-verifies. The shared raw data directory must not count for those:
-    ``copy_and_insert_nwb`` copies every ingested fixture into it under its
-    own stem, so a leftover copy from a previous run would satisfy a check
-    whose whole purpose is to prove THIS run's download happened.
-
-    A name ``_fetch.py`` does not know has no home in ``fixtures/``. That is
-    the real recorded session (``minirec20230622``) the workflow curls
-    straight into the raw data directory, so for those -- and only those --
-    the raw data directory is where the check looks.
+    A ``_fetch.py`` stem counts only as ``fixtures/<name>.nwb``; a raw data
+    directory copy may be left from an earlier run. Other names (e.g.
+    ``minirec20230622``) are looked up in the raw data directory.
 
     Parameters
     ----------
@@ -365,14 +304,10 @@ def _missing_required_fixtures(required):
 
 
 def _missing_fixtures_message(missing: list[str]) -> str:
-    """Session-exit message for required fixtures that are absent.
+    """Session-exit message for absent required fixtures.
 
-    Separates the two reasons a required fixture can be absent, because they
-    need different fixes: a stem whose ``FIXTURE_URLS`` entry is empty has no
-    hosted copy to download (someone must upload it and set its URL), while
-    any other stem had a download that failed or a link that went stale (a
-    known stem) or a workflow download step that failed (a stem ``_fetch.py``
-    does not know, such as ``minirec20230622``).
+    Groups stems by fix: no hosted URL in ``FIXTURE_URLS`` vs. a failed
+    download.
 
     Parameters
     ----------
@@ -410,14 +345,9 @@ def _missing_fixtures_message(missing: list[str]) -> str:
 
 
 def pytest_sessionstart(session):
-    """Pre-fetch only the fixtures this session is configured to require.
+    """Pre-fetch and check the fixtures this session requires.
 
-    Downloads the required set (``SPYGLASS_V2_REQUIRE_FIXTURES``, or every
-    fixture under ``SPYGLASS_V2_FETCH_FULL=1``) and checks it is present. The
-    per-PR smoke fixture is fetched by explicit fixture dependencies, so a
-    pure-helper run starts no download. Existing files are verified against
-    their manifest hashes before reuse; an absent fixture with no URL is
-    left for the required-fixture check or its consumer's skip guard.
+    Existing files are hash-verified before reuse.
     """
     if session.config.getoption("v2_tier", default=None) == "unit":
         return
@@ -439,17 +369,11 @@ def pytest_sessionstart(session):
             # below and in consumers; it must never reach the tests.
             pytest.exit(f"[v2 fixtures] {exc}", returncode=1)
         except FixtureFetchError as exc:
-            # Don't abort the whole session on a fetch failure -- dependent
-            # tests skip via their own ``_PATH.exists()`` guard. Surface it.
+            # Dependent tests skip via their ``_PATH.exists()`` guard.
             warnings.warn(f"[v2 fixtures] could not fetch {name}: {exc}")
 
-    # Required-fixture check: any fixture named in SPYGLASS_V2_REQUIRE_FIXTURES
-    # MUST be present, or its test would silently skip and the run would look
-    # green without exercising it. The CI workflow sets a job-wide list per
-    # trigger (its "Select required fixtures for this run" step), and steps
-    # that need other fixtures (the acceptance probes, the two-session matcher
-    # gate, the motion benchmark) set their own list on their pytest command
-    # only. Unset locally, so absent fixtures skip as before.
+    # A required fixture must exist, or its tests would skip and the run
+    # look green. CI sets the list; unset locally.
     required = os.environ.get("SPYGLASS_V2_REQUIRE_FIXTURES", "").split()
     missing = _missing_required_fixtures(required)
     if missing:
@@ -468,13 +392,9 @@ _DOWNSTREAM_FIXTURE_PATH = (
 @pytest.fixture(scope="package")
 def populated_sorting(dj_conn, smoke_nwb):
     """Populate Recording -> ArtifactDetection -> Sorting for the smoke
-    fixture. Package-scoped so the heavy populate is paid once and shared
-    across ``test_downstream_consumers.py`` and ``test_integrity.py``.
+    fixture, once per package.
 
-    Lives in conftest (rather than in one module with a cross-module
-    import) so the integrity tests resolve it directly: an import from a
-    sibling test module passes vacuously when a CI shard split collects
-    the two modules separately, leaving the integrity loops iterating
+    In conftest so sharded runs cannot leave the integrity tests looping
     over an empty DB.
     """
     from tests.spikesorting.v2._ingest_helpers import copy_and_insert_nwb
@@ -506,11 +426,8 @@ def populated_sorting(dj_conn, smoke_nwb):
         SortingSelection,
     )
 
-    # Ingest under a session name UNIQUE to this shared fixture. Other v2
-    # test modules ingest the same smoke fixture under its own basename and
-    # run ``_clean_session_v2`` / ``reinsert`` on that session; isolating this
-    # one keeps the package-scoped rows (cached as ``sort_pk`` below) from
-    # being cascade-deleted out from under the downstream/integrity tests.
+    # Unique session name: other modules' cleanup of the smoke session must
+    # not cascade-delete these package-scoped rows.
     nwb_file_name = copy_and_insert_nwb(
         _DOWNSTREAM_FIXTURE_PATH, dest_name="mearec_downstream_smoke.nwb"
     )
@@ -564,16 +481,9 @@ def populated_sorting(dj_conn, smoke_nwb):
 
 @pytest.fixture
 def populated_sorting_with_curation(populated_sorting):
-    """A root ``CurationV2`` over the populated smoke sort.
+    """A root ``CurationV2`` (no labels or merges) over the smoke sort.
 
-    Builds on the package-scoped ``populated_sorting`` and inserts one
-    root curation (``parent_curation_id=-1``, no labels, no merges) so the
-    curation-side read tests (``get_unit_brain_regions`` on ``CurationV2``,
-    ``get_merged_sorting`` early returns) have a known master to query.
-
-    Function-scoped and self-cleaning: the persistent test DB carries rows
-    across runs, so the fixture clears any pre-existing curations for this
-    sorting first, then removes the ones it created on teardown. Yields the
+    Clears the sort's curations before and after. Yields the
     ``{"sorting_id", "curation_id"}`` PK dict.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -594,11 +504,8 @@ _PREVIEW_FIXTURE_PATH = (
 def planted_two_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with two planted units (so a merge group exists).
 
-    Shared in conftest (rather than a single test module) so the merge-aware
-    tests across modules -- preview-merge warnings and the merged-parent guard
-    -- resolve the SAME populated sort without a fragile
-    cross-module import. The smoke sort yields only one MEArec unit, so this
-    plants two units on the real recording with ``plant_sorter``. Tests clear curations around themselves for isolation.
+    ``plant_sorter`` plants them on the smoke recording, whose own sort
+    yields one unit. Tests clear curations around themselves.
     """
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
@@ -707,20 +614,9 @@ def planted_two_unit_sort(dj_conn, smoke_nwb):
 def planted_three_unit_sort(dj_conn, smoke_nwb):
     """A populated Sorting with three planted units (0, 1, 2).
 
-    The merged-parent composition tests need a parent curation that keeps at
-    least TWO units after a merge, one of which is a FRESH merged id absent
-    from ``Sorting.Unit`` -- so the child genuinely composes from the parent
-    namespace rather than the raw sort. Two raw units collapse to a single
-    merged unit, which is not enough; three raw units let a parent merge two
-    of them and still expose a second unit to merge/label in the child.
-
-    Modeled on ``planted_two_unit_sort`` (the smoke sort yields one MEArec
-    unit, so ``plant_sorter`` plants the three units on the real
-    recording). The three units' spikes are spaced ~200
-    frames apart so no cross-unit coincidence is removed by the 0.4 ms merge
-    dedup -- a manual merge of any two then conserves spikes exactly, keeping
-    the conservation assertions clean. Tests clear curations around themselves
-    for isolation.
+    Three units let a parent merge two and keep a second unit for a child to
+    edit. Spikes are ~200 frames apart, so the 0.4 ms merge dedup removes
+    none and merges conserve spikes. Tests clear curations around themselves.
     """
     from tests.spikesorting.v2._ingest_helpers import (
         _clean_session_v2,
@@ -840,12 +736,9 @@ def planted_three_unit_sort(dj_conn, smoke_nwb):
 
 @pytest.fixture
 def curation_evaluation_defaults(dj_conn):
-    """Ensure the default metric/auto-curation/waveform Lookup rows exist.
+    """Ensure the Lookup rows a ``CurationEvaluation`` needs exist.
 
-    The Lookup rows a ``CurationEvaluation`` needs ("minimal" metrics, "none"
-    auto-curation rules, default waveform window) -- the curation-eval subset of
-    ``initialize_v2_defaults``. Shared here so every eval-based test (curation,
-    UnitMatch, concat) reuses it instead of re-seeding defaults in-body.
+    "minimal" metrics, "none" auto-curation rules, default waveform window.
     """
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
@@ -858,9 +751,7 @@ def curation_evaluation_defaults(dj_conn):
     AnalyzerWaveformParameters.insert_default()
 
 
-#: ``session_group_owner`` LabTeam used by the chronic concat fixture and its
-#: tests. Named once so the fixture's setup/teardown cleanup and the tests that
-#: create groups under it cannot drift.
+#: ``session_group_owner`` LabTeam of the chronic concat fixture and its tests.
 CHRONIC_OWNER_TEAM = "chronic_concat_owner"
 
 
@@ -868,20 +759,12 @@ CHRONIC_OWNER_TEAM = "chronic_concat_owner"
 def chronic_2_session_minirec(dj_conn, tmp_path_factory):
     """Two same-day + one next-day single-tetrode synthetic sessions.
 
-    Synthesizes three short 4-channel recordings with byte-identical channel
-    positions (the fixed ``tetrode_probe_layout``) but different planted-spike
-    seeds, writes each into a Frank-lab-style NWB, ingests all three, sets up a
-    one-tetrode sort group per session, and populates the per-member
-    ``Recording`` cache for the two SAME-DAY members under the ``"default"``
-    preprocessing recipe. The third session shares neither a Recording nor a
-    date with the first two; it exists so the ``SessionGroup`` same-day check
-    has a second date to reject.
-
-    Package-scoped read substrate: tests build their OWN ``SessionGroup`` /
-    ``ConcatenatedRecording`` rows on top and tear them down. The fixture
-    clears any leftover groups for ``CHRONIC_OWNER_TEAM`` on entry (the
-    persistent test DB carries rows across runs) and again on teardown, then
-    drops the three sessions.
+    Identical channel positions, different planted-spike seeds. ``Recording``
+    (``"default"`` preprocessing) is populated for the two same-day members
+    only; the next-day session gives the same-day check a date to reject.
+    Tests build and tear down their own ``SessionGroup`` /
+    ``ConcatenatedRecording`` rows. ``CHRONIC_OWNER_TEAM`` groups are cleared
+    on entry and teardown.
 
     Yields
     ------
@@ -941,10 +824,7 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
     same_day_members = members[:2]
     next_day_member = members[2]
 
-    # ``recording_pks[i]`` is the populated Recording PK for ``same_day_members[i]``;
-    # the member dicts stay CLEAN (only Member columns) so they can be passed
-    # straight to ``SessionGroup.create_group`` without leaking a recording_id
-    # into the Member insert.
+    # Member dicts hold only Member columns, for ``SessionGroup.create_group``.
     recording_pks = []
     for member in same_day_members:
         rec_pk = RecordingSelection.insert_selection(
@@ -971,13 +851,9 @@ def chronic_2_session_minirec(dj_conn, tmp_path_factory):
         _clean_session_v2({"nwb_file_name": nwb_file_name})
 
 
-#: Two intervals cut from one session per day for the daily concatenations
-#: the UnitMatch input tests match (seconds after the session's first sample;
-#: each longer than ``Recording``'s 1 s minimum segment). Both START in one
-#: float64 binade ([2, 4) s): SpikeInterface estimates a persisted recording's
-#: sampling rate from its first 1000 timestamps, and a concatenation requires
-#: its members' rates to agree to 1e-9 Hz, which timestamps rounded in
-#: different binades miss.
+#: Daily-concat intervals (s after first sample, each > 1 s). Both start in the
+#: [2, 4) s float64 binade so SI's timestamp-derived sampling rates agree to
+#: the 1e-9 Hz concatenation tolerance.
 DAILY_CONCAT_INTERVALS = {
     "first": (2.02, 3.22),
     "second": (3.3, 4.9),

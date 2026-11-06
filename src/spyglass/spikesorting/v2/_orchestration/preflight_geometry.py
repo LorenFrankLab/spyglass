@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-# A preflight message is read in a terminal, so it names enough contacts to
-# act on and then says how many it left out. A 128-channel group with no
-# geometry would otherwise print 128 triples.
+# Cap terminal output; a 128-channel group would otherwise print 128 triples.
 _MAX_REPORTED_CONTACTS = 4
 
 
@@ -18,9 +16,7 @@ def _truncated(items: list) -> str:
 def _missing_coordinate_report(channel_ids, positions) -> str:
     """Name the electrodes with a non-finite coordinate, and which one.
 
-    "electrode 12 is missing rel_z" is actionable; "electrode 12 has no
-    position" sends the operator looking for a row that is there. A whole
-    unpositioned contact reports all three columns.
+    A whole unpositioned contact reports all three columns.
 
     Parameters
     ----------
@@ -56,9 +52,8 @@ def _missing_coordinate_report(channel_ids, positions) -> str:
 def _coincident_contact_report(channel_ids, positions) -> str:
     """Describe the electrodes that share an x-y position.
 
-    Only called once ``select_distinct_plane`` has returned ``None``, so x-y
-    necessarily has at least one duplicate: had it not, ``"xy"`` -- the first
-    candidate plane -- would have been chosen.
+    Called only after ``select_distinct_plane`` found no plane, so x-y has a
+    duplicate.
 
     Parameters
     ----------
@@ -75,8 +70,7 @@ def _coincident_contact_report(channel_ids, positions) -> str:
     """
     import numpy as np
 
-    # Same rounding the geometry helpers use to decide "same contact", so the
-    # message cannot name a different set than the verdict was based on.
+    # Same rounding as the verdict, so the message names the same set.
     from spyglass.spikesorting.v2._recording.geometry import _POSITION_DECIMALS
 
     xy = np.round(np.asarray(positions, dtype=float)[:, :2], _POSITION_DECIMALS)
@@ -101,40 +95,11 @@ def sort_group_geometry_problem(
 ) -> "str | None":
     """Report a sort group whose effective 2D contact geometry collapses.
 
-    SpikeInterface builds a probe from the contact positions and rejects two
-    contacts at the same place, so a sort group whose electrodes share a
-    position fails minutes into ``Recording.populate`` (or, on a stored
-    artifact, at the analyzer build). This reproduces the *effective* geometry
-    the recording stage computes -- ``select_distinct_plane`` over the
-    ``Probe.Electrode`` ``rel_x``/``rel_y``/``rel_z``, then the legacy
-    ``tetrode_12.5`` repair -- and reports the failure up front instead.
-
-    How much of the geometry is missing is classified by
-    :func:`~spyglass.spikesorting.v2._recording.geometry.classify_missing_geometry`
-    -- the same predicate ``normalize_channel_locations`` uses at make, so
-    this check cannot clear a group that then fails there. NULL / absent
-    ``rel_*`` for EVERY coordinate of the whole group is the legacy "geometry
-    was never written" case: the raw electrodes table reads back as all-zero,
-    which is exactly what the tetrode repair covers, so it is checked as
-    all-zero rather than rejected outright. Anything less than that -- one
-    NULL ``rel_z`` across the group, or a single unpositioned electrode among
-    positioned ones -- is a partially-populated probe and is reported as such,
-    naming the electrodes AND the missing columns (``select_distinct_plane``
-    would otherwise raise on the NaN rows, and NaNs compare as distinct).
-
-    Checked on the sort group's full electrode membership -- the same list
-    ``Recording.make_fetch`` passes to ``maybe_apply_tetrode_geometry``. A
-    ``bad_channel_handling='remove'`` run drops members later, which can only
-    remove a collision, so this is conservative by at most that case.
-
-    Reads the REGISTERED PROBE's geometry (``Probe.Electrode``, keyed by probe
-    type), while the sort itself gets its channel locations from the session's
-    own electrodes table. Those agree for any file whose writer filled both
-    from one probe definition, but nothing enforces it -- see
-    :func:`~spyglass.spikesorting.v2._recording.geometry.fetch_sort_group_contact_positions`.
-    A session that disagrees with its probe can therefore pass this check and
-    still reach the recording stage's own assertion, which sees what
-    SpikeInterface sees.
+    SpikeInterface rejects coincident contacts. Reproduces the recording
+    stage's effective geometry (distinct plane, then the ``tetrode_12.5``
+    repair) on the registered ``Probe.Electrode`` positions of every member.
+    A group with no positions at all takes the tetrode repair; a partially
+    positioned group is reported with its missing columns.
 
     Parameters
     ----------
@@ -168,13 +133,11 @@ def sort_group_geometry_problem(
         key=int,
     )
     if not channel_ids:
-        # ``sort_group_has_electrodes`` owns this failure; reporting it twice
-        # would just duplicate the error.
+        # ``sort_group_has_electrodes`` reports this.
         return None
 
     registered = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
-    # The same verdict ``normalize_channel_locations`` reaches at make, so a
-    # group cannot clear preflight and then fail there.
+    # Same verdict as ``normalize_channel_locations`` at make.
     verdict, positions, _ = effective_contact_plane(registered)
     if verdict == "partial":
         report = _missing_coordinate_report(channel_ids, positions)

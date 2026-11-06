@@ -1,9 +1,6 @@
-"""Shared fixtures and opt-in gating for the v2 end-to-end acceptance probes.
+"""Fixtures and opt-in gating for the v2 end-to-end acceptance probes.
 
-The probes in this directory run the whole v2 lifecycle on the MEArec tetrode
-fixture (sort, curate, review, decode, restore) and take minutes each, so they
-are marked ``acceptance`` and skipped unless pytest is given
-``--run-acceptance``.
+The probes take minutes each and run only with ``--run-acceptance``.
 """
 
 from pathlib import Path
@@ -87,8 +84,7 @@ def workflow(dj_conn, tmp_path_factory):
             description="Lifecycle audit: controlled merge, not a biological judgment",
         )
     )
-    # Verify and label the resulting unit namespace after the merge, including
-    # the newly allocated merged unit; contributor IDs are no longer units.
+    # Label the post-merge namespace, including the new merged unit.
     merged_ids = (CurationV2.Unit & child.as_key()).fetch("unit_id")
     child = CurationRef.from_key(
         CurationV2.insert_curation(

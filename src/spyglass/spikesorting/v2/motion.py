@@ -1,33 +1,25 @@
 """Motion estimation for spike-sorting v2, independent of concatenation.
 
 Tables:
-    MotionEstimationParameters -- Named, validated SpikeInterface motion recipes.
-    MotionEstimateSelection    -- One source (a Recording or an uncorrected
-                                  ConcatenatedRecording), an optional artifact
-                                  mask, and a recipe, content-addressed.
-        .RecordingSource             -- single-recording source.
-        .ConcatenatedRecordingSource -- concatenated-recording source.
-        .ArtifactDetectionSource     -- optional mask (single recording only).
-    MotionEstimate             -- The saved SpikeInterface ``Motion`` (on the
-                                  source's estimation clock) with that clock,
-                                  its resolved configuration and diagnostics.
-    MotionInterpolationParameters -- Named interpolation recipes, every
-                                  ``interpolate_motion`` argument explicit.
-    MotionCorrectionParameters -- Public recipe: one estimation recipe and one
-                                  interpolation recipe.
-    MotionCorrectedRecordingSelection -- One saved estimate and an
-                                  interpolation recipe, content-addressed.
-    MotionCorrectedRecording   -- The corrected, masked, unwhitened traces
-                                  written with the source's own timestamps.
+    MotionEstimationParameters: named, validated SpikeInterface motion recipes.
+    MotionEstimateSelection: one source (a Recording or an uncorrected
+        ConcatenatedRecording), an optional artifact mask, and a recipe.
+        .RecordingSource: single-recording source.
+        .ConcatenatedRecordingSource: concatenated-recording source.
+        .ArtifactDetectionSource: optional mask (single recording only).
+    MotionEstimate: the saved SpikeInterface ``Motion``, its estimation clock,
+        resolved configuration and diagnostics.
+    MotionInterpolationParameters: named interpolation recipes, every
+        ``interpolate_motion`` argument explicit.
+    MotionCorrectionParameters: public recipe pairing one estimation and one
+        interpolation recipe.
+    MotionCorrectedRecordingSelection: one saved estimate and an interpolation
+        recipe.
+    MotionCorrectedRecording: the corrected, masked, unwhitened traces written
+        with the source's own timestamps.
 
 ``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
-a sort's input. The DB-free computation
-(parameter resolution, the estimation adapter, the ``Motion`` serialization,
-applying a saved estimate) lives in ``_motion``. The selection insert paths
-are in ``_motion.selection``, the pure ``make_compute`` steps in
-``_motion.compute``, the reads behind ``MotionEstimate.report`` in
-``_motion.report_inputs``, and the corrected artifact's rebuild in
-``_storage.nwb``.
+a sort's input. DB-free computation lives in ``_motion``.
 """
 
 from __future__ import annotations
@@ -89,19 +81,14 @@ class MotionEstimationParameters(
 ):
     """Named motion-estimation recipes: a SpikeInterface preset plus overrides.
 
-    The ``params`` blob is validated by :class:`MotionEstimationParamsSchema`
-    and every row must resolve
-    (``_motion.resolve_estimation_params``): an override key that is not a
-    parameter of the selected SpikeInterface method is rejected at insert.
-    ``insert_default`` ships ``dredge_v1`` and ``dredge_fast_v1``; the
-    ``rigid_fast`` preset is allowed but ships no row. No recipe here is
-    validated for a particular probe.
+    ``params`` is validated by :class:`MotionEstimationParamsSchema`; an
+    override key the selected SpikeInterface method does not accept is
+    rejected at insert. ``insert_default`` ships ``dredge_v1`` and
+    ``dredge_fast_v1``. No recipe here is validated for a particular probe.
 
-    ``job_kwargs`` is the optional per-row SpikeInterface job-kwargs blob
-    (``n_jobs``, ``chunk_duration``, ...) for the detect-and-localize pass. It
-    is not part of the estimate's identity. The noise-estimate seed is the
-    identity-bearing ``noise_levels_seed`` params field, so a ``random_seed``
-    job kwarg is rejected.
+    ``job_kwargs`` (detect-and-localize pass) is not part of the estimate's
+    identity. The seed belongs in ``params.noise_levels_seed``, so a
+    ``random_seed`` job kwarg is rejected.
     """
 
     definition = f"""
@@ -117,10 +104,14 @@ class MotionEstimationParameters(
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
         """Insert motion-estimation parameter rows after validation.
 
-        Each row's blob is validated, resolved against the installed
-        SpikeInterface (unknown override keys raise), and checked by the
-        duplicate-content guard. ``allow_duplicate_params=True`` opts out of
-        that guard; see ``reject_duplicate_parameter_content``.
+        ``allow_duplicate_params=True`` opts out of the duplicate-content
+        guard; see ``reject_duplicate_parameter_content``.
+
+        Raises
+        ------
+        ValueError
+            If ``params`` has an unknown override key or ``job_kwargs``
+            contains ``random_seed``.
         """
         from spyglass.spikesorting.v2._motion.estimation import (
             resolve_estimation_params,
@@ -159,14 +150,11 @@ class MotionInterpolationParameters(
 ):
     """Named motion-interpolation recipes for applying a saved estimate.
 
-    The ``params`` blob is validated by
-    :class:`MotionInterpolationParamsSchema`: ``border_mode``
-    (``remove_channels`` or ``force_extrapolate``),
-    ``spatial_interpolation_method``, ``sigma_um``, ``p`` and ``num_closest``
-    are all required, so no SpikeInterface default is ever relied on.
+    Validated by :class:`MotionInterpolationParamsSchema`. Every argument
+    (``border_mode``, ``spatial_interpolation_method``, ``sigma_um``, ``p``,
+    ``num_closest``) is required so no SpikeInterface default is relied on.
     ``insert_default`` ships ``kriging_force_extrapolate_v1`` (the
-    interpolation of the ``dredge`` / ``dredge_fast`` presets) and
-    ``kriging_remove_channels_v1``.
+    ``dredge`` presets' interpolation) and ``kriging_remove_channels_v1``.
     """
 
     definition = f"""
@@ -207,12 +195,9 @@ class MotionCorrectionParameters(
 ):
     """Named public motion-correction recipes: estimation plus interpolation.
 
-    Each row composes one ``MotionEstimationParameters`` row and one
-    ``MotionInterpolationParameters`` row. The two stages keep their own
-    identities: two recipes that share an estimation row reuse the same saved
-    ``MotionEstimate`` and differ only in the corrected recording.
-    ``insert_default`` ships ``dredge_v1`` and ``dredge_fast_v1``, each with
-    its preset's interpolation. Neither is validated for a probe.
+    Recipes sharing an estimation row reuse the same saved
+    ``MotionEstimate``. ``insert_default`` ships ``dredge_v1`` and
+    ``dredge_fast_v1``; neither is validated for a probe.
     """
 
     definition = """
@@ -293,14 +278,11 @@ class MotionEstimateSelection(
     """One motion estimate to compute: a source, an optional mask, a recipe.
 
     Exactly one of ``RecordingSource`` / ``ConcatenatedRecordingSource``
-    exists per row. An ``ArtifactDetectionSource`` part pins the artifact mask
-    of a single-recording source; a concatenated recording carries its own
-    member masks, so it never has one. ``motion_estimate_id`` is derived from
-    the source kind and id, the source artifact's ``content_hash``, the
-    artifact detection (when present), the recipe name, the resolved
-    configuration's hash, the SpikeInterface version and the estimation
-    algorithm version, so a change to any of them selects a new estimate.
-    Create rows with :meth:`insert_selection`.
+    exists per row. ``ArtifactDetectionSource`` applies to single recordings
+    only; a concatenation carries its members' masks. ``motion_estimate_id``
+    hashes the source, its ``content_hash``, the artifact detection, the
+    recipe, the resolved configuration, and the SpikeInterface and algorithm
+    versions. Create rows with :meth:`insert_selection`.
     """
 
     definition = """
@@ -450,10 +432,8 @@ class MotionEstimateSelection(
     def resolve_source(cls, key: dict) -> SourceLineage:
         """Return the selection's source and pinned artifact detection.
 
-        ``motion_estimate_id`` folds in every part, so the id is re-derived
-        from the parts present now: a source or ``ArtifactDetectionSource``
-        part inserted or deleted after the selection shows up as a
-        mismatch.
+        Re-derives ``motion_estimate_id`` from the current parts to catch
+        parts inserted or deleted after selection.
 
         Raises
         ------
@@ -534,8 +514,7 @@ class MotionEstimateFetched(NamedTuple):
 
 
 class MotionEstimateComputed(NamedTuple):
-    """The ``MotionEstimate`` row fields :meth:`MotionEstimate.make_compute`
-    returns (see the table definition for each column)."""
+    """``MotionEstimate`` row fields returned by ``make_compute``."""
 
     motion: dict
     resolved_params: dict
@@ -589,31 +568,19 @@ def _estimation_clock_of(row: dict):
 class MotionEstimate(SpyglassMixin, dj.Computed):
     """A saved motion estimate with its resolved configuration and evidence.
 
-    ``motion`` is the SpikeInterface ``Motion`` as a blob dict
-    (``_motion.motion_to_storage_dict``); :meth:`get_motion` rebuilds it.
-    ``resolved_params`` is exactly the configuration passed to
-    SpikeInterface. The spans record which frames were one uninterrupted
-    acquisition and which samples were valid evidence; the diagnostics are
-    counts, never peak arrays.
+    ``motion`` is the SpikeInterface ``Motion`` as a blob dict; read it with
+    :meth:`get_motion`. ``resolved_params`` is exactly the configuration
+    passed to SpikeInterface.
 
-    Every source is estimated once, on its *estimation clock*: within each
-    continuity span time advances by ``1 / fs`` per frame from the span's
-    ``estimation_start_s``, and the real gap between two spans (an
-    acquisition gap or a concatenation member join) is kept up to the
-    recipe's ``max_gap_s`` (``_motion.build_estimation_clock``); a gap runs
-    from one sample after a span's last timestamp to the next span's first
-    timestamp, both on the source's own clock. All spans
-    therefore share one reference frame. The ``motion`` bins are on that
-    clock; :meth:`get_estimation_clock` returns the time map and
-    :meth:`get_displacement_on_source_clock` maps the bins back to source
-    time for inspection.
+    The ``motion`` bins are on the source's *estimation clock*: time
+    advances ``1 / fs`` per frame within each continuity span, and the real
+    gap between spans is kept up to the recipe's ``max_gap_s``.
+    :meth:`get_estimation_clock` returns the time map and
+    :meth:`get_displacement_on_source_clock` maps bins back to source time.
 
-    Populated explicitly (``MotionEstimate.populate(selection_key)``); no
-    other table populates or reads it. Estimation runs outside the DB
-    transaction (``make_fetch`` / ``make_compute`` / ``make_insert``), and
-    ``make_compute`` reads only the files ``make_fetch`` resolved. A recipe
-    whose resolution, SpikeInterface version or algorithm version changed
-    since selection raises: recreate the selection.
+    Populated explicitly. If the recipe's resolution, SpikeInterface version
+    or algorithm version changed since selection, populate raises; recreate
+    the selection.
     """
 
     definition = """
@@ -640,31 +607,19 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     input_fingerprint: char(64)       # SHA-256 of source content, spans, channels and configuration
     """
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
-    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
-    # long peak detection and estimation run OUTSIDE the DB transaction (and
-    # so multiple sources can be estimated in parallel). The inherited
-    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
-    # through tri-part dispatch.
     _parallel_make = True
 
     def make_fetch(self, key) -> MotionEstimateFetched:
         """Resolve the selection, recipe, source artifact and mask.
 
-        Rebuilds a missing source NWB through the owning table's own verified
-        self-heal. Refuses a source whose ``content_hash`` changed since
-        selection. A concat source's continuity spans and their start times
-        come from its row.
+        Rebuilds a missing source NWB.
 
         Raises
         ------
         ValueError
-            If the source's preprocessing recipe applies no temporal filter
-            (:func:`._motion.unfiltered_source_problem`; for a concat, the
-            concatenation's own recipe). ``insert_selection`` already refuses
-            this, but a selection row can reach the table without it (a raw
-            insert via ``allow_direct_insert=True``), so this is re-checked
-            here before any file is read.
+            If the source's ``content_hash`` changed since selection, or its
+            preprocessing recipe applies no temporal filter (re-checked here
+            for rows inserted with ``allow_direct_insert=True``).
         """
         from spyglass.spikesorting.v2._artifacts.readers import (
             read_recording_artifact_valid_times,
@@ -730,16 +685,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     ) -> MotionEstimateComputed:
         """Estimate motion from the resolved files; no DB access.
 
-        Re-resolves the recipe and requires its hash, the SpikeInterface
-        version and the algorithm version to equal the selection's. Reads the
-        source traces. For a single recording, reads the continuity spans and
-        each span's first and last timestamp from the persisted timestamps
-        and computes the statistics spans from the artifact ranges as the
-        sort stage does; for a concat, reads the same spans, timestamps and
-        statistics spans from its row. Builds the estimation clock with the
-        recipe's ``max_gap_s`` and runs ``_motion.estimate_motion_in_spans``
-        once, which silences every frame outside the statistics spans after
-        converting the traces to microvolts.
+        Frames outside the statistics spans are silenced (after conversion
+        to microvolts) before one ``estimate_motion_in_spans`` call. A
+        concat source's spans come from its row.
 
         Raises
         ------
@@ -878,10 +826,9 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     def get_spans_without_evidence(self, key: dict) -> list[dict]:
         """The continuity spans of one estimate that kept no peak.
 
-        The displacement over such a span rests on the estimator's temporal
-        prior only, not on spikes recorded in it; a correction applied there
-        is not evidence-based. Dropped-frame gaps can leave spans too short
-        to hold a peak, so this is reported rather than refused.
+        Displacement over such a span comes only from the estimator's
+        temporal prior. Reported, not refused, since dropped-frame gaps can
+        leave spans too short to hold a peak.
 
         Parameters
         ----------
@@ -939,10 +886,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     ):
         """Summarize and plot one estimate before (or after) applying it.
 
-        Reads the stored arrays (and, for a concatenation, where its members
-        join) and hands them to ``_motion.report``. A continuity span that
-        kept no peak is corrected from the estimator's temporal prior alone;
-        the summary lists such spans and the figure marks them.
+        Spans that kept no peak (corrected from the temporal prior alone)
+        are listed in the summary and marked in the figure.
 
         Parameters
         ----------
@@ -982,13 +927,10 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 
         Notes
         -----
-        Masked-interval and trace-window times inside a continuity span
-        are placed through that span's affine map from frames to its real
-        extent, so they are approximate up to the timestamps' own jitter;
-        span starts and ends are exact.
+        Times inside a continuity span are approximate up to timestamp
+        jitter; span starts and ends are exact.
 
-        Each call opens a new figure: close it (``plt.close(fig)``) when
-        reporting many estimates in a loop.
+        Each call opens a new figure; close it in loops.
         """
         return _motion_report_inputs.motion_estimate_report(
             self,
@@ -1019,8 +961,7 @@ def _live_source_row(
     ------
     ValueError
         If the source artifact's ``content_hash`` differs from
-        ``selected_hash``, the one the estimate was selected on: the saved
-        motion no longer describes those traces.
+        ``selected_hash``.
     """
     table = _SOURCE_TABLES[lineage.kind]
     source_row = (table & lineage.key).fetch1()
@@ -1060,13 +1001,10 @@ class MotionCorrectedRecordingSelection(
 ):
     """One corrected recording to compute: a saved estimate and a recipe.
 
-    ``motion_corrected_recording_id`` is derived from the
-    ``motion_estimate_id`` (which already carries the source, its content,
-    the mask and the estimation recipe), the interpolation recipe name, its
-    resolved configuration's hash, the SpikeInterface version that applies
-    it and the application algorithm version. Changing only the interpolation recipe
-    therefore selects a new corrected recording on the same estimate. Create
-    rows with :meth:`insert_selection`.
+    ``motion_corrected_recording_id`` hashes the ``motion_estimate_id``,
+    the interpolation recipe and its resolved configuration, and the
+    SpikeInterface and algorithm versions. Create rows with
+    :meth:`insert_selection`.
     """
 
     definition = """
@@ -1119,9 +1057,6 @@ class MotionCorrectedRecordingSelection(
     @classmethod
     def resolve_source(cls, key: dict) -> SourceLineage:
         """Return the source and artifact mask the corrected recording is of.
-
-        The lineage of its motion estimate
-        (:meth:`MotionEstimateSelection.resolve_source`).
 
         Parameters
         ----------
@@ -1204,9 +1139,7 @@ class MotionCorrectedFetched(NamedTuple):
 
 
 class MotionCorrectedComputed(NamedTuple):
-    """The ``MotionCorrectedRecording`` row fields
-    :meth:`MotionCorrectedRecording.make_compute` returns (plus the parent
-    NWB name the artifact is registered under)."""
+    """``MotionCorrectedRecording`` row fields plus the parent NWB name."""
 
     analysis_file_name: str
     object_id: str
@@ -1242,30 +1175,14 @@ class MotionCorrectedRecording(
 ):
     """A saved motion estimate applied to the traces it was estimated from.
 
-    The source artifact (a ``Recording`` or ``ConcatenatedRecording``) is
-    silenced outside the estimate's statistics spans, presented on the
-    estimate's estimation clock so every frame looks up the displacement at
-    the time it had during estimation, interpolated with the recipe's
-    explicit ``interpolate_motion`` arguments and silenced again
-    (``_motion.apply_motion_on_estimation_clock``). The corrected, masked,
-    unwhitened traces are written with the source artifact's own timestamps:
-    a single recording's acquisition timestamps, a concatenation's own
-    clock. Motion correction changes positions, not sample times: sample
-    count, order and rate are the source's.
+    The source is silenced outside the statistics spans, interpolated on
+    the estimation clock, and silenced again. The corrected, masked,
+    unwhitened traces keep the source's timestamps, sample count and rate.
 
-    ``channel_ids`` are the output channels in order; each is the
-    ``electrode_id`` the persisted series references. ``remove_channels``
-    records the dropped source channels in ``removed_channel_ids``.
-    ``channel_locations`` are the UNMOVED source positions of the kept
-    channels (SpikeInterface copies the parent's metadata). The spans are
-    copies of the estimate's: statistics come from the same valid samples.
-
-    Tri-part: ``make_fetch`` resolves every row and the source path (its
-    self-heal may rebuild the source), ``make_compute`` reads only files and
-    writes the staged artifact outside the DB transaction, ``make_insert``
-    registers it. :meth:`get_recording` rebuilds a missing file by
-    reapplying the SAVED motion (it never estimates again) and installs it
-    only when its content hash matches.
+    ``channel_locations`` are the unmoved source positions of the kept
+    channels. :meth:`get_recording` rebuilds a missing file from the saved
+    motion (never re-estimating) and installs it only if its content hash
+    matches.
     """
 
     definition = """
@@ -1286,20 +1203,18 @@ class MotionCorrectedRecording(
     continuity_spans: longblob         # (n, 2) int64 copy of the estimate's continuity spans
     """
 
-    # ``_parallel_make = True`` + the tri-part ``make_fetch`` /
-    # ``make_compute`` / ``make_insert`` split mirror ``Recording`` so the
-    # long interpolation and NWB write run OUTSIDE the DB transaction (and so
-    # multiple sources can be corrected in parallel). The inherited
-    # ``AutoPopulate.make`` generator is left in place so DataJoint routes
-    # through tri-part dispatch.
     _parallel_make = True
 
     def make_fetch(self, key) -> MotionCorrectedFetched:
         """Resolve the selection, recipe, saved estimate and source artifact.
 
-        Rebuilds a missing source NWB through its own verified self-heal and
-        refuses a source whose ``content_hash`` changed since the estimate
-        was selected.
+        Rebuilds a missing source NWB.
+
+        Raises
+        ------
+        ValueError
+            If the source's ``content_hash`` changed since the estimate was
+            selected.
         """
         from spyglass.spikesorting.v2._storage.rebuilds import (
             ensure_artifact_file,
@@ -1360,23 +1275,14 @@ class MotionCorrectedRecording(
     ) -> MotionCorrectedComputed:
         """Apply the saved motion and write the staged artifact.
 
-        Reads only the inputs ``make_fetch`` resolved. The artifact file is
-        created through ``write_nwb_artifact`` (as every v2 trace writer
-        does), whose staging is the one DB access left here (see
-        :mod:`._storage.nwb`), and registered only by :meth:`make_insert`. Its
-        provenance scratch describes the file on its own: the correction's
-        ids, recipe and source, the statistics spans, each continuity span
-        with its real start and end times and its start on the estimation
-        clock, and, for a concatenation, the concatenation's member back-map
-        copied from the source artifact.
+        Uses only ``make_fetch`` inputs; the one DB access is staging the
+        output file.
 
         Parameters
         ----------
         allow_spikeinterface_version_change : bool, optional
-            Skip only the SpikeInterface-version staleness check. Set by
-            :meth:`_rebuild_nwb_artifact`, which installs the result only when
-            its content hash equals the stored one; a new compute keeps the
-            check (default ``False``).
+            Skip the SpikeInterface-version staleness check. Used by
+            :meth:`_rebuild_nwb_artifact`, which verifies the content hash.
 
         Raises
         ------
@@ -1501,9 +1407,8 @@ class MotionCorrectedRecording(
     def make_insert(self, key, *computed) -> None:
         """Register the staged artifact and insert the row atomically.
 
-        Removing a failed attempt's staged file is
-        ``StagedOutputCleanupMixin``'s job during ``populate()``; a direct
-        call leaves that to its caller.
+        A direct call (outside ``populate``) must remove a failed attempt's
+        staged file itself.
         """
         from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 
@@ -1522,9 +1427,8 @@ class MotionCorrectedRecording(
     def get_recording(self, key: dict):
         """Return the corrected recording, rebuilding a missing file first.
 
-        The same self-heal contract as ``Recording.get_recording``: the row
-        is never deleted, and a rebuild is installed only when its content
-        hash matches the stored one.
+        As ``Recording.get_recording``: never deletes the row; a rebuild is
+        installed only if its content hash matches.
 
         Parameters
         ----------
@@ -1545,13 +1449,10 @@ class MotionCorrectedRecording(
         )
 
     def _rebuild_nwb_artifact(self, key) -> None:
-        """Rebuild a missing corrected artifact from the SAVED motion.
+        """Rebuild a missing corrected artifact from the saved motion.
 
-        The rebuild is
-        :func:`._storage.rebuilds.rebuild_motion_corrected_artifact`; it calls
-        ``make_fetch`` and ``make_compute`` on this instance.
-        :func:`._storage.rebuilds.ensure_artifact_file` calls this method on
-        every trace-artifact table.
+        Kept on the class because ``ensure_artifact_file`` calls it on every
+        trace-artifact table.
         """
         from spyglass.spikesorting.v2._storage import (
             rebuilds as _recording_rebuilds,

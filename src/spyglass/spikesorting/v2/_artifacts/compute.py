@@ -1,19 +1,8 @@
 """DB-free worker kernels for the chunked artifact scan.
 
-These two functions are the pure-compute core of artifact detection --
-``_init_artifact_worker`` (per-worker initializer) and
-``_compute_artifact_chunk`` (per-chunk detector). They depend ONLY on
-``numpy`` and ``spikeinterface``; they touch no DataJoint schema, table, or
-``spyglass.common`` import.
-
-Why they are not in ``artifact.py``: ``scan_artifact_frames`` runs them via
-SpikeInterface's ``ChunkRecordingExecutor``, whose ``n_jobs>1`` pool spawns
-workers (``spawn`` on macOS) that re-import the module DEFINING the worker
-function. Importing a schema module such as ``artifact.py`` opens a DB
-connection, so keeping the kernels here lets ``n_jobs>1`` detection run on
-workers (or DB-isolated HPC nodes) that cannot reach the database. Do not
-import helpers from a schema module here. ``artifact.py`` re-exports both
-names.
+Spawned ``n_jobs>1`` workers re-import the module defining the worker
+function, and importing a schema module opens a DB connection. Keep this
+module free of DataJoint and ``spyglass.common`` imports.
 """
 
 from __future__ import annotations
@@ -29,13 +18,7 @@ def _init_artifact_worker(
 ):
     """Per-worker initializer for the chunked artifact scan.
 
-    On a multi-process pool the ``recording`` arrives as a ``to_dict()`` blob
-    and is re-hydrated with ``si.load`` (the SI 0.104+ name for the former
-    ``load_extractor``); on the single-process / thread path the live
-    recording object is passed straight through. ``n_required`` is constant
-    across chunks, so it is
-    resolved once here and cached in the worker context rather than
-    recomputed per chunk.
+    Resolves ``n_required`` once per worker.
 
     Parameters
     ----------
@@ -71,14 +54,9 @@ def _init_artifact_worker(
 def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     """Flag artifact frame indices within a ``[start_frame, end_frame)`` chunk.
 
-    Applies the per-frame detection math to one chunk: read traces already in
-    µV, then OR-combine the amplitude and across-channel z-score detectors.
-    The across-channel (``axis=1``) z-score uses only the chunk row's own
-    columns, so it is identical regardless of where the chunk boundaries fall --
-    this is what makes the chunked output frame-identical to the in-memory one.
-    Peak working set per chunk ≈ ``4 × (end_frame - start_frame) × n_channels ×
-    4 bytes`` (µV float32 slice + abs + z-score intermediate),
-    independent of the full recording length.
+    OR-combines the amplitude and across-channel z-score detectors on µV
+    traces. The z-score uses only each frame's own channels, so chunk
+    boundaries do not change the result.
 
     Parameters
     ----------
@@ -94,27 +72,17 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     Returns
     -------
     np.ndarray
-        Contiguous flagged-frame RUNS as ascending ``(start_inclusive,
-        end_inclusive)`` GLOBAL frame pairs, shape ``(n_runs, 2)``. Returning
-        runs rather than one index per flagged frame bounds both this return and
-        the executor's collected result to the number of artifact EVENTS, not
-        the number of artifact SAMPLES -- a fully-flagged chunk is one run, not
-        ``chunk_len`` ids. ``detect_artifacts`` joins runs across chunk seams
-        and splits them at wall-clock gaps, so the chunk boundaries (which can
-        fall mid-run) do not change the result.
+        Contiguous flagged-frame runs as ascending ``(start_inclusive,
+        end_inclusive)`` global frame pairs, shape ``(n_runs, 2)``. Runs keep
+        the result sized by events, not samples; ``detect_artifacts`` joins
+        runs across chunk seams.
     """
     recording = worker_ctx["recording"]
     zscore_threshold = worker_ctx["zscore_threshold"]
     amplitude_threshold_uv = worker_ctx["amplitude_threshold_uv"]
     n_required = worker_ctx["n_required"]
 
-    # ``return_in_uV=True`` lets SpikeInterface apply the recording's stored
-    # per-channel gain AND offset, returning microvolts directly. This is the
-    # threshold's unit, and it avoids re-implementing the count->µV conversion
-    # (a gain-only scaling would silently ignore any non-zero channel offset).
-    # SpikeInterface's scaled read already returns float32, so ``copy=False``
-    # skips a second chunk-sized copy; ``traces_uv`` is only read, never
-    # written, below.
+    # SI applies gain and offset; the scaled read is already float32.
     traces_uv = recording.get_traces(
         segment_index=segment_index,
         start_frame=start_frame,
@@ -122,13 +90,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         return_in_uV=True,
     ).astype(np.float32, copy=False)
 
-    # Fail loudly on a non-finite chunk instead of silently reporting "no
-    # artifacts": a NaN (or Inf) sample compares False against every
-    # threshold below (``np.abs(nan) > x`` is False, and a NaN channel
-    # poisons that channel's mean/std for the z-score too), so a corrupted
-    # chunk -- one bad sample, or a whole all-NaN chunk -- would otherwise
-    # flag nothing and vanish into an empty interval list. ``get_traces``
-    # already read every sample above, so this scan is nearly free.
+    # NaN compares False against every threshold, so it would flag nothing.
     non_finite = ~np.isfinite(traces_uv)
     if non_finite.any():
         channel_ids = recording.get_channel_ids()
@@ -153,10 +115,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         zscores = np.abs((traces_uv - ch_mean) / ch_std)
         channel_hit |= zscores > zscore_threshold
 
-    # Collapse the per-frame flagged mask to contiguous run edges via a padded
-    # boolean diff: rising edge (+1) = inclusive run start, falling edge (-1) =
-    # one past the inclusive run end. This keeps the worker's return O(n_runs)
-    # rather than O(n_flagged) for the whole chunk.
+    # Padded diff: +1 is a run start, -1 is one past a run end.
     flagged = channel_hit.sum(axis=1) >= n_required
     edges = np.diff(np.concatenate(([False], flagged, [False])).astype(np.int8))
     starts = np.flatnonzero(edges == 1)

@@ -1,12 +1,8 @@
 """Parent-state child-curation composition for CurationV2.
 
-A child curation edits the PARENT curation's committed state: its unit rows,
-spike trains, labels, and merge namespace all come from the parent
-``CurationV2`` row rather than the raw ``Sorting.Unit`` rows. These tests pin
-that contract against a parent that already applied a merge (so its unit set
-contains a fresh ``max+1`` merged id that is NOT in ``Sorting.Unit``) -- the
-case where sourcing the child from the raw ``Sorting.Unit`` rows would silently
-resurrect the absorbed contributors.
+A child's units, spike trains, labels and merge namespace come from the parent
+curation, not ``Sorting.Unit``. Tested on a parent with an applied merge, whose
+fresh ``max+1`` id is absent from ``Sorting.Unit``.
 """
 
 from __future__ import annotations
@@ -21,12 +17,10 @@ from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 def merged_parent(planted_three_unit_sort):
     """A committed applied-merge parent curation over three planted units.
 
-    Merges raw units ``[0, 1]`` into a fresh id ``3`` (``max(0,1,2)+1``),
-    leaving the committed parent unit set ``{2, 3}`` -- unit ``3`` is the
-    merged id and is absent from ``Sorting.Unit``. Yields a dict with the
-    sort key, the merged-parent curation key, the raw unit ids, the parent
-    unit set, and the fresh merged id. Clears curations around itself so the
-    persistent test DB does not leak rows across runs.
+    Merges raw units ``[0, 1]`` into fresh id ``3``, leaving parent units
+    ``{2, 3}``. Yields a dict with the sort key, the parent curation key, the
+    raw unit ids, the parent unit set, and the merged id. Clears curations
+    before and after.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -96,9 +90,8 @@ def test_child_curation_composes_from_merged_parent(merged_parent):
     }
     assert (merged_id, "mua") in child_labels, child_labels
 
-    # A label-only child of a merged parent is COMMITTED, not a preview -- even
-    # though its raw MergeGroup carries multi-contributor provenance inherited
-    # from the parent's merge (the own-namespace view must not misread that).
+    # A label-only child of a merged parent is committed, not a preview, even
+    # though its raw MergeGroup carries the parent's merge provenance.
     assert CurationV2.is_committed_curation(child)
     assert not CurationV2.has_unapplied_proposed_merges(child)
 
@@ -117,9 +110,7 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
     parent = merged_parent["parent"]
     merged_id = merged_parent["merged_id"]  # 3
 
-    # Merge the two PARENT units {2, 3} -- where 3 is the fresh merged id from
-    # the parent, absent from Sorting.Unit. The new merged id is
-    # max(parent units) + 1 = 4.
+    # Merge parent units {2, 3}; 3 is absent from Sorting.Unit.
     child_merged_id = max(merged_parent["parent_units"]) + 1  # 4
     child = CurationV2.insert_curation(
         sort_pk,
@@ -134,8 +125,8 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
     )
     assert child_units == {child_merged_id}, child_units
 
-    # Raw-contributor provenance: child unit 4 expands through the parent's
-    # MergeGroup to the ORIGINAL raw units -- raw(2)={2} U raw(3)={0,1}.
+    # Child unit 4 expands through the parent's MergeGroup to raw units:
+    # raw(2)={2} U raw(3)={0,1}.
     raw_contribs = {
         int(r["contributor_unit_id"])
         for r in (
@@ -168,9 +159,8 @@ def test_child_merge_groups_are_parent_namespace(merged_parent):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_parent_operation_provenance_records_parent_units(merged_parent):
-    """The child merge operation provenance (ParentMergeGroup) records PARENT
-    unit ids -- including the fresh merged parent id that is not in
-    Sorting.Unit -- stored separately from the raw-contributor provenance.
+    """ParentMergeGroup records parent unit ids (including a merged id absent
+    from Sorting.Unit), separately from raw-contributor provenance.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -195,9 +185,8 @@ def test_parent_operation_provenance_records_parent_units(merged_parent):
     }
     assert parent_op == {2, merged_id}, parent_op
 
-    # The fresh merged parent id 3 is genuinely absent from Sorting.Unit, so it
-    # could not be FK'd there -- the part stores it as a validated int, not an
-    # FK to the raw sort.
+    # Parent id 3 is absent from Sorting.Unit, so it is a validated int, not
+    # an FK.
     raw_ids = set(int(u) for u in (Sorting.Unit & sort_pk).fetch("unit_id"))
     assert merged_id not in raw_ids
 
@@ -207,12 +196,10 @@ def test_parent_operation_provenance_records_parent_units(merged_parent):
 def test_parent_merge_group_insert_rejects_invalid_provenance(merged_parent):
     """A direct ParentMergeGroup insert cannot forge invalid provenance.
 
-    ``parent_unit_id`` is intentionally not a DataJoint FK (a merged parent id
-    is absent from ``Sorting.Unit``), so ``insert`` enforces the two invariants
-    ``get_unit_contributor_groups`` relies on: a ROOT curation gets no rows, and a child
-    row's ``parent_unit_id`` must be a unit in the immediate parent. Without the
-    guard a forged row could misclassify a committed curation as a preview or
-    break merged-sorting reconstruction.
+    ``parent_unit_id`` is not an FK, so ``insert`` enforces:
+
+    - a root curation gets no rows;
+    - a child row's ``parent_unit_id`` is a unit of the immediate parent.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -229,9 +216,8 @@ def test_parent_merge_group_insert_rejects_invalid_provenance(merged_parent):
             {**parent, "unit_id": merged_id, "parent_unit_id": merged_id}
         )
 
-    # A child of the merged parent: its parent-namespace rows must reference
-    # parent units {2, 3} only. Raw unit 0 was absorbed into the merge and is
-    # NOT in the parent set -- exactly the resurrection the design forbids.
+    # A child of the merged parent may reference only parent units {2, 3};
+    # raw unit 0 was absorbed into the merge.
     child = CurationV2.insert_curation(
         sort_pk,
         labels={merged_id: ["mua"]},
@@ -251,14 +237,11 @@ def test_parent_merge_group_insert_rejects_invalid_provenance(merged_parent):
 def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
     merged_parent,
 ):
-    """A PREVIEW child of a merged parent reads/applies its proposed merge in
-    the PARENT namespace (via ParentMergeGroup), not the raw MergeGroup.
+    """A preview child of a merged parent reads and applies its proposed merge
+    in the parent namespace (ParentMergeGroup), not the raw MergeGroup.
 
-    This pins the own-namespace path that `get_unit_contributor_groups` /
-    `has_unapplied_proposed_merges` / `get_merged_sorting` take for a child:
-    proposing to further-merge the parent's merged unit id is a valid draft, is
-    reported as a preview (not silently committed), and the lazy merge collapses
-    the parent units over the child's stored trains.
+    Merging the parent's merged unit is a valid draft, reported as a preview,
+    and the lazy merge collapses the parent units over the child's trains.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -276,9 +259,8 @@ def test_preview_child_of_merged_parent_lazy_merges_in_parent_namespace(
         apply_merge=False,
     )
 
-    # Preview keeps every parent unit; the own-namespace merge view is the
-    # PARENT namespace (ParentMergeGroup), so [2, 3] reads as a real proposed
-    # merge -- NOT misread from the raw MergeGroup (where unit 3 -> raw [0,1]).
+    # Preview keeps every parent unit; [2, 3] reads as a proposed merge in the
+    # parent namespace, not the raw MergeGroup (where 3 -> raw [0, 1]).
     assert set(
         int(u) for u in (CurationV2.Unit & preview).fetch("unit_id")
     ) == {2, merged_id}
@@ -446,13 +428,10 @@ def test_child_labels_inherit_and_merge(planted_three_unit_sort):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_insert_curation_rejects_preview_parent(planted_two_unit_sort):
-    """A child cannot branch from a PREVIEW parent (anti-laundering).
+    """A child cannot branch from a preview parent.
 
-    A preview (apply_merge=False with an unapplied proposed merge) is a draft;
-    building a child on it would launder the draft into a committed-looking
-    curation and inherit the unapplied merge as raw provenance. insert_curation
-    rejects a preview parent -- commit or discard the draft first. A committed
-    parent (root / label-only / applied-merge) is unaffected.
+    A preview is a draft; a child would make it look committed and inherit the
+    unapplied merge as provenance. Committed parents still accept children.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -496,12 +475,9 @@ def test_insert_curation_retries_on_curation_id_collision(
 ):
     """A concurrent insert claiming the allocated curation_id is recovered.
 
-    The child curation_id is allocated as ``max+1`` outside the insert
-    transaction (and the NWB is staged before it), so a concurrent child can
-    take the same id. Simulate that by forcing ``_next_curation_id`` to first
-    return an id that is already occupied (collision -> duplicate-key error
-    after staging), then a fresh one: ``insert_curation`` must retry and
-    succeed rather than crash.
+    The ``max+1`` id is allocated outside the insert transaction. Forcing
+    ``_next_curation_id`` to return a taken id first, ``insert_curation`` must
+    retry with a fresh id.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -546,13 +522,8 @@ def test_insert_curation_retries_on_curation_id_collision(
 def test_insert_curation_retry_reuses_concurrent_winner(
     planted_three_unit_sort, monkeypatch
 ):
-    """Under a curation_id collision, if a concurrent insert created the SAME
-    logical child, the retry RETURNS it (reuse_existing) instead of staging a
-    duplicate child under a fresh id.
-
-    Simulates the race: the pre-loop reuse check misses (winner not visible
-    yet), the id allocation collides with the winner's id, and the retry's
-    reuse re-check then finds the winner.
+    """Under a curation_id collision with the same logical child, the retry
+    returns that child (reuse_existing) instead of inserting a duplicate.
     """
     from spyglass.spikesorting.v2._curation import insert as _curation_insert
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -611,11 +582,9 @@ def test_insert_curation_retry_reuses_concurrent_winner(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_delete_refuses_to_orphan_descendant(planted_three_unit_sort):
-    """A direct ``CurationV2.delete`` REFUSES to remove a parent while a
-    descendant still references it via ``parent_curation_id`` (which the schema
-    cannot self-FK), naming the offending (parent, child) pair -- so a child's
-    lineage pointer is never silently orphaned. A leaf curation, or a parent
-    whose descendant has been removed, is not refused.
+    """``CurationV2.delete`` refuses to remove a parent while a descendant
+    references it via ``parent_curation_id`` (not a self-FK), naming the
+    (parent, child) pair. Leaves and parents without descendants are allowed.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -638,15 +607,13 @@ def test_curation_delete_refuses_to_orphan_descendant(planted_three_unit_sort):
         assert CurationV2 & root
         assert CurationV2 & child
 
-        # A leaf child (no descendants of its own) is NOT refused by the guard
-        # (it raises no descendant-orphan error). Physical removal of a
-        # merge-registered curation goes through the merge-aware
-        # clear_curations_for; the guard only governs the orphan refusal.
+        # A leaf child is not refused. Removal itself goes through the
+        # merge-aware clear_curations_for.
         (CurationV2 & child).delete(safemode=False)
         clear_curations_for(child)
         assert not (CurationV2 & child)
 
-        # With the descendant gone, the parent is no longer refused either.
+        # With the descendant gone, the parent is not refused.
         (CurationV2 & root).delete(safemode=False)
     finally:
         clear_curations_for(sort_pk)
@@ -655,9 +622,8 @@ def test_curation_delete_refuses_to_orphan_descendant(planted_three_unit_sort):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_audit_orphaned_lineage_flags_bypass_orphan(planted_three_unit_sort):
-    """audit_orphaned_lineage is empty for intact lineage and flags a child whose
-    parent was removed by an administrative bypass (super_delete) -- the detector
-    for the lineage boundary documented on CurationV2.delete.
+    """audit_orphaned_lineage is empty for intact lineage and flags a child
+    whose parent was removed by super_delete.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
 

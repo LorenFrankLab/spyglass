@@ -1,17 +1,7 @@
 """Pure steps of the motion tables' ``make_compute``.
 
-:func:`stale_estimate_selection_fields` and
-:func:`stale_corrected_selection_fields` say what changed since a
-``MotionEstimateSelection`` or ``MotionCorrectedRecordingSelection`` row
-was selected. :func:`estimation_spans` gives the continuity and statistics
-spans a source is estimated in. :func:`assert_source_matches_estimate` and
-:func:`assert_geometry_matches_estimate` refuse source traces a saved
-estimate does not describe, and :func:`motion_correction_provenance_tables`
-builds the provenance a corrected recording's NWB carries.
-
-The functions read only their arguments and the source NWB file; they
-never query the database or stage a file. SpikeInterface, ``_motion`` and
-the NWB provenance builders are imported inside the functions.
+They read only their arguments and the source NWB file; no database or
+staging. Heavy dependencies are imported inside the functions.
 """
 
 from __future__ import annotations

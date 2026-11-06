@@ -8,19 +8,10 @@ PREPROCESSING_SCHEMA_VERSION = 4
 
 
 class BandpassFilterParams(BaseModel):
-    """Bandpass filter cutoffs applied BEFORE referencing.
+    """Bandpass filter cutoffs, applied before referencing.
 
-    The runtime bandpass-filters first, then references -- the
-    signal-processing-preferred order. The order is NOT commutative on the
-    global-median common-reference branch (the per-sample median is
-    non-linear), so reference-then-filter would differ numerically there; on
-    the ``specific`` / ``none`` paths the steps are linear and commute, so
-    output is identical either way.
-
-    Defaults ``freq_min=300.0``, ``freq_max=6000.0`` are the Frank-lab
-    production bandpass, exposed as schema-level defaults so a user
-    constructing ``PreprocessingParamsSchema()`` without arguments gets the
-    production preset implicitly.
+    Order matters on the global-median branch, where the median is
+    non-linear. Defaults are the Frank-lab production bandpass.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -40,12 +31,9 @@ class BandpassFilterParams(BaseModel):
 class PhaseShiftParams(BaseModel):
     """ADC sample-shift (phase-shift) correction options.
 
-    Compensates the per-channel time offsets introduced by multiplexed
-    ADCs (e.g. Neuropixels). Applied FIRST, before bandpass filtering. Only
-    meaningful when the recording carries an ``inter_sample_shift``
-    property; the runtime skips it (with a log) otherwise, so enabling it
-    on non-multiplexed acquisition is a safe no-op. Off by default
-    (``PreprocessingParamsSchema.phase_shift = None``).
+    Corrects per-channel offsets of multiplexed ADCs (e.g. Neuropixels).
+    Applied first. A logged no-op when the recording has no
+    ``inter_sample_shift`` property.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -55,18 +43,9 @@ class PhaseShiftParams(BaseModel):
 class CommonReferenceParams(BaseModel):
     """Common-reference re-referencing options.
 
-    The reference mode is selected from the ``SortGroupV2.reference_mode``
-    column in ``apply_spatial_preprocessing`` (single for
-    ``"specific"`` -- subtract the named ``reference_electrode_id`` --
-    global for ``"global_median"``, none for ``"none"``). A free-standing
-    ``reference`` field is intentionally not exposed because that dispatch
-    fully determines the reference, so a params-blob field would only be a
-    silent runtime override; removing it keeps the schema honest about what
-    the runtime honors.
-
-    ``operator`` IS used on the global-median branch and stays, exposed as a
-    user knob. The default ``"median"`` is the production behavior; passing
-    ``"average"`` selects mean common-average referencing instead.
+    The reference mode comes from ``SortGroupV2.reference_mode``, so there is
+    no ``reference`` field. ``operator`` applies on the global-median branch;
+    ``"average"`` selects common-average referencing.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -76,32 +55,19 @@ class CommonReferenceParams(BaseModel):
 class PreprocessingParamsSchema(BaseModel):
     """Validated schema for the preprocessing parameter blob.
 
-    The recording stage owns phase-shift + bandpass filter + bad-channel
-    handling + common reference, materialized to the ``Recording``
-    NWB-resident artifact (the ``ElectricalSeries`` inside the
-    ``AnalysisNwbfile``). Whitening is deliberately NOT a recording-stage
-    parameter: motion correction must never run on whitened data, and each
-    consumer whitens exactly once under its own tracked row -- MS4/MS5 via
-    ``SorterParameters.params["whiten"]`` (the external float64 pin in
-    ``run_si_sorter``), the metric analyzer via
-    ``AnalyzerWaveformParameters.params["whiten"]``. A ``whiten`` key here is
-    rejected (``extra="forbid"``) rather than accepted as an inert field.
+    Steps run in order: phase shift, bandpass, bad-channel handling, common
+    reference. Whitening is not a field: motion correction must not see
+    whitened data, so the sorter and metric analyzer each whiten under their
+    own tracked row.
 
-    The runtime applies the steps in the order phase-shift -> bandpass
-    filter -> bad-channel handling -> common reference (see
-    ``apply_temporal_preprocessing`` / ``apply_spatial_preprocessing``).
-
-    ``min_segment_length`` drops sub-second slivers from the intersected
-    sort interval before the sorter sees them. ``bandpass_filter`` is
-    optional (``None`` = skip filtering, so the ``"no_filter"`` preset is a
-    real disable instead of a wide-band pass). ``phase_shift`` is the ADC
-    sample-shift correction for multiplexed acquisition (``None`` = off), and
-    ``bad_channel_handling`` (``"remove"`` | ``"interpolate"``, default
-    ``"remove"``) controls how curated ``Electrode.bad_channel`` flags
-    are handled at materialization. Under ``"remove"`` the flagged channels
-    stay excluded, as they already are at sort-group creation. Detection of
-    bad channels is a separate concern handled by ``suggest_bad_channels``
-    (it writes the flags this field consumes), not a preprocessing parameter.
+    - ``phase_shift``: ``None`` is off.
+    - ``bandpass_filter``: ``None`` skips filtering (the ``"no_filter"``
+      preset).
+    - ``min_segment_length``: drop sort-interval slivers shorter than this (s).
+    - ``bad_channel_handling``: ``"remove"`` keeps curated
+      ``Electrode.bad_channel`` flags excluded; ``"interpolate"`` re-includes
+      interior flagged channels and fills them from good neighbours. Flags
+      come from ``suggest_bad_channels`` or manual curation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -109,24 +75,11 @@ class PreprocessingParamsSchema(BaseModel):
         PREPROCESSING_SCHEMA_VERSION
     )
     phase_shift: PhaseShiftParams | None = Field(default=None)
-    # phase_shift defaults to None: off in the franklab default and only a
-    # no-op-until-present step for multiplexed-ADC (Neuropixels) recordings.
     bandpass_filter: BandpassFilterParams | None = Field(
         default_factory=BandpassFilterParams
     )
-    # bandpass_filter=None disables filtering entirely (the "no_filter"
-    # preset); the default ships the production bandpass.
     common_reference: CommonReferenceParams = Field(
         default_factory=CommonReferenceParams
     )
     min_segment_length: float = Field(default=1.0, ge=0.0)
-    # Drop disjoint-interval slivers shorter than this many seconds
-    # before the sorter sees them; passed through to
-    # ``sort_interval.intersect(..., min_length=...)``.
     bad_channel_handling: Literal["remove", "interpolate"] = "remove"
-    # How curated ``Electrode.bad_channel='True'`` flags are handled at
-    # materialization. ``"remove"`` (default) keeps them out: the flagged
-    # channels are already excluded at sort-group creation. ``"interpolate"`` re-includes the group's pitch-adjacent interior
-    # flagged channels and fills them from good neighbours so geometry-aware
-    # sorters see a complete probe. Detection is NOT done here -- the flags come
-    # from ``suggest_bad_channels`` or manual curation.

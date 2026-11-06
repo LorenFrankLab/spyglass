@@ -12,8 +12,8 @@ use seed 0), measured on the interior channels (the two contacts at each end
 extrapolate): with the planted motion applied, the RMS difference from the
 static twin was at most 0.065 uV for whole-pitch rigid steps (single span and
 across a gap) and at most 0.30 x the uncorrected difference for the +/-25 um
-zigzag. A no-motion estimate reproduces the source to the kriging kernel's
-1e-6 ridge (``preprocessing/preprocessing_tools.py:67``).
+zigzag. A no-motion estimate reproduces the source to SpikeInterface's
+kriging kernel 1e-6 ridge.
 """
 
 from __future__ import annotations

@@ -1,11 +1,8 @@
 """Tests for the recording-stage service helpers.
 
-Covers restriction / truncation tolerance and save-expectation accounting
-(``_recording_restriction``), the lazy regular-grid timestamp path and its
-parity with the eager ``get_times()`` path, the raw-ElectricalSeries
-timestamp-mode detection (``_recording_nwb``), and the preprocessing
-filtering-description report (``_recording_preprocessing``). All pure /
-NWB-IO -- no DB.
+Restriction and save-expectation accounting, lazy timestamps, raw
+ElectricalSeries timestamp-mode detection and the preprocessing report.
+No DB.
 """
 
 from __future__ import annotations
@@ -196,14 +193,12 @@ def test_save_expectation_sums_disjoint_intended_intervals():
 
 
 def test_save_expectation_drops_sub_min_segment_slivers():
-    """A requested epoch shorter than min_segment_length is excluded from the
-    request total (the intersect already dropped it from the intended set), so
-    it is not flagged as over-request -- it was intentionally dropped."""
+    """An epoch shorter than min_segment_length is excluded from the request
+    total, so it is not flagged as over-request."""
     from spyglass.spikesorting.v2._recording.restriction import (
         compute_recording_save_expectation,
     )
 
-    # The intersect already dropped the 0.05 s sliver from the intended set.
     intended = np.array([[0.0, 1.0]])
     sort = np.array(
         [[0.0, 1.0], [2.0, 2.05]]
@@ -217,9 +212,8 @@ def test_save_expectation_drops_sub_min_segment_slivers():
 
 
 def test_save_expectation_flags_request_past_raw_coverage():
-    """A sort interval running past the raw recording is clipped to raw in the
-    intended set; over_request is the dropped past-coverage span (the warning
-    trigger)."""
+    """A sort interval past the raw recording is clipped to raw;
+    over_request is the dropped span."""
     from spyglass.spikesorting.v2._recording.restriction import (
         compute_recording_save_expectation,
     )
@@ -235,8 +229,8 @@ def test_save_expectation_flags_request_past_raw_coverage():
 
 
 def test_regular_interval_consolidation_matches_timestamp_search():
-    """The lazy regular-grid path must match the established searchsorted path
-    without materializing the full timestamp vector."""
+    """The lazy regular-grid path matches the searchsorted path without
+    materializing the full timestamp vector."""
     from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
     )
@@ -262,13 +256,8 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
     """Boundaries placed exactly on sample lines must not lose the edge sample
     to float round-off.
 
-    At ``fs=30000`` / ``t_start=17.0`` the products ``(t0 + k/fs - t0) * fs``
-    drift off the integer ``k`` by ~1e-11 (e.g. ``4.000000000026`` and
-    ``8.999999999979``). Without snapping, ``ceil`` pushes the start sample
-    forward and ``floor`` pulls the stop sample back, dropping the first and
-    last samples relative to the searchsorted timestamp path. The snapped
-    rate-based path must agree with the full-vector searchsorted reference
-    exactly.
+    At ``fs=30000`` / ``t_start=17.0``, ``(t0 + k/fs - t0) * fs`` misses
+    ``k`` by ~1e-11, so unsnapped ``ceil``/``floor`` drop the edge samples.
     """
     from spyglass.spikesorting.v2._recording.restriction import (
         _consolidate_regular_intervals,
@@ -293,8 +282,7 @@ def test_regular_interval_consolidation_snaps_grid_boundaries():
     )
 
     np.testing.assert_array_equal(out, expected)
-    # Pin the intended frames so a future regression to the searchsorted path
-    # can't silently move both sides together.
+    # Pin the frames so both paths cannot move together.
     np.testing.assert_array_equal(out, np.array([[4, 10]]))
 
 
@@ -318,9 +306,8 @@ def test_lazy_timestamp_override_indexes_and_slices_regular_grid():
 
 
 def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
-    """Lazy timestamp overrides intentionally support only the current streaming
-    consumers' int/slice indexing; unsupported indexing should fail explicitly.
-    """
+    """Lazy timestamp overrides support only int/slice indexing; other
+    indexing raises."""
     from spyglass.spikesorting.v2._recording.restriction import (
         _lazy_timestamp_override,
     )
@@ -393,17 +380,10 @@ def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):
 
 
 def test_raw_eseries_path_resolves_by_object_id(tmp_path):
-    """Raw-source resolution pins to the series matching ``raw_object_id`` --
-    the exact object the common ``Raw`` row points at -- NOT the first
-    acquisition ElectricalSeries.
+    """Raw-source resolution uses the series matching ``raw_object_id`` (the
+    ``Raw`` row's object), not the first acquisition ElectricalSeries.
 
-    An NWB can hold more than one acquisition ``ElectricalSeries`` (a repacked
-    or copied file can also reorder acquisition iteration). The previous
-    resolver returned whichever series came first, so v2 could silently
-    preprocess and sort a different signal than the ``RecordingSelection``
-    lineage implies. This pins resolution to the object id and asserts the
-    matched series' OWN path and timestamp mode are returned: the rate-based
-    first series vs. the explicit-timestamp second series.
+    Returns that series' own path and timestamp mode.
     """
     from spyglass.utils.nwb_helper_fn import (
         raw_eseries_path_and_timestamp_mode,
@@ -426,8 +406,7 @@ def test_raw_eseries_path_resolves_by_object_id(tmp_path):
         False,
     )
 
-    # An object id absent from the file's acquisition series fails loudly
-    # rather than silently falling back to the first series.
+    # An absent object id raises instead of falling back to the first series.
     with pytest.raises(ValueError, match="object_id"):
         raw_eseries_path_and_timestamp_mode(str(path), "no-such-object-id")
 
@@ -436,12 +415,8 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     """The lazy regular-grid path reproduces the eager ``get_times()`` path
     byte-for-byte on a real SI recording whose ``t_start`` is non-zero.
 
-    Pins SpikeInterface's affine timestamp origin (``get_start_time`` /
-    ``get_times``): a future SI change that shifted the regular-grid origin --
-    or a recording read that dropped ``starting_time`` -- would diverge here
-    rather than silently persisting wall-clock timestamps that start at the
-    wrong offset (the smoke fixtures all start at 0.0, so nothing else catches
-    it). Two disjoint intervals also exercise the multi-interval concat path.
+    Pins SpikeInterface's timestamp origin; the smoke fixtures all start at
+    0.0. Two disjoint intervals cover the multi-interval path.
     """
     from spikeinterface.core import NumpyRecording
 
@@ -484,8 +459,8 @@ def test_lazy_regular_path_matches_eager_on_nonzero_start_recording():
     lazy_override = _lazy_timestamp_override(
         lazy_frames, sampling_frequency=fs, t_start=t_start
     )
-    # Materialize via the slice path the NWB chunk iterator actually uses, and
-    # require byte-identity (the persisted timestamps feed the cache hash).
+    # Slice path the NWB chunk iterator uses; byte-identical because the
+    # timestamps feed the cache hash.
     np.testing.assert_array_equal(lazy_override[:], eager_override)
     # First/last reads are the truncation-guard accessors.
     assert float(lazy_override[0]) == float(eager_override[0])
@@ -512,14 +487,12 @@ def test_filtering_description_lists_only_steps_that_ran():
     assert filtering_description(None, "global_median", no_ps) == (
         "common reference (global_median)"
     )
-    # Bandpass first, then reference (the non-commutative apply order).
+    # Bandpass first, then reference.
     assert filtering_description(bp, "global_median", no_ps) == (
         "bandpass filter 300-6000 Hz; common reference (global_median)"
     )
 
-    # Phase-shift is listed ONLY when the report says it ran, and prepended
-    # first (the apply order). A requested-but-skipped phase-shift (report
-    # False) must NOT appear -- the report-driven honesty check.
+    # Phase-shift is listed first, and only when the report says it ran.
     ran = {"phase_shift": True}
     assert filtering_description(bp, "global_median", ran) == (
         "phase-shift (ADC); bandpass filter 300-6000 Hz; "
@@ -618,27 +591,22 @@ def test_restriction_preserves_segment_boundaries_and_rejects_backward_time():
 
 
 # ---------------------------------------------------------------------------
-# Filter-before-restriction: the temporal preprocessing must see the
-# CONTINUOUS recording, so every retained sample is filtered with its true
-# temporal context instead of the ringing around an artificial join.
+# Filter before restriction, so retained samples are not filtered across
+# artificial joins.
 # ---------------------------------------------------------------------------
 
 _DRIFT_HZ = 0.3
 _DRIFT_UV = 200.0
 _FS = 30_000.0
-# Endpoints are deliberately NOT multiples of the drift half-period
-# (1 / (2 * 0.3) = 1.667 s): at a zero crossing the join carries no step and
-# the defect hides.
+# Not multiples of the drift half-period (1.667 s), where a join has no step.
 _INTERVALS = [[2.4, 6.4], [9.3, 9.3015], [12.7, 18.9]]
 
 
 def _drift_recording(duration_s, n_channels=2, seed=0):
     """Synthetic recording plus an explicit slow drift, gains pinned to 1.
 
-    The drift is what makes a concatenation join visible: a 600 Hz high-pass
-    removes it completely, but only when the filter sees the continuous
-    signal. Gains 1.0 / offsets 0.0 make ``return_in_uV=True`` the identity,
-    so the numbers below are the stored values in uV.
+    The drift makes a join visible after a 600 Hz high-pass. Unit gains, so
+    values are in uV.
     """
     import spikeinterface as si
     from spikeinterface.core import NumpyRecording
@@ -699,10 +667,7 @@ def _rms(values):
 def test_restriction_output_unchanged_by_reorder():
     """Restricting a filtered recording selects exactly the same frames.
 
-    The reorder (filter first, restrict second) may not move a single frame
-    boundary, timestamp or channel: SpikeInterface preprocessors copy the
-    parent segment's time kwargs, so the restriction arithmetic sees the same
-    clock either way.
+    SpikeInterface preprocessors copy the parent's time kwargs.
     """
     from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,
@@ -716,8 +681,6 @@ def test_restriction_output_unchanged_by_reorder():
         recording, _bandpass_params()
     )
 
-    # The filter delegates the clock to its parent, so the inputs the
-    # restriction reads are identical.
     assert filtered.get_num_samples() == recording.get_num_samples()
     assert filtered.has_time_vector(0) == recording.has_time_vector(0)
     np.testing.assert_array_equal(filtered.get_times(), recording.get_times())
@@ -736,8 +699,7 @@ def test_restriction_output_unchanged_by_reorder():
     )
     assert filtered_sel.get_num_samples() == raw_sel.get_num_samples()
 
-    # Per-interval frames, not just the total: a compensating pair of shifts
-    # would keep the total unchanged.
+    # Per interval: compensating shifts would keep the total.
     for interval in _INTERVALS:
         raw_one, raw_one_times, _ = restrict_recording_times(
             recording, [interval]
@@ -755,12 +717,9 @@ def test_restriction_output_unchanged_by_reorder():
 def test_restricted_traces_match_continuously_filtered_reference():
     """Filter-then-restrict reproduces the continuously filtered signal.
 
-    The target is the SAME filter applied to the whole recording and sampled
-    at the selected frame ranges -- never the restrict-then-filter output,
-    which differs at every interval edge by construction. The tolerance is
-    loose on purpose: SpikeInterface's lazy filter takes a finite margin per
-    ``get_traces`` request, so two requests with different boundaries differ
-    by ~1e-4 uV.
+    The target is the same filter over the whole recording, sampled at the
+    selected frames. The tolerance allows ~1e-4 uV from SpikeInterface's
+    per-request filter margin.
     """
     import scipy.signal
     import spikeinterface.preprocessing as sip
@@ -795,12 +754,8 @@ def test_restricted_traces_match_continuously_filtered_reference():
         dtype=np.float64,
     )
 
-    # Independent reference: scipy over the whole trace in one pass, with
-    # SpikeInterface's own coefficients (``FilterRecording.__init__`` builds
-    # them with ``scipy.signal.iirfilter(filter_order=5, band, fs=fs,
-    # btype="bandpass", ftype="butter", output="sos")`` and filters with
-    # ``sosfiltfilt``). Without it the target would come from the very filter
-    # object under test, and a margin bug inside it would cancel out.
+    # Independent scipy pass with SpikeInterface's coefficients, so a margin
+    # bug in the filter under test cannot cancel out.
     sos = scipy.signal.iirfilter(
         5,
         [
@@ -855,8 +810,7 @@ def test_restricted_traces_match_continuously_filtered_reference():
             f"uV exceeds {bound:.4g} uV"
         )
         assert abs(_rms(filter_first_traces) - rms_ref) / rms_ref <= 1e-3
-        # The edges are where the join transient lives; assert them by name so
-        # a future slice that trims them cannot pass quietly.
+        # The join transient lives at the edges.
         assert np.max(np.abs(filter_first_traces[0] - ref[0])) <= bound
         assert np.max(np.abs(filter_first_traces[-1] - ref[-1])) <= bound
         assert restrict_first_max > 100 * bound, (
@@ -876,20 +830,15 @@ def test_restricted_traces_match_continuously_filtered_reference():
         )
 
 
-# Jitter as a fraction of the nominal sample period. Each step lands in
-# [0.8/fs, 1.2/fs], which is irregular enough that no regular grid reproduces
-# the clock but still under the 1.5/fs threshold ``base_intervals_and_gaps``
-# reads as a wall-clock discontinuity, so the jitter alone splits no interval.
+# Fraction of the sample period: irregular, but under the 1.5/fs gap threshold.
 _CLOCK_JITTER_FRACTION = 0.2
 
 
 def _explicit_clock_recording(duration_s, seed=11):
     """``_drift_recording`` carrying an explicit, slightly irregular clock.
 
-    The Frank-lab production path: the raw ElectricalSeries stores per-frame
-    timestamps, so ``restrict_recording_times`` takes its non-regular branch
-    (``frames_for_times`` binary search) rather than the regular-grid
-    arithmetic every other test in this block exercises.
+    Per-frame timestamps, as in Frank-lab raw files, take the
+    ``frames_for_times`` branch of ``restrict_recording_times``.
     """
     recording = _drift_recording(duration_s)
     n_samples = recording.get_num_samples(segment_index=0)
@@ -920,16 +869,8 @@ def _explicit_clock_frames(recording, intervals):
 def test_restricted_traces_match_reference_on_explicit_clock():
     """The same reference agreement, on the explicit-timestamp clock.
 
-    ``test_restricted_traces_match_continuously_filtered_reference`` pins the
-    filter-then-restrict order on a rate-based recording, which takes
-    ``restrict_recording_times``' regular-grid branch. Production raw files
-    carry per-frame timestamps and take the other branch, whose frames come
-    from a binary search over the clock -- so the clock has to survive the
-    filter for the reorder to select the same samples. It does: SpikeInterface
-    copies the parent segment's time kwargs into the preprocessor's segment
-    (``BasePreprocessorSegment.__init__`` ->
-    ``parent_recording_segment.get_times_kwargs()``), so the filtered
-    recording reports the identical explicit time vector.
+    The filtered recording keeps the parent's explicit time vector, so the
+    binary-search branch selects the same frames.
     """
     import scipy.signal
     import spikeinterface.preprocessing as sip
@@ -947,13 +888,10 @@ def test_restricted_traces_match_reference_on_explicit_clock():
     assert np.all(np.diff(recording.get_times()) > 0)
 
     filtered, _ = apply_temporal_preprocessing(recording, validated)
-    # The clock is the parent's, unchanged, so the restriction arithmetic
-    # below reads exactly what it would read on the raw recording.
     assert filtered.has_time_vector(segment_index=0) is True
     np.testing.assert_array_equal(filtered.get_times(), recording.get_times())
 
-    # The frames chosen on the filtered recording ARE the frames chosen on the
-    # raw one -- the reorder must not move a sample boundary.
+    # Same frames on the filtered and raw recordings.
     frames = _explicit_clock_frames(recording, _INTERVALS)
     assert frames == _explicit_clock_frames(filtered, _INTERVALS)
     assert len(frames) == len(_INTERVALS)
@@ -978,8 +916,7 @@ def test_restricted_traces_match_reference_on_explicit_clock():
         freq_max=validated.bandpass_filter.freq_max,
         dtype=np.float64,
     )
-    # Independent whole-trace pass with SpikeInterface's own coefficients, so
-    # a margin bug inside the filter under test cannot cancel out.
+    # Independent pass with SpikeInterface's coefficients.
     sos = scipy.signal.iirfilter(
         5,
         [
@@ -1056,9 +993,7 @@ def test_sliver_after_highpass_matches_continuous_filter():
     """A 1.5 ms sliver is pure filter transient under restrict-then-filter;
     filter-then-restrict recovers the continuously filtered signal.
 
-    With ``min_segment_length`` at its 1.5 ms floor a selected sliver is
-    shorter than the 600 Hz high-pass settling time, so restrict-then-filter
-    returns ringing from the two joins rather than signal.
+    A 1.5 ms sliver is shorter than the 600 Hz high-pass settling time.
     """
     from spyglass.spikesorting.v2._recording.preprocessing import (
         apply_temporal_preprocessing,

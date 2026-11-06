@@ -338,10 +338,8 @@ def add_trace_inspection(
 
     if time_range is None or time_range[1] - time_range[0] > 10:
         raise ValueError("Choose a trace window of at most 10 seconds.")
-    # SI's trace widget uses the recording clock (and reads an entire stored
-    # timestamp vector). Give this display a lightweight frame-based wrapper,
-    # so relative windows select the same frames as the raster, even across
-    # absolute session timestamps/gaps. The source recording stays unchanged.
+    # SI's trace widget reads the full recording clock; a frame-based wrapper
+    # makes relative windows match the raster across gaps.
     original = analyzer.recording
     original_sorting = analyzer.sorting
     relative = original.select_channels(original.channel_ids)

@@ -107,8 +107,7 @@ def test_native_ms4_recovers_planted_spikes(tmp_path, monkeypatch):
     assert spikes.size > 0
     assert np.all(spikes["sample_index"] >= 0)
     assert np.all(spikes["sample_index"] < recording.get_num_samples())
-    # Check recovered physical events rather than merely accepting nonempty
-    # output. MS4 can oversplit, so require one planted unit at >=70% accuracy.
+    # MS4 can oversplit, so require one planted unit at >=70% accuracy.
     performance = compare_sorter_to_ground_truth(
         ground_truth, sorting
     ).get_performance()

@@ -1,21 +1,10 @@
 """NWB trace reading, preprocessing, streaming writes and geometry persistence.
 
-``read_recording_nwb`` and ``read_stored_traces`` open explicit series with lazy
-timestamp access, including when workers or analyzers reconstruct an extractor.
-``compute_recording_artifact`` preprocesses raw traces into a staged artifact;
-``recording_provenance_table`` builds its source-lineage metadata, and
-``write_nwb_artifact`` streams traces and timestamps into an ``AnalysisNwbfile``.
-The writer owns cleanup of partial, unregistered writes. Artifact self-heal,
-verified rebuilding and publication are owned by ``_storage.rebuilds``.
-
-DB-free at import. Writers receive resolved inputs explicitly and never import
-their owning table module. Allocation through ``AnalysisNwbfile().create`` and
-``get_abs_path`` still reads DataJoint metadata at call time. This is the
-accepted staging exception to database-free tri-part computation: inputs belong
-in ``make_fetch``, and the staged file is registered only in ``make_insert``.
-The sorting-units, UnitMatch and CurationEvaluation writers use the same
-allocation adapter. ``read_stored_traces`` reads a previously resolved carrier
-without database access.
+DB-free at import. Writers receive resolved inputs and never import their
+table module. Allocating a file with ``AnalysisNwbfile().create`` reads
+DataJoint metadata, the accepted exception to DB-free ``make_compute``; the
+file is registered only in ``make_insert``. Self-heal and rebuilds live in
+``_storage.rebuilds``.
 """
 
 from __future__ import annotations
@@ -39,10 +28,9 @@ _ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
 def _stored_trace_dtype(dtype):
     """dtype a recording artifact stores ``dtype`` traces as.
 
-    Preprocessing runs in float64; the artifact stores float32, which halves
-    the file and every read of it. float32's rounding is far below the raw
-    int16 step: on a real 32-channel epoch it was ~3e-7 uV rms against a
-    1 uV/count raw step and ~10 uV noise. Integer traces keep their dtype.
+    float64 is stored as float32, halving file size and reads; its rounding
+    (~3e-7 uV rms) is far below the 1 uV raw step. Integer traces keep their
+    dtype.
     """
     import numpy as np
 
@@ -53,11 +41,8 @@ def _stored_trace_dtype(dtype):
 class StoredTraces(NamedTuple):
     """A cached trace artifact resolved for a read that needs no DB.
 
-    A tri-part ``make_fetch`` builds it with
-    ``_storage.rebuilds.stored_traces`` after self-healing the artifact, and
-    ``make_compute`` opens it with :func:`read_stored_traces`.
-    Strings only, so DataJoint's hash of the fetched inputs is the same on
-    both of its fetches; ``content_hash`` puts the row's content under that
+    Strings only, so DataJoint's hash of the fetched inputs matches across
+    its two fetches; ``content_hash`` brings the row's content into that
     check.
 
     Attributes
@@ -80,11 +65,9 @@ def read_recording_nwb(
 ):
     """Read an explicit NWB series without materializing its timestamps.
 
-    SI 0.104.3's default HDF5 backend reads the entire timestamp dataset to
-    estimate the sampling rate. Its PyNWB backend reads only a short prefix
-    and retains the dataset for lazy time access. Preserve that choice in
-    worker/analyzer serialization too: this SI version omits ``use_pynwb``
-    from the extractor's reconstruction kwargs.
+    SI 0.104.3's default HDF5 backend reads every timestamp; its PyNWB backend
+    does not. SI omits ``use_pynwb`` from reconstruction kwargs, so it is
+    re-added for workers and analyzers.
     """
     import spikeinterface.extractors as se
 
@@ -105,10 +88,7 @@ def read_recording_nwb(
 def open_persisted_traces(abs_path: str, electrical_series_path: str):
     """Open a persisted trace artifact's ``ElectricalSeries``; no DB access.
 
-    Reads the stored ``electrical_series_path`` (authoritative, not an
-    auto-detect hint) and annotates ``is_filtered=True``: the persisted traces
-    are already bandpass-filtered and referenced, so a downstream
-    SpikeInterface consumer must not filter them again.
+    Annotates ``is_filtered=True`` so SpikeInterface does not filter again.
 
     Parameters
     ----------
@@ -147,13 +127,8 @@ def _remove_partial_artifact(
 ) -> None:
     """Best-effort cleanup of a partial artifact after a failed write.
 
-    NEVER unlink a canonical artifact. An in-place rebuild
-    (``existing_analysis_file_name`` set) writes to the *canonical* slot, so
-    deleting it on failure would destroy the very artifact being rebuilt; it is
-    left in place. The production rebuild temp-stages
-    (``existing_analysis_file_name is None``), so only that freshly created temp
-    file is removed. The unlink is best-effort -- a cleanup failure is logged,
-    not raised, so it cannot mask the original error.
+    Never unlinks a canonical artifact (``existing_analysis_file_name`` set).
+    Cleanup failures are logged, not raised.
     """
     _unlink_staged_analysis_file(
         analysis_file_name,
@@ -162,31 +137,19 @@ def _remove_partial_artifact(
     )
 
 
-# Probe-relative contact position columns of the NWB electrodes table. These
-# are what SpikeInterface rebuilds a reloaded recording's channel locations
-# from (``NwbRecordingExtractor._fetch_locations_and_groups``), and what the
-# content fingerprint hashes as the artifact's geometry component.
+# SpikeInterface rebuilds a reloaded recording's channel locations from these;
+# the content fingerprint hashes them.
 _RELATIVE_POSITION_COLUMNS = ("rel_x", "rel_y", "rel_z")
 
-# Contact positions are micrometres. 1e-6 um is far below any real contact
-# pitch and matches the rounding the geometry helpers in
-# ``_recording.geometry`` use to decide "same contact", so it is the tolerance
-# for the persisted-versus-requested read-back.
+# Matches the "same contact" rounding in ``_recording.geometry``.
 _POSITION_TOLERANCE_UM = 1e-6
 
 
 def _ensure_relative_position_columns(nwbfile) -> None:
     """Give the analysis file's electrodes table its ``rel_*`` columns.
 
-    ``AnalysisNwbfile().create`` exports the parent NWB's electrodes table
-    verbatim, so a parent written without probe-relative contact positions
-    yields an analysis file with nowhere to put the normalized geometry.
-    hdmf 4.3 accepts a new column on a table that was already written (the
-    file is open in append mode), so the missing columns are created here
-    BEFORE ``io.write``. The post-write pass then fills the rows the
-    ElectricalSeries actually references; every other row is left ``NaN``,
-    which records "no geometry known for this contact" rather than asserting
-    a contact at the origin.
+    The parent NWB may lack them. Must run before ``io.write``. Unreferenced
+    rows stay ``NaN`` ("unknown"), not the origin.
 
     Parameters
     ----------
@@ -211,24 +174,9 @@ def _ensure_relative_position_columns(nwbfile) -> None:
 def _widen_position_column_to_float64(group, column) -> None:
     """Recreate a narrower-than-float64 ``rel_*`` dataset as float64.
 
-    ``group[column][:] = values`` casts to the DESTINATION dtype, so a float32
-    column silently truncates the geometry it is handed (1000.1 um is stored
-    as 1000.0999755859375 -- an error of 2.4e-5 um, far outside the 1e-6 um
-    read-back tolerance below). Column dtypes come from the parent NWB:
-    ``AnalysisNwbfile().create`` exports the parent's electrodes table and a
-    pynwb export preserves each column's on-disk dtype, so a parent written
-    with float32 ``rel_*`` hands the writer a float32 destination. Widening
-    the destination keeps the persisted geometry equal to the geometry the
-    sort ran with, for every file, rather than only for coordinates that
-    happen to be exactly representable in the parent's dtype.
-
-    h5py cannot change a dataset's dtype in place, so the dataset is read,
-    unlinked and recreated with the same name, shape, layout and ATTRIBUTES.
-    The attributes are what keep the file readable: hdmf identifies a
-    ``VectorData`` column by its ``neurodata_type``/``namespace`` and tracks
-    it by ``object_id``, so dropping them would orphan the column. (The
-    unlinked dataset's bytes are not reclaimed by HDF5; for a handful of
-    electrode rows that is a few hundred bytes.)
+    Assignment casts to the parent NWB's column dtype, so a float32 column
+    would truncate geometry beyond the read-back tolerance. The dataset is
+    recreated with its attributes, which hdmf needs to identify the column.
 
     Parameters
     ----------
@@ -252,28 +200,10 @@ def _persist_channel_geometry(
 ) -> None:
     """Stamp the recording's normalized 2D geometry onto its electrodes rows.
 
-    Writes ``rel_x``/``rel_y`` from the recording's 2D channel locations and
-    ``rel_z = 0`` into the electrodes-table rows the ElectricalSeries
-    references, then reads them back and verifies them. Rows outside the
-    region keep whatever the parent NWB held -- or ``NaN``, when the column
-    was created here because the parent carried no contact positions at all.
-
-    The two persisted axes are the CHOSEN PLANE's axes, not necessarily the
-    original x and y: for an x-z sort group ``rel_y`` holds what
-    ``Probe.Electrode`` calls ``rel_z``, and the persisted ``rel_z`` is 0. A
-    diff of an artifact's ``rel_*`` against ``Probe.Electrode``'s will show
-    that relabeling; the geometry itself is unchanged.
-
-    This runs after ``io.write`` (the ElectricalSeries and its region are on
-    disk) and before the content fingerprint, which hashes exactly these rows.
-    h5py rather than pynwb because the datasets already exist and only a few
-    of their elements change.
-
-    Coordinates are persisted at DOUBLE precision: a destination column the
-    parent NWB wrote narrower than float64 is recreated as float64 first
-    (:func:`_widen_position_column_to_float64`), because assigning into it
-    would otherwise round every coordinate to the parent's precision.
-    Columns this writer had to create are float64 already.
+    Writes ``rel_x``/``rel_y`` (the chosen plane's axes, so an x-z group's
+    ``rel_y`` is ``Probe.Electrode``'s ``rel_z``) and ``rel_z = 0`` to the
+    referenced rows as float64, then verifies the read-back. Runs after
+    ``io.write`` and before the content fingerprint.
 
     Parameters
     ----------
@@ -316,8 +246,6 @@ def _persist_channel_geometry(
     with h5py.File(analysis_abs_path, "a") as handle:
         group = handle["/general/extracellular_ephys/electrodes"]
         for axis, column in enumerate(_RELATIVE_POSITION_COLUMNS):
-            # The destination dtype is the parent NWB's; widen it first so
-            # the assignment below cannot truncate what it is handed.
             _widen_position_column_to_float64(group, column)
             values = group[column][:]
             values[rows] = expected[:, axis]
@@ -351,39 +279,21 @@ def write_nwb_artifact(
 ) -> tuple[str, str, str]:
     """Write the preprocessed recording into an ``AnalysisNwbfile``.
 
-    Streams the ``(n_samples, n_channels)`` trace array and the
-    ``(n_samples,)`` timestamps vector into the ElectricalSeries
-    via HDMF's ``GenericDataChunkIterator``, in buffers of a few seconds
-    (~8 s at 32 channels, ~2.4 s at 384; see the comment at the iterator).
-    Without streaming, a 30 kHz x 128 ch x 1 h recording
-    (~110 GB float64) would have to materialize in RAM before the
-    NWB write, which OOMs on any lab workstation.
+    Streams traces and timestamps in buffers of a few seconds. Stamps the
+    referenced electrodes rows with the recording's 2D geometry, which
+    SpikeInterface reloads from. The caller registers the file.
 
-    The electrodes rows the ElectricalSeries references are stamped with the
-    recording's NORMALIZED 2D geometry -- ``rel_x``/``rel_y`` from
-    ``recording.get_channel_locations()`` and a constant ``rel_z = 0`` -- so a
-    reload's x-y projection is exactly the geometry the sort saw. SpikeInterface
-    rebuilds channel locations from those columns, so persisting the parent
-    NWB's raw 3D coordinates instead would let an x-z probe collapse back into
-    coincident contacts on every read. A recording whose locations are still 3D
-    is REFUSED rather than projected: the caller must normalize it to a plane
-    first. The persisted ``rel_x``/``rel_y`` are the two axes of the plane that
-    normalization chose, so for an x-z sort group ``rel_y`` holds the original
-    ``Probe.Electrode`` ``rel_z``. Rows outside the series region keep the
-    parent NWB's values, or ``NaN`` where a ``rel_*`` column had to be created
-    because the parent carried none.
+    Returns
+    -------
+    tuple of str
+        ``(analysis_file_name, electrical_series_object_id, content_hash)``.
+        ``content_hash`` is :func:`recording_content_fingerprint` of the
+        written file, so a content-identical rebuild reproduces it.
 
-    Returns ``(analysis_file_name, electrical_series_object_id,
-    content_hash)``. The ``content_hash`` is the
-    :func:`recording_content_fingerprint` aggregate computed **after**
-    the write by reading the persisted ElectricalSeries back from its
-    known absolute path -- the recording's reproducible scientific
-    identity, not a whole-file byte digest -- so a content-identical
-    rebuild reproduces it (see :mod:`spyglass.spikesorting.v2._recording.fingerprint`).
-
-    Writes the file to disk only; the caller registers the
-    ``AnalysisNwbfile`` row inside its DataJoint transaction so
-    the file registration and the table row commit atomically.
+    Raises
+    ------
+    ValueError
+        If the recording has no channel locations or still has 3D locations.
 
     Parameters
     ----------
@@ -392,27 +302,20 @@ def write_nwb_artifact(
     nwb_file_name : str
         Parent NWB filename (passed to ``AnalysisNwbfile().create``).
     existing_analysis_file_name : str, optional
-        When set, write into the existing slot (the recompute /
-        rebuild path) rather than minting a new analysis file.
+        When set, write into this existing file instead of a new one.
     timestamps_override : array-like, optional
-        Pre-computed persisted timestamps, shape ``(n_samples,)``. May be a
-        lazy timestamp vector; the chunk iterator materializes only requested
-        slices. ``None`` lets the helper concatenate per-segment
-        ``recording.get_times()`` via :func:`_get_recording_timestamps`.
+        Persisted timestamps, shape ``(n_samples,)``; may be lazy. ``None``
+        uses :func:`_get_recording_timestamps`.
     filtering_description : str
-        Keyword-only. Provenance string written to
-        ``ElectricalSeries.filtering`` describing the preprocessing
-        steps that actually ran (from :func:`filtering_description`).
+        Keyword-only. ``ElectricalSeries.filtering``: the preprocessing steps
+        that ran.
     provenance_tables : list of hdmf.common.DynamicTable, optional
-        Keyword-only. Pre-built provenance tables (from
-        :mod:`._storage.provenance`) embedded as NWB scratch alongside the
-        ElectricalSeries so the artifact is self-describing. ``None``
-        (default) writes no provenance and leaves the data path unchanged.
-        Scratch does not enter the ``content_hash`` fingerprint.
+        Keyword-only. Provenance tables added as NWB scratch; not part of
+        ``content_hash``.
     description : str, optional
         Keyword-only. ``ElectricalSeries.description``; ``None`` (default)
         describes a pre-motion preprocessed recording of ``nwb_file_name``.
-        The description does not enter the ``content_hash`` fingerprint.
+        Not part of ``content_hash``.
     """
     import pynwb
 
@@ -438,11 +341,7 @@ def write_nwb_artifact(
         recording_content_fingerprint,
     )
 
-    # ``AnalysisNwbfile().create`` writes a stub file to disk
-    # before we open it for the streaming write. Track the
-    # filename from the first byte on disk and unlink on any
-    # failure between here and the post-write hash, so a
-    # partial / aborted write never outlives this call.
+    # ``create`` writes a stub to disk; any later failure removes it.
     analysis_file_name = AnalysisNwbfile().create(
         nwb_file_name=nwb_file_name,
         recompute_file_name=existing_analysis_file_name,
@@ -454,28 +353,10 @@ def write_nwb_artifact(
             from_schema=bool(existing_analysis_file_name),
         )
 
-        # Traces are written unscaled (return_in_uV=False), so the
-        # ElectricalSeries must carry gain (as ``conversion``) AND offset
-        # (as ``offset``) to recover real volts on readback:
-        # ``volts = raw * conversion + offset``. The resolver rejects
-        # heterogeneous gain/offset and non-positive gain so a per-channel
-        # gain or a missing offset cannot silently corrupt the scaling.
         conversion, es_offset = resolve_conversion_and_offset(recording)
 
-        # Geometry preconditions, settled before anything streams: the
-        # electrodes rows this write stamps are what SpikeInterface rebuilds a
-        # reloaded recording's channel locations from, so a recording with no
-        # geometry -- or with geometry that has not been reduced to a plane --
-        # must not reach the write at all.
-        #
-        # ``get_channel_locations()`` defaults to ``axes="xy"``, so a still-3D
-        # recording would be silently PROJECTED rather than rejected, and the
-        # persisted x-y projection of an x-z probe is exactly the collapse the
-        # normalization exists to prevent. Reject it here rather than rely on
-        # the caller: ``Recording.make_compute`` normalizes and asserts
-        # distinct positions upstream, but the concatenated-recording writer
-        # assembles its recording from reloaded member artifacts and has no
-        # such upstream check.
+        # A 3D recording would be silently projected to x-y, collapsing an
+        # x-z probe. The concat writer has no upstream check, so check here.
         if not recording.has_channel_location():
             raise ValueError(
                 "write_nwb_artifact: the recording carries no contact "
@@ -495,23 +376,14 @@ def write_nwb_artifact(
                 "collapse contacts that are distinct only in z."
             )
 
-        # The data iterator drives ``recording.get_traces(...)``
-        # per chunk and never materializes the whole array. The
-        # timestamps iterator wraps a 1D vector; resolve through
-        # ``_get_recording_timestamps`` so multi-segment NWBs and
-        # persisted-timestamps overrides both flow through correctly.
         sampling_frequency = assert_positive_sampling_frequency(
             recording.get_sampling_frequency(), context="write_nwb_artifact: "
         )
         timestamps = _get_recording_timestamps(
             recording, override=timestamps_override
         )
-        # Bound the buffers to ~a fixed duration of data so a narrow sort
-        # group (e.g. a 4-ch tetrode) does not buffer the whole recording
-        # in one 5 GB chunk. With every channel in each chunk, HDMF grows the
-        # buffer along time only, to about the square root of this ~30 s
-        # budget (~8 s at 32 ch). A full 30 s buffer wrote no faster (15 vs
-        # 13 s for 5 min at 32 ch, 60 s at 128 ch) at 2-5x the memory.
+        # HDMF grows all-channel buffers along time to about the square root
+        # of this ~30 s budget (~8 s at 32 ch).
         stored_dtype = _stored_trace_dtype(recording.get_dtype())
         data_iterator = SpikeInterfaceRecordingDataChunkIterator(
             recording=recording,
@@ -532,14 +404,7 @@ def write_nwb_artifact(
             path=analysis_abs_path, mode="a", load_namespaces=True
         ) as io:
             nwbfile = io.read()
-            # The normalized geometry has to land in rel_x/rel_y/rel_z; a
-            # parent NWB that never carried those columns gets them here,
-            # NaN-filled, while the file is still open for writing.
             _ensure_relative_position_columns(nwbfile)
-            # ``recording.get_channel_ids()`` are spyglass electrode ids;
-            # map them to electrodes-table ROW INDICES (not raw ids) so a
-            # non-contiguous / reordered electrodes table does not silently
-            # mis-point the ElectricalSeries at the wrong electrodes.
             table_region = electrode_table_region(
                 nwbfile,
                 recording.get_channel_ids(),
@@ -566,26 +431,15 @@ def write_nwb_artifact(
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
 
-        # Persist the geometry the sort actually ran on. SpikeInterface
-        # rebuilds a reloaded recording's channel locations from these rows,
-        # so without this the reload silently reverts to the parent NWB's raw
-        # 3D coordinates -- an x-z tetrode collapses again under SI's x-y
-        # projection and the in-memory normalization is lost. Before the
-        # fingerprint below, which hashes these same rows as the artifact's
-        # geometry component. ``axes="xy"`` is explicit: the guards above
-        # already established that these locations ARE 2D, so this is an
-        # identity selection, not a projection.
+        # Without this a reload reverts to the parent NWB's 3D coordinates.
+        # The locations are already 2D, so ``axes="xy"`` does not project.
         _persist_channel_geometry(
             analysis_abs_path,
             geometry_rows,
             recording.get_channel_locations(axes="xy"),
         )
 
-        # Fingerprint the persisted file (read back from the known abs path,
-        # never the checksum-validating get_abs_path) so the identity reflects
-        # the recording's reproducible SCIENCE -- traces, timestamps, geometry,
-        # scaling -- not the whole-file byte digest. A content-identical rebuild
-        # reproduces this hash even though its bytes differ.
+        # Content, not bytes, so a rebuild reproduces it.
         content_hash = combined_hash(
             recording_content_fingerprint(
                 analysis_abs_path,
@@ -593,9 +447,6 @@ def write_nwb_artifact(
             )
         )
     except Exception:
-        # Any write/hash failure: remove the partial analysis file before
-        # re-raising so a half-written artifact never lingers -- but NEVER a
-        # canonical artifact (see ``_remove_partial_artifact``).
         _remove_partial_artifact(
             analysis_file_name, existing_analysis_file_name
         )
@@ -615,12 +466,8 @@ def recording_provenance_table(
 ):
     """Build the recording source-provenance scratch table.
 
-    Re-emits, into the artifact NWB, the source lineage ``make_fetch``
-    resolved from the DB so the file is interpretable without the database:
-    the raw source object id, the recording id, the preprocessing recipe,
-    the sort group, the resolved reference mode, the bad-channel handling,
-    and the producing SpikeInterface version. Returns a one-element list
-    (``write_nwb_artifact``'s ``provenance_tables`` contract).
+    Records the source lineage so the file is interpretable without the
+    database. Returns a one-element list for ``provenance_tables``.
     """
     import spikeinterface as si
 
@@ -666,19 +513,10 @@ def compute_recording_artifact(
 ) -> RecordingArtifactResult:
     """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
 
-    The stage order is: read -> channel-select -> normalize the channel
-    geometry -> temporal preprocessing (phase-shift, bandpass) on the
-    CONTINUOUS recording -> time restriction -> spatial preprocessing
-    (bad-channel interpolation, reference) -> tetrode geometry repair ->
-    distinct-position check. Filtering before the restriction is what
-    keeps a selected interval free of the transient a concatenation join
-    would otherwise inject.
-
-    Pipeline body shared between ``Recording.make_compute`` and
-    ``Recording._rebuild_nwb_artifact``; both stage a fresh, unregistered file
-    (``existing_analysis_file_name=None``). The rebuild path installs that
-    staged file into the canonical slot via ``os.replace`` only after a
-    verified ``content_hash`` match -- it does not overwrite in place.
+    Order: read, channel-select, normalize geometry, temporal preprocessing
+    on the continuous recording, time restriction, spatial preprocessing,
+    tetrode geometry repair, distinct-position check. Filtering before the
+    restriction keeps join transients out of selected intervals.
 
     Parameters
     ----------
@@ -717,9 +555,8 @@ def compute_recording_artifact(
         path; defaults to ``()`` (empty, the ``remove`` path).
     existing_analysis_file_name : str or None, optional
         When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
-        otherwise write into this existing file in place, which is left in
-        place (never unlinked) if the write fails. Every current caller --
-        populate, rebuild and recompute -- passes ``None``.
+        otherwise write into this file in place, never unlinking it on
+        failure.
     provenance_tables : optional
         Source-lineage scratch table(s) to embed in the file (see
         :func:`recording_provenance_table`), passed to the writer.
@@ -728,25 +565,8 @@ def compute_recording_artifact(
     -------
     RecordingArtifactResult
         ``(analysis_file_name, object_id, content_hash, saved_start,
-        saved_end, sampling_frequency, n_channels, duration_s)`` -- the
-        metadata needed for the ``RecordingComputed`` boxing.
-        ``saved_start``/``saved_end``/``duration_s`` describe the
-        PERSISTED timestamps (the override when set).
-
-    Notes
-    -----
-    Cleanup contract: ``_write_nwb_artifact`` either writes a full file or
-    raises before any registration. On a write/hash failure a freshly
-    staged partial file is unlinked before the error propagates; an existing
-    file named by ``existing_analysis_file_name`` is never unlinked. When the
-    file was freshly staged (every current caller), a half-written artifact
-    never outlives a failed compute.
-
-    A rebuild whose content drifted is rejected by the caller
-    (``RecordingContentDriftError``) and the canonical slot is never
-    written. The rebuild runs only when the cache file is already absent,
-    so no valid cache is lost, and the row's ``content_hash`` plus the raw
-    NWB let the next ``get_recording`` try again.
+        saved_end, sampling_frequency, n_channels, duration_s)``. The saved
+        times describe the persisted timestamps.
     """
     from spyglass.spikesorting.v2._recording.geometry import (
         assert_unique_contact_positions,
@@ -771,10 +591,8 @@ def compute_recording_artifact(
     )
     from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
-    # Name the exact raw acquisition, including when the file also has LFP.
-    # Rate-based raw ElectricalSeries can reconstruct selected timestamps
-    # lazily from (t_start, sampling_frequency, frame index). Explicit
-    # timestamp series may be irregular, so retain their explicit vector.
+    # Name the raw series explicitly (the file may also hold LFP). Explicit
+    # timestamps may be irregular, so they are kept.
     raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
         raw_path, object_id=raw_object_id
     )
@@ -785,17 +603,8 @@ def compute_recording_artifact(
     )
     sampling_frequency = float(recording.get_sampling_frequency())
 
-    # Channel-slice first, then filter each continuous acquisition span, and only
-    # then restrict in time. Restricting first would hand the lazy bandpass
-    # a concatenation of the selected intervals, and its margin would be
-    # read across the artificial joins -- so every interval edge, and a
-    # short interval in its entirety, would be filter transient rather than
-    # signal. Real timestamp gaps are split before filtering, so margins cannot
-    # cross missing acquisition data. A frame slice of a filter pulls
-    # that margin from the continuous parent instead, so each retained
-    # sample is filtered with its true temporal context. The spatial steps
-    # are per-sample across channels, so they are unaffected by the joins
-    # and run afterwards, on the restricted recording only.
+    # Filter before restricting in time: a filter over joined intervals reads
+    # its margin across the joins, turning interval edges into transients.
     recording = select_sort_group_channels(
         recording,
         nwb_file_abs_path=raw_path,
@@ -805,15 +614,8 @@ def compute_recording_artifact(
         bad_channel_handling=preprocessing_params.bad_channel_handling,
         bad_channel_ids=bad_channel_ids,
     )
-    # Choose the plane from the contacts that STAY on the sort surface.
-    # The slice above also carries the ``specific`` reference, which
-    # ``apply_spatial_preprocessing`` subtracts and drops; because
-    # ``Probe.Electrode`` rel_* are per probe TYPE, a reference on another
-    # probe of the same type duplicates a member's raw position and would
-    # veto every plane for a group that is distinct without it.
-    # The interior bad channels the ``interpolate`` path re-includes DO
-    # stay; the reference is excluded even when it is one of them (which
-    # is also how ``apply_spatial_preprocessing`` treats it).
+    # Choose the plane from retained contacts only. A ``specific`` reference
+    # on another probe of the same type duplicates a member's position.
     retained = {int(c) for c in channel_ids}
     if preprocessing_params.bad_channel_handling == "interpolate":
         retained |= {int(c) for c in bad_channel_ids}
@@ -851,12 +653,7 @@ def compute_recording_artifact(
     )
     assert_unique_contact_positions(recording)
 
-    # Provenance string for the persisted ElectricalSeries, built from the
-    # steps ACTUALLY applied (the ``applied_steps`` report): a fixed
-    # "Bandpass filter + common reference" string would misdescribe the
-    # saved artifact for the no_filter preset or reference_mode='none'
-    # (DANDI / archival), and a requested-but-skipped phase-shift must not
-    # be listed.
+    # Describe only the steps that actually ran.
     filtering_description = _filtering_description_svc(
         preprocessing_params.bandpass_filter, reference_mode, applied_steps
     )
@@ -875,14 +672,8 @@ def compute_recording_artifact(
             filtering_description=filtering_description,
             provenance_tables=provenance_tables,
         )
-        # For a single contiguous interval, derive saved
-        # start/end/duration from the persisted override
-        # so the row matches the cached timestamps rather than the
-        # frame-slice's uncorrected ``get_times()``. For a
-        # multi-interval concat the override is the gap-spanning
-        # wall-clock envelope; its span would over-count by the gaps
-        # and break the truncation guard, so use the concat's own
-        # gap-excluded times there.
+        # Multiple intervals: the override's span would count the gaps, so
+        # use the concatenation's gap-free time axis.
         if n_selected_intervals == 1:
             saved_times = _get_recording_timestamps(
                 recording, override=timestamps_override
@@ -890,9 +681,7 @@ def compute_recording_artifact(
             saved_start = float(saved_times[0])
             saved_end = float(saved_times[-1])
         else:
-            # ``concatenate_recordings(ignore_times=True)`` gives a
-            # synthetic contiguous 0-based time axis. Avoid materializing
-            # that full vector just to read the first/last value.
+            # ``ignore_times=True`` gives a 0-based axis; avoid materializing it.
             n_samples = int(recording.get_num_samples(segment_index=0))
             saved_start = 0.0
             saved_end = (
@@ -901,10 +690,7 @@ def compute_recording_artifact(
         n_channels = int(recording.get_num_channels())
         duration_s = float(saved_end - saved_start)
     except Exception:
-        # Unlink only a file this call staged fresh. A file named by
-        # ``existing_analysis_file_name`` is an existing artifact written in
-        # place; it is never unlinked here (``write_nwb_artifact`` leaves it
-        # in place too).
+        # Never unlink an existing artifact written in place.
         if (
             existing_analysis_file_name is None
             and analysis_file_name is not None

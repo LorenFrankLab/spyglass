@@ -1,26 +1,9 @@
 """Execute the user-facing spike-sorting notebooks end-to-end on a fixture.
 
-These are smoke tests: they run every code cell of the published notebooks in
-order against a small ingested fixture, so a cell that no longer runs (a renamed
-API, a wrong argument, a stale example) fails here instead of in a user's hands.
-
-Execution is in-process -- each code cell's source is ``exec``'d in one shared
-namespace, papermill-style parameter overrides injected right after the
-``parameters``-tagged cell -- rather than in an isolated Jupyter kernel. That
-keeps the notebook on the test's own DataJoint connection + fixtures (no
-subprocess credential plumbing) and renders plots to a headless Agg backend.
-
-The notebooks gate their optional-extra cells on import checks, and neither
-optional extra is in the default v2 test env. 10_'s browser-curation cells need
-the ``spikesorting-v2-curation`` extra (figpack), so they self-skip in the
-default job and run in the separate curation CI lane. UnitMatch's bundle
-extraction needs the ``spikesorting-v2-matching`` extra (UnitMatchPy), so the
-cross-session notebook's match (Part B) runs only in the matching lane -- the cross-session test below
-stands in a lightweight fixture matcher there and exercises Part A (concat)
-everywhere.
-
-Heavy (real MountainSort4 sorts + curation-evaluation PCA), hence
-``@pytest.mark.slow``.
+Cells are ``exec``'d in-process in one namespace so they share the test's
+DataJoint connection; parameter overrides follow the ``parameters`` cell as
+in papermill. Cells needing the curation (figpack) or matching (UnitMatchPy)
+extras self-skip when those are absent.
 """
 
 from __future__ import annotations
@@ -55,14 +38,8 @@ def _require_fixture():
 def _restore_pipeline_preset_registry():
     """Undo any in-session pipeline-preset registration a notebook makes.
 
-    ``_execute_notebook`` runs cells IN-PROCESS (see the module docstring), so
-    the presets notebook's ``register_pipeline_preset`` / ``clone_pipeline_preset``
-    calls mutate the module-level ``_PIPELINE_PRESETS`` dict (adding ``my_lab_*``)
-    for the whole pytest process. Without restoring it those registrations leak
-    into later tests that iterate the registry -- the preset-enumeration and
-    recipe-parity tests then see a preset with no ``intended_use`` or a
-    non-shipped sorter row. Snapshot and restore around every test in this
-    module so a notebook's in-session registrations stay local to it.
+    In-process cells mutate the module-level ``_PIPELINE_PRESETS``, which
+    would leak ``my_lab_*`` presets into later registry tests.
     """
     from spyglass.spikesorting.v2._orchestration import presets as _pp
 
@@ -77,11 +54,8 @@ def _restore_pipeline_preset_registry():
 def _execute_notebook(ipynb_path: Path, parameters: dict) -> dict:
     """Run a notebook's code cells in-process; return the final namespace.
 
-    Cells run in order in one namespace. After the ``parameters``-tagged cell
-    runs (installing the notebook's defaults), the ``parameters`` overrides are
-    assigned on top of them -- the same contract papermill uses -- so downstream
-    cells see the test's session / preset values. A cell that raises propagates,
-    failing the test with the offending cell's traceback.
+    ``parameters`` overrides are assigned right after the
+    ``parameters``-tagged cell, as in papermill. A raising cell propagates.
     """
     import matplotlib
 
@@ -112,9 +86,7 @@ def _execute_notebook(ipynb_path: Path, parameters: dict) -> dict:
 def _prepare_notebook_session(dj_conn, dest_name):
     """Ingest the smoke fixture + build sort groups; return (nwb, sort_group_id).
 
-    The notebooks pick a sort group only when exactly one exists; build the
-    groups here and hand the notebook the first id so the multi-shank guard does
-    not stop the run.
+    The first id is passed so the notebook's multi-shank guard does not stop.
     """
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -144,14 +116,7 @@ def _notebook_params(nwb_file_name, sort_group_id):
 
 @pytest.mark.slow
 def test_single_session_notebook_runs(dj_conn, smoke_nwb):
-    """``10_Spike_SortingV2`` (the lean first-sort path) runs end-to-end.
-
-    Exercises the published first-sort walkthrough on one fixture: setup,
-    preset choice, preflight, the run, one-call auto-curation, and the
-    downstream accessor. (Browser/step-by-step curation moved to the Curation
-    how-to; preset customization + the whole-session sweep to the Presets how-to,
-    each with its own test below.)
-    """
+    """``10_Spike_SortingV2`` (the lean first-sort path) runs end-to-end."""
     nwb_file_name, sort_group_id = _prepare_notebook_session(
         dj_conn, "notebook_single.nwb"
     )
@@ -159,10 +124,8 @@ def test_single_session_notebook_runs(dj_conn, smoke_nwb):
         _NOTEBOOKS / "10_Spike_SortingV2.ipynb",
         _notebook_params(nwb_file_name, sort_group_id),
     )
-    # The walkthrough produced a real auto-labeled child and ended with the
-    # explicit unit-selection handoff: a receipt pinned to that child's
-    # generation whose group is what downstream reads, and (when the FigPack
-    # extra is installed) a review that was reopened from its persisted id.
+    # An auto-labeled child, a receipt pinned to it, and (with FigPack) a
+    # review reopened from its persisted id.
     assert namespace["run_summary"]["n_units"] >= 0
     assert namespace["auto_summary"]["auto_labeled_merge_id"] is not None
     receipt = namespace["receipt"]
@@ -181,12 +144,8 @@ def test_single_session_notebook_runs(dj_conn, smoke_nwb):
 def test_curation_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2_Curation`` runs end-to-end on the smoke session.
 
-    Self-contained: it sets up, sorts to a root curation, starts the FigPack
-    browser review (self-skips without the curation extra), previews it
-    (no browser edits in run-all, no commit), and hands ONE deliberate
-    ``final_curation`` -- here the reviewed parent itself -- to
-    ``select_units_for_analysis``. The opt-in scripted appendix runs too and
-    must not replace that result.
+    The reviewed parent is the ``final_curation`` handed to
+    ``select_units_for_analysis``; the scripted appendix must not replace it.
     """
     nwb_file_name, sort_group_id = _prepare_notebook_session(
         dj_conn, "notebook_curation.nwb"
@@ -216,11 +175,7 @@ def test_curation_notebook_runs(dj_conn, smoke_nwb):
 @pytest.mark.slow
 @pytest.mark.parametrize("subset", [False, True], ids=["all-groups", "subset"])
 def test_presets_notebook_runs(dj_conn, subset, monkeypatch, smoke_nwb):
-    """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session.
-
-    Self-contained: setup, then customize a preset (clone + register) and sort
-    the whole session at once with ``run_v2_pipeline_session``.
-    """
+    """``10_Spike_SortingV2_Presets`` runs end-to-end on the smoke session."""
     # Exercise the production label filter; shared v1 fixtures normally
     # disable it under test_mode, which would invalidate population receipts.
     from spyglass.spikesorting.analysis.v1 import group as group_module
@@ -331,10 +286,7 @@ class _NotebookMatcherParams(BaseModel):
 class _NotebookFixtureMatcher:
     """Match the first matchable unit of each session, deterministically.
 
-    A real sort of the small fixture recovers too few units for UnitMatchPy's
-    metric path, so this lightweight matcher stands in: it reads each session's
-    matchable units (no hardcoded ids) and emits one cross-session pair, exactly
-    the surface ``UnitMatch`` / ``TrackedUnit`` consume.
+    The small fixture yields too few units for UnitMatchPy's metric path.
     """
 
     name = "notebook_fixture_matcher"
@@ -368,22 +320,9 @@ class _NotebookFixtureMatcher:
 def test_cross_session_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2_CrossSession`` runs all three workflows.
 
-    Ingests the polymer smoke fixture three times (identical, same-day
-    sessions a, b and c) and runs the notebook: Part A concatenates and sorts
-    a and b; Part B sorts a and c independently and matches units across
-    them; Part C matches the a+b concatenation directly against c's sort --
-    c lies outside the concatenation, as matching inputs must not share a
-    session.
-
-    UnitMatch's bundle extraction needs the optional ``UnitMatchPy`` package, so
-    Part B runs only where it is installed (the default v2 test env excludes the
-    matching extra). When it IS present, a real sort of the tiny fixture recovers
-    too few units for UnitMatchPy's metric path, so the notebook's matcher is
-    pointed (via its ``matcher_params_name`` parameter) at a registered
-    lightweight fixture matcher -- the same substrate the unit-match table tests
-    use -- so the full match + tracked-unit chain runs in-process for Parts B
-    and C. Without UnitMatchPy, only Part A (concat) is exercised here; the
-    match API is covered by the unit-match table tests.
+    Sessions a, b and c are copies of the smoke fixture. Part A concatenates
+    a and b; Part B matches a and c; Part C matches a+b against c. Parts B
+    and C need UnitMatchPy and use the fixture matcher.
     """
     import importlib.util
 
@@ -462,13 +401,10 @@ def test_cross_session_notebook_runs(dj_conn, smoke_nwb):
             mp._SCHEMA_REGISTRY.clear()
             mp._SCHEMA_REGISTRY.update(registry[1])
 
-    # Part A concatenated both members into one sort (runs everywhere).
     assert len(namespace["concat_summary"]["member_recording_ids"]) == 2
     member_merge_ids = namespace["concat_summary"]["member_merge_ids"]
     assert len(member_merge_ids) == 2
-    # The automatic-only concat result is handed to analysis through an
-    # explicit unflagged policy over the auto-labeled curation, one group per
-    # member on that member's own merge id.
+    # One unflagged-policy group per member, on its own merge id.
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
     selection = namespace["concat_selection"]
@@ -481,11 +417,8 @@ def test_cross_session_notebook_runs(dj_conn, smoke_nwb):
     )
     for member_group in selection.groups:
         assert SortedSpikesGroup & dict(member_group.group_key)
-    # Parts B and C matched units into tracked units (only where UnitMatchPy
-    # is present).
     if unitmatch_available:
         assert namespace["match_summary"]["n_tracked_units"] >= 1
-        # Part C matched the a+b concatenation against c's single sort.
         daily_summary = namespace["daily_summary"]
         inputs = {item.source_kind: item for item in daily_summary["inputs"]}
         assert len(daily_summary["inputs"]) == 2

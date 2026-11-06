@@ -1,10 +1,4 @@
-"""Tests for the ``_units_nwb`` units-NWB build / read helpers.
-
-Covers lazy absolute-time deduplication with stored sample frames, the pure
-spike-times dataframe builders, and the pynwb readback path. All of these
-are DB-free: the compute operates on numpy / SpikeInterface objects and
-the readback goes through pynwb against a temp NWB file -- no DataJoint.
-"""
+"""Tests for the ``_units_nwb`` units-NWB build / read helpers."""
 
 from __future__ import annotations
 
@@ -72,13 +66,8 @@ def test_build_lazy_merged_sorting_dedups_coincident_cross_unit_spikes():
 
 
 def test_build_lazy_merged_sorting_absolute_time_dedup_respects_gaps():
-    """Cross-gap, frame-adjacent spikes are NOT deduped (absolute time).
-
-    On a disjoint recording the units-NWB frames are contiguous across an
-    excluded wall-clock gap. Two spikes one frame apart (49, 50) but ~10 s
-    apart in real time must BOTH survive -- a frame-space dedup would
-    wrongly drop one. This pins the gap-correctness of the abs-time merge.
-    """
+    """Frame-adjacent spikes across a 10 s wall-clock gap are both kept
+    (dedup is in absolute time)."""
     # Two 50-sample chunks separated by a 10 s wall-clock gap.
     gap_ts = np.concatenate(
         [
@@ -245,7 +234,7 @@ def test_read_units_abs_spike_times_populated(tmp_path):
 
 
 def test_read_units_abs_spike_times_empty(tmp_path):
-    """No Units table -> {} (the zero-unit-sort edge case)."""
+    """No Units table (a zero-unit sort) reads as {}."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_spike_times,
     )
@@ -560,10 +549,8 @@ def test_read_units_abs_times_and_sample_indices_matches_single_readers(
 def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
     tmp_path,
 ):
-    """``unit_ids`` reads ONLY the requested units' trains, so a curation that
-    keeps a subset of a large sort never materializes the discarded units.
-    ``None`` reads every unit; a requested id absent from the table is skipped
-    (the caller's kept-set is authoritative)."""
+    """``unit_ids`` reads only the requested units' trains; ``None`` reads
+    every unit; a requested id absent from the table is skipped."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
@@ -587,7 +574,7 @@ def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
     np.testing.assert_array_equal(samp_sub[4], [10, 20])
     np.testing.assert_array_equal(samp_sub[9], [99])
 
-    # None reads every unit (unchanged default behavior).
+    # None reads every unit.
     abs_all, _, _ = read_units_abs_times_and_sample_indices(
         str(p), unit_ids=None
     )
@@ -601,12 +588,9 @@ def test_read_units_abs_times_and_sample_indices_filters_to_requested_units(
 
 
 def test_curation_source_unit_ids_selects_kept_and_contributors():
-    """The source units ``write_curated_units_nwb`` actually reads: with
-    ``apply_merge=True`` a single-contributor kept unit reads its own train
-    (by kept id) and a multi-contributor kept unit reads its contributors'
-    (NOT the fresh merged head id) -- exactly mirroring the write body's access,
-    so dropped units are never read. ``apply_merge=False`` writes every original
-    unit 1:1, so it returns ``None`` (read all)."""
+    """The source units ``write_curated_units_nwb`` reads: with
+    ``apply_merge=True``, kept units' own ids and merged units' contributors;
+    with ``apply_merge=False``, ``None`` (all units)."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         curation_source_unit_ids,
     )
@@ -659,12 +643,8 @@ class _FakeRecording:
         return self.times[sample_ind]
 
     def get_times(self, segment_index=0, start_frame=None, end_frame=None):
-        # SI 0.104.3's BaseRecording.get_times takes NO frame bounds -- a
-        # frame-bounded call raises TypeError there. Model that so this double
-        # cannot stand in for an API real SI lacks: a bounded call is a hard
-        # error, and the bounds-less call is recorded so the tests can assert
-        # production never reads the full vector this way (it uses
-        # sample_index_to_time instead).
+        # SI 0.104.3's get_times takes no frame bounds, so reject them; the
+        # unbounded call is recorded so tests can assert it is never used.
         if start_frame is not None or end_frame is not None:
             raise TypeError(
                 "spikeinterface 0.104.3 BaseRecording.get_times() takes no "
@@ -676,8 +656,8 @@ class _FakeRecording:
 
 
 def test_sample_indices_to_times_maps_only_requested_frames():
-    """frame->time mapping goes through sample_index_to_time with ONLY the spike
-    frames (one request per unit), never the full timeline."""
+    """Frame-to-time mapping requests only the spike frames (one call per
+    unit) through sample_index_to_time, never the full timeline."""
     from spyglass.spikesorting.v2._storage.units_nwb import (
         _sample_indices_to_times_by_unit,
     )
@@ -695,8 +675,7 @@ def test_sample_indices_to_times_maps_only_requested_frames():
     )
     np.testing.assert_allclose(out[1], [times[2], times[1002]])
     np.testing.assert_allclose(out[2], [times[1003]])
-    # Exactly the requested spike frames are mapped (one call per unit), so a
-    # long recording's full timeline is never materialized.
+    # Exactly the requested spike frames, one call per unit.
     assert [c.tolist() for c in rec.sample_calls] == [[2, 1002], [1003]]
     assert rec.time_slice_calls == []
 
@@ -765,10 +744,7 @@ def test_base_intervals_and_gaps_detects_gaps():
         [0.0, 0.004],
         [10.0, 10.003],
     ]
-    # One chunk (chunk_size == round(fs) == 1000) covers the 9 samples, read as
-    # one contiguous slice of the explicit time vector -- NOT frame-bounded
-    # get_times (which SI 0.104.3 does not support), a full get_times()
-    # materialization, or per-frame sample_index_to_time point reads.
+    # One chunk covers the 9 samples, read as one contiguous slice.
     assert rec.time_vector.reads == [slice(0, 9)]
     assert rec.sample_calls == []
     assert rec.time_slice_calls == []
@@ -1067,15 +1043,7 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
     populated_sorting, monkeypatch
 ):
     """If the units-NWB write fails after ``AnalysisNwbfile().create`` staged the
-    file, the writer unlinks that orphan before propagating.
-
-    Mirrors the recording writer's cleanup contract. Without it the partial,
-    unregistered AnalysisNwbfile would leak on disk (the Sorting/curation
-    staging cleanup only knows the analyzer folder / the registration step, not
-    this file's name). The curated writer shares the identical wrapper. Fault is
-    injected into the post-create body so the real ``create`` + cleanup path
-    runs end to end.
-    """
+    file, the writer unlinks that orphan before propagating."""
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -1113,13 +1081,7 @@ def test_write_sorting_units_nwb_unlinks_staged_file_on_failure(
 @pytest.mark.integration
 def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
     """The sort-time Units NWB carries per-unit metadata matching Sorting.Unit
-    plus a source-provenance scratch, so the file is interpretable standalone.
-
-    Per-unit columns (peak_amplitude_uv / peak_electrode_id / n_spikes /
-    brain_region) come from the SAME rows used for Sorting.Unit.insert (computed
-    once), and a header records the sort source / sorter / params / recipe /
-    versions / seed.
-    """
+    and a source-provenance header, so the file is interpretable standalone."""
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -1180,8 +1142,7 @@ def test_units_nwb_carries_per_unit_and_source_metadata(planted_two_unit_sort):
     assert prov["recording_id"] == str(recording_id)
     assert prov["concat_recording_id"] is None
     assert prov["sorter"] == "mountainsort5"
-    # The named sorter recipe + execution backend are recorded, not just the
-    # scientific params blob (execution_params can change the sorter output).
+    # execution_params can change sorter output, so the recipe name is kept.
     assert prov["sorter_params_name"] == sel["sorter_params_name"]
     assert isinstance(prov["sorter_params"], dict)
     assert isinstance(prov["execution_params"], dict)

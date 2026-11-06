@@ -1,14 +1,6 @@
 """Row validation and legacy rows for ``SorterParameters``.
 
-:func:`validate_sorter_rows` is the per-sorter validation behind
-``SorterParameters.insert``: each row's ``params`` blob is validated against
-its sorter's schema, the sorter name is checked against the known sorters, and
-the execution backend is validated and its schema version backfilled.
-:func:`legacy_si_sorter_rows` builds the ``('<sorter>', 'default')`` rows
-``SorterParameters.insert_default_legacy_si_sorters`` inserts for installed,
-non-curated SpikeInterface sorters.
-
-Imports without the DB layer; SpikeInterface is imported inside the functions.
+SpikeInterface is imported inside the functions.
 """
 
 from __future__ import annotations
@@ -48,13 +40,8 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
         an in-process sorter for a container backend, or has an
         ``execution_params_schema_version`` that disagrees with its blob.
     """
-    # Sorter-name typo guard: ``_get_sorter_schema`` falls back to the
-    # permissive ``GenericSorterParamsSchema`` for any unknown sorter, so a
-    # typo like ``"mountainSort4"`` would otherwise fail only at populate with
-    # an opaque SI error. The gate is ``available_sorters()`` (spelling), not
-    # ``installed_sorters()``: a sorter absent on this machine may still be
-    # staged for a compute node. ``validate_lookup_rows`` backfills
-    # ``params_schema_version`` from the validated blob.
+    # Unknown sorters get the permissive schema, so check spelling here.
+    # available_sorters, not installed: a compute node may have it.
     import spikeinterface.sorters as sis
 
     from spyglass.spikesorting.v2._params.sorter import (
@@ -78,9 +65,7 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
                 f"Curated v2 sorters: {sorted(_SORTER_SCHEMAS)}; or any "
                 "sorter from spikeinterface.sorters.available_sorters()."
             )
-        # Permissive (``extra="allow"``) schemas pass unknown keys through;
-        # check them against the installed SI wrapper's own parameter
-        # vocabulary so a typo fails here, not minutes into the sort.
+        # Permissive schemas pass unknown keys through.
         validate_sorter_params_against_wrapper(sorter, row["params"])
         # Container provenance lives only on ``execution_params``; the
         # permissive schemas would otherwise pass these keys through.
@@ -90,14 +75,11 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
         reject_reserved_execution_keys(
             row.get("job_kwargs"), context="SorterParameters job_kwargs"
         )
-        # A row without ``execution_params`` defaults to local execution; its
-        # outer schema version is backfilled when omitted, else cross-checked.
         validated_execution = validate_execution_params(
             row.get("execution_params")
         )
         row["execution_params"] = validated_execution
-        # In-process sorters ignore a container backend at run time, but
-        # preflight would then falsely require its image.
+        # Preflight would otherwise require an image the sort never uses.
         if (
             sorter in non_si_sorters
             and validated_execution["backend"] != "local"
@@ -138,11 +120,8 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
 def legacy_si_sorter_rows() -> list:
     """Build ``('<sorter>', 'default')`` rows for installed non-curated sorters.
 
-    See ``SorterParameters.insert_default_legacy_si_sorters`` for which
-    sorters are included and why. Each row's ``params`` are the SpikeInterface
-    wrapper's own defaults, validated through ``GenericSorterParamsSchema``
-    and the wrapper vocabulary; a sorter that fails either is skipped with a
-    warning.
+    See ``SorterParameters.insert_default_legacy_si_sorters``. A sorter
+    whose wrapper defaults fail validation is skipped with a warning.
 
     Returns
     -------
@@ -167,22 +146,17 @@ def legacy_si_sorter_rows() -> list:
     skipped_not_installed = []
     for sorter in sis.available_sorters():
         if sorter in curated:
-            # See SorterParameters.insert_default_legacy_si_sorters: a curated
-            # sorter's typed schema would fail or drop SI's default keys.
+            # Its typed schema would fail or drop SI's default keys.
             continue
         if sorter.lower() in MATLAB_SORTERS:
-            # A local 'default' row would be rejected at populate; MATLAB
-            # rows are inserted explicitly with a container backend.
+            # MATLAB sorters need an explicit container-backend row.
             continue
         if sorter not in installed:
-            # Same gate as insert_default: a wrapper exposes defaults even
-            # when its binary is absent.
+            # A wrapper exposes defaults even without its binary.
             skipped_not_installed.append(sorter)
             continue
         try:
-            # Not ``get_default_sorter_params``, which adds SI's global job
-            # kwargs for ``requires_binary_data`` sorters; those keys are
-            # outside the wrapper vocabulary the insert guard enforces.
+            # get_default_sorter_params adds job kwargs outside the vocabulary.
             sorter_class = sis.sorter_dict[sorter]
             params, _descriptions = sorter_class._dynamic_params()
             params = copy.deepcopy(params)
@@ -201,8 +175,7 @@ def legacy_si_sorter_rows() -> list:
                 f"({exc!r})."
             )
             continue
-        # The insert hook repeats this guard; checking here skips one bad
-        # sorter instead of aborting the whole batch insert.
+        # Skips one bad sorter instead of aborting the batch insert.
         try:
             validate_sorter_params_against_wrapper(sorter, validated)
         except Exception as exc:
@@ -212,8 +185,6 @@ def legacy_si_sorter_rows() -> list:
                 f"vocabulary ({exc!r}); skipping."
             )
             continue
-        # A mapping row lets the insert hook backfill the omitted
-        # execution_params (local) and its schema version.
         rows.append(
             {
                 "sorter": sorter,

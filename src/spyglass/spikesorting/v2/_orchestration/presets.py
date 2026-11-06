@@ -24,39 +24,22 @@ if TYPE_CHECKING:
 class _PipelinePreset(BaseModel):
     """A v2 pipeline preset: a bundle of Lookup-row names.
 
-    The orchestrator consults this bundle once, then drives the
-    ``insert_selection`` -> ``populate`` chain on each stage. ``params``
-    Lookup row names must exist in the database before
-    ``run_v2_pipeline`` is called; the preset itself does NOT insert
-    Lookup rows (default rows are inserted explicitly by callers via
-    ``*.insert_default()``).
-
-    The human-facing fields (``intended_use``, ``threshold_units``,
-    ``notes``) carry no runtime behavior; they describe the preset for
-    ``describe_pipeline_presets()`` so a scientist can choose one without reading
-    module source. They default to ``""`` so external presets need not
-    supply them, but the built-ins below populate them.
+    The named rows must exist before ``run_v2_pipeline``; the preset inserts
+    none. Discovery fields (``probe_type`` through ``notes``) have no runtime
+    behavior. The sorter execution backend lives on the ``SorterParameters``
+    row, not here.
     """
 
     model_config = ConfigDict(extra="forbid")
     preprocessing_params_name: str
     sorter: str
     sorter_params_name: str
-    # Curation-stage row names: the quality-metric set and the auto-curation
-    # rule set the preset computes/suggests. Required so every preset declares
-    # its curation; consumed by the orchestrator only when the caller opts into
-    # auto-curation (otherwise a convenience run stays initial-curation-only).
+    # Used only when the caller opts into auto-curation.
     metric_params_name: str
     auto_curation_rules_name: str
-    # artifact_detection_params_name is optional: None means the preset runs no
-    # artifact detection in either source mode. A non-None value names the
-    # ArtifactDetectionParameters row (applied per member for concat).
+    # None runs no artifact detection; concat applies it per member.
     artifact_detection_params_name: "str | None" = None
-    # Discovery metadata (no runtime behavior) -- the axes a scientist picks a
-    # preset by. probe_type is informational: the recipe is set by target
-    # region (the preproc high-pass) and sampling rate (the sorter window),
-    # not by probe geometry, so e.g. the tetrode- and probe-hippocampus 30 kHz
-    # presets resolve to the SAME parameter rows.
+    # Region and sampling rate set the recipe; probe_type is informational.
     probe_type: str = ""  # "tetrode" | "probe" | "neuropixels" | "" (n/a)
     target_region: str = ""  # "hippocampus" | "cortex" -> preproc high-pass
     sampling_rate_hz: "int | None" = None
@@ -65,19 +48,12 @@ class _PipelinePreset(BaseModel):
         None  # informational MS4 spatial radius
     )
     recommendation_status: str = ""  # production | alternative | experimental
-    # NB: the sorter EXECUTION backend (local vs Docker/Singularity) is NOT a
-    # preset field -- it lives on the referenced ``SorterParameters.execution_params``
-    # row (the single source of truth). ``describe_pipeline_preset(name)`` reads it
-    # back from the row; this DB-free preset only names the sorter row.
     intended_use: str = ""  # one-line "when to reach for this pipeline preset"
     threshold_units: str = ""  # detection-threshold units (sigma / µV)
     notes: str = ""  # key assumptions (probe geometry, sampling rate, etc.)
 
 
-# The preset bundles + UX metadata are the single source of truth in
-# ``_core.recipe_catalog.pipeline_preset_specs`` (alongside the parameter-row
-# recipes they reference); build the validated ``_PipelinePreset`` objects
-# from those plain-dict specs here.
+# Specs live in ``_core.recipe_catalog.pipeline_preset_specs``.
 _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
     name: _PipelinePreset(**spec)
     for name, spec in pipeline_preset_specs().items()
@@ -92,8 +68,7 @@ def _unknown_pipeline_preset_message(
 ) -> str:
     """The message for a ``pipeline_preset`` name not in the registry.
 
-    Names the bad value and every registered preset, then ``hint``;
-    prefixed with ``"{caller}: "`` when ``caller`` is given.
+    Prefixed with ``"{caller}: "`` when ``caller`` is given.
     """
     message = (
         f"unknown pipeline_preset {name!r}. Available pipeline presets: "
@@ -105,9 +80,7 @@ def _unknown_pipeline_preset_message(
 def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
     """Return ``table & restriction``; raise ``ValueError`` if it is empty.
 
-    For a parameter row a registered preset references: the message names
-    ``caller``, the table, ``row`` (as given, ``repr``-formatted) and the
-    preset, and points at ``initialize_v2_defaults()``.
+    The message points at ``initialize_v2_defaults()``.
     """
     rel = table & restriction
     if not rel:
@@ -120,9 +93,6 @@ def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
     return rel
 
 
-# The three-value ``recommendation_status`` taxonomy, defined in ONE place so
-# ``describe_pipeline_presets``, ``describe_recommendation_status`` and the docs
-# agree on what each label means.
 RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
     "production": (
         "Frank-lab validated and recommended for real science -- the default "
@@ -144,10 +114,6 @@ RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
 
 def list_pipeline_presets() -> list[str]:
     """Return the sorted pipeline-preset names accepted by ``run_v2_pipeline``.
-
-    Notebook-discoverable accessor so users don't need to read the
-    module source to learn what's available.
-
     Examples
     --------
     >>> from spyglass.spikesorting.v2.pipeline import list_pipeline_presets
@@ -160,20 +126,8 @@ def list_pipeline_presets() -> list[str]:
 def describe_pipeline_presets() -> "pd.DataFrame":
     """Return a table describing each pipeline preset accepted by ``run_v2_pipeline``.
 
-    Companion to :func:`list_pipeline_presets` that adds the detail a scientist
-    needs to choose a preset -- the sorter, the parameter-row names each
-    stage uses, the intended use, and (a known footgun) the units of the
-    detection threshold -- without reading module source. Pure and
-    database-free: it reads only the in-module preset metadata and
-    queries/inserts nothing. ``pandas`` is imported lazily so
-    ``import spyglass.spikesorting.v2.pipeline`` stays cheap.
-
-    The ``recommendation_status`` column is one of ``production`` (Frank-lab
-    validated -- the recommended default for its probe/region/rate),
-    ``alternative`` (a sound substitute for when production does not fit, e.g.
-    MountainSort5 as an alternative to MountainSort4), or ``experimental``
-    (runs but not yet validated -- verify the output before relying on it).
-    Call :func:`describe_recommendation_status` for the full definitions.
+    Database-free. :func:`describe_recommendation_status` defines the
+    ``recommendation_status`` values.
 
     Returns
     -------
@@ -222,10 +176,7 @@ def describe_pipeline_presets() -> "pd.DataFrame":
 def describe_recommendation_status() -> "pd.DataFrame":
     """Explain the ``recommendation_status`` values from describe_pipeline_presets.
 
-    :func:`describe_pipeline_presets` tags each preset ``production`` /
-    ``alternative`` / ``experimental``; this returns what those labels mean so
-    the column is interpretable without reading module source. Pure and
-    database-free.
+    Database-free.
 
     Returns
     -------
@@ -267,16 +218,8 @@ _PRESET_DETAIL_COLUMNS = [
 def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     """Unpack one pipeline preset into its full, validated parameter values.
 
-    The singular companion to :func:`describe_pipeline_presets`: where the
-    plural helper lists every preset and the parameter-row *names* each stage
-    uses, this resolves ONE preset to the actual VALUES of its preprocessing,
-    artifact-detection, sorter, metric, and auto-curation parameter rows -- so
-    you can see exactly what
-    ``run_v2_pipeline(..., pipeline_preset=name)`` will do before running it.
-
-    Unlike the DB-free :func:`describe_pipeline_presets`, this reads the live
-    parameter Lookup tables. If a referenced row is missing it raises a clear
-    "run ``initialize_v2_defaults()``" message rather than failing opaquely.
+    Reads the live parameter rows. A missing row raises with a pointer to
+    ``initialize_v2_defaults()``.
 
     Parameters
     ----------
@@ -287,31 +230,17 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     Returns
     -------
     pandas.DataFrame
-        Long-format, one row per parameter, columns ``stage`` (``"preset"`` /
+        Long format, one row per parameter: ``stage`` (``"preset"`` /
         ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"`` /
         ``"sorter_execution"`` / ``"metric"`` / ``"auto_curation"``),
-        ``params_row_name``, ``key`` (dotted path into the validated blob), and
-        ``value``. The ``"metric"`` rows unpack the ``QualityMetricParameters`` columns
-        (``metric_names`` / ``metric_kwargs`` / ``template_metric_columns`` /
-        ``skip_pc_metrics``) and the ``"auto_curation"`` rows carry the
-        ``AutoCurationRules`` master fields plus one ``rule.<index>`` entry per
-        ordered label rule (``"<rule_name>: <metric> <op> <threshold> ->
-        <label>"``). Parameter-row entries also carry
-        ``params_schema_version`` and ``job_kwargs`` so the display shows the
-        full row resolved by the preset, not just the core params blob. The
-        ``"sorter_execution"`` rows surface the sorter's ``execution_params``
-        backend/container provenance read from the ``SorterParameters`` row (the
-        single source of truth -- the DB-free :func:`describe_pipeline_presets`
-        does not carry execution fields); their own ``schema_version`` is one of
-        the flattened keys, so ``params_schema_version`` is left blank for them.
-        Preset entries include the human-facing ``threshold_units`` field so
-        detection thresholds are never unitless.
+        ``params_row_name``, ``key`` (dotted path), ``value``,
+        ``params_schema_version`` and ``job_kwargs``. Each auto-curation rule
+        is a ``rule.<index>`` entry. ``"sorter_execution"`` rows leave
+        ``params_schema_version`` blank; their ``schema_version`` is a key.
     """
     import pandas as pd
 
-    # Validate the name BEFORE importing the table modules: importing them
-    # triggers DataJoint ``@schema`` decoration (a DB connection), so an unknown
-    # name must reject first to keep that path database-free.
+    # Before table imports, which connect to the database.
     if name not in _PIPELINE_PRESETS:
         raise ValueError(_unknown_pipeline_preset_message(name))
     preset = _PIPELINE_PRESETS[name]
@@ -387,8 +316,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             ("notes", preset.notes),
         )
     ]
-    # Build the value-resolving stages. Artifact detection is optional: a None
-    # name means the preset runs no artifact stage, so there is no row to unpack.
     stage_specs = [
         (
             "preprocessing",
@@ -440,12 +367,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
                 )
             )
 
-    # The sorter EXECUTION backend (local vs Docker/Singularity + container
-    # install provenance) lives on the SorterParameters row, not the preset, so
-    # surface it here from the single source of truth. The execution blob's own
-    # ``schema_version`` is one of the flattened keys, so ``params_schema_version``
-    # (the params-stage column) is left None for these rows rather than
-    # overloaded. The sorter row's existence was already verified above.
     execution_params = (
         SorterParameters
         & {
@@ -463,8 +384,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             )
         )
 
-    # Curation recipe values. QualityMetricParameters stores named columns (not a
-    # single params blob), so unpack them into a params-shaped dict and flatten.
+    # QualityMetricParameters stores named columns, not one params blob.
     metric_rel = _require_preset_row(
         QualityMetricParameters,
         {"metric_params_name": preset.metric_params_name},
@@ -510,9 +430,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             )
         )
 
-    # Auto-curation: the master row (merge preset + kwargs) plus one row per
-    # ordered label rule from the Rule part, so the actual thresholds are visible
-    # rather than hidden behind the row name.
     auto_rel = _require_preset_row(
         AutoCurationRules,
         {"auto_curation_rules_name": preset.auto_curation_rules_name},
@@ -569,10 +486,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
 def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     """Raise ``ValueError`` if any Lookup row the preset references is absent.
 
-    A preset is only usable if every parameter row it names already exists, so
-    ``register_pipeline_preset`` checks them up front rather than letting the orchestrator
-    fail with an opaque FK error mid-populate. Names the missing row and the
-    table so the fix is obvious.
+    Fails up front rather than with a foreign-key error mid-populate.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -611,8 +525,6 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
             preset.auto_curation_rules_name,
         ),
     ]
-    # artifact detection is optional: a None name means the preset runs no
-    # artifact stage (explicitly disabled), so there is no row to require.
     if preset.artifact_detection_params_name is not None:
         checks.append(
             (
@@ -640,22 +552,15 @@ def register_pipeline_preset(
 ) -> str:
     """Register a custom pipeline preset at runtime; return its name.
 
-    The public, source-free way for a lab to add a preset: external labs use the
-    same dated ``{lab}_..._{date}`` naming as the built-ins. The preset is
-    Pydantic-validated (unknown fields are rejected) and, by default, every
-    parameter row it references is verified to exist so a typo fails here with a
-    clear message rather than mid-populate.
+    Use the dated ``{lab}_..._{date}`` naming of the built-ins. The preset is
+    validated and, by default, its referenced rows must exist.
 
     Parameters
     ----------
     name : str
-        Registry name. Must not already exist (refuses to silently overwrite a
-        built-in or a prior registration).
+        Registry name. Must not already exist.
     preset : dict or _PipelinePreset
-        The preset bundle. The registry stores its OWN freshly validated
-        ``_PipelinePreset`` built from the supplied content, so later
-        mutation of a caller-supplied model does not change the registered
-        recipe, and a model whose fields were made invalid is rejected.
+        The preset bundle. The registry stores a freshly validated copy.
     validate_rows : bool, optional
         If True (default), verify the referenced Lookup rows exist (requires a
         database connection). Pass False to register without the DB check.
@@ -672,8 +577,7 @@ def register_pipeline_preset(
         Pydantic validation, or (when ``validate_rows``) a referenced parameter
         row is missing.
     """
-    # Guard the registry key first: a non-string name breaks list_pipeline_presets
-    # (it sorts mixed-type keys) and an empty/blank name is unusable.
+    # list_pipeline_presets sorts keys, so names must be strings.
     if not isinstance(name, str) or not name.strip():
         raise ValueError(
             f"register_pipeline_preset: name must be a non-empty string, got {name!r}."
@@ -741,9 +645,7 @@ def _derive_preset_parameters(stages, overrides, base_name):
 
     touched = [name for name in stages if stage_overrides[name]]
 
-    # Step 1 -- build + Pydantic-validate every derived blob BEFORE any insert,
-    # so a bad override raises the same teaching error as a direct parameter
-    # insert and leaves the database untouched.
+    # Validate every derived blob before any insert.
     derived_params: dict[str, dict] = {}
     for name in touched:
         stage = stages[name]
@@ -766,33 +668,14 @@ def clone_pipeline_preset(
 ) -> str:
     """Clone a pipeline preset with one or more parameter values changed.
 
-    The "tune one knob" path: a user who wants a single non-default value need
-    not hand-write a full Pydantic params dict. ``clone_pipeline_preset`` resolves
-    ``base_name`` to its preprocessing / artifact-detection / sorter parameter
-    rows, applies ``overrides`` to the relevant stage's ``params`` blob, inserts
-    the derived parameter rows under ``new_name``, and registers ``new_name`` via
-    :func:`register_pipeline_preset`. Inspect the result with
-    :func:`describe_pipeline_preset`.
+    Inserts the changed stage rows under ``new_name`` and registers the
+    preset; untouched stages reuse the base rows. Re-running with identical
+    overrides reuses the rows.
 
-    Each override key is a dotted path into a stage's scientific ``params`` blob
-    -- e.g. ``detect_threshold=4.0`` (a flat sorter knob, passable as a keyword)
-    or ``**{"bandpass_filter.freq_min": 700.0}`` (a nested preprocessing knob;
-    dotted keys are not valid Python identifiers, so pass them via ``**{...}``).
-    The override is routed to whichever stage's blob already contains that path;
-    a key that is not present in any stage blob is rejected rather than silently
-    added. Only the scientific ``params`` blob is editable -- ``job_kwargs`` and
-    the sorter's ``execution_params`` are carried over from the base row
-    verbatim; change those by inserting a parameter row directly.
-
-    Stages the overrides do not touch are not forked: the clone reuses the base
-    preset's existing row names for them, so a one-knob change adds exactly one
-    derived parameter row.
-
-    The clone never mutates the base preset or its parameter rows -- it only adds
-    new rows and a new registration. The derived rows are named ``new_name``, so
-    re-running ``clone_pipeline_preset`` with identical overrides (e.g. on a fresh process,
-    where the in-memory registry is empty but the DB rows persist) is a no-op
-    rather than a fork.
+    Each override key is a dotted path into one stage's ``params`` blob,
+    e.g. ``detect_threshold=4.0`` or ``**{"bandpass_filter.freq_min": 700.0}``.
+    Keys absent from every blob are rejected. ``job_kwargs`` and
+    ``execution_params`` are copied from the base row.
 
     Parameters
     ----------
@@ -802,10 +685,8 @@ def clone_pipeline_preset(
         The fresh name for the clone. Must be a non-empty string not already in
         the preset registry, and is also used to name each derived parameter row.
     allow_duplicate_params : bool, optional
-        If True, opt out of the duplicate-content guard when a derived row's
-        content matches an existing row under a different name (see
-        :func:`register_pipeline_preset` / the parameter Lookups). Default False refuses
-        to fork provenance, mirroring the parameter tables.
+        If True, allow a derived row whose content matches an existing row
+        under a different name. Default False.
     **overrides
         Dotted ``stage_blob`` paths mapped to their new values.
 
@@ -826,10 +707,7 @@ def clone_pipeline_preset(
         If a derived row's content matches an existing row under a different
         name and ``allow_duplicate_params`` is False.
     """
-    # --- cheap, database-free validation (mirrors register_pipeline_preset / describe) ---
-    # Validate before importing the table modules: importing them triggers
-    # DataJoint ``@schema`` decoration (a DB connection), so these checks stay
-    # database-free and fail fast before any row is touched.
+    # Before table imports, which connect to the database.
     if base_name not in _PIPELINE_PRESETS:
         raise ValueError(_unknown_pipeline_preset_message(base_name))
     if not isinstance(new_name, str) or not new_name.strip():
@@ -868,12 +746,7 @@ def clone_pipeline_preset(
     )
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
-    # One descriptor per stage. ``sorter`` is the per-sorter dispatch key (and
-    # the extra ``SorterParameters`` primary-key column / ``execution_params``
-    # carrier); it is None for the single-key Lookups. The artifact-detection
-    # stage is included only when the base preset runs one (a None artifact name
-    # means no artifact stage -- an explicit skip-artifact preset -- so there is
-    # no base row to fetch and no artifact key to override).
+    # ``sorter`` is None for the single-key tables.
     stages = {
         "preprocessing": {
             "table": PreprocessingParameters,
@@ -908,9 +781,7 @@ def clone_pipeline_preset(
             restriction["sorter"] = stage["sorter"]
         return restriction
 
-    # Fetch every base row's params (and the carried-over blobs) up front: the
-    # routing step needs all three blobs to disambiguate an override, and a
-    # missing row must fail with an actionable message, not an opaque fetch1.
+    # Routing needs every stage's blob to disambiguate an override.
     for stage in stages.values():
         rel = _require_preset_row(
             stage["table"],
@@ -937,10 +808,6 @@ def clone_pipeline_preset(
         stage["base_params_schema_version"] = int(psv)
         stage["base_job_kwargs"] = _jsonable_blob(job_kwargs)
 
-    # Route each override to the one stage whose params blob already contains
-    # its dotted path. A path present in no stage is a typo / unsupported key; a
-    # path present in more than one (e.g. a top-level key shared across stages)
-    # cannot be disambiguated by a dotted key alone.
     touched, derived_params = _derive_preset_parameters(
         stages, overrides, base_name
     )
@@ -950,12 +817,7 @@ def clone_pipeline_preset(
             stage["table_name"], row, sorter_keyed=stage["sorter"] is not None
         )
 
-    # Step 2 -- insert the derived rows atomically. For each touched stage,
-    # reconcile against any existing row already named ``new_name``: identical
-    # content is an idempotent no-op (a re-run reuses it), different content is a
-    # name collision and refused. The duplicate-content guard inside the table
-    # ``insert`` separately refuses a derived row whose content matches a
-    # DIFFERENT existing name (unless ``allow_duplicate_params``).
+    # An existing ``new_name`` row is reused if identical, refused otherwise.
     with PreprocessingParameters._safe_context():
         for name in touched:
             stage = stages[name]
@@ -981,7 +843,7 @@ def clone_pipeline_preset(
             existing = stage["table"] & new_restriction
             if existing:
                 if _fingerprint(stage, existing.fetch1()) == derived_fp:
-                    continue  # idempotent: the derived row already exists
+                    continue
                 raise ValueError(
                     f"clone_pipeline_preset: a {stage['table_name']} row named "
                     f"{new_name!r} already exists with different content. "
@@ -1001,8 +863,7 @@ def clone_pipeline_preset(
                 row, allow_duplicate_params=allow_duplicate_params
             )
         if "preprocessing" in touched:
-            # Analyzer windows are resolved by preprocessing row name, so the
-            # forked row records the base recipe's windows.
+            # Analyzer windows are keyed by preprocessing row name.
             display, metric = waveform_params_for_preprocessing(
                 base.preprocessing_params_name
             )

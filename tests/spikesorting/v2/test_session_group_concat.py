@@ -1,14 +1,9 @@
 """Behavioral tests for same-day chronic concatenate-and-sort.
 
-Covers the ``SessionGroup`` grouping table (multi-day gate, derived dates,
-atomic create, owner namespacing), the ``ConcatenatedRecordingSelection``
-missing-recording precondition, and -- behind the ``slow`` marker -- the
-``ConcatenatedRecording`` materializer plus the concat-backed
-``Sorting.populate`` + ``split_sorting_by_session`` round trip.
-
-The substrate is the package-scoped ``chronic_2_session_minirec`` fixture
-(two same-day single-tetrode sessions with populated ``Recording`` caches,
-plus one next-day session for the multi-day gate).
+Covers ``SessionGroup``, ``ConcatenatedRecordingSelection``,
+``ConcatenatedRecording`` and the concat-backed sort and split. Uses
+``chronic_2_session_minirec``: two same-day sessions plus one next-day
+session.
 """
 
 from __future__ import annotations
@@ -30,11 +25,8 @@ logger = logging.getLogger(__name__)
 class _PeakRSS:
     """Context manager: sample process RSS in a background thread; expose peak.
 
-    A REAL measurement (psutil polling of the live process RSS), not a mocked
-    metric: ``peak_mb`` is the high-water-mark resident-set size observed while
-    the ``with`` body ran, and ``elapsed_s`` is its wall-clock runtime. Used by
-    both the synthetic memory/runtime smoke and the ``--run-chronic`` gate so
-    the real-data budget assertions run against a proven measurement path.
+    ``peak_mb`` is the polled high-water RSS during the body and
+    ``elapsed_s`` its wall-clock runtime.
     """
 
     def __init__(self, interval_s: float = 0.05):
@@ -95,8 +87,7 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
 
     assert len(same_day) == 2
     assert len(recording_pks) == 2
-    # Both same-day members have a populated Recording cache (recording_pks is
-    # aligned with same_day_members; the member dicts stay clean for create_group).
+    # recording_pks is aligned with same_day_members.
     for rec_pk in recording_pks:
         assert Recording & rec_pk
 
@@ -124,9 +115,8 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
 def same_day_group(chronic_2_session_minirec):
     """A same-day ``SessionGroup`` over the two populated members.
 
-    Function-scoped: creates the group, yields the substrate (group key,
-    members, recording PKs, preprocessing recipe), and tears the group (plus
-    any concat lineage built on it) down for the owner afterward.
+    Yields the group key, members, recording PKs and preprocessing recipe;
+    tears down the group and its concat lineage.
     """
     from spyglass.spikesorting.v2.session_group import SessionGroup
     from tests.spikesorting.v2._ingest_helpers import (
@@ -160,8 +150,7 @@ def test_session_group_member_has_no_recording_date_column():
 
 @pytest.mark.usefixtures("dj_conn")
 def test_create_group_rejects_empty_members():
-    """An empty members list is rejected up front, not deferred to an obscure
-    ``members[0]`` failure in ConcatenatedRecording.make."""
+    """An empty members list is rejected at create time."""
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     with pytest.raises(ValueError, match="empty"):
@@ -172,9 +161,8 @@ def test_create_group_rejects_empty_members():
 def test_create_group_rejects_duplicate_logical_members(
     chronic_2_session_minirec,
 ):
-    """Two members with the same (nwb, sort_group, interval, team) are rejected
-    -- the Member PK is member_index only, so a duplicate would silently
-    concatenate the same recording twice."""
+    """Two members with the same (nwb, sort_group, interval, team) are
+    rejected; the Member PK is member_index only."""
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     sub = chronic_2_session_minirec
@@ -189,12 +177,8 @@ def test_create_group_rejects_duplicate_logical_members(
 def test_assert_concat_preflight_guards_members_and_auto_curate(
     same_day_group,
 ):
-    """Concat preflight passes a fully-ingested group but fails fast on a
-    missing auto-curation prerequisite (rather than deep in the sort compute).
-
-    The passing case is also a regression guard for the per-member Raw /
-    'raw data valid times' / sort-group-electrode / sampling-rate checks: a
-    VALID same-day group must not trip any of them.
+    """Concat preflight passes a fully-ingested group and fails fast on a
+    missing auto-curation prerequisite.
     """
     from spyglass.spikesorting.v2._orchestration.preflight import (
         assert_concat_preflight,
@@ -210,8 +194,6 @@ def test_assert_concat_preflight_guards_members_and_auto_curate(
     # A valid, fully-ingested group passes every per-member prerequisite.
     assert assert_concat_preflight(owner, name, bundle) == []
 
-    # auto_curate=True with a missing metric row fails fast at preflight,
-    # not after the member + concat + sort compute.
     bad = bundle.model_copy(update={"metric_params_name": "does_not_exist_xyz"})
     with pytest.raises(PreflightError, match="QualityMetricParameters"):
         assert_concat_preflight(owner, name, bad, auto_curate=True)
@@ -223,9 +205,7 @@ def test_assert_concat_preflight_rejects_member_with_coincident_contacts(
 ):
     """A member whose contacts coincide fails concat preflight by name.
 
-    Concat members run the single-session sort-group checks, so a member the
-    recording stage could not turn into a probe is reported before any member
-    recording is built, and the message says which member it is.
+    The check runs before any member recording is built.
     """
     import spyglass.spikesorting.v2._orchestration.preflight_checks as checks
     from spyglass.spikesorting.v2._orchestration.preflight import (
@@ -362,8 +342,8 @@ def test_create_group_multi_day_allowed_with_flag(chronic_2_session_minirec):
 def test_create_group_rejects_caller_supplied_recording_date(
     chronic_2_session_minirec,
 ):
-    """A member dict carrying ``recording_date`` raises ``SessionGroupDateError``
-    -- dates are derived, never caller-set."""
+    """A member dict carrying ``recording_date`` raises
+    ``SessionGroupDateError``; dates are derived."""
     from spyglass.spikesorting.v2.exceptions import SessionGroupDateError
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
@@ -467,10 +447,8 @@ def test_concat_selection_inserts_and_is_idempotent(same_day_group):
 
 @pytest.mark.slow
 def test_concat_id_folds_member_set(same_day_group):
-    """``concat_recording_id`` folds the ordered frozen member set: it equals the
-    deterministic id of (identity + member_set_hash) and DIFFERS from the
-    pre-fold formula (identity alone), and the stored hash is the hash of the
-    captured snapshot rows."""
+    """``concat_recording_id`` is the id of (identity + member_set_hash), not
+    of the identity alone, and the stored hash matches the snapshot rows."""
     from spyglass.spikesorting.v2._recording.concat import member_set_hash
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
@@ -507,9 +485,8 @@ def test_concat_id_folds_member_set(same_day_group):
 
 @pytest.mark.slow
 def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
-    """The frozen ``MemberSnapshot`` captures each member's logical identity, its
-    resolved ``recording_id``, and its ``Recording.content_hash`` -- the values a
-    later materialize / rebuild verifies the live recordings against."""
+    """``MemberSnapshot`` freezes each member's identity, ``recording_id`` and
+    ``Recording.content_hash`` for later verification."""
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
@@ -536,9 +513,8 @@ def test_concat_member_snapshot_freezes_recording_identity(same_day_group):
 
 @pytest.mark.slow
 def test_concat_id_changes_with_member_set(same_day_group):
-    """Two selections identical in params but over a DIFFERENT frozen member set
-    mint different ``concat_recording_id``s (and different ``member_set_hash``es)
-    -- a different member set is a different concat, not a silent reuse."""
+    """Same params over a different member set mint a different
+    ``concat_recording_id`` and ``member_set_hash``."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
         SessionGroup,
@@ -551,8 +527,7 @@ def test_concat_id_changes_with_member_set(same_day_group):
             "preprocessing_params_name": grp["preprocessing_params_name"],
         }
     )
-    # A second group over only the first member -- same owner + params, a
-    # different ordered member set. (Torn down with the owner by same_day_group.)
+    # Same owner and params, only the first member.
     owner = grp["owner"]
     SessionGroup.create_group(
         owner, "sg_concat_subset", [grp["same_day_members"][0]]
@@ -574,10 +549,8 @@ def test_concat_id_changes_with_member_set(same_day_group):
 def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
     same_day_group,
 ):
-    """Editing the LIVE SessionGroup.Member set under a fixed
-    group name+params re-mints a different concat_recording_id on re-selection,
-    and the original concat's frozen MemberSnapshot is unchanged by the edit (old
-    concat rows stay valid; the change is not silently absorbed)."""
+    """Editing the live member set re-mints the concat id on re-selection and
+    leaves the original concat's MemberSnapshot unchanged."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
         SessionGroup,
@@ -594,17 +567,14 @@ def test_concat_member_edit_remints_id_and_freezes_old_snapshot(
     ).fetch(as_dict=True, order_by="member_index")
     assert [r["member_index"] for r in original_snapshot] == [0, 1]
 
-    # Edit the LIVE member set under the SAME group_key: drop the second member.
+    # Drop the second member under the same group_key.
     (
         SessionGroup.Member & {**grp["group_key"], "member_index": 1}
     ).delete_quick()
 
-    # Re-selection over the now-different live member set mints a DIFFERENT id.
     edited = select_unmasked_concat(dict(request))
     assert edited["concat_recording_id"] != original["concat_recording_id"]
 
-    # The original concat's frozen snapshot is untouched by the live edit -- the
-    # old concat row stays valid (reads its own frozen members), not invalidated.
     still_frozen = (
         ConcatenatedRecordingSelection.MemberSnapshot & original
     ).fetch(as_dict=True, order_by="member_index")
@@ -631,8 +601,7 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
 
     sub = chronic_2_session_minirec
     owner, name = sub["owner"], "sg_missing_rec"
-    # The next-day member has no populated Recording; build a multi-day group
-    # so the precondition (not the date gate) is what fails on insert.
+    # Multi-day, so the missing recording (not the date gate) fails.
     members = [sub["same_day_members"][0], sub["next_day_member"]]
     SessionGroup.create_group(owner, name, members, allow_multi_day=True)
     try:
@@ -654,11 +623,8 @@ def test_concat_selection_needs_the_member_recording_for_current_inputs(
 ):
     """A member recording built before a sort-group change is not used.
 
-    A reference change gives the member new recording inputs. The concat
-    selection must use the recording for the current inputs. None is populated
-    here, so the member is reported as missing: both before and after the
-    member is selected again for the new inputs (which adds a second
-    ``RecordingSelection`` row for the same logical key).
+    After a reference change the member is reported missing, both before
+    and after a second ``RecordingSelection`` row is added for it.
     """
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
@@ -716,10 +682,8 @@ def test_concat_selection_needs_the_member_recording_for_current_inputs(
 
 @pytest.mark.usefixtures("dj_conn")
 def test_concat_selection_rejects_unknown_fields():
-    """A concat selection refuses any field outside its identity, including
-    ``motion_correction_params_name`` (motion correction is a separate stage,
-    never part of a concat). The check runs before any member is read, so no
-    group needs to exist."""
+    """A concat selection refuses fields outside its identity, including
+    ``motion_correction_params_name``, before reading any member."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
         SessionGroup,
@@ -743,8 +707,7 @@ def test_concat_selection_rejects_unknown_fields():
         ConcatenatedRecordingSelection.insert_selection(
             {**request, "typo": 1}, artifact_detection_ids={}
         )
-    # The minted id is accepted (and ignored), so the refusal of unknown
-    # fields is not what the empty-group check below reports.
+    # The minted id is accepted and ignored.
     with pytest.raises(ValueError, match="has no members"):
         ConcatenatedRecordingSelection.insert_selection(
             {**request, "concat_recording_id": None},
@@ -757,12 +720,8 @@ def test_concat_rejects_mismatched_electrode_space(monkeypatch):
     """A SessionGroup whose members map to different physical electrode spaces
     (different electrode ids or brain regions) is rejected.
 
-    The concat result is read in the ANCHOR member's electrode frame, so two
-    members with the same local channel layout but different underlying
-    electrodes/regions would be silently mis-attributed. The per-member
-    electrode/region signature query is exercised end to end by the chronic
-    concat path; here the signature source is stubbed so the comparison logic
-    (raise on mismatch, accept on match) is checked directly.
+    The concat is read in the anchor member's electrode frame. The
+    signature source is stubbed here.
     """
     from spyglass.spikesorting.v2 import session_group as sg
 
@@ -782,7 +741,6 @@ def test_concat_rejects_mismatched_electrode_space(monkeypatch):
     with pytest.raises(ValueError, match="electrode"):
         sg.assert_members_share_electrode_space(members)
 
-    # Matching signatures across members pass.
     signatures[1] = signatures[0]
     sg.assert_members_share_electrode_space(members)
 
@@ -791,16 +749,13 @@ def test_concat_rejects_mismatched_electrode_space(monkeypatch):
 def test_concat_make_fetch_rejects_mismatched_electrode_space(
     same_day_group, monkeypatch
 ):
-    """``ConcatenatedRecording.make_fetch`` re-asserts electrode-space
-    compatibility at the compute boundary -- so member drift after selection (or
-    a raw ``allow_direct_insert`` selection) that bypassed ``insert_selection``'s
-    check still fails before the concat is read in the anchor member's frame."""
+    """``ConcatenatedRecording.make_fetch`` re-checks electrode-space
+    compatibility, catching drift after selection or a bypassing insert."""
     from spyglass.spikesorting.v2 import session_group as sg
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
     )
 
-    # The members match at selection time (insert_selection's check passes).
     key = select_unmasked_concat(
         {
             **same_day_group["group_key"],
@@ -809,8 +764,7 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
             ],
         }
     )
-    # Simulate post-selection drift: the per-member electrode/region signatures
-    # now diverge, so the compute-boundary re-check must reject.
+    # Post-selection drift.
     signatures = {0: ((0, "hpc"),), 1: ((0, "cortex"),)}
     monkeypatch.setattr(
         sg,
@@ -825,10 +779,8 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
     """A bypass-inserted concat sort carrying an ``ArtifactDetectionSource`` row
     raises ``SchemaBypassError`` at ``make_fetch``.
 
-    ``insert_selection`` rejects a concat source combined with an
-    ``artifact_detection_id``, but a direct insert of the part rows bypasses it.
-    Member masks belong to the concat source; a stray sorting-stage artifact id
-    cannot describe those dependencies and must not be silently ignored.
+    Member masks belong to the concat source, so a sorting-stage artifact id
+    cannot describe them.
     """
     import uuid
 
@@ -867,11 +819,8 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
         SortingSelection.ConcatenatedRecordingSource.insert1(
             {"sorting_id": sid, "concat_recording_id": concat_id}
         )
-        # The bypass: a concat source must NOT carry an artifact pass. The
-        # ArtifactDetectionSource FK is the ArtifactDetectionOutput merge, so
-        # register a (bypass) recording artifact into the merge and point the
-        # part at that merge id -- resolve_artifact_detection then recovers a
-        # non-None artifact_detection_id and the concat re-check fires.
+        # Register a bypass recording artifact in the merge and point the
+        # ArtifactDetectionSource part at it.
         RecordingArtifactDetection().insert(
             [{"artifact_detection_id": art_id}], allow_direct_insert=True
         )
@@ -989,10 +938,8 @@ def _member_snapshot(grp):
 def test_load_member_recordings_returns_aligned_counts_and_indices(
     same_day_group,
 ):
-    """``_load_member_recordings`` loads each member's cached Recording from the
-    snapshot-resolved plan in member_index order and returns sample counts /
-    indices aligned element-wise with the loaded recordings -- the core per-member
-    materialization contract, exercised without driving a full populate."""
+    """``_load_member_recordings`` returns recordings, sample counts and
+    indices aligned in member_index order."""
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2._recording.concat_fetch import (
@@ -1013,7 +960,6 @@ def test_load_member_recordings_returns_aligned_counts_and_indices(
     expected = _member_sample_counts(grp)
     assert member_indices == [0, 1]
     assert sample_counts == expected
-    # The returned recordings are the same objects the counts were taken from.
     assert [int(r.get_num_samples()) for r in recordings] == expected
 
 
@@ -1022,8 +968,8 @@ def test_resolve_snapshot_recordings_raises_on_missing_recording(
     same_day_group,
 ):
     """A frozen member whose ``Recording`` is gone raises
-    ``MissingRecordingForConcatError`` rather than silently dropping it (which
-    would shift every later member's boundary)."""
+    ``MissingRecordingForConcatError``; dropping it would shift later
+    boundaries."""
     from spyglass.spikesorting.v2.exceptions import (
         MissingRecordingForConcatError,
     )
@@ -1045,9 +991,8 @@ def test_resolve_snapshot_recordings_raises_on_missing_recording(
 def test_resolve_snapshot_recordings_raises_on_member_content_drift(
     same_day_group,
 ):
-    """A frozen member whose live ``Recording.content_hash`` no longer matches the
-    snapshot raises ``ConcatMemberDriftError`` -- the concat would be built from
-    different underlying data than its id was minted for."""
+    """A member whose live ``Recording.content_hash`` differs from the
+    snapshot raises ``ConcatMemberDriftError``."""
     from spyglass.spikesorting.v2.exceptions import ConcatMemberDriftError
     from spyglass.spikesorting.v2._recording.concat_fetch import (
         resolve_snapshot_recordings,
@@ -1282,8 +1227,7 @@ def test_concatenated_recording_make_shape(same_day_group):
     n0, n1 = _member_sample_counts(grp)
     fs = float(row["sampling_frequency"])
     assert row["total_duration_s"] == pytest.approx((n0 + n1) / fs)
-    # n_samples is the EXACT integer concat sample count (the split-back guard's
-    # authoritative basis), not a float duration round-trip.
+    # Exact integer count; the split-back guard relies on it.
     assert int(row["n_samples"]) == n0 + n1
 
     idxs, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
@@ -1299,9 +1243,8 @@ def test_concatenated_recording_make_shape(same_day_group):
 
 @pytest.mark.slow
 def test_concat_get_recording_rebuilds_on_missing(same_day_group):
-    """A missing concat cache file is rebuilt on demand: ``get_recording``
-    reconciles the ``~external`` checksum and returns a valid, content-identical
-    recording -- mirroring ``Recording.get_recording``."""
+    """``get_recording`` rebuilds a missing concat cache file, reconciles the
+    ``~external`` checksum and returns identical content."""
     import numpy as np
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -1329,9 +1272,8 @@ def test_concat_get_recording_rebuilds_on_missing(same_day_group):
 
 @pytest.mark.slow
 def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
-    """A concat rebuild whose fingerprint diverges from the stored
-    ``content_hash`` raises ``RecordingContentDriftError``; the canonical slot is
-    NOT written (drifted bytes are never served) -- mirrors the recording side.
+    """A concat rebuild whose fingerprint differs from ``content_hash``
+    raises ``RecordingContentDriftError`` and writes nothing.
     """
     import shutil
 
@@ -1375,10 +1317,9 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
 
 @pytest.mark.slow
 def test_concat_split_conserves_all_spikes(same_day_group):
-    """``split_sorting_by_session`` back-maps a concat-frame sorting so every input
-    (unit, frame) lands in exactly one member and reconstructs to its original
-    frame -- per-spike membership, not just summed counts. A MemberBoundary set
-    that no longer covers the frozen member set raises ``ConcatSplitError``."""
+    """``split_sorting_by_session`` maps every (unit, frame) to exactly one
+    member and back. Boundaries not covering the frozen member set raise
+    ``ConcatSplitError``."""
     import numpy as np
     import spikeinterface as si
 
@@ -1434,8 +1375,6 @@ def test_concat_split_conserves_all_spikes(same_day_group):
         )
         np.testing.assert_array_equal(reconstructed, np.sort(original))
 
-    # A MemberBoundary set short of the frozen member set is rejected, not
-    # silently truncated.
     (
         ConcatenatedRecording.MemberBoundary & concat_pk & {"member_index": 1}
     ).delete_quick()
@@ -1449,10 +1388,9 @@ def test_concat_split_conserves_all_spikes(same_day_group):
 def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
     """The concat NWB self-describes the split.
 
-    It embeds the ordered member provenance + frame boundaries that reproduce
-    ``split_sorting_by_session``'s mapping without reading live
-    ``SessionGroup.Member``. The header carries no motion-correction fields:
-    concatenation does not correct motion.
+    It embeds member provenance and frame boundaries that reproduce
+    ``split_sorting_by_session`` without the database, and no
+    motion-correction fields.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
@@ -1484,9 +1422,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
         read_long_provenance(abs_path, CONCAT_MEMBERS),
         key=lambda r: r["member_index"],
     )
-    # Every export row independently names the requested source Recording and
-    # its full frame span. Missing rows, placeholder/wrong recording ids, and
-    # compensating frame-map errors cannot satisfy this complete oracle.
+    # Every row names its source Recording and full frame span.
     expected_members = []
     concat_start = 0
     for index, (member, recording_key) in enumerate(
@@ -1511,8 +1447,7 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
     assert members == expected_members
     assert concat_start == row["n_samples"]
 
-    # Frame boundaries reproduce MemberBoundary (split_sorting_by_session's
-    # arithmetic basis), contiguously partitioning the concat timeline.
+    # Boundaries match MemberBoundary and tile the concat timeline.
     idxs, ends = (ConcatenatedRecording.MemberBoundary & concat_pk).fetch(
         "member_index", "end_sample", order_by="member_index"
     )
@@ -1544,8 +1479,8 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
 def test_concatenated_recording_make_never_calls_recording_populate(
     same_day_group, monkeypatch
 ):
-    """make() consumes cached Recording artifacts -- it must NOT call
-    Recording.populate (a DataJoint anti-pattern)."""
+    """make() reads cached Recording artifacts and never calls
+    Recording.populate."""
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
@@ -1564,9 +1499,8 @@ def test_concatenated_recording_make_never_calls_recording_populate(
 
 @pytest.mark.slow
 def test_concat_make_uses_selection_row_not_uuid_key(same_day_group):
-    """Two concat selections over different member sets populate independently:
-    each row's MemberBoundary count and duration reflect its OWN group, proving
-    make() restricts by the fetched selection row, not the UUID-only key."""
+    """Concats over different member sets populate independently: make()
+    restricts by the fetched selection row, not the UUID-only key."""
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         SessionGroup,
@@ -1630,10 +1564,8 @@ def test_concatenated_recording_is_the_uncorrected_member_concatenation(
 
 @pytest.mark.slow
 def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
-    """If the stitched recording's sample count ever differed from the summed
-    member counts, make() raises (and persists nothing) rather than writing
-    MemberBoundary rows that would misalign split_sorting_by_session's
-    back-mapping."""
+    """A stitched sample count differing from the member sum raises and
+    persists nothing."""
     import numpy as np
     import spikeinterface as si
 
@@ -1655,9 +1587,7 @@ def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
         grp["group_key"], grp["preprocessing_params_name"]
     )
     monkeypatch.setattr(concat_mod, "build_concatenated_recording", _drifted)
-    # Drive make_compute directly so the raw RuntimeError surfaces; it raises
-    # before the NWB write (the guard precedes write_nwb_artifact), so nothing
-    # is persisted and no analysis file orphans.
+    # make_compute directly; it raises before the NWB write.
     fetched = ConcatenatedRecording().make_fetch(concat_pk)
     with pytest.raises(RuntimeError, match="sample count"):
         ConcatenatedRecording().make_compute(concat_pk, **fetched._asdict())
@@ -1750,8 +1680,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     )
     assert folder.exists()
 
-    # Parent anchoring: every Sorting.Unit electrode belongs to the FIRST
-    # member's NWB (the deterministic anchor), not the second member's.
+    # Unit electrodes are anchored to the first member's NWB.
     first_nwb = grp["same_day_members"][0]["nwb_file_name"]
     unit_nwbs = set((Sorting.Unit & sort_pk).fetch("nwb_file_name"))
     assert unit_nwbs == {first_nwb}
@@ -1764,15 +1693,12 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     )
     assert (regions["region_resolution"] == "anchor_member").all()
 
-    # split_sorting_by_session: one entry per member, local frames, unit ids
-    # preserved.
     sorting_obj = Sorting().get_analyzer(sort_pk).sorting
     split = ConcatenatedRecording().split_sorting_by_session(
         sorting_obj, concat_pk
     )
     members = grp["same_day_members"]
-    # Keyed by the full member identity (nwb, sort_group_id, interval, team) so
-    # two distinct members never collide; one entry per member.
+    # Keyed by the full member identity.
     assert set(split) == {
         (
             m["nwb_file_name"],
@@ -1789,9 +1715,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     }
     all_unit_ids = set(sorting_obj.unit_ids)
     for (nwb_file_name, _sg, _interval, _team), member_sorting in split.items():
-        # Unit ids are preserved across every member.
         assert set(member_sorting.unit_ids) == all_unit_ids
-        # Every spike falls within that member's local sample range.
         for unit_id in member_sorting.unit_ids:
             frames = member_sorting.get_unit_spike_train(unit_id=unit_id)
             if len(frames):
@@ -1814,9 +1738,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
         in caplog.text
     )
 
-    # Session-scoped downstream provenance resolves through the anchor member
-    # for concat sorts (instead of raising): get_sort_metadata yields the first
-    # member's nwb, and get_sort_group_info returns that member's electrodes.
+    # Session-scoped provenance resolves through the anchor member.
     sorter, meta_nwb = CurationV2.get_sort_metadata(
         {"sorting_id": sort_pk["sorting_id"]}
     )
@@ -1831,10 +1753,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     curated_sorting = CurationV2.get_sorting(curation_key)
     assert set(curated_sorting.unit_ids) == all_unit_ids
 
-    # Reporting / analyzer-curation provenance is concat-aware (no crash on the
-    # empty RecordingSource join): the CurationEvaluation NWB anchor resolves to
-    # the first member, and describe_units computes firing rate against the
-    # concat recording's total_duration_s.
+    # describe_units uses the concat recording's total_duration_s.
     from spyglass.spikesorting.v2.pipeline import describe_units
 
     assert (
@@ -1862,12 +1781,7 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
 ):
     """A concat-backed evaluation can be accepted into a committed child.
 
-    Exercises the source-aware concat branch of ``make_fetch`` (it resolves the
-    recording through ``ConcatenatedRecording.get_recording``, not a per-member
-    ``Recording``) and the DB-free concat reconstruction in ``make_compute``;
-    then accepts labels with ``use_evaluation_labels`` and re-evaluates the
-    accepted child to prove the normal curation workflow works for concat-backed
-    sorts.
+    The accepted child is re-evaluated.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -1904,9 +1818,7 @@ def test_concat_curation_evaluation_acceptance_creates_committed_child(
     )
     CurationEvaluation.populate(sel, reserve_jobs=False)
 
-    # The concat-backed evaluation NWB is self-identifying: it carries the
-    # concat_recording_id (recording_id is None for a concat source) so the file
-    # is interpretable standalone rather than only via the upstream join.
+    # The evaluation NWB carries concat_recording_id (recording_id is None).
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
         CURATION_EVALUATION_PROVENANCE,
@@ -2011,8 +1923,7 @@ def test_preproc_restriction_excludes_concat_and_includes_recording_curations(
         )
         assert rec_merge_id in by_preproc
 
-        # The cross-source branch genuinely FILTERS (rather than falling through
-        # to "all sorts"): an unmatched recipe surfaces neither family.
+        # An unmatched recipe returns neither.
         by_absent_preproc = SpikeSortingOutput().get_restricted_merge_ids(
             {"preprocessing_params_name": "no_such_preproc_recipe"},
             sources=["v2"],
@@ -2038,9 +1949,7 @@ def test_preproc_restriction_excludes_concat_and_includes_recording_curations(
         )
         assert len(by_concat_wrong_preproc) == 0
 
-        # The post-union artifact filter still applies in the cross-source
-        # branch: an artifact id neither (artifact-free) sort has excludes both,
-        # while artifact_detection_id=None (no artifact pass) keeps both.
+        # An unknown artifact id excludes both; None keeps both.
         by_preproc_unknown_artifact = (
             SpikeSortingOutput().get_restricted_merge_ids(
                 {
@@ -2060,9 +1969,7 @@ def test_preproc_restriction_excludes_concat_and_includes_recording_curations(
         )
         assert rec_merge_id in by_preproc_no_artifact
     finally:
-        # ``same_day_group`` teardown only follows concat lineage, so the
-        # recording-backed sort must be cleaned explicitly or its merge row
-        # leaks into later broad preproc queries (order-dependent failures).
+        # ``same_day_group`` teardown only follows concat lineage.
         clear_curations_for(rec_sort)
         (Sorting & rec_sort).super_delete(warn=False)
         (SortingSelection & rec_sort).super_delete(warn=False)
@@ -2073,11 +1980,8 @@ def test_preproc_restriction_excludes_concat_and_includes_recording_curations(
 
 @pytest.mark.slow
 def test_concat_materialization_memory_runtime_is_measured(same_day_group):
-    """Real (psutil) peak-RSS + runtime measurement of the concat materialize
-    path on the synthetic fixture. The bounds are generous (the minirec is
-    tiny); the point is that the measurement is REAL and logged, so the
-    ``--run-chronic`` gate reuses a proven measurement path rather than a
-    mocked metric."""
+    """Measures and logs peak RSS and runtime of concat materialization,
+    with generous bounds for the tiny fixture."""
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     grp = same_day_group
@@ -2093,10 +1997,7 @@ def test_concat_materialization_memory_runtime_is_measured(same_day_group):
         measured.elapsed_s,
     )
     assert ConcatenatedRecording & concat_pk
-    # Generous sanity bounds for a 2x5s 4-channel synthetic concat. Bound the
-    # growth, not the process RSS, which in a full suite already holds every
-    # earlier test's state. The real lab budget (peak < 8 GB, runtime < 10
-    # min) lives in the --run-chronic gate below.
+    # Growth, not process RSS, which holds earlier tests' state.
     assert measured.growth_mb < 4096
     assert measured.elapsed_s < 300
 
@@ -2105,14 +2006,9 @@ def test_concat_materialization_memory_runtime_is_measured(same_day_group):
 def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
     """Opt-in real-chronic memory/runtime check (``pytest --run-chronic``).
 
-    Skipped by default. Given a real 1-hour, 30 kHz chronic NWB via
-    ``SPIKESORTING_V2_CHRONIC_TEST_PATH``, ingests it, builds a same-day
-    ``SessionGroup`` over its lowest sort group (one shank / ~32 channels for a
-    polymer probe), and runs the concatenation end-to-end path
-    (``ConcatenatedRecording.populate`` then concat-backed ``Sorting.populate``).
-    Asserts peak RSS < 8 GB and total runtime < 10 min on a 16-core machine,
-    and logs the materialization vs sort timings separately so concatenation
-    vs sorter cost is visible. Reports timing + memory even on pass."""
+    Uses the 1-hour 30 kHz NWB at ``SPIKESORTING_V2_CHRONIC_TEST_PATH`` and
+    its lowest sort group. Asserts peak RSS < 8 GB and runtime < 10 min on 16
+    cores; logs concat and sort timings separately."""
     import os
 
     if not request.config.getoption("--run-chronic"):
@@ -2198,9 +2094,8 @@ def test_concat_applied_merge_through_curation_and_evaluation(
     ``CurationV2.get_sorting`` and ``CurationEvaluation`` carrying its MERGED
     unit set, without creating an unsafe SpikeSortingOutput row.
 
-    Pins concat reconstruction + merged namespace together (the prior concern):
-    the concat clusterless sort's unit count is data-dependent, so plant a
-    deterministic 2-unit sort on the concat recording to host a real merge.
+    A planted 2-unit sort hosts the merge; the clusterless unit count is
+    data-dependent.
     """
     import numpy as np
     import spikeinterface as si
@@ -2312,9 +2207,7 @@ def test_concat_applied_merge_through_curation_and_evaluation(
 
         assert not (SpikeSortingOutput.CurationV2 & merged)
 
-        # CurationEvaluation over the MERGED CONCAT curation exercises the concat
-        # reconstruction + merged-namespace analyzer together; metrics index the
-        # merged unit.
+        # Metrics index the merged unit.
         sel = CurationEvaluationSelection.insert_selection(
             {
                 **merged,
@@ -2342,13 +2235,8 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
     """A concat sort persists span-split statistics spans and its analyzers
     rebuild noise levels from them after reload.
 
-    The chronic members are unmasked, so the spans are just the member spans;
-    the discriminating facts are that they split at every member join (a
-    single ``[0, n)`` span would hand SpikeInterface its unchanged estimator
-    across the join), that the sort persisted exactly the concat's stored
-    column, and that the display analyzer ``CurationEvaluation`` rebuilds
-    after its folder is dropped carries the sort-time noise levels, which
-    are within 2% of the concatenated members' exact per-channel MAD.
+    Spans split at every member join; the rebuilt display analyzer carries
+    the sort-time noise levels, within 2% of the members' exact MAD.
     """
     import shutil
 
@@ -2498,10 +2386,8 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
 def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
 
-    This custom preset explicitly disables member detection. The orchestrator
-    populates each member's Recording, concatenates them, sorts, and curates.
-    Its manifest has per-member source keys and a skipped artifact stage; only
-    session-aligned member outputs enter the merge. The run reuses work on retry.
+    Member detection is disabled. Only session-aligned member outputs enter
+    the merge; a rerun reuses work.
     """
     import spyglass.spikesorting.v2._orchestration.presets as presets_mod
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -2523,9 +2409,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     _ensure_clusterless_sorter_params()
     grp = same_day_group
     preset_name = "test_concat_clusterless_smoke"
-    # A preset (run in concat mode by the concat inputs below) using the
-    # default preproc + smoke clusterless sorter the chronic minirec is known to
-    # sort. It carries no motion recipe: concat mode does not require one.
+    # Smoke clusterless sorter; concat mode needs no motion recipe.
     register_pipeline_preset(
         preset_name,
         {
@@ -2595,10 +2479,8 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         )
         assert rerun["concat_recording_status"] == "reused"
 
-        # Auto-curation still materializes an analysis-ready child curation,
-        # The child and root remain off the unsafe concat timeline. Member IDs
-        # now point at the analysis-ready child, one row per session. The
-        # repeated gate is represented by one warning entry.
+        # Auto-curation yields a child off the concat timeline; member ids
+        # point at it, one per session, with one warning for the gate.
         auto_summary = run_v2_concat_pipeline(
             session_group_owner=grp["group_key"]["session_group_owner"],
             session_group_name=grp["group_key"]["session_group_name"],
@@ -2631,10 +2513,8 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
         )
         assert auto_summary["warnings"].count(gate_message) == 1
 
-        # The downstream handoff for a concat sort builds one SortedSpikesGroup
-        # per frozen member, each on that member's own session timeline, never
-        # the synthetic concat timeline; every unit verdict is shared across
-        # members because the curation (and its labels) is one object.
+        # One SortedSpikesGroup per member on its session timeline; unit
+        # verdicts are shared since the curation is one object.
         from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
         from spyglass.spikesorting.v2.analysis_selection import (
             select_units_for_analysis,
