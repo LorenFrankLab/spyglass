@@ -29,6 +29,10 @@ class FakeSpikeSortingOutput:
             else [self.merge_id]
         )
 
+    def fetch(self, attribute):
+        assert attribute == "source"
+        return ["CurationV1"] * len(self._merge_ids())
+
     def fetch_nwb(self, *, return_merge_ids=False):
         merge_ids = self._merge_ids()
         payloads = [self.payloads[merge_id] for merge_id in merge_ids]

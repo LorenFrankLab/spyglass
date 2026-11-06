@@ -48,7 +48,7 @@ class _MergeRelation(_Relation):
         self.nwb_files = nwb_files
         self.merge_ids = merge_ids
 
-    def fetch_nwb(self, *, return_merge_ids):
+    def fetch_nwb(self, *, return_merge_ids, multi_source=None):
         assert return_merge_ids is True
         return self.nwb_files, self.merge_ids
 

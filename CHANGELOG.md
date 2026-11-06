@@ -97,6 +97,8 @@ units-table id, the same id `CurationV1` uses.
 the returned `unit_id`s change, and stored `UnitAnnotation` rows need
 migrating. Until a merge is migrated, `fetch_unit_spikes` and `add_annotation`
 raise on it. `UnitAnnotationPositionalIdMigration` records migrated merges.
+`add_annotation` now runs inside a caller's open transaction, so the caller
+must roll back if it fails.
 Separately, `include_labels` on a curation with no labels now returns none of
 its units, with a warning naming the merge id; it returned every unit.
 
