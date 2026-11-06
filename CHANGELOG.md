@@ -75,6 +75,22 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
+#### `Merge.fetch_nwb` Requires `multi_source=True` Across Sources (#PRNUM)
+
+`Merge.fetch_nwb` drops the unused `disable_warning` argument. A restriction
+that spans more than one source part now raises a `ValueError` naming the
+sources, unless `multi_source=True` is passed. Before, it raised an unclear
+`Found N potential parents`, so no working cross-source call changes. Pass
+`return_merge_ids` and `log_export` by keyword, since their positions moved.
+
+```python
+# OLD: disable_warning was accepted and ignored
+nwbs = (LFPOutput & merge_keys).fetch_nwb(disable_warning=True)
+
+# NEW: drop it; opt in when the keys span sources
+nwbs = (LFPOutput & merge_keys).fetch_nwb(multi_source=True)
+```
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -127,6 +143,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Implement `multi_source` in `Merge.fetch_nwb`; `return_merge_ids` pairs each
+    file with its own merge id. Parent-attribute and string restrictions select
+    their own source; an unknown column raises, and a skipped source warns
+    #PRNUM
 
 ### Pipelines
 
@@ -167,6 +187,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - `SortedSpikesGroup` and `SpikeSortingOutput.get_spike_times` fetch across
+        source parts; `UnitAnnotation.fetch_unit_spikes` raises on annotations
+        that span sources #PRNUM
 
 ## [0.6.0] (Sep 1st 2026)
 

@@ -345,8 +345,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
+        # A group may span sources (e.g. CurationV1 and ImportedSpikeSorting).
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
-            return_merge_ids=True
+            return_merge_ids=True, multi_source=True
         )
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
