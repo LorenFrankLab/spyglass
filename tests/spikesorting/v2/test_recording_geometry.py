@@ -521,3 +521,37 @@ def test_effective_contact_plane(case, verdict):
         np.testing.assert_array_equal(positions, np.zeros((4, 3)))
     if case == "one_null":
         np.testing.assert_array_equal(positions, locations)
+
+
+def test_sort_group_planar_positions_matches_the_recording_stage():
+    """The plotted positions are the ones the recording stage installs.
+
+    A single-group ``tetrode_12.5`` tetrode always gets the 12.5 um square,
+    whatever is registered; other groups use the plane that separates every
+    contact (a Frank-lab tetrode lies in x-z); a group no plane separates
+    and no repair rescues has none.
+    """
+    from spyglass.spikesorting.v2._recording.geometry import (
+        sort_group_planar_positions,
+    )
+
+    xz_tetrode = np.array(
+        [[0.0, 5.0, 0.0], [0.0, 5.0, 20.0], [20.0, 5.0, 0.0], [20.0, 5.0, 20.0]]
+    )
+    source, planar = sort_group_planar_positions(
+        xz_tetrode, ("tetrode_12.5",) * 4, ("0",) * 4
+    )
+    assert source == "tetrode_12.5"
+    np.testing.assert_array_equal(
+        planar, [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
+    )
+
+    source, planar = sort_group_planar_positions(
+        xz_tetrode, ("other_probe",) * 4, ("0",) * 4
+    )
+    assert source == "xz"
+    np.testing.assert_array_equal(planar, xz_tetrode[:, [0, 2]])
+
+    assert sort_group_planar_positions(
+        np.zeros((4, 3)), ("other_probe",) * 4, ("0",) * 4
+    ) == (None, None)

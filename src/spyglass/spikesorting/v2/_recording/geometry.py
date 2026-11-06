@@ -355,15 +355,56 @@ def maybe_apply_tetrode_geometry(
     import probeinterface as pi
 
     tetrode = pi.Probe(ndim=2)
-    position = [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
     tetrode.set_contacts(
-        position,
+        [list(p) for p in TETRODE_12_5_POSITIONS],
         shapes="circle",
         shape_params={"radius": 6.25},
     )
     tetrode.set_contact_ids([str(c) for c in sort_group_channel_ids])
     tetrode.set_device_channel_indices(np.arange(4))
     return recording.set_probe(tetrode, in_place=True)
+
+
+# Contact positions (um) the ``tetrode_12.5`` repair installs, in sort-group
+# channel order.
+TETRODE_12_5_POSITIONS = ((0.0, 0.0), (0.0, 12.5), (12.5, 0.0), (12.5, 12.5))
+
+
+def sort_group_planar_positions(positions, probe_types, electrode_group_names):
+    """Return the 2D contact positions the recording stage gives a sort group.
+
+    Mirrors preflight from registered positions: when the ``tetrode_12.5``
+    repair's gates pass, :func:`maybe_apply_tetrode_geometry` replaces the
+    group's positions with the 12.5 um square; otherwise the recording keeps
+    the plane that separates every contact.
+
+    Parameters
+    ----------
+    positions : array_like
+        ``(n_contacts, 3)`` ``(rel_x, rel_y, rel_z)`` positions in sorted
+        electrode-id order, NaN where missing.
+    probe_types, electrode_group_names : tuple
+        Per-channel metadata, as :func:`fetch_sort_group_probe_info` returns.
+
+    Returns
+    -------
+    source : {"tetrode_12.5", "xy", "xz", "yz"} or None
+        The repair, or the chosen axis pair; ``None`` when no plane
+        separates every contact or a position is missing (preflight refuses
+        such a group).
+    planar : numpy.ndarray or None
+        ``(n_contacts, 2)`` positions, or ``None`` with ``source``.
+    """
+    import numpy as np
+
+    if tetrode_repair_applies(
+        tuple(probe_types), tuple(electrode_group_names), len(positions)
+    ):
+        return "tetrode_12.5", np.asarray(TETRODE_12_5_POSITIONS)
+    verdict, registered, _ = effective_contact_plane(positions)
+    if verdict != "plane":
+        return None, None
+    return select_distinct_plane(registered)
 
 
 # Axis pairs tried, in order, when reducing 3D contact positions to the plane

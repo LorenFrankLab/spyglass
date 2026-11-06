@@ -174,10 +174,44 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     return pd.DataFrame(rows, columns=_SORT_GROUP_COLUMNS)
 
 
+def _registered_position(probe_geometry, electrode):
+    """``(rel_x, rel_y, rel_z)`` of an electrode's probe contact, NaN if none."""
+    import numpy as np
+
+    geometry = probe_geometry.get(_probe_key(electrode))
+    if not geometry:
+        return np.full(3, np.nan)
+    return np.array(
+        [
+            np.nan if _missing(geometry[axis]) else float(geometry[axis])
+            for axis in ("rel_x", "rel_y", "rel_z")
+        ]
+    )
+
+
+def _planar_coordinate_source(planar_source: str) -> str:
+    """``"tetrode_12.5"`` or ``"probe_<axes>"`` for a planar row."""
+    if planar_source == "tetrode_12.5":
+        return planar_source
+    return f"probe_{planar_source}"
+
+
 def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
-    """Return DB-backed electrode geometry rows for sort-group plotting."""
+    """Return DB-backed electrode geometry rows for sort-group plotting.
+
+    ``plot_x``/``plot_y`` are the positions the recording stage gives each
+    contact (see ``sort_group_planar_positions``), read from the registered
+    ``Probe.Electrode`` geometry as preflight does.
+    """
+    import numpy as np
+    from probeinterface import select_axes
+
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2._recording.geometry import (
+        fetch_sort_group_probe_info,
+        sort_group_planar_positions,
+    )
     from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
@@ -264,6 +298,28 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
         # Append the (non-member) specific reference electrode so its row gets
         # is_reference=True below and renders as the star overlay; it is excluded
         # from the per-group electrode scatter in plot_sort_group_geometry.
+        # Plot the contacts where the recording stage places them (the
+        # tetrode repair's square, or the plane separating every contact);
+        # a group preflight refuses keeps its registered x-y below.
+        member_ids = [int(row["electrode_id"]) for row in group_electrodes]
+        planar_source, planar = (
+            sort_group_planar_positions(
+                np.array(
+                    [
+                        _registered_position(probe_geometry, row)
+                        for row in group_electrodes
+                    ]
+                ),
+                *fetch_sort_group_probe_info(nwb_file_name, member_ids),
+            )
+            if group_electrodes
+            else (None, None)
+        )
+        planar_by_id = (
+            dict(zip(member_ids, map(tuple, planar)))
+            if planar is not None
+            else {}
+        )
         if reference_electrode_id in reference_electrode_by_id:
             group_electrodes = [
                 *group_electrodes,
@@ -287,7 +343,24 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             # here keeps the contract explicit if only one were present.
             electrode_x = electrode.get("x")
             electrode_y = electrode.get("y")
-            if not _missing(rel_x) and not _missing(rel_y):
+            electrode_id = int(electrode["electrode_id"])
+            if electrode_id in planar_by_id:
+                plot_x, plot_y = map(float, planar_by_id[electrode_id])
+                coord_source = _planar_coordinate_source(planar_source)
+            elif planar_source == "tetrode_12.5":
+                # A reference off this tetrode has no place on its square.
+                plot_x, plot_y, coord_source = None, None, None
+            elif planar_source is not None:
+                registered = _registered_position(probe_geometry, electrode)
+                if np.isfinite(registered).all():
+                    plot_x, plot_y = map(
+                        float,
+                        select_axes(registered[None, :], planar_source)[0],
+                    )
+                    coord_source = _planar_coordinate_source(planar_source)
+                else:
+                    plot_x, plot_y, coord_source = None, None, None
+            elif not _missing(rel_x) and not _missing(rel_y):
                 plot_x, plot_y, coord_source = rel_x, rel_y, "probe"
             elif not _missing(electrode_x) and not _missing(electrode_y):
                 plot_x, plot_y, coord_source = (
@@ -473,6 +546,12 @@ def plot_sort_group_geometry(
     electrodes are marked with a star -- see ``show_reference`` for where that
     reference comes from; its channel id is in ``describe_sort_groups``.
 
+    Contacts sit where the recording stage places them, from the registered
+    ``Probe.Electrode`` geometry: a single-group ``tetrode_12.5`` tetrode on
+    the 12.5 um square, any other group in the plane that separates every
+    contact (x-z for a Frank-lab tetrode), with the axis labels naming it. A
+    group the sort would refuse keeps its registered x-y.
+
     When the session spans **more than one probe**, ``Probe.Electrode``
     rel_x/rel_y are each probe's own coordinate frame (all near the origin), so
     the probes are laid out **side-by-side** along x -- each probe's contacts
@@ -647,9 +726,22 @@ def plot_sort_group_geometry(
         if row["coordinate_source"]
     }
     x_suffix = ", offset per probe" if multi_probe else ""
-    if coordinate_sources == {"probe"}:
-        ax.set_xlabel(f"Probe rel_x (um{x_suffix})")
-        ax.set_ylabel("Probe rel_y (um)")
+    probe_planes = {
+        "xy" if source == "probe" else source.removeprefix("probe_")
+        for source in coordinate_sources
+        if source.startswith("probe")
+    }
+    if (
+        coordinate_sources
+        and len(probe_planes) == 1
+        and all(source.startswith("probe") for source in coordinate_sources)
+    ):
+        (plane,) = probe_planes
+        ax.set_xlabel(f"Probe rel_{plane[0]} (um{x_suffix})")
+        ax.set_ylabel(f"Probe rel_{plane[1]} (um)")
+    elif coordinate_sources == {"tetrode_12.5"}:
+        ax.set_xlabel(f"tetrode_12.5 contact x (um{x_suffix})")
+        ax.set_ylabel("tetrode_12.5 contact y (um)")
     elif coordinate_sources == {"electrode"}:
         ax.set_xlabel(f"Electrode x (um{x_suffix})")
         ax.set_ylabel("Electrode y (um)")

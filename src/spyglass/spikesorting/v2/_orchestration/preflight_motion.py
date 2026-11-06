@@ -444,9 +444,10 @@ def motion_geometry_problem_from_contacts(
     """Say why a sort group's effective geometry cannot be motion-estimated.
 
     Rebuilds the planar geometry the recording stage produces from the
-    registered ``Probe.Electrode`` positions -- ``select_distinct_plane``, or
-    the legacy ``tetrode_12.5`` repair for a group with no usable positions --
-    on a one-frame stand-in recording, and runs the estimator's own
+    registered ``Probe.Electrode`` positions (``sort_group_planar_positions``:
+    the ``tetrode_12.5`` square whenever that repair's gates pass, otherwise
+    the plane separating every contact) on a one-frame stand-in recording,
+    and runs the estimator's own
     eligibility check
     (``_motion.estimation.check_estimation_eligibility``: finite,
     distinct positions, one shank, an attachable probe, a depth extent of at
@@ -480,24 +481,22 @@ def motion_geometry_problem_from_contacts(
         check_estimation_eligibility,
     )
     from spyglass.spikesorting.v2._recording.geometry import (
-        effective_contact_plane,
         maybe_apply_tetrode_geometry,
-        tetrode_repair_applies,
+        sort_group_planar_positions,
     )
 
     channel_ids = [int(c) for c in channel_ids]
-    verdict, _, planar = effective_contact_plane(positions)
-    repaired = verdict == "collapsed" and tetrode_repair_applies(
-        tuple(probe_types), tuple(electrode_group_names), len(channel_ids)
+    source, planar = sort_group_planar_positions(
+        positions, probe_types, electrode_group_names
     )
-    if verdict != "plane" and not repaired:
+    if source is None:
         return None
     recording = NumpyRecording(
         np.zeros((1, len(channel_ids)), dtype="float32"),
         sampling_frequency=30000.0,
         channel_ids=channel_ids,
     )
-    if repaired:
+    if source == "tetrode_12.5":
         maybe_apply_tetrode_geometry(
             recording,
             tuple(probe_types),

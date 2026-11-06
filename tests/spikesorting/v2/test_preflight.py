@@ -465,6 +465,7 @@ def _column(n_contacts: int, pitch_um: float = 26.0):
         ("polymer_shank", None),
         ("partial_geometry", None),
         ("legacy_tetrode", "detection radius_um"),
+        ("positioned_tetrode", "detection radius_um"),
         ("four_contacts", "detection radius_um"),
         ("two_shanks", "2 shanks"),
         ("sixteen_contacts", "nonrigid windows"),
@@ -474,7 +475,9 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
     """Preflight runs the estimator's own eligibility check on the group's
     effective planar geometry: a 32-contact polymer shank (806 um) passes the
     shipped nonrigid recipe; a repaired legacy tetrode (12.5 um) and four
-    contacts are shorter than the detection radius; two shanks and a 16-contact
+    contacts are shorter than the detection radius -- as is a positioned
+    ``tetrode_12.5`` group, whose registered positions the recording stage
+    replaces with the 12.5 um square; two shanks and a 16-contact
     shank (too short for 400 um windows) are refused. Incomplete geometry is
     left to the recording-geometry check (reported once)."""
     import numpy as np
@@ -483,15 +486,21 @@ def test_motion_geometry_eligibility_from_registered_contacts(case, match):
         motion_geometry_problem_from_contacts,
     )
 
-    n = {"legacy_tetrode": 4, "four_contacts": 4, "sixteen_contacts": 16}.get(
-        case, 32
-    )
+    n = {
+        "legacy_tetrode": 4,
+        "positioned_tetrode": 4,
+        "four_contacts": 4,
+        "sixteen_contacts": 16,
+    }.get(case, 32)
     positions = _column(n)
     probe_types = ["128c-4s6mm6cm-15um-26um-sl"] * n
     groups = ["0"] * n
     shanks = [0] * n
     if case == "legacy_tetrode":
         positions = np.full((4, 3), np.nan)
+        probe_types = ["tetrode_12.5"] * 4
+    elif case == "positioned_tetrode":
+        positions = _column(4, pitch_um=300.0)
         probe_types = ["tetrode_12.5"] * 4
     elif case == "partial_geometry":
         positions[3, 2] = np.nan
