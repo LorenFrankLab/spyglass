@@ -1,3 +1,4 @@
+import warnings
 from typing import Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -109,7 +110,7 @@ def plot_burst_pair_peaks(
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        # Cap at n_cols for units with more than 4 channels.
+        # Plot at most n_cols channels.
         for i in range(min(peak1.shape[1], peak2.shape[1], n_cols)):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
@@ -290,8 +291,6 @@ def calculate_isi_violation(
 ) -> float:
     """Fraction of refractory violations in the merged two-unit spike train.
 
-    Low for an oversplit unit, higher for two distinct cells.
-
     Parameters
     ----------
     peak1, peak2 : np.ndarray
@@ -307,11 +306,9 @@ def calculate_isi_violation(
         ``violations / total_spikes``.
     """
     if isi_threshold_s is not None:
-        import warnings
-
         warnings.warn(
             "calculate_isi_violation(isi_threshold_s=...) is deprecated; the "
-            "value was always applied in milliseconds -- use isi_threshold_ms.",
+            "value was always applied in milliseconds. Use isi_threshold_ms.",
             DeprecationWarning,
             stacklevel=2,
         )

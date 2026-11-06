@@ -421,6 +421,56 @@ class AbstractGraph(ABC):
 
     # ---------------------------- Graph Traversal -----------------------------
 
+    @staticmethod
+    def _bridge_renamed_values(
+        ft1: QueryExpression,
+        ft2: QueryExpression,
+        attr_map: dict,
+    ) -> QueryExpression:
+        """Restrict ft2 by ft1 when ft1 already has both names of a rename.
+
+        Takes the distinct values of ft1's renamed source attributes, plus
+        primary key attributes shared with ft2 that are not renamed, and
+        renames them onto ft2's names.
+
+        Parameters
+        ----------
+        ft1 : QueryExpression
+            Restricted table the restriction comes from.
+        ft2 : QueryExpression
+            Table to restrict.
+        attr_map : dict
+            Foreign key attribute map between ft1 and ft2.
+
+        Returns
+        -------
+        QueryExpression
+            ft2 restricted by ft1.
+        """
+        renames = dict()  # ft2 name -> ft1 name
+        for name_a, name_b in attr_map.items():
+            if name_a == name_b:
+                continue
+            fits = [
+                (target, source)
+                for target, source in ((name_a, name_b), (name_b, name_a))
+                if target in ft2.heading.names and source in ft1.heading.names
+            ]
+            if len(fits) != 1:
+                raise dj.errors.DataJointError(
+                    f"Cannot orient rename {attr_map} between tables"
+                )
+            renames.update(fits)
+        shared = [
+            name
+            for name in ft1.primary_key
+            if name in ft2.heading.names
+            and name not in renames
+            and name not in renames.values()
+        ]
+        values = dj.U(*renames.values(), *shared) & ft1
+        return ft2 & values.proj(**renames)
+
     def _bridge_restr(
         self,
         table1: str,
@@ -482,26 +532,11 @@ class AbstractGraph(ABC):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
         try:
-            projected = ft1.proj(**attr_map)
+            ret = ft2 & (ft1.proj(**attr_map))
         except dj.errors.DataJointError as err:
-            # A table carrying BOTH the FK source and target columns -- e.g. a
-            # merge group with two unit FKs (``unit_id`` AND
-            # ``contributor_unit_id``) -- cannot be projected onto the bridged
-            # table without renaming onto an already-present attribute, in
-            # either ``attr_map`` orientation (the reverse above only swaps when
-            # the sources are absent, which they are not here). Edges are
-            # re-bridged even when their node was already visited (#1610), so
-            # the rename clash would abort the whole cascade. For this
-            # irreconcilable case only, skip just this edge (other paths to the
-            # node still restrict it) instead of failing the export.
             if "already exists" not in str(err):
                 raise
-            self._log_truncate(
-                f"Bridge Link: {path}: SKIPPED (irreconcilable rename "
-                f"{attr_map})"
-            )
-            return ["False"]
-        ret = ft2 & projected
+            ret = self._bridge_renamed_values(ft1, ft2, attr_map)
 
         if self.verbose:  # For debugging. Not required for typical use.
             if not bool(ret):

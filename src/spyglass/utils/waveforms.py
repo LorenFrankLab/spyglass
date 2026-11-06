@@ -1,5 +1,4 @@
-# Lazy annotations: some SI versions lack hint-only names (WaveformExtractor)
-from __future__ import annotations
+from __future__ import annotations  # handles SI version issues
 
 import numpy as np
 import spikeinterface as si
@@ -48,7 +47,6 @@ def _get_peak_amplitude(
         spike_peak_ind = values[counts.argmax()]
     else:
         # Spike sits at nbefore, the midpoint only for symmetric windows.
-        # SI 0.99 and 0.10x both expose nbefore.
         spike_peak_ind = waveform_extractor.nbefore
 
     return waveforms[:, spike_peak_ind]

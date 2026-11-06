@@ -129,17 +129,16 @@ def convert_dataset_type(
     # Validate the conversion before unlinking the original dataset.
     data = np.asarray(dset[()], dtype=target_dtype)  # loads into memory
     attrs = dict(dset.attrs.items())
-    creation_kwargs = {
-        "chunks": dset.chunks,
-        "compression": dset.compression,
-        "compression_opts": dset.compression_opts,
-        "shuffle": dset.shuffle,
-        "fletcher32": dset.fletcher32,
-        "scaleoffset": dset.scaleoffset,
-        "fillvalue": dset.fillvalue,
-    }
-    # Supplying maxshape enables chunking, even for a fixed-size dataset.
-    # Unchunked arrays already have maxshape == shape; scalars cannot chunk.
+    creation_kwargs = dict(
+        chunks=dset.chunks,
+        compression=dset.compression,
+        compression_opts=dset.compression_opts,
+        shuffle=dset.shuffle,
+        fletcher32=dset.fletcher32,
+        scaleoffset=dset.scaleoffset,
+        fillvalue=dset.fillvalue,
+    )
+    # Passing maxshape enables chunking, so set it only for chunked datasets.
     if dset.chunks is not None:
         creation_kwargs["maxshape"] = dset.maxshape
 

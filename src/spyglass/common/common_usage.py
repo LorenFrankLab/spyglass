@@ -521,11 +521,20 @@ class Export(SpyglassMixin, dj.Computed):
     def _delete_superseded_exports(self, all_export_ids, max_export_id):
         """Delete part rows of exported ids superseded by ``max_export_id``.
 
-        - ``Table`` rows are always removed.
-        - ``File`` rows are kept while a child table (e.g. DANDI validation)
-          still references them.
+        ``Table`` rows are always removed. ``File`` rows are kept while a
+        child table (e.g., ``DandiPath``) still references them.
 
-        Returns the set of superseded export ids.
+        Parameters
+        ----------
+        all_export_ids : list of int
+            All export_ids for the paper.
+        max_export_id : int
+            The export_id being populated.
+
+        Returns
+        -------
+        set of int
+            The superseded export_ids that had part rows.
         """
         processed_ids = set(
             list(self.Table.fetch("export_id"))
@@ -571,7 +580,7 @@ class Export(SpyglassMixin, dj.Computed):
             self.insert1(key)
             return
 
-        # Lesser, already-exported ids collapse to null entries
+        # If lesser ids are present, delete parts yielding null entries
         self._delete_superseded_exports(all_export_ids, max_export_id)
 
         logger.debug(f"Building restr graph for {key['export_id']}")

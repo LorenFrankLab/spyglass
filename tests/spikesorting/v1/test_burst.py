@@ -117,7 +117,7 @@ def calc_isi():
 
 
 @pytest.mark.parametrize(
-    "peak1, peak2, isi_threshold_s, expected_result",
+    "peak1, peak2, isi_threshold_ms, expected_result",
     [  # Normal Case - Some ISI violations. All ISIs are >= 1.5ms
         (np.array([1, 3, 5]), np.array([2, 4, 6]), 1.5e3, 5 / 6),
         # Case with Empty first
@@ -131,9 +131,9 @@ def calc_isi():
     ],
 )
 def test_calculate_isi_violation(
-    calc_isi, peak1, peak2, isi_threshold_s, expected_result
+    calc_isi, peak1, peak2, isi_threshold_ms, expected_result
 ):
-    result = calc_isi(peak1, peak2, isi_threshold_s)
+    result = calc_isi(peak1, peak2, isi_threshold_ms)
     assert np.isclose(
         result, expected_result
     ), f"Expected {expected_result}, got {result}"

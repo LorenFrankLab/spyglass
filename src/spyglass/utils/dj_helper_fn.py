@@ -268,6 +268,16 @@ def get_child_references(table):
     ``table - get_child_references(table)`` leaves unreferenced rows.
     Attributes secondary in both tables are dropped because DataJoint refuses
     to join on them.
+
+    Parameters
+    ----------
+    table : dj.Table or type
+        Parent table, as an instance or class.
+
+    Returns
+    -------
+    list of QueryExpression
+        One projection per child table.
     """
     table = table() if inspect.isclass(table) else table
     parent_secondary = set(table.heading.secondary_attributes)
@@ -280,22 +290,6 @@ def get_child_references(table):
         ]
         references.append(child.proj(*shared_secondary))
     return references
-
-
-def get_child_tables(table):
-    """Get all child tables of a given table."""
-    table = table() if inspect.isclass(table) else table
-    return [
-        dj.FreeTable(
-            table.connection,
-            (
-                s
-                if not s.isdigit()
-                else next(iter(table.connection.dependencies.children(s)))
-            ),
-        )
-        for s in table.children()
-    ]
 
 
 def _write_external_checksum(filepath, external_table, key):

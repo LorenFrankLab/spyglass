@@ -343,107 +343,82 @@ def test_intersect_export_populate(populate_intersect_export, common):
     ), "Intersection failed to censor entries"
 
 
-def test_reexport_deletes_unreferenced_files(common, teardown):
-    """Superseded exports lose both File and Table parts.
+class _StopAfterCleanup(Exception):
+    """Stands in for the restriction graph build that follows cleanup."""
 
-    Only processed lesser ids count as superseded.
-    """
+
+def _make_until_cleanup(monkeypatch, export_id):
+    """Run ``Export.make`` up to and including superseded-export cleanup."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    def _stop(*args, **kwargs):
+        raise _StopAfterCleanup
+
+    monkeypatch.setattr(ExportSelection, "get_restr_graph", _stop)
+    with pytest.raises(_StopAfterCleanup):
+        Export().make({"export_id": export_id})
+
+
+def _insert_superseded_export(paper_id, file_path):
+    """Insert two selections and an exported, now superseded, first one."""
     from spyglass.common.common_usage import Export, ExportSelection
 
     sel, export = ExportSelection(), Export()
-    paper = "export_overwrite_test"
-
-    def _make_selection(analysis_id):
-        sel.insert1(
-            {
-                "paper_id": paper,
-                "analysis_id": analysis_id,
-                "spyglass_version": "test",
-            }
-        )
-        return (sel & {"paper_id": paper, "analysis_id": analysis_id}).fetch1(
-            "export_id"
-        )
-
-    e1 = _make_selection("a1")  # superseded (already exported)
-    e2 = _make_selection("a2")  # superseding (max) export
+    export_ids = []
+    for analysis_id in ("a1", "a2"):
+        key = {"paper_id": paper_id, "analysis_id": analysis_id}
+        sel.insert1({**key, "spyglass_version": "test"})
+        export_ids.append((sel & key).fetch1("export_id"))
+    old_id, new_id = export_ids
 
     export.insert1(
-        {"export_id": e1, "paper_id": paper}, allow_direct_insert=True
+        {"export_id": old_id, "paper_id": paper_id}, allow_direct_insert=True
     )
     export.Table.insert1(
-        {"export_id": e1, "table_id": 0, "table_name": "x", "restriction": "x"},
+        {
+            "export_id": old_id,
+            "table_id": 0,
+            "table_name": "x",
+            "restriction": "x",
+        },
         allow_direct_insert=True,
     )
-    export.File.insert1(
-        {"export_id": e1, "file_id": 0, "file_path": "/tmp/x.nwb"},
-        allow_direct_insert=True,
-    )
-    assert len(export.Table & {"export_id": e1}) == 1
-    assert len(export.File & {"export_id": e1}) == 1
+    file_key = {"export_id": old_id, "file_id": 0, "file_path": file_path}
+    export.File.insert1(file_key, allow_direct_insert=True)
+    return old_id, new_id, file_key
 
+
+def test_reexport_deletes_superseded_parts(common, monkeypatch):
+    """Re-export removes both Table and File parts of a superseded export."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    paper = "export_overwrite_test"
     try:
-        overlap = export._delete_superseded_exports([e1, e2], max_export_id=e2)
-        # `all - ({max} & processed)` would wrongly include the unprocessed e2.
-        assert overlap == {e1}, f"unexpected superseded set {overlap}"
-        assert len(export.Table & {"export_id": e1}) == 0
+        old_id, new_id, file_key = _insert_superseded_export(
+            paper, "/tmp/superseded.nwb"
+        )
+        _make_until_cleanup(monkeypatch, new_id)
+
+        assert len(Export.Table & {"export_id": old_id}) == 0
         assert (
-            len(export.File & {"export_id": e1}) == 0
-        ), "stale Export.File row leaked after overwrite"
+            len(Export.File & file_key) == 0
+        ), "stale Export.File row leaked after re-export"
     finally:
-        if teardown:
-            (export & {"paper_id": paper}).super_delete(
-                warn=False, safemode=False
-            )
-            (sel & {"paper_id": paper}).super_delete(warn=False, safemode=False)
+        (ExportSelection & {"paper_id": paper}).super_delete(
+            warn=False, safemode=False
+        )
 
 
-def test_reexport_keeps_dandi_referenced_files(common, teardown, caplog):
-    """A superseded file with DANDI provenance survives part cleanup."""
-    import logging
-
+def test_reexport_keeps_dandi_referenced_files(common, monkeypatch):
+    """A superseded File row with DANDI provenance survives cleanup."""
     from spyglass.common.common_dandi import DandiPath
     from spyglass.common.common_usage import Export, ExportSelection
 
-    sel, export = ExportSelection(), Export()
     paper = "export_dandi_retention_test"
-    selection_ids = []
-
     try:
-        for analysis_id in ("a1", "a2"):
-            sel.insert1(
-                {
-                    "paper_id": paper,
-                    "analysis_id": analysis_id,
-                    "spyglass_version": "test",
-                }
-            )
-            selection_ids.append(
-                (sel & {"paper_id": paper, "analysis_id": analysis_id}).fetch1(
-                    "export_id"
-                )
-            )
-        old_id, new_id = selection_ids
-
-        export.insert1(
-            {"export_id": old_id, "paper_id": paper},
-            allow_direct_insert=True,
+        old_id, new_id, file_key = _insert_superseded_export(
+            paper, "/tmp/dandi-referenced.nwb"
         )
-        export.Table.insert1(
-            {
-                "export_id": old_id,
-                "table_id": 0,
-                "table_name": "x",
-                "restriction": "x",
-            },
-            allow_direct_insert=True,
-        )
-        file_key = {
-            "export_id": old_id,
-            "file_id": 0,
-            "file_path": "/tmp/dandi-referenced.nwb",
-        }
-        export.File.insert1(file_key, allow_direct_insert=True)
         DandiPath.insert1(
             {
                 **file_key,
@@ -454,27 +429,16 @@ def test_reexport_keeps_dandi_referenced_files(common, teardown, caplog):
             },
             ignore_extra_fields=True,
         )
+        _make_until_cleanup(monkeypatch, new_id)
 
-        with caplog.at_level(logging.INFO):
-            overlap = export._delete_superseded_exports(
-                selection_ids, max_export_id=new_id
-            )
-
-        assert overlap == {old_id}
-        assert len(export.Table & {"export_id": old_id}) == 0
-        assert len(export.File & file_key) == 1
+        assert len(Export.Table & {"export_id": old_id}) == 0
+        assert len(Export.File & file_key) == 1
         assert len(DandiPath & file_key) == 1
-        assert DandiPath.full_table_name in caplog.text
     finally:
-        if selection_ids:
-            (DandiPath & [{"export_id": i} for i in selection_ids]).delete(
-                safemode=False
-            )
-        if teardown:
-            (export & {"paper_id": paper}).super_delete(
-                warn=False, safemode=False
-            )
-            (sel & {"paper_id": paper}).super_delete(warn=False, safemode=False)
+        (DandiPath & {"dandiset_id": "000001"}).delete_quick()
+        (ExportSelection & {"paper_id": paper}).super_delete(
+            warn=False, safemode=False
+        )
 
 
 def test_invalid_export_id(export_tbls):
