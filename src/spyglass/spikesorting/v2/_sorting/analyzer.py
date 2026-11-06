@@ -332,8 +332,66 @@ def _load_analyzer_folder_or_rebuild(
         return load()
 
 
+def assert_analyzer_matches_recipe(analyzer, waveform_params) -> None:
+    """Raise if a cached sort analyzer was built from other recipe content.
+
+    The sort-level cache folder is keyed by recipe NAME
+    (``{sorting_id}__{waveform_params_name}.analyzer``). A recipe row deleted
+    and re-inserted under its name with another window, spike budget or
+    whitening leaves the old folder behind, which must be rebuilt rather
+    than served under the new recipe.
+
+    Raises
+    ------
+    ValueError
+        If the cached window, ``max_spikes_per_unit`` or whitening differs
+        from ``waveform_params``.
+    """
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        analyzer_extension_params,
+    )
+
+    expected = {
+        ("waveforms", "ms_before"): float(waveform_params["ms_before"]),
+        ("waveforms", "ms_after"): float(waveform_params["ms_after"]),
+        ("random_spikes", "max_spikes_per_unit"): int(
+            waveform_params["max_spikes_per_unit"]
+        ),
+    }
+    for (extension, name), value in expected.items():
+        cached = analyzer_extension_params(analyzer, extension).get(name)
+        if cached != value:
+            raise ValueError(
+                f"Analyzer {extension}.{name}={cached!r} does not match its "
+                f"recipe's {value!r}; the recipe changed under the same name. "
+                "Rebuild the analyzer."
+            )
+    if bool(analyzer.return_in_uV) == bool(waveform_params.get("whiten")):
+        raise ValueError(
+            "Analyzer whitening does not match its recipe's "
+            f"whiten={bool(waveform_params.get('whiten'))}; the recipe "
+            "changed under the same name. Rebuild the analyzer."
+        )
+
+
+def sort_analyzer_validator(waveform_params, sorter_params_fn):
+    """Validate a sort-level cache against its recipe, then its polarity."""
+    check_polarity = analyzer_sparsity_validator(sorter_params_fn)
+
+    def validate(analyzer):
+        assert_analyzer_matches_recipe(analyzer, waveform_params)
+        check_polarity(analyzer)
+
+    return validate
+
+
 def analyzer_sparsity_validator(sorter_params_fn):
-    """Resolve sorter polarity once, on the first sparse-cache validation."""
+    """Check a cached analyzer's polarity against its sorter's.
+
+    Covers the sparse channel selection and every computed
+    :data:`POLARITY_EXTENSIONS` member; the sorter polarity is resolved once,
+    on the first analyzer that needs it.
+    """
     peak_sign = None
 
     def validate(analyzer):
@@ -509,7 +567,7 @@ def load_or_rebuild_analyzer(
     )
 
     assert_path_safe_waveform_params_name(waveform_params_name)
-    fetch_waveform_params(waveform_params_name)
+    waveform_params = fetch_waveform_params(waveform_params_name)
 
     def sorter_params():
         from spyglass.spikesorting.v2._sorting.fetch import (
@@ -541,7 +599,9 @@ def load_or_rebuild_analyzer(
         ),
         recipe_label=waveform_params_name,
         sorting_id=sorting_id,
-        validate_analyzer=analyzer_sparsity_validator(sorter_params),
+        validate_analyzer=sort_analyzer_validator(
+            waveform_params, sorter_params
+        ),
         restore_recording=restore_recording if rebuild else None,
     )
 
@@ -662,8 +722,8 @@ def load_or_rebuild_analyzer_from_resolved(
         ),
         recipe_label=analyzer_folder.name,
         sorting_id=sorting_id,
-        validate_analyzer=analyzer_sparsity_validator(
-            lambda: sorter_row.get("params")
+        validate_analyzer=sort_analyzer_validator(
+            waveform_params, lambda: sorter_row.get("params")
         ),
     )
 

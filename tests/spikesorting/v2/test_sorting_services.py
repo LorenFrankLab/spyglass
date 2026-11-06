@@ -266,6 +266,14 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
         {1: np.array([500, 1500])}, sampling_frequency=1000.0
     )
     rebuilds = []
+    recipe = {
+        "ms_before": 1.0,
+        "ms_after": 2.0,
+        "max_spikes_per_unit": 10,
+        "whiten": False,
+        "purpose": "display",
+        "sparsity": {"method": "dense"},
+    }
 
     class _OneUnitSortingRelation:
         def __and__(self, key):
@@ -290,14 +298,7 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
             sorter_row={"job_kwargs": {}},
             job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
             analyzer_folder=folder,
-            waveform_params={
-                "ms_before": 1.0,
-                "ms_after": 2.0,
-                "max_spikes_per_unit": 10,
-                "whiten": False,
-                "purpose": "display",
-                "sparsity": {"method": "dense"},
-            },
+            waveform_params=recipe,
         )
 
     monkeypatch.setattr(
@@ -307,7 +308,7 @@ def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
     # Only the DB recipe lookup and canonical source reconstruction are stubbed;
     # folder loading, completeness validation and analyzer building are real.
     monkeypatch.setattr(
-        _sorting_analyzer, "fetch_waveform_params", lambda name: {}
+        _sorting_analyzer, "fetch_waveform_params", lambda name: recipe
     )
 
     analyzer = _sorting_analyzer.load_or_rebuild_analyzer(

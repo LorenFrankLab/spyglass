@@ -56,7 +56,10 @@ def _cached_analyzer(
     analyzer.compute(
         list(analyzer_service.BASE_ANALYZER_EXTENSIONS),
         extension_params={
-            "random_spikes": {"seed": 0},
+            "random_spikes": {
+                "seed": 0,
+                "max_spikes_per_unit": params["max_spikes_per_unit"],
+            },
             "noise_levels": {"random_slices_kwargs": {"seed": 0}},
             "waveforms": {
                 "ms_before": params["ms_before"],
@@ -201,6 +204,41 @@ def test_dense_cache_without_receipt_is_reused(tmp_path, monkeypatch):
         np.abs(cached.get_extension("templates").get_data()[0, :, 0]).max()
         == 100
     )
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [{"ms_after": 2.5}, {"ms_before": 0.5}, {"max_spikes_per_unit": 10}],
+)
+def test_cache_built_from_other_recipe_content_is_rebuilt(
+    tmp_path, monkeypatch, changed
+):
+    """The cache folder is keyed by recipe name, not content.
+
+    A recipe row deleted and re-inserted under its name with another window
+    leaves the old folder behind; it must be rebuilt, not reused.
+    """
+    from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
+
+    inputs = _cached_analyzer(
+        tmp_path, sign=1, sparsity={"method": "dense"}, built_peak_sign=None
+    )
+    inputs["sorter_row"] = {"params": {"detect_sign": 1}}
+    analyzer_service.load_or_rebuild_analyzer_from_resolved(
+        **inputs, rebuild=False
+    )
+    inputs["waveform_params"] = {**inputs["waveform_params"], **changed}
+    with pytest.raises(AnalyzerFolderInvalidError):
+        analyzer_service.load_or_rebuild_analyzer_from_resolved(
+            **inputs, rebuild=False
+        )
+
+    rebuilt = analyzer_service.load_or_rebuild_analyzer_from_resolved(**inputs)
+    for name, value in changed.items():
+        extension = (
+            "random_spikes" if name == "max_spikes_per_unit" else "waveforms"
+        )
+        assert rebuilt.get_extension(extension).params[name] == value
 
 
 def test_public_sort_analyzer_rebuilds_incompatible_cache(
