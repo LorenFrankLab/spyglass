@@ -87,10 +87,9 @@ def test_unexpected_concat_member_import_error_is_logged(
 
     _force_v2_concat_member_error(monkeypatch, exc)
     with caplog.at_level("WARNING"):
-        member_table, captured = _probe_v2_concat_member_curation()
+        member_table = _probe_v2_concat_member_curation()
 
     assert member_table is None
-    assert captured is exc
     assert any(
         "concat-member outputs are unavailable" in record.message
         and type(exc).__name__ in record.message

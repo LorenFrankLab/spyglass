@@ -1,7 +1,4 @@
-# Deferred annotation evaluation keeps module import working across
-# SpikeInterface versions whose public API no longer exposes some names
-# (e.g. WaveformExtractor) used only in type hints here.
-from __future__ import annotations
+from __future__ import annotations  # handles SI version issues
 
 import os
 import random
@@ -280,13 +277,6 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        # Confine the caller-supplied source name to a bare basename at this
-        # acceptance boundary (it is used to locate the file to copy and as the
-        # base of the generated analysis name); a separator / ``..`` / absolute
-        # path must not slip through. ``recompute_file_name`` is confined the
-        # same way -- it is threaded straight into ``analysis_file_name`` and the
-        # path builder below, so an unsafe value would escape the managed
-        # analysis directory just as ``nwb_file_name`` would.
         assert_safe_nwb_file_name(nwb_file_name)
         if recompute_file_name is not None:
             assert_safe_nwb_file_name(recompute_file_name)
@@ -367,8 +357,6 @@ class AnalysisMixin(BaseMixin):
         with h5py.File(nwb_file_path, "a") as f:
             f["/general/source_script"][()] = self._logged_env_info()
 
-    _ENV_CAPTURE_UNAVAILABLE = "environment capture unavailable (conda absent)"
-
     def _logged_env_info(self) -> str:
         """Get the environment information for logging."""
         sg_version = self._spyglass_version
@@ -381,13 +369,8 @@ class AnalysisMixin(BaseMixin):
                 stderr=subprocess.DEVNULL,
             )
         except (OSError, subprocess.SubprocessError) as err:
-            # conda-less / uv-only environments cannot export a conda env;
-            # record a marker rather than aborting the NWB write.
-            self._logger.warning(
-                f"Could not capture conda environment ({err}); recording an "
-                "'environment capture unavailable' marker instead."
-            )
-            python_env = self._ENV_CAPTURE_UNAVAILABLE
+            self._logger.warning(f"Could not capture conda environment: {err}")
+            python_env = "environment capture unavailable (conda absent)"
         env_info += python_env
         return env_info
 

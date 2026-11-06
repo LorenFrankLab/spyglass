@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib import import_module
 from pathlib import Path
 
 import datajoint as dj
@@ -68,8 +69,8 @@ class AnalysisFileIssues(dj.Manual):
     def _get_recompute_deleted() -> set:
         """Return analysis file names intentionally deleted by recompute.
 
-        Queries the v1 spike sorting recompute table for files that were
-        successfully recomputed and then deleted (deleted=1).
+        Queries the v1 and v2 spike sorting recompute tables for files that
+        were successfully recomputed and then deleted (deleted=1).
 
         Returns
         -------
@@ -77,70 +78,24 @@ class AnalysisFileIssues(dj.Manual):
             Analysis file names that were intentionally deleted.
         """
         deleted = set()
-
-        try:
-            from spyglass.spikesorting.v1.recompute import (
-                RecordingRecompute as V1RecordingRecompute,
-            )
-
-            deleted.update(
-                (V1RecordingRecompute().with_names & "deleted=1").fetch(
-                    "analysis_file_name"
+        for module, table in (
+            ("spyglass.spikesorting.v1.recompute", "RecordingRecompute"),
+            (
+                "spyglass.spikesorting.v2.recompute",
+                "RecordingArtifactRecompute",
+            ),
+        ):
+            try:
+                recompute = getattr(import_module(module), table)
+                deleted.update(
+                    (recompute().with_names & "deleted=1").fetch(
+                        "analysis_file_name"
+                    )
                 )
-            )
-        except (ImportError, ModuleNotFoundError):
-            # v1 spike-sorting recompute not installed; nothing to exclude.
-            logger.debug("v1 spike-sorting recompute unavailable; skipping.")
-        except Exception as e:
-            # File tracking is common infrastructure; v1 recompute may be
-            # unavailable, undeclared, or temporarily query-broken in an
-            # otherwise valid environment. Keep the scan running and report
-            # the optional exclusion source that could not be read.
-            logger.warning(f"Could not fetch v1 recompute deleted files: {e}")
-
-        deleted.update(AnalysisFileIssues._get_v2_deleted_files())
-
-        return deleted
-
-    @staticmethod
-    def _get_v2_deleted_files() -> set:
-        """Return v2 analysis file names intentionally deleted by recompute.
-
-        Companion to ``_get_recompute_deleted`` for the v2 spike-sorting
-        recompute machinery: ``RecordingArtifactRecompute.delete_files`` removes
-        a recording's ``AnalysisNwbfile`` after a verified, current-environment
-        match and sets ``deleted=1``. Without this companion the file-tracking
-        infrastructure would flag those intentionally-deleted v2 files as
-        orphans. (The ``SortingAnalyzerRecompute`` trio deletes regeneratable
-        analyzer FOLDERS, not ``AnalysisNwbfile`` rows, so it is not relevant
-        to analysis-file tracking.)
-
-        Returns
-        -------
-        deleted : set of str
-            v2 analysis file names that were intentionally deleted.
-        """
-        deleted = set()
-
-        try:
-            from spyglass.spikesorting.v2.recompute import (
-                RecordingArtifactRecompute as V2RecordingArtifactRecompute,
-            )
-
-            deleted.update(
-                (V2RecordingArtifactRecompute().with_names & "deleted=1").fetch(
-                    "analysis_file_name"
-                )
-            )
-        except (ImportError, ModuleNotFoundError):
-            # v2 spike-sorting recompute not installed; nothing to exclude.
-            logger.debug("v2 spike-sorting recompute unavailable; skipping.")
-        except Exception as e:
-            # Same env-agnostic shape as the v1 helper above: missing or
-            # query-broken v2 recompute tables should not abort common
-            # file-tracking scans.
-            logger.warning(f"Could not fetch v2 recompute deleted files: {e}")
-
+            except ImportError:
+                logger.debug(f"{module} unavailable; skipping.")
+            except Exception as e:  # Keep the scan running
+                logger.warning(f"Could not fetch {table} deleted files: {e}")
         return deleted
 
     @staticmethod
@@ -215,8 +170,8 @@ class AnalysisFileIssues(dj.Manual):
         full_table_name : str
             Full table name of the source analysis table.
         deleted_files : set
-            File names intentionally deleted by recompute; skipped only while
-            still physically absent (see the presence check below).
+            File names intentionally deleted by recompute; skipped while
+            absent from disk.
         hash_map : dict
             Pre-fetched mapping of analysis_file_name -> stored contents_hash.
 
@@ -225,11 +180,7 @@ class AnalysisFileIssues(dj.Manual):
         insert_dict : dict or None
             Dict ready for insertion into AnalysisFileIssues, or None if OK.
         """
-        # A file intentionally deleted by recompute is skipped ONLY while it is
-        # physically absent (the intended "reclaimed and gone" state). If it is
-        # back on disk -- an on-demand rebuild restored it -- fall through to
-        # normal integrity tracking, so a stale ``deleted=1`` flag can never
-        # hide a live file from the scan.
+        # A file may reappear after initial deletion
         if analysis_file_name in deleted_files and not Path(fname).exists():
             return None
 

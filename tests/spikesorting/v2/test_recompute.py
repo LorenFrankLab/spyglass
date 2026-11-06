@@ -972,7 +972,7 @@ def test_file_tracking_excludes_v2_deleted_files(
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 
     The file-tracking ``deleted`` set includes v2 ``RecordingArtifactRecompute``
-    rows with deleted=1 via ``_get_v2_deleted_files``.
+    rows with deleted=1.
     """
     _assert_temp_base_dir()
     from spyglass.common.common_file_tracking import AnalysisFileIssues
@@ -1002,8 +1002,6 @@ def test_file_tracking_excludes_v2_deleted_files(
         allow_direct_insert=True,
     )
     try:
-        assert fname in AnalysisFileIssues._get_v2_deleted_files()
-        # The unified file-tracking deleted set folds in the v2 companion.
         assert fname in AnalysisFileIssues._get_recompute_deleted()
     finally:
         (RecordingArtifactRecompute & sel_key).delete(safemode=False)

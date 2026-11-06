@@ -65,9 +65,7 @@ def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
 CurationV2, _v2_import_error = _probe_v2_curation()
 
 
-def _probe_v2_concat_member_curation() -> (
-    "tuple[Union[type, None], Union[Exception, None]]"
-):
+def _probe_v2_concat_member_curation() -> "Union[type, None]":
     """Import the optional per-member concat curation merge target."""
     try:
         from spyglass.spikesorting.v2.concat_member_curation import (
@@ -80,13 +78,11 @@ def _probe_v2_concat_member_curation() -> (
             "ConcatMemberCuration part in this process. Captured cause: "
             f"{type(err).__name__}: {err}"
         )
-        return None, err
-    return ConcatMemberCuration, None
+        return None
+    return ConcatMemberCuration
 
 
-ConcatMemberCuration, _v2_concat_member_import_error = (
-    _probe_v2_concat_member_curation()
-)
+ConcatMemberCuration = _probe_v2_concat_member_curation()
 
 
 def _raise_v2_unavailable(caller: str) -> None:
