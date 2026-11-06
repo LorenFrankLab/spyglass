@@ -85,7 +85,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Rewrite the Data Sync notebook for the shared-store workflow, keeping kachery
     in an appendix #1686
 - Fix `Export.md` example calls: `stop_export`, quoted key names, and the
-    `list_file_paths` and `populate_paper` arguments #PRNUM
+    `list_file_paths` and `populate_paper` arguments #1714
 
 ### Infrastructure
 
@@ -131,10 +131,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     #1686
 - Fix `Export` re-export cleanup, which deleted superseded `Export.Table` rows
     twice and never `Export.File` rows. `File` rows still referenced by
-    `DandiPath` are kept #PRNUM
+    `DandiPath` are kept #1714
 - Fix `RestrGraph` cascade abort ("already exists") across a renamed foreign
     key whose target name the table already has; restrict by the renamed
-    values instead #PRNUM
+    values instead #1714
 
 ### Pipelines
 
