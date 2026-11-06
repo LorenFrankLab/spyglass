@@ -243,6 +243,23 @@ def test_plot_metrics_figure_empty_table_is_labeled_not_raising():
 
 
 @pytest.mark.unit
+def test_plot_metrics_figure_rejects_unknown_columns():
+    """A requested name that is not a metric column raises, naming it.
+
+    Metric names and their output columns differ (``nn_advanced`` emits
+    ``nn_noise_overlap``), so dropping unknown names would silently plot a
+    subset, or nothing.
+    """
+    metrics = pd.DataFrame(
+        {"snr": [3.0, 5.0], "nn_noise_overlap": [0.1, 0.2]},
+        index=pd.Index([0, 1], name="unit_id"),
+    )
+    with pytest.raises(ValueError, match="nn_advanced") as excinfo:
+        plot_metrics_figure(metrics, columns=["snr", "nn_advanced"])
+    assert "nn_noise_overlap" in str(excinfo.value)
+
+
+@pytest.mark.unit
 def test_plot_metrics_figure_coerces_none_and_drops_non_finite():
     """``None`` / non-numeric / inf values coerce to NaN and drop per-column.
 

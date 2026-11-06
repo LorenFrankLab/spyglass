@@ -295,6 +295,11 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     Returns
     -------
     matplotlib.figure.Figure
+
+    Raises
+    ------
+    ValueError
+        If ``columns`` names a column the table does not have.
     """
     import math
 
@@ -311,8 +316,16 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     )
     if columns is None:
         columns = list(numeric.columns)
-    else:
-        columns = [c for c in columns if c in numeric.columns]
+    elif len(numeric.columns):
+        # A zero-unit table has no columns to check against.
+        unknown = [c for c in columns if c not in numeric.columns]
+        if unknown:
+            raise ValueError(
+                f"Unknown metric column(s) {unknown}. Pass output column "
+                "names, not metric names (nn_advanced emits "
+                "nn_noise_overlap/nn_isolation). Available columns: "
+                f"{list(numeric.columns)}."
+            )
 
     if len(metrics_df) == 0 or not columns:
         fig, ax = plt.subplots(figsize=(5, 3))

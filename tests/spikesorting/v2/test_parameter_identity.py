@@ -789,6 +789,10 @@ def test_params_lookup_rejects_positional_replace(dj_conn):
 def test_describe_parameter_rows_columns_and_usage(dj_conn):
     """Documented columns + correct ``used_by_pipeline_presets`` per row."""
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2._orchestration.reporting import (
         _PARAMETER_ROW_COLUMNS,
         describe_parameter_rows,
@@ -840,6 +844,19 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
             "is_shipped_default",
         )
     )
+
+    # Every preset scores with a metric row and an auto-curation rule row.
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
+    df = describe_parameter_rows()
+    assert "franklab_tetrode_hippocampus_30khz_ms4_2026_06" in _cell(
+        "QualityMetricParameters",
+        "franklab_default",
+        "used_by_pipeline_presets",
+    )
+    assert _cell("AutoCurationRules", "none", "used_by_pipeline_presets") == [
+        "franklab_clusterless_2026_06"
+    ]
 
 
 def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):

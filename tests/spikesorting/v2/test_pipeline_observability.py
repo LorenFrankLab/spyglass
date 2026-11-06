@@ -95,6 +95,26 @@ def first_run(obs_session):
 
 @pytest.mark.database
 @pytest.mark.slow
+def test_rerun_reports_an_ignored_curation_description(first_run):
+    """A re-run reuses the root curation, so a new description is reported.
+
+    It used to reach only the logger; the run summary looked clean.
+    """
+    _, inputs = first_run
+    run_summary = run_v2_pipeline(
+        **{**inputs, "curation_description": "a new description"}
+    )
+    assert run_summary["curation_status"] == "reused"
+    assert any(
+        "a new description" in warning for warning in run_summary["warnings"]
+    ), run_summary["warnings"]
+
+    rerun = run_v2_pipeline(**inputs)
+    assert not any("curation_description" in w for w in rerun["warnings"])
+
+
+@pytest.mark.database
+@pytest.mark.slow
 def test_run_summary_has_additive_keys(first_run):
     """The run summary carries the six additive keys with the right types."""
     run_summary, _ = first_run

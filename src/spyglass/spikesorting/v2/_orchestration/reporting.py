@@ -55,9 +55,10 @@ def describe_parameter_rows() -> "pd.DataFrame":
     default, which pipeline presets reference it, and -- when its content
     duplicates another row's -- the name it duplicates. Discovery metadata that
     lives on the *presets* (``probe_type`` / ``sampling_rate_hz`` /
-    ``recommendation_status`` / ``used_by_pipeline_presets``) applies only to
-    the three preset-referenced tables and is left blank / ``None`` for the
-    others (they are resolved downstream of preset selection);
+    ``recommendation_status``) applies only to the three preset-referenced
+    stage tables and is left blank / ``None`` for the others;
+    ``used_by_pipeline_presets`` also lists the presets that score with each
+    ``QualityMetricParameters`` / ``AutoCurationRules`` row;
     ``adjacency_radius_um`` is read straight from the ``SorterParameters`` blob.
 
     Unlike the DB-free :func:`describe_pipeline_presets`, this reads the **live
@@ -140,6 +141,14 @@ def _preset_parameter_use() -> tuple[dict, dict, dict]:
             (preset.sorter, preset.sorter_params_name), []
         ).append(preset_name)
     return preproc_use, artifact_use, sorter_use
+
+
+def _presets_using(attr: str) -> dict[str, list[str]]:
+    """Preset names keyed by their ``attr`` parameter-row name."""
+    use: dict[str, list[str]] = {}
+    for preset_name, preset in _PIPELINE_PRESETS.items():
+        use.setdefault(getattr(preset, attr), []).append(preset_name)
+    return use
 
 
 def _str_axis(used_by: list[str], attr: str) -> str:
@@ -271,13 +280,13 @@ def _preset_parameter_records(
 
 
 def _downstream_parameter_records() -> list[dict]:
-    """Catalog records for the parameter Lookups no preset references.
+    """Catalog records for the parameter Lookups outside the stage tables.
 
-    The remaining parameter Lookups are not referenced by the pipeline
-    PRESETS (they are resolved downstream of preset selection, used only by
-    cross-session matching, or chosen per run as a motion recipe), so the
+    These Lookups are resolved downstream of preset selection, used only by
+    cross-session matching, or chosen per run as a motion recipe, so the
     preset-fold columns (probe_type / sampling_rate_hz / adjacency_radius_um /
-    used_by_pipeline_presets / recommendation_status) stay blank. They ARE
+    recommendation_status) stay blank. Presets do name a metric row and an
+    auto-curation rule row, so those two fill ``used_by_pipeline_presets``. They ARE
     content-addressed by name and user-populatable, so listing them keeps this
     report aligned with the full ``initialize_v2_defaults`` surface (ten
     Lookups, not three).
@@ -310,6 +319,7 @@ def _downstream_parameter_records() -> list[dict]:
             for r in QualityMetricParameters._default_rows()
         },
         lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
+        used_by=_presets_using("metric_params_name"),
     )
     records += _simple_parameter_records(
         AutoCurationRules,
@@ -320,6 +330,7 @@ def _downstream_parameter_records() -> list[dict]:
         },
         lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
         extra_content=_autocuration_rule_content,
+        used_by=_presets_using("auto_curation_rules_name"),
     )
     records += _simple_parameter_records(
         MatcherParameters,
@@ -352,12 +363,13 @@ def _downstream_parameter_records() -> list[dict]:
 
 
 def _simple_parameter_records(
-    table, name_attr, shipped, summarize, extra_content=None
+    table, name_attr, shipped, summarize, extra_content=None, used_by=None
 ) -> list[dict]:
     """List a name-keyed param Lookup with preset-fold columns blank.
 
     ``shipped`` is the set of names the table's default catalog ships
-    (each caller knows its table's catalog). ``extra_content(row)`` folds
+    (each caller knows its table's catalog). ``used_by`` maps a row name to
+    the presets that name it, for tables a preset references by name. ``extra_content(row)`` folds
     part-table content (e.g. ``AutoCurationRules.Rule`` rows) into the
     fingerprint so a name-keyed master with identical scalar columns but
     different part rows is not falsely flagged as a content duplicate.
@@ -395,7 +407,9 @@ def _simple_parameter_records(
                 ),
                 "is_shipped_default": simple_row[name_attr] in shipped,
                 "recommendation_status": None,
-                "used_by_pipeline_presets": [],
+                "used_by_pipeline_presets": (used_by or {}).get(
+                    simple_row[name_attr], []
+                ),
                 "summary": summarize(simple_row),
             }
         )

@@ -332,6 +332,7 @@ def _run_root_curation_stage(
         If the curation insert or its merge registration fails.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.utils import logger
 
     # Idempotent curation: ``insert_curation`` owns the root-reuse logic.
     # With ``reuse_existing=True`` it returns the canonical (lowest
@@ -359,6 +360,19 @@ def _run_root_curation_stage(
             ),
             reuse_existing=True,
         )
+        if curation_description:
+            stored = (CurationV2 & curation_key).fetch1("description")
+            if stored != curation_description:
+                ignored = (
+                    "run_v2_pipeline: reused root curation_id="
+                    f"{curation_key['curation_id']} of sorting_id="
+                    f"{sorting_key['sorting_id']}; it keeps its description "
+                    f"{stored!r} and curation_description="
+                    f"{curation_description!r} is ignored. Curate a child "
+                    "to record a new description."
+                )
+                logger.warning(ignored)
+                warnings_list.append(ignored)
         # A single-session curation is registered atomically. A concat curation
         # deliberately is not: its synthetic timeline is unsafe for a
         # session-scoped merge consumer, so its merge id is None and the gate
