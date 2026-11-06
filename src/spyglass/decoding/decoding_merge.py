@@ -81,7 +81,14 @@ class DecodingOutput(_Merge, SpyglassMixin):
                         logger.warning(f"Unable to remove {path}, skipping")
 
         table_model_paths = self._fetch_registered_paths("classifier_path")
-        for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
+        analysis_dir = Path(config["SPYGLASS_ANALYSIS_DIR"])
+        # Models are .nld files; entries made before non_local_detector 0.7
+        # point at .pkl files.
+        model_files = [
+            *analysis_dir.glob("**/*.nld"),
+            *analysis_dir.glob("**/*.pkl"),
+        ]
+        for path in model_files:
             if str(path) not in table_model_paths:
                 self._info_msg(f"Removing {path}")
                 if not dry_run:
@@ -155,6 +162,11 @@ class DecodingOutput(_Merge, SpyglassMixin):
         view
             Figurl visualization view (1D or 2D depending on decoder)
         """
+        from non_local_detector.analysis import (
+            get_position_posterior,
+            get_spatial_posterior,
+        )
+
         results = cls.fetch_results(key)
 
         # Filter to specific interval if requested
@@ -169,10 +181,11 @@ class DecodingOutput(_Merge, SpyglassMixin):
                     "have 'interval_labels' coordinate. Ignoring interval_idx."
                 )
 
-        posterior = (
-            results.acausal_posterior.unstack("state_bins")
-            .drop_sel(state=["Local", "No-Spike"], errors="ignore")
-            .sum("state")
+        # Local leaves even when it has position bins (local_position_std).
+        posterior = get_position_posterior(
+            get_spatial_posterior(results.acausal_posterior).drop_sel(
+                state=["Local", "No-Spike"], errors="ignore"
+            )
         )
         # Normalize over the spatial dimension(s): 1D posteriors have a
         # "position" dim while 2D posteriors have "x_position"/"y_position".

@@ -26,6 +26,13 @@ info.connection.query(
 
 ### Breaking Changes
 
+- Decoding uses explicit uniform time bins and rates in Hz with
+    `non-local-detector>=0.7.0,<0.8`. The model sampling frequency sets the
+    decode rate independently of tracking. Recompute existing models and
+    results; see
+    [the migration guide](docs/src/ForDevelopers/time_grid_migration.md) for
+    parameter and direct-call changes #1618
+
 #### `LabMemberInfo` Takes Five Values (#1686)
 
 `LabMember.LabMemberInfo` gains `github_user_name`, between
@@ -136,6 +143,28 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 - Decoding
 
+    - Serialize constructor parameters and concrete model classes, preserving
+        algorithm settings when parameters are fetched. Upgrade legacy NonLocal
+        parameter rows without persisting fitted state. Environments are stored
+        as configuration only (`Environment.get_params()`); legacy rows holding
+        fitted environment keys still load #1618
+    - `DecodingParameters.insert` raises `TypeError` for objects that are
+        neither a detector (`get_params`) nor a dict, instead of storing
+        `vars()` #1618
+    - `get_ahead_behind_distance` works on results stored before explicit
+        decode bins by matching tracking at the stored decode times #1618
+    - `get_ahead_behind_distance` is measured from the states with a position.
+        It kept Local, whose mass unstacking puts on the last position bin, so
+        while Local dominated it measured from that bin. It is NaN at a time
+        with no spatial mass #1618
+    - `create_decoding_view` leaves out position-less states of any name #1618
+    - `fetch_environments` returns the detector's fitted environments
+        (`environments_`); the detector's `environments` parameter stays
+        configuration #1618
+    - Fitted models are saved in non_local_detector's versioned `.nld` format
+        instead of a pickle; models stored as `.pkl` by earlier runs still load,
+        and `cleanup` removes unregistered files of both kinds. `fetch_model`
+        trusts the transition formulas of the models Spyglass saved #1618
     - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
