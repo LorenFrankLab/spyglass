@@ -111,6 +111,15 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             {"merge_id": merge_id}
             for merge_id in list(set(self.fetch("spikesorting_merge_id")))
         ]
+        # Raise the annotation-specific error before fetch_nwb's generic one.
+        sources = set((SpikeSortingOutput & merge_keys).fetch("source"))
+        if len(sources) > 1:
+            raise ValueError(
+                "UnitAnnotation.fetch_unit_spikes: the selected annotations span "
+                f"multiple SpikeSortingOutput sources {sorted(sources)}. Restrict "
+                "the query to one source; annotations are single-analysis and "
+                "cross-source spike-time fetches are not supported here."
+            )
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True
         )
