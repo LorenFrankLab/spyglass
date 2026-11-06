@@ -128,9 +128,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
 - `convert_dataset_type` keeps a chunked dataset's `maxshape` and leaves the
-    original dataset in place when the dtype conversion fails #PRNUM
+    original dataset in place when the dtype conversion fails #1711
 - `_get_peak_amplitude` reads amplitudes at the waveform extractor's
-    `nbefore`, not the window midpoint, for asymmetric windows #PRNUM
+    `nbefore`, not the window midpoint, for asymmetric windows #1711
 
 ### Pipelines
 
@@ -172,10 +172,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
     - `plot_burst_pair_peaks` handles a single pair and units with more than
-        four channels #PRNUM
+        four channels #1711
     - Rename `calculate_isi_violation`'s `isi_threshold_s` to
         `isi_threshold_ms`, since the value is in milliseconds. The old name
-        warns and is removed in a future release #PRNUM
+        warns and is removed in a future release #1711
 
 ## [0.6.0] (Sep 1st 2026)
 
