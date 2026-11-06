@@ -19,19 +19,10 @@ Spike Sorting v2 pipeline (#1609). To upgrade:
     built from `environments/environment_spikesorting_legacy.yml` (follow steps
     1-3 in its header). Both environments use the same database. See
     [Two environments, one database](Features/SpikeSortingV2_Migration.md#two-environments-one-database).
-- Audit existing `UnitAnnotation` rows and run the migration below once before
-    reading or writing annotations that used positional unit ids.
 - If you used Spike Sorting v2 on a development database before this release,
     start from a fresh database; development v2 data is not migrated.
 
 ```python
-# UnitAnnotation.unit_id now stores the NWB unit id instead of the unit's
-# position in the spike-times list. Audit before reading or writing old rows:
-from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
-
-UnitAnnotation.audit_positional_unit_ids()  # inspect candidates
-UnitAnnotation.migrate_positional_unit_ids(dry_run=False)  # apply once
-
 # Databases created before 0.6.0 also need these 0.6.0 alters, which the 0.6.0
 # release notes did not include. Skip any you have already run.
 from spyglass.common.common_filter import FirFilterParameters
@@ -117,33 +108,13 @@ ingestion uses) rather than letting SpikeInterface pick one. SpikeInterface
 0.104 will not guess when a file also stores LFP. A file with no matching
 series, or more than one, raises `ValueError`.
 
-#### `Merge.fetch_nwb` refuses restrictions that span sources (#1609)
-
-`fetch_nwb` on any merge table now raises `ValueError` when the restriction
-matches more than one source part, instead of returning a mixed list. Pass
-`multi_source=True` to fetch across sources deliberately. The unused
-`disable_warning` parameter is removed, so calls that passed `return_merge_ids`
-or `log_export` positionally must pass them by keyword.
-
 #### Spike-sorting analysis results can change (#1609)
 
-- `SortedSpikesGroup.fetch_spike_data` and `get_spike_indicator` with
-    `return_unit_ids=True` report the NWB units-table id rather than the unit's
-    position. Values change for sorts whose unit ids are not `0..n-1`, such as
-    v1 curations made with `apply_merge=True`.
-- `UnitAnnotation.unit_id` stores the NWB unit id. Reads and `add_annotation`
-    refuse an unmarked merge whose NWB unit ids differ from their positions
-    until its annotations are audited and migrated. `add_annotation` now runs
-    inside a caller's open transaction, so the caller must roll back if it
-    fails. A new `UnitAnnotationPositionalIdMigration` table records the
-    migration.
 - V2 specific and global-median referencing require uniform finite channel
     offsets and uniform finite positive gains across all contributing channels,
     including a specific reference electrode. Unsupported calibration raises
     before raw-count subtraction can silently change physical units. Filtered
     recordings are checked after the filter has cleared their offsets.
-- An include-label filter on a curation whose units carry no labels now selects
-    no units (previously every unit).
 - Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` no
     longer runs across gaps in the time axis.
 - `SortedSpikesDecodingV1` combines a user-supplied
@@ -374,12 +345,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         spans sources #1609
     - Add `SortedSpikesGroup.UnitSelection`, which records each group's selected
         units at creation, and `create_group(unit_selections=...)` #1609
-    - Group or merge firing rate over zero units returns an `(n_time, 0)` array
-        instead of raising #1609
     - v1 `show_available_metrics` skips metrics the installed SpikeInterface does
         not provide #1609
-    - `Merge.fetch_nwb` warns when a parent-attribute restriction skips a source
-        #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

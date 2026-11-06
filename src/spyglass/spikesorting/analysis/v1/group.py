@@ -273,11 +273,13 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
-            SortedSpikesGroup.Units
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "sorted_spikes_group_name": key["sorted_spikes_group_name"],
-            }
+            (
+                SortedSpikesGroup.Units
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "sorted_spikes_group_name": key["sorted_spikes_group_name"],
+                }
+            )
         ).fetch("spikesorting_merge_id")
 
         # get the filtering parameters. unit_criteria is fetched by `get` so
@@ -307,7 +309,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
-        # A group may span source parts (e.g. CurationV1 and CurationV2).
+        # A group may span sources (e.g. CurationV1 and ImportedSpikeSorting).
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True, multi_source=True
         )
@@ -354,33 +356,24 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     ),
                     None,
                 )
-                # Skipped in test_mode: it would empty the shared fixtures'
-                # default_exclusion groups. test_filter_units covers it.
-                if group_col is not None:
-                    if not test_mode:
-                        include_unit &= SortedSpikesGroup.filter_units(
-                            units_df[group_col].to_list(),
-                            include_labels,
-                            exclude_labels,
-                        )
-                else:
-                    # Unlabeled curations omit the label column. Filter on
-                    # empty labels so an include-only selection returns none.
-                    include_filter = (
-                        list(include_labels)
-                        if include_labels is not None
-                        else []
+                if group_col is not None and not test_mode:
+                    include_unit &= SortedSpikesGroup.filter_units(
+                        units_df[group_col].to_list(),
+                        include_labels,
+                        exclude_labels,
                     )
-                    exclude_filter = (
-                        list(exclude_labels)
-                        if exclude_labels is not None
-                        else []
+                elif group_col is None:
+                    # Unlabeled curations omit the label column: no unit has
+                    # labels.
+                    include_unit &= SortedSpikesGroup.filter_units(
+                        [[] for _ in sorting_spike_times],
+                        [] if include_labels is None else include_labels,
+                        [] if exclude_labels is None else exclude_labels,
                     )
-                    if include_filter or exclude_filter:
-                        include_unit &= SortedSpikesGroup.filter_units(
-                            [[] for _ in sorting_spike_times],
-                            include_filter,
-                            exclude_filter,
+                    if include_labels is not None and len(include_labels) > 0:
+                        logger.warning(
+                            f"include_labels removed all units of {merge_id}: "
+                            + "its curation has no labels."
                         )
 
                 # filter on arbitrary criteria over the units table columns
@@ -390,6 +383,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 include_unit &= SortedSpikesGroup.filter_units_by_criteria(
                     units_df, unit_criteria, strict=False
                 )
+
             if not include_unit.all():
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)

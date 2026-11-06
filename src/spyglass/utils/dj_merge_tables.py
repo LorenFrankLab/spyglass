@@ -159,6 +159,33 @@ class Merge(ExportMixin, dj.Manual):
             return applied or None
         return restriction
 
+    @staticmethod
+    def _master_clauses(restriction, master_attrs: set):
+        """Keep only the master-column keys (``merge_id``, ``source``).
+
+        Parameters
+        ----------
+        restriction : dict, list, tuple, dj.AndList, str, or bool
+            A DataJoint restriction.
+        master_attrs : set
+            Attribute names of the merge master.
+
+        Returns
+        -------
+        dict, list, dj.AndList, or bool
+            The same structure keeping only master keys; ``True`` for forms
+            that cannot be introspected.
+        """
+        if isinstance(restriction, dict):
+            return {k: v for k, v in restriction.items() if k in master_attrs}
+        if isinstance(restriction, dj.AndList):
+            return dj.AndList(
+                [Merge._master_clauses(r, master_attrs) for r in restriction]
+            )
+        if isinstance(restriction, (list, tuple)):
+            return [Merge._master_clauses(r, master_attrs) for r in restriction]
+        return True
+
     def get_source_from_key(self, key: dict) -> str:
         """Return the source of a given key"""
         return self._normalize_source(key)
@@ -688,6 +715,14 @@ class Merge(ExportMixin, dj.Manual):
             matched = (self * part * parent) & applicable
             if matched:
                 matches.append((source_name, parent, matched))
+        if warn and matches and skipped:
+            # Sources the master columns already exclude were never candidates
+            reachable = set(
+                (self & self._master_clauses(restriction, master_attrs)).fetch(
+                    self._reserved_sk, log_export=False
+                )
+            )
+            skipped = [s for s in skipped if s in reachable]
         if warn and matches and skipped:
             # Legitimate but partial, so warn rather than raise
             logger.warning(

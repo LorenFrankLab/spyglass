@@ -447,3 +447,35 @@ def test_fetch_nwb_warns_when_restriction_skips_a_source(
     assert any(
         "LeafB" in message and "not searched" in message for message in messages
     ), f"no warning naming the skipped source; got {messages}"
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.parametrize("pin", ["merge_id", "source", "both"])
+def test_fetch_nwb_no_skip_warning_when_master_columns_pin_source(
+    two_source_merge, caplog, pin
+):
+    """No skip warning for a source the master columns already exclude."""
+    Merge = two_source_merge["Merge"]
+    merge_id_a = two_source_merge["merge_id_a"]
+    restriction = {"leaf_a_id": 0}
+    if pin in ("merge_id", "both"):
+        restriction["merge_id"] = merge_id_a
+    if pin in ("source", "both"):
+        restriction["source"] = "LeafA"
+
+    with caplog.at_level(logging.WARNING, logger="spyglass"):
+        nwb_list, merge_ids = Merge().fetch_nwb(
+            restriction, return_merge_ids=True
+        )
+
+    assert merge_ids == [merge_id_a]
+    assert len(nwb_list) == 1
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+    ]
+    assert not any(
+        "not searched" in message for message in messages
+    ), f"unexpected skip warning: {messages}"

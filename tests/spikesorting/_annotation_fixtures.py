@@ -22,16 +22,16 @@ class FakeSpikeSortingOutput:
             )
         return type(self)(self.payloads, restriction["merge_id"])
 
-    def fetch(self, attribute):
-        assert attribute == "source"
-        return ["CurationV1"] * len(self._merge_ids())
-
     def _merge_ids(self):
         return (
             self.merge_id
             if isinstance(self.merge_id, list)
             else [self.merge_id]
         )
+
+    def fetch(self, attribute):
+        assert attribute == "source"
+        return ["CurationV1"] * len(self._merge_ids())
 
     def fetch_nwb(self, *, return_merge_ids=False):
         merge_ids = self._merge_ids()

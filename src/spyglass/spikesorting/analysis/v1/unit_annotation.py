@@ -338,7 +338,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             raise ValueError(
                 "UnitAnnotation.fetch_unit_spikes: the selected annotations span "
                 f"multiple SpikeSortingOutput sources {sorted(sources)}. Restrict "
-                "the query to one source -- annotations are single-analysis and "
+                "the query to one source; annotations are single-analysis and "
                 "cross-source spike-time fetches are not supported here."
             )
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(

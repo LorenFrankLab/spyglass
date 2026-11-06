@@ -1,7 +1,7 @@
 """DB-free unit tests for the UnitAnnotation spike-selection helper.
 
 ``fetch_unit_spikes`` selects spikes by true NWB unit id, not position, so
-sparse id sets (v2, merge-applied v0/v1 curations) resolve correctly.
+sparse id sets (merge-applied curations) resolve correctly.
 """
 
 import pytest
