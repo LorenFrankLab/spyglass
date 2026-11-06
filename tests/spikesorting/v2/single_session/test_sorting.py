@@ -429,23 +429,11 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
         f"Clusterless found only {unit_row['n_spikes']} peaks on the "
         "smoke fixture; expected at least 20 given the planted firing "
         "rates and the detect_threshold of 5 (a MAD multiplier, not "
-        "µV -- see the note below). A buggy detector that returns a "
-        "single false-positive would pass `n_spikes > 0`."
+        "µV). A buggy detector that returns a single false positive "
+        "would pass `n_spikes > 0`."
     )
-    # Peak amplitude sanity: must be a finite positive number.
-    # NOTE: we cannot assert ``peak_amplitude_uv >= detect_threshold``
-    # because ``detect_threshold`` is interpreted by SI's
-    # ``detect_peaks`` in the recording's native units (raw counts,
-    # since the v2 preprocessing pipeline -- bandpass +
-    # common_reference -- does NOT gain-scale traces to uV before
-    # detection; gain conversion happens only at NWB-write time via
-    # ``ElectricalSeries.conversion``). The "detect_threshold stays
-    # in microvolts" docstring inherits a v1-era assumption that
-    # only holds if the recording was pre-scaled to uV, so this test makes
-    # no amplitude-vs-threshold assertion. The
-    # template peak (post-gain-applied via channel_gains in
-    # build_analyzer) being ~0.6 uV is consistent with a 5-count
-    # detection threshold on a ~0.2 uV/count probe.
+    # No amplitude-vs-threshold check: with threshold_unit="mad" the
+    # threshold is 5 x each channel's noise MAD, not microvolts.
     assert unit_row["peak_amplitude_uv"] > 0, (
         f"Clusterless reported non-positive peak_amplitude_uv="
         f"{unit_row['peak_amplitude_uv']}; a detector that returns "
