@@ -83,6 +83,24 @@ def test_selection_attempt(caplog, recomp_selection):
     assert prev_len == post_len, "Selection attempt should not add new entries"
 
 
+def test_has_matching_env_ignores_optional_namespace(
+    recomp_module, monkeypatch
+):
+    """An extension loaded in the session but absent from the file matches."""
+    pytest.importorskip("ndx_pose")  # registers ndx-pose with pynwb
+
+    tbl = recomp_module.RecordingRecomputeVersions()
+    assert "ndx-pose" in tbl.nwb_deps, "ndx-pose not in the live namespaces"
+    file_env = {k: v for k, v in tbl.nwb_deps.items() if k != "ndx-pose"}
+
+    monkeypatch.setattr(tbl, "_has_key", lambda key: True)
+    monkeypatch.setattr(tbl, "key_env", lambda key: dict(file_env))
+    assert tbl._has_matching_env(dict()), "Optional namespace blocked match"
+
+    file_env["core"] = "0.0.0"
+    assert not tbl._has_matching_env(dict()), "Core version mismatch matched"
+
+
 def test_delete_dry_run(recomp_tbl):
     """Test dry run delete."""
     prev_len = len(recomp_tbl)
