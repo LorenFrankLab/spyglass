@@ -91,7 +91,8 @@ window.figpack_p1.registerFPViewComponent({
         session.saved = snapshot;
         session.revision = response.headers.get("ETag");
         // New edits are not in an earlier commit; stop showing it as ready.
-        if (session.operation?.result) session.operation = null;
+        // {} is "no operation": render() and pollOperation() read its fields.
+        if (session.operation.result) session.operation = {};
       } finally {
         session.saving = false;
         session.render();
