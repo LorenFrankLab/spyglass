@@ -51,10 +51,8 @@ def test_browser_review_commit_verify_and_select(
 ):
     from spyglass.spikesorting.analysis.v1 import group as group_module
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
-    from spyglass.spikesorting.v2._review.delivery import (
-        served_review_bundles,
-        stop_review_servers,
-    )
+    from spyglass.spikesorting.v2._review import delivery
+    from spyglass.spikesorting.v2._review.delivery import stop_review_servers
     from spyglass.spikesorting.v2.analysis_selection import (
         select_units_for_analysis,
     )
@@ -149,7 +147,7 @@ def test_browser_review_commit_verify_and_select(
         #    after a kernel restart, then inspect the merged unit.
         continuation = receipt.continue_review()
         stop_review_servers()
-        assert served_review_bundles() == {}
+        assert delivery._SERVER is None
         resumed = FigPackReview.resume(continuation.review_id)
         merged_url = resumed.open(open_browser=False)
         with browser.review_page(

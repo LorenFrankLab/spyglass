@@ -372,9 +372,9 @@ def supplied_motion_estimate_problem(
             "MotionEstimate.populate)."
         )
     problems = []
-    estimation_name = (MotionEstimateSelection & key).fetch1(
-        "motion_estimation_params_name"
-    )
+    estimation_name, source_content_hash = (
+        MotionEstimateSelection & key
+    ).fetch1("motion_estimation_params_name", "source_content_hash")
     recipe_estimation = motion_recipe.recipe["motion_estimation_params_name"]
     if estimation_name != recipe_estimation:
         problems.append(
@@ -392,7 +392,7 @@ def supplied_motion_estimate_problem(
             _live_source_row(
                 lineage,
                 key["motion_estimate_id"],
-                (MotionEstimateSelection & key).fetch1("source_content_hash"),
+                source_content_hash,
             )
         except ValueError as exc:
             problems.append(str(exc))

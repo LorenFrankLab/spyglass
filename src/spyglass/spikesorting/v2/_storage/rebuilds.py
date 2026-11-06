@@ -144,8 +144,9 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
 
     The one self-heal every trace-artifact table shares: when the file is
     gone, ``table()._rebuild_nwb_artifact(key)`` restores it (a locked,
-    content-verified rebuild; the DataJoint row is never deleted), and the
-    path is resolved again.
+    content-verified rebuild; the DataJoint row is never deleted) at the
+    already-resolved path. The rebuild's install checksums the file through
+    ``get_abs_path``, so the path is not resolved a second time.
 
     ``AnalysisNwbfile.get_abs_path`` checksums the whole file, about 1.3 s per
     GiB (measured on a 1 GiB file with a warm page cache, dominated by
@@ -187,7 +188,6 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
     abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     if not Path(abs_path).exists():
         table()._rebuild_nwb_artifact(key)
-        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
     identity = _file_identity(abs_path)
     if not in_transaction and identity is not None:
         _VERIFIED_ARTIFACT_PATHS[analysis_file_name] = (abs_path, identity)

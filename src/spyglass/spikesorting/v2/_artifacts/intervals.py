@@ -311,49 +311,57 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     # Split runs at gaps first (a scan chunk can straddle one), then join runs
     # within join_window; the result equals a per-frame join's.
     runs = _split_runs_at_gaps(runs, gap_after)
-    spans = []
-    cur_start = int(runs[0, 0])
-    cur_end = int(runs[0, 1])
-    for r_start, r_end in runs[1:]:
-        r_start = int(r_start)
-        r_end = int(r_end)
-        crosses_gap = bool(
-            np.any((gap_after >= cur_end) & (gap_after < r_start))
+    run_starts = runs[:, 0]
+    run_ends = runs[:, 1]
+    # Runs are ascending and non-overlapping, so a span's end is its last
+    # run's end. A run starts a new span when it is more than join_window past
+    # the previous run's end, or when the first gap at/after that end falls
+    # before it (the pair straddles a gap).
+    prev_ends = run_ends[:-1]
+    next_starts = run_starts[1:]
+    breaks = next_starts - prev_ends > join_window_frames
+    if gap_after.size:
+        first_gap = np.searchsorted(gap_after, prev_ends, side="left")
+        breaks |= (first_gap < gap_after.size) & (
+            gap_after[np.minimum(first_gap, gap_after.size - 1)] < next_starts
         )
-        if r_start - cur_end <= join_window_frames and not crosses_gap:
-            cur_end = max(cur_end, r_end)
-        else:
-            spans.append((cur_start, cur_end))
-            cur_start = r_start
-            cur_end = r_end
-    spans.append((cur_start, cur_end))
+    break_idx = np.flatnonzero(breaks)
+    span_starts = run_starts[np.concatenate(([0], break_idx + 1))]
+    span_ends = run_ends[np.concatenate((break_idx, [len(runs) - 1]))]
 
-    # Cap the removal-window expansion at the chunk boundary on each side.
-    clipped_spans = []
-    for start_f, end_f in spans:
-        left = gap_after[gap_after < start_f]
-        chunk_start = int(left[-1]) + 1 if left.size else 0
-        right = gap_after[gap_after >= end_f]
-        chunk_end = int(right[0]) if right.size else n - 1
-        start_f = max(chunk_start, start_f - half_window_frames)
-        end_f = min(chunk_end, end_f + half_window_frames)
-        # Half-open [start, end): ``end_f`` is the inclusive last artifact
-        # sample, so ``end_f + 1`` keeps it out of the complement (the saved
-        # valid_times). At a chunk's last sample, ``end_f + 1`` is the next
-        # chunk's first timestamp; the per-chunk subtraction below clips to
-        # exactly that element (its ``base_start``), so valid_times never
-        # cross the gap.
-        clipped_spans.append((start_f, min(end_f + 1, n - 1)))
+    # Cap the removal-window expansion at the chunk boundary on each side:
+    # a span's chunk starts one past the last gap before it and ends at the
+    # first gap at/after its end.
+    if gap_after.size:
+        n_left = np.searchsorted(gap_after, span_starts, side="left")
+        chunk_start = np.where(
+            n_left > 0, gap_after[np.maximum(n_left - 1, 0)] + 1, 0
+        )
+        right = np.searchsorted(gap_after, span_ends, side="left")
+        chunk_end = np.where(
+            right < gap_after.size,
+            gap_after[np.minimum(right, gap_after.size - 1)],
+            n - 1,
+        )
+    else:
+        chunk_start = np.zeros_like(span_starts)
+        chunk_end = np.full_like(span_ends, n - 1)
+    clipped_starts = np.maximum(chunk_start, span_starts - half_window_frames)
+    clipped_ends = np.minimum(chunk_end, span_ends + half_window_frames)
+    # Half-open [start, end): ``clipped_ends`` is the inclusive last artifact
+    # sample, so ``+ 1`` keeps it out of the complement (the saved
+    # valid_times). At a chunk's last sample, ``+ 1`` is the next chunk's
+    # first timestamp; the per-chunk subtraction below clips to exactly that
+    # element (its ``base_start``), so valid_times never cross the gap.
+    clipped_ends = np.minimum(clipped_ends + 1, n - 1)
 
     # One batched read for every span boundary (a noisy recording can have
     # hundreds of spans; per-span reads are many tiny h5py reads).
-    boundary_frames = np.array(
-        [frame for span in clipped_spans for frame in span], dtype=np.int64
-    )
+    boundary_frames = np.column_stack((clipped_starts, clipped_ends)).ravel()
     boundary_times = _segment_times_at(recording, boundary_frames)
     artifact_intervals = [
         [float(boundary_times[2 * i]), float(boundary_times[2 * i + 1])]
-        for i in range(len(clipped_spans))
+        for i in range(len(span_starts))
     ]
 
     # Subtract per base chunk, not from one ``[t0, t_end]`` envelope, so no

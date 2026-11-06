@@ -441,18 +441,13 @@ class ConcatenatedRecordingSelection(
             {"concat_recording_id": concat_recording_id, **row}
             for row in snapshot_rows
         ]
-        from contextlib import ExitStack
-
-        from spyglass.spikesorting.v2._core.db_locking import (
-            required_advisory_lock,
-        )
         from spyglass.spikesorting.v2.artifact_output import (
-            ArtifactDetectionOutput,
+            artifact_lifecycle_locks,
         )
 
-        detection_ids = sorted(
-            {value for value in artifacts.values() if value is not None}
-        )
+        detection_ids = [
+            value for value in artifacts.values() if value is not None
+        ]
         if detection_ids and cls.connection.in_transaction:
             raise ValueError(
                 "Create an artifact-backed concat selection outside a caller-owned "
@@ -464,14 +459,7 @@ class ConcatenatedRecordingSelection(
             # snapshot, and minted the deterministic id), so it bypasses the
             # master insert guard. Master + snapshot land in one transaction so
             # a concat id never exists without its frozen member set.
-            with ExitStack() as locks:
-                for detection_id in detection_ids:
-                    locks.enter_context(
-                        required_advisory_lock(
-                            ArtifactDetectionOutput,
-                            {"artifact_detection_id": detection_id},
-                        )
-                    )
+            with artifact_lifecycle_locks(detection_ids):
                 with cls._safe_context():
                     cls.insert1(
                         {
@@ -756,8 +744,8 @@ class ConcatenatedRecording(
             observation_intervals,
         )
         from spyglass.spikesorting.v2._storage.nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2._storage.units_nwb import (
-            _base_intervals_from_recording,
+        from spyglass.spikesorting.v2._core.signal_math import (
+            base_intervals_and_gaps,
         )
 
         recordings, member_sample_counts, member_indices = (
@@ -767,9 +755,9 @@ class ConcatenatedRecording(
             (
                 plan["valid_times"]
                 if plan["valid_times"] is not None
-                else _base_intervals_from_recording(
+                else base_intervals_and_gaps(
                     recording, recording.get_sampling_frequency()
-                )
+                ).base_intervals
             )
             for plan, recording in zip(member_plan, recordings, strict=True)
         ]

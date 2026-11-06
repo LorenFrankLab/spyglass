@@ -230,10 +230,7 @@ def run_v2_unit_match(
         report = preflight_v2_unit_match(plan)
         if not report.ok:
             raise PreflightError(report.summary())
-        input_unit_selections = [
-            value.snapshot() if hasattr(value, "snapshot") else dict(value)
-            for value in report.unit_selections
-        ]
+        input_unit_selections = list(report.unit_selections)
         expected_input_set_hash = report.input_set_hash
         preflight_warnings = list(report.warnings)
 
@@ -642,12 +639,9 @@ def _preflight_match_plan(plan, *, unit_policy: str):
         value for value in report.warnings if value not in plan.warnings
     )
     selections = {}
+    # preflight_v2_unit_match keeps only typed UnitSelectionSnapshot objects.
     for selection in report.unit_selections:
-        snapshot = (
-            selection.snapshot()
-            if hasattr(selection, "snapshot")
-            else dict(selection)
-        )
+        snapshot = selection.snapshot()
         selections[
             (str(snapshot["sorting_id"]), int(snapshot["curation_id"]))
         ] = snapshot
@@ -655,11 +649,7 @@ def _preflight_match_plan(plan, *, unit_policy: str):
         (str(item["sorting_id"]), int(item["curation_id"])): item
         for item in (report._prepared or {}).get("inputs", [])
     }
-    pins = (
-        plan.curations
-        if isinstance(plan, UnitMatchInputPlan)
-        else [pin for _, pin in sorted(plan.curation_choices.items())]
-    )
+    pins = plan.pinned_curations
     requested_indices = {
         (str(pin["sorting_id"]), int(pin["curation_id"])): index
         for index, pin in enumerate(pins)

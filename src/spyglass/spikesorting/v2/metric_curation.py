@@ -44,6 +44,7 @@ from spyglass.spikesorting.v2._curation.metrics import (
     rules_payloads_match,
 )
 from spyglass.spikesorting.v2._storage.metrics_nwb import (
+    read_analyzer_curation_tables,
     read_merge_suggestions,
     read_proposed_labels,
     read_quality_metrics,
@@ -62,6 +63,7 @@ from spyglass.spikesorting.v2._recording.source import EffectiveTraces
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
     StagedOutputs,
+    staged_analysis_file,
 )
 from spyglass.spikesorting.v2._storage.units_nwb import StoredUnits
 from spyglass.spikesorting.v2.curation import CurationV2
@@ -69,12 +71,8 @@ from spyglass.spikesorting.v2.exceptions import (
     UnsupportedDirectInsertError,
     ZeroUnitAnalyzerError,
 )
-from spyglass.spikesorting.v2._storage.staged_outputs import (
-    unlink_staged_analysis_file as _unlink_staged_analysis_file,
-)
 from spyglass.spikesorting.v2.sorting import (
     AnalyzerWaveformParameters,
-    Sorting,
     SortingSelection,
 )
 from spyglass.spikesorting.v2._core.table_integrity import (
@@ -512,55 +510,6 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         for master, rules in cls._default_payloads():
             cls.insert_rules(master, rules, skip_duplicates=True)
 
-    @classmethod
-    def check_rule_integrity(cls, restriction=True) -> list[dict]:
-        """Return master rows whose Rule rows are malformed or missing.
-
-        ``insert``/``insert1`` on ``AutoCurationRules.Rule`` raise, but
-        out-of-band writes (``insert_quick`` / raw SQL) can still bypass
-        whole-payload validation; this surfaces a CUSTOM rows-set that does
-        nothing (preset ``none`` and no rules) or rule rows that fail the rule
-        schema, for use in an integrity check. The shipped ``"none"`` default
-        is the documented inert "skip auto-curation" sentinel, so it is exempt
-        from the no-effect flag.
-        """
-        from spyglass.spikesorting.v2._params.metric_curation import (
-            AutoCurationRuleSchema,
-        )
-
-        offenders = []
-        for master in (cls & restriction).fetch(as_dict=True):
-            name = master["auto_curation_rules_name"]
-            rules = (cls.Rule & {"auto_curation_rules_name": name}).fetch(
-                as_dict=True
-            )
-            if (
-                name != "none"
-                and master["auto_merge_preset"] == "none"
-                and not rules
-            ):
-                offenders.append(
-                    {"auto_curation_rules_name": name, "issue": "no_effect"}
-                )
-                continue
-            for rule in rules:
-                try:
-                    AutoCurationRuleSchema.model_validate(
-                        {
-                            k: rule[k]
-                            for k in AutoCurationRuleSchema.model_fields
-                        }
-                    )
-                except Exception as err:  # noqa: BLE001 - report, don't raise
-                    offenders.append(
-                        {
-                            "auto_curation_rules_name": name,
-                            "rule_index": rule.get("rule_index"),
-                            "issue": str(err),
-                        }
-                    )
-        return offenders
-
 
 class _WaveformsAccessor:
     """Narrow ``WaveformExtractor``-shaped view over a SortingAnalyzer.
@@ -863,84 +812,85 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
         spikeinterface_version = si.__version__
-        analysis_file_name = AnalysisNwbfile().create(
+        with staged_analysis_file(
             recording_inputs.nwb_file_name,
-            restrict_permission=True,  # 0o644, not world-writable 0o666
-        )
-        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        wants_pc = (not metric_inputs.skip_pc_metrics) and bool(
-            _requested_pc_metrics(metric_inputs.metric_names)
-        )
-
-        # Concat sources carry no single recording_id (recording_id is None);
-        # record the lineage concat_recording_id so the file identifies its
-        # upstream standalone. recording_content_hash is the content_hash of
-        # the traces the metrics were computed on: the source row's (the
-        # concat's, for a concat), or the corrected recording's for a sort of
-        # motion-corrected traces, whose id is then recorded too.
-        corrected_id = recording_inputs.traces.key.get(
-            "motion_corrected_recording_id"
-        )
-
-        # Provenance header shared by the populated and zero-unit paths so every
-        # CurationEvaluation artifact is self-describing; source_analyzer_hashes
-        # is added per-path (a manifest on the fast path, None for a zero-unit
-        # or merged-temp-analyzer evaluation).
-        base_provenance = {
-            "sorting_id": str(sorting_inputs.sorting_id),
-            "curation_id": int(sorting_inputs.curation_id),
-            "metric_params_name": metric_inputs.metric_params_name,
-            "auto_curation_rules_name": metric_inputs.auto_curation_rules_name,
-            "display_waveform_params_name": analyzer_inputs.display_waveform_params_name,
-            "metric_waveform_params_name": analyzer_inputs.metric_waveform_params_name,
-            "metric_names": list(metric_inputs.metric_names),
-            "metric_kwargs": metric_inputs.metric_kwargs,
-            "auto_merge_preset": metric_inputs.auto_merge_preset,
-            "auto_merge_kwargs": metric_inputs.auto_merge_kwargs,
-            "auto_curation_rules": metric_inputs.rule_rows,
-            "source_kind": recording_inputs.source_kind,
-            "recording_id": recording_inputs.recording_id,
-            "concat_recording_id": recording_inputs.concat_recording_id,
-            "recording_content_hash": recording_inputs.traces.row[
-                "content_hash"
-            ],
-            "spikeinterface_version": spikeinterface_version,
-        }
-        if corrected_id is not None:
-            base_provenance["motion_corrected_recording_id"] = str(corrected_id)
-
-        from spyglass.spikesorting.v2._core.observed_time import (
-            OBSERVATION_VERSION,
-        )
-
-        base_provenance["observation_version"] = OBSERVATION_VERSION
-        base_provenance["observed_presence_bin_duration_s"] = (
-            metric_inputs.observed_presence_bin_duration_s
-        )
-
-        def _provenance_tables(source_analyzer_hashes):
-            from spyglass.spikesorting.v2._core.runtime import (
-                runtime_environment_provenance,
+            context="CurationEvaluation.make_compute",
+        ) as analysis_file_name:
+            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            wants_pc = (not metric_inputs.skip_pc_metrics) and bool(
+                _requested_pc_metrics(metric_inputs.metric_names)
             )
 
-            return [
-                build_provenance_table(
-                    CURATION_EVALUATION_PROVENANCE,
-                    {
-                        **base_provenance,
-                        "source_analyzer_hashes": source_analyzer_hashes,
-                        **runtime_environment_provenance(
-                            job_kwargs=metric_inputs.metric_job_kwargs,
-                            execution_params={
-                                "stage": "curation_evaluation",
-                                "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
-                            },
-                        ),
-                    },
-                )
-            ]
+            # Concat sources carry no single recording_id (recording_id is None);
+            # record the lineage concat_recording_id so the file identifies its
+            # upstream standalone. recording_content_hash is the content_hash of
+            # the traces the metrics were computed on: the source row's (the
+            # concat's, for a concat), or the corrected recording's for a sort of
+            # motion-corrected traces, whose id is then recorded too.
+            corrected_id = recording_inputs.traces.key.get(
+                "motion_corrected_recording_id"
+            )
 
-        try:
+            # Provenance header shared by the populated and zero-unit paths so every
+            # CurationEvaluation artifact is self-describing; source_analyzer_hashes
+            # is added per-path (a manifest on the fast path, None for a zero-unit
+            # or merged-temp-analyzer evaluation).
+            base_provenance = {
+                "sorting_id": str(sorting_inputs.sorting_id),
+                "curation_id": int(sorting_inputs.curation_id),
+                "metric_params_name": metric_inputs.metric_params_name,
+                "auto_curation_rules_name": metric_inputs.auto_curation_rules_name,
+                "display_waveform_params_name": analyzer_inputs.display_waveform_params_name,
+                "metric_waveform_params_name": analyzer_inputs.metric_waveform_params_name,
+                "metric_names": list(metric_inputs.metric_names),
+                "metric_kwargs": metric_inputs.metric_kwargs,
+                "auto_merge_preset": metric_inputs.auto_merge_preset,
+                "auto_merge_kwargs": metric_inputs.auto_merge_kwargs,
+                "auto_curation_rules": metric_inputs.rule_rows,
+                "source_kind": recording_inputs.source_kind,
+                "recording_id": recording_inputs.recording_id,
+                "concat_recording_id": recording_inputs.concat_recording_id,
+                "recording_content_hash": recording_inputs.traces.row[
+                    "content_hash"
+                ],
+                "spikeinterface_version": spikeinterface_version,
+            }
+            if corrected_id is not None:
+                base_provenance["motion_corrected_recording_id"] = str(
+                    corrected_id
+                )
+
+            from spyglass.spikesorting.v2._core.observed_time import (
+                OBSERVATION_VERSION,
+            )
+
+            base_provenance["observation_version"] = OBSERVATION_VERSION
+            base_provenance["observed_presence_bin_duration_s"] = (
+                metric_inputs.observed_presence_bin_duration_s
+            )
+
+            def _provenance_tables(source_analyzer_hashes):
+                from spyglass.spikesorting.v2._core.runtime import (
+                    runtime_environment_provenance,
+                )
+
+                return [
+                    build_provenance_table(
+                        CURATION_EVALUATION_PROVENANCE,
+                        {
+                            **base_provenance,
+                            "source_analyzer_hashes": source_analyzer_hashes,
+                            **runtime_environment_provenance(
+                                job_kwargs=metric_inputs.metric_job_kwargs,
+                                execution_params={
+                                    "stage": "curation_evaluation",
+                                    "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
+                                },
+                            ),
+                        },
+                    )
+                ]
+
             # Zero-unit committed curation: nothing to analyze; write empty
             # metric/merge/label tables (SI cannot build an analyzer over zero
             # units). Write empty metric/merge/label tables.
@@ -1028,11 +978,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 spikeinterface_version,
                 source_analyzer_hashes,
             )
-        except Exception:
-            _unlink_staged_analysis_file(
-                analysis_file_name, context="CurationEvaluation.make_compute"
-            )
-            raise
 
     def make_insert(
         self,
@@ -1129,6 +1074,23 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         return read_merge_suggestions(
             abs_path, row["merge_suggestions_object_id"]
+        )
+
+    @classmethod
+    def _read_outputs(cls, key) -> tuple:
+        """Return ``(metrics, merge_groups, labels)`` from one file open.
+
+        Each element equals what :meth:`get_metrics`,
+        :meth:`get_suggested_merge_groups` and :meth:`get_labels` return, read
+        with one row fetch and one path resolution.
+        """
+        row = (cls & key).fetch1()
+        abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        return read_analyzer_curation_tables(
+            abs_path,
+            metrics_object_id=row["metrics_object_id"],
+            merge_suggestions_object_id=row["merge_suggestions_object_id"],
+            proposed_labels_object_id=row["proposed_labels_object_id"],
         )
 
     # ---- acceptance helpers (evaluation outputs -> committed curation) ----
@@ -1415,13 +1377,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "the sort-time waveform subsample (full re-extraction is not "
                 "supported)."
             )
-        from spyglass.spikesorting.v2._curation.analyzer import (
-            _resolve_curation_analyzer,
-        )
-
-        request = self._display_analyzer_key(key)
-        analyzer = _resolve_curation_analyzer(**request)
-        return _WaveformsAccessor(analyzer)
+        return _WaveformsAccessor(self._analyzer_for(key))
 
     def _display_analyzer_key(self, key):
         """Resolve the curation + DISPLAY recipe request for every plot.
@@ -1431,18 +1387,17 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         curations build or reuse their per-generation analyzer. Preview and
         zero-unit handling therefore cannot drift among individual helpers.
         """
-        sel = (CurationEvaluationSelection & key).fetch1()
-        waveform_recipe = (Sorting & {"sorting_id": sel["sorting_id"]}).fetch1(
-            "display_waveform_params_name"
+        from spyglass.spikesorting.v2._curation.analyzer import (
+            display_analyzer_request,
         )
-        return {
-            "curation_ref": {
+
+        sel = (CurationEvaluationSelection & key).fetch1()
+        return display_analyzer_request(
+            {
                 "sorting_id": sel["sorting_id"],
                 "curation_id": int(sel["curation_id"]),
-            },
-            "waveform_recipe": waveform_recipe,
-            "role": "display",
-        }
+            }
+        )
 
     def _analyzer_for(self, key):
         """Return this curation's DISPLAY analyzer for a controlled read.

@@ -381,19 +381,9 @@ class CurationUnitAnnotationSet(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             "created_by": author,
         }
         value_column = _VALUE_COLUMN[definition_ref.value_type]
+        # Value.insert derives value_special and nulls the typed column.
         value_rows = [
-            {
-                **key,
-                "unit_id": unit_id,
-                value_column: (
-                    None
-                    if _special_value_state(definition_ref.value_type, value)
-                    else value
-                ),
-                "value_special": _special_value_state(
-                    definition_ref.value_type, value
-                ),
-            }
+            {**key, "unit_id": unit_id, value_column: value}
             for unit_id, value in values
         ]
         try:

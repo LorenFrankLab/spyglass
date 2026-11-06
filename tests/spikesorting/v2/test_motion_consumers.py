@@ -826,9 +826,7 @@ def test_resolver_rebuilds_a_missing_base_artifact(discontinuous_sources, kind):
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording.source import (
-        load_effective_recording,
-    )
+    from tests.spikesorting.v2._ingest_helpers import load_effective_recording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     source = (
@@ -1070,9 +1068,7 @@ def test_corrected_concat_bundle_keeps_windows_in_spans(
         unitmatch_backend as _unitmatch_backend,
     )
     from spyglass.spikesorting.v2 import matcher_protocol
-    from spyglass.spikesorting.v2._recording.source import (
-        load_effective_recording,
-    )
+    from tests.spikesorting.v2._ingest_helpers import load_effective_recording
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import (

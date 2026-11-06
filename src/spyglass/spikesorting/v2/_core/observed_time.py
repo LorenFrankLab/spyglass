@@ -8,8 +8,6 @@ lives in ``spyglass.spikesorting._observed_time``.
 
 from __future__ import annotations
 
-from itertools import pairwise
-
 import numpy as np
 
 from spyglass.spikesorting._intervals import _normalize
@@ -25,12 +23,11 @@ OBSERVATION_VERSION = 2
 
 def observed_intervals(recording, valid_times):
     """Convert stored valid times into half-open, gap-preserving exposure."""
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_at,
-        base_intervals_and_gaps,
-    )
+    from spyglass.spikesorting._intervals import intersect_intervals
+    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         artifact_frame_ranges,
+        boundary_spans_from_timestamps,
         complement_frame_ranges,
     )
 
@@ -46,21 +43,18 @@ def observed_intervals(recording, valid_times):
         name="observed_intervals sampling_frequency",
         positive=True,
     )
-    boundaries = np.r_[0, base_intervals_and_gaps(recording).gap_after + 1, n]
-    kept = []
-    for start, stop in complement_frame_ranges(excluded, n):
-        cuts = np.r_[
-            start,
-            boundaries[(boundaries > start) & (boundaries < stop)],
-            stop,
-        ].astype(np.int64)
-        for first, end in pairwise(cuts):
-            t0 = float(_segment_times_at(recording, np.array([first]))[0])
-            t1 = (
-                float(_segment_times_at(recording, np.array([end - 1]))[0])
-                + 1.0 / fs
-            )
-            kept.append((t0, t1))
+    # Each kept piece is artifact-free and never crosses a timestamp gap.
+    pieces = intersect_intervals(
+        complement_frame_ranges(excluded, n),
+        boundary_spans_from_timestamps(recording),
+        merge=False,
+    ).astype(np.int64)
+    kept = np.column_stack(
+        (
+            _segment_times_at(recording, pieces[:, 0]),
+            _segment_times_at(recording, pieces[:, 1] - 1) + 1.0 / fs,
+        )
+    )
     result = finite_intervals(
         kept, name="observed_intervals computed intervals"
     )

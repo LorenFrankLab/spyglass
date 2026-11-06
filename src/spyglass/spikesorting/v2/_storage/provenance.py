@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from numbers import Integral
 
 import numpy as np
@@ -326,9 +326,37 @@ def _to_python(value):
     return value
 
 
-def build_provenance_table(
-    name: str, values: dict, *, description: str = ""
-) -> DynamicTable:
+def concrete_vectordata(
+    name: str, values, dtype, *, description: str | None = None
+) -> VectorData:
+    """Build a ``VectorData`` column with a concrete numpy dtype.
+
+    Passing a concrete-dtype array (rather than a Python list) lets hdmf write
+    even an empty column -- an empty Python list raises "Cannot infer dtype".
+
+    Parameters
+    ----------
+    name : str
+        Column name.
+    values : array-like
+        Column values, shape ``(n_rows,)``.
+    dtype : numpy dtype or type
+        Concrete dtype of the stored column (``object`` for strings).
+    description : str, optional
+        Column description; defaults to ``name``.
+
+    Returns
+    -------
+    hdmf.common.VectorData
+    """
+    return VectorData(
+        name=name,
+        description=name if description is None else description,
+        data=np.asarray(values, dtype=dtype),
+    )
+
+
+def build_provenance_table(name: str, values: dict) -> DynamicTable:
     """Build a ``key`` / ``value_json`` scalar-provenance table.
 
     Each entry in ``values`` becomes one row whose ``value_json`` is the
@@ -340,25 +368,24 @@ def build_provenance_table(
     keys = sorted(payload)
     return DynamicTable(
         name=name,
-        description=description or f"{name} (key/value_json provenance)",
+        description=f"{name} (key/value_json provenance)",
         columns=[
-            VectorData(
-                name=_KEY_COLUMN,
+            concrete_vectordata(
+                _KEY_COLUMN,
+                keys,
+                object,
                 description="provenance field name",
-                data=np.asarray(keys, dtype=object),
             ),
-            VectorData(
-                name=_VALUE_COLUMN,
+            concrete_vectordata(
+                _VALUE_COLUMN,
+                [
+                    json.dumps(
+                        payload[k], sort_keys=True, default=_json_default
+                    )
+                    for k in keys
+                ],
+                object,
                 description="JSON-encoded provenance value",
-                data=np.asarray(
-                    [
-                        json.dumps(
-                            payload[k], sort_keys=True, default=_json_default
-                        )
-                        for k in keys
-                    ],
-                    dtype=object,
-                ),
             ),
         ],
     )
@@ -368,8 +395,6 @@ def build_long_provenance_table(
     name: str,
     rows: list[dict],
     columns: list[tuple[str, type]],
-    *,
-    description: str = "",
 ) -> DynamicTable:
     """Build a typed long provenance table (one row per item).
 
@@ -385,35 +410,70 @@ def build_long_provenance_table(
             data[col].append(row[col])
         data[_SCHEMA_VERSION_FIELD].append(PROVENANCE_SCHEMA_VERSION)
     vector_columns = [
-        VectorData(
-            name=col,
-            description=col,
-            data=np.asarray(data[col], dtype=_NUMPY_FOR_PYTYPE[pytype]),
-        )
+        concrete_vectordata(col, data[col], _NUMPY_FOR_PYTYPE[pytype])
         for col, pytype in col_specs
     ]
     return DynamicTable(
         name=name,
-        description=description or f"{name} (provenance)",
+        description=f"{name} (provenance)",
         columns=vector_columns,
     )
 
 
-def read_provenance_values(abs_path: str, name: str) -> dict:
-    """Read a scalar-provenance table back to ``{field: value}`` (JSON-decoded)."""
+def read_table_frames(
+    abs_path: str,
+    *,
+    object_ids: Sequence[str] = (),
+    scratch_names: Sequence[str] = (),
+) -> tuple:
+    """Open an NWB file once and read several tables as DataFrames.
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the NWB file.
+    object_ids : sequence of str, optional
+        Object ids of tables to read (looked up in ``NWBFile.objects``).
+    scratch_names : sequence of str, optional
+        Names of scratch tables to read.
+
+    Returns
+    -------
+    tuple of pandas.DataFrame
+        ``to_dataframe()`` of each ``object_ids`` table, then of each
+        ``scratch_names`` table, in the order given.
+    """
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        frame = io.read().scratch[name].to_dataframe()
+        nwbf = io.read()
+        return tuple(
+            [nwbf.objects[object_id].to_dataframe() for object_id in object_ids]
+            + [nwbf.scratch[name].to_dataframe() for name in scratch_names]
+        )
+
+
+def _provenance_values_from_frame(frame) -> dict:
+    """Decode a scalar-provenance DataFrame to ``{field: value}``."""
     return {
         str(row[_KEY_COLUMN]): json.loads(row[_VALUE_COLUMN])
         for _, row in frame.iterrows()
     }
 
 
-def read_long_provenance(abs_path: str, name: str) -> list[dict]:
-    """Read a typed long provenance table back to a list of native-type dicts."""
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        frame = io.read().scratch[name].to_dataframe()
+def long_provenance_from_frame(frame) -> list[dict]:
+    """Convert a typed long-provenance DataFrame to native-type row dicts."""
     return [
         {col: _to_python(value) for col, value in record.items()}
         for record in frame.to_dict(orient="records")
     ]
+
+
+def read_provenance_values(abs_path: str, name: str) -> dict:
+    """Read a scalar-provenance table back to ``{field: value}`` (JSON-decoded)."""
+    (frame,) = read_table_frames(abs_path, scratch_names=(name,))
+    return _provenance_values_from_frame(frame)
+
+
+def read_long_provenance(abs_path: str, name: str) -> list[dict]:
+    """Read a typed long provenance table back to a list of native-type dicts."""
+    (frame,) = read_table_frames(abs_path, scratch_names=(name,))
+    return long_provenance_from_frame(frame)

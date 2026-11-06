@@ -571,15 +571,12 @@ class CurationRef:
         evaluation-internal object and is not exposed here.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
+            display_analyzer_request,
             open_curation_analyzer,
         )
-        from spyglass.spikesorting.v2.sorting import Sorting
 
-        recipe = (Sorting & {"sorting_id": self.sorting_id}).fetch1(
-            "display_waveform_params_name"
-        )
         return open_curation_analyzer(
-            self, recipe, "display", extra_extensions=extra_extensions
+            **display_analyzer_request(self), extra_extensions=extra_extensions
         )
 
     def preview_merges(
@@ -1012,6 +1009,9 @@ class EvaluationResult:
                 f"CurationEvaluation; populate {evaluation_key} first."
             )
         curation = CurationRef.from_key(selection)
+        metrics, suggested_merges, proposed_labels = (
+            CurationEvaluation._read_outputs(evaluation_key)
+        )
         return cls(
             curation=curation,
             spec=EvaluationSpec(
@@ -1021,11 +1021,9 @@ class EvaluationResult:
                 ),
             ),
             evaluation_id=selection["curation_evaluation_id"],
-            metrics=CurationEvaluation.get_metrics(evaluation_key),
-            suggested_merges=CurationEvaluation.get_suggested_merge_groups(
-                evaluation_key
-            ),
-            proposed_labels=CurationEvaluation.get_labels(evaluation_key),
+            metrics=metrics,
+            suggested_merges=suggested_merges,
+            proposed_labels=proposed_labels,
         )
 
     def _current_evaluation_key(self) -> dict[str, uuid.UUID]:

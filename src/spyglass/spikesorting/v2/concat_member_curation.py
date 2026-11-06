@@ -15,6 +15,7 @@ import numpy as np
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v2._curation.plan import build_curation_header
 from spyglass.spikesorting.v2._recording.concat import (
     member_spike_times,
     split_unit_spike_trains,
@@ -250,10 +251,17 @@ class ConcatMemberCuration(
         untouched), then restrict cleanup to registry rows with no remaining
         child reference anywhere in Spyglass.
         """
+        pk = cls.primary_key
+        remaining = {
+            tuple(key[name] for name in pk)
+            for key in (
+                cls & [{name: row[name] for name in pk} for row in rows]
+            ).fetch("KEY")
+        }
         deleted_names = {
             str(row["analysis_file_name"])
             for row in rows
-            if not (cls & {name: row[name] for name in cls.primary_key})
+            if tuple(row[name] for name in pk) not in remaining
         }
         if not deleted_names:
             return []
@@ -317,15 +325,12 @@ class ConcatMemberCuration(
     def delete(self, *args, **kwargs):
         """Delete member rows and reclaim their orphaned analysis files."""
         from spyglass.spikesorting.v2._core.table_integrity import (
-            split_leading_restrictions,
+            restrict_by_leading_args,
         )
 
-        restriction_args, args = split_leading_restrictions(args)
-        if restriction_args:
-            target = self
-            for restriction in restriction_args:
-                target = target & restriction
-            return target.delete(*args, **kwargs)
+        restricted, args = restrict_by_leading_args(self, args)
+        if restricted is not None:
+            return restricted.delete(*args, **kwargs)
 
         rows = self.fetch(as_dict=True)
         return self._delete_and_reclaim(
@@ -428,6 +433,24 @@ class ConcatMemberCuration(
         sorting_id, member_index = (cls & key).fetch1(
             "sorting_id", "member_index"
         )
+        return cls._frozen_member_snapshot(sorting_id, member_index)
+
+    @staticmethod
+    def _frozen_member_snapshot(sorting_id, member_index: int) -> dict:
+        """Return the frozen ``MemberSnapshot`` row of one concat member.
+
+        Parameters
+        ----------
+        sorting_id : uuid.UUID
+            The concatenated sort.
+        member_index : int
+            The member's position in the concatenation.
+
+        Returns
+        -------
+        dict
+            The ``ConcatenatedRecordingSelection.MemberSnapshot`` row.
+        """
         source = (
             SortingSelection.ConcatenatedRecordingSource
             & {"sorting_id": sorting_id}
@@ -541,13 +564,15 @@ class ConcatMemberCuration(
             labels=CurationV2._labels_by_unit(curation_key),
             merge_group_rows=merge_group_rows,
             curation_header={
-                "sorting_id": str(curation_row["sorting_id"]),
-                "curation_id": int(curation_row["curation_id"]),
-                "curation_uuid": str(curation_row["curation_uuid"]),
-                "parent_curation_id": int(curation_row["parent_curation_id"]),
-                "curation_source": str(curation_row["curation_source"]),
-                "merges_applied": bool(curation_row["merges_applied"]),
-                "description": curation_row["description"],
+                **build_curation_header(
+                    sorting_id=curation_row["sorting_id"],
+                    curation_id=curation_row["curation_id"],
+                    curation_uuid=curation_row["curation_uuid"],
+                    parent_curation_id=curation_row["parent_curation_id"],
+                    curation_source=curation_row["curation_source"],
+                    merges_applied=curation_row["merges_applied"],
+                    description=curation_row["description"],
+                ),
                 "member_index": member_index,
                 "member_nwb_file_name": nwb_file_name,
             },
@@ -607,11 +632,13 @@ class ConcatMemberCuration(
         identity_groups = {
             int(unit_id): [int(unit_id)] for unit_id in local_frames
         }
-        analysis_file_name = AnalysisNwbfile().create(
-            nwb_file_name=nwb_file_name,
-            restrict_permission=True,
+        from spyglass.spikesorting.v2._storage.staged_outputs import (
+            staged_analysis_file,
         )
-        try:
+
+        with staged_analysis_file(
+            nwb_file_name, context="ConcatMemberCuration.make_compute"
+        ) as analysis_file_name:
             _, object_id, _, n_spikes_by_uid = _write_curated_units_nwb_body(
                 analysis_file_name=analysis_file_name,
                 nwb_file_name=nwb_file_name,
@@ -634,16 +661,6 @@ class ConcatMemberCuration(
                     "ConcatMemberCuration.make: staged Units IDs differ from "
                     "the conserved member split."
                 )
-        except Exception:
-            from spyglass.spikesorting.v2._storage.staged_outputs import (
-                unlink_staged_analysis_file as _unlink_staged_analysis_file,
-            )
-
-            _unlink_staged_analysis_file(
-                analysis_file_name,
-                context="ConcatMemberCuration.make_compute",
-            )
-            raise
         return ConcatMemberComputed(
             analysis_file_name=analysis_file_name,
             object_id=object_id,
@@ -773,19 +790,18 @@ class ConcatMemberCuration(
         return recording
 
     @classmethod
-    def _member_frame_span(cls, key: dict) -> tuple[int, int]:
+    def _member_frame_span(cls, row: dict) -> tuple[int, int]:
         """This member's frozen ``[start, end)`` frames in the concatenation.
 
-        Members occupy consecutive frames in ``member_index`` order, so a
-        member starts where the previous ``MemberBoundary.end_sample`` ends.
+        ``row`` is the member's fetched primary key. Members occupy
+        consecutive frames in ``member_index`` order, so a member starts where
+        the previous ``MemberBoundary.end_sample`` ends.
         """
-        sorting_id, member_index = (cls & key).fetch1(
-            "sorting_id", "member_index"
-        )
+        member_index = row["member_index"]
         concat_key = {
             "concat_recording_id": (
                 SortingSelection.ConcatenatedRecordingSource
-                & {"sorting_id": sorting_id}
+                & {"sorting_id": row["sorting_id"]}
             ).fetch1("concat_recording_id")
         }
         indices, ends = (
@@ -803,23 +819,27 @@ class ConcatMemberCuration(
         through the same readback as ``CurationV2.get_sorting``.
         """
         row = (cls & key).fetch1()
-        snapshot = cls._member_snapshot_row(key)
-        recording_row = (
+        snapshot = cls._frozen_member_snapshot(
+            row["sorting_id"], row["member_index"]
+        )
+        sampling_frequency = (
             Recording & {"recording_id": snapshot["recording_id"]}
-        ).fetch1()
+        ).fetch1("sampling_frequency")
         return sorting_from_units_nwb(
             AnalysisNwbfile.get_abs_path(row["analysis_file_name"]),
-            float(recording_row["sampling_frequency"]),
+            float(sampling_frequency),
         )
 
     @classmethod
     def get_sort_metadata(cls, key: dict) -> tuple[str, str]:
         """Return ``(sorter, member_nwb_file_name)`` for this output."""
-        sorting_id = (cls & key).fetch1("sorting_id")
+        sorting_id, nwb_file_name = (cls & key).fetch1(
+            "sorting_id", "nwb_file_name"
+        )
         sorter = (SortingSelection & {"sorting_id": sorting_id}).fetch1(
             "sorter"
         )
-        return str(sorter), str((cls & key).fetch1("nwb_file_name"))
+        return str(sorter), str(nwb_file_name)
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":

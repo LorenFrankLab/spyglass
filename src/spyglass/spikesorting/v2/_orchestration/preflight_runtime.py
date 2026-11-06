@@ -201,18 +201,18 @@ def _check_sorter_execution(
     warnings: list[str],
     bundle,
     pipeline_preset: "str | None",
-    sorter_params_query,
-    sorter_params_exist: bool,
+    sorter_row: "dict | None",
 ) -> None:
     """Check the sorter can execute on the row's execution backend.
 
     The selected backend (local vs container) is read ONLY from the
     SorterParameters row's execution_params (the single source of truth --
-    never the preset). When the row is absent, sorter_params_exist already
-    reported the blocking error and the backend is unknowable, so the
-    container / MATLAB-policy checks are skipped; the sorter NAME is still
-    validated as a local sorter so a misspelled sorter keeps its spelling
-    hint. A runnable container backend appends an advisory to ``warnings``.
+    never the preset). ``sorter_row`` is the row fetched by
+    ``_check_sorter_param_rows``, or ``None`` when it is absent. When the row
+    is absent, sorter_params_exist already reported the blocking error and
+    the backend is unknowable, so the container / MATLAB-policy checks are
+    skipped; the sorter NAME is still validated as a local sorter so a
+    misspelled sorter keeps its spelling hint. A runnable container backend appends an advisory to ``warnings``.
     A ``pipeline_preset`` of ``None`` (a caller holding only the resolved
     bundle) names no preset in the container messages.
     """
@@ -220,7 +220,7 @@ def _check_sorter_execution(
 
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    if not sorter_params_exist:
+    if sorter_row is None:
         _check_local_sorter_runtime(
             bundle, sis, SorterParameters._NON_SI_SORTERS, check
         )
@@ -234,7 +234,7 @@ def _check_sorter_execution(
         )
 
         execution_params = validate_execution_params(
-            sorter_params_query.fetch1("execution_params")
+            sorter_row["execution_params"]
         )
         execution_backend = execution_params["backend"]
         container_image = execution_params["container_image"]

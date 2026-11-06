@@ -218,51 +218,27 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
             str(motion_corrected_recording_id)
         )
 
-    if has_concat:
-        # A concat already owns frozen member masks. A single detection here
-        # cannot describe that source; the identity helper enforces the same
-        # invariant for callers that bypass this selection boundary.
-        if artifact_detection_id is not None:
-            raise ValueError(
-                "SortingSelection.insert_selection: a concat_recording_id "
-                "source cannot supply an artifact_detection_id. Concat sorts "
-                "own per-member masks through ConcatenatedRecordingSelection; "
-                "supply the detections when selecting the concat source."
-            )
-        source_restriction = {"concat_recording_id": key["concat_recording_id"]}
-        identity = sorting_identity_payload(
-            concat_recording_id=key["concat_recording_id"],
-            sorter=key["sorter"],
-            sorter_params_name=key["sorter_params_name"],
-            motion_corrected_recording_id=motion_corrected_recording_id,
+    # A concat already owns frozen member masks. A single detection here
+    # cannot describe that source; the identity helper enforces the same
+    # invariant for callers that bypass this selection boundary.
+    if has_concat and artifact_detection_id is not None:
+        raise ValueError(
+            "SortingSelection.insert_selection: a concat_recording_id "
+            "source cannot supply an artifact_detection_id. Concat sorts "
+            "own per-member masks through ConcatenatedRecordingSelection; "
+            "supply the detections when selecting the concat source."
         )
-        sorting_id = deterministic_id("sorting", identity)
-        assert_supplied_id_matches(
-            key.get("sorting_id"), sorting_id, field="sorting_id"
-        )
-        master_row = {**master_restriction, "sorting_id": sorting_id}
-        concat_source_row = {"sorting_id": sorting_id, **source_restriction}
-        return SortingSelectionPlan(
-            sorting_id=sorting_id,
-            source_kind="concat",
-            master_restriction=master_restriction,
-            source_restriction=source_restriction,
-            master_row=master_row,
-            recording_source_row=None,
-            concat_source_row=concat_source_row,
-            artifact_detection_id=None,
-            motion_corrected_recording_id=motion_corrected_recording_id,
-        )
-
-    source_restriction = {"recording_id": key["recording_id"]}
+    source_field = "concat_recording_id" if has_concat else "recording_id"
+    source_restriction = {source_field: key[source_field]}
     # Deterministic, content-addressed sorting_id from the logical identity
-    # (recording source + sorter + the optional artifact-detection pass).
-    # ``artifact_detection_id=None`` is the single "no artifact-detection
-    # pass" form and cannot alias any real artifact_detection_id, so an
-    # artifact-detection-backed and an artifact-detection-free sort for the
-    # same (recording, sorter) are distinct, idempotent rows.
+    # (source + sorter + the optional artifact-detection pass, which is
+    # always ``None`` for a concat source). ``artifact_detection_id=None`` is
+    # the single "no artifact-detection pass" form and cannot alias any real
+    # artifact_detection_id, so an artifact-detection-backed and an
+    # artifact-detection-free sort for the same (recording, sorter) are
+    # distinct, idempotent rows.
     identity = sorting_identity_payload(
-        recording_id=key["recording_id"],
+        **source_restriction,
         sorter=key["sorter"],
         sorter_params_name=key["sorter_params_name"],
         artifact_detection_id=artifact_detection_id,
@@ -274,15 +250,15 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
     )
 
     master_row = {**master_restriction, "sorting_id": sorting_id}
-    recording_source_row = {"sorting_id": sorting_id, **source_restriction}
+    source_row = {"sorting_id": sorting_id, **source_restriction}
     return SortingSelectionPlan(
         sorting_id=sorting_id,
-        source_kind="recording",
+        source_kind="concat" if has_concat else "recording",
         master_restriction=master_restriction,
         source_restriction=source_restriction,
         master_row=master_row,
-        recording_source_row=recording_source_row,
-        concat_source_row=None,
+        recording_source_row=None if has_concat else source_row,
+        concat_source_row=source_row if has_concat else None,
         artifact_detection_id=artifact_detection_id,
         motion_corrected_recording_id=motion_corrected_recording_id,
     )

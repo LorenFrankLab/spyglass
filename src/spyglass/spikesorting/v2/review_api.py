@@ -332,9 +332,6 @@ class FigPackReview:
         Without a window, the raster uses the review's overview budget. This
         inspection does not edit the draft or change evaluation settings.
         """
-        from spyglass.spikesorting.v2._curation.analyzer import (
-            curation_analyzer_with_extensions,
-        )
         from spyglass.spikesorting.v2._storage.observation_io import (
             cached_review_timeline,
             review_timeline,
@@ -344,14 +341,11 @@ class FigPackReview:
             review_unit_properties,
         )
         from spyglass.spikesorting.v2._review.view import coerce_units_table_ids
-        from spyglass.spikesorting.v2._review.visualization import (
-            DISPLAY_WIDGET_EXTENSIONS,
-        )
         from spyglass.spikesorting.v2.figpack_curation import (
             FigPackCurationSelection,
+            _curation_view_analyzer,
             _review_context_table,
         )
-        from spyglass.spikesorting.v2.sorting import Sorting
 
         stored = (
             FigPackCurationSelection & {"figpack_curation_id": self.review_id}
@@ -374,18 +368,7 @@ class FigPackReview:
                 curation_uuid=self.parent.curation_uuid,
             )
         )
-        recipe = (Sorting & {"sorting_id": self.parent.sorting_id}).fetch1(
-            "display_waveform_params_name"
-        )
-        with curation_analyzer_with_extensions(
-            self.parent,
-            recipe,
-            "display",
-            extra_extensions={
-                name: {}
-                for name in DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
-            },
-        ) as analyzer:
+        with _curation_view_analyzer(self.parent) as analyzer:
             view = inspection_view(
                 analyzer,
                 self.display_options,
@@ -959,10 +942,7 @@ def start_review(
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)
     from spyglass.spikesorting.v2._review.view import require_figpack
-    from spyglass.spikesorting.v2.figpack_curation import (
-        FigPackCuration,
-        FigPackCurationSelection,
-    )
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
@@ -1018,16 +998,6 @@ def start_review(
         annotation_sets=resolved_annotation_sets,
         display_options=resolved_display,
     )
-    selection = FigPackCurationSelection.insert_selection(
-        parent.as_key(),
-        label_options=list(resolved_profile.label_options),
-        displayed_unit_properties=list(
-            resolved_profile.displayed_unit_properties
-        ),
-        upload=upload,
-        ephemeral=ephemeral,
-        review_config=config,
-    )
     view_result = FigPackCuration.build_curation_view_result(
         parent.as_key(),
         label_options=list(resolved_profile.label_options),
@@ -1038,7 +1008,7 @@ def start_review(
         ephemeral=ephemeral,
         review_config=config,
     )
-    review = FigPackReview.resume(selection["figpack_curation_id"])
+    review = FigPackReview.resume(view_result.figpack_curation_id)
     return replace(
         review,
         uri=view_result.uri,
@@ -1151,33 +1121,96 @@ def _normalize_review_edits(
     )
 
 
-def _preview_review(review: FigPackReview) -> CurationChangeSet:
+def _load_review_edits(
+    review: FigPackReview,
+    parent_key: dict,
+    *,
+    expected_annotations_hash: str | None = None,
+) -> tuple[
+    str,
+    set[int],
+    Mapping[int, tuple[str, ...]],
+    tuple[
+        Mapping[int, tuple[str, ...]],
+        tuple[tuple[int, ...], ...],
+        tuple[MergeLabelConflict, ...],
+        int,
+    ],
+]:
+    """Verify the review figure and normalize its edits against the parent.
+
+    Parameters
+    ----------
+    review : FigPackReview
+        Review whose FigPack annotations are read.
+    parent_key : dict
+        Primary key of the reviewed parent curation.
+    expected_annotations_hash : str, optional
+        When given, raise before validating edits if the annotations no
+        longer hash to this value, so a changed figure reports as changed
+        rather than as whatever validation error its new edits trigger.
+
+    Returns
+    -------
+    annotations_hash : str
+        Hash of the loaded annotations payload.
+    parent_units : set of int
+        Unit ids of the parent curation.
+    labels_before : Mapping[int, tuple of str]
+        Parent labels before the review edits.
+    normalized : tuple
+        ``(labels_after, merge_groups, label_conflicts, unit_count_after)``
+        from ``_normalize_review_edits``.
+
+    Raises
+    ------
+    ReviewChangedSincePreviewError
+        If ``expected_annotations_hash`` is given and does not match.
+    """
     from spyglass.spikesorting.v2.figpack_curation import (
         FigPackCurationSelection,
         _assert_figure_identity,
         _load_annotations_json,
     )
 
-    parent_row = review.parent._current_row()
-    parent_key = review.parent._unchecked_key()
-    selection = (
+    config_hash = (
         FigPackCurationSelection & {"figpack_curation_id": review.review_id}
-    ).fetch1()
+    ).fetch1("figpack_config_hash")
     _assert_figure_identity(
         review.uri,
         parent_key,
-        expected_config_hash=str(selection["figpack_config_hash"]),
+        expected_config_hash=str(config_hash),
     )
     annotations = _load_annotations_json(review.uri)
+    annotations_hash = annotations_payload_hash(annotations)
+    if (
+        expected_annotations_hash is not None
+        and annotations_hash != expected_annotations_hash
+    ):
+        raise ReviewChangedSincePreviewError(
+            "FigPack annotations changed after preview for review_id="
+            f"{review.review_id}. Run preview_import() again before "
+            "committing."
+        )
     labels, groups = curation_annotations_to_labels_and_merges(annotations)
     parent_units, before = _read_parent_units_and_labels(parent_key)
-    labels_after, groups, conflicts, count_after = _normalize_review_edits(
+    normalized = _normalize_review_edits(
         review.profile,
         labels,
         groups,
         unit_ids=parent_units,
         labels_before=before,
     )
+    return annotations_hash, parent_units, before, normalized
+
+
+def _preview_review(review: FigPackReview) -> CurationChangeSet:
+    parent_row = review.parent._current_row()
+    parent_key = review.parent._unchecked_key()
+    annotations_hash, parent_units, before, normalized = _load_review_edits(
+        review, parent_key
+    )
+    labels_after, groups, conflicts, count_after = normalized
     current_siblings = {
         child.curation_uuid: child for child in review.parent.children
     }
@@ -1188,7 +1221,7 @@ def _preview_review(review: FigPackReview) -> CurationChangeSet:
     )
     return CurationChangeSet(
         review=review,
-        annotations_hash=annotations_payload_hash(annotations),
+        annotations_hash=annotations_hash,
         labels_before=before,
         labels_after=labels_after,
         merge_groups=groups,
@@ -1238,11 +1271,6 @@ def _commit_change_set(
     on_commit=None,
 ) -> ReviewImportReceipt:
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.figpack_curation import (
-        FigPackCurationSelection,
-        _assert_figure_identity,
-        _load_annotations_json,
-    )
 
     parent_key = changes.review.parent.as_key()
     if CurationV2.connection.in_transaction:
@@ -1250,34 +1278,12 @@ def _commit_change_set(
             "CurationChangeSet.commit must be called outside an open DataJoint "
             "transaction; curation and evaluation manage their own writes."
         )
-    selection = (
-        FigPackCurationSelection
-        & {"figpack_curation_id": changes.review.review_id}
-    ).fetch1()
-    _assert_figure_identity(
-        changes.review.uri,
+    _, parent_units, _, normalized = _load_review_edits(
+        changes.review,
         parent_key,
-        expected_config_hash=str(selection["figpack_config_hash"]),
+        expected_annotations_hash=changes.annotations_hash,
     )
-    annotations = _load_annotations_json(changes.review.uri)
-    current_hash = annotations_payload_hash(annotations)
-    if current_hash != changes.annotations_hash:
-        raise ReviewChangedSincePreviewError(
-            "FigPack annotations changed after preview for review_id="
-            f"{changes.review.review_id}. Run preview_import() again before "
-            "committing."
-        )
-    labels, groups = curation_annotations_to_labels_and_merges(annotations)
-    parent_units, before = _read_parent_units_and_labels(parent_key)
-    current_after, current_groups, current_conflicts, _ = (
-        _normalize_review_edits(
-            changes.review.profile,
-            labels,
-            groups,
-            unit_ids=parent_units,
-            labels_before=before,
-        )
-    )
+    current_after, current_groups, current_conflicts, _ = normalized
     if (
         dict(current_after) != dict(changes.labels_after)
         or current_groups != changes.merge_groups

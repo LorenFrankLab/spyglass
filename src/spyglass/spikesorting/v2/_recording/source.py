@@ -23,16 +23,12 @@ the result with :func:`effective_source_from_base` or
 checks that a corrected recording was made from the sort's own source and mask,
 and :func:`sorting_parts_mismatch` that the parts still give the stored
 ``sorting_id``.
-:func:`load_effective_recording` opens the traces, and
-:func:`read_effective_recording` does the same from an already-resolved path;
-:func:`read_persisted_traces` opens them as persisted, with no mask at load.
+:func:`read_effective_recording` opens the traces from an already-resolved
+path; :func:`read_persisted_traces` opens them as persisted, with no mask at
+load.
 
-DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import. SpikeInterface and the NWB reader are imported lazily.
-:func:`load_effective_recording` resolves the file path through
-``AnalysisNwbfile.get_abs_path``, which reads the ``AnalysisNwbfile`` table;
-:func:`read_effective_recording` and :func:`read_persisted_traces` touch no
-DB.
+DB-FREE. This module activates no ``dj.schema`` and opens no DB connection;
+SpikeInterface and the NWB reader are imported lazily.
 """
 
 from __future__ import annotations
@@ -458,49 +454,6 @@ def read_persisted_traces(
     """
     return read_effective_recording(
         abs_path, traces._replace(apply_artifact_mask=False)
-    )
-
-
-def load_effective_recording(
-    traces: EffectiveTraces,
-    *,
-    artifact_valid_times: np.ndarray | None = None,
-    artifact_detection_id: uuid.UUID | None = None,
-    recording_id: uuid.UUID | None = None,
-) -> si.BaseRecording:
-    """Open the effective traces by analysis file name, masking if needed.
-
-    Resolves ``traces.row["analysis_file_name"]`` through
-    ``AnalysisNwbfile.get_abs_path`` and delegates to
-    :func:`read_effective_recording`. The file must already exist; the
-    owning table's self-heal (``SortingSelection.ensure_effective_traces``)
-    is the caller's responsibility.
-
-    Parameters
-    ----------
-    traces : EffectiveTraces
-        The resolved traces artifact.
-    artifact_valid_times : np.ndarray, optional
-        Artifact-removed valid times, shape ``(n_intervals, 2)`` in seconds;
-        see :func:`read_effective_recording`.
-    artifact_detection_id : uuid.UUID, optional
-        Passed to the mask for error messages.
-    recording_id : uuid.UUID, optional
-        Passed to the mask for error messages.
-
-    Returns
-    -------
-    si.BaseRecording
-        The traces, silenced over the artifact periods when masking applies.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    return read_effective_recording(
-        AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"]),
-        traces,
-        artifact_valid_times=artifact_valid_times,
-        artifact_detection_id=artifact_detection_id,
-        recording_id=recording_id,
     )
 
 

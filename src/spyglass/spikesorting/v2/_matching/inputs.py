@@ -238,6 +238,9 @@ def prepare_match_inputs(
             recording["session_start_time"] for recording in item["recordings"]
         )
     for item in resolved:
+        # A single recording's frames and kept intervals come from its
+        # persisted traces; they are frozen and hashed like a
+        # concatenation member's.
         _add_single_recording_frames(item, allow_rebuild=allow_rebuild)
         enrich_recording_source_coverage(
             item["recordings"], allow_rebuild=allow_rebuild
@@ -250,9 +253,6 @@ def prepare_match_inputs(
     ordered = chronological_input_order(resolved)
     for input_index, item in enumerate(ordered):
         item["input_index"] = input_index
-        # A single recording's frames and kept intervals come from its
-        # persisted traces; they are frozen and hashed like a
-        # concatenation member's.
     input_rows, recording_rows = _input_part_rows(ordered)
     set_hash = input_set_hash(input_rows, recording_rows)
     identity = {
@@ -303,7 +303,6 @@ def _resolve_unit_selections(inputs, supplied) -> dict:
     from spyglass.spikesorting.v2._curation.unit_selection import (
         validate_unit_selection_snapshot,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
 
     if supplied is None:
         supplied = [
@@ -341,28 +340,46 @@ def _resolve_unit_selections(inputs, supplied) -> dict:
             raise ValueError(
                 "Unit selection pins a different curation generation. Rebuild the plan."
             )
-        actual = set(
-            map(
-                int,
-                (
-                    CurationV2.Unit
-                    & {
-                        "sorting_id": item["sorting_id"],
-                        "curation_id": item["curation_id"],
-                    }
-                ).fetch("unit_id"),
-            )
+        _check_selection_universe(
+            {
+                "sorting_id": item["sorting_id"],
+                "curation_id": item["curation_id"],
+            },
+            data,
+            ValueError,
+            "Unit selection universe differs from its pinned curation.",
         )
-        if actual != set(map(int, data["labels_by_unit"])):
-            raise ValueError(
-                "Unit selection universe differs from its pinned curation."
-            )
         if not data["included_unit_ids"]:
             raise ValueError(
                 f"Matching input {item['sorting_id']} has no eligible units under "
                 f"policy {data['policy_name']!r}. Review labels or choose another policy."
             )
     return snapshots
+
+
+def _check_selection_universe(
+    curation_key: dict, snapshot: dict, exc_class: type, message: str
+) -> None:
+    """Require a unit-selection snapshot to label every unit of its curation.
+
+    Parameters
+    ----------
+    curation_key : dict
+        ``{"sorting_id", "curation_id"}`` of the pinned curation.
+    snapshot : dict
+        A validated unit-selection snapshot (``labels_by_unit``).
+    exc_class : type
+        Exception raised when the unit sets differ.
+    message : str
+        The exception's message.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    known_units = set(
+        map(int, (CurationV2.Unit & curation_key).fetch("unit_id"))
+    )
+    if set(map(int, snapshot["labels_by_unit"])) != known_units:
+        raise exc_class(message)
 
 
 def find_existing_pk(
@@ -581,8 +598,8 @@ def _resolve_match_input(
     the cumulative exclusive ``end_sample``, a member starting where the
     previous one ended) and its kept intervals on its own clock
     (``member_valid_times``). A single recording's frames and kept intervals
-    need its persisted traces and are added by :func:`_recording_n_samples` /
-    :func:`_recording_valid_times`.
+    need its persisted traces and are added by
+    :func:`_add_single_recording_frames`.
 
     Parameters
     ----------
@@ -794,60 +811,32 @@ def _add_single_recording_frames(item, *, allow_rebuild=True) -> None:
     ----------
     item : dict
         A :func:`_resolve_match_input` result.
+    allow_rebuild : bool, optional
+        Rebuild a missing traces file (:func:`.coverage.open_base_recording`);
+        a plan passes ``False``. Default ``True``.
     """
     if item["source_kind"] != "recording":
         return
+    from spyglass.spikesorting.v2._matching.coverage import (
+        open_base_recording,
+    )
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        close_nwb_recording,
+    )
+
     recording = item["recordings"][0]
     recording["start_sample"] = 0
-    if not allow_rebuild:
-        from spyglass.spikesorting.v2._matching.coverage import (
-            open_base_recording,
+    traces = open_base_recording(recording, allow_rebuild=allow_rebuild)
+    try:
+        recording["end_sample"] = int(traces.get_num_samples())
+        recording["valid_times"] = _recording_valid_times(
+            traces, recording["nwb_file_name"], item["artifact_detection_id"]
         )
-        from spyglass.spikesorting.v2._storage.spikeinterface import (
-            close_nwb_recording,
-        )
-
-        traces = open_base_recording(recording, allow_rebuild=False)
-        try:
-            recording["end_sample"] = int(traces.get_num_samples())
-            if item["artifact_detection_id"] is None:
-                from spyglass.spikesorting.v2._storage.units_nwb import (
-                    _base_intervals_from_recording,
-                )
-
-                recording["valid_times"] = _base_intervals_from_recording(
-                    traces, traces.get_sampling_frequency()
-                )
-                return
-        finally:
-            close_nwb_recording(traces)
-    else:
-        recording["end_sample"] = _recording_n_samples(
-            recording["recording_id"]
-        )
-    recording["valid_times"] = _recording_valid_times(
-        recording["recording_id"],
-        recording["nwb_file_name"],
-        item["artifact_detection_id"],
-    )
+    finally:
+        close_nwb_recording(traces)
 
 
-def _recording_n_samples(recording_id) -> int:
-    """Frame count of a single recording's persisted traces.
-
-    A sort of the recording, or of its motion correction (same frames), sees
-    frames ``[0, n_samples)``.
-    """
-    from spyglass.spikesorting.v2.recording import Recording
-
-    return int(
-        Recording()
-        .get_recording({"recording_id": recording_id})
-        .get_num_samples()
-    )
-
-
-def _recording_valid_times(recording_id, nwb_file_name, artifact_detection_id):
+def _recording_valid_times(traces, nwb_file_name, artifact_detection_id):
     """Kept intervals of a single recording on its own clock, in seconds.
 
     The same intervals the sort records as its observation times
@@ -855,6 +844,13 @@ def _recording_valid_times(recording_id, nwb_file_name, artifact_detection_id):
     times when the sort pins an artifact detection, else the recorded chunks
     of the persisted traces (gaps between disjoint intervals kept) -- the
     rule ``ConcatenatedRecording`` uses for ``member_valid_times``.
+
+    Parameters
+    ----------
+    traces : si.BaseRecording
+        The recording's opened persisted traces.
+    nwb_file_name : str
+    artifact_detection_id : uuid.UUID or None
 
     Returns
     -------
@@ -873,15 +869,13 @@ def _recording_valid_times(recording_id, nwb_file_name, artifact_detection_id):
             caller="UnitMatchSelection.insert_inputs",
         )
     else:
-        from spyglass.spikesorting.v2._storage.units_nwb import (
-            _base_intervals_from_recording,
+        from spyglass.spikesorting.v2._core.signal_math import (
+            base_intervals_and_gaps,
         )
-        from spyglass.spikesorting.v2.recording import Recording
 
-        recording = Recording().get_recording({"recording_id": recording_id})
-        valid_times = _base_intervals_from_recording(
-            recording, recording.get_sampling_frequency()
-        )
+        valid_times = base_intervals_and_gaps(
+            traces, traces.get_sampling_frequency()
+        ).base_intervals
     return np.asarray(valid_times, dtype=np.float64).reshape(-1, 2)
 
 

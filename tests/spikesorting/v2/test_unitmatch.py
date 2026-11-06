@@ -3211,7 +3211,7 @@ def test_geometry_preflight_fails_before_extraction(
     grp = two_session_curated_group
     sid0 = str(grp["choices"][0]["sorting_id"])
 
-    def fake_positions(curation_key):
+    def fake_positions(curation_key, **_):
         # member 0: 4-channel probe; the other member: 8-channel -> mismatch.
         n = 4 if str(curation_key["sorting_id"]) == sid0 else 8
         return np.zeros((n, 2))
@@ -3270,7 +3270,7 @@ def test_selection_geometry_dispatches_without_global_policy(
     monkeypatch.setitem(protocol._MATCHER_REGISTRY, backend.name, backend)
     monkeypatch.setitem(protocol._SCHEMA_REGISTRY, backend.name, BaseModel)
 
-    def read_positions(key):
+    def read_positions(key, **_):
         if not has_validator:
             raise AssertionError(
                 "Backend without geometry validation read geometry"

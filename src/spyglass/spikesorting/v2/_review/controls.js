@@ -45,8 +45,8 @@ window.figpack_p1.registerFPViewComponent({
     const curation = () => JSON.parse(state().annotations["/"]?.sorting_curation || JSON.stringify(seed));
     const selected = () => [...selection.stateRef.current.selectedUnitIds].sort((a, b) => Number(a) - Number(b));
     // Merged table rows represent all original contributors until commit.
-    const contributors = () => [...new Set(selected().flatMap(id =>
-      curation().mergeGroups?.find(group => group.map(String).includes(String(id))) || [id]
+    const contributors = cur => [...new Set(selected().flatMap(id =>
+      cur.mergeGroups?.find(group => group.map(String).includes(String(id))) || [id]
     ))];
     const edit = action => {
       session.preview = null;
@@ -186,7 +186,9 @@ window.figpack_p1.registerFPViewComponent({
       container.replaceChildren();
       const busy = session.operation.status === "running";
       const editable = session.loaded && !busy && (local || state().editingAnnotations);
-      const ids = contributors();
+      // Parse the curation once per render; edit() re-reads it at click time.
+      const cur = curation();
+      const ids = contributors(cur);
       element("div", `Units: ${selected().join(", ") || "none selected"}`);
       const choices = element("div");
       for (const label of palette) {
@@ -196,7 +198,7 @@ window.figpack_p1.registerFPViewComponent({
         checkbox.type = "checkbox";
         checkbox.dataset.reviewControl = `label:${label}`;
         checkbox.disabled = !editable || !ids.length;
-        const count = ids.filter(id => (curation().labelsByUnit?.[id] || []).includes(label)).length;
+        const count = ids.filter(id => (cur.labelsByUnit?.[id] || []).includes(label)).length;
         checkbox.checked = !!ids.length && count === ids.length;
         checkbox.indeterminate = count > 0 && count < ids.length;
         checkbox.onchange = () => edit({type: "TOGGLE_UNIT_LABEL", unitId: ids, label});
@@ -204,7 +206,7 @@ window.figpack_p1.registerFPViewComponent({
       }
       button("Merge Selected", () => edit({type: "MERGE_UNITS", unitIds: ids}), !editable || ids.length < 2);
       button("Undo selected merge", () => edit({type: "UNMERGE_UNITS", unitIds: ids}),
-        !editable || !curation().mergeGroups?.some(group => group.some(id => ids.includes(id))));
+        !editable || !cur.mergeGroups?.some(group => group.some(id => ids.includes(id))));
       if (local) {
         button(session.saving ? "Saving draft…" : "Save draft", () => saveDraft().catch(reportError),
           !session.loaded || session.saving || session.conflict || busy || payload() === session.saved, "save-draft");
@@ -320,7 +322,7 @@ window.figpack_p1.registerFPViewComponent({
           "Unsaved draft — Save draft or Preview and commit.") :
         "Use Curate Figure, then Save Annotations in the toolbar to save a draft. Commit in the notebook."));
       status.setAttribute("role", "status");
-      if (curation().mergeGroups?.length) element("div",
+      if (cur.mergeGroups?.length) element("div",
         "Pending merges: displayed waveforms and metrics still describe the original units. Commit and inspect the reevaluated result.");
       if (!session.connected) element("div", "Next: review.commit_panel() previews saved edits and records your review.");
       if (focused) {

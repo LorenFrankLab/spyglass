@@ -191,18 +191,6 @@ def normalize_review_profile(
     }
 
 
-def review_profile_label_policy(label_import_mode: str) -> str:
-    """Map the profile's public import mode to CurationV2's expert policy."""
-    if label_import_mode == "replace":
-        return "replace"
-    if label_import_mode == "overlay":
-        return "inherit"
-    raise ValueError(
-        "label_import_mode must be 'replace' or 'overlay'; "
-        f"got {label_import_mode!r}."
-    )
-
-
 REVIEW_DISPLAY_OPTIONS_VERSION = 2
 
 

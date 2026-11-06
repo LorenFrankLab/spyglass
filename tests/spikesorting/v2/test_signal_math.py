@@ -2,7 +2,7 @@
 
 Covers the boundary invariant guards (positive sampling frequency,
 monotonic timestamps) wired into the frame-mapping functions
-(``_spike_times_to_frames`` / ``base_intervals_and_gaps``).
+(``frames_for_times`` / ``base_intervals_and_gaps``).
 All pure numpy -- no DB, no NWB IO.
 """
 
@@ -76,39 +76,6 @@ def test_assert_artifact_frame_fraction_guards_pathological_overmasking():
         assert_artifact_frame_fraction(bound + 1, n, context="ctx: ")
     # Degenerate n_samples == 0: no fraction to form -> no-op.
     assert assert_artifact_frame_fraction(0, 0) is None
-
-
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_spike_times_to_frames_rejects_nonfinite_spike_times(bad):
-    """Malformed compatibility inputs must not become last-sample spikes."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _spike_times_to_frames,
-    )
-
-    with pytest.raises(ValueError, match="Unit 7 has non-finite"):
-        _spike_times_to_frames(
-            np.arange(100) / 1000,
-            np.array([0.01, bad, 0.05]),
-            100,
-            7,
-        )
-
-
-def test_spike_times_to_frames_rejects_nonmonotonic_recording_times():
-    """``_spike_times_to_frames`` searchsorts spike times into the recording
-    timeline; a backward step there mis-maps every spike frame."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _spike_times_to_frames,
-    )
-
-    with pytest.raises(ValueError, match="monotonic"):
-        _spike_times_to_frames(
-            np.array([0.0, 2.0, 1.0]), np.array([0.5]), 3, unit_id=0
-        )
 
 
 # --------------------------------------------------------------------------- #

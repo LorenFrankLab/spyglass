@@ -188,7 +188,7 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     )
 
     sort_group_id, electrode_by_id, region_by_electrode = (
-        fetch_unit_electrode_metadata(recording_id, nwb_file_name)
+        fetch_unit_electrode_metadata(anchor.sort_group_id, nwb_file_name)
     )
 
     # Resolved after the concat schema-bypass check above, which must fire
@@ -286,7 +286,7 @@ def fetch_motion_correction(corrected_key, sorter_row, source):
     return provenance, int(source_n_samples)
 
 
-def fetch_unit_electrode_metadata(recording_id, nwb_file_name):
+def fetch_unit_electrode_metadata(sort_group_id, nwb_file_name):
     """DB reads for the per-unit Electrode FK + brain region (fetch stage).
 
     Resolved once here so ``make_compute`` performs no DB writes while
@@ -297,21 +297,15 @@ def fetch_unit_electrode_metadata(recording_id, nwb_file_name):
     ``SortGroupElectrode`` so it stays complete (the row-construction key set
     is unchanged); ``region_by_electrode`` is a best-effort
     ``electrode_id -> brain region`` map (an electrode without a region
-    simply has no entry). Anchored to ``recording_id`` / ``nwb_file_name``
-    (the sort's own recording, or the first concat member).
+    simply has no entry). Anchored to ``sort_group_id`` / ``nwb_file_name``
+    of the sort's anchor (its own recording, or the first concat member).
     """
-    from spyglass.common.common_ephys import Electrode
-    from spyglass.common.common_region import BrainRegion
-    from spyglass.spikesorting.v2.recording import (
-        RecordingSelection,
-        SortGroupV2,
+    from spyglass.spikesorting.v2._recording.unit_metadata import (
+        sort_group_electrode_regions,
     )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
 
-    sort_group_id = int(
-        (RecordingSelection & {"recording_id": recording_id}).fetch1(
-            "sort_group_id"
-        )
-    )
+    sort_group_id = int(sort_group_id)
     restriction = {
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
@@ -324,11 +318,9 @@ def fetch_unit_electrode_metadata(recording_id, nwb_file_name):
     }
     region_by_electrode = {
         int(row["electrode_id"]): str(row["region_name"])
-        for row in (
-            (SortGroupV2.SortGroupElectrode & restriction)
-            * Electrode
-            * BrainRegion
-        ).fetch("electrode_id", "region_name", as_dict=True)
+        for row in sort_group_electrode_regions(restriction).fetch(
+            "electrode_id", "region_name", as_dict=True
+        )
     }
     return sort_group_id, electrode_by_id, region_by_electrode
 

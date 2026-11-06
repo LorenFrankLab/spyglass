@@ -352,15 +352,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``Table().delete(restriction)`` form.
         """
         from spyglass.spikesorting.v2._core.table_integrity import (
-            split_leading_restrictions,
+            restrict_by_leading_args,
         )
 
-        restriction_args, args = split_leading_restrictions(args)
-        if restriction_args:
-            target = self
-            for restriction in restriction_args:
-                target = target & restriction
-            return target.delete(*args, safemode=safemode, **kwargs)
+        restricted, args = restrict_by_leading_args(self, args)
+        if restricted is not None:
+            return restricted.delete(*args, safemode=safemode, **kwargs)
 
         cls = type(self)
         pk = self.primary_key
@@ -387,17 +384,27 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             (SpikeSortingOutput.CurationV2 & list(rows)).fetch("merge_id")
         ) + ConcatMemberCuration._merge_ids(concat_member_rows)
         in_delete_set = {tuple(sorted(row.items())) for row in rows}
-        orphaned: list[tuple[int, int]] = []
-        for row in rows:
-            sorting_key = {k: row[k] for k in pk if k != "curation_id"}
-            descendants = (
-                cls & {**sorting_key, "parent_curation_id": row["curation_id"]}
-            ).fetch("KEY")
-            for child in descendants:
-                if tuple(sorted(child.items())) not in in_delete_set:
-                    orphaned.append(
-                        (int(row["curation_id"]), int(child["curation_id"]))
-                    )
+        sorting_fields = [k for k in pk if k != "curation_id"]
+        children = (
+            cls
+            & [
+                {
+                    **{k: row[k] for k in sorting_fields},
+                    "parent_curation_id": row["curation_id"],
+                }
+                for row in rows
+            ]
+        ).fetch(
+            *pk,
+            "parent_curation_id",
+            as_dict=True,
+            order_by=(*sorting_fields, "parent_curation_id", "curation_id"),
+        )
+        orphaned: list[tuple[int, int]] = [
+            (int(child["parent_curation_id"]), int(child["curation_id"]))
+            for child in children
+            if tuple(sorted((k, child[k]) for k in pk)) not in in_delete_set
+        ]
         if orphaned:
             raise ValueError(
                 f"{cls.__name__}.delete: refusing to delete curation(s) that "
@@ -449,23 +456,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         return orphaned.fetch(
             "sorting_id", "curation_id", "parent_curation_id", as_dict=True
         )
-
-    @classmethod
-    def audit_concat_merge_rows(cls) -> list[dict]:
-        """Return merge rows whose CurationV2 sorting is concat-backed."""
-        from spyglass.spikesorting.spikesorting_merge import (
-            SpikeSortingOutput,
-        )
-
-        concat_sortings = SortingSelection.ConcatenatedRecordingSource.fetch(
-            "sorting_id"
-        )
-        if not len(concat_sortings):
-            return []
-        return (
-            SpikeSortingOutput.CurationV2
-            & [{"sorting_id": sorting_id} for sorting_id in concat_sortings]
-        ).fetch("KEY")
 
     @classmethod
     def insert_curation(
@@ -643,21 +633,28 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             raw_sorting_units=sorting_units,
         )
 
+        from spyglass.spikesorting.v2._curation.plan import (
+            build_curation_header,
+            build_curation_insert_plan,
+        )
+
         curation_id, unit_rows, kept_unit_to_contributors, labels = (
-            _curation_insert.plan_curation_insert(
-                cls,
+            build_curation_insert_plan(
                 sorting_id=sorting_id,
                 sorting_units=source_units,
                 merge_groups=merge_groups,
                 apply_merge=apply_merge,
                 labels=labels,
                 allow_unknown_unit_ids=allow_unknown_unit_ids,
+                curation_id=cls._next_curation_id(sorting_id),
                 parent_labels=parent_labels,
                 label_policy=label_policy,
             )
         )
-        if parent_curation_id != -1 and reuse_existing:
-            existing_child = _curation_insert.find_matching_child_curation(
+
+        def _find_matching_child():
+            # Reads ``unit_rows`` at call time: a curation_id retry re-stamps it.
+            return _curation_insert.find_matching_child_curation(
                 cls,
                 sorting_id=sorting_id,
                 parent_curation_id=parent_curation_id,
@@ -668,6 +665,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 description=description,
                 curation_source=curation_source,
             )
+
+        if parent_curation_id != -1 and reuse_existing:
+            existing_child = _find_matching_child()
             if existing_child is not None:
                 logger.warning(
                     "CurationV2.insert_curation: matching child curation "
@@ -727,16 +727,15 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     source_units_abs_path=source_units_abs_path,
                     merge_group_rows=merge_group_rows,
                     curation_header={
-                        "sorting_id": str(sorting_id),
-                        "curation_id": int(curation_id),
-                        "curation_uuid": str(curation_uuid),
-                        "parent_curation_id": int(parent_curation_id),
-                        # Canonical string for the enum option on the row.
-                        "curation_source": getattr(
-                            curation_source, "value", curation_source
+                        **build_curation_header(
+                            sorting_id=sorting_id,
+                            curation_id=curation_id,
+                            curation_uuid=curation_uuid,
+                            parent_curation_id=parent_curation_id,
+                            curation_source=curation_source,
+                            merges_applied=apply_merge,
+                            description=description,
                         ),
-                        "merges_applied": bool(apply_merge),
-                        "description": description,
                         **runtime_environment_provenance(
                             execution_params={"stage": "curation"}
                         ),
@@ -782,21 +781,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                     # logical child (the likely cause of the collision), return
                     # it rather than staging a duplicate under a fresh id.
                     if reuse_existing:
-                        existing_child = (
-                            _curation_insert.find_matching_child_curation(
-                                cls,
-                                sorting_id=sorting_id,
-                                parent_curation_id=parent_curation_id,
-                                labels=labels,
-                                unit_rows=unit_rows,
-                                kept_unit_to_contributors=(
-                                    kept_unit_to_contributors
-                                ),
-                                apply_merge=apply_merge,
-                                description=description,
-                                curation_source=curation_source,
-                            )
-                        )
+                        existing_child = _find_matching_child()
                         if existing_child is not None:
                             logger.warning(
                                 "CurationV2.insert_curation: a concurrent "
@@ -1876,12 +1861,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         # A child records its parent-namespace operation in ParentMergeGroup;
         # a root has none, so its own namespace IS the raw MergeGroup. The
         # presence of ParentMergeGroup rows is the child discriminator (a child
-        # always has at least the per-unit self-entries).
-        if cls.ParentMergeGroup & key:
-            return cls._fetch_contributor_groups(
-                cls.ParentMergeGroup & key, "parent_unit_id"
-            )
-        return cls._raw_contributor_groups(key)
+        # always has at least the per-unit self-entries), and the grouped
+        # fetch is empty exactly when there are no rows.
+        return cls._fetch_contributor_groups(
+            cls.ParentMergeGroup & key, "parent_unit_id"
+        ) or cls._raw_contributor_groups(key)
 
     @classmethod
     def _raw_contributor_groups(cls, key) -> dict[int, list[int]]:

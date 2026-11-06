@@ -163,16 +163,16 @@ def test_ms5_schema_covers_wrapper():
     the schema to omit them); a
     schema field the wrapper does not accept would fail at sort time.
     """
-    from spyglass.spikesorting.v2._params.sorter import (
-        MS5_MANAGED_KEYS,
-        MountainSort5Schema,
-    )
+    from spyglass.spikesorting.v2._params.sorter import MountainSort5Schema
 
+    # ``delete_temporary_recording`` only controls MS5's own temp cache;
+    # ``run_si_sorter`` removes the whole sorter scratch directory regardless.
+    managed = {"delete_temporary_recording"}
     wrapper = set(_ms5_wrapper_defaults())
     fields = set(MountainSort5Schema.model_fields) - {"schema_version"}
-    assert fields & MS5_MANAGED_KEYS == set()
-    assert fields | MS5_MANAGED_KEYS == wrapper, {
-        "unexposed": sorted(wrapper - fields - MS5_MANAGED_KEYS),
+    assert fields & managed == set()
+    assert fields | managed == wrapper, {
+        "unexposed": sorted(wrapper - fields - managed),
         "not_in_wrapper": sorted(fields - wrapper),
     }
 

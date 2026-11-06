@@ -452,23 +452,16 @@ def canonicalize_match_pairs(
                 "Match pairs must span two distinct matching inputs."
             )
         # Orient so side A is the lower input_index (canonical orientation).
-        if input_a <= input_b:
-            low, low_unit, high, high_unit = (
-                side_a,
-                unit_a,
+        if input_a > input_b:
+            side_a, unit_a, input_a, side_b, unit_b, input_b = (
                 side_b,
                 unit_b,
-            )
-            low_input, high_input = input_a, input_b
-        else:
-            low, low_unit, high, high_unit = (
-                side_b,
-                unit_b,
+                input_b,
                 side_a,
                 unit_a,
+                input_a,
             )
-            low_input, high_input = input_b, input_a
-        identity = (low_input, low_unit, high_input, high_unit)
+        identity = (input_a, unit_a, input_b, unit_b)
         if identity in oriented:
             raise ValueError(
                 "UnitMatch.make: matcher returned a reversed/duplicate pair for "
@@ -478,17 +471,17 @@ def canonicalize_match_pairs(
         drift = pair.drift_estimate_um
         fdr = pair.fdr_estimate
         oriented[identity] = {
-            "session_a_sorting_id": low[0],
-            "session_a_curation_id": low[1],
-            "unit_a_id": low_unit,
-            "session_b_sorting_id": high[0],
-            "session_b_curation_id": high[1],
-            "unit_b_id": high_unit,
+            "session_a_sorting_id": side_a[0],
+            "session_a_curation_id": side_a[1],
+            "unit_a_id": unit_a,
+            "session_b_sorting_id": side_b[0],
+            "session_b_curation_id": side_b[1],
+            "unit_b_id": unit_b,
             "match_probability": float(pair.match_probability),
             "drift_estimate_um": None if drift is None else float(drift),
             "fdr_estimate": None if fdr is None else float(fdr),
-            "input_a": low_input,
-            "input_b": high_input,
+            "input_a": input_a,
+            "input_b": input_b,
         }
     return [oriented[identity] for identity in sorted(oriented)]
 

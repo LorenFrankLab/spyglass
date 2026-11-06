@@ -112,12 +112,15 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
     # per-channel gain AND offset, returning microvolts directly. This is the
     # threshold's unit, and it avoids re-implementing the count->µV conversion
     # (a gain-only scaling would silently ignore any non-zero channel offset).
+    # SpikeInterface's scaled read already returns float32, so ``copy=False``
+    # skips a second chunk-sized copy; ``traces_uv`` is only read, never
+    # written, below.
     traces_uv = recording.get_traces(
         segment_index=segment_index,
         start_frame=start_frame,
         end_frame=end_frame,
         return_in_uV=True,
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
     # Fail loudly on a non-finite chunk instead of silently reporting "no
     # artifacts": a NaN (or Inf) sample compares False against every
@@ -141,26 +144,14 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
             f"{per_channel} non-finite sample(s) each."
         )
 
-    absolute = np.abs(traces_uv)
-
+    channel_hit = np.zeros(traces_uv.shape, dtype=bool)
     if amplitude_threshold_uv is not None:
-        above_amp = absolute > amplitude_threshold_uv
-    else:
-        above_amp = np.zeros_like(absolute, dtype=bool)
+        channel_hit |= np.abs(traces_uv) > amplitude_threshold_uv
     if zscore_threshold is not None:
         ch_mean = traces_uv.mean(axis=1, keepdims=True)
         ch_std = traces_uv.std(axis=1, keepdims=True) + 1e-12
         zscores = np.abs((traces_uv - ch_mean) / ch_std)
-        above_z = zscores > zscore_threshold
-    else:
-        above_z = np.zeros_like(absolute, dtype=bool)
-
-    if amplitude_threshold_uv is not None and zscore_threshold is not None:
-        channel_hit = above_amp | above_z
-    elif amplitude_threshold_uv is not None:
-        channel_hit = above_amp
-    else:
-        channel_hit = above_z
+        channel_hit |= zscores > zscore_threshold
 
     # Collapse the per-frame flagged mask to contiguous run edges via a padded
     # boolean diff: rising edge (+1) = inclusive run start, falling edge (-1) =

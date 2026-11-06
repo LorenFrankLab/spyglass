@@ -115,17 +115,15 @@ def electrode_table_region(nwbf, electrode_ids, description: str):
 def write_buffer_gb(
     n_channels: int,
     sampling_frequency: float,
-    max_seconds: float = 30.0,
     itemsize: int = 8,
-    cap_gb: float = 5.0,
 ) -> float:
-    """Streaming-write buffer size (GB) bounded to ~``max_seconds`` of data.
+    """Streaming-write buffer size (GB) bounded to ~30 s of data.
 
     A fixed 5 GB buffer would hold the WHOLE recording for narrow sort
     groups -- a 4-channel tetrode is ~87 min in 5 GB -- defeating the
     HDMF streaming write and spiking RAM under parallel per-group workers.
     Scale the buffer with channel count so every group buffers ~the same
-    bounded duration, capped at ``cap_gb`` so wide groups are unchanged.
+    bounded duration, capped at 5 GB so wide groups are unchanged.
 
     Parameters
     ----------
@@ -133,24 +131,16 @@ def write_buffer_gb(
         Number of channels in the recording being written.
     sampling_frequency : float
         Sampling frequency of the recording, in Hz.
-    max_seconds : float, optional
-        Target buffered duration, in seconds. Default ``30.0``.
     itemsize : int, optional
         Bytes per sample of the trace dtype. Default ``8`` (float64).
-    cap_gb : float, optional
-        Upper bound on the returned buffer size, in GB. Default ``5.0``.
 
     Returns
     -------
     float
-        Buffer size in GB, in ``[0, cap_gb]`` (``0`` only for the degenerate
+        Buffer size in GB, in ``[0, 5]`` (``0`` only for the degenerate
         ``n_channels == 0``; ``> 0`` for any real recording).
     """
     seconds_gb = (
-        float(n_channels)
-        * float(sampling_frequency)
-        * float(max_seconds)
-        * itemsize
-        / 1e9
+        float(n_channels) * float(sampling_frequency) * 30.0 * itemsize / 1e9
     )
-    return min(cap_gb, seconds_gb)
+    return min(5.0, seconds_gb)

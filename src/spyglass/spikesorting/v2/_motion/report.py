@@ -31,6 +31,7 @@ from spyglass.spikesorting.v2._motion.estimation import (
     EstimationClock,
     displacement_on_source_clock,
     motion_max_abs_displacement_um,
+    normalize_spans,
     span_nominal_durations,
     span_scales,
     span_containing,
@@ -234,24 +235,33 @@ def _masked_intervals(inputs: MotionReportInputs) -> list[dict]:
     clock = inputs.clock
     n_samples = int(clock.spans[-1, 1])
     masked = complement_frame_ranges(
-        [tuple(s) for s in np.asarray(inputs.statistics_spans).reshape(-1, 2)],
-        n_samples,
+        normalize_spans(inputs.statistics_spans), n_samples
     )
-    intervals = []
+    starts = clock.spans[:, 0]
+    pieces = []
     for start, end in masked:
-        for a, b in clock.spans:
+        # Continuity spans are sorted and contiguous, so only the spans
+        # holding frames ``start`` through ``end - 1`` can overlap the range.
+        first_span, last_span = span_containing(starts, [start, end - 1])
+        for a, b in clock.spans[first_span : last_span + 1]:
             lo, hi = max(start, int(a)), min(end, int(b))
             if lo < hi:
-                first, last = source_time_of_frames(clock, [lo, hi - 1])
-                intervals.append(
-                    {
-                        "start_frame": lo,
-                        "end_frame": hi,
-                        "source_start_s": float(first),
-                        "source_end_s": float(last),
-                    }
-                )
-    return intervals
+                pieces.append((lo, hi))
+    if not pieces:
+        return []
+    frames = np.array(pieces, dtype=np.int64)
+    times = source_time_of_frames(
+        clock, np.column_stack([frames[:, 0], frames[:, 1] - 1])
+    )
+    return [
+        {
+            "start_frame": lo,
+            "end_frame": hi,
+            "source_start_s": float(first),
+            "source_end_s": float(last),
+        }
+        for (lo, hi), (first, last) in zip(pieces, times)
+    ]
 
 
 def _gaps(inputs: MotionReportInputs) -> list[dict]:
@@ -394,9 +404,9 @@ def motion_report_summary(inputs: MotionReportInputs) -> dict:
 
 
 def default_trace_channels(
-    channel_ids, channel_locations, depth_dim: int, n_channels: int = 4
+    channel_ids, channel_locations, depth_dim: int
 ) -> list:
-    """The ``n_channels`` contacts nearest the middle of the probe's depth.
+    """The four contacts nearest the middle of the probe's depth.
 
     Parameters
     ----------
@@ -406,8 +416,6 @@ def default_trace_channels(
         ``(len(channel_ids), 2)`` contact positions (um).
     depth_dim : int
         Column of ``channel_locations`` along the motion axis.
-    n_channels : int, optional
-        How many to return. Defaults to 4.
 
     Returns
     -------
@@ -416,7 +424,7 @@ def default_trace_channels(
     """
     depth = np.asarray(channel_locations, dtype=np.float64)[:, depth_dim]
     middle = (depth.min() + depth.max()) / 2.0
-    nearest = np.argsort(np.abs(depth - middle), kind="stable")[:n_channels]
+    nearest = np.argsort(np.abs(depth - middle), kind="stable")[:4]
     return [channel_ids[i] for i in nearest[np.argsort(depth[nearest])]]
 
 

@@ -155,11 +155,7 @@ def _remove_partial_artifact(
     file is removed. The unlink is best-effort -- a cleanup failure is logged,
     not raised, so it cannot mask the original error.
     """
-    from spyglass.spikesorting.v2._storage.staged_outputs import (
-        unlink_staged_analysis_file,
-    )
-
-    unlink_staged_analysis_file(
+    _unlink_staged_analysis_file(
         analysis_file_name,
         context="Recording._write_nwb_artifact",
         existing_analysis_file_name=existing_analysis_file_name,
@@ -593,7 +589,7 @@ def write_nwb_artifact(
         content_hash = combined_hash(
             recording_content_fingerprint(
                 analysis_abs_path,
-                electrical_series_path=f"acquisition/{_ELECTRICAL_SERIES_NAME}",
+                electrical_series_path=_ELECTRICAL_SERIES_PATH,
             )
         )
     except Exception:

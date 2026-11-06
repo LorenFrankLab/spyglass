@@ -19,7 +19,9 @@ import time
 from spyglass.spikesorting.v2._matching.inputs import _input_label
 
 
-def extract_and_match(input_plan, matcher_name, params, job_kwargs):
+def extract_and_match(
+    input_plan, matcher_name, params, job_kwargs, *, sortings=None
+):
     """Extract per-input bundles, run the matcher, canonicalize the pairs.
 
     Returns ``(oriented_pairs, runtime_s)``. The wrapper extracts dense
@@ -37,6 +39,10 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
     those units. They stay in the frozen matchable universe
     (``make_insert`` writes ``MatchableUnit`` from the plan, not the
     bundles) and become unmatched tracked units.
+
+    ``sortings`` (optional) maps each plan's ``input_index`` to its curated
+    units already read from ``plan["units"]`` (``make_compute`` reads them
+    once for the spike counts too); default reads them here.
 
     Raises
     ------
@@ -111,7 +117,11 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
             # every analyzer rebuild use; the sorting is
             # CurationV2.get_sorting's.
             recording = read_canonical_recording(plan["sorting_input"])
-            full_sorting = read_stored_units(plan["units"])
+            full_sorting = (
+                read_stored_units(plan["units"])
+                if sortings is None
+                else sortings[plan["input_index"]]
+            )
             sorting = full_sorting.select_units(plan["matchable_unit_ids"])
             session_dir = Path(tmp_root) / f"input_{plan['input_index']}"
             source = MatcherInputSource(
@@ -184,18 +194,19 @@ def extract_and_match(input_plan, matcher_name, params, job_kwargs):
     return oriented_pairs, runtime_s
 
 
-def _input_recording_spike_counts(plan: dict) -> list[dict]:
+def _input_recording_spike_counts(plan: dict, sorting) -> list[dict]:
     """Count each matchable unit's spikes per constituent recording; no DB.
 
-    Reads the input's curated units (sort frames) from ``plan["units"]``
-    and splits every matchable unit's spikes by the recordings' frozen
-    ``[start_sample, end_sample)`` spans (:func:`._matching.graph.
+    Splits every matchable unit's spikes (sort frames) by the recordings'
+    frozen ``[start_sample, end_sample)`` spans (:func:`._matching.graph.
     count_recording_spikes`), which conserves every spike.
 
     Parameters
     ----------
     plan : dict
         One ``UnitMatchFetched.input_plan`` entry.
+    sorting : si.BaseSorting
+        The input's curated units, read from ``plan["units"]``.
 
     Returns
     -------
@@ -210,10 +221,8 @@ def _input_recording_spike_counts(plan: dict) -> list[dict]:
         input's recordings.
     """
     from spyglass.spikesorting.v2._matching.graph import count_recording_spikes
-    from spyglass.spikesorting.v2._storage.units_nwb import read_stored_units
     from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
-    sorting = read_stored_units(plan["units"])
     trains = {
         int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
         for unit_id in plan["matchable_unit_ids"]

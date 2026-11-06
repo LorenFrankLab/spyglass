@@ -7,7 +7,6 @@ import pytest
 from spyglass.spikesorting.v2._review.profile import (
     normalize_review_profile,
     profile_display_property_vocabulary,
-    review_profile_label_policy,
 )
 
 _AVAILABLE = ("snr", "isi_violation", "nn_isolation", "nn_noise_overlap")
@@ -89,12 +88,10 @@ def test_review_profile_property_vocabulary_expands_builtin_outputs():
     )
 
 
-def test_review_profile_import_mode_reuses_curation_label_policy():
-    """Public overlay maps to the existing expert-layer inherit policy."""
-    assert review_profile_label_policy("replace") == "replace"
-    assert review_profile_label_policy("overlay") == "inherit"
+def test_review_profile_rejects_unknown_import_mode():
+    """Only the public ``replace`` / ``overlay`` import modes normalize."""
     with pytest.raises(ValueError, match="replace.*overlay"):
-        review_profile_label_policy("merge")
+        _normalized(label_import_mode="merge")
 
 
 @pytest.mark.database
@@ -152,12 +149,6 @@ def test_review_profile_persisted_and_immutable(dj_conn):
             CurationReviewProfile.update1(
                 {**stored, "label_import_mode": "overlay"}
             )
-        assert (
-            CurationReviewProfile.label_policy(
-                {"review_profile_name": names[0]}
-            )
-            == "replace"
-        )
     finally:
         (
             CurationReviewProfile

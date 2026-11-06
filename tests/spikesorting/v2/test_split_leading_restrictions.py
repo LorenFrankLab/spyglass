@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from spyglass.spikesorting.v2._core.table_integrity import (
+    restrict_by_leading_args,
     split_leading_restrictions,
 )
 
@@ -62,3 +63,27 @@ def test_peeling_stops_at_first_non_restriction():
         [{"a": 1}],
         (True,),
     )
+
+
+class _RecordingTable:
+    """Stand-in relation that records each ``&`` restriction applied."""
+
+    def __init__(self, restrictions=()):
+        self.restrictions = tuple(restrictions)
+
+    def __and__(self, restriction):
+        return _RecordingTable((*self.restrictions, restriction))
+
+
+def test_restrict_by_leading_args_applies_restrictions_in_order():
+    restricted, remaining = restrict_by_leading_args(
+        _RecordingTable(), ({"a": 1}, "b > 0", True)
+    )
+    assert restricted.restrictions == ({"a": 1}, "b > 0")
+    assert remaining == (True,)
+
+
+def test_restrict_by_leading_args_returns_none_without_restrictions():
+    table = _RecordingTable()
+    assert restrict_by_leading_args(table, ()) == (None, ())
+    assert restrict_by_leading_args(table, (True,)) == (None, (True,))

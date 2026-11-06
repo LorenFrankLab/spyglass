@@ -25,7 +25,12 @@ from __future__ import annotations
 
 import numpy as np
 import pynwb
-from hdmf.common import DynamicTable, VectorData
+from hdmf.common import DynamicTable
+
+from spyglass.spikesorting.v2._storage.provenance import (
+    concrete_vectordata,
+    read_table_frames,
+)
 
 UNIT_MATCH_PAIRS_TABLE = "unit_match_pairs"
 
@@ -81,11 +86,7 @@ def build_pairs_table(pairs: list[dict]) -> DynamicTable:
     dtype_for.update(dict.fromkeys(_INT_COLUMNS, np.int64))
     dtype_for.update(dict.fromkeys(_FLOAT_COLUMNS, np.float64))
     vector_columns = [
-        VectorData(
-            name=name,
-            description=name,
-            data=np.asarray(columns[name], dtype=dtype_for[name]),
-        )
+        concrete_vectordata(name, columns[name], dtype_for[name])
         for name in _STR_COLUMNS + _INT_COLUMNS + _FLOAT_COLUMNS
     ]
     return DynamicTable(
@@ -123,9 +124,7 @@ def write_pairs_table(
 
 def read_pairs(abs_path: str, object_id: str) -> list[dict]:
     """Read the pairs table back to a list of dicts (NaN drift / FDR -> None)."""
-    with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
-        nwbf = io.read()
-        frame = nwbf.objects[object_id].to_dataframe()
+    (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
     rows: list[dict] = []
     # itertuples(index=False) is faster + cleaner than iterrows (no per-row
     # Series). Pair columns are valid identifiers, so attribute access works.
@@ -174,19 +173,22 @@ def read_input_provenance(abs_path: str) -> tuple[list[dict], list[dict]]:
         UNITMATCH_INPUT_RECORDING_COLUMNS,
         UNITMATCH_INPUT_RECORDINGS,
         UNITMATCH_INPUTS,
-        read_long_provenance,
+        long_provenance_from_frame,
     )
 
-    def _read(name, columns):
+    input_frame, recording_frame = read_table_frames(
+        abs_path,
+        scratch_names=(UNITMATCH_INPUTS, UNITMATCH_INPUT_RECORDINGS),
+    )
+
+    def _rows(frame, columns):
         return [
             {column: row[column] for column, _ in columns}
-            for row in read_long_provenance(abs_path, name)
+            for row in long_provenance_from_frame(frame)
         ]
 
-    inputs = _read(UNITMATCH_INPUTS, UNITMATCH_INPUT_COLUMNS)
-    recordings = _read(
-        UNITMATCH_INPUT_RECORDINGS, UNITMATCH_INPUT_RECORDING_COLUMNS
-    )
+    inputs = _rows(input_frame, UNITMATCH_INPUT_COLUMNS)
+    recordings = _rows(recording_frame, UNITMATCH_INPUT_RECORDING_COLUMNS)
     inputs.sort(key=lambda row: row["input_index"])
     recordings.sort(
         key=lambda row: (row["input_index"], row["recording_index"])

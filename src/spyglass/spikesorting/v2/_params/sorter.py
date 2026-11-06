@@ -5,11 +5,15 @@ fallback for any SpikeInterface sorter the installed environment
 exposes but this pipeline does not ship a dedicated default for.
 
 Strictness policy:
-    MountainSort4Schema, MountainSort5Schema, Kilosort4Schema, and
+    MountainSort4Schema, MountainSort5Schema, and
     ClusterlessThresholderSchema use ``extra="forbid"`` because their
     field lists come from documented APIs. A typo in one of their kwargs
     raises at Lookup insert time -- the typo-catching is the value-add
     over the generic schema.
+
+    Kilosort4Schema uses ``extra="allow"``: it types the most-used knobs
+    of KS4's large parameter surface and passes the rest through to SI,
+    rejecting only ``whiten`` (KS4 has no such kwarg) at insert.
 
     SpykingCircus2Schema and Tridesclous2Schema use ``extra="allow"``
     because their fields are not curated here; they exist as dedicated
@@ -99,8 +103,8 @@ class MountainSort5Schema(BaseModel):
     with the wrapper's own default, except ``filter`` (see below). The one
     wrapper key that is NOT a field is ``delete_temporary_recording``: it is an
     execution/scratch detail managed by Spyglass (the sorter scratch dir is
-    always removed by ``run_si_sorter``), so it is listed in
-    :data:`MS5_MANAGED_KEYS` rather than accepted as science.
+    always removed by ``run_si_sorter``), so the schema rejects it rather than
+    accepting it as science.
     ``test_ms5_schema_covers_wrapper`` fails if the pinned wrapper grows a key
     that is neither a field nor managed. ``extra="forbid"`` catches typos.
 
@@ -155,14 +159,6 @@ class MountainSort5Schema(BaseModel):
         return self
 
 
-# Keys of SI's ``Mountainsort5Sorter`` default params that Spyglass manages
-# rather than exposing as scientific parameters. ``delete_temporary_recording``
-# only controls whether MS5 deletes its own temp cache; the whole sorter
-# scratch directory is removed by ``run_si_sorter`` regardless, so the value is
-# inert and must not be smuggled through the row.
-MS5_MANAGED_KEYS: frozenset[str] = frozenset({"delete_temporary_recording"})
-
-
 class Kilosort4Schema(BaseModel):
     """Validated schema for Kilosort 4.
 
@@ -200,7 +196,7 @@ class Kilosort4Schema(BaseModel):
         Whitening is controlled via ``skip_kilosort_preprocessing`` /
         ``whitening_range``.
         """
-        if "whiten" in self.model_dump():
+        if "whiten" in (self.model_extra or {}):
             raise ValueError(
                 "Kilosort4 has no 'whiten' parameter; it whitens internally. "
                 "Remove 'whiten' -- SpikeInterface's Kilosort4 wrapper does "

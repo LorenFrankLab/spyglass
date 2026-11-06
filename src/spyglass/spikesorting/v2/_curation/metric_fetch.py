@@ -54,6 +54,9 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
         fetch_waveform_params,
         resolve_display_waveform_params_name,
     )
+    from spyglass.spikesorting.v2._sorting.fetch import (
+        fetch_sorter_analyzer_inputs,
+    )
 
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -67,11 +70,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
         QualityMetricParameters,
         _assert_is_metric_recipe,
     )
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sel = (CurationEvaluationSelection & key).fetch1()
     sorting_id = str(sel["sorting_id"])
@@ -82,7 +81,9 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     # Re-assert committed (reject a preview planted via allow_direct_insert)
     # and the metric recipe is whitened (same bypass rationale as
     # the sanctioned DB-fetch stage).
-    merges_applied = (CurationV2 & curation_key).fetch1("merges_applied")
+    merges_applied, curated_analysis_file_name = (
+        CurationV2 & curation_key
+    ).fetch1("merges_applied", "analysis_file_name")
     CurationV2.assert_committed_curation(
         curation_key,
         context="CurationEvaluation",
@@ -113,11 +114,9 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
 
     metric_names = list(qm["metric_names"])
     assert_merge_preset_metrics(acr["auto_merge_preset"], metric_names)
-    sorter_params = (SortingSelection * SorterParameters & sorting_key).fetch1(
-        "params"
-    )
+    sorter_row, analyzer_job_kwargs = fetch_sorter_analyzer_inputs(sorting_key)
     metric_kwargs = apply_snr_peak_sign(
-        metric_names, dict(qm["metric_kwargs"] or {}), sorter_params
+        metric_names, dict(qm["metric_kwargs"] or {}), sorter_row["params"]
     )
 
     # Recording reconstruction inputs. make_compute rebuilds the recording
@@ -144,14 +143,15 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
         )
 
     # Units readback uses stored sample frames and the lineage source rate.
-    raw_units = SortingSelection.resolve_stored_units(
-        (Sorting & sorting_key).fetch1("analysis_file_name"),
-        effective_source,
+    raw_analysis_file_name, raw_n_units = (Sorting & sorting_key).fetch1(
+        "analysis_file_name", "n_units"
     )
-    raw_n_units = int((Sorting & sorting_key).fetch1("n_units"))
+    raw_units = SortingSelection.resolve_stored_units(
+        raw_analysis_file_name, effective_source
+    )
+    raw_n_units = int(raw_n_units)
     curated_units = SortingSelection.resolve_stored_units(
-        (CurationV2 & curation_key).fetch1("analysis_file_name"),
-        effective_source,
+        curated_analysis_file_name, effective_source
     )
     expected_unit_ids = sorted(
         int(u) for u in (CurationV2.Unit & curation_key).fetch("unit_id")
@@ -176,14 +176,6 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     metric_waveform_params_name = sel["metric_waveform_params_name"]
     metric_waveform_params = fetch_waveform_params(metric_waveform_params_name)
 
-    sorter_row = (
-        SorterParameters
-        & (
-            (SortingSelection & sorting_key).proj(
-                "sorter", "sorter_params_name"
-            )
-        )
-    ).fetch1()
     merged_display_cache = None
     if not use_fast_path and expected_unit_ids:
         from spyglass.spikesorting.v2._curation.analyzer import (
@@ -231,7 +223,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
                 analyzer_path(sorting_id, metric_waveform_params_name)
             ),
             sorter_row=sorter_row,
-            analyzer_job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
+            analyzer_job_kwargs=analyzer_job_kwargs,
             merged_display_cache=merged_display_cache,
         ),
         metric_inputs=EvaluationMetricInputs(

@@ -775,13 +775,12 @@ def _observed_duration_s(sorting_id) -> float:
     """
     import numpy as np
 
-    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._artifacts.readers import (
+        read_recording_artifact_valid_times,
+    )
     from spyglass.spikesorting.v2._core.observed_time import observed_intervals
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.spikesorting.v2._artifacts.naming import (
-        artifact_detection_interval_list_name,
-    )
 
     sorting_key = {"sorting_id": sorting_id}
     source, traces = SortingSelection.resolve_effective_source(sorting_key)
@@ -803,15 +802,9 @@ def _observed_duration_s(sorting_id) -> float:
         nwb_file_name = (
             RecordingSelection & {"recording_id": recording_id}
         ).fetch1("nwb_file_name")
-        valid_times = (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": artifact_detection_interval_list_name(
-                    artifact_detection_id
-                ),
-            }
-        ).fetch1("valid_times")
+        valid_times = read_recording_artifact_valid_times(
+            artifact_detection_id, nwb_file_name, caller="describe_units"
+        )
         return float(
             np.diff(observed_intervals(recording, valid_times), axis=1).sum()
         )
@@ -937,7 +930,6 @@ _RUN_STAGE_ORDER = (
     "auto_curation",
     "member_curation",
     "figpack",
-    "merge",
 )
 
 
@@ -954,8 +946,9 @@ _RUN_MOTION_FIELDS = (
 )
 
 
-def _run_blank_row() -> dict[str, Any]:
-    return {col: None for col in _RUN_COLUMNS}
+def _run_row(**fields: Any) -> dict[str, Any]:
+    """One receipt row: every ``_RUN_COLUMNS`` key, ``None`` unless given."""
+    return {**dict.fromkeys(_RUN_COLUMNS), **fields}
 
 
 def _run_stage_seconds_total(summary) -> "float | None":
@@ -1047,9 +1040,7 @@ def _describe_match_input(match_input) -> str:
     )
 
 
-def _describe_run_single_rows(
-    run_summary: dict, *, sort_group_id=None
-) -> list[dict[str, Any]]:
+def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
     """Receipt rows for one ``run_v2_pipeline`` summary (summary, stages, warnings)."""
     stage_seconds = run_summary.get("stage_seconds") or {}
     stage_names = [
@@ -1073,10 +1064,8 @@ def _describe_run_single_rows(
         )
     else:
         summary_status = None
-    header = _run_blank_row()
-    header.update(
+    header = _run_row(
         row_type="summary",
-        sort_group_id=sort_group_id,
         status=summary_status,
         seconds=_run_stage_seconds_total(run_summary),
         n_units=run_summary.get("n_units"),
@@ -1085,27 +1074,22 @@ def _describe_run_single_rows(
     )
     rows.append(header)
     for stage in stage_names:
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="stage",
-            sort_group_id=sort_group_id,
             stage=stage,
             status=run_summary.get(f"{stage}_status"),
             seconds=stage_seconds.get(stage),
         )
         rows.append(row)
     for setting, value in (run_summary.get("scientific_config") or {}).items():
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="config",
-            sort_group_id=sort_group_id,
             setting=setting,
             value=repr(value),
         )
         rows.append(row)
     for artifact in run_summary.get("member_artifacts", []):
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="member_artifact",
             member_index=artifact["member_index"],
             status=artifact["status"],
@@ -1114,8 +1098,7 @@ def _describe_run_single_rows(
         )
         rows.append(row)
     if "artifact_masked_duration_s" in run_summary:
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="config",
             setting="artifact_masked_duration_s",
             value=str(run_summary["artifact_masked_duration_s"]),
@@ -1126,10 +1109,8 @@ def _describe_run_single_rows(
     # recording is never hidden in a nested dict.
     if "motion_mode" in run_summary:
         for setting in _RUN_MOTION_FIELDS:
-            row = _run_blank_row()
-            row.update(
+            row = _run_row(
                 row_type="config",
-                sort_group_id=sort_group_id,
                 setting=setting,
                 value=str(run_summary.get(setting)),
             )
@@ -1137,8 +1118,7 @@ def _describe_run_single_rows(
     for member_index, member_merge_id in sorted(
         (run_summary.get("member_merge_ids") or {}).items()
     ):
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="member",
             member_index=int(member_index),
             member_merge_id=member_merge_id,
@@ -1147,8 +1127,7 @@ def _describe_run_single_rows(
     # A run_v2_unit_match receipt: one row per matching input, in input_index
     # (chronological) order.
     for match_input in run_summary.get("inputs") or ():
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="input",
             nwb_file_name=", ".join(match_input.nwb_file_names),
             setting=f"input_{match_input.input_index}",
@@ -1156,10 +1135,8 @@ def _describe_run_single_rows(
         )
         rows.append(row)
     for warning in run_summary.get("warnings") or []:
-        row = _run_blank_row()
-        row.update(
+        row = _run_row(
             row_type="warning",
-            sort_group_id=sort_group_id,
             warning=str(warning),
         )
         rows.append(row)
@@ -1180,10 +1157,8 @@ def _describe_run_single_rows(
         ):
             if setting not in sorter_config:
                 continue
-            row = _run_blank_row()
-            row.update(
+            row = _run_row(
                 row_type="config",
-                sort_group_id=sort_group_id,
                 setting=setting,
                 value=repr(sorter_config[setting]),
             )
@@ -1277,8 +1252,7 @@ def describe_run(result) -> "pd.DataFrame":
                 total_seconds += seconds
                 have_seconds = True
 
-            group = _run_blank_row()
-            group.update(
+            group = _run_row(
                 row_type="group",
                 sort_group_id=sort_group_id,
                 status=outcome,
@@ -1290,8 +1264,7 @@ def describe_run(result) -> "pd.DataFrame":
             )
             rows.append(group)
             for warning in warnings:
-                row = _run_blank_row()
-                row.update(
+                row = _run_row(
                     row_type="warning",
                     sort_group_id=sort_group_id,
                     warning=str(warning),
@@ -1299,8 +1272,7 @@ def describe_run(result) -> "pd.DataFrame":
                 rows.append(row)
 
         n_ok, n_failed, n_zero, n_warn = _session_outcome_counts(result)
-        header = _run_blank_row()
-        header.update(
+        header = _run_row(
             row_type="summary",
             status=(
                 f"{n_ok} ok, {n_failed} failed, {n_zero} zero-unit, "

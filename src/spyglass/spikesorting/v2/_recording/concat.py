@@ -151,7 +151,7 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     )
 
 
-def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
+def concat_recording_artifact_lock(concat_recording_id):
     """Return the cross-process lock for one concat artifact's slot.
 
     See :func:`._storage.analyzer_cache.artifact_slot_lock`.
@@ -160,9 +160,6 @@ def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
     ----------
     concat_recording_id
         The concat whose canonical artifact the caller will mutate.
-    timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
-        blocks.
 
     Returns
     -------
@@ -173,9 +170,7 @@ def concat_recording_artifact_lock(concat_recording_id, *, timeout: float = -1):
         artifact_slot_lock,
     )
 
-    return artifact_slot_lock(
-        "concat_recording", concat_recording_id, timeout=timeout
-    )
+    return artifact_slot_lock("concat_recording", concat_recording_id)
 
 
 def cumulative_member_boundaries(

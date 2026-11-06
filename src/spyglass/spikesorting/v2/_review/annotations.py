@@ -217,14 +217,13 @@ def curation_state(
     merge_groups: list | None,
     *,
     label_options: list[str] | None = None,
-    is_closed: bool = False,
 ) -> dict:
     """Build the curation state the review control reads and writes.
 
     ``{"labelsByUnit": {str(unit_id): [label, ...]}, "mergeGroups":
-    [[unit_id, ...]], "isClosed": bool}``, plus ``"labelChoices"`` when
+    [[unit_id, ...]], "isClosed": False}``, plus ``"labelChoices"`` when
     ``label_options`` is not ``None``. ``None`` labels or merge groups are
-    treated as empty.
+    treated as empty; the seeded state is never marked finalized.
     """
     state = {
         "labelsByUnit": {
@@ -232,7 +231,7 @@ def curation_state(
             for unit_id, unit_labels in (labels or {}).items()
         },
         "mergeGroups": [list(group) for group in (merge_groups or [])],
-        "isClosed": bool(is_closed),
+        "isClosed": False,
     }
     if label_options is not None:
         state["labelChoices"] = list(label_options)
@@ -244,7 +243,6 @@ def labels_and_merges_to_annotations(
     merge_groups: list | None,
     *,
     label_options: list[str] | None = None,
-    is_closed: bool = False,
 ) -> dict:
     """Build a FigPack ``annotations.json`` payload seeding a curation state.
 
@@ -262,8 +260,6 @@ def labels_and_merges_to_annotations(
         ``[[unit_id, ...], ...]`` merge groups. ``None`` is treated as empty.
     label_options : list of str, optional
         The label palette to record as ``labelChoices`` (omitted if ``None``).
-    is_closed : bool, optional
-        Whether the seeded curation is marked finalized. Default ``False``.
 
     Returns
     -------
@@ -274,7 +270,6 @@ def labels_and_merges_to_annotations(
         labels,
         merge_groups,
         label_options=label_options or None,
-        is_closed=is_closed,
     )
     return {
         "annotations": {

@@ -7,6 +7,11 @@ and in isolation from the heavy end-to-end curation-evaluation test.
 
 import numpy as np
 import pytest
+import spikeinterface.metrics.quality.pca_metrics as _pm
+
+#: SI's own ``_compute_isolation``, captured at collection (before any test
+#: installs the k-d tree patch over it) as the reference the copy must match.
+_SI_COMPUTE_ISOLATION = _pm._compute_isolation
 
 
 def _sparse_whitened_analyzer(num_channels, num_units):
@@ -93,7 +98,6 @@ def test_isolation_patch_matches_spikeinterface(n_neighbors, n_workers):
     import spikeinterface.metrics.quality.pca_metrics as pm
 
     from spyglass.spikesorting.v2._core.si_metric_patches import (
-        _SI_COMPUTE_ISOLATION,
         isolation_workers,
         patch_isolation_kdtree,
     )
@@ -114,7 +118,6 @@ def test_isolation_patch_excludes_each_spike_among_duplicates():
     instead of itself, as scikit-learn's ``kneighbors()`` does, so every
     spike keeps exactly ``n_neighbors`` neighbors."""
     from spyglass.spikesorting.v2._core.si_metric_patches import (
-        _SI_COMPUTE_ISOLATION,
         _compute_isolation_kdtree,
     )
 
@@ -132,7 +135,6 @@ def test_isolation_patch_excludes_the_spike_not_its_shared_twin():
     returns either copy first. The shared spikes sit far from the rest, so
     with one neighbor that pair is the only tie and the score is SI's."""
     from spyglass.spikesorting.v2._core.si_metric_patches import (
-        _SI_COMPUTE_ISOLATION,
         _compute_isolation_kdtree,
     )
 
@@ -149,7 +151,6 @@ def test_isolation_patch_raises_like_spikeinterface_when_k_is_all_spikes():
     """``n_neighbors`` equal to the spike count leaves no neighbor to drop the
     spike for: SI's scikit-learn search raises, and its callers report NaN."""
     from spyglass.spikesorting.v2._core.si_metric_patches import (
-        _SI_COMPUTE_ISOLATION,
         _compute_isolation_kdtree,
     )
 

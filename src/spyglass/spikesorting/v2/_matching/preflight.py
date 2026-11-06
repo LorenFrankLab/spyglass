@@ -174,11 +174,7 @@ def preflight_v2_unit_match(
         resolve_unit_selection,
     )
 
-    curations = (
-        plan.curations
-        if isinstance(plan, UnitMatchInputPlan)
-        else [pin for _, pin in sorted(plan.curation_choices.items())]
-    )
+    curations = plan.pinned_curations
     checks = []
     selections = []
     warnings = []
@@ -289,10 +285,7 @@ def preflight_v2_unit_match(
         prepared = prepare_match_inputs(
             curations,
             plan.matcher_params_name,
-            unit_selections=[
-                value.snapshot() if hasattr(value, "snapshot") else dict(value)
-                for value in selections
-            ],
+            unit_selections=selections,
             allow_rebuild=False,
             validate_backend=True,
         )

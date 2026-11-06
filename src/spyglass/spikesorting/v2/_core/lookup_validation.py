@@ -12,10 +12,10 @@ module imports without a DB connection.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from numbers import Integral
+from collections.abc import Callable, Hashable, Mapping
 from typing import TYPE_CHECKING
 
+from spyglass.spikesorting._numerical import integer_scalar
 from spyglass.spikesorting.v2._curation.metrics import rules_payloads_match
 from spyglass.spikesorting.v2._core.parameter_identity import (
     parameter_fingerprint,
@@ -34,14 +34,10 @@ def lossless_int(value, what: str) -> int:
     The rule for user-facing ids (unit ids, curation ids, member indices):
     Python and NumPy integers are accepted; booleans, fractional numbers and
     strings are rejected so ``1.9`` / ``True`` / ``"12"`` cannot silently
-    become a different identifier than the caller meant. Not for values
-    already read from integer database columns.
+    become a different identifier than the caller meant, as are integers
+    outside int64. Not for values already read from integer database columns.
     """
-    if isinstance(value, Integral) and not isinstance(value, bool):
-        return int(value)
-    raise ValueError(
-        f"{what} must be an integer; got {value!r} ({type(value).__name__})."
-    )
+    return integer_scalar(value, name=what)
 
 
 def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
@@ -304,33 +300,76 @@ def reject_duplicate_parameter_content(
             (row["sorter"], row[name_attr]) if sorter_keyed else row[name_attr]
         )
 
-    stored_rows = table.fetch(as_dict=True)
-    existing_pks = {_pk(row) for row in stored_rows}
+    _reject_duplicate_fingerprints(
+        table.fetch(as_dict=True),
+        validated_rows,
+        table_name=table_name,
+        name_attr=name_attr,
+        fingerprint=_fingerprint,
+        pk=_pk,
+    )
+
+
+def _reject_duplicate_fingerprints(
+    stored_rows: list[dict],
+    incoming_rows: list[dict],
+    *,
+    table_name: str,
+    name_attr: str,
+    fingerprint: Callable[[dict], str],
+    pk: Callable[[dict], Hashable],
+) -> None:
+    """Raise if an incoming row reuses another row name's content fingerprint.
+
+    Parameters
+    ----------
+    stored_rows : list[dict]
+        Rows already in the table; they claim their fingerprints first.
+    incoming_rows : list[dict]
+        Rows about to be inserted, checked in order against the stored rows
+        and the earlier incoming rows.
+    table_name : str
+        Table name used in the error message.
+    name_attr : str
+        The params-name column.
+    fingerprint : Callable[[dict], str]
+        Content fingerprint of one row (row name excluded).
+    pk : Callable[[dict], Hashable]
+        The row's primary key; an incoming row whose key is already stored is
+        a re-insert and is skipped.
+
+    Raises
+    ------
+    DuplicateParameterContentError
+        If an incoming row's content was already claimed by a different name.
+    """
+    existing_pks = {pk(row) for row in stored_rows}
     # fingerprint -> the row name that first claimed it (stored rows first,
     # then earlier rows in this same batch).
     claimed: dict[str, str] = {}
     for stored in stored_rows:
-        claimed.setdefault(_fingerprint(stored), stored[name_attr])
+        claimed.setdefault(fingerprint(stored), stored[name_attr])
 
-    for row in validated_rows:
+    for row in incoming_rows:
         # A re-insert of an already-stored row (same primary key) is
         # idempotent, not a new provenance fork: skip it so insert_default /
         # initialize_v2_defaults stay re-runnable even after an opted-in
         # duplicate has been added under another name.
-        if _pk(row) in existing_pks:
+        if pk(row) in existing_pks:
             continue
         name = row[name_attr]
-        fingerprint = _fingerprint(row)
-        prior = claimed.get(fingerprint)
+        row_fingerprint = fingerprint(row)
+        prior = claimed.get(row_fingerprint)
         if prior is not None and prior != name:
             raise DuplicateParameterContentError(
                 f"{table_name}: row {name!r} duplicates the content of "
-                f"existing row {prior!r} (fingerprint {fingerprint[:12]}). A "
-                "second name for identical parameters forks provenance. Reuse "
-                f"{prior!r}, change the parameters, or pass "
-                "allow_duplicate_params=True to insert it anyway."
+                f"existing row {prior!r} (fingerprint "
+                f"{row_fingerprint[:12]}). A second name for identical "
+                f"parameters forks provenance. Reuse {prior!r}, change the "
+                "parameters, or pass allow_duplicate_params=True to insert "
+                "it anyway."
             )
-        claimed.setdefault(fingerprint, name)
+        claimed.setdefault(row_fingerprint, name)
 
 
 def _quality_metric_content(row: dict) -> dict:
@@ -398,26 +437,14 @@ def reject_duplicate_quality_metric_content(
             job_kwargs=_jsonable_blob(row.get("job_kwargs")),
         )
 
-    existing_names = {row["metric_params_name"] for row in stored_rows}
-    claimed: dict[str, str] = {}
-    for stored in stored_rows:
-        claimed.setdefault(_fingerprint(stored), stored["metric_params_name"])
-
-    for row in incoming_rows:
-        name = row["metric_params_name"]
-        if name in existing_names:
-            continue
-        fingerprint = _fingerprint(row)
-        prior = claimed.get(fingerprint)
-        if prior is not None and prior != name:
-            raise DuplicateParameterContentError(
-                f"QualityMetricParameters: row {name!r} duplicates the content "
-                f"of existing row {prior!r} (fingerprint {fingerprint[:12]}). A "
-                "second name for identical parameters forks provenance. Reuse "
-                f"{prior!r}, change the parameters, or pass "
-                "allow_duplicate_params=True to insert it anyway."
-            )
-        claimed.setdefault(fingerprint, name)
+    _reject_duplicate_fingerprints(
+        stored_rows,
+        incoming_rows,
+        table_name="QualityMetricParameters",
+        name_attr="metric_params_name",
+        fingerprint=_fingerprint,
+        pk=lambda row: row["metric_params_name"],
+    )
 
 
 def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:

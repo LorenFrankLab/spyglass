@@ -57,9 +57,8 @@ def assert_positive_sampling_frequency(
 def assert_monotonic_timestamps(timestamps, *, context: str = "") -> None:
     """Raise if ``timestamps`` is empty or steps backward.
 
-    ``searchsorted``-based frame mapping (``_spike_times_to_frames``) and
-    the first/last-sample reads assume a
-    non-empty, monotonically non-decreasing wall-clock vector; an out-of-order
+    ``searchsorted``-based frame mapping and the first/last-sample reads
+    assume a non-empty, monotonically non-decreasing wall-clock vector; an out-of-order
     or empty vector silently mis-slices the recording rather than failing.
     Equal consecutive timestamps are allowed (``searchsorted`` handles
     duplicates); only a strictly backward step is rejected. ``context`` is
@@ -333,131 +332,6 @@ def frames_with_window_in_one_span(frames, spans, *, n_before, n_after):
     return kept
 
 
-def _spike_times_to_frames(recording_times, spike_times, n_samples, unit_id):
-    """Map absolute spike times (seconds) to recording frame indices.
-
-    Spike times are persisted in the recording's ABSOLUTE wall-clock
-    timeline (``timestamps[frame]``). For disjoint sort intervals that
-    timeline is non-uniform (it carries the wall-clock gaps that
-    ``concatenate_recordings(ignore_times=True)`` drops), so the inverse
-    map must compare against the actual timestamps -- NOT an affine
-    ``round((t - t_start) * fs)``, which would shift every frame after a
-    gap by the accumulated gap and can push frames past ``n_samples``.
-    Bracket each spike with ``np.searchsorted`` and return the nearest
-    timestamp so tiny serialization/round-trip noise (e.g.
-    ``timestamps[i] + 1e-12``) does not shift the frame by +1.
-
-    A spike more than two typical sample periods from its nearest timestamp
-    raises: that is an alignment/units error (or a spike in a disjoint
-    wall-clock gap), not floating-point roundoff. Near-boundary spikes within
-    that tolerance are snapped to the nearest valid sample so the returned
-    frame count always matches ``spike_times`` -- dropping them desyncs
-    downstream per-spike features.
-
-    Parameters
-    ----------
-    recording_times : np.ndarray, shape (n_samples,)
-        Recording timestamps in seconds, monotonically increasing.
-    spike_times : np.ndarray, shape (n_spikes,)
-        Spike times for a single unit in seconds.
-    n_samples : int
-        Total number of samples in the recording.
-    unit_id : int or str
-        Identifier of the unit, used only in the warning message.
-
-    Returns
-    -------
-    np.ndarray, shape (n_spikes,)
-        Frame indices in ``[0, n_samples)``. A spike whose absolute time
-        floating-point-rounds slightly away from the stored timestamp is
-        snapped to the nearest sample (count preserved, so downstream
-        per-spike features stay aligned). A spike genuinely outside the
-        recording or inside a disjoint gap raises.
-
-    Raises
-    ------
-    ValueError
-        If a spike time is more than a couple of sample periods from the
-        nearest timestamp -- an upstream alignment/units error, not FP
-        rounding.
-    """
-    import numpy as np
-
-    recording_times = np.asarray(recording_times, dtype=float)
-    spike_times = np.atleast_1d(np.asarray(spike_times, dtype=float))
-    n_samples = int(n_samples)
-    if spike_times.size == 0:
-        return np.asarray([], dtype=np.int64)
-    if not np.all(np.isfinite(spike_times)):
-        raise ValueError(
-            f"Unit {unit_id} has non-finite (NaN/Inf) spike times; "
-            "absolute spike times must be finite seconds before mapping "
-            "them to recording samples."
-        )
-    if recording_times.size != n_samples:
-        raise ValueError(
-            "_spike_times_to_frames: recording_times length "
-            f"({recording_times.size}) does not match n_samples ({n_samples})."
-        )
-    if n_samples == 0:
-        raise ValueError(
-            f"Unit {unit_id} has spike times but the recording has zero samples."
-        )
-
-    assert_monotonic_timestamps(
-        recording_times, context=f"_spike_times_to_frames (unit {unit_id}): "
-    )
-    insert_indices = np.searchsorted(recording_times, spike_times, side="left")
-    right_indices = np.clip(insert_indices, 0, n_samples - 1)
-    left_indices = np.clip(insert_indices - 1, 0, n_samples - 1)
-
-    left_dist = np.abs(spike_times - recording_times[left_indices])
-    right_dist = np.abs(recording_times[right_indices] - spike_times)
-    use_left = left_dist < right_dist
-    spike_frames = np.where(use_left, left_indices, right_indices).astype(
-        np.int64, copy=False
-    )
-    nearest_dist = np.where(use_left, left_dist, right_dist)
-
-    if recording_times.size >= 2:
-        diffs = np.diff(recording_times)
-        positive_diffs = diffs[diffs > 0]
-        sample_period = (
-            float(np.median(positive_diffs)) if positive_diffs.size else 0.0
-        )
-    else:
-        sample_period = 0.0
-    tol = 2.0 * sample_period  # a couple of sample periods covers FP roundoff
-
-    far_mask = nearest_dist > tol
-    if bool(far_mask.any()):
-        worst = int(np.argmax(nearest_dist))
-        nearest_t = float(recording_times[spike_frames[worst]])
-        raise ValueError(
-            f"Unit {unit_id} has spike time(s) up to "
-            f"{float(nearest_dist[worst]):.6g}s from the nearest recording "
-            f"sample (spike_time={float(spike_times[worst]):.6g}s, "
-            f"nearest_timestamp={nearest_t:.6g}s) -- more than {tol:.6g}s "
-            "from any sample, so this is an alignment/units error, not "
-            "floating-point rounding. Inspect the upstream spike times."
-        )
-
-    outside_mask = (spike_times < recording_times[0]) | (
-        spike_times > recording_times[-1]
-    )
-    n_outside = int(outside_mask.sum())
-    if n_outside > 0:
-        from spyglass.utils import logger
-
-        logger.warning(
-            f"Unit {unit_id} has {n_outside} spike(s) just outside the "
-            "recording timestamp envelope but within floating-point tolerance. "
-            "Snapping to the nearest sample to keep the frame count aligned "
-            "with the persisted spike_times."
-        )
-    return spike_frames
-
-
 # Coincidence window (ms) for cross-unit duplicate-spike removal when
 # merging units. Matches SpikeInterface's ``MergeUnitsSorting`` default.
 # A neuron's refractory period (~1-2 ms) means a genuine spike train never
@@ -527,15 +401,12 @@ def _segment_times_at(recording, frames, *, segment_index=0):
     flat = frames.reshape(-1)
     if flat.size == 0:
         return np.empty(frames.shape, dtype=np.float64)
-    order = np.argsort(flat, kind="stable")
-    uniq, inverse = np.unique(flat[order], return_inverse=True)
+    uniq, inverse = np.unique(flat, return_inverse=True)
     vals = np.asarray(
         recording.sample_index_to_time(uniq, segment_index=segment_index),
         dtype=np.float64,
     )
-    out = np.empty(flat.shape, dtype=np.float64)
-    out[order] = vals[inverse]
-    return out.reshape(frames.shape)
+    return vals[inverse].reshape(frames.shape)
 
 
 def _segment_times_slice(recording, start, stop, *, segment_index=0):
@@ -553,7 +424,7 @@ def _segment_times_slice(recording, start, stop, *, segment_index=0):
     )
 
 
-def frames_for_times(recording, times_s, *, segment_index=0, side="left"):
+def frames_for_times(recording, times_s, *, side="left"):
     """Bounded-memory equivalent of ``searchsorted(get_times(), t, side)``.
 
     With ``side="left"``, returns the smallest frame ``i`` in
@@ -574,9 +445,9 @@ def frames_for_times(recording, times_s, *, segment_index=0, side="left"):
     Parameters
     ----------
     recording : si.BaseRecording
+        Read on segment 0.
     times_s : array-like
         Query times in seconds.
-    segment_index : int, optional
     side : {"left", "right"}, optional
         Use "right" for the exclusive frame bound of an inclusive end time.
 
@@ -602,7 +473,7 @@ def frames_for_times(recording, times_s, *, segment_index=0, side="left"):
             f"values: {np.asarray(times_s).tolist()!r}. searchsorted-based "
             "frame mapping would silently mis-map them (NaN sorts as +inf)."
         )
-    n = int(recording.get_num_samples(segment_index=segment_index))
+    n = int(recording.get_num_samples(segment_index=0))
     lo = np.zeros(times.shape, dtype=np.int64)
     hi = np.full(times.shape, n, dtype=np.int64)
     if n == 0:
@@ -617,7 +488,6 @@ def frames_for_times(recording, times_s, *, segment_index=0, side="left"):
         vals = _segment_times_at(
             recording,
             np.minimum(mid, n - 1),
-            segment_index=segment_index,
         )
         go_right = active & (
             (vals < times) if side == "left" else (vals <= times)
@@ -640,14 +510,12 @@ class BaseIntervalsAndGaps(NamedTuple):
     gap_after: Any  # numpy.ndarray[int64] (np is lazy-imported in this module)
 
 
-def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
+def base_intervals_and_gaps(recording, fs=None):
     """Recorded chunks (seconds) and inter-chunk gap frame indices, chunked.
 
     Streams the timeline in contiguous ~1 s slices (bounded
     peak memory, no ``get_times()`` materialization) to derive the same gap
-    structure the full-vector path computes from ``get_times()``. Generalizes
-    the chunked scan in ``_storage.units_nwb._base_intervals_from_recording`` to also
-    emit the gap frame indices. Returns:
+    structure the full-vector path computes from ``get_times()``. Returns:
 
     * ``base_intervals`` -- one ``[start, end]`` (inclusive first/last sample
       times, seconds) per recorded chunk, split wherever consecutive
@@ -666,9 +534,9 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     Parameters
     ----------
     recording : si.BaseRecording
+        Read on segment 0.
     fs : float, optional
         Sampling frequency; read from the recording when ``None``.
-    segment_index : int, optional
 
     Returns
     -------
@@ -682,17 +550,16 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     fs = assert_positive_sampling_frequency(
         fs, context="base_intervals_and_gaps: "
     )
-    n_samples = int(recording.get_num_samples(segment_index=segment_index))
+    n_samples = int(recording.get_num_samples(segment_index=0))
     if n_samples == 0:
         return BaseIntervalsAndGaps([], np.empty(0, dtype=np.int64))
 
-    if not recording.has_time_vector(segment_index=segment_index):
+    if not recording.has_time_vector(segment_index=0):
         # Rate-based recording: uniform timestamps, no wall-clock gaps. Map the
         # two endpoints affinely instead of scanning n_samples frames.
         endpoints = _segment_times_at(
             recording,
             np.array([0, n_samples - 1], dtype=np.int64),
-            segment_index=segment_index,
         )
         return BaseIntervalsAndGaps(
             [[float(endpoints[0]), float(endpoints[1])]],
@@ -711,7 +578,6 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
             recording,
             start_frame,
             end_frame,
-            segment_index=segment_index,
         )
         if times.size == 0:
             continue
@@ -744,7 +610,7 @@ def base_intervals_and_gaps(recording, fs=None, *, segment_index=0):
     )
 
 
-def timestamp_fingerprint(recording, *, segment_index=0):
+def timestamp_fingerprint(recording):
     """SHA-256 over the recording's timestamp vector, computed chunked.
 
     A content fingerprint for the ``(n_samples,)`` float64 timestamp vector that
@@ -765,7 +631,7 @@ def timestamp_fingerprint(recording, *, segment_index=0):
     Parameters
     ----------
     recording : si.BaseRecording
-    segment_index : int, optional
+        Read on segment 0.
 
     Returns
     -------
@@ -776,7 +642,7 @@ def timestamp_fingerprint(recording, *, segment_index=0):
 
     import numpy as np
 
-    n_samples = int(recording.get_num_samples(segment_index=segment_index))
+    n_samples = int(recording.get_num_samples(segment_index=0))
     hasher = hashlib.sha256()
     hasher.update(np.int64(n_samples).tobytes())
     if n_samples == 0:
@@ -788,7 +654,6 @@ def timestamp_fingerprint(recording, *, segment_index=0):
             recording,
             start_frame,
             end_frame,
-            segment_index=segment_index,
         )
         hasher.update(np.ascontiguousarray(times, dtype=np.float64).tobytes())
     return hasher.digest()

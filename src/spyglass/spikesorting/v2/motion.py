@@ -76,6 +76,8 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
     find_orphaned_masters,
+    optional_part_value,
+    single_source_part,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
@@ -438,20 +440,12 @@ class MotionEstimateSelection(
         SchemaBypassError
             If more than one ``ArtifactDetectionSource`` row exists.
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rows = (cls.ArtifactDetectionSource & master_key).fetch(
-            "artifact_detection_merge_id"
+        merge_id = optional_part_value(
+            cls, key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
         )
-        if len(rows) > 1:
-            raise SchemaBypassError(
-                f"MotionEstimateSelection {master_key} has {len(rows)} "
-                "ArtifactDetectionSource rows; expected zero or one."
-            )
-        if len(rows) == 0:
+        if merge_id is None:
             return None
-        return ArtifactDetectionOutput.resolve_artifact_detection_id(rows[0])
+        return ArtifactDetectionOutput.resolve_artifact_detection_id(merge_id)
 
     @classmethod
     def resolve_source(cls, key: dict) -> SourceLineage:
@@ -476,37 +470,22 @@ class MotionEstimateSelection(
         from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        recording_rows = (cls.RecordingSource & master_key).fetch(
-            "recording_id"
-        )
-        concat_rows = (cls.ConcatenatedRecordingSource & master_key).fetch(
-            "concat_recording_id"
-        )
-        if len(recording_rows) + len(concat_rows) != 1:
-            raise SchemaBypassError(
-                f"MotionEstimateSelection {master_key} has "
-                f"{len(recording_rows) + len(concat_rows)} source part rows; "
-                "expected exactly one. Use insert_selection()."
-            )
+        kind, source_key = single_source_part(cls, master_key)
         artifact_detection_id = cls.resolve_artifact_detection(master_key)
-        if len(recording_rows):
-            lineage = SourceLineage(
-                kind="recording",
-                key={"recording_id": recording_rows[0]},
-                artifact_detection_id=artifact_detection_id,
-            )
-        elif artifact_detection_id is not None:
+        if (
+            kind == "concatenated_recording"
+            and artifact_detection_id is not None
+        ):
             raise SchemaBypassError(
                 f"MotionEstimateSelection {master_key} pairs a concatenated "
                 "recording with an ArtifactDetectionSource; a concat source "
                 "owns its member masks. Drop the stray part row."
             )
-        else:
-            lineage = SourceLineage(
-                kind="concatenated_recording",
-                key={"concat_recording_id": concat_rows[0]},
-                artifact_detection_id=None,
-            )
+        lineage = SourceLineage(
+            kind=kind,
+            key=source_key,
+            artifact_detection_id=artifact_detection_id,
+        )
         master = (cls & master_key).fetch1()
         mismatch = motion_estimate_parts_mismatch(
             master["motion_estimate_id"], lineage, master
@@ -1059,11 +1038,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
 _ESTIMATE_APPLICATION_FIELDS = (
     "motion",
     "n_samples",
-    "sampling_frequency",
-    "continuity_spans",
-    "continuity_start_s",
-    "continuity_end_s",
-    "estimation_start_s",
+    *_ESTIMATION_CLOCK_COLUMNS.values(),
     "statistics_spans",
     "channel_ids",
     "channel_locations",

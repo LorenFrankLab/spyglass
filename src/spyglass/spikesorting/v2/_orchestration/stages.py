@@ -8,13 +8,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import Any, get_args
+from typing import Any
 
 from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
 from spyglass.spikesorting.v2._orchestration.types import StageStatus
-
-# Closed vocabulary for stage receipts: work created, reused, or omitted.
-_STAGE_STATUSES: frozenset[StageStatus] = frozenset(get_args(StageStatus))
 
 
 def _run_stage(
@@ -459,7 +456,6 @@ def _run_auto_curation_stage(
         _PIPELINE_PRESETS,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
@@ -478,29 +474,25 @@ def _run_auto_curation_stage(
     # "reused" only when BOTH were already done (the evaluation was
     # populated and the accepted child already existed), else "computed" --
     # so a run that (re)created the child is never mislabeled "reused" just
-    # because the evaluation pre-existed. ``_run_stage``'s exists-before-work
-    # model cannot express that (the child id is only known after
-    # acceptance), so time + wrap the stage here, preserving the same
-    # stage-aware ``PipelineStageError``.
+    # because the evaluation pre-existed. The child id is only known after
+    # acceptance, so ``_run_stage``'s exists-before-work status is discarded
+    # and the status is classified after the work returns.
     eval_was_populated = bool(CurationEvaluation & eval_key)
     sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
-    auto_start = time.perf_counter()
-    try:
+
+    def _work():
         _populate_once(CurationEvaluation, eval_key)
-        children_before = set(
-            (CurationV2 & sorting_restriction).fetch("curation_id")
+        sibling_rows = (CurationV2 & sorting_restriction).fetch(
+            "curation_id", "parent_curation_id", "description", as_dict=True
         )
+        children_before = {row["curation_id"] for row in sibling_rows}
         description = _auto_curation_description(
             pipeline_preset,
-            set(
-                (
-                    CurationV2
-                    & {
-                        **sorting_restriction,
-                        "parent_curation_id": curation_key["curation_id"],
-                    }
-                ).fetch("description")
-            ),
+            {
+                row["description"]
+                for row in sibling_rows
+                if row["parent_curation_id"] == curation_key["curation_id"]
+            },
             _PIPELINE_PRESETS,
         )
         child = CurationEvaluation().use_evaluation_labels(
@@ -509,14 +501,13 @@ def _run_auto_curation_stage(
         auto_merge_id = _curation_merge_id(
             child, is_concat=is_concat, warnings_list=warnings_list
         )
-    except Exception as exc:  # noqa: BLE001 - re-raised as typed + chained
-        raise PipelineStageError(
-            "auto_curation",
-            dict(run_summary),
-            str(exc),
-            original_type=type(exc).__name__,
-        ) from exc
-    stage_seconds["auto_curation"] = time.perf_counter() - auto_start
+        return child, auto_merge_id, children_before
+
+    (
+        (child, auto_merge_id, children_before),
+        _,
+        stage_seconds["auto_curation"],
+    ) = _run_stage("auto_curation", False, _work, run_summary)
     child_created = child["curation_id"] not in children_before
     run_summary["auto_curation_status"] = (
         "reused" if eval_was_populated and not child_created else "computed"
@@ -596,7 +587,7 @@ def _run_member_curation_stage(
         stage_seconds["member_curation"],
     ) = _run_stage(
         "member_curation",
-        all(bool(ConcatMemberCuration & key) for key in member_keys),
+        len(ConcatMemberCuration & member_keys) == len(member_keys),
         _populate_member_curations,
         run_summary,
     )

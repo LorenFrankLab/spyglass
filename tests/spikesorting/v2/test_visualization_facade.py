@@ -329,8 +329,8 @@ def _patch_curation_analyzer(monkeypatch, fake, *, recorder=None):
     ``_curation_request`` is stubbed (no DB), and the published resolver
     records each ``(request, extra_extensions)`` call so a test can assert
     which extensions were requested and that only the display role is used.
-    ``open_curation_analyzer`` (the export working copy) yields the same fake
-    and records too.
+    ``analyzer_working_copy`` (the export working copy) yields the analyzer
+    it is handed and records ``{"working_copy": True}``.
     """
     from contextlib import contextmanager
 
@@ -357,27 +357,20 @@ def _patch_curation_analyzer(monkeypatch, fake, *, recorder=None):
         return fake
 
     @contextmanager
-    def _open(
-        curation_ref, waveform_recipe, role="display", *, extra_extensions=None
-    ):
+    def _working_copy(published):
         if recorder is not None:
-            recorder.append(
-                {
-                    "role": role,
-                    "extra_extensions": dict(extra_extensions or {}),
-                    "working_copy": True,
-                }
-            )
-        fake.present.update(extra_extensions or {})
-        yield fake
+            recorder.append({"working_copy": True})
+        yield published
 
     monkeypatch.setattr(resolver, "_resolve_curation_analyzer", _resolve)
-    monkeypatch.setattr(resolver, "open_curation_analyzer", _open)
+    monkeypatch.setattr(resolver, "analyzer_working_copy", _working_copy)
     monkeypatch.setattr(ssviz, "_write_export_provenance", lambda *a, **k: None)
 
 
 def _requested_extensions(recorder) -> set:
-    return {name for call in recorder for name in call["extra_extensions"]}
+    return {
+        name for call in recorder for name in call.get("extra_extensions", {})
+    }
 
 
 def _forbid_add_extensions(monkeypatch):
@@ -802,8 +795,9 @@ def test_export_report_uses_working_copy(dj_conn, monkeypatch):
     """``export_si_report`` wraps SI ``export_report`` over a working copy.
 
     ``compute_missing=False`` requests no extensions; ``True`` requests only
-    display-safe report extensions; SI is always called with its own
-    ``force_computation=False`` so it never mutates the cache itself.
+    the missing display-safe report extensions; SI is always called with its
+    own ``force_computation=False`` so it never mutates the cache itself. The
+    working copy is taken from the analyzer the extension check resolved.
     """
     import spikeinterface.exporters as sie
 
@@ -825,8 +819,10 @@ def test_export_report_uses_working_copy(dj_conn, monkeypatch):
     )
     assert captured["analyzer"] is fake_present
     assert captured["kwargs"]["force_computation"] is False
-    assert any(c.get("working_copy") for c in calls)
-    assert _requested_extensions(calls) == {"unit_locations"}
+    assert calls == [
+        {"role": "display", "extra_extensions": {}},
+        {"working_copy": True},
+    ]
 
     # compute_missing=True: requests the display-safe report extensions.
     from spyglass.spikesorting.v2._review.visualization import (
@@ -841,8 +837,13 @@ def test_export_report_uses_working_copy(dj_conn, monkeypatch):
         "/tmp/report_b",
         compute_missing=True,
     )
-    assert _requested_extensions(calls) == set(REPORT_DISPLAY_EXTENSIONS)
+    assert _requested_extensions(calls) == set(REPORT_DISPLAY_EXTENSIONS) - {
+        "unit_locations"
+    }
     assert "principal_components" not in _requested_extensions(calls)
+    assert captured["analyzer"] is fake_missing
+    assert fake_missing.present >= set(REPORT_DISPLAY_EXTENSIONS)
+    assert calls[-1] == {"working_copy": True}
 
 
 @pytest.mark.db_unit
@@ -896,7 +897,8 @@ def test_export_to_phy_uses_working_copy(dj_conn, monkeypatch):
     assert captured["analyzer"] is fake
     # Display role only, on an owned working copy.
     assert calls == [
-        {"role": "display", "extra_extensions": {}, "working_copy": True}
+        {"role": "display", "extra_extensions": {}},
+        {"working_copy": True},
     ]
     # PC features off by default (no principal_components on the display path),
     # and raw SI display-analyzer metric TSVs off by default (the routed
@@ -975,7 +977,7 @@ def test_no_widget_uses_metric_analyzer_by_default(dj_conn, monkeypatch):
     ssviz.export_to_phy(curation, "/tmp/p")
 
     assert calls, "expected curation analyzer loads"
-    assert {call["role"] for call in calls} == {"display"}
+    assert {call["role"] for call in calls if "role" in call} == {"display"}
 
 
 @pytest.mark.db_unit

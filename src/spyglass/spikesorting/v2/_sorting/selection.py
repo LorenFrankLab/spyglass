@@ -19,32 +19,6 @@ from spyglass.spikesorting.v2._recording.source import (
 )
 
 
-def _resolve_artifact_merge(plan):
-    """Find or register the materialized artifact output before linking it."""
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-    art_merge_id = None
-    if plan.artifact_detection_id is not None:
-        art_key = {"artifact_detection_id": plan.artifact_detection_id}
-        try:
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-        except KeyError:
-            try:
-                ArtifactDetectionOutput.insert_detection(art_key)
-            except KeyError as key_exc:
-                raise SchemaBypassError(
-                    "SortingSelection: artifact_detection_id "
-                    f"{plan.artifact_detection_id} is not materialized in "
-                    "the artifact detection tables (or was concurrently "
-                    "deleted). Populate the artifact detection before "
-                    "linking it to a sort."
-                ) from key_exc
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-
-    return art_merge_id
-
-
 def insert_selection(table_cls, key: dict) -> dict:
     """Insert master + exactly one source part; return PK-only dict.
 
@@ -57,12 +31,12 @@ def insert_selection(table_cls, key: dict) -> dict:
     statement, before any part row is written. Keep the master insert first,
     or the recovery would leave part rows inside a caller's transaction.
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v2._core.selection_plan import (
         build_sorting_selection_plan,
     )
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+    from spyglass.spikesorting.v2.artifact_output import (
+        insert_artifact_bound_selection,
+    )
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import SorterParameters
@@ -82,20 +56,22 @@ def insert_selection(table_cls, key: dict) -> dict:
         source_part = table_cls.RecordingSource
         source_row = plan.recording_source_row
 
-    existing = table_cls._find_existing_pk(
-        plan.master_restriction,
-        plan.source_restriction,
-        plan.artifact_detection_id,
-        plan.sorting_id,
-        source_part,
-        plan.motion_corrected_recording_id,
-    )
+    def existing_pk() -> dict | None:
+        return table_cls._find_existing_pk(
+            plan.master_restriction,
+            plan.source_restriction,
+            plan.artifact_detection_id,
+            plan.sorting_id,
+            source_part,
+            plan.motion_corrected_recording_id,
+        )
+
+    existing = existing_pk()
     if existing is not None:
         return existing
 
     # Translate the would-be DataJoint FK IntegrityError into a
     # clear "missing default row" message before the inserts attempt.
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2._core.lookup_validation import (
         _ensure_lookup_row_exists,
     )
@@ -145,125 +121,56 @@ def insert_selection(table_cls, key: dict) -> dict:
     if plan.motion_corrected_recording_id is not None:
         validate_motion_correction_source(plan)
 
-    # Fail fast: an artifact-bound selection cannot be safely linked inside a
-    # CALLER-owned transaction. The delete-vs-select advisory lock below is
-    # released when this method RETURNS -- before the caller commits -- so it
-    # cannot serialize a concurrent artifact deletion against the still-
-    # uncommitted selection, and a ``force_masters`` detection delete could
-    # then cascade through the freshly committed ArtifactDetectionSource and
-    # consume the sort. Require insert_selection to OWN the transaction for an
-    # artifact-bound sort (it does on the standalone call); an artifact-FREE
-    # sort takes no lock and touches no merge, so it is unaffected.
-    if (
-        plan.artifact_detection_id is not None
-        and table_cls.connection.in_transaction
-    ):
-        raise ValueError(
-            "SortingSelection.insert_selection: refusing to link an "
-            "artifact detection while a caller-owned transaction is open. "
-            "The delete-vs-select advisory lock is released when this call "
-            "returns -- before your transaction commits -- so it cannot "
-            "serialize a concurrent artifact deletion against the "
-            "uncommitted selection. Call insert_selection OUTSIDE the "
-            "transaction (it manages its own), or link the artifact in a "
-            "separate committed step."
-        )
-
-    # Resolve the artifact merge id BEFORE opening the sorting transaction.
-    # A materialized detection registers itself into ArtifactDetectionOutput
-    # (producer-owned, in RecordingArtifactDetection/SharedGroupArtifactDetection
-    # make_insert), so the common path is a pure lookup. The lazy fallback
-    # (register-if-absent) covers a detection materialized out-of-band; it
-    # runs OUTSIDE the sorting transaction, so its own merge-master
-    # concurrency never strands sorting rows -- and the sorting transaction
-    # then contains NO merge insert, so a deterministic-id duplicate collides
-    # on the master insert (the transaction's first statement) with nothing
-    # written to roll back. Hence a single try + refetch, no retry loop.
-    art_merge_id = _resolve_artifact_merge(plan)
-
-    # Hold the artifact detection's advisory lock -- the same one
-    # ``_ArtifactDetectionMixin.delete`` takes -- across the transaction that
-    # links it, so a concurrent delete of that detection cannot cascade to
-    # this sort between our commit and its referrer check: it blocks until we
-    # commit, then sees us as a referrer and refuses. FAIL-CLOSED: a lock we
-    # cannot take within the lifecycle timeout raises AdvisoryLockError and
-    # aborts the selection rather than linking it unserialized; no lock for
-    # an artifact-free sort.
-    #
-    # This is sound because insert_selection OWNS the transaction for an
-    # artifact-bound sort: the fail-fast check above REFUSES an artifact-bound
-    # call inside a caller's open transaction, so ``_safe_context()`` here
-    # always opens AND commits the rows before this method returns and
-    # releases the lock. The lock therefore always covers the commit window
-    # (see test_insert_selection_rejects_artifact_link_in_ambient_transaction
-    # and test_artifact_source_fk_rejects_dangling_detection).
-    from contextlib import ExitStack
-
-    from spyglass.spikesorting.v2._core.db_locking import required_advisory_lock
-
-    with ExitStack() as art_lock:
+    # The shared insert holds the artifact detection's advisory lock -- the
+    # same one ``_ArtifactDetectionMixin.delete`` takes -- across the
+    # transaction that links it, so a concurrent delete of that detection
+    # blocks until we commit, then sees us as a referrer and refuses. It
+    # refuses an artifact-bound sort inside a CALLER-owned transaction: the
+    # lock is released when it returns, before that transaction commits, and
+    # a ``force_masters`` detection delete could then cascade through the
+    # fresh ArtifactDetectionSource and consume the sort (see
+    # test_insert_selection_rejects_artifact_link_in_ambient_transaction and
+    # test_artifact_source_fk_rejects_dangling_detection). An artifact-FREE
+    # sort takes no lock and touches no merge.
+    def insert_rows(art_merge_id) -> None:
+        # allow_direct_insert: this helper IS the validation boundary.
+        table_cls.insert1(plan.master_row, allow_direct_insert=True)
+        source_part.insert1(source_row)
         if art_merge_id is not None:
-            art_lock.enter_context(
-                required_advisory_lock(
-                    ArtifactDetectionOutput,
-                    {"artifact_detection_id": plan.artifact_detection_id},
-                )
+            table_cls.ArtifactDetectionSource.insert1(
+                {
+                    "sorting_id": plan.master_row["sorting_id"],
+                    "artifact_detection_merge_id": art_merge_id,
+                }
             )
-        try:
-            with table_cls._safe_context():
-                # allow_direct_insert: this helper IS the validation
-                # boundary.
-                table_cls.insert1(plan.master_row, allow_direct_insert=True)
-                source_part.insert1(source_row)
-                if art_merge_id is not None:
-                    table_cls.ArtifactDetectionSource.insert1(
-                        {
-                            "sorting_id": plan.master_row["sorting_id"],
-                            "artifact_detection_merge_id": art_merge_id,
-                        }
-                    )
-                if plan.motion_corrected_recording_id is not None:
-                    table_cls.MotionCorrectionSource.insert1(
-                        {
-                            "sorting_id": plan.master_row["sorting_id"],
-                            "motion_corrected_recording_id": (
-                                plan.motion_corrected_recording_id
-                            ),
-                        }
-                    )
-            return {k: plan.master_row[k] for k in table_cls.primary_key}
-        except dj.errors.DuplicateError as exc:
-            # A concurrent caller may have inserted the same selection.
-            existing = table_cls._find_existing_pk(
-                plan.master_restriction,
-                plan.source_restriction,
-                plan.artifact_detection_id,
-                plan.sorting_id,
-                source_part,
-                plan.motion_corrected_recording_id,
+        if plan.motion_corrected_recording_id is not None:
+            table_cls.MotionCorrectionSource.insert1(
+                {
+                    "sorting_id": plan.master_row["sorting_id"],
+                    "motion_corrected_recording_id": (
+                        plan.motion_corrected_recording_id
+                    ),
+                }
             )
-            if existing is not None:
-                return existing
-            raise SchemaBypassError(
-                f"SortingSelection master {plan.sorting_id} exists but "
-                "its source/artifact parts do not match this selection: "
-                "the master was inserted without insert_selection (a "
-                "raw-insert orphan). Use insert_selection(), or drop the "
-                "orphan master."
-            ) from exc
-        except dj.errors.IntegrityError as exc:
-            raise SchemaBypassError(
-                "SortingSelection: an input foreign key is unsatisfied "
-                f"for source {plan.source_restriction} / "
-                f"artifact_detection_id={plan.artifact_detection_id} / "
-                "motion_corrected_recording_id="
-                f"{plan.motion_corrected_recording_id} -- the referenced "
-                "Recording / ConcatenatedRecording, ArtifactDetectionOutput "
-                "or MotionCorrectedRecording row is missing (a raw insert "
-                "bypassing insert_selection, or a concurrent delete "
-                "mid-insert). Populate the input, or retry if a "
-                "transient race."
-            ) from exc
+
+    return insert_artifact_bound_selection(
+        table_cls,
+        {k: plan.master_row[k] for k in table_cls.primary_key},
+        plan.artifact_detection_id,
+        insert_rows=insert_rows,
+        refetch=existing_pk,
+        consumer="a sort",
+        inputs=(
+            f"source {plan.source_restriction} / "
+            f"artifact_detection_id={plan.artifact_detection_id} / "
+            "motion_corrected_recording_id="
+            f"{plan.motion_corrected_recording_id}"
+        ),
+        input_tables=(
+            "Recording / ConcatenatedRecording, ArtifactDetectionOutput or "
+            "MotionCorrectedRecording"
+        ),
+    )
 
 
 def find_existing_pk(

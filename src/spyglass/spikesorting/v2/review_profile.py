@@ -26,7 +26,6 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._review.profile import (
     normalize_review_profile,
     profile_display_property_vocabulary,
-    review_profile_label_policy,
 )
 from spyglass.spikesorting.v2.exceptions import DuplicateParameterContentError
 from spyglass.spikesorting.v2.metric_curation import (
@@ -187,9 +186,3 @@ class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         }
         cls().insert1(row, skip_duplicates=True)
         return {"review_profile_name": FRANKLAB_REVIEW_PROFILE}
-
-    @classmethod
-    def label_policy(cls, restriction) -> str:
-        """Resolve a profile's mode to CurationV2 ``label_policy``."""
-        mode = (cls & restriction).fetch1("label_import_mode")
-        return review_profile_label_policy(str(mode))

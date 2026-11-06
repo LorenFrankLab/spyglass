@@ -23,11 +23,12 @@ ready.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_args
 
 import numpy as np
 import pytest
 
-from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
+from spyglass.spikesorting.v2._orchestration.types import StageStatus
 from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_preset,
     describe_pipeline_presets,
@@ -213,7 +214,7 @@ def test_ux_smoke_first_hour(first_hour):
     )
     assert isinstance(run_summary["warnings"], list)
     for key in _STATUS_KEYS:
-        assert run_summary[key] in _STAGE_STATUSES
+        assert run_summary[key] in get_args(StageStatus)
     assert all(run_summary[k] == "computed" for k in _STATUS_KEYS), {
         k: run_summary[k] for k in _STATUS_KEYS
     }

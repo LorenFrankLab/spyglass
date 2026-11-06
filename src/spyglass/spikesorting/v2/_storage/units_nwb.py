@@ -447,39 +447,17 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
             for uid, frames in sample_indices_by_unit.items()
         }
 
-    def lookup(frames):
-        if frames.size == 0:
-            return np.asarray([], dtype=np.float64)
-        # ``sample_index_to_time`` indexes the h5py-/mmap-backed timestamp
-        # vector, whose fancy-indexing requires STRICTLY INCREASING indices.
-        # A unit's spike frames are not guaranteed sorted (and may repeat), so
-        # map the unique-sorted frames and broadcast the times back into the
-        # original frame order -- still sparse, no full-vector materialization.
-        order = np.argsort(frames, kind="stable")
-        uniq, inverse = np.unique(frames[order], return_inverse=True)
-        uniq_times = read_times(uniq)
-        out = np.empty(frames.shape, dtype=np.float64)
-        out[order] = uniq_times[inverse]
-        return out
+    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 
+    # A unit's spike frames may be unsorted or repeat; ``_segment_times_at``
+    # reads the sorted unique frames the h5py-/mmap-backed timestamp vector
+    # requires and scatters them back -- no full-vector materialization.
     return {
-        int(uid): lookup(frames)
+        int(uid): finite_vector(
+            _segment_times_at(recording, frames), name="spike_times"
+        )
         for uid, frames in sample_indices_by_unit.items()
     }
-
-
-def _base_intervals_from_recording(recording, fs):
-    """Return recorded time chunks without materializing full timestamps.
-
-    The chunked/affine scan lives in ``_core.signal_math.base_intervals_and_gaps``
-    (which generalizes it to also emit the inter-chunk gap frame indices the
-    artifact path needs); this writer only needs the per-chunk base intervals.
-    """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        base_intervals_and_gaps,
-    )
-
-    return base_intervals_and_gaps(recording, fs).base_intervals
 
 
 def recording_timestamps(recording_row):
@@ -661,17 +639,17 @@ def write_sorting_units_nwb(
     )
 
     validate_sorting_provenance(source_provenance)
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-
-    analysis_file_name = AnalysisNwbfile().create(
-        nwb_file_name=nwb_file_name,
-        restrict_permission=True,  # 0o644, not world-writable 0o666
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        staged_analysis_file,
     )
-    # ``create`` already wrote a stub file to disk; if any step below raises
-    # before the caller registers the AnalysisNwbfile row, unlink that orphan
+
+    # ``create`` writes a stub file to disk; if any step below raises before
+    # the caller registers the AnalysisNwbfile row, unlink that orphan
     # (mirrors the recording writer -- the caller's staging cleanup only knows
     # the analyzer folder, not this file's name).
-    try:
+    with staged_analysis_file(
+        nwb_file_name, context="write_sorting_units_nwb"
+    ) as analysis_file_name:
         return _write_sorting_units_nwb_body(
             analysis_file_name=analysis_file_name,
             sorting=sorting,
@@ -680,15 +658,6 @@ def write_sorting_units_nwb(
             unit_metadata=unit_metadata,
             source_provenance=source_provenance,
         )
-    except Exception:
-        from spyglass.spikesorting.v2._storage.staged_outputs import (
-            unlink_staged_analysis_file,
-        )
-
-        unlink_staged_analysis_file(
-            analysis_file_name, context="write_sorting_units_nwb"
-        )
-        raise
 
 
 def _write_sorting_units_nwb_body(
@@ -715,6 +684,9 @@ def _write_sorting_units_nwb_body(
     import pynwb
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
     from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         build_provenance_table,
@@ -751,7 +723,9 @@ def _write_sorting_units_nwb_body(
         # contiguous recording this collapses to a single
         # ``[t0, t_end]``, unchanged.
         obs_intervals_arr = finite_intervals(
-            _base_intervals_from_recording(recording, sampling_frequency),
+            base_intervals_and_gaps(
+                recording, sampling_frequency
+            ).base_intervals,
             name="obs_intervals",
         )
     else:
@@ -926,14 +900,16 @@ def write_curated_units_nwb(
         )
     )
 
-    analysis_file_name = AnalysisNwbfile().create(
-        nwb_file_name=nwb_file_name,
-        restrict_permission=True,  # 0o644, not world-writable 0o666
+    from spyglass.spikesorting.v2._storage.staged_outputs import (
+        staged_analysis_file,
     )
-    # ``create`` staged a stub file; unlink it if the write below fails before
+
+    # ``create`` stages a stub file; unlink it if the write below fails before
     # the caller registers the AnalysisNwbfile row (curation stages OUTSIDE its
     # rows-transaction try, so its cleanup does not otherwise cover this file).
-    try:
+    with staged_analysis_file(
+        nwb_file_name, context="write_curated_units_nwb"
+    ) as analysis_file_name:
         return _write_curated_units_nwb_body(
             analysis_file_name=analysis_file_name,
             nwb_file_name=nwb_file_name,
@@ -946,15 +922,6 @@ def write_curated_units_nwb(
             curation_header=curation_header,
             merge_group_rows=merge_group_rows,
         )
-    except Exception:
-        from spyglass.spikesorting.v2._storage.staged_outputs import (
-            unlink_staged_analysis_file,
-        )
-
-        unlink_staged_analysis_file(
-            analysis_file_name, context="write_curated_units_nwb"
-        )
-        raise
 
 
 def _curated_obs_intervals(

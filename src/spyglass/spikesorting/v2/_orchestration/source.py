@@ -519,8 +519,7 @@ def _build_member_recordings(
 
     def _populate_member_recordings():
         for key in member_recording_keys:
-            if not (Recording & key):
-                _populate_once(Recording, key)
+            _populate_once(Recording, key)
 
     (
         _,
@@ -528,7 +527,7 @@ def _build_member_recordings(
         stage_seconds["member_recording"],
     ) = _run_stage(
         "member_recording",
-        all(bool(Recording & key) for key in member_recording_keys),
+        len(Recording & member_recording_keys) == len(member_recording_keys),
         _populate_member_recordings,
         run_summary,
     )
@@ -641,9 +640,8 @@ def _build_member_artifacts(
             stage_seconds["member_artifact_detection"],
         ) = _run_stage(
             "member_artifact_detection",
-            all(
-                bool(RecordingArtifactDetection & key) for key in artifact_keys
-            ),
+            len(RecordingArtifactDetection & artifact_keys)
+            == len(artifact_keys),
             _populate_member_artifacts,
             run_summary,
         )

@@ -381,9 +381,9 @@ def prepare_quality_metric_row(row: dict) -> dict:
     Single source of the insert-input -> stored-column mapping, shared by
     ``QualityMetricParameters.insert`` and the default-catalog audit so a new
     validated field or default is filled identically on both paths.
-    ``template_metric_columns`` is forwarded only when the row sets it, so an
-    omitting row picks up the schema default (the conservative, window-safe
-    ``trough_half_width`` shape column).
+    Optional schema fields are forwarded only when the row sets them, so an
+    omitting row picks up the schema default (e.g. the conservative,
+    window-safe ``trough_half_width`` shape column).
 
     Parameters
     ----------
@@ -402,14 +402,15 @@ def prepare_quality_metric_row(row: dict) -> dict:
             "params_schema_version", QUALITY_METRIC_SCHEMA_VERSION
         ),
         "metric_names": row["metric_names"],
-        "metric_kwargs": row.get("metric_kwargs", {}),
-        "skip_pc_metrics": row.get("skip_pc_metrics", True),
-        "observed_presence_bin_duration_s": row.get(
-            "observed_presence_bin_duration_s", 60.0
-        ),
     }
-    if "template_metric_columns" in row:
-        payload["template_metric_columns"] = row["template_metric_columns"]
+    for field in (
+        "metric_kwargs",
+        "skip_pc_metrics",
+        "observed_presence_bin_duration_s",
+        "template_metric_columns",
+    ):
+        if field in row:
+            payload[field] = row[field]
     clean = QualityMetricParamsSchema.model_validate(payload).model_dump()
     return {
         "metric_params_name": row["metric_params_name"],

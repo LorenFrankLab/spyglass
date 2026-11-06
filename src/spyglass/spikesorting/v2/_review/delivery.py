@@ -142,18 +142,6 @@ def serve_review_bundle(
         return review_bundle_url(server.server_port, bundle_id)
 
 
-def served_review_bundles() -> dict[Path, str]:
-    """``{bundle: url}`` for every bundle this process is serving."""
-    with _LOCK:
-        if _SERVER is None:
-            return {}
-        server, _ = _SERVER
-        return {
-            bundle.root: review_bundle_url(server.server_port, bundle_id)
-            for bundle_id, bundle in server.bundles.items()
-        }
-
-
 def stop_review_servers(bundle=None) -> None:
     """Unregister a bundle; stop delivery when none remain (or stop all)."""
     global _SERVER

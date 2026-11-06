@@ -449,52 +449,6 @@ def test_cascade_delete_removes_referencing_sorts(ingested_recording):
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 
-def test_merge_source_part_integrity_is_clean(ingested_recording):
-    """A well-formed tree has no orphan/ambiguous merge
-    masters (every ArtifactDetectionOutput master has exactly one source part).
-    """
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-
-    # The fixture's populated detection is registered; the audit must be clean.
-    assert ArtifactDetectionOutput.audit_source_part_integrity() == []
-
-
-def test_merge_integrity_flags_orphan_master(ingested_recording):
-    """audit_source_part_integrity flags
-    a raw-inserted merge master that has NO source part.
-
-    Producer-owned registration + coordinated deletion keep the merge
-    well-formed, so a bad master is only reachable by a raw insert; plant one
-    with FK-checks-off and confirm the audit reports it (count 0,
-    discriminator mismatch)."""
-    import uuid
-
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-
-    orphan_id = uuid.uuid4()
-    conn = dj.conn()
-    conn.query("SET FOREIGN_KEY_CHECKS=0")
-    try:
-        # dj.Table.insert bypasses the _Merge insert override to plant a bare
-        # master with no source part.
-        dj.Table.insert(
-            ArtifactDetectionOutput(),
-            [{"merge_id": orphan_id, "source": "RecordingSource"}],
-        )
-        flagged = ArtifactDetectionOutput.audit_source_part_integrity()
-        entry = next((f for f in flagged if f["merge_id"] == orphan_id), None)
-        assert entry is not None, "orphan merge master not flagged by the audit"
-        assert entry["source_part_count"] == 0
-        assert entry["discriminator_ok"] is False
-    finally:
-        (ArtifactDetectionOutput & {"merge_id": orphan_id}).super_delete(
-            warn=False, force_masters=True
-        )
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
-
-
 def test_insert_selection_lazily_registers_unregistered_detection(
     ingested_recording,
 ):

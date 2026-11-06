@@ -339,8 +339,11 @@ def test_fingerprint_rejects_unlisted_environment_capture(receipt, container):
 def test_gpu_capture_handles_unavailable_cli_and_records_device_driver(
     monkeypatch,
 ):
+    # The uncached function, so each call re-queries the patched CLI and the
+    # fake inventory never enters the process-wide cache.
+    gpu_inventory = runtime._gpu_inventory.__wrapped__
     monkeypatch.setattr(runtime.shutil, "which", lambda name: None)
-    assert runtime._gpu_inventory() == {"status": "unavailable", "devices": []}
+    assert gpu_inventory() == {"status": "unavailable", "devices": []}
     monkeypatch.setattr(
         runtime.shutil, "which", lambda name: "/private/bin/nvidia-smi"
     )
@@ -352,7 +355,7 @@ def test_gpu_capture_handles_unavailable_cli_and_records_device_driver(
         return SimpleNamespace(stdout="Test GPU, GPU-001, 550.0\n")
 
     monkeypatch.setattr(runtime.subprocess, "run", run)
-    assert runtime._gpu_inventory() == {
+    assert gpu_inventory() == {
         "status": "available",
         "devices": [
             {"name": "Test GPU", "uuid": "GPU-001", "driver_version": "550.0"}

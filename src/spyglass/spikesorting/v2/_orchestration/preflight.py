@@ -191,8 +191,8 @@ def preflight_v2_pipeline(
     # The sorter-only checks (the sorter row and its params, the display
     # analyzer row, the sampling rate and the sorter execution) are skipped
     # for a caller that builds no sort (``sort_checks=False``).
-    sorter_params_query, sorter_params_exist, sorter_row = (
-        _check_sorter_param_rows(_check, bundle, sort_checks=sort_checks)
+    sorter_params_exist, sorter_row = _check_sorter_param_rows(
+        _check, bundle, sort_checks=sort_checks
     )
     # What run_sorter would receive, resolved by the dispatcher's own resolver.
     effective_config = (
@@ -212,21 +212,21 @@ def preflight_v2_pipeline(
             warnings,
             bundle,
             pipeline_preset,
-            sorter_params_query,
-            sorter_params_exist,
+            sorter_row,
         )
     motion_recipe = None
     if motion_mode != "off":
         motion_recipe = _check_motion_stage(
             _check,
             bundle,
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
+            sort_groups=(
+                [(_check, nwb_file_name, sort_group_id)]
+                if sort_group_exists
+                else []
+            ),
             motion_mode=motion_mode,
             motion_correction_params_name=motion_correction_params_name,
             preprocessing_params_exist=preprocessing_params_exist,
-            sort_group_exists=sort_group_exists,
-            sorter_params_exist=sorter_params_exist,
             sorter_row=sorter_row,
         )
 

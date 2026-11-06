@@ -8,6 +8,7 @@ describe libraries loaded at capture time and do not change environment identity
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -182,6 +183,10 @@ def _platform_identity():
     }
 
 
+# The device inventory is fixed for the process lifetime, and each
+# ``nvidia-smi`` call costs ~0.1 s per receipt. Callers get a deep copy via
+# ``_normalized``, so the cached dict is never mutated.
+@functools.cache
 def _gpu_inventory():
     executable = shutil.which("nvidia-smi")
     if executable is None:

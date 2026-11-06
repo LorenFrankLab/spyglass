@@ -229,13 +229,14 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     # Canonicalize on read to derive_tracked_units' node identity:
     # MatchableUnit stores (sorting_id uuid, curation_id, unit_id); the graph
     # keys on (str(sorting_id), int(curation_id), int(unit_id)).
+    matchable_rows = (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
     node_universe = [
         (
             str(row["sorting_id"]),
             int(row["curation_id"]),
             int(row["unit_id"]),
         )
-        for row in (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
+        for row in matchable_rows
     ]
     # A populated UnitMatch always wrote a non-empty MatchableUnit snapshot
     # (make_fetch rejects an input with zero matchable units), so an empty
@@ -268,7 +269,9 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
         for pair in (UnitMatch.Pair & key).fetch(as_dict=True)
     ]
 
-    input_by_node, detected_sessions_by_node = _node_detections(key)
+    input_by_node, detected_sessions_by_node = _node_detections(
+        key, matchable_rows
+    )
     tracked = derive_tracked_units(
         node_universe,
         edges,
@@ -306,11 +309,10 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     return master_rows, member_rows
 
 
-def _node_detections(key) -> tuple[dict, dict]:
+def _node_detections(key, matchable_rows: list[dict]) -> tuple[dict, dict]:
     """Each matchable unit's input and the sessions it was detected in.
 
-    Reads one run's frozen ``UnitMatch.MatchableUnit``,
-    ``UnitMatch.RecordingSpikeCount`` and
+    Reads one run's frozen ``UnitMatch.RecordingSpikeCount`` and
     ``UnitMatchSelection.InputRecording`` rows. A unit is detected in a
     recording's session (``nwb_file_name``) when it has at least one spike
     in that recording's frame span.
@@ -319,6 +321,8 @@ def _node_detections(key) -> tuple[dict, dict]:
     ----------
     key : dict
         Restriction selecting one ``UnitMatch`` row.
+    matchable_rows : list of dict
+        The run's ``UnitMatch.MatchableUnit`` rows.
 
     Returns
     -------
@@ -353,9 +357,12 @@ def _node_detections(key) -> tuple[dict, dict]:
         counts.setdefault((int(row["input_index"]), int(row["unit_id"])), {})[
             int(row["recording_index"])
         ] = int(row["n_spikes"])
+    recordings_by_input: dict[int, set[int]] = {}
+    for input_index, recording_index in nwb_by_recording:
+        recordings_by_input.setdefault(input_index, set()).add(recording_index)
     input_by_node, detected_sessions_by_node = {}, {}
     missing = []
-    for row in (UnitMatch.MatchableUnit & key).fetch(as_dict=True):
+    for row in matchable_rows:
         input_index = int(row["input_index"])
         node = (
             str(row["sorting_id"]),
@@ -363,12 +370,7 @@ def _node_detections(key) -> tuple[dict, dict]:
             int(row["unit_id"]),
         )
         per_recording = counts.get((input_index, node[2]), {})
-        recordings = {
-            recording_index
-            for index, recording_index in nwb_by_recording
-            if index == input_index
-        }
-        if set(per_recording) != recordings:
+        if set(per_recording) != recordings_by_input.get(input_index, set()):
             missing.append(node)
             continue
         input_by_node[node] = input_index
@@ -389,23 +391,102 @@ def _node_detections(key) -> tuple[dict, dict]:
     return input_by_node, detected_sessions_by_node
 
 
+def _member_inputs(member_rel) -> tuple:
+    """Bulk-read tracked-unit members' matchable units and input recordings.
+
+    Parameters
+    ----------
+    member_rel : datajoint.expression.QueryExpression
+        ``TrackedUnit.Member`` rows to read for.
+
+    Returns
+    -------
+    matchable : datajoint.expression.QueryExpression
+        The members' ``UnitMatch.MatchableUnit`` rows.
+    input_indices : dict
+        ``{(unitmatch_id, sorting_id, curation_id, unit_id): [input_index]}``
+        from ``matchable``; :func:`_member_input_index` checks each list has
+        exactly one entry.
+    input_recordings : datajoint.expression.QueryExpression
+        The members' inputs' ``UnitMatchSelection.InputRecording`` rows.
+    recordings_by_input : dict
+        ``{(unitmatch_id, input_index): [InputRecording row]}`` in
+        ``recording_index`` order.
+    """
+    from spyglass.spikesorting.v2.unit_matching import (
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    matchable = UnitMatch.MatchableUnit & member_rel
+    input_indices: dict[tuple, list[int]] = {}
+    for row in matchable.fetch(as_dict=True):
+        unit = (row["unitmatch_id"], row["sorting_id"])
+        unit += (int(row["curation_id"]), int(row["unit_id"]))
+        input_indices.setdefault(unit, []).append(int(row["input_index"]))
+    input_recordings = UnitMatchSelection.InputRecording & matchable
+    recordings_by_input: dict[tuple, list[dict]] = {}
+    for row in input_recordings.fetch(as_dict=True, order_by="recording_index"):
+        recordings_by_input.setdefault(
+            (row["unitmatch_id"], int(row["input_index"])), []
+        ).append(row)
+    return matchable, input_indices, input_recordings, recordings_by_input
+
+
+def _member_input_index(input_indices: dict, run: dict, unit_key: dict) -> int:
+    """The one matching input of a member unit, from :func:`_member_inputs`.
+
+    Parameters
+    ----------
+    input_indices : dict
+        ``input_indices`` from :func:`_member_inputs`.
+    run : dict
+        ``{"unitmatch_id"}`` of the member's run.
+    unit_key : dict
+        ``{"sorting_id", "curation_id", "unit_id"}`` of the member unit.
+
+    Returns
+    -------
+    int
+        The unit's ``input_index``.
+
+    Raises
+    ------
+    datajoint.DataJointError
+        The unit does not have exactly one ``UnitMatch.MatchableUnit`` row.
+    """
+    import datajoint as dj
+
+    indices = input_indices.get(
+        (
+            run["unitmatch_id"],
+            unit_key["sorting_id"],
+            int(unit_key["curation_id"]),
+            int(unit_key["unit_id"]),
+        ),
+        [],
+    )
+    if len(indices) != 1:
+        raise dj.DataJointError(
+            f"UnitMatch.MatchableUnit has {len(indices)} rows for unit "
+            f"{unit_key} of run {run}; expected exactly one."
+        )
+    return indices[0]
+
+
 def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
     """Brain regions of tracked units' member units, per original recording.
 
     The body of ``TrackedUnit.get_unit_brain_regions`` (see its docstring).
     ``table`` is the ``TrackedUnit`` instance.
     """
-    import datajoint as dj
     import pandas as pd
 
     from spyglass.spikesorting.v2._recording.unit_metadata import (
         sort_group_electrode_regions,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.unit_matching import (
-        UnitMatch,
-        UnitMatchSelection,
-    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
     region_columns = [
         "electrode_group_name",
@@ -421,12 +502,9 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
     # Bulk-read everything the member loop looks up: the members' matchable
     # units, their per-recording spike counts, their inputs' recordings, and
     # those recordings' sort-group electrode regions.
-    matchable = UnitMatch.MatchableUnit & member_rel
-    input_indices: dict[tuple, list[int]] = {}
-    for row in matchable.fetch(as_dict=True):
-        unit = (row["unitmatch_id"], row["sorting_id"])
-        unit += (int(row["curation_id"]), int(row["unit_id"]))
-        input_indices.setdefault(unit, []).append(int(row["input_index"]))
+    matchable, input_indices, input_recordings, recordings_by_input = (
+        _member_inputs(member_rel)
+    )
     n_spikes_by_key = {
         (
             row["unitmatch_id"],
@@ -438,12 +516,6 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
             as_dict=True
         )
     }
-    input_recordings = UnitMatchSelection.InputRecording & matchable
-    recordings_by_input: dict[tuple, list[dict]] = {}
-    for row in input_recordings.fetch(as_dict=True, order_by="recording_index"):
-        recordings_by_input.setdefault(
-            (row["unitmatch_id"], int(row["input_index"])), []
-        ).append(row)
     regions_by_electrode = {
         (
             row["nwb_file_name"],
@@ -465,15 +537,7 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
             "curation_id": int(member["curation_id"]),
             "unit_id": int(member["unit_id"]),
         }
-        indices = input_indices.get(
-            (run["unitmatch_id"], *unit_key.values()), []
-        )
-        if len(indices) != 1:
-            raise dj.DataJointError(
-                f"UnitMatch.MatchableUnit has {len(indices)} rows for unit "
-                f"{unit_key} of run {run}; expected exactly one."
-            )
-        input_index = indices[0]
+        input_index = _member_input_index(input_indices, run, unit_key)
         input_key = {**run, "input_index": input_index}
         if (str(run["unitmatch_id"]), input_index) not in checked:
             _assert_run_input_unchanged("get_unit_brain_regions", input_key)
@@ -575,10 +639,7 @@ def get_member_spike_times(table, tracked_unit_key) -> "pd.DataFrame":
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.unit_matching import (
-        UnitMatch,
-        UnitMatchSelection,
-    )
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     timestamps_by_recording: dict = {}
 
@@ -589,42 +650,65 @@ def get_member_spike_times(table, tracked_unit_key) -> "pd.DataFrame":
             )
         return timestamps_by_recording[recording_id]
 
-    rows = []
+    member_rel = table.Member & tracked_unit_key
+    matchable, input_indices, _, recordings_by_input = _member_inputs(
+        member_rel
+    )
+    source_kind_by_input = {
+        (row["unitmatch_id"], int(row["input_index"])): row["source_kind"]
+        for row in (UnitMatchSelection.Input & matchable).fetch(
+            "unitmatch_id", "input_index", "source_kind", as_dict=True
+        )
+    }
+
+    # Check every member's input before reading any units file, then read
+    # each curation's file once for all of its members.
+    members = []
+    unit_ids_by_curation: dict[tuple, set[int]] = {}
     checked = set()
-    for member in (table.Member & tracked_unit_key).fetch(as_dict=True):
+    for member in member_rel.fetch(as_dict=True):
         run = {"unitmatch_id": member["unitmatch_id"]}
-        curation_key = {
-            "sorting_id": member["sorting_id"],
-            "curation_id": int(member["curation_id"]),
-        }
+        curation = (member["sorting_id"], int(member["curation_id"]))
         unit_id = int(member["unit_id"])
-        input_index = int(
-            (
-                UnitMatch.MatchableUnit
-                & run
-                & curation_key
-                & {"unit_id": unit_id}
-            ).fetch1("input_index")
+        input_index = _member_input_index(
+            input_indices,
+            run,
+            {
+                "sorting_id": curation[0],
+                "curation_id": curation[1],
+                "unit_id": unit_id,
+            },
         )
         input_key = {**run, "input_index": input_index}
         if (str(run["unitmatch_id"]), input_index) not in checked:
             _assert_run_input_unchanged("get_member_spike_times", input_key)
             checked.add((str(run["unitmatch_id"]), input_index))
-        source_kind = (UnitMatchSelection.Input & input_key).fetch1(
-            "source_kind"
-        )
-        recordings = (UnitMatchSelection.InputRecording & input_key).fetch(
-            as_dict=True, order_by="recording_index"
-        )
+        members.append((member, curation, unit_id, input_index))
+        unit_ids_by_curation.setdefault(curation, set()).add(unit_id)
+    units_by_curation = {}
+    for curation, unit_ids in unit_ids_by_curation.items():
         abs_times, sample_indices, _obs = (
             read_units_abs_times_and_sample_indices(
                 AnalysisNwbfile.get_abs_path(
-                    (CurationV2 & curation_key).fetch1("analysis_file_name")
+                    (
+                        CurationV2
+                        & {
+                            "sorting_id": curation[0],
+                            "curation_id": curation[1],
+                        }
+                    ).fetch1("analysis_file_name")
                 ),
-                unit_ids=[unit_id],
+                unit_ids=sorted(unit_ids),
             )
         )
-        if source_kind == "recording":
+        units_by_curation[curation] = (abs_times, sample_indices)
+
+    rows = []
+    for member, curation, unit_id, input_index in members:
+        abs_times, sample_indices = units_by_curation[curation]
+        input_id = (member["unitmatch_id"], input_index)
+        recordings = recordings_by_input.get(input_id, [])
+        if source_kind_by_input[input_id] == "recording":
             times_per_recording = [abs_times[unit_id]]
         else:
             local_frames = split_spike_frames_by_spans(

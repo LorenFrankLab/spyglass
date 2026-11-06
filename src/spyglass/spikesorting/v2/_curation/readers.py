@@ -2,8 +2,9 @@
 
 :func:`get_sorting` and :func:`get_merged_sorting` are the bodies of
 ``CurationV2.get_sorting`` / ``get_merged_sorting``: they read a curation's
-curated-units NWB using stored sample frames and the upstream sampling rate (:func:`load_curation_recording_meta`, :func:`upstream_recording_row`)
-and, for an unapplied proposed merge, rebuild the merged sorting lazily.
+curated-units NWB using stored sample frames and the upstream sampling rate
+(:func:`load_curation_units_meta`) and, for an unapplied proposed merge,
+rebuild the merged sorting lazily.
 ``table_cls`` is ``CurationV2``.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
@@ -40,9 +41,8 @@ def get_sorting(
 
     from spyglass.utils import logger
 
-    row, _recording_row, fs, abs_path = load_curation_recording_meta(
-        table_cls, key
-    )
+    row = (table_cls & key).fetch1()
+    fs, abs_path = load_curation_units_meta(row)
 
     # A curation created with apply_merge=False records PROPOSED merges in
     # MergeGroup but does NOT apply them: get_sorting (what consumers such
@@ -102,7 +102,8 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
     # merges_applied OR no multi-contributor group -> the base sorting
     # already IS the result; delegate to get_sorting (its read is
     # unavoidable in those cases).
-    if bool((table_cls & key).fetch1("merges_applied")):
+    row = (table_cls & key).fetch1()
+    if bool(row["merges_applied"]):
         return table_cls.get_sorting(key)
     merge_groups = table_cls.get_unit_contributor_groups(key)
     units_to_merge = [
@@ -119,9 +120,7 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
     # would re-open the units NWB and emit a spurious "merges NOT applied"
     # warning -- we ARE applying them. The merge is deduplicated in ABSOLUTE time
     # (gap-correct on disjoint recordings); see the helper docstrings.
-    _row, _recording_row, fs, abs_path = load_curation_recording_meta(
-        table_cls, key
-    )
+    fs, abs_path = load_curation_units_meta(row)
     # Both columns are needed (dedup is in absolute time, frames are reused
     # directly) -- read them from a single NWB open.
     abs_times, sample_indices, _obs = read_units_abs_times_and_sample_indices(
@@ -136,42 +135,37 @@ def get_merged_sorting(table_cls, key: dict) -> si.BaseSorting:
     )
 
 
-def load_curation_recording_meta(table_cls, key):
-    """Fetch the master row + upstream recording metadata for a curation.
+def load_curation_units_meta(row) -> tuple[float, str]:
+    """Resolve a curation's sampling frequency and curated-units NWB path.
 
-    Returns ``(row, recording_row, fs, abs_path)``: the ``CurationV2``
-    master row, the upstream ``Recording`` row, its sampling frequency,
-    and the curated-units NWB path. Shared by ``get_sorting`` and
-    ``get_merged_sorting`` so the master row is fetched ONCE and its
-    ``sorting_id`` threaded into ``upstream_recording_row`` (skipping a
-    redundant lookup). The curated-units NWB itself is NOT read here --
-    callers read it lazily so ``get_sorting`` can short-circuit a
-    zero-unit curation without touching the filesystem.
+    Parameters
+    ----------
+    row : Mapping
+        The ``CurationV2`` master row, already fetched by the caller.
+
+    Returns
+    -------
+    fs : float
+        The upstream recording's sampling frequency (matching the
+        ``Sorting.get_sorting`` round-trip convention).
+    abs_path : str
+        The curated-units NWB path. The file itself is NOT read here --
+        callers read it lazily so ``get_sorting`` can short-circuit a
+        zero-unit curation without touching the filesystem.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
-    row = (table_cls & key).fetch1()
-    recording_row = upstream_recording_row(
-        table_cls, key, sorting_id=row["sorting_id"]
-    )
-    fs = float(recording_row["sampling_frequency"])
+    fs = _source_sampling_frequency(row["sorting_id"])
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-    return row, recording_row, fs, abs_path
+    return fs, abs_path
 
 
-def upstream_recording_row(table_cls, key, *, sorting_id=None) -> dict:
-    """Fetch the upstream Recording row for a CurationV2 key.
+def _source_sampling_frequency(sorting_id) -> float:
+    """Return the sampling frequency of a sort's recording source.
 
-    Used by ``get_sorting`` to recover the recording's
-    sampling-frequency and timestamp metadata (matching the
-    ``Sorting.get_sorting`` round-trip convention). For a concat-backed
-    sort this is the ``ConcatenatedRecording`` row (the timeline the curated
-    spike times were written against), NOT a per-member ``Recording``.
-
-    ``key`` may be a single dict or the list-of-dict form the
-    merge dispatcher passes; the restriction-based fetch
-    normalizes both. Pass ``sorting_id`` when the caller already
-    holds the master row to skip the redundant ``sorting_id`` lookup.
+    For a concat-backed sort this is the ``ConcatenatedRecording`` (the
+    timeline the curated spike times were written against), NOT a
+    per-member ``Recording``.
     """
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
@@ -179,9 +173,6 @@ def upstream_recording_row(table_cls, key, *, sorting_id=None) -> dict:
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    if sorting_id is None:
-        sorting_id = (table_cls & key).fetch1("sorting_id")
     source = SortingSelection.resolve_source({"sorting_id": sorting_id})
-    if source.kind == "recording":
-        return (Recording & source.key).fetch1()
-    return (ConcatenatedRecording & source.key).fetch1()
+    table = Recording if source.kind == "recording" else ConcatenatedRecording
+    return float((table & source.key).fetch1("sampling_frequency"))

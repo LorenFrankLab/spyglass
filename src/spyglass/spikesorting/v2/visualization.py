@@ -53,7 +53,6 @@ one; only the actual plot/export calls touch the database.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import contextmanager
 
 from spyglass.spikesorting.v2._review import visualization as _viz
 from spyglass.spikesorting.v2._review.visualization import (
@@ -94,8 +93,10 @@ def _curation_request(curation, *, caller: str) -> dict:
     its root curation (``run.root_curation`` / ``CurationV2`` with
     ``parent_curation_id=-1``), never through an unqualified sort.
     """
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        display_analyzer_request,
+    )
     from spyglass.spikesorting.v2.curation_api import CurationRef
-    from spyglass.spikesorting.v2.sorting import Sorting
 
     if not isinstance(curation, CurationRef):
         if not isinstance(curation, Mapping) or "curation_id" not in curation:
@@ -106,14 +107,7 @@ def _curation_request(curation, *, caller: str) -> dict:
                 "run.root_curation); for curated units pass that curation."
             )
         curation = CurationRef.from_key(curation)
-    waveform_recipe = (Sorting & {"sorting_id": curation.sorting_id}).fetch1(
-        "display_waveform_params_name"
-    )
-    return {
-        "curation_ref": curation,
-        "waveform_recipe": waveform_recipe,
-        "role": "display",
-    }
+    return display_analyzer_request(curation)
 
 
 def _curation_analyzer_for_plot(
@@ -132,11 +126,22 @@ def _curation_analyzer_for_plot(
     one -- and reused afterwards. The returned analyzer is the published
     object and must not be mutated.
     """
+    return _request_analyzer_for_plot(
+        _curation_request(curation, caller=caller),
+        required_extensions,
+        compute_missing=compute_missing,
+        recommend_metrics=recommend_metrics,
+    )
+
+
+def _request_analyzer_for_plot(
+    request, required_extensions, *, compute_missing, recommend_metrics=False
+):
+    """:func:`_curation_analyzer_for_plot` for an already-built request."""
     from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
     )
 
-    request = _curation_request(curation, caller=caller)
     analyzer = _resolve_curation_analyzer(**request)
     missing = _viz.missing_extensions(analyzer, required_extensions)
     if not missing:
@@ -151,25 +156,6 @@ def _curation_analyzer_for_plot(
     return _resolve_curation_analyzer(
         **request, extra_extensions={name: {} for name in missing}
     )
-
-
-@contextmanager
-def _curation_working_copy(curation, required_extensions, *, caller):
-    """Yield a disk-backed working copy carrying ``required_extensions``.
-
-    For exporters: SpikeInterface computes extensions onto the analyzer it is
-    handed, so exports run on an owned temp copy (never the published cache).
-    """
-    from spyglass.spikesorting.v2._curation.analyzer import (
-        open_curation_analyzer,
-    )
-
-    request = _curation_request(curation, caller=caller)
-    with open_curation_analyzer(
-        **request,
-        extra_extensions={name: {} for name in required_extensions},
-    ) as working:
-        yield working, request["curation_ref"], request["waveform_recipe"]
 
 
 def _write_export_provenance(output_folder, curation_ref, analyzer, recipe):
@@ -585,26 +571,32 @@ def export_si_report(
     """
     import spikeinterface.exporters as sie
 
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        analyzer_working_copy,
+    )
+
     required = (
         _viz.REPORT_DISPLAY_EXTENSIONS
         if compute_missing
         else _viz.REPORT_REQUIRED_EXTENSIONS
     )
+    request = _curation_request(curation, caller="export_si_report")
     # Read-only default: fail before any copy if the required extension is
-    # absent from the published analyzer.
-    _curation_analyzer_for_plot(
-        curation,
-        required,
-        compute_missing=compute_missing,
-        caller="export_si_report",
+    # absent from the published analyzer. SI computes onto the analyzer it is
+    # handed, so the export runs on an owned copy of the resolved analyzer.
+    published = _request_analyzer_for_plot(
+        request, required, compute_missing=compute_missing
     )
-    with _curation_working_copy(
-        curation, required, caller="export_si_report"
-    ) as (analyzer, ref, recipe):
+    with analyzer_working_copy(published) as analyzer:
         result = sie.export_report(
             analyzer, output_folder, force_computation=False, **kwargs
         )
-        _write_export_provenance(output_folder, ref, analyzer, recipe)
+        _write_export_provenance(
+            output_folder,
+            request["curation_ref"],
+            analyzer,
+            request["waveform_recipe"],
+        )
     return result
 
 
@@ -637,14 +629,25 @@ def export_to_phy(curation, output_folder, **kwargs):
     """
     import spikeinterface.exporters as sie
 
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _resolve_curation_analyzer,
+        analyzer_working_copy,
+    )
+
     kwargs.setdefault("compute_pc_features", False)
     kwargs.setdefault("add_quality_metrics", False)
     kwargs.setdefault("add_template_metrics", False)
-    with _curation_working_copy(curation, (), caller="export_to_phy") as (
-        analyzer,
-        ref,
-        recipe,
-    ):
+    request = _curation_request(curation, caller="export_to_phy")
+    # SI computes the export's extensions onto the analyzer it is handed, so
+    # the export runs on an owned copy, never the published cache.
+    with analyzer_working_copy(
+        _resolve_curation_analyzer(**request)
+    ) as analyzer:
         result = sie.export_to_phy(analyzer, output_folder, **kwargs)
-        _write_export_provenance(output_folder, ref, analyzer, recipe)
+        _write_export_provenance(
+            output_folder,
+            request["curation_ref"],
+            analyzer,
+            request["waveform_recipe"],
+        )
     return result

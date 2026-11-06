@@ -6,10 +6,8 @@ concurrent ``curation_id`` collision. The steps before staging live here:
 :func:`normalize_curation_inputs` validates the labels and source,
 :func:`validate_parent_or_reuse_root` checks the parent (or returns an existing
 root to reuse), :func:`resolve_curation_source` reads what the new curation
-composes from, :func:`plan_curation_insert` allocates the ``curation_id`` and
-builds the unit rows, and :func:`find_matching_child_curation` finds an
-existing child with the same content. ``table_cls`` is ``CurationV2``;
-``plan_curation_insert`` calls its ``_next_curation_id`` through it.
+composes from, and :func:`find_matching_child_curation` finds an existing
+child with the same content. ``table_cls`` is ``CurationV2``.
 
 Imports without the DB layer: the DataJoint tables are imported inside the
 functions.
@@ -17,17 +15,12 @@ functions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from spyglass.spikesorting.v2._curation.transforms import (
     normalize_label_state,
     validate_labels,
 )
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2._core.enums import CurationSource
-
-if TYPE_CHECKING:
-    from spyglass.spikesorting.v2._curation.plan import CurationInsertPlan
 
 
 def find_matching_child_curation(
@@ -298,50 +291,6 @@ def resolve_curation_source(
         source_units_abs_path,
         parent_raw_contributors,
         parent_labels,
-    )
-
-
-def plan_curation_insert(
-    table_cls,
-    sorting_id,
-    sorting_units: list[dict],
-    merge_groups,
-    apply_merge: bool,
-    labels: dict,
-    allow_unknown_unit_ids: bool,
-    parent_labels: dict | None = None,
-    label_policy: str = "inherit",
-) -> CurationInsertPlan:
-    """Resolve the curation_id and build the curated ``Unit`` rows.
-
-    Resolves the auto-increment ``curation_id`` (the one DB-coupled
-    step) and delegates row shaping, label composition, and label-key
-    validation to the DB-free
-    :func:`._curation.plan.build_curation_insert_plan`. ``sorting_units``
-    are the SOURCE units (raw for a root, parent ``CurationV2.Unit`` for a
-    child); ``parent_labels`` + ``label_policy`` drive label inheritance.
-    Returns the :class:`._curation.plan.CurationInsertPlan` namedtuple
-    ``(curation_id, unit_rows, kept_unit_to_contributors, labels)``, which
-    unpacks positionally.
-    """
-    from spyglass.spikesorting.v2._curation.plan import (
-        build_curation_insert_plan,
-    )
-
-    # Resolve which curation_id to use (auto-increment within sort) --
-    # the one DB-coupled step; the rest of the plan is pure.
-    curation_id = table_cls._next_curation_id(sorting_id)
-
-    return build_curation_insert_plan(
-        sorting_id=sorting_id,
-        sorting_units=sorting_units,
-        merge_groups=merge_groups,
-        apply_merge=apply_merge,
-        labels=labels,
-        allow_unknown_unit_ids=allow_unknown_unit_ids,
-        curation_id=curation_id,
-        parent_labels=parent_labels,
-        label_policy=label_policy,
     )
 
 

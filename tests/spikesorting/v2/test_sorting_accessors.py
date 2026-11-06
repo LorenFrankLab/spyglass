@@ -464,9 +464,9 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]
-    nwb_file_name = (
+    nwb_file_name, recording_sort_group_id = (
         RecordingSelection & {"recording_id": recording_id}
-    ).fetch1("nwb_file_name")
+    ).fetch1("nwb_file_name", "sort_group_id")
     # The transient analyzer folder build_unit_rows_from_analyzer loads
     # (built by the populate that created populated_sorting; resolved from
     # sorting_id).
@@ -496,7 +496,7 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
     # is ``_sorting_units.build_unit_rows_from_analyzer`` (run once in
     # make_compute); the Electrode FK / sort group are resolved at fetch time.
     sort_group_id, electrode_by_id, _region = fetch_unit_electrode_metadata(
-        recording_id, nwb_file_name
+        recording_sort_group_id, nwb_file_name
     )
     sorter_row = (
         SortingSelection * SorterParameters & populated_sorting

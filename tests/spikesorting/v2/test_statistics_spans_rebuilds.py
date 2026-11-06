@@ -276,12 +276,10 @@ def test_curation_evaluation_builds_reuse_persisted_spans(
 
 
 @pytest.mark.slow
-def test_merged_curation_analyzer_reuses_persisted_spans(
-    masked_planted_sort, tmp_path
-):
-    """``build_merged_analyzer`` estimates noise from the sort's spans."""
+def test_merged_curation_analyzer_reuses_persisted_spans(masked_planted_sort):
+    """A merged curation's analyzer estimates noise from the sort's spans."""
     from spyglass.spikesorting.v2._curation.analyzer import (
-        build_merged_analyzer,
+        _resolve_curation_analyzer,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
@@ -295,14 +293,13 @@ def test_merged_curation_analyzer_reuses_persisted_spans(
             parent_curation_id=-1,
             apply_merge=True,
         )
-        analyzer = build_merged_analyzer(
-            merged,
-            sort["display_name"],
-            "display",
-            analyzer_folder=tmp_path / "merged.analyzer",
+        analyzer = _resolve_curation_analyzer(
+            merged, sort["display_name"], "display"
         )
         assert len(analyzer.unit_ids) == 1
         np.testing.assert_array_equal(_noise(analyzer), sort["noise"])
+        # Unmap the published analyzer before the cleanup removes its folder.
+        del analyzer
     finally:
         clear_curations_for(sort["sort_key"])
 

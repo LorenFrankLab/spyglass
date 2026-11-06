@@ -21,7 +21,10 @@ caller resolved. The duration arithmetic
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 def truncation_tolerance(
@@ -329,6 +332,39 @@ def _lazy_timestamp_override(
     return parts[0] if len(parts) == 1 else _LazyConcatenatedTimestamps(parts)
 
 
+def intended_save_intervals(
+    sort_valid_times, raw_valid_times, min_segment_length: float
+) -> np.ndarray:
+    """Intersect the sort interval with the raw valid times, dropping slivers.
+
+    The one definition of the intervals a ``Recording`` is built from, shared
+    by ``restrict_recording`` (which slices them) and ``Recording.make_compute``
+    (which feeds them to the truncation guard), so the guard's expectation
+    always matches what was sliced.
+
+    Parameters
+    ----------
+    sort_valid_times, raw_valid_times : np.ndarray
+        ``(n, 2)`` [start, end] seconds for the sort interval and the raw-data
+        valid times.
+    min_segment_length : float
+        Drop intersected sub-intervals shorter than this many seconds.
+
+    Returns
+    -------
+    np.ndarray
+        Intersected intervals, shape ``(n_intervals, 2)`` in seconds.
+    """
+    # ``Interval`` opens a DB connection on import, so import it lazily.
+    from spyglass.common.common_interval import Interval
+
+    return (
+        Interval(sort_valid_times)
+        .intersect(Interval(raw_valid_times), min_length=min_segment_length)
+        .times
+    )
+
+
 def compute_recording_save_expectation(
     intended_intervals, sort_valid_times, min_segment_length: float
 ) -> RecordingSaveExpectation:
@@ -336,11 +372,10 @@ def compute_recording_save_expectation(
 
     Pure (DB-free) duration arithmetic for the ``make_insert`` truncation and
     over-request guards. The caller passes ``intended_intervals`` -- the result
-    of ``Interval(sort_valid_times).intersect(Interval(raw_valid_times),
-    min_length=min_segment_length).times``, the SAME filtering
+    of :func:`intended_save_intervals`, the SAME filtering
     ``restrict_recording`` applies to build the recording -- so ``Interval``
-    (which opens a DB connection on import) stays at the call site and this
-    helper has no DB dependency.
+    (which opens a DB connection on import) stays out of this helper and it
+    has no DB dependency.
 
     ``expected_saved_total`` sums those intended intervals; ``requested_saved_
     total`` sums the raw request after ``min_segment_length`` filtering but
@@ -521,16 +556,13 @@ def restrict_recording(
         Drop intersected sub-intervals shorter than this many seconds
         before slicing. Default ``1.0``.
     """
-    from spyglass.common.common_interval import Interval
-
     # When the requested sort interval is disjoint (e.g., a
     # run+sleep+run epoch group), frame-slice each chunk
     # separately and concatenate; a single ``frame_slice`` on the
     # outer envelope silently sorts the inter-chunk gaps too.
-    intersection = Interval(sort_valid_times).intersect(
-        Interval(raw_valid_times), min_length=min_segment_length
-    )
-    valid_times = intersection.times  # (n, 2) ndarray, seconds
+    valid_times = intended_save_intervals(
+        sort_valid_times, raw_valid_times, min_segment_length
+    )  # (n, 2) ndarray, seconds
     if len(valid_times) == 0:
         # After the min_segment_length filter the intersection may
         # be empty -- e.g. a noisy session where every chunk is

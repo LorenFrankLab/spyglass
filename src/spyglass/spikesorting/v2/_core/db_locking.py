@@ -31,8 +31,8 @@ from contextlib import contextmanager
 POPULATE_LOCK_TIMEOUT_S = 8 * 3600
 #: Fail-closed lifecycle lock: the delete/select serialization holds the lock
 #: only across a short check + cascade, so a wait past this means real contention
-#: or a stuck holder -- abort loudly instead of blocking for hours. Read at call
-#: time (callers pass ``timeout_s=None``), so a test can shorten it.
+#: or a stuck holder -- abort loudly instead of blocking for hours. Both timeouts
+#: are read at call time, so a test can shorten them.
 LIFECYCLE_LOCK_TIMEOUT_S = 120
 
 
@@ -66,7 +66,7 @@ def _lock_name(table, key) -> str:
 
 
 @contextmanager
-def advisory_key_lock(table, key, *, timeout_s: int | None = None):
+def advisory_key_lock(table, key):
     """Best-effort serialize one ``(table, key)`` via a MySQL named lock.
 
     Yields ``True`` if the lock was acquired, ``False`` on timeout/error -- the
@@ -75,15 +75,14 @@ def advisory_key_lock(table, key, *, timeout_s: int | None = None):
     raises. Self-releasing: ``RELEASE_LOCK`` on exit, and the session ending
     frees it anyway.
     """
-    if timeout_s is None:
-        timeout_s = POPULATE_LOCK_TIMEOUT_S
     lock_name = _lock_name(table, key)
     connection = table.connection
     acquired = False
     try:
         try:
             result = connection.query(
-                "SELECT GET_LOCK(%s, %s)", args=(lock_name, int(timeout_s))
+                "SELECT GET_LOCK(%s, %s)",
+                args=(lock_name, int(POPULATE_LOCK_TIMEOUT_S)),
             ).fetchone()
             acquired = bool(result and result[0] == 1)
         except Exception:  # noqa: BLE001 - best-effort; fall through unacquired
@@ -100,7 +99,7 @@ def advisory_key_lock(table, key, *, timeout_s: int | None = None):
 
 
 @contextmanager
-def required_advisory_lock(table, key, *, timeout_s: int | None = None):
+def required_advisory_lock(table, key):
     """Fail-closed serialize one ``(table, key)`` via a MySQL named lock.
 
     Raises :class:`AdvisoryLockError` unless ``GET_LOCK`` returns exactly ``1``
@@ -109,15 +108,14 @@ def required_advisory_lock(table, key, *, timeout_s: int | None = None):
     Yields nothing (entering the block IS the acquisition proof). Self-releasing
     on exit.
     """
-    if timeout_s is None:
-        timeout_s = LIFECYCLE_LOCK_TIMEOUT_S
+    timeout_s = int(LIFECYCLE_LOCK_TIMEOUT_S)
     lock_name = _lock_name(table, key)
     connection = table.connection
     acquired = False
     try:
         try:
             result = connection.query(
-                "SELECT GET_LOCK(%s, %s)", args=(lock_name, int(timeout_s))
+                "SELECT GET_LOCK(%s, %s)", args=(lock_name, timeout_s)
             ).fetchone()
         except Exception as exc:  # GET_LOCK itself failed -> fail closed
             raise AdvisoryLockError(
@@ -127,7 +125,7 @@ def required_advisory_lock(table, key, *, timeout_s: int | None = None):
         if outcome != 1:
             raise AdvisoryLockError(
                 f"could not acquire advisory lock {lock_name!r} within "
-                f"{int(timeout_s)}s (GET_LOCK returned {outcome!r}: "
+                f"{timeout_s}s (GET_LOCK returned {outcome!r}: "
                 f"{'timed out' if outcome == 0 else 'server error'}); refusing "
                 "to proceed unserialized."
             )

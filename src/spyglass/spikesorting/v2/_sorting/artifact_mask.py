@@ -915,8 +915,6 @@ def sorting_statistics_spans(
         over the artifact frames of a masked single recording, otherwise
         unchanged) and the spans as ``(start_frame, end_frame)`` pairs.
     """
-    import numpy as np
-
     if traces.kind == "motion_corrected_recording":
         # Persisted masked, with the source's spans copied onto its row.
         spans = corrected_statistics_spans(
@@ -945,8 +943,7 @@ def sorting_statistics_spans(
             recording.get_num_samples(), excluded_ranges, boundary_spans
         )
     else:  # concat member masks and spans were materialized upstream
-        spans = [
-            (int(a), int(b))
-            for a, b in np.asarray(concat_statistics_spans).reshape(-1, 2)
-        ]
+        from spyglass.spikesorting.v2._motion.estimation import normalize_spans
+
+        spans = normalize_spans(concat_statistics_spans)
     return recording, spans

@@ -65,9 +65,6 @@ from spyglass.spikesorting.v2._matching.inputs import (
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
-from spyglass.spikesorting.v2.exceptions import (
-    UnknownMatcherError,
-)
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
@@ -194,7 +191,6 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """
         from spyglass.spikesorting.v2.matcher_protocol import (
             _get_matcher_schema,
-            _registered_matchers,
         )
         from spyglass.spikesorting.v2._core.table_integrity import (
             _insert_parameter_rows,
@@ -203,16 +199,7 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             validate_lookup_rows,
         )
 
-        registered = _registered_matchers()
-
         def schema_for(row):
-            if row["matcher"] not in registered:
-                raise UnknownMatcherError(
-                    f"Unknown matcher {row['matcher']!r}. Registered matchers: "
-                    f"{sorted(registered)}. To add a new matcher, implement "
-                    "MatcherProtocol and register it via register_matcher() "
-                    "before inserting parameters."
-                )
             return _get_matcher_schema(row["matcher"])
 
         def validate_rows(batch, names):
@@ -564,31 +551,21 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             stored_analysis_path,
         )
         from spyglass.spikesorting.v2.sorting import SortingSelection
-        from spyglass.spikesorting.v2.recording import Recording
-        from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
-        from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
         from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
+        from spyglass.spikesorting.v2._storage.spikeinterface import (
+            close_nwb_recording,
+        )
 
-        source = SortingSelection.resolve_effective_source(curation_key).traces
-        table = {
-            "recording": Recording,
-            "concatenated_recording": ConcatenatedRecording,
-            "motion_corrected_recording": MotionCorrectedRecording,
-        }[source.kind]
-        row = (table & source.key).fetch1()
-        path = stored_analysis_path(row["analysis_file_name"])
+        traces = SortingSelection.resolve_effective_source(curation_key).traces
+        path = stored_analysis_path(traces.row["analysis_file_name"])
         if not Path(path).is_file():
             raise FileNotFoundError(
                 f"Matching input {curation_key} has a missing trace artifact. "
                 "Rebuild its recording before planning the match."
             )
         recording = read_recording_nwb(
-            path, electrical_series_path=row["electrical_series_path"]
+            path, electrical_series_path=traces.row["electrical_series_path"]
         )
-        from spyglass.spikesorting.v2._storage.spikeinterface import (
-            close_nwb_recording,
-        )
-
         try:
             return recording.get_channel_locations()
         finally:
@@ -629,7 +606,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                         "sorting_id": choices_by_input[label][0],
                         "curation_id": choices_by_input[label][1],
                     },
-                    **({"allow_rebuild": False} if not allow_rebuild else {}),
+                    allow_rebuild=allow_rebuild,
                 ),
             )
             for label in sorted(choices_by_input)
@@ -1055,7 +1032,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             get_matcher,
         )
         from spyglass.spikesorting.v2._storage.staged_outputs import (
-            unlink_staged_analysis_file as _unlink_staged_analysis_file,
+            staged_analysis_file,
+        )
+        from spyglass.spikesorting.v2._storage.units_nwb import (
+            read_stored_units,
         )
 
         # Producer provenance, resolved from the registry entry that runs, so
@@ -1091,10 +1071,18 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             for plan in input_plan
             for unit_id in plan["matchable_unit_ids"]
         ]
+        # Each input's curated units are read once, for both its spike
+        # counts and its bundle.
+        sortings = {
+            plan["input_index"]: read_stored_units(plan["units"])
+            for plan in input_plan
+        }
         recording_spike_counts = [
             count
             for plan in input_plan
-            for count in _input_recording_spike_counts(plan)
+            for count in _input_recording_spike_counts(
+                plan, sortings[plan["input_index"]]
+            )
         ]
         provenance_tables = _unit_match_compute.unit_match_provenance_tables(
             key,
@@ -1108,12 +1096,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             matcher_provenance=producer_provenance,
         )
 
-        analysis_file_name = AnalysisNwbfile().create(
-            anchor_nwb_file_name,
-            restrict_permission=True,  # 0o644, not world-writable 0o666
-        )
-        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-        try:
+        with staged_analysis_file(
+            anchor_nwb_file_name, context="UnitMatch.make_compute"
+        ) as analysis_file_name:
+            abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
             if len(input_plan) < 2:
                 # A single input: no cross-session pairs, no matcher or
                 # bundle extraction (needs no matcher backend).
@@ -1127,20 +1113,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             else:
                 oriented_pairs, runtime_s = (
                     _unit_match_compute.extract_and_match(
-                        input_plan, matcher_name, params, job_kwargs
+                        input_plan,
+                        matcher_name,
+                        params,
+                        job_kwargs,
+                        sortings=sortings,
                     )
                 )
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
             )
-        except Exception:
-            # write_pairs_table may already have created the file on disk; unlink
-            # it so a failed compute does not orphan staged scratch (mirrors
-            # Recording / ConcatenatedRecording make cleanup).
-            _unlink_staged_analysis_file(
-                analysis_file_name, context="UnitMatch.make_compute"
-            )
-            raise
         return UnitMatchComputed(
             analysis_file_name=analysis_file_name,
             pairs_object_id=pairs_object_id,

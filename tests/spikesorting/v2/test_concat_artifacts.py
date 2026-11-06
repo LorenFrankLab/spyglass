@@ -470,9 +470,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     from spyglass.spikesorting.v2._sorting.analyzer import (
         reconstruct_recording_and_sorting,
     )
-    from spyglass.spikesorting.v2._recording.source import (
-        load_effective_recording,
-    )
+    from tests.spikesorting.v2._ingest_helpers import load_effective_recording
 
     rebuilt, canonical_sorting = reconstruct_recording_and_sorting(
         Sorting(), sorting_key

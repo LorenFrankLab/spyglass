@@ -2205,9 +2205,9 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
         read_recording_artifact_valid_times,
     )
     from spyglass.spikesorting.v2._recording.source import (
-        load_effective_recording,
         read_persisted_traces,
     )
+    from tests.spikesorting.v2._ingest_helpers import load_effective_recording
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording

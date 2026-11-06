@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import functools
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -86,6 +88,45 @@ def unlink_staged_analysis_file(
             f"{context}: failed to clean up staged analysis file "
             f"{analysis_file_name!r}: {cleanup_exc!r}"
         )
+
+
+@contextmanager
+def staged_analysis_file(
+    nwb_file_name: str,
+    *,
+    context: str,
+) -> Iterator[str]:
+    """Create an unregistered ``AnalysisNwbfile``; remove it if the body fails.
+
+    ``AnalysisNwbfile().create`` writes a stub to disk (0o644) before the
+    caller fills it, so a write that raises before ``make_insert`` registers
+    the row would otherwise orphan that file. On an exception in the ``with``
+    body the staged file is discarded with
+    :func:`unlink_staged_analysis_file` and the exception re-raised.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Parent NWB the analysis file is created from.
+    context : str
+        Caller name used in cleanup log messages.
+
+    Yields
+    ------
+    str
+        The staged analysis file name.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    analysis_file_name = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name,
+        restrict_permission=True,  # 0o644, not world-writable 0o666
+    )
+    try:
+        yield analysis_file_name
+    except Exception:
+        unlink_staged_analysis_file(analysis_file_name, context=context)
+        raise
 
 
 class StagedOutputs(NamedTuple):

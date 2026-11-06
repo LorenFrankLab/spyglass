@@ -169,7 +169,9 @@ def assert_displayed_unit_properties_available(
 ) -> None:
     """Fail closed when requested FigPack unit-table columns are unavailable."""
     requested = normalize_displayed_unit_properties(displayed_unit_properties)
-    if requested is None:
+    # ``None`` defers to SI's defaults and ``[]`` requests no columns, so
+    # neither needs the analyzer's units table.
+    if not requested:
         return
     available = available_displayed_unit_properties(analyzer)
     missing = [prop for prop in requested if prop not in available]

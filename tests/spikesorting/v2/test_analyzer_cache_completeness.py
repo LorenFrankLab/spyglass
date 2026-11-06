@@ -248,6 +248,31 @@ def test_incomplete_cache_is_rejected_or_rebuilt(
     _assert_recovered_values(reused, original, expected)
 
 
+def test_extension_without_run_info_is_incomplete(complete_analyzer, tmp_path):
+    """A saved extension without run info is never attached or trusted.
+
+    SI writes ``run_info.json`` only after a compute finishes (the waveform
+    memmap and ``params.json`` already exist while it runs), so its absence
+    marks an interrupted compute at every reader.
+    """
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        attach_memmapped_waveforms,
+    )
+
+    original, _recording, _sorting, _params = complete_analyzer
+    folder = tmp_path / "running.analyzer"
+    cache.copy_analyzer_folder(original, folder)
+    (folder / "extensions/waveforms/run_info.json").unlink()
+    analyzer = si.SortingAnalyzer.load(
+        folder, load_extensions=False, format="binary_folder"
+    )
+    attach_memmapped_waveforms(analyzer)
+    assert "waveforms" not in analyzer.extensions
+    with pytest.raises(ValueError, match="incomplete"):
+        cache.analyzer_extension_params(analyzer, "waveforms")
+    assert cache.analyzer_extension_params(analyzer, "templates")
+
+
 def test_complete_cache_validation_keeps_extensions_lazy_and_reuses_bytes(
     complete_analyzer,
 ):

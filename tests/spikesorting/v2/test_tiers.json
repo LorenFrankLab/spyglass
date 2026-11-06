@@ -174,6 +174,9 @@
         "test_waveform_params_for_preprocessing_literal_region_names": "unit"
       }
     },
+    "test_artifact_bound_selection.py": {
+      "tier": "db_unit"
+    },
     "test_artifact_detection_merge.py": {
       "tier": "stage",
       "overrides": {
@@ -204,7 +207,6 @@
         "test_detect_artifacts_warns_zscore_inert_on_single_channel": "unit",
         "test_scan_artifact_frames_raises_on_nan_at_n_jobs_1": "unit",
         "test_scan_artifact_frames_raises_on_nan_at_n_jobs_2_process_pool": "unit",
-        "test_spike_times_to_frames_clamp_vs_raise_boundary": "unit",
         "test_split_runs_at_gaps_splits_only_inside_runs": "unit",
         "test_timestamp_helpers_peak_memory_bounded_vs_get_times": "unit"
       }
@@ -386,9 +388,6 @@
         "test_detect_artifacts_valid_times_never_cross_gap": "db_unit"
       }
     },
-    "test_disjoint_readback.py": {
-      "tier": "unit"
-    },
     "test_downstream_consumers.py": {
       "tier": "pipeline",
       "overrides": {
@@ -459,7 +458,6 @@
     "test_integrity.py": {
       "tier": "db_unit",
       "overrides": {
-        "test_audit_source_part_integrity": "pipeline",
         "test_no_orphan_part_rows_in_v2_tables": "pipeline",
         "test_selection_fk_chain_holds_for_artifact_and_sorting_selection": "pipeline"
       }

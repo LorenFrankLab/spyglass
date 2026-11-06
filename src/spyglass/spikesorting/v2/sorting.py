@@ -103,7 +103,9 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
     find_orphaned_masters,
-    split_leading_restrictions,
+    optional_part_value,
+    restrict_by_leading_args,
+    single_source_part,
 )
 from spyglass.spikesorting.v2._recording.source import SourceResolution
 from spyglass.spikesorting.v2._core.job_config import resolve_effective_seed
@@ -770,30 +772,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         SchemaBypassError
             If zero or multiple source part rows exist for ``key``.
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rec_rows = (cls.RecordingSource & master_key).fetch(as_dict=True)
-        concat_rows = (cls.ConcatenatedRecordingSource & master_key).fetch(
-            as_dict=True
-        )
-        total = len(rec_rows) + len(concat_rows)
-        if total != 1:
-            raise SchemaBypassError(
-                f"SortingSelection {master_key} has {total} source part "
-                "rows; expected exactly one. Use "
-                "SortingSelection.insert_selection() to add or remove "
-                "this selection."
-            )
-        if rec_rows:
-            return SourceResolution(
-                kind="recording",
-                key={"recording_id": rec_rows[0]["recording_id"]},
-            )
-        return SourceResolution(
-            kind="concatenated_recording",
-            key={"concat_recording_id": concat_rows[0]["concat_recording_id"]},
-        )
+        kind, source_key = single_source_part(cls, key)
+        return SourceResolution(kind=kind, key=source_key)
 
     @classmethod
     def resolve_artifact_detection(cls, key: dict):
@@ -816,8 +796,8 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If more than one ``ArtifactDetectionSource`` row exists for ``key``
             (the part is zero-or-one by construction).
         """
-        merge_id = cls._optional_part_value(
-            key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
+        merge_id = optional_part_value(
+            cls, key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
         )
         if merge_id is None:
             return None
@@ -835,29 +815,12 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         SchemaBypassError
             If more than one ``MotionCorrectionSource`` row exists for ``key``.
         """
-        return cls._optional_part_value(
-            key, cls.MotionCorrectionSource, "motion_corrected_recording_id"
+        return optional_part_value(
+            cls,
+            key,
+            cls.MotionCorrectionSource,
+            "motion_corrected_recording_id",
         )
-
-    @classmethod
-    def _optional_part_value(cls, key: dict, part, column: str):
-        """Return ``column`` of a selection's zero-or-one part row, or ``None``.
-
-        Raises
-        ------
-        SchemaBypassError
-            If more than one ``part`` row exists for ``key``.
-        """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        rows = (part & master_key).fetch(column)
-        if len(rows) > 1:
-            raise SchemaBypassError(
-                f"SortingSelection {master_key} has {len(rows)} "
-                f"{part.__name__} rows; expected zero or one."
-            )
-        return rows[0] if len(rows) else None
 
     @classmethod
     def resolve_effective_source(cls, key: dict) -> EffectiveSource:
@@ -954,7 +917,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         (``Recording``, ``ConcatenatedRecording`` or
         ``MotionCorrectedRecording``): a locked, verified rebuild whose
         content must match the stored ``content_hash``. Call it before
-        :func:`._recording.source.load_effective_recording`, or use
+        :func:`._recording.source.read_effective_recording`, or use
         :meth:`load_stored_traces`.
 
         Parameters
@@ -989,14 +952,16 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         recording preserves its lineage source's frames and sampling rate.
         """
         lineage, traces = source
-        recording_row = (
-            traces.row
+        sampling_frequency = (
+            traces.row["sampling_frequency"]
             if traces.kind == lineage.kind
-            else (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
+            else (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1(
+                "sampling_frequency"
+            )
         )
         return StoredUnits(
             abs_path=AnalysisNwbfile.get_abs_path(units_analysis_file_name),
-            sampling_frequency=float(recording_row["sampling_frequency"]),
+            sampling_frequency=float(sampling_frequency),
         )
 
     @staticmethod
@@ -1660,13 +1625,11 @@ class Sorting(
         # Resolve the source sampling rate. A motion-corrected recording keeps
         # its source's frames and rate, so the same row serves a corrected sort.
         source = SortingSelection.resolve_source(key)
-        if source.kind == "recording":
-            rec_row = (
-                Recording & {"recording_id": source.key["recording_id"]}
-            ).fetch1()
-        else:  # concatenated_recording
-            rec_row = (ConcatenatedRecording & source.key).fetch1()
-        fs = float(rec_row["sampling_frequency"])
+        fs = float(
+            (_TRACE_TABLES[source.kind] & source.key).fetch1(
+                "sampling_frequency"
+            )
+        )
 
         if int(row["n_units"]) == 0:
             # Zero units is a valid result; return an empty sorting /
@@ -2026,12 +1989,9 @@ class Sorting(
         **kwargs
             Keyword arguments forwarded to ``super().delete``.
         """
-        restriction_args, args = split_leading_restrictions(args)
-        if restriction_args:
-            target = self
-            for restriction in restriction_args:
-                target = target & restriction
-            return target.delete(*args, safemode=safemode, **kwargs)
+        restricted, args = restrict_by_leading_args(self, args)
+        if restricted is not None:
+            return restricted.delete(*args, safemode=safemode, **kwargs)
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
@@ -2054,8 +2014,9 @@ class Sorting(
         # 5-50 GB analyzer scratch then would destroy data for a row the user
         # chose to keep. ``remove_analyzer_cache`` no-ops a missing folder and
         # propagates a real removal error (``ignore_errors=False``).
+        surviving = set((Sorting & rows).fetch("sorting_id"))
         for row in rows:
-            if not (Sorting & row):
+            if row["sorting_id"] not in surviving:
                 # Remove the regeneratable cache UNDER the per-sort lock so a
                 # concurrent reader / rebuild never races the rmtree.
                 with analyzer_cache_lock(row["sorting_id"]):

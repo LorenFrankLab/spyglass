@@ -293,7 +293,7 @@ def run_v2_pipeline(
                 stage did work this call, ``"reused"`` if its row already existed
                 and the call no-opped, or ``"skipped"`` if the preset configured
                 no such stage (only ``artifact_detection_status`` for a
-                no-artifact preset) -- see ``_STAGE_STATUSES``.
+                no-artifact preset) -- see ``StageStatus``.
             ``stage_seconds``     : dict of monotonic wall-clock seconds spent
                 per stage **this call** (the same stage names as the ``*_status``
                 keys above) -- ≈0 on an idempotent re-run, NOT cumulative
@@ -687,5 +687,4 @@ def _run_pipeline(
             warnings_list=warnings_list,
         )
 
-    run_summary["stage_seconds"] = stage_seconds
     return RunResult(run_summary)

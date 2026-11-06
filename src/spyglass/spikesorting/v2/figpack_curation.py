@@ -27,6 +27,7 @@ import json
 import shutil
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -71,7 +72,6 @@ from spyglass.spikesorting.v2.exceptions import (
     FigPackUploadError,
     SchemaBypassError,
 )
-from spyglass.spikesorting.v2.sorting import Sorting
 from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
 )
@@ -89,6 +89,7 @@ class FigPackBuildResult:
 
     uri: str
     reused: bool
+    figpack_curation_id: uuid.UUID
 
 
 # ---- figpack access + storage helpers (lazy / DB-light) ------------------
@@ -285,22 +286,40 @@ def _assert_figure_identity(
     return config
 
 
+@contextmanager
+def _curation_view_analyzer(curation_ref):
+    """Yield a curation's published display analyzer for the curation view.
+
+    The analyzer carries the sorting-summary widget's extensions, which both
+    the FigPack curation figure and a review's unit inspection render --
+    building, rebuilding, or extending the published cache as needed (see
+    ``curation_analyzer_with_extensions``). It must not be mutated.
+    """
+    from spyglass.spikesorting.v2._review import visualization as _viz
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        curation_analyzer_with_extensions,
+        display_analyzer_request,
+    )
+
+    required = _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
+    with curation_analyzer_with_extensions(
+        **display_analyzer_request(curation_ref),
+        extra_extensions={name: {} for name in required},
+    ) as analyzer:
+        yield analyzer
+
+
 def _resolve_curation_view_inputs(
     curation_key: dict, display_options
 ) -> tuple[str, ReviewTimelineInputs]:
     """Resolve the DB inputs of :func:`._review.view.build_curation_view`.
 
-    Resolves the sort's display analyzer carrying the curation-view
-    extensions -- building, rebuilding, or extending the published cache as
-    needed (see ``curation_analyzer_with_extensions``) -- and the review
-    timeline's inputs. Returns ``(analyzer_folder, timeline_inputs)``.
-    ``display_options`` is validated first so a malformed display budget fails
-    before any analyzer work.
+    Resolves the curation-view display analyzer
+    (:func:`_curation_view_analyzer`) and the review timeline's inputs.
+    Returns ``(analyzer_folder, timeline_inputs)``. ``display_options`` is
+    validated first so a malformed display budget fails before any analyzer
+    work.
     """
-    from spyglass.spikesorting.v2._review import visualization as _viz
-    from spyglass.spikesorting.v2._curation.analyzer import (
-        curation_analyzer_with_extensions,
-    )
     from spyglass.spikesorting.v2._storage.observation_io import (
         resolve_review_timeline_inputs,
     )
@@ -309,17 +328,7 @@ def _resolve_curation_view_inputs(
     require_figpack()
     ReviewDisplayOptions.from_mapping(display_options)
 
-    sorting_key = {"sorting_id": curation_key["sorting_id"]}
-    waveform_recipe = (Sorting & sorting_key).fetch1(
-        "display_waveform_params_name"
-    )
-    required = _viz.DISPLAY_WIDGET_EXTENSIONS["plot_sorting_summary"]
-    with curation_analyzer_with_extensions(
-        curation_key,
-        waveform_recipe,
-        "display",
-        extra_extensions={name: {} for name in required},
-    ) as analyzer:
+    with _curation_view_analyzer(curation_key) as analyzer:
         analyzer_folder = str(analyzer.folder)
     return analyzer_folder, resolve_review_timeline_inputs(curation_key)
 
@@ -1069,6 +1078,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         return FigPackBuildResult(
             uri=(cls & selection).fetch1("figpack_uri"),
             reused=reused,
+            figpack_curation_id=selection["figpack_curation_id"],
         )
 
     @classmethod

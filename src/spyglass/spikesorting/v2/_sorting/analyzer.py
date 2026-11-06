@@ -11,8 +11,9 @@ compute). ``load_or_rebuild_analyzer`` and ``rebuild_analyzer_folder`` hold the
 cache-miss / reconstruction policy.
 
 DB-FREE AT IMPORT. This module activates no ``dj.schema`` and opens no DB
-connection at import: all SpikeInterface / spyglass dependencies are imported
-lazily inside the functions. ``build_analyzer`` accepts resolved inputs only;
+connection at import: all SpikeInterface / spyglass dependencies except the
+DB-free ``_storage.recompute`` extension tuple are imported lazily inside the
+functions. ``build_analyzer`` accepts resolved inputs only;
 the explicit rebuild adapter fetches its inputs before invoking computation.
 """
 
@@ -20,15 +21,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+from spyglass.spikesorting.v2._storage.recompute import (
+    BASE_ANALYZER_EXTENSIONS,
+)
+
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._recording.source import EffectiveSource
-
-BASE_ANALYZER_EXTENSIONS = (
-    "random_spikes",
-    "noise_levels",
-    "templates",
-    "waveforms",
-)
 
 # Complete immutable extension set published for an interactive display
 # analyzer. Evaluation, curation plots, and the curation-scoped resolver import
@@ -350,10 +348,11 @@ def _assert_complete_base_extensions(analyzer) -> None:
     array headers without registering extensions or reading their payloads.
     Low-level loaders still allow intentionally partial expert analyzers.
     """
-    from spikeinterface.core.sortinganalyzer import get_extension_class
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_extension_array,
+    )
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        saved_extension_metadata,
     )
 
     missing = set(BASE_ANALYZER_EXTENSIONS) - set(
@@ -369,10 +368,8 @@ def _assert_complete_base_extensions(analyzer) -> None:
         "waveforms": ("waveforms",),
     }
     for name in BASE_ANALYZER_EXTENSIONS:
-        extension = get_extension_class(name)(analyzer)
-        extension.load_params()
-        extension.load_run_info()
-        if not (extension.run_info or {}).get("run_completed", False):
+        extension, completed = saved_extension_metadata(analyzer, name)
+        if not completed:
             raise ValueError(f"Analyzer base extension {name!r} is incomplete.")
         params = extension.params
         if name == "templates":
@@ -940,6 +937,7 @@ def build_analyzer(
             "before computation; this function does no database or "
             "ambient configuration lookup."
         )
+    seed = job_kwargs.get("random_seed", 0)
 
     import shutil
 
@@ -1033,8 +1031,6 @@ def build_analyzer(
     if probe.ndim == 3:
         import numpy as np
 
-        from spyglass.utils import logger
-
         # Dropping a non-constant z shifts channel distances (and sparsity);
         # Frank-lab probes are planar, so warn.
         z = np.asarray(probe.contact_positions)[:, 2]
@@ -1054,7 +1050,7 @@ def build_analyzer(
 
         recording = pinned_whiten(
             recording,
-            random_seed=(job_kwargs or {}).get("random_seed", 0),
+            random_seed=seed,
             spans=statistics_spans,
         )
 
@@ -1072,7 +1068,7 @@ def build_analyzer(
         recording,
         statistics_spans,
         return_in_uV=not whiten,
-        seed=(job_kwargs or {}).get("random_seed", 0),
+        seed=seed,
     )
 
     try:
@@ -1119,14 +1115,12 @@ def build_analyzer(
                 # persisted peak_amplitude_uv / peak channel derived from its
                 # templates) drifts between rebuilds. Same row seed as the
                 # sort's whitening / noise pins.
-                "seed": (job_kwargs or {}).get("random_seed", 0),
+                "seed": seed,
             },
             "noise_levels": {
                 # SI samples unseeded random chunks by default, so noise (and
                 # SNR-based curation) would drift between builds.
-                "random_slices_kwargs": {
-                    "seed": (job_kwargs or {}).get("random_seed", 0)
-                },
+                "random_slices_kwargs": {"seed": seed},
             },
             "waveforms": {
                 "ms_before": float(waveform_params["ms_before"]),

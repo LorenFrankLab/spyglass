@@ -22,6 +22,7 @@ from spyglass.spikesorting.v2._matching.inputs import (
     _check_input_count_and_sortings,
     _check_input_curation,
     _check_input_sessions,
+    _check_selection_universe,
     _input_label,
     _resolve_match_input,
     _session_start_mismatches,
@@ -60,7 +61,6 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         input_set_hash,
         utc_datetime,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -218,13 +218,12 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         ]
         snapshot = row["selection_snapshot"]
         matchable = [int(u) for u in snapshot["included_unit_ids"]]
-        known_units = set(
-            map(int, (CurationV2.Unit & curation_key).fetch("unit_id"))
+        _check_selection_universe(
+            curation_key,
+            snapshot,
+            exc_class,
+            "Frozen unit selection universe differs from the pinned curation.",
         )
-        if set(map(int, snapshot["labels_by_unit"])) != known_units:
-            raise exc_class(
-                "Frozen unit selection universe differs from the pinned curation."
-            )
         if not matchable:
             raise ValueError(
                 f"UnitMatch.make: input_index {input_index} "
@@ -256,8 +255,8 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         input_curation_keys.append(curation_key)
     # Resolve the files last, once every input passed its checks. The
     # checks above can still rebuild a file: for two or more inputs, a
-    # single recording's frames are read through
-    # Recording().get_recording, which rebuilds a missing traces file,
+    # single recording's frames are read through open_base_recording
+    # (allow_rebuild=True), which rebuilds a missing traces file,
     # so a fetch that raises on a later input may already have rebuilt
     # an earlier input's file. A single input writes zero pairs without
     # extracting a bundle, so it reads (and heals) no traces file; only

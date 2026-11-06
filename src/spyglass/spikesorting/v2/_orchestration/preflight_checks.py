@@ -1,7 +1,8 @@
 """Per-stage prerequisite checks for ``preflight_v2_pipeline``.
 
-The concat preflight reuses the preset-row checks through ``_raising_check``
-and :func:`assert_preset_compute_rows`.
+The concat preflight runs the same checks through ``_raising_check``: the
+preset rows via :func:`assert_preset_compute_rows`, and the per-session,
+sort-group, sampling-rate and motion checks once per member.
 """
 
 from __future__ import annotations
@@ -28,6 +29,28 @@ if TYPE_CHECKING:
 # Relative tolerance for a recording's sampling rate against the rate a
 # preset is tuned for; 0.5% absorbs float drift in an estimated rate.
 _SAMPLING_RATE_TOLERANCE = 0.005
+
+
+def _sampling_rate_matches(actual_rate: float, bundle) -> bool:
+    """Whether ``actual_rate`` is within tolerance of the preset's rate.
+
+    Parameters
+    ----------
+    actual_rate : float
+        The recording's sampling rate, in Hz.
+    bundle : _PipelinePreset
+        The resolved preset; its ``sampling_rate_hz`` must not be ``None``.
+
+    Returns
+    -------
+    bool
+        True when the rates differ by at most ``_SAMPLING_RATE_TOLERANCE``
+        of ``bundle.sampling_rate_hz``.
+    """
+    return (
+        abs(actual_rate - bundle.sampling_rate_hz)
+        <= _SAMPLING_RATE_TOLERANCE * bundle.sampling_rate_hz
+    )
 
 
 def _raising_check(
@@ -219,8 +242,6 @@ def _check_sorter_param_rows(
 
     Returns
     -------
-    sorter_params_query : QueryExpression
-        The ``SorterParameters`` restriction to the preset's row.
     sorter_params_exist : bool
         Whether the row exists; False when ``sort_checks`` is False.
     sorter_row : dict or None
@@ -254,7 +275,7 @@ def _check_sorter_param_rows(
             check("sorter_params_valid", False, str(exc))
         else:
             check("sorter_params_valid", True, "")
-    return sorter_params_query, sorter_params_exist, sorter_row
+    return sorter_params_exist, sorter_row
 
 
 def _check_display_waveform_params(
@@ -343,7 +364,7 @@ def _check_sampling_rate(
     check: "Callable[[str, Any, str], bool]",
     bundle,
     nwb_file_name: str,
-    pipeline_preset: str,
+    pipeline_preset: "str | None",
 ) -> None:
     """Check the recording samples at the rate the preset is tuned for.
 
@@ -353,6 +374,8 @@ def _check_sampling_rate(
     The clusterless preset is rate-agnostic (sampling_rate_hz is None) and is
     skipped; the check is also skipped if Raw is not ingested yet (raw_exists
     already reports that, so this would only add a confusing second failure).
+    A ``pipeline_preset`` of ``None`` (a caller holding only the resolved
+    bundle, e.g. the concat preflight) names "the preset" instead.
     """
     from spyglass.common import Raw
 
@@ -360,15 +383,16 @@ def _check_sampling_rate(
         raw = Raw & {"nwb_file_name": nwb_file_name}
         if raw:
             actual_rate = float(raw.fetch1("sampling_rate"))
-            rate_ok = (
-                abs(actual_rate - bundle.sampling_rate_hz)
-                <= _SAMPLING_RATE_TOLERANCE * bundle.sampling_rate_hz
+            preset_label = (
+                "the preset"
+                if pipeline_preset is None
+                else f"pipeline_preset {pipeline_preset!r}"
             )
             check(
                 "sampling_rate_matches",
-                rate_ok,
+                _sampling_rate_matches(actual_rate, bundle),
                 f"recording {nwb_file_name!r} samples at {actual_rate:g} Hz "
-                f"but pipeline_preset {pipeline_preset!r} is tuned for "
+                f"but {preset_label} is tuned for "
                 f"{bundle.sampling_rate_hz} Hz: the rate-keyed sorter row "
                 f"{bundle.sorter_params_name!r} holds its clip_size / "
                 "detect_interval snippet window at that rate. Pick the "
@@ -381,24 +405,40 @@ def _check_motion_stage(
     check: "Callable[[str, Any, str], bool]",
     bundle,
     *,
-    nwb_file_name: str,
-    sort_group_id: int,
+    sort_groups: "list[tuple[Callable[[str, Any, str], bool], str, int]]",
     motion_mode,
     motion_correction_params_name: str,
     preprocessing_params_exist: bool,
-    sort_group_exists: bool,
-    sorter_params_exist: bool,
     sorter_row: "dict | None",
 ) -> "MotionRecipe | None":
     """Check a motion stage (estimate / apply) can run; return its recipe.
 
     The recipe must exist and resolve, the preset's preprocessing recipe must
     filter (motion is estimated on filtered, unwhitened traces;
-    MotionEstimateSelection.insert_selection refuses the same source), the
-    group's effective geometry must support the estimation recipe (checked
-    here on the registered positions, before any populate; the estimator
-    re-checks the actual recording), and a sort of a corrected recording must
-    not run the sorter's own motion correction.
+    MotionEstimateSelection.insert_selection refuses the same source), each
+    sort group's effective geometry must support the estimation recipe
+    (checked here on the registered positions, before any populate; the
+    estimator re-checks the actual recording), and a sort of a corrected
+    recording must not run the sorter's own motion correction.
+
+    Parameters
+    ----------
+    check : Callable[[str, Any, str], bool]
+        The check callback for the run-level checks.
+    bundle : _PipelinePreset
+        The resolved preset.
+    sort_groups : list of (check, nwb_file_name, sort_group_id)
+        The sort groups whose geometry is checked, each through its own
+        callback so a concat run can name the member; empty skips the
+        geometry check.
+    motion_mode, motion_correction_params_name
+        The motion request.
+    preprocessing_params_exist : bool
+        Whether the preset's ``PreprocessingParameters`` row exists; the
+        filter check is skipped otherwise.
+    sorter_row : dict or None
+        The preset's ``SorterParameters`` row; ``None`` (not checked or
+        missing) skips the sorter's motion-correction check.
 
     Returns
     -------
@@ -425,18 +465,18 @@ def _check_motion_stage(
         check("motion_recipe_exists", False, str(exc))
     else:
         check("motion_recipe_exists", True, "")
-        if sort_group_exists:
+        for group_check, nwb_file_name, sort_group_id in sort_groups:
             motion_geometry = motion_geometry_problem(
                 nwb_file_name,
                 sort_group_id,
                 motion_recipe.resolved_estimation,
             )
-            check(
+            group_check(
                 "motion_geometry_supported",
                 motion_geometry is None,
                 motion_geometry or "",
             )
-    if motion_mode == "apply" and sorter_params_exist:
+    if motion_mode == "apply" and sorter_row is not None:
         sorter_motion = sorter_motion_correction_problem(
             bundle.sorter, sorter_row["params"], bundle.sorter_params_name
         )
@@ -450,7 +490,7 @@ def _check_motion_stage(
 
 def assert_preset_compute_rows(
     bundle, *, caller: str = "run_v2_concat_pipeline", sort_checks: bool = True
-) -> None:
+) -> "dict | None":
     """Raise ``PreflightError`` if a preset's compute-time rows / sorter binary
     are missing.
 
@@ -465,14 +505,18 @@ def assert_preset_compute_rows(
     check raises with its fix prefixed by ``caller``. ``sort_checks=False``
     stops after the preprocessing and artifact rows (a caller that builds the
     source without sorting it).
+
+    Returns
+    -------
+    dict or None
+        The preset's ``SorterParameters`` row, or ``None`` when
+        ``sort_checks`` is False.
     """
     check = _raising_check(caller)
     _check_source_param_rows(check, bundle)
     if not sort_checks:
-        return
-    sorter_params_query = _check_sorter_param_rows(
-        check, bundle, sort_checks=True
-    )[0]
+        return None
+    sorter_row = _check_sorter_param_rows(check, bundle, sort_checks=True)[1]
     _check_display_waveform_params(check, bundle, sort_checks=True)
     # The sorter binary/runtime on the row's execution backend, through the
     # single-session check (the row exists: the check above raised otherwise).
@@ -483,6 +527,6 @@ def assert_preset_compute_rows(
         [],
         bundle,
         None,
-        sorter_params_query,
-        sorter_params_exist=True,
+        sorter_row,
     )
+    return sorter_row

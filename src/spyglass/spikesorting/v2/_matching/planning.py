@@ -106,7 +106,7 @@ def _plan_summary(plan) -> str:
     lines = [
         f"Unit-match plan {state}: "
         f"{plan.matcher_params_name}; unit policy {plan.unit_policy!r}.",
-        f"Pinned inputs: {len(plan.curations) if isinstance(plan, UnitMatchInputPlan) else len(plan.curation_choices)} "
+        f"Pinned inputs: {len(plan.pinned_curations)} "
         f"of {len(rows)} requested; curation strategy {plan.curation_strategy!r}.",
     ]
     for row in plan.rows:
@@ -211,6 +211,11 @@ class UnitMatchPlan:
         """True when the strategy pinned exactly one curation per member."""
         return not self.errors
 
+    @property
+    def pinned_curations(self) -> list[dict[str, Any]]:
+        """The pinned curations in ``member_index`` order."""
+        return [pin for _, pin in sorted(self.curation_choices.items())]
+
     def __bool__(self) -> bool:
         return self.ok
 
@@ -279,6 +284,11 @@ class UnitMatchInputPlan:
     def ok(self) -> bool:
         """True when the strategy pinned exactly one curation per sort."""
         return not self.errors
+
+    @property
+    def pinned_curations(self) -> list[dict[str, Any]]:
+        """The pinned curations in the order the sorts were named."""
+        return self.curations
 
     def __bool__(self) -> bool:
         return self.ok

@@ -4,10 +4,10 @@
 and a DB half (the table method). :func:`build_curation_insert_plan`
 resolves the post-merge curated ``Unit`` rows (via
 :func:`._curation.transforms.build_curated_unit_rows`) and validates the
-supplied labels against the source/written unit sets.
-:func:`._curation.insert.plan_curation_insert` resolves the auto-increment
-``curation_id`` (a DB query) before calling it, and the table method stages
-the curated-units NWB and runs the atomic insert transaction on the plan.
+supplied labels against the source/written unit sets. The table method
+allocates the auto-increment ``curation_id`` (a DB query) before calling it,
+then stages the curated-units NWB and runs the atomic insert transaction on
+the plan.
 
 ``CurationV2.summarize_curation`` is split the same way:
 :func:`build_curation_summary` assembles its return dict (including the
@@ -51,6 +51,44 @@ class CurationInsertPlan(NamedTuple):
     unit_rows: list[dict]
     kept_unit_to_contributors: dict[int, list[int]]
     labels: dict[int, list[str]]
+
+
+def build_curation_header(
+    *,
+    sorting_id,
+    curation_id: int,
+    curation_uuid,
+    parent_curation_id: int,
+    curation_source,
+    merges_applied: bool,
+    description: str,
+) -> dict:
+    """Return the ``CurationV2`` identity fields of a curated-units NWB header.
+
+    Parameters
+    ----------
+    sorting_id, curation_uuid : uuid.UUID or str
+        Written as strings.
+    curation_id, parent_curation_id : int
+    curation_source : CurationSource or str
+        Written as the enum option's canonical string.
+    merges_applied : bool
+    description : str
+
+    Returns
+    -------
+    dict
+        JSON-native header fields; callers add stage-specific provenance.
+    """
+    return {
+        "sorting_id": str(sorting_id),
+        "curation_id": int(curation_id),
+        "curation_uuid": str(curation_uuid),
+        "parent_curation_id": int(parent_curation_id),
+        "curation_source": getattr(curation_source, "value", curation_source),
+        "merges_applied": bool(merges_applied),
+        "description": description,
+    }
 
 
 def validate_label_unit_ids(

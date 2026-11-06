@@ -59,11 +59,18 @@ def _put(url: str, body: bytes, *, revision=None) -> int:
         return exc.code
 
 
+def _served_roots() -> set:
+    """Bundle roots the process-wide review server is serving."""
+    from spyglass.spikesorting.v2._review import delivery
+
+    if delivery._SERVER is None:
+        return set()
+    server, _ = delivery._SERVER
+    return {served.root for served in server.bundles.values()}
+
+
 def test_serves_bundle_and_writes_only_annotations(bundle):
-    from spyglass.spikesorting.v2._review.delivery import (
-        serve_review_bundle,
-        served_review_bundles,
-    )
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
 
     url = serve_review_bundle(bundle)
     assert url.startswith("http://localhost:")  # the frontend's local check
@@ -86,13 +93,12 @@ def test_serves_bundle_and_writes_only_annotations(bundle):
         {"id": 1}
     )
     assert not (bundle / "new.js").exists()
-    assert served_review_bundles() == {bundle.resolve(): url}
+    assert _served_roots() == {bundle.resolve()}
 
 
 def test_repeated_open_reuses_server_and_stop_frees_it(bundle):
     from spyglass.spikesorting.v2._review.delivery import (
         serve_review_bundle,
-        served_review_bundles,
         stop_review_servers,
     )
 
@@ -100,7 +106,7 @@ def test_repeated_open_reuses_server_and_stop_frees_it(bundle):
     assert serve_review_bundle(bundle) == first
     assert serve_review_bundle(bundle, port=1) == first  # port ignored
     stop_review_servers(bundle)
-    assert bundle.resolve() not in served_review_bundles()
+    assert bundle.resolve() not in _served_roots()
     with pytest.raises(urllib.error.URLError):
         urllib.request.urlopen(first, timeout=2)
     second = serve_review_bundle(bundle)

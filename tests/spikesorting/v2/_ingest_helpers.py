@@ -934,3 +934,62 @@ def _plant_concat_sorting_selection(sid):
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+def load_effective_recording(traces, **mask_kwargs):
+    """Open a sort's effective traces by analysis file name (no self-heal).
+
+    ``mask_kwargs`` (``artifact_valid_times`` / ``artifact_detection_id`` /
+    ``recording_id``) pass through to ``read_effective_recording``.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._recording.source import (
+        read_effective_recording,
+    )
+
+    return read_effective_recording(
+        AnalysisNwbfile.get_abs_path(traces.row["analysis_file_name"]),
+        traces,
+        **mask_kwargs,
+    )
+
+
+def build_reference_merged_analyzer(
+    curation_key, waveform_recipe: str, role: str, *, analyzer_folder
+):
+    """Build a committed merged curation's analyzer from scratch.
+
+    A reference for the published merged-curation analyzer: the same
+    low-level builder over the curation's own merged sorting, the sort's
+    recording and statistics spans, and ``waveform_recipe``'s params, written
+    to ``analyzer_folder`` outside the analyzer cache.
+    """
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        reconstruct_recording_and_sorting,
+    )
+    from spyglass.spikesorting.v2._sorting.fetch import (
+        fetch_sorter_analyzer_inputs,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    row = resolver._resolve_curation_row(curation_key)
+    sorting_key = {"sorting_id": row["sorting_id"]}
+    recording, _ = reconstruct_recording_and_sorting(Sorting(), sorting_key)
+    sorter_row, job_kwargs = fetch_sorter_analyzer_inputs(sorting_key)
+    return resolver._build_resolved_merged_analyzer(
+        CurationV2.get_merged_sorting(
+            {**sorting_key, "curation_id": int(row["curation_id"])}
+        ),
+        recording,
+        sorting_id=row["sorting_id"],
+        sorter_row=sorter_row,
+        job_kwargs=job_kwargs,
+        waveform_params=dict(
+            resolver._resolve_recipe(waveform_recipe, role)["params"]
+        ),
+        statistics_spans=Sorting().get_statistics_spans(sorting_key),
+        role=role,
+        analyzer_folder=analyzer_folder,
+    )

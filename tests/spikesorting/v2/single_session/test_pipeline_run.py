@@ -1046,13 +1046,16 @@ def test_stage_statuses_vocabulary_includes_skipped():
     """The status vocabulary covers ``"skipped"`` (the no-artifact-stage value).
 
     ``run_v2_pipeline`` emits ``artifact_detection_status="skipped"`` for a
-    no-artifact preset, so the closed ``_STAGE_STATUSES`` set the observability
-    tests validate against must contain it, alongside the populate states.
+    no-artifact preset, so the closed ``StageStatus`` vocabulary the
+    observability tests validate against must contain it, alongside the
+    populate states.
     """
-    from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
+    from typing import get_args
 
-    assert "skipped" in _STAGE_STATUSES
-    assert {"computed", "reused"} <= _STAGE_STATUSES
+    from spyglass.spikesorting.v2._orchestration.types import StageStatus
+
+    assert "skipped" in get_args(StageStatus)
+    assert {"computed", "reused"} <= set(get_args(StageStatus))
 
 
 def test_run_v2_pipeline_auto_curate_param_defaults_false():

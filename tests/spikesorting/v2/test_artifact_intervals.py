@@ -9,8 +9,6 @@ Locks two contracts a silent error would corrupt:
   (the disjoint case also proves a chunk-boundary artifact IS masked -- an
   artifact ending on a chunk's final sample cannot collapse to a single
   unmasked sample because removal_window_ms>0 widens every artifact).
-
-Plus a pin on the clamp-vs-raise boundary of ``_spike_times_to_frames``.
 """
 
 from __future__ import annotations
@@ -305,36 +303,6 @@ def test_detect_artifacts_recovers_planted_interval_times():
             planted_start - half_window_s, abs=tol
         )
         assert rem_end == pytest.approx(planted_end + half_window_s, abs=tol)
-
-
-# --------------------------------------------------------------------------- #
-# _spike_times_to_frames clamp-vs-raise boundary pin
-# --------------------------------------------------------------------------- #
-
-
-def test_spike_times_to_frames_clamp_vs_raise_boundary():
-    """Within ~2 sample periods past the end -> clamp (FP rounding); beyond ->
-    raise (genuine alignment/units error). Pins the 2*dt tolerance."""
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _spike_times_to_frames,
-    )
-
-    fs = 30000.0
-    timestamps = np.arange(100) / fs
-    n = timestamps.size
-    dt = 1.0 / fs
-
-    # 1.5 sample periods past -> within tolerance -> clamp to last frame.
-    frames = _spike_times_to_frames(
-        timestamps, np.array([timestamps[50], timestamps[-1] + 1.5 * dt]), n, 1
-    )
-    assert frames.tolist() == [50, 99], f"within-tol must clamp; got {frames}"
-
-    # 3 sample periods past -> beyond tolerance -> raise.
-    with pytest.raises(ValueError, match="alignment/units error"):
-        _spike_times_to_frames(
-            timestamps, np.array([timestamps[-1] + 3.0 * dt]), n, 1
-        )
 
 
 # --------------------------------------------------------------------------- #

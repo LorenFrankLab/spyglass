@@ -110,16 +110,18 @@ def _params_schema_version(params: dict) -> int:
     return int(params["schema_version"])
 
 
-def _lookup_row(name: str, params: dict, job_kwargs=None) -> tuple:
-    """Build a parameter-lookup row with the version copied from ``params``."""
-    return (name, params, _params_schema_version(params), job_kwargs)
+def _lookup_row(name: str, params: dict) -> tuple:
+    """Build a parameter-lookup row with the version copied from ``params``.
+
+    Shipped rows carry no ``job_kwargs`` (NULL).
+    """
+    return (name, params, _params_schema_version(params), None)
 
 
 def _sorter_row(
     sorter: str,
     name: str,
     params: dict,
-    job_kwargs=None,
     execution_params: dict | None = None,
 ) -> tuple:
     """Build a sorter-lookup row with versions copied from the blobs.
@@ -127,9 +129,12 @@ def _sorter_row(
     Each row is ``(sorter, sorter_params_name, params_blob,
     params_schema_version, job_kwargs, execution_params_blob,
     execution_params_schema_version)`` -- matching the ``SorterParameters``
-    heading order. A row that omits ``execution_params`` gets the schema-default
-    local-execution blob.
+    heading order. ``params`` is the raw payload; the stored blob is its
+    validation against ``sorter``'s schema. Shipped rows carry no
+    ``job_kwargs`` (NULL). A row that omits ``execution_params`` gets the
+    schema-default local-execution blob.
     """
+    params = _validate_params(_get_sorter_schema(sorter), params)
     exec_blob = (
         execution_params
         if execution_params is not None
@@ -140,7 +145,7 @@ def _sorter_row(
         name,
         params,
         _params_schema_version(params),
-        job_kwargs,
+        None,
         exec_blob,
         _params_schema_version(exec_blob),
     )
@@ -437,9 +442,7 @@ def _ms4_singularity_sorter_row() -> tuple:
     return _sorter_row(
         "mountainsort4",
         MS4_SINGULARITY_30KHZ,
-        _validate_params(
-            _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
-        ),
+        _MS4_RATE_PARAMS[30000],
         execution_params=_ms4_singularity_execution_params(),
     )
 
@@ -464,9 +467,7 @@ def sorter_default_contents() -> tuple:
             # um (also the schema default).
             "mountainsort4",
             MS4_30KHZ,
-            _validate_params(
-                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[30000]
-            ),
+            _MS4_RATE_PARAMS[30000],
         ),
         _sorter_row(
             # 20 kHz variant: ``clip_size=27`` / ``detect_interval=7`` hold the
@@ -474,16 +475,14 @@ def sorter_default_contents() -> tuple:
             # matches the 30 kHz row.
             "mountainsort4",
             MS4_20KHZ,
-            _validate_params(
-                _get_sorter_schema("mountainsort4"), _MS4_RATE_PARAMS[20000]
-            ),
+            _MS4_RATE_PARAMS[20000],
         ),
         _sorter_row(
             # MS5 is region-agnostic (filter=False, like MS4), so the row is
             # rate-keyed; 30 kHz uses the schema-default snippet window.
             "mountainsort5",
             MS5_30KHZ,
-            _validate_params(_get_sorter_schema("mountainsort5"), {}),
+            {},
         ),
         _sorter_row(
             # Kilosort4 Neuropixels recipe matched to the AIND
@@ -502,57 +501,43 @@ def sorter_default_contents() -> tuple:
             # would double-whiten.
             "kilosort4",
             KS4_NEUROPIXELS,
-            _validate_params(
-                _get_sorter_schema("kilosort4"),
-                {
-                    "nblocks": 5,
-                    "whitening_range": 32,
-                    "skip_kilosort_preprocessing": False,
-                    "highpass_cutoff": 300,
-                    "do_correction": True,
-                    "keep_good_only": False,
-                },
-            ),
+            {
+                "nblocks": 5,
+                "whitening_range": 32,
+                "skip_kilosort_preprocessing": False,
+                "highpass_cutoff": 300,
+                "do_correction": True,
+                "keep_good_only": False,
+            },
         ),
-        _sorter_row(
-            "spykingcircus2",
-            "default",
-            _validate_params(_get_sorter_schema("spykingcircus2"), {}),
-        ),
-        _sorter_row(
-            "tridesclous2",
-            "default",
-            _validate_params(_get_sorter_schema("tridesclous2"), {}),
-        ),
+        _sorter_row("spykingcircus2", "default", {}),
+        _sorter_row("tridesclous2", "default", {}),
         _sorter_row(
             "clusterless_thresholder",
             "default",
-            _validate_params(
-                _get_sorter_schema("clusterless_thresholder"),
-                # ``threshold_unit="uv"`` makes the shipped
-                # ``detect_threshold=100`` a TRUE 100 microvolt threshold:
-                # the runtime scales the recording to uV (via the stored
-                # NWB gain) before detection, rather than treating it as a
-                # MAD multiplier. (For Frank-lab data gain==1 uV/count so
-                # 100 "uv" == 100 counts == 100 uV either way.) The
-                # explicit ``noise_levels=[1.0]`` is the equivalent
-                # advanced override, kept as a belt-and-suspenders guard:
-                # without it, a row whose ``threshold_unit`` were lost would
-                # read the 100 as a MAD multiplier. The runtime uses it
-                # verbatim (explicit noise_levels take precedence over
-                # ``threshold_unit``).
-                # The smoke / synthetic-fixture rows set
-                # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
-                # computes per-channel MAD and the threshold tracks the
-                # recording's noise floor -- they do not rely on the 'uv'
-                # default unit.
-                #
-                # THIS shipped ``default`` row sets ``threshold_unit="uv"``
-                # explicitly and takes detect_threshold from the schema
-                # default (100); the runtime ``scale_to_uV`` makes that a
-                # true 100 uV threshold.
-                {"threshold_unit": "uv", "noise_levels": [1.0]},
-            ),
+            # ``threshold_unit="uv"`` makes the shipped
+            # ``detect_threshold=100`` a TRUE 100 microvolt threshold:
+            # the runtime scales the recording to uV (via the stored
+            # NWB gain) before detection, rather than treating it as a
+            # MAD multiplier. (For Frank-lab data gain==1 uV/count so
+            # 100 "uv" == 100 counts == 100 uV either way.) The
+            # explicit ``noise_levels=[1.0]`` is the equivalent
+            # advanced override, kept as a belt-and-suspenders guard:
+            # without it, a row whose ``threshold_unit`` were lost would
+            # read the 100 as a MAD multiplier. The runtime uses it
+            # verbatim (explicit noise_levels take precedence over
+            # ``threshold_unit``).
+            # The smoke / synthetic-fixture rows set
+            # ``threshold_unit="mad"`` EXPLICITLY (no noise_levels) so SI
+            # computes per-channel MAD and the threshold tracks the
+            # recording's noise floor -- they do not rely on the 'uv'
+            # default unit.
+            #
+            # THIS shipped ``default`` row sets ``threshold_unit="uv"``
+            # explicitly and takes detect_threshold from the schema
+            # default (100); the runtime ``scale_to_uV`` makes that a
+            # true 100 uV threshold.
+            {"threshold_unit": "uv", "noise_levels": [1.0]},
         ),
         _ms4_singularity_sorter_row(),
     )
@@ -866,26 +851,16 @@ def pipeline_preset_specs() -> dict[str, dict]:
         MS4_SINGULARITY_30KHZ: _franklab_ms4_singularity_spec(),
         # Same-day chronic sort: detect/mask each member before concatenation;
         # otherwise the single-session MS5 recipe.
-        "franklab_concat_hippocampus_30khz_ms5_2026_09": dict(
-            preprocessing_params_name=HIPPOCAMPUS_PREPROC,
-            artifact_detection_params_name=ARTIFACT_100UV,
-            sorter="mountainsort5",
-            sorter_params_name=MS5_30KHZ,
-            metric_params_name="franklab_default",
-            auto_curation_rules_name=FRANKLAB_CURATION_RULES,
-            probe_type="probe",
-            target_region="hippocampus",
-            sampling_rate_hz=30000,
-            sorter_family="mountainsort5",
-            recommendation_status="experimental",
-            intended_use=(
+        "franklab_concat_hippocampus_30khz_ms5_2026_09": {
+            **_franklab_ms5_spec("probe"),
+            "recommendation_status": "experimental",
+            "intended_use": (
                 "Frank-lab same-day chronic hippocampal probes at 30 kHz: "
                 "concatenate a SessionGroup's members into one "
                 "ConcatenatedRecording and sort once (MountainSort5). Run it "
                 "with run_v2_concat_pipeline."
             ),
-            threshold_units="sigma of the whitened signal (~5.5)",
-            notes=(
+            "notes": (
                 "Detect and mask artifacts per member before concatenation. "
                 "Otherwise the same MS5 "
                 "hippocampus recipe as the single-session MS5 alternative; MS5 runs "
@@ -893,7 +868,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "run_v2_concat_pipeline. Marked experimental: validate the "
                 "recipe on your own same-day data before relying on it."
             ),
-        ),
+        },
     }
 
 

@@ -6,8 +6,6 @@ parameter validation and integrity queries run at the explicit table boundary.
 
 from __future__ import annotations
 
-from collections import Counter
-
 from spyglass.spikesorting.v2._core.lookup_validation import (
     reject_duplicate_parameter_content,
     validate_lookup_rows,
@@ -50,6 +48,115 @@ def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
         restrictions.append(remaining[0])
         remaining = remaining[1:]
     return restrictions, remaining
+
+
+def restrict_by_leading_args(table, args: tuple) -> tuple[object | None, tuple]:
+    """Apply a ``delete`` call's leading restriction positionals to ``table``.
+
+    The table-side half of :func:`split_leading_restrictions`: a ``delete``
+    override re-dispatches ``restricted.delete(*remaining)`` when ``restricted``
+    is not ``None``, and otherwise runs its own delete on ``table``.
+
+    Parameters
+    ----------
+    table : datajoint.Table
+        The instance whose ``delete`` received ``args``.
+    args : tuple
+        The ``*args`` that ``delete`` received.
+
+    Returns
+    -------
+    restricted : datajoint.Table or None
+        ``table & r1 & r2 & ...`` over the leading restrictions, or ``None``
+        when ``args`` does not start with a restriction.
+    remaining : tuple
+        The rest of ``args`` after the leading restrictions, untouched.
+    """
+    restrictions, remaining = split_leading_restrictions(args)
+    if not restrictions:
+        return None, remaining
+    restricted = table
+    for restriction in restrictions:
+        restricted = restricted & restriction
+    return restricted, remaining
+
+
+def single_source_part(table, key: dict) -> tuple[str, dict]:
+    """Return the one XOR source part row of a selection master.
+
+    Backs ``resolve_source`` on ``SortingSelection`` and
+    ``MotionEstimateSelection``, whose masters each carry exactly one
+    ``RecordingSource`` or ``ConcatenatedRecordingSource`` part row.
+
+    Parameters
+    ----------
+    table : type
+        The selection master class.
+    key : dict
+        A key restricting ``table`` to one master; non-primary-key fields
+        are ignored.
+
+    Returns
+    -------
+    kind : {"recording", "concatenated_recording"}
+        Which source part holds the row.
+    source_key : dict
+        ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``.
+
+    Raises
+    ------
+    SchemaBypassError
+        If zero or more than one source part row exists for ``key``.
+    """
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    master_key = {k: v for k, v in key.items() if k in table.primary_key}
+    recording_ids = (table.RecordingSource & master_key).fetch("recording_id")
+    concat_ids = (table.ConcatenatedRecordingSource & master_key).fetch(
+        "concat_recording_id"
+    )
+    total = len(recording_ids) + len(concat_ids)
+    if total != 1:
+        raise SchemaBypassError(
+            f"{table.__name__} {master_key} has {total} source part "
+            f"rows; expected exactly one. Use {table.__name__}."
+            "insert_selection() to add or remove this selection."
+        )
+    if len(recording_ids):
+        return "recording", {"recording_id": recording_ids[0]}
+    return "concatenated_recording", {"concat_recording_id": concat_ids[0]}
+
+
+def optional_part_value(table, key: dict, part, column: str):
+    """Return ``column`` of a selection's zero-or-one part row, or ``None``.
+
+    Parameters
+    ----------
+    table : type
+        The selection master class that owns ``part``.
+    key : dict
+        A key restricting ``table`` to one master; non-primary-key fields
+        are ignored.
+    part : type
+        The optional part table to read.
+    column : str
+        The ``part`` attribute to return.
+
+    Raises
+    ------
+    SchemaBypassError
+        If more than one ``part`` row exists for ``key``.
+    """
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    master_key = {k: v for k, v in key.items() if k in table.primary_key}
+    rows = (part & master_key).fetch(column)
+    if len(rows) > 1:
+        raise SchemaBypassError(
+            f"{table.__name__} {master_key} has {len(rows)} "
+            f"{part.__name__} rows; expected zero or one."
+        )
+    return rows[0] if len(rows) else None
 
 
 class _IdentityMasterGuard:
@@ -437,51 +544,3 @@ def find_orphaned_masters(master_table, part_tables: list) -> list[dict]:
     for part in part_tables:
         orphans = orphans - part.proj()
     return orphans.fetch("KEY", as_dict=True)
-
-
-def audit_source_part_integrity(master_table, part_tables: list) -> list[dict]:
-    """Return masters whose source-part row count is not exactly one.
-
-    Complements :func:`find_orphaned_masters`, which flags only the
-    zero-source case. A master with TWO source-part rows is an
-    AMBIGUOUS-source bug -- ``resolve_source`` would raise lazily, only when
-    something happens to read it -- so flag both ``0`` (orphan) and ``>1``
-    (ambiguous) here for a maintenance script to review.
-
-    ``part_tables`` must be the recording-source parts ONLY -- the
-    exactly-one-of XOR set. For ``SortingSelection`` (its only user) that is
-    ``[RecordingSource, ConcatenatedRecordingSource]``; ``ArtifactDetectionSource``
-    is deliberately EXCLUDED because it is an independent zero-or-one part (a
-    valid artifact-backed sorting carries one, so including it would falsely
-    flag every artifact-bearing sorting as ``count == 2``). This is the same
-    part list ``find_orphaned_masters`` / ``prune_orphaned_selections`` pass.
-    (The ``ArtifactDetectionOutput`` merge has its OWN, separate
-    ``audit_source_part_integrity`` classmethod for its two source parts.)
-
-    Parameters
-    ----------
-    master_table : datajoint.Table
-        The selection master table to scan.
-    part_tables : list
-        The recording-source part tables (the exactly-one-of XOR set) to count
-        against each master row.
-
-    Returns
-    -------
-    list[dict]
-        One entry per offending master: its primary-key fields plus
-        ``"source_part_count"`` (``0`` = orphan, ``>= 2`` = ambiguous). Masters
-        with exactly one source part are omitted.
-    """
-    pk = master_table.primary_key
-    counts = Counter(
-        tuple(row[attr] for attr in pk)
-        for part in part_tables
-        for row in part.fetch("KEY", as_dict=True)
-    )
-    flagged: list[dict] = []
-    for master in master_table.fetch("KEY", as_dict=True):
-        count = counts[tuple(master[attr] for attr in pk)]
-        if count != 1:
-            flagged.append({**master, "source_part_count": count})
-    return flagged

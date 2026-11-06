@@ -101,15 +101,13 @@ def recording_content_fingerprint(
     analysis_abs_path,
     *,
     electrical_series_path,
-    trace_rounding: int = TRACE_ROUNDING,
-    timestamp_rounding: int = TIMESTAMP_ROUNDING,
 ) -> dict[str, str]:
     """Return the component-hash dict identifying a persisted recording.
 
     Opens ``analysis_abs_path`` DIRECTLY (never ``AnalysisNwbfile.get_abs_path``,
     which validates the stale ``~external`` checksum). Every field is read from
-    the persisted ``ElectricalSeries``; nothing but the rounding constants is
-    caller-supplied.
+    the persisted ``ElectricalSeries``, rounded to ``TRACE_ROUNDING`` (µV) and
+    ``TIMESTAMP_ROUNDING`` (s) decimals.
 
     Parameters
     ----------
@@ -119,8 +117,6 @@ def recording_content_fingerprint(
     electrical_series_path : str
         In-file path of the preprocessed ElectricalSeries (e.g.
         ``"acquisition/ProcessedElectricalSeries"``).
-    trace_rounding, timestamp_rounding : int
-        Decimal precision for the trace (µV) and timestamp (s) components.
 
     Returns
     -------
@@ -167,7 +163,7 @@ def recording_content_fingerprint(
             "fingerprint empty/partial data."
         )
     traces_hash = combined_hash(
-        hash_recording_traces(recording, rounding=trace_rounding)
+        hash_recording_traces(recording, rounding=TRACE_ROUNDING)
     )
 
     timestamp_hashes: dict[str, str] = {}
@@ -184,7 +180,7 @@ def recording_content_fingerprint(
                     min(start + 300_000, n_frames),
                     segment_index=segment,
                 ),
-                timestamp_rounding,
+                TIMESTAMP_ROUNDING,
             )
             digest.update(np.ascontiguousarray(times, dtype="<f8").tobytes())
         timestamp_hashes[f"segment_{segment}"] = digest.hexdigest()
@@ -214,9 +210,16 @@ def recording_content_fingerprint(
         coord_cols = [
             c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames
         ]
+        # One read per column, not per (row, column) h5py element. With no
+        # coordinate columns each row stays an empty list, so
+        # geometry_component_hash raises its "no probe geometry" error.
+        columns = [
+            np.asarray(table[col].data[:], dtype=np.float64)
+            for col in coord_cols
+        ]
         coords = np.asarray(
             [
-                [float(table[col][int(row)]) for col in coord_cols]
+                [float(column[int(row)]) for column in columns]
                 for row in region.data[:]
             ],
             dtype=np.float64,
@@ -244,7 +247,7 @@ def recording_content_fingerprint(
     return components
 
 
-def recording_artifact_lock(recording_id, *, timeout: float = -1):
+def recording_artifact_lock(recording_id):
     """Return the cross-process lock for one recording's artifact slot.
 
     See :func:`._storage.analyzer_cache.artifact_slot_lock`.
@@ -253,9 +256,6 @@ def recording_artifact_lock(recording_id, *, timeout: float = -1):
     ----------
     recording_id
         The recording whose canonical artifact the caller will mutate.
-    timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
-        blocks.
 
     Returns
     -------
@@ -266,4 +266,4 @@ def recording_artifact_lock(recording_id, *, timeout: float = -1):
         artifact_slot_lock,
     )
 
-    return artifact_slot_lock("recording", recording_id, timeout=timeout)
+    return artifact_slot_lock("recording", recording_id)

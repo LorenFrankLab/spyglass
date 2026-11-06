@@ -32,6 +32,7 @@ from spyglass.spikesorting._numerical import (
 )
 
 from spyglass.spikesorting.v2._sorting.analyzer import (
+    BASE_ANALYZER_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
 from spyglass.utils import logger
@@ -1256,13 +1257,7 @@ def compute_metrics(
         # leaving the column missing and any rule thresholding it never
         # firing. ``principal_components`` is excluded defensively: it is
         # metric-analyzer-only and voltage metrics never depend on it.
-        base_present = {
-            "random_spikes",
-            "noise_levels",
-            "templates",
-            "waveforms",
-            *_CURATION_EXTENSIONS,
-        }
+        base_present = {*BASE_ANALYZER_EXTENSIONS, *_CURATION_EXTENSIONS}
         extra_extensions = [
             ext
             for ext in required_extensions_for_metrics(
@@ -1562,17 +1557,13 @@ def compute_merge_groups(
     from spikeinterface.curation import compute_merge_unit_groups
 
     from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
+    from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
 
     extensions = list(_CURATION_EXTENSIONS)
     extensions.extend(_AUTO_MERGE_EXTRA_EXTENSIONS.get(auto_merge_preset, ()))
     ensure_extensions(analyzer, extensions, job_kwargs=job_kwargs)
-    merge_job_kwargs = {
-        key: value
-        for key, value in (job_kwargs or {}).items()
-        if key != "random_seed"
-    }
     compute_kwargs = dict(auto_merge_kwargs or {})
-    compute_kwargs.update(merge_job_kwargs)
+    compute_kwargs.update(without_random_seed(job_kwargs))
     groups = compute_merge_unit_groups(
         analyzer,
         preset=auto_merge_preset,

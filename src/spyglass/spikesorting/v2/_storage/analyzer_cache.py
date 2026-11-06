@@ -404,32 +404,31 @@ def analyzer_extension_array(analyzer, extension_name, data_name):
     """
     import numpy as np
 
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        saved_extension_data_file,
+    )
+
     if (
         analyzer.format != "binary_folder"
         or extension_name in analyzer.extensions
     ):
         return analyzer.get_extension(extension_name).data[data_name]
     return np.load(
-        Path(analyzer.folder)
-        / "extensions"
-        / extension_name
-        / f"{data_name}.npy",
+        saved_extension_data_file(analyzer, extension_name, data_name),
         mmap_mode="r",
     )
 
 
 def analyzer_extension_params(analyzer, name):
     """Read extension parameters without loading a disk-backed payload."""
-    from spikeinterface.core.sortinganalyzer import get_extension_class
+    from spyglass.spikesorting.v2._storage.spikeinterface import (
+        saved_extension_metadata,
+    )
 
     if analyzer.format != "binary_folder" or name in analyzer.extensions:
         return analyzer.get_extension(name).params or {}
-    extension = get_extension_class(name)(analyzer)
-    extension.load_params()
-    extension.load_run_info()
-    if extension.run_info is not None and not extension.run_info.get(
-        "run_completed", False
-    ):
+    extension, completed = saved_extension_metadata(analyzer, name)
+    if not completed:
         raise ValueError(f"Analyzer extension {name!r} is incomplete.")
     return extension.params or {}
 
@@ -565,7 +564,7 @@ def analyzer_cache_lock(sorting_id):
     )
 
 
-def artifact_slot_lock(prefix: str, slot_id, *, timeout: float = -1):
+def artifact_slot_lock(prefix: str, slot_id):
     """Return a cross-process lock serializing one trace artifact's slot.
 
     A per-artifact ``filelock.FileLock`` so a rebuild (``get_recording``
@@ -591,23 +590,20 @@ def artifact_slot_lock(prefix: str, slot_id, *, timeout: float = -1):
         ``"motion_corrected"``.
     slot_id
         The id of the artifact whose canonical file the caller will mutate.
-    timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``. Default ``-1``
-        blocks indefinitely (serialize-don't-fail); the lock releases when the
-        holding process exits, so a crashed job cannot wedge the next one.
 
     Returns
     -------
     filelock.FileLock
         An unacquired lock; use it as a context manager or call ``.acquire()``.
+        Acquiring blocks indefinitely (serialize-don't-fail); the lock
+        releases when the holding process exits, so a crashed job cannot
+        wedge the next one.
     """
     from filelock import FileLock
 
     root = analyzer_cache_root()
     root.mkdir(parents=True, exist_ok=True)
-    return FileLock(
-        str(root / f"{prefix}_{slot_id}.artifact.lock"), timeout=timeout
-    )
+    return FileLock(str(root / f"{prefix}_{slot_id}.artifact.lock"))
 
 
 _POPULATING_SORTING_IDS: ContextVar[tuple[str, ...]] = ContextVar(
@@ -1095,16 +1091,32 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
         for row in sorting_rows
     }
     curation_rows = curations.fetch(
-        "sorting_id", "curation_id", "curation_uuid", as_dict=True
+        "sorting_id",
+        "curation_id",
+        "curation_uuid",
+        "merges_applied",
+        as_dict=True,
     )
+    unit_bearing_curations = {
+        (str(row["sorting_id"]), int(row["curation_id"]))
+        for row in (curations & CurationV2.Unit.proj()).fetch(
+            "sorting_id", "curation_id", as_dict=True
+        )
+    }
+    # Unit-bearing committed curations, also consulted by the PC loop below
+    # (every PC row is joined to one of ``curations``).
+    live_committed: set[tuple[str, int]] = set()
     for row in curation_rows:
         sorting_id = str(row["sorting_id"])
         curation_id = int(row["curation_id"])
         key = {"sorting_id": row["sorting_id"], "curation_id": curation_id}
-        if not (CurationV2.Unit & key) or not CurationV2.is_committed_curation(
-            key
+        if (sorting_id, curation_id) not in unit_bearing_curations:
+            continue
+        if not CurationV2.is_committed_curation(
+            key, merges_applied=row["merges_applied"]
         ):
             continue
+        live_committed.add((sorting_id, curation_id))
         # A raw-namespace curation has no base cache of its own (it shares the
         # sort analyzer), but a parameter-specific DERIVATIVE of it is keyed by
         # its generation; referencing the would-be base path lets
@@ -1128,9 +1140,7 @@ def collect_analyzer_cache_references(sorting_table) -> dict:
             "sorting_id": row["sorting_id"],
             "curation_id": int(row["curation_id"]),
         }
-        if not (CurationV2.Unit & key) or not CurationV2.is_committed_curation(
-            key
-        ):
+        if (str(row["sorting_id"]), key["curation_id"]) not in live_committed:
             continue
         if CurationV2.matches_raw_namespace(key):
             referenced_paths.add(

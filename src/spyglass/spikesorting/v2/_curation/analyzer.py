@@ -23,6 +23,7 @@ Every folder is a ``binary_folder`` analyzer loaded through
 
 from __future__ import annotations
 
+import functools
 import gc
 import hashlib
 import json
@@ -47,6 +48,7 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
     _AnalyzerSparsityInputsError,
     analyzer_sparsity_validator,
+    resolve_display_waveform_params_name,
 )
 from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
 
@@ -185,21 +187,6 @@ def _resolve_recipe(waveform_recipe: str, role: str) -> dict:
             f"whiten={bool(params.get('whiten'))}."
         )
     return row
-
-
-def curation_analyzer_cache_path(
-    curation_ref, waveform_recipe: str, role: str = "display"
-) -> Path:
-    """Resolve the canonical cache path for one curation-generation recipe."""
-    row = _resolve_curation_row(curation_ref)
-    recipe_row = _resolve_recipe(waveform_recipe, role)
-    return curation_analyzer_path(
-        row["sorting_id"],
-        row["curation_uuid"],
-        role,
-        waveform_recipe_hash(recipe_row),
-        _spikeinterface_version(),
-    )
 
 
 def _source_artifact_hashes(sorting_id) -> dict[str, str]:
@@ -450,6 +437,32 @@ def _write_manifest(folder: Path, manifest: CurationAnalyzerManifest) -> None:
     )
 
 
+def _publish_manifest(
+    staging_folder, prefix: Mapping, extension_inventory: dict[str, str]
+) -> None:
+    """Write the manifest of a fully built staging folder.
+
+    Parameters
+    ----------
+    staging_folder : str or Path
+        The analyzer folder being published; every analyzer file must already
+        be in it, because the manifest's storage fingerprint covers them.
+    prefix : Mapping
+        The manifest identity fields (see :func:`_manifest_with_sorting`).
+    extension_inventory : dict[str, str]
+        The validated extension inventory (:func:`_extension_inventory`).
+    """
+    folder = Path(staging_folder)
+    _write_manifest(
+        folder,
+        CurationAnalyzerManifest(
+            **prefix,
+            extension_inventory=extension_inventory,
+            storage_fingerprint=_folder_storage_fingerprint(folder),
+        ),
+    )
+
+
 def _load_valid_cached_analyzer(
     folder: Path, expected_prefix: dict, role: str, *, validate_analyzer=None
 ):
@@ -567,76 +580,6 @@ def _resolve_published_analyzer(
         return analyzer
 
 
-def build_merged_analyzer(
-    curation_ref,
-    waveform_recipe: str,
-    role: str = "display",
-    *,
-    analyzer_folder,
-):
-    """Build one merged-curation analyzer through the shared low-level builder."""
-    from spyglass.spikesorting.v2._sorting.analyzer import (
-        reconstruct_recording_and_sorting,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        Sorting,
-        SortingSelection,
-    )
-    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
-
-    row = _resolve_curation_row(curation_ref)
-    key = {
-        "sorting_id": row["sorting_id"],
-        "curation_id": int(row["curation_id"]),
-    }
-    CurationV2.assert_committed_curation(
-        key,
-        context="curation analyzer",
-        merges_applied=row["merges_applied"],
-    )
-    if not (CurationV2.Unit & key):
-        raise ZeroUnitAnalyzerError(
-            "curation analyzer: curation "
-            f"(sorting_id={row['sorting_id']}, "
-            f"curation_id={row['curation_id']}) has zero units; no "
-            "SortingAnalyzer exists."
-        )
-    recipe_row = _resolve_recipe(waveform_recipe, role)
-
-    recording, _raw_sorting = reconstruct_recording_and_sorting(
-        Sorting(), {"sorting_id": row["sorting_id"]}
-    )
-    # Rebuild from the committed curation's own merged sorting rather than
-    # SortingAnalyzer.merge_units(censor_ms=...): SI censors duplicates in
-    # sample space, so on a recording with acquisition gaps it drops a real
-    # spike that is adjacent in frames but seconds apart in time (shown on a
-    # gapped fixture: merged spike count 4 -> 3, firing rate 40 -> 30 Hz).
-    curated_sorting = CurationV2.get_merged_sorting(key)
-    sorter_row = (
-        SorterParameters
-        & (
-            (SortingSelection & {"sorting_id": row["sorting_id"]}).proj(
-                "sorter", "sorter_params_name"
-            )
-        )
-    ).fetch1()
-    return _build_resolved_merged_analyzer(
-        curated_sorting,
-        recording,
-        sorting_id=row["sorting_id"],
-        sorter_row=sorter_row,
-        job_kwargs=_resolved_job_kwargs(sorter_row["job_kwargs"]),
-        waveform_params=dict(recipe_row["params"]),
-        statistics_spans=Sorting().get_statistics_spans(
-            {"sorting_id": row["sorting_id"]}
-        ),
-        role=role,
-        analyzer_folder=analyzer_folder,
-    )
-
-
 def _build_resolved_merged_analyzer(
     curated_sorting,
     recording,
@@ -711,14 +654,11 @@ def publish_resolved_merged_analyzer(
             role=role,
             analyzer_folder=staging_folder,
         )
-        manifest = CurationAnalyzerManifest(
-            **expected_prefix,
-            extension_inventory=_extension_inventory(analyzer, role),
-            storage_fingerprint=_folder_storage_fingerprint(
-                Path(staging_folder)
-            ),
+        _publish_manifest(
+            staging_folder,
+            expected_prefix,
+            _extension_inventory(analyzer, role),
         )
-        _write_manifest(Path(staging_folder), manifest)
 
     return _resolve_published_analyzer(
         Path(cache_inputs["folder"]),
@@ -730,6 +670,40 @@ def publish_resolved_merged_analyzer(
             lambda: sorter_row.get("params")
         ),
     )
+
+
+def display_analyzer_request(curation_ref) -> dict:
+    """Return the resolver kwargs for a curation's DISPLAY analyzer.
+
+    Every display consumer (plots, exports, reviews, expert working copies)
+    uses the sort's stored ``Sorting.display_waveform_params_name``, so they
+    all address the same published cache.
+
+    Parameters
+    ----------
+    curation_ref : CurationRef or Mapping
+        A ``CurationRef`` or a curation key carrying ``sorting_id``.
+
+    Returns
+    -------
+    dict
+        ``{"curation_ref", "waveform_recipe", "role": "display"}`` for
+        :func:`_resolve_curation_analyzer` and the context managers below.
+    """
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_id = (
+        curation_ref["sorting_id"]
+        if isinstance(curation_ref, Mapping)
+        else curation_ref.sorting_id
+    )
+    return {
+        "curation_ref": curation_ref,
+        "waveform_recipe": resolve_display_waveform_params_name(
+            Sorting, sorting_id
+        ),
+        "role": "display",
+    }
 
 
 def _resolve_curation_analyzer(
@@ -748,8 +722,12 @@ def _resolve_curation_analyzer(
     the result as read-only; use :func:`open_curation_analyzer` for a mutable
     working copy.
     """
-    import spikeinterface as si
-
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        reconstruct_recording_and_sorting,
+    )
+    from spyglass.spikesorting.v2._sorting.fetch import (
+        fetch_sorter_analyzer_inputs,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -774,15 +752,20 @@ def _resolve_curation_analyzer(
         )
     recipe_row = _resolve_recipe(waveform_recipe, role)
 
-    def sorter_params():
-        from spyglass.spikesorting.v2._sorting.fetch import (
-            fetch_sorter_analyzer_inputs,
-        )
+    # Fetched only when a cache check or build needs it; shared by the
+    # sparsity validator and both builders.
+    @functools.cache
+    def sorter_inputs() -> tuple[dict, dict]:
+        return fetch_sorter_analyzer_inputs({"sorting_id": row["sorting_id"]})
 
-        sorter_row, _jobs = fetch_sorter_analyzer_inputs(
-            {"sorting_id": row["sorting_id"]}
+    def sorter_params():
+        return sorter_inputs()[0].get("params")
+
+    def source_recording():
+        recording, _sorting = reconstruct_recording_and_sorting(
+            Sorting(), {"sorting_id": row["sorting_id"]}
         )
-        return sorter_row.get("params")
+        return recording
 
     validate_analyzer = analyzer_sparsity_validator(sorter_params)
     # The COMPLETE normalized request is the derivative's identity and its
@@ -830,25 +813,32 @@ def _resolve_curation_analyzer(
             row["curation_uuid"],
             role,
             expected_prefix["waveform_recipe_hash"],
-            si.__version__,
+            _spikeinterface_version(),
         )
 
         def _build_base(staging_folder):
-            analyzer = build_merged_analyzer(
-                key,
-                waveform_recipe,
-                role,
+            # This namespace is committed and non-empty, and ``row``,
+            # ``recipe_row`` and ``curated_sorting`` are already resolved, so
+            # build from them rather than re-resolving them.
+            sorter_row, job_kwargs = sorter_inputs()
+            analyzer = _build_resolved_merged_analyzer(
+                curated_sorting,
+                source_recording(),
+                sorting_id=row["sorting_id"],
+                sorter_row=sorter_row,
+                job_kwargs=job_kwargs,
+                waveform_params=dict(recipe_row["params"]),
+                statistics_spans=Sorting().get_statistics_spans(
+                    {"sorting_id": row["sorting_id"]}
+                ),
+                role=role,
                 analyzer_folder=staging_folder,
             )
-            inventory = _extension_inventory(analyzer, role)
-            manifest = CurationAnalyzerManifest(
-                **expected_prefix,
-                extension_inventory=inventory,
-                storage_fingerprint=_folder_storage_fingerprint(
-                    Path(staging_folder)
-                ),
+            _publish_manifest(
+                staging_folder,
+                expected_prefix,
+                _extension_inventory(analyzer, role),
             )
-            _write_manifest(Path(staging_folder), manifest)
 
         base = _resolve_published_analyzer(
             base_folder,
@@ -882,49 +872,25 @@ def _resolve_curation_analyzer(
         row["curation_uuid"],
         role,
         expected_prefix["waveform_recipe_hash"],
-        si.__version__,
+        _spikeinterface_version(),
         extension_request_hash=derived_extension_request_hash(request),
     )
 
     def _build_derivative(staging_folder):
-        from spyglass.spikesorting.v2._sorting.analyzer import (
-            reconstruct_recording_and_sorting,
-        )
-        from spyglass.spikesorting.v2.sorting import (
-            SorterParameters,
-            SortingSelection,
-        )
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
         derivative = copy_analyzer_folder(base, Path(staging_folder))
         if not derivative.has_recording():
-            recording, _sorting = reconstruct_recording_and_sorting(
-                Sorting(), {"sorting_id": row["sorting_id"]}
-            )
-            derivative.set_temporary_recording(recording)
-        sorter_job_kwargs = (
-            SorterParameters
-            & (SortingSelection & {"sorting_id": row["sorting_id"]})
-        ).fetch1("job_kwargs")
+            derivative.set_temporary_recording(source_recording())
         _compute_request_on_copy(
             derivative,
             request,
             needs_compute,
-            job_kwargs=_resolved_job_kwargs(sorter_job_kwargs),
+            job_kwargs=sorter_inputs()[1],
         )
-        inventory = _extension_inventory(
-            derivative, role, tuple(request), exact=False
+        _publish_manifest(
+            staging_folder,
+            derived_prefix,
+            _extension_inventory(derivative, role, tuple(request), exact=False),
         )
-        manifest = CurationAnalyzerManifest(
-            **derived_prefix,
-            extension_inventory=inventory,
-            storage_fingerprint=_folder_storage_fingerprint(
-                Path(staging_folder)
-            ),
-        )
-        _write_manifest(Path(staging_folder), manifest)
 
     return _resolve_published_analyzer(
         derived_folder,
@@ -960,6 +926,7 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
+    from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
 
     required = set(BASE_ANALYZER_EXTENSIONS) | set(request)
     plan = {name: dict(params) for name, params in needs_compute.items()}
@@ -975,9 +942,7 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
                     )
                     or {}
                 )
-    compute_kwargs = {
-        k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"
-    }
+    compute_kwargs = without_random_seed(job_kwargs)
     for name in plan:
         if analyzer.has_extension(name):
             analyzer.delete_extension(name)
@@ -1018,6 +983,20 @@ def open_curation_analyzer(
     published caches (see :func:`_resolve_curation_analyzer`), so the copy
     carries the exact curated unit ids and spike trains.
     """
+    published = _resolve_curation_analyzer(
+        curation_ref, waveform_recipe, role, extra_extensions=extra_extensions
+    )
+    with analyzer_working_copy(published) as working:
+        yield working
+
+
+@contextmanager
+def analyzer_working_copy(published):
+    """Yield a mutable working copy of an already-resolved published analyzer.
+
+    The copy step of :func:`open_curation_analyzer`, for callers that resolved
+    (and validated) the published analyzer themselves.
+    """
     import shutil
     import tempfile
 
@@ -1026,9 +1005,6 @@ def open_curation_analyzer(
         ANALYZER_FOLDER_SUFFIX,
     )
 
-    published = _resolve_curation_analyzer(
-        curation_ref, waveform_recipe, role, extra_extensions=extra_extensions
-    )
     tmp = tempfile.mkdtemp(
         prefix="v2_curation_analyzer_", dir=spyglass_temp_dir
     )

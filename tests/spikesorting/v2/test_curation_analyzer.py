@@ -53,6 +53,26 @@ def _concurrent_cache_resolve_worker(
         results.put(("error", traceback.format_exc()))
 
 
+def _curation_cache_path(curation_ref, waveform_recipe: str) -> Path:
+    """The display analyzer cache path of one curation generation + recipe."""
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        curation_analyzer_path,
+        waveform_recipe_hash,
+    )
+
+    row = resolver._resolve_curation_row(curation_ref)
+    return curation_analyzer_path(
+        row["sorting_id"],
+        row["curation_uuid"],
+        "display",
+        waveform_recipe_hash(
+            resolver._resolve_recipe(waveform_recipe, "display")
+        ),
+        resolver._spikeinterface_version(),
+    )
+
+
 def _folder_content_hash(folder: Path) -> str:
     """Hash relative paths and file bytes, ignoring filesystem metadata."""
     digest = hashlib.sha256()
@@ -320,73 +340,29 @@ def test_open_curation_analyzer_yields_disk_backed_working_copy(
 
 
 @pytest.mark.parametrize("wants_pc", [False, True])
-def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
-    """Interactive and evaluation paths execute the same builder on curated units."""
-    import sys
-    from types import ModuleType, SimpleNamespace
+def test_evaluation_builds_temporary_analyzers_on_curated_units(
+    tmp_path, monkeypatch, wants_pc
+):
+    """The evaluation builds its temporary analyzers on the curated units."""
+    from types import SimpleNamespace
 
     from spyglass import settings
-    from spyglass.spikesorting.v2._curation import analyzer as resolver
     from spyglass.spikesorting.v2._curation import (
         evaluation_analyzers as _evaluation_analyzers,
     )
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
     from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
 
     sorting_id = uuid.uuid4()
-    key = {"sorting_id": sorting_id, "curation_id": 3}
     recording, curated_sorting = object(), object()
     sorter_row = {"job_kwargs": {"n_jobs": 1}}
     spans = [{"start_frame": 0, "end_frame": 100}]
     waveform_params = {"ms_before": 1.0, "ms_after": 2.0}
     builds, saved, evaluations = [], {}, []
-
-    class Relation:
-        def __and__(self, restriction):
-            return self
-
-        def __bool__(self):
-            return True
-
-        def proj(self, *args):
-            return self
-
-        def fetch1(self):
-            return sorter_row
-
-    class Sorting:
-        def get_statistics_spans(self, restriction):
-            assert restriction == {"sorting_id": sorting_id}
-            return spans
-
-    def require_committed(restriction, **kwargs):
-        assert restriction == key
-
-    curation = ModuleType("spyglass.spikesorting.v2.curation")
-    curation.CurationV2 = SimpleNamespace(
-        Unit=Relation(),
-        assert_committed_curation=require_committed,
-        get_merged_sorting=lambda restriction: curated_sorting,
-    )
-    sorting_module = ModuleType("spyglass.spikesorting.v2.sorting")
-    sorting_module.Sorting = Sorting
-    sorting_module.SortingSelection = Relation()
-    sorting_module.SorterParameters = Relation()
-    monkeypatch.setitem(sys.modules, curation.__name__, curation)
-    monkeypatch.setitem(sys.modules, sorting_module.__name__, sorting_module)
     monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
-    monkeypatch.setattr(
-        resolver,
-        "_resolve_curation_row",
-        lambda ref: {**key, "merges_applied": True},
-    )
-    monkeypatch.setattr(
-        resolver, "_resolve_recipe", lambda *args: {"params": waveform_params}
-    )
-    monkeypatch.setattr(
-        _sorting_analyzer,
-        "reconstruct_recording_and_sorting",
-        lambda *args: (recording, object()),
-    )
 
     def build(sorting, source, compute_key, **kwargs):
         assert sorting is curated_sorting
@@ -405,22 +381,6 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
     monkeypatch.setattr(
         _sorting_analyzer, "ensure_extensions", lambda *a, **k: None
     )
-    monkeypatch.setattr(
-        resolver, "load_analyzer_folder", lambda folder: saved[Path(folder)]
-    )
-    interactive_folder = tmp_path / "interactive.analyzer"
-    assert (
-        resolver.build_merged_analyzer(
-            key, "recipe", analyzer_folder=interactive_folder
-        )
-        is saved[interactive_folder]
-    )
-
-    from spyglass.spikesorting.v2._storage import (
-        analyzer_cache as _analyzer_cache,
-    )
-    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
-
     monkeypatch.setattr(
         _analyzer_cache,
         "load_analyzer_folder",
@@ -458,12 +418,11 @@ def test_single_low_level_analyzer_builder(tmp_path, monkeypatch, wants_pc):
         statistics_spans=spans,
     )
     assert result == (metrics, labels, merges, None)
-    assert len(builds) == (3 if wants_pc else 2)
+    assert len(builds) == (2 if wants_pc else 1)
     assert evaluations == [
-        (saved[builds[1]], saved[builds[2]] if wants_pc else None)
+        (saved[builds[0]], saved[builds[1]] if wants_pc else None)
     ]
-    assert interactive_folder.exists()
-    assert all(not folder.exists() for folder in builds[1:])
+    assert all(not folder.exists() for folder in builds)
 
 
 def test_temporary_evaluation_unmaps_analyzers_before_cleanup(
@@ -701,7 +660,6 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
     from spyglass.spikesorting.v2 import visualization as ssviz
     from spyglass.spikesorting.v2._curation.analyzer import (
         _resolve_curation_analyzer,
-        curation_analyzer_cache_path,
         curation_analyzer_with_extensions,
         derived_extension_request_hash,
         open_curation_analyzer,
@@ -724,7 +682,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
     try:
         root = CurationV2.insert_curation(sorting_key)
         recipe = (Sorting & sorting_key).fetch1("display_waveform_params_name")
-        raw_curation_folder = curation_analyzer_cache_path(root, recipe)
+        raw_curation_folder = _curation_cache_path(root, recipe)
         raw_analyzer = _resolve_curation_analyzer(root, recipe)
         assert list(raw_analyzer.unit_ids) == unit_ids
         assert not raw_curation_folder.exists()
@@ -749,7 +707,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         )
         merged_id = int(merged["curation_id"])
         merged_uuid = str((CurationV2 & merged).fetch1("curation_uuid"))
-        folder = curation_analyzer_cache_path(merged, recipe)
+        folder = _curation_cache_path(merged, recipe)
         analyzer = _resolve_curation_analyzer(merged, recipe)
         expected = CurationV2.get_sorting(merged)
         assert list(analyzer.unit_ids) == list(expected.unit_ids)
@@ -784,7 +742,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         # derivative keyed by the exact request, never into the immutable
         # published base cache, and reused on the next identical request.
         request = {"spike_locations": {}}
-        derived_folder = curation_analyzer_cache_path(merged, recipe).with_name(
+        derived_folder = _curation_cache_path(merged, recipe).with_name(
             folder.name.replace(
                 folder.suffix,
                 f"_ext_{derived_extension_request_hash(request)}{folder.suffix}",
@@ -988,7 +946,7 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
         assert (
             str((CurationV2 & recreated).fetch1("curation_uuid")) != merged_uuid
         )
-        assert curation_analyzer_cache_path(recreated, recipe) != folder
+        assert _curation_cache_path(recreated, recipe) != folder
         orphan_report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
         assert str(folder) in orphan_report["disk_side"]
         # The analyzers above map files in ``folder``. Unmap them before the

@@ -111,6 +111,20 @@ _NOISE_NUM_CHUNKS = STATISTICS_SAMPLE_NUM_CHUNKS
 _NOISE_CHUNK_DURATION = f"{STATISTICS_SAMPLE_CHUNK_MS}ms"
 
 
+def _with_motion_arrays(stored: dict) -> dict:
+    """Return ``stored`` with its ``Motion`` array entries as NumPy arrays.
+
+    ``displacement`` and ``temporal_bins_s`` become per-segment lists of
+    arrays and ``spatial_bins_um`` one array; every other key is kept as is.
+    """
+    return {
+        **stored,
+        "displacement": [np.asarray(d) for d in stored["displacement"]],
+        "temporal_bins_s": [np.asarray(t) for t in stored["temporal_bins_s"]],
+        "spatial_bins_um": np.asarray(stored["spatial_bins_um"]),
+    }
+
+
 def motion_to_storage_dict(motion) -> dict:
     """Flatten a SpikeInterface ``Motion`` to a DataJoint-blob-safe dict.
 
@@ -122,13 +136,7 @@ def motion_to_storage_dict(motion) -> dict:
     window centers shared across segments), ``direction``,
     ``interpolation_method``, and SpikeInterface's ``object`` tag.
     """
-    stored = motion.to_dict()
-    return {
-        **stored,
-        "displacement": [np.asarray(d) for d in stored["displacement"]],
-        "temporal_bins_s": [np.asarray(t) for t in stored["temporal_bins_s"]],
-        "spatial_bins_um": np.asarray(stored["spatial_bins_um"]),
-    }
+    return _with_motion_arrays(motion.to_dict())
 
 
 def motion_from_storage_dict(blob: dict):
@@ -143,14 +151,7 @@ def motion_from_storage_dict(blob: dict):
     """
     from spikeinterface.core.motion import Motion
 
-    return Motion.from_dict(
-        {
-            **blob,
-            "displacement": [np.asarray(d) for d in blob["displacement"]],
-            "temporal_bins_s": [np.asarray(t) for t in blob["temporal_bins_s"]],
-            "spatial_bins_um": np.asarray(blob["spatial_bins_um"]),
-        }
-    )
+    return Motion.from_dict(_with_motion_arrays(blob))
 
 
 def motion_max_abs_displacement_um(motion) -> float:
@@ -169,27 +170,29 @@ def motion_n_temporal_bins(motion) -> int:
     return int(sum(np.asarray(t).shape[0] for t in motion.temporal_bins_s))
 
 
-def _signature_defaults(func, bound: frozenset) -> dict:
-    """Return ``func``'s defaulted parameters, minus the ``bound`` ones."""
-    return {
+def _signature_parameters(func, bound: frozenset) -> tuple[dict, set[str]]:
+    """Return ``func``'s defaulted and named parameters, minus ``bound``.
+
+    Returns
+    -------
+    defaults : dict
+        Each named parameter that has a default, mapped to that default.
+    names : set of str
+        Every named parameter (``*args`` / ``**kwargs`` excluded).
+    """
+    named = {
+        name: param
+        for name, param in inspect.signature(func).parameters.items()
+        if name not in bound
+        and param.kind
+        not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+    }
+    defaults = {
         name: param.default
-        for name, param in inspect.signature(func).parameters.items()
-        if name not in bound
-        and param.default is not inspect.Parameter.empty
-        and param.kind
-        not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+        for name, param in named.items()
+        if param.default is not inspect.Parameter.empty
     }
-
-
-def _signature_names(func, bound: frozenset) -> set[str]:
-    """Return ``func``'s named parameters, minus the ``bound`` ones."""
-    return {
-        name
-        for name, param in inspect.signature(func).parameters.items()
-        if name not in bound
-        and param.kind
-        not in (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
-    }
+    return defaults, set(named)
 
 
 def _canonical(value, reference=None):
@@ -344,8 +347,7 @@ def resolve_estimation_params(params: dict) -> dict:
         "detect_kwargs",
         merged["detect_kwargs"],
         preset["detect_kwargs"],
-        _signature_defaults(detect_cls.__init__, _DETECT_BOUND),
-        _signature_names(detect_cls.__init__, _DETECT_BOUND),
+        *_signature_parameters(detect_cls.__init__, _DETECT_BOUND),
     )
 
     localize_cls = peak_localization_methods[
@@ -355,26 +357,30 @@ def resolve_estimation_params(params: dict) -> dict:
         "localize_peaks_kwargs",
         merged["localize_peaks_kwargs"],
         preset["localize_peaks_kwargs"],
-        _signature_defaults(localize_cls.__init__, _LOCALIZE_BOUND),
-        _signature_names(localize_cls.__init__, _LOCALIZE_BOUND),
+        *_signature_parameters(localize_cls.__init__, _LOCALIZE_BOUND),
     )
 
     _method("estimate_motion_kwargs", _ESTIMATE_METHODS)
-    estimate_explicit = _signature_names(estimate_motion, _ESTIMATE_BOUND)
+    explicit_defaults, estimate_explicit = _signature_parameters(
+        estimate_motion, _ESTIMATE_BOUND
+    )
+    dredge_defaults, dredge_names = _signature_parameters(
+        dredge_ap, _ESTIMATE_BOUND
+    )
     estimate_defaults = {
         **{
             k: v
-            for k, v in _signature_defaults(dredge_ap, _ESTIMATE_BOUND).items()
+            for k, v in dredge_defaults.items()
             if k not in estimate_explicit
         },
-        **_signature_defaults(estimate_motion, _ESTIMATE_BOUND),
+        **explicit_defaults,
     }
     estimate = _resolve_step(
         "estimate_motion_kwargs",
         merged["estimate_motion_kwargs"],
         preset["estimate_motion_kwargs"],
         estimate_defaults,
-        estimate_explicit | _signature_names(dredge_ap, _ESTIMATE_BOUND),
+        estimate_explicit | dredge_names,
     )
     estimate["device"] = "cpu"
 
@@ -1785,9 +1791,7 @@ def motion_corrected_identity_payload(
     }
 
 
-def motion_corrected_recording_artifact_lock(
-    motion_corrected_recording_id, *, timeout: float = -1
-):
+def motion_corrected_recording_artifact_lock(motion_corrected_recording_id):
     """Return the cross-process lock for one corrected artifact's slot.
 
     See :func:`._storage.analyzer_cache.artifact_slot_lock`.
@@ -1796,9 +1800,6 @@ def motion_corrected_recording_artifact_lock(
     ----------
     motion_corrected_recording_id
         The corrected recording whose canonical artifact the caller mutates.
-    timeout : float, optional
-        Seconds to wait before raising ``filelock.Timeout``; ``-1`` (default)
-        blocks.
 
     Returns
     -------
@@ -1809,9 +1810,7 @@ def motion_corrected_recording_artifact_lock(
         artifact_slot_lock,
     )
 
-    return artifact_slot_lock(
-        "motion_corrected", motion_corrected_recording_id, timeout=timeout
-    )
+    return artifact_slot_lock("motion_corrected", motion_corrected_recording_id)
 
 
 def motion_estimate_identity_payload(
@@ -2017,8 +2016,6 @@ def motion_corrected_selection_identity(
     -------
     MotionSelectionIdentity
     """
-    import uuid
-
     import spikeinterface
 
     from spyglass.spikesorting.v2._core.selection_identity import (

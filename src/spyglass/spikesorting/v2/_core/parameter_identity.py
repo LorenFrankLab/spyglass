@@ -144,12 +144,10 @@ def parameter_fingerprint(
     return sha256_json(_normalize_numbers(payload), allow_nan=False)
 
 
-def short_fingerprint(
-    fingerprint: str, length: int = _SHORT_FINGERPRINT_LENGTH
-) -> str:
-    """Return the leading ``length`` characters of a full fingerprint.
+def short_fingerprint(fingerprint: str) -> str:
+    """Return the leading ``_SHORT_FINGERPRINT_LENGTH`` characters of a digest.
 
     A display-friendly prefix for catalogs and error messages; the full
     digest stays available for exact comparison.
     """
-    return fingerprint[:length]
+    return fingerprint[:_SHORT_FINGERPRINT_LENGTH]

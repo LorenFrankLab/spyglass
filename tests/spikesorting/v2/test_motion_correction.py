@@ -3648,7 +3648,7 @@ def test_invalid_support_and_geometry_fail_before_sorting(
     [
         ("self_correcting_sorter", "apply_motion_correction=False"),
         ("missing_recipe", "is missing"),
-        ("short_member", "concat member 0 sort_group_id=99"),
+        ("short_member", "concat member 0: sort_group_id=99"),
     ],
 )
 def test_concat_preflight_refuses_unsupported_motion(

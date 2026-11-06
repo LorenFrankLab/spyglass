@@ -8,7 +8,7 @@ unit-testable in isolation.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 # How a ``SortGroupV2`` references its channels before sorting:
 #   * ``"none"`` -- no re-referencing.
@@ -20,17 +20,15 @@ from typing import Literal
 # Literal at insert time (NOT a MySQL enum). The set may grow --
 # SpikeInterface also supports ``global_average`` / CAR and local per-group
 # referencing -- and a varchar lets a new mode be added in Python (this
-# Literal, ``_VALID_REFERENCE_MODES`` below, and its preprocessing branch)
-# without changing the column definition of a populated table. The Literal
-# gives identical typo protection at the ``insert1`` boundary; ``CurationLabel``
-# uses the same pattern. v1's ``SortGroup`` instead stores a single
+# Literal and its preprocessing branch) without changing the column
+# definition of a populated table. The Literal gives identical typo
+# protection at the ``insert1`` boundary; ``CurationLabel`` uses the same
+# pattern. v1's ``SortGroup`` instead stores a single
 # ``sort_reference_electrode_id`` int whose magic sentinels (-1 none, -2
 # global median, >=0 specific) conflate the mode with the channel id.
 ReferenceMode = Literal["none", "global_median", "specific"]
 
-_VALID_REFERENCE_MODES: frozenset[str] = frozenset(
-    ("none", "global_median", "specific")
-)
+_VALID_REFERENCE_MODES: frozenset[str] = frozenset(get_args(ReferenceMode))
 
 
 def _validate_reference_fields(row: dict) -> None:

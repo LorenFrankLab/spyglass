@@ -64,9 +64,6 @@ _VALIDATED_SI_PREFIXES = ("0.104",)
 _PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
 _ISOLATION_PATCH_FLAG = "_spyglass_v2_isolation_kdtree_patched"
 
-#: SI's own ``_compute_isolation``, kept as the reference the k-d tree copy
-#: must reproduce.
-_SI_COMPUTE_ISOLATION = _pm._compute_isolation
 _SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
 
 #: Reentrant lock guarding SpikeInterface's class-level metric params (the
@@ -505,6 +502,42 @@ def _nn_noise_overlap_sparse_fixed(
     )
 
 
+def _install(
+    target, attr: str, replacement, *, flag: str, description: str
+) -> None:
+    """Idempotently set ``target.<attr>`` to ``replacement``.
+
+    No-op once ``target`` carries ``flag``. Outside the validated SI family,
+    logs a warning naming ``description`` and still applies, so a future SI
+    change surfaces.
+
+    Parameters
+    ----------
+    target : module or type
+        The SI module or class whose attribute is replaced.
+    attr : str
+        Attribute name to replace.
+    replacement : object
+        The patched function.
+    flag : str
+        Attribute set to ``True`` on ``target`` once patched.
+    description : str
+        The patch's name in the version warning.
+    """
+    if getattr(target, flag, False):
+        return
+    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
+        logger.warning(
+            "spikesorting v2: SpikeInterface %s is outside the validated set "
+            "%s for the %s; applying anyway -- re-verify or remove this shim.",
+            si.__version__,
+            _VALIDATED_SI_PREFIXES,
+            description,
+        )
+    setattr(target, attr, replacement)
+    setattr(target, flag, True)
+
+
 def patch_nn_noise_overlap_sparsity() -> None:
     """Idempotently install the sparse-median ``nn_noise_overlap`` fix.
 
@@ -512,18 +545,13 @@ def patch_nn_noise_overlap_sparsity() -> None:
     family, logs a warning (and still applies) so a future SI change surfaces.
     Callers must run the PC/NN metric with ``n_jobs=1`` -- see module docstring.
     """
-    if getattr(_pm, _PATCH_FLAG, False):
-        return
-    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
-        logger.warning(
-            "spikesorting v2: SpikeInterface %s is outside the validated set "
-            "%s for the nn_noise_overlap sparsity patch; applying anyway -- "
-            "re-verify or remove this shim.",
-            si.__version__,
-            _VALIDATED_SI_PREFIXES,
-        )
-    _pm.nearest_neighbors_noise_overlap = _nn_noise_overlap_sparse_fixed
-    setattr(_pm, _PATCH_FLAG, True)
+    _install(
+        _pm,
+        "nearest_neighbors_noise_overlap",
+        _nn_noise_overlap_sparse_fixed,
+        flag=_PATCH_FLAG,
+        description="nn_noise_overlap sparsity patch",
+    )
 
 
 @contextlib.contextmanager
@@ -631,18 +659,13 @@ def patch_isolation_kdtree() -> None:
     the module at call time. Logs a warning (and still applies) outside the
     validated SI family.
     """
-    if getattr(_pm, _ISOLATION_PATCH_FLAG, False):
-        return
-    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
-        logger.warning(
-            "spikesorting v2: SpikeInterface %s is outside the validated set "
-            "%s for the k-d tree isolation patch; applying anyway -- "
-            "re-verify or remove this shim.",
-            si.__version__,
-            _VALIDATED_SI_PREFIXES,
-        )
-    _pm._compute_isolation = _compute_isolation_kdtree
-    setattr(_pm, _ISOLATION_PATCH_FLAG, True)
+    _install(
+        _pm,
+        "_compute_isolation",
+        _compute_isolation_kdtree,
+        flag=_ISOLATION_PATCH_FLAG,
+        description="k-d tree isolation patch",
+    )
 
 
 def _template_corrected_sd_ratio(
@@ -743,13 +766,16 @@ def _template_corrected_sd_ratio(
 
 def _span_spike_counts(sorting, spans):
     """``{unit_id: int}`` spikes whose frame lies inside a half-open span."""
+    from spyglass.spikesorting.v2._core.signal_math import (
+        frames_with_window_in_one_span,
+    )
+
     np = _mm.np
     spike_vector = sorting.to_spike_vector()
-    frames = spike_vector["sample_index"]
-    starts = np.array([a for a, _ in spans], dtype=np.int64)
-    ends = np.array([b for _, b in spans], dtype=np.int64)
-    owner = np.searchsorted(starts, frames, side="right") - 1
-    inside = (owner >= 0) & (frames < ends[np.maximum(owner, 0)])
+    # A one-sample window [frame, frame + 1) lies in a span iff the frame does.
+    inside = frames_with_window_in_one_span(
+        spike_vector["sample_index"], spans, n_before=0, n_after=1
+    )
     counts = np.bincount(
         spike_vector["unit_index"][inside], minlength=len(sorting.unit_ids)
     )
@@ -824,15 +850,10 @@ def patch_sd_ratio_statistics_spans() -> None:
     :func:`noise_cluster_spans` reach it. Warns (and still applies) outside
     the validated SI versions.
     """
-    if getattr(_mm.SDRatio, _SD_RATIO_PATCH_FLAG, False):
-        return
-    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
-        logger.warning(
-            "spikesorting v2: SpikeInterface %s is outside the validated set "
-            "%s for the sd_ratio statistics-span patch; applying anyway -- "
-            "re-verify or remove this shim.",
-            si.__version__,
-            _VALIDATED_SI_PREFIXES,
-        )
-    _mm.SDRatio.metric_function = _sd_ratio_statistics_spans
-    setattr(_mm.SDRatio, _SD_RATIO_PATCH_FLAG, True)
+    _install(
+        _mm.SDRatio,
+        "metric_function",
+        _sd_ratio_statistics_spans,
+        flag=_SD_RATIO_PATCH_FLAG,
+        description="sd_ratio statistics-span patch",
+    )

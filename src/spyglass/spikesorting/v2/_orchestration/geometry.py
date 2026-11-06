@@ -50,6 +50,30 @@ def _nullable_int(value):
     return None if _missing(value) else int(value)
 
 
+def _probe_key(electrode: dict) -> "tuple[Any, int, int] | None":
+    """Return an electrode's ``Probe.Electrode`` key, or ``None`` if incomplete.
+
+    Parameters
+    ----------
+    electrode : dict
+        An ``Electrode`` row (sort-group member or reference electrode).
+
+    Returns
+    -------
+    tuple or None
+        ``(probe_id, probe_shank, probe_electrode)`` with the shank and
+        electrode as ``int``, or ``None`` when any of the three is missing.
+    """
+    probe_id = electrode.get("probe_id")
+    probe_shank = electrode.get("probe_shank")
+    probe_electrode = electrode.get("probe_electrode")
+    if any(
+        _missing(value) for value in (probe_id, probe_shank, probe_electrode)
+    ):
+        return None
+    return probe_id, int(probe_shank), int(probe_electrode)
+
+
 def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     """Return a notebook-friendly summary of v2 sort groups for a session.
 
@@ -172,6 +196,11 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     member_rows = sort_group_electrode_regions(
         {"nwb_file_name": nwb_file_name}
     ).fetch(as_dict=True)
+    member_rows_by_group: dict[int, list[dict]] = {}
+    for row in member_rows:
+        member_rows_by_group.setdefault(int(row["sort_group_id"]), []).append(
+            row
+        )
 
     # Reference electrodes for 'specific'-reference groups are NOT sort-group
     # members (membership excludes them), so fetch them directly; the group loop
@@ -193,20 +222,11 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             ).fetch(as_dict=True)
         }
 
-    probe_restrictions = []
-    for electrode in [*member_rows, *reference_electrode_by_id.values()]:
-        probe_key = {
-            "probe_id": electrode.get("probe_id"),
-            "probe_shank": electrode.get("probe_shank"),
-            "probe_electrode": electrode.get("probe_electrode"),
-        }
-        if all(not _missing(value) for value in probe_key.values()):
-            probe_restrictions.append(
-                {
-                    key: _nullable_int(value) if key != "probe_id" else value
-                    for key, value in probe_key.items()
-                }
-            )
+    probe_restrictions = [
+        dict(zip(("probe_id", "probe_shank", "probe_electrode"), probe_key))
+        for electrode in [*member_rows, *reference_electrode_by_id.values()]
+        if (probe_key := _probe_key(electrode)) is not None
+    ]
     probe_geometry = {}
     if probe_restrictions:
         probe_rows = (Probe.Electrode & probe_restrictions).fetch(
@@ -238,11 +258,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             else None
         )
         group_electrodes = sorted(
-            (
-                row
-                for row in member_rows
-                if int(row["sort_group_id"]) == sort_group_id
-            ),
+            member_rows_by_group.get(sort_group_id, []),
             key=lambda row: int(row["electrode_id"]),
         )
         # Append the (non-member) specific reference electrode so its row gets
@@ -255,19 +271,9 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
             ]
         for electrode in group_electrodes:
             rel_x = rel_y = rel_z = contact_size = None
-            probe_key = {
-                "probe_id": electrode.get("probe_id"),
-                "probe_shank": electrode.get("probe_shank"),
-                "probe_electrode": electrode.get("probe_electrode"),
-            }
-            if all(not _missing(value) for value in probe_key.values()):
-                geometry = probe_geometry.get(
-                    (
-                        probe_key["probe_id"],
-                        _nullable_int(probe_key["probe_shank"]),
-                        _nullable_int(probe_key["probe_electrode"]),
-                    )
-                )
+            probe_key = _probe_key(electrode)
+            if probe_key is not None:
+                geometry = probe_geometry.get(probe_key)
                 if geometry:
                     rel_x = geometry["rel_x"]
                     rel_y = geometry["rel_y"]

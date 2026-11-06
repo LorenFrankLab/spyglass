@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
 from spyglass.spikesorting.v2.exceptions import PipelineStageError
-from spyglass.spikesorting.v2._orchestration.stages import _STAGE_STATUSES
+from spyglass.spikesorting.v2._orchestration.types import StageStatus
 from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
 from tests.spikesorting.v2._ingest_helpers import (
     configure_v2_run_inputs,
@@ -110,7 +111,7 @@ def test_run_summary_has_additive_keys(first_run):
     )
     assert isinstance(run_summary["warnings"], list)
     for key in _STATUS_KEYS:
-        assert run_summary[key] in _STAGE_STATUSES
+        assert run_summary[key] in get_args(StageStatus)
 
 
 @pytest.mark.database
@@ -481,7 +482,7 @@ def test_advisory_key_lock_acquire_error_is_non_fatal():
 
 
 @pytest.mark.database
-def test_advisory_key_lock_excludes_other_session(dj_conn):
+def test_advisory_key_lock_excludes_other_session(dj_conn, monkeypatch):
     """A second DB session cannot take the lock while the first holds it.
 
     This is the property the pipeline's per-key lock relies on and that the
@@ -493,6 +494,7 @@ def test_advisory_key_lock_excludes_other_session(dj_conn):
     """
     import datajoint as dj
 
+    from spyglass.spikesorting.v2._core import db_locking
     from spyglass.spikesorting.v2._core.db_locking import (
         advisory_key_lock as _advisory_key_lock,
     )
@@ -517,10 +519,11 @@ def test_advisory_key_lock_excludes_other_session(dj_conn):
         with _advisory_key_lock(holder, key) as held:
             assert held is True
             # The OTHER session blocks and times out -- cannot acquire.
-            with _advisory_key_lock(waiter, key, timeout_s=1) as while_held:
+            monkeypatch.setattr(db_locking, "POPULATE_LOCK_TIMEOUT_S", 1)
+            with _advisory_key_lock(waiter, key) as while_held:
                 assert while_held is False
         # Once the holder releases, the other session acquires it.
-        with _advisory_key_lock(waiter, key, timeout_s=1) as after_release:
+        with _advisory_key_lock(waiter, key) as after_release:
             assert after_release is True
     finally:
         conn_b.close()

@@ -54,7 +54,6 @@ from spyglass.spikesorting.v2._recording.fingerprint import (
     recording_content_fingerprint,
 )
 from spyglass.spikesorting.v2.exceptions import (
-    AnalyzerFolderInvalidError,
     AnalyzerFolderMissingError,
     StaleEnvMatchedError,
 )
@@ -691,12 +690,11 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
     def get_parent_key(self, key) -> dict:
         """Return the upstream ``Recording`` key for a recompute row.
 
-        Projects to the ``recording_id`` PK rather than joining ``Recording``
-        directly -- both tables carry a ``content_hash`` secondary attr, which
-        would otherwise trigger a join on a dependent attribute.
+        ``recording_id`` is part of every recompute primary key, so it is read
+        straight off ``key`` (no join: ``Recording`` and the versions table
+        both carry a ``content_hash`` secondary attr).
         """
-        recording_id = (RecordingArtifactVersions & key).fetch1("recording_id")
-        return {"recording_id": recording_id}
+        return {"recording_id": key["recording_id"]}
 
     # Tri-part dispatch: the trace regeneration (re-preprocess to a fresh NWB +
     # hash) is the long step and stays OUTSIDE the framework transaction
@@ -1059,24 +1057,14 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                     analyzer_folder
                 ),
             }
-        except AnalyzerFolderInvalidError as exc:
+        except AnalyzerFolderMissingError as exc:
+            # AnalyzerFolderInvalidError subclasses the missing error: an
+            # unloadable folder is inventoried exactly like an absent one.
             logger.warning(
-                "SortingAnalyzerVersions: analyzer folder invalid for "
+                "SortingAnalyzerVersions: analyzer folder unavailable for "
                 f"sorting_id={key['sorting_id']}, "
                 f"recipe={key['waveform_params_name']}; inventorying as MISSING "
-                f"(not rebuilding). Error: {exc}"
-            )
-            return AnalyzerVersionsComputed(
-                si_deps=si_deps,
-                analyzer_manifest={},
-                analyzer_hash=_MISSING_HASH,
-            )
-        except AnalyzerFolderMissingError:
-            logger.warning(
-                "SortingAnalyzerVersions: analyzer folder missing for "
-                f"sorting_id={key['sorting_id']}, "
-                f"recipe={key['waveform_params_name']}; inventorying as MISSING "
-                "(not rebuilding)."
+                f"(not rebuilding). {type(exc).__name__}: {exc}"
             )
             return AnalyzerVersionsComputed(
                 si_deps=si_deps,
@@ -1111,15 +1099,25 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         prior generation, then the current folder is inventoried immediately.
         """
         refreshed = 0
-        for row in (cls & restriction).fetch(as_dict=True):
+        inventories = cls & restriction
+        # A folder freed by ``delete_files`` is absent ON PURPOSE; its
+        # ``deleted=1`` rows are the reclamation audit and cascade away if
+        # this invalidates the inventory.
+        reclaimed_keys = {
+            (row["sorting_id"], row["waveform_params_name"])
+            for row in (
+                SortingAnalyzerRecompute & "deleted=1" & inventories.proj()
+            ).fetch("sorting_id", "waveform_params_name", as_dict=True)
+        }
+        for row in inventories.fetch(as_dict=True):
             key = {field: row[field] for field in cls.primary_key}
             folder = _analyzer_cache.analyzer_path(
                 key["sorting_id"], key["waveform_params_name"]
             )
-            # A folder freed by ``delete_files`` is absent ON PURPOSE; its
-            # ``deleted=1`` rows are the reclamation audit and cascade away if
-            # this invalidates the inventory.
-            reclaimed = bool(SortingAnalyzerRecompute & key & "deleted=1")
+            reclaimed = (
+                key["sorting_id"],
+                key["waveform_params_name"],
+            ) in reclaimed_keys
             with analyzer_cache_lock(key["sorting_id"]):
                 current = (
                     analyzer_folder_storage_fingerprint(folder)
@@ -1214,9 +1212,11 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         return self * Sorting.proj()
 
     def get_parent_key(self, key) -> dict:
-        """Return the upstream ``Sorting`` key for a recompute row."""
-        sorting_id = (SortingAnalyzerVersions & key).fetch1("sorting_id")
-        return {"sorting_id": sorting_id}
+        """Return the upstream ``Sorting`` key for a recompute row.
+
+        ``sorting_id`` is part of every recompute primary key.
+        """
+        return {"sorting_id": key["sorting_id"]}
 
     # Tri-part dispatch: the analyzer-folder regeneration + extension hashing is
     # the long step and stays OUTSIDE the framework transaction. A regen failure

@@ -750,18 +750,18 @@ def test_frame_to_time_preserves_unsorted_repeated_observations(explicit):
     assert recording.time_slice_calls == []
 
 
-def test_base_intervals_from_recording_detects_gaps():
+def test_base_intervals_and_gaps_detects_gaps():
     """Gap detection yields one interval per contiguous run from bounded
     timestamp chunks."""
-    from spyglass.spikesorting.v2._storage.units_nwb import (
-        _base_intervals_from_recording,
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
     )
 
     times = np.concatenate(
         [np.arange(5, dtype=float) / _FS, 10.0 + np.arange(4) / _FS]
     )
     rec = _FakeRecording(times, explicit=True)
-    assert _base_intervals_from_recording(rec, _FS) == [
+    assert base_intervals_and_gaps(rec, _FS).base_intervals == [
         [0.0, 0.004],
         [10.0, 10.003],
     ]

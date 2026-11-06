@@ -999,14 +999,17 @@ def fetch_interior_bad_channel_ids(
             "electrode_group_name": egroup,
             "probe_shank": shank,
         }
+        shank_rows = ((Electrode * Probe.Electrode) & restr).fetch(
+            "electrode_id",
+            "bad_channel",
+            "rel_x",
+            "rel_y",
+            "rel_z",
+            as_dict=True,
+        )
         # Full-shank positions -> physical pitch (and the finiteness gate).
         shank_xyz = np.array(
-            [
-                [r["rel_x"], r["rel_y"], r["rel_z"]]
-                for r in ((Electrode * Probe.Electrode) & restr).fetch(
-                    "rel_x", "rel_y", "rel_z", as_dict=True
-                )
-            ],
+            [[r["rel_x"], r["rel_y"], r["rel_z"]] for r in shank_rows],
             dtype=float,
         )
         pitch = _shank_pitch(shank_xyz)
@@ -1023,10 +1026,9 @@ def fetch_interior_bad_channel_ids(
                 int(r["electrode_id"]),
                 np.array([r["rel_x"], r["rel_y"], r["rel_z"]], dtype=float),
             )
-            for r in (
-                (Electrode * Probe.Electrode) & restr & {"bad_channel": "True"}
-            ).fetch("electrode_id", "rel_x", "rel_y", "rel_z", as_dict=True)
-            if int(r["electrode_id"]) not in good_ids
+            for r in shank_rows
+            if r["bad_channel"] == "True"
+            and int(r["electrode_id"]) not in good_ids
         ]
         interior.extend(
             _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch)

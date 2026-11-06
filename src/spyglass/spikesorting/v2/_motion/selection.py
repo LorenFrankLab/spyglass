@@ -157,7 +157,7 @@ def insert_estimate_selection_rows(
 ) -> dict:
     """Insert the master and its parts atomically, locked against deletion.
 
-    The same protocol as ``SortingSelection.insert_selection``: an
+    Runs the artifact-bound insert shared with ``SortingSelection``: an
     artifact-bound selection must own its transaction (the advisory lock
     that serializes it against the detection's deletion is released when
     this returns), the artifact's merge id is resolved before the
@@ -169,64 +169,39 @@ def insert_estimate_selection_rows(
     statement, before any part row is written. Keep the master insert first,
     or the recovery would leave part rows inside a caller's transaction.
     """
-    from contextlib import ExitStack
+    from spyglass.spikesorting.v2.artifact_output import (
+        insert_artifact_bound_selection,
+    )
 
-    import datajoint as dj
+    motion_estimate_id = master_row["motion_estimate_id"]
 
-    from spyglass.spikesorting.v2._core.db_locking import required_advisory_lock
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
-    art_merge_id = None
-    if artifact_detection_id is not None:
-        if table_cls.connection.in_transaction:
-            raise ValueError(
-                "MotionEstimateSelection.insert_selection: refusing to link "
-                "an artifact detection while a caller-owned transaction is "
-                "open; the lock that serializes it against the detection's "
-                "deletion is released before your transaction commits. "
-                "Call insert_selection outside the transaction."
-            )
-        art_key = {"artifact_detection_id": artifact_detection_id}
-        try:
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-        except KeyError:
-            ArtifactDetectionOutput.insert_detection(art_key)
-            art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
-
-    with ExitStack() as art_lock:
+    def insert_rows(art_merge_id) -> None:
+        table_cls.insert1(master_row, allow_direct_insert=True)
+        source_part.insert1(source_row)
         if art_merge_id is not None:
-            art_lock.enter_context(
-                required_advisory_lock(
-                    ArtifactDetectionOutput,
-                    {"artifact_detection_id": artifact_detection_id},
-                )
+            table_cls.ArtifactDetectionSource.insert1(
+                {
+                    "motion_estimate_id": motion_estimate_id,
+                    "artifact_detection_merge_id": art_merge_id,
+                }
             )
-        try:
-            with table_cls._safe_context():
-                table_cls.insert1(master_row, allow_direct_insert=True)
-                source_part.insert1(source_row)
-                if art_merge_id is not None:
-                    table_cls.ArtifactDetectionSource.insert1(
-                        {
-                            "motion_estimate_id": master_row[
-                                "motion_estimate_id"
-                            ],
-                            "artifact_detection_merge_id": art_merge_id,
-                        }
-                    )
-        except dj.errors.DuplicateError as exc:
-            existing = refetch()
-            if existing is not None:
-                return existing
-            raise SchemaBypassError(
-                "MotionEstimateSelection master "
-                f"{master_row['motion_estimate_id']} exists but its "
-                "source/artifact parts do not match this selection (a "
-                "raw-insert orphan). Drop the orphan master and use "
-                "insert_selection()."
-            ) from exc
-    return {"motion_estimate_id": master_row["motion_estimate_id"]}
+
+    return insert_artifact_bound_selection(
+        table_cls,
+        {"motion_estimate_id": motion_estimate_id},
+        artifact_detection_id,
+        insert_rows=insert_rows,
+        refetch=refetch,
+        consumer="a motion estimate",
+        inputs=(
+            f"source {source_row} / "
+            f"artifact_detection_id={artifact_detection_id}"
+        ),
+        input_tables=(
+            "MotionEstimationParameters, Recording / ConcatenatedRecording "
+            "or ArtifactDetectionOutput"
+        ),
+    )
 
 
 def insert_corrected_selection(table_cls, key: dict) -> dict:

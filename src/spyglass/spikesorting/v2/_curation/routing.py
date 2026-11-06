@@ -104,7 +104,6 @@ class RestrictionPlan(NamedTuple):
     sort's motion correction the same way: a ``uuid.UUID`` matches sorts of
     that corrected recording, ``None`` matches sorts that read their source's
     own traces, and :data:`NO_MOTION_CORRECTION_RESTRICTION` matches both.
-    ``restrict_by_artifact`` is the caller's flag, threaded through unchanged.
     ``unresolved_name_warning`` is the message
     ``_curation.restriction.resolve_restriction`` emits via ``logger.warning``
     when ``restrict_by_artifact`` was requested but the interval name carried
@@ -118,7 +117,6 @@ class RestrictionPlan(NamedTuple):
     curation_restriction: dict
     artifact_detection_id: object
     motion_corrected_recording_id: object
-    restrict_by_artifact: bool
     unresolved_name_warning: "str | None"
 
 
@@ -245,6 +243,5 @@ def classify_and_normalize_restriction(
         curation_restriction=curation_restriction,
         artifact_detection_id=artifact_detection_id,
         motion_corrected_recording_id=motion_corrected_recording_id,
-        restrict_by_artifact=restrict_by_artifact,
         unresolved_name_warning=unresolved_name_warning,
     )

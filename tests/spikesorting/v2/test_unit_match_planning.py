@@ -1343,7 +1343,10 @@ def test_match_runner_passes_frozen_population_and_verified_source_hash(
     assert len(inserted) == 1
     assert inserted[0][0] == plan.curations
     assert inserted[0][2]["expected_input_set_hash"] == plan.input_set_hash
-    assert inserted[0][2]["unit_selections"] == [
+    # The frozen selections reach insert_inputs, which normalizes them itself;
+    # they must pin the same populations the plan froze.
+    passed = inserted[0][2]["unit_selections"]
+    assert [value.snapshot() for value in passed] == [
         value.snapshot() for value in plan.unit_selections
     ]
     assert result["n_pairs"] == 3 and result["n_tracked_units"] == 2

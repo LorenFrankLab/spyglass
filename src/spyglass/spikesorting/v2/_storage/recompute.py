@@ -117,15 +117,10 @@ def hash_extension_data(
 #: Base analyzer extensions ``Sorting.make`` computes, in build order. Used to
 #: report each extension's seed mode in the recompute manifest. Every STOCHASTIC
 #: base extension (random_spikes, noise_levels) is seed-pinned; templates and
-#: waveforms are intrinsically deterministic and carry no seed. This equals
-#: ``ANALYZER_RECOMPUTE_EXTENSIONS`` (the content the recompute hash covers);
-#: kept as a named list because the manifest reports seed modes in build order.
-BASE_ANALYZER_EXTENSIONS = (
-    "random_spikes",
-    "noise_levels",
-    "templates",
-    "waveforms",
-)
+#: waveforms are intrinsically deterministic and carry no seed. The recompute
+#: hash covers exactly the base extensions, so this is the same tuple under the
+#: name the build and manifest code read.
+BASE_ANALYZER_EXTENSIONS = ANALYZER_RECOMPUTE_EXTENSIONS
 
 
 def analyzer_seed_modes(analyzer) -> dict[str, object]:
@@ -188,34 +183,32 @@ def analyzer_inventory_refresh_needed(
     return analyzer_inventory_storage_changed(manifest, current_fingerprint)
 
 
-def hash_recording_traces(
-    recording, *, rounding: int = 4, chunk_frames: int = 300_000
-) -> dict[str, str]:
+def hash_recording_traces(recording, *, rounding: int = 4) -> dict[str, str]:
     """Return ``{segment_i: content_hash}`` of a recording's rounded traces.
 
-    Chunked over frames to bound memory; deterministic given the same
+    Chunked over 300,000 frames to bound memory; deterministic given the same
     preprocessing pipeline, raw data, and SpikeInterface version.
     """
     hashes: dict[str, str] = {}
     for segment in range(recording.get_num_segments()):
         digest = hashlib.md5()
         n_frames = recording.get_num_frames(segment_index=segment)
-        for start in range(0, n_frames, chunk_frames):
-            end = min(start + chunk_frames, n_frames)
-            traces = np.asarray(
-                recording.get_traces(
-                    segment_index=segment, start_frame=start, end_frame=end
+        for start in range(0, n_frames, 300_000):
+            end = min(start + 300_000, n_frames)
+            rounded = np.round(
+                np.asarray(
+                    recording.get_traces(
+                        segment_index=segment, start_frame=start, end_frame=end
+                    ),
+                    dtype=np.float64,
                 ),
-                dtype=np.float64,
+                rounding,
             )
-            # Serialize explicit little-endian so the digest is byte-stable
-            # across architectures (the content-fingerprint contract). traces
-            # is float64 above; ``<f8`` is a no-op on x86/ARM but defensive.
-            digest.update(
-                np.ascontiguousarray(
-                    np.round(traces, rounding).astype("<f8")
-                ).tobytes()
-            )
+            # Serialize explicit little-endian C-order so the digest is
+            # byte-stable across architectures (the content-fingerprint
+            # contract); on x86/ARM this hashes ``rounded``'s buffer without a
+            # copy.
+            digest.update(np.ascontiguousarray(rounded, dtype="<f8"))
         hashes[f"segment_{segment}"] = digest.hexdigest()
     return hashes
 

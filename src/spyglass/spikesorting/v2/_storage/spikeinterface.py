@@ -5,6 +5,8 @@ lazy NWB reloads and disk-backed analyzers. The dependency pin and real NWB /
 analyzer round-trip tests must move together when upgrading SpikeInterface.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 
@@ -38,20 +40,55 @@ def close_nwb_recording(recording) -> None:
             close()
 
 
-def attach_memmapped_waveforms(analyzer) -> None:
-    """Attach a complete saved waveform extension without loading it into RAM."""
+def saved_extension_metadata(analyzer, name: str):
+    """Load a saved extension's params and run status without its data.
+
+    SI 0.104.3 writes ``params.json`` when a compute starts, the data while it
+    runs (``waveforms.npy`` is a memmap filled in place), and ``run_info.json``
+    only once it finishes, so an extension without run info is an interrupted
+    or still-running compute. Only analyzers saved by a SpikeInterface that
+    predates run info legitimately lack it, and every v2 analyzer is built by
+    the pinned SI.
+
+    Parameters
+    ----------
+    analyzer : spikeinterface.SortingAnalyzer
+        A ``binary_folder`` analyzer that lists ``name`` as saved.
+    name : str
+        The extension name.
+
+    Returns
+    -------
+    extension : spikeinterface.core.sortinganalyzer.AnalyzerExtension
+        A detached instance with ``params`` and ``run_info`` loaded and empty
+        ``data``; it is not registered on ``analyzer``.
+    completed : bool
+        Whether the saved run finished.
+    """
     from spikeinterface.core.sortinganalyzer import get_extension_class
 
-    if "waveforms" not in analyzer.get_saved_extension_names():
-        return
-    extension = get_extension_class("waveforms")(analyzer)
+    extension = get_extension_class(name)(analyzer)
     extension.load_params()
     extension.load_run_info()
-    run_info = extension.run_info
-    data_file = extension._get_binary_extension_folder() / "waveforms.npy"
-    if (
-        run_info is not None and not run_info.get("run_completed", False)
-    ) or not data_file.is_file():
+    completed = bool((extension.run_info or {}).get("run_completed", False))
+    return extension, completed
+
+
+def saved_extension_data_file(analyzer, name: str, data_name: str) -> Path:
+    """Return the ``.npy`` file SI's binary format saves ``data_name`` in."""
+    from spikeinterface.core.sortinganalyzer import get_extension_class
+
+    extension = get_extension_class(name)(analyzer)
+    return extension._get_binary_extension_folder() / f"{data_name}.npy"
+
+
+def attach_memmapped_waveforms(analyzer) -> None:
+    """Attach a complete saved waveform extension without loading it into RAM."""
+    if "waveforms" not in analyzer.get_saved_extension_names():
+        return
+    extension, completed = saved_extension_metadata(analyzer, "waveforms")
+    data_file = saved_extension_data_file(analyzer, "waveforms", "waveforms")
+    if not completed or not data_file.is_file():
         return
     extension.data["waveforms"] = np.load(data_file, mmap_mode="r")
     analyzer.extensions["waveforms"] = extension

@@ -166,7 +166,6 @@ def plot_units_qc_figure(
     *,
     metric_names: list[str] | None = None,
     color_metric: str = "snr",
-    depth_axis: int = 1,
     axes=None,
 ):
     """Render a population QC overview: metric histograms + a depth scatter.
@@ -186,9 +185,8 @@ def plot_units_qc_figure(
         Metrics to histogram; defaults to the present subset of
         ``_DEFAULT_QC_METRICS`` (or all numeric columns).
     color_metric : str
-        Metric used to color the depth scatter.
-    depth_axis : int
-        Column of ``unit_locations`` to treat as depth (default 1 = y).
+        Metric used to color the depth scatter (depth is column 1, y, of
+        ``unit_locations``).
     axes : dict, sequence, numpy.ndarray, or matplotlib.axes.Axes, optional
         Axes to draw into. For non-empty sorts, pass either a mapping with one
         axis per metric name plus ``"scatter"``, or a flat/numpy sequence where
@@ -228,7 +226,7 @@ def plot_units_qc_figure(
     # colored by the chosen metric (units with a NaN color metric drawn gray).
     locations = np.asarray(unit_locations, dtype=float)
     x = locations[:, 0]
-    depth = locations[:, min(depth_axis, locations.shape[1] - 1)]
+    depth = locations[:, min(1, locations.shape[1] - 1)]
     color_values = (
         numeric.reindex(unit_ids)[color_metric].to_numpy(dtype=float)
         if color_metric in numeric.columns
@@ -449,23 +447,29 @@ def burst_pair_metrics_from_analyzer(
         for u in unit_ids
     }
 
+    # The merged train, and so its ISI-violation fraction, does not depend on
+    # pair order; compute it once per unordered pair.
+    isi_violation_by_pair: dict[frozenset, float] = {}
     rows = []
     for u1, u2 in pairs:
         i1, i2 = index_of[u1], index_of[u2]
-        merged_times = np.sort(
-            np.concatenate([spike_times[u1], spike_times[u2]])
-        )
-        violations = np.count_nonzero(
-            np.diff(merged_times) < isi_threshold_ms * 1e-3
-        )
+        pair_key = frozenset((u1, u2))
+        if pair_key not in isi_violation_by_pair:
+            merged_times = np.sort(
+                np.concatenate([spike_times[u1], spike_times[u2]])
+            )
+            violations = np.count_nonzero(
+                np.diff(merged_times) < isi_threshold_ms * 1e-3
+            )
+            isi_violation_by_pair[pair_key] = float(
+                isi_violation_fraction(violations, len(merged_times))
+            )
         rows.append(
             {
                 "unit1": u1,
                 "unit2": u2,
                 "wf_similarity": float(similarity[i1, i2]),
-                "isi_violation": float(
-                    isi_violation_fraction(violations, len(merged_times))
-                ),
+                "isi_violation": isi_violation_by_pair[pair_key],
                 "xcorrel_asymm": calculate_ca(bin_centers, ccgs[i1, i2, :]),
                 "unit_distance": float(
                     np.linalg.norm(locations[i1] - locations[i2])

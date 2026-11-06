@@ -13,8 +13,7 @@ Tables (one result table per source kind; unified downstream by the
 
 The recording source is a required FK on each selection master, so
 "exactly one source" is STRUCTURAL (a row cannot exist with zero or two
-sources) rather than a runtime-asserted XOR. ``insert_artifact_detection``
-dispatches a single-entry request to the matching selection.
+sources) rather than a runtime-asserted XOR.
 
 Artifact-removed valid times live in ``common.IntervalList`` (the
 UUID-suffixed name prevents collision with human-authored session intervals,
@@ -68,7 +67,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    split_leading_restrictions,
+    restrict_by_leading_args,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -246,19 +245,6 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 )
             member_recording_ids.append(m["recording_id"])
 
-        # All recording_ids must reference populated Recording rows.
-        missing = [
-            rid
-            for rid in member_recording_ids
-            if not (Recording & {"recording_id": rid})
-        ]
-        if missing:
-            raise ValueError(
-                "SharedArtifactGroup.insert_group: recording_id(s) "
-                f"{missing} are not in Recording. Populate Recording for "
-                "those selections first."
-            )
-
         # Time-axis compatibility check. ``RecordingSelection`` is
         # keyed by (nwb_file_name, sort_group_id, interval_list_name,
         # preprocessing_params_name, team_name); same NWB does NOT imply
@@ -284,6 +270,16 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         rec_by_id = {
             str(r["recording_id"]): r for r in per_member_recording_rows
         }
+        # All recording_ids must reference populated Recording rows.
+        missing = [
+            rid for rid in member_recording_ids if str(rid) not in rec_by_id
+        ]
+        if missing:
+            raise ValueError(
+                "SharedArtifactGroup.insert_group: recording_id(s) "
+                f"{missing} are not in Recording. Populate Recording for "
+                "those selections first."
+            )
         sel_by_id = {
             str(r["recording_id"]): r for r in per_member_selection_rows
         }
@@ -312,7 +308,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         # Load each member's preprocessed recording through ``Recording.
         # get_recording`` (the same path ``make_compute`` uses) and require
         # EXACT ``get_num_samples()``, ``get_dtype()``, and timestamps.
-        per_member_sizes: dict[str, tuple[int, str]] = {}
+        member_dtypes: set[str] = set()
         reference_fingerprint = None
         reference_rid = None
         for rid in member_recording_ids:
@@ -364,26 +360,11 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                     "recordings from the same interval identity or run "
                     "separate artifact detections."
                 )
-            per_member_sizes[str(rid)] = (
-                n_samples,
-                str(rec_obj.get_dtype()),
-            )
-        distinct_n_samples = {n for (n, _) in per_member_sizes.values()}
-        if len(distinct_n_samples) != 1:
+            member_dtypes.add(str(rec_obj.get_dtype()))
+        if len(member_dtypes) != 1:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members have "
-                f"differing exact n_samples "
-                f"{sorted(distinct_n_samples)}; "
-                "``si.aggregate_channels`` requires identical sample "
-                "counts. Likely cause: different "
-                "``interval_list_name`` values on the upstream "
-                "RecordingSelection rows."
-            )
-        distinct_dtypes = {dt for (_, dt) in per_member_sizes.values()}
-        if len(distinct_dtypes) != 1:
-            raise ValueError(
-                "SharedArtifactGroup.insert_group: members have "
-                f"differing dtypes {sorted(distinct_dtypes)}; "
+                f"differing dtypes {sorted(member_dtypes)}; "
                 "``si.aggregate_channels`` requires identical dtype."
             )
 
@@ -623,43 +604,6 @@ class SharedGroupArtifactSelection(
                 "member_set_hash": member_set_hash,
             },
         )
-
-
-def insert_artifact_detection(key: dict) -> dict:
-    """Insert an artifact-detection selection, dispatching on source kind.
-
-    Single entry point over the two source-specific selections: a
-    single-recording key (``recording_id``) routes to
-    :class:`RecordingArtifactSelection`, a cross-recording key
-    (``shared_artifact_group_name``) to :class:`SharedGroupArtifactSelection`.
-
-    Parameters
-    ----------
-    key : dict
-        Carries ``artifact_detection_params_name`` plus exactly one of
-        ``recording_id`` or ``shared_artifact_group_name``.
-
-    Returns
-    -------
-    dict
-        ``{"artifact_detection_id": ...}`` -- the content-addressed PK.
-
-    Raises
-    ------
-    ValueError
-        If neither or both source keys are supplied.
-    """
-    has_recording = "recording_id" in key
-    has_shared = "shared_artifact_group_name" in key
-    if has_recording == has_shared:
-        raise ValueError(
-            "insert_artifact_detection requires exactly one source key: "
-            "recording_id (single-recording) xor shared_artifact_group_name "
-            "(cross-recording), not both and not neither."
-        )
-    if has_recording:
-        return RecordingArtifactSelection.insert_selection(key)
-    return SharedGroupArtifactSelection.insert_selection(key)
 
 
 class RecordingArtifactFetched(NamedTuple):
@@ -917,35 +861,21 @@ class _ArtifactDetectionMixin:
         positional restriction is accepted for the easy-to-mistype
         ``Table().delete(restriction)`` form.
         """
-        restriction_args, args = split_leading_restrictions(args)
-        if restriction_args:
-            target = self
-            for restriction in restriction_args:
-                target = target & restriction
-            return target.delete(
+        restricted, args = restrict_by_leading_args(self, args)
+        if restricted is not None:
+            return restricted.delete(
                 *args,
                 safemode=safemode,
                 _cascade_sorts=_cascade_sorts,
                 **kwargs,
             )
 
-        from contextlib import ExitStack
-
-        from spyglass.spikesorting.v2._core.db_locking import (
-            required_advisory_lock,
-        )
         from spyglass.spikesorting.v2.artifact_output import (
-            ArtifactDetectionOutput,
+            artifact_lifecycle_locks,
         )
 
         detection_cls = type(self)
-        # Sort by artifact_detection_id so the per-detection locks below are
-        # acquired in a deterministic order: two overlapping bulk deletes then
-        # take them in the SAME order and cannot deadlock (A->B vs B->A).
-        rows = sorted(
-            self.fetch(as_dict=True),
-            key=lambda r: str(r["artifact_detection_id"]),
-        )
+        rows = self.fetch(as_dict=True)
 
         # Serialize delete-vs-insert_selection on each detection with the same
         # advisory lock insert_selection takes when it links an artifact, keyed
@@ -957,16 +887,12 @@ class _ArtifactDetectionMixin:
         # between where the force_masters cascade would silently drop its sort.
         # FAIL-CLOSED: required_advisory_lock RAISES AdvisoryLockError if it
         # cannot take the lock within the lifecycle timeout, so a delete never
-        # proceeds unserialized (ExitStack releases any locks already taken).
-        with ExitStack() as locks:
-            for row in rows:
-                locks.enter_context(
-                    required_advisory_lock(
-                        ArtifactDetectionOutput,
-                        {"artifact_detection_id": row["artifact_detection_id"]},
-                    )
-                )
-
+        # proceeds unserialized (any locks already taken are released). The
+        # locks are taken in id order, so two overlapping bulk deletes cannot
+        # deadlock (A->B vs B->A).
+        with artifact_lifecycle_locks(
+            row["artifact_detection_id"] for row in rows
+        ):
             # Count standalone and concat dependencies under the lifecycle
             # lock so a concurrent selection cannot slip past this check.
             if not _cascade_sorts:
@@ -1004,9 +930,14 @@ class _ArtifactDetectionMixin:
             else:
                 super().delete(*args, safemode=safemode, **kwargs)
 
-        for master_key, interval_rows_to_remove in delete_targets:
-            if not (detection_cls & master_key):
-                remove_artifact_interval_rows(interval_rows_to_remove)
+        remove_artifact_interval_rows(
+            [
+                restriction
+                for master_key, interval_rows_to_remove in delete_targets
+                if not (detection_cls & master_key)
+                for restriction in interval_rows_to_remove
+            ]
+        )
 
     def cascade_delete(self, *args, safemode=None, **kwargs):
         """Delete these detections and their dependent sorts and concats.
@@ -1072,14 +1003,27 @@ class RecordingArtifactDetection(
         """
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        params_blob, artifact_job_kwargs = (
-            ArtifactDetectionParameters * (RecordingArtifactSelection & key)
-        ).fetch1("params", "job_kwargs")
+        # The three tables share only FK-derived attributes
+        # (artifact_detection_params_name, recording_id), so one join reads
+        # every selection-side input.
+        (
+            params_blob,
+            artifact_job_kwargs,
+            recording_id,
+            nwb_file_name,
+            manual_excluded_times,
+        ) = (
+            ArtifactDetectionParameters
+            * (RecordingArtifactSelection & key)
+            * RecordingSelection
+        ).fetch1(
+            "params",
+            "job_kwargs",
+            "recording_id",
+            "nwb_file_name",
+            "manual_excluded_times",
+        )
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
-        recording_id = (RecordingArtifactSelection & key).fetch1("recording_id")
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
         return RecordingArtifactFetched(
             validated=validated,
             recording_id=recording_id,
@@ -1088,9 +1032,7 @@ class RecordingArtifactDetection(
             traces=Recording().resolve_stored_traces(
                 {"recording_id": recording_id}
             ),
-            manual_excluded_times=(RecordingArtifactSelection & key).fetch1(
-                "manual_excluded_times"
-            ),
+            manual_excluded_times=manual_excluded_times,
         )
 
     def make_compute(
@@ -1191,12 +1133,21 @@ class SharedGroupArtifactDetection(
         )
         from spyglass.spikesorting.v2.recording import RecordingSelection
 
-        group_name, frozen_hash = (SharedGroupArtifactSelection & key).fetch1(
-            "shared_artifact_group_name", "member_set_hash"
-        )
-        params_blob, artifact_job_kwargs = (
+        (
+            group_name,
+            frozen_hash,
+            manual_excluded_times,
+            params_blob,
+            artifact_job_kwargs,
+        ) = (
             ArtifactDetectionParameters * (SharedGroupArtifactSelection & key)
-        ).fetch1("params", "job_kwargs")
+        ).fetch1(
+            "shared_artifact_group_name",
+            "member_set_hash",
+            "manual_excluded_times",
+            "params",
+            "job_kwargs",
+        )
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)
 
         # Members ordered by recording_id so the tuple shape is DeepHash-stable
@@ -1249,9 +1200,7 @@ class SharedGroupArtifactDetection(
                 Recording().resolve_stored_traces({"recording_id": rid})
                 for rid in member_recording_ids
             ),
-            manual_excluded_times=(SharedGroupArtifactSelection & key).fetch1(
-                "manual_excluded_times"
-            ),
+            manual_excluded_times=manual_excluded_times,
         )
 
     def make_compute(

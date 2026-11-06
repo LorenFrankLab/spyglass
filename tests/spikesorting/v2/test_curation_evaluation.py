@@ -107,9 +107,7 @@ def test_effective_recording_load_matches_table_accessor(populated_sorting):
     from spyglass.spikesorting.v2._artifacts.readers import (
         read_artifact_removed_intervals,
     )
-    from spyglass.spikesorting.v2._recording.source import (
-        load_effective_recording,
-    )
+    from tests.spikesorting.v2._ingest_helpers import load_effective_recording
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
@@ -308,7 +306,10 @@ def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
     """
     import numpy as np
 
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._ingest_helpers import (
+        build_reference_merged_analyzer,
+        clear_curations_for,
+    )
 
     import spyglass.spikesorting.v2._curation.analyzer as curation_analyzer
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -346,7 +347,7 @@ def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
         )
 
         reference_folder = tmp_path / "reference.analyzer"
-        reference = curation_analyzer.build_merged_analyzer(
+        reference = build_reference_merged_analyzer(
             merged, recipe, "display", analyzer_folder=reference_folder
         )
 
@@ -354,7 +355,7 @@ def test_merged_evaluation_publishes_the_display_analyzer_the_review_reuses(
             raise AssertionError("the review rebuilt the merged analyzer")
 
         monkeypatch.setattr(
-            curation_analyzer, "build_merged_analyzer", no_rebuild
+            curation_analyzer, "_build_resolved_merged_analyzer", no_rebuild
         )
         published = curation_analyzer._resolve_curation_analyzer(
             merged, recipe, "display"

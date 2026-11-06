@@ -68,9 +68,8 @@ def motion_estimate_report(
             "corrected traces; pass corrected_key too."
         )
     key = id_restriction(key, "motion_estimate_id")
-    estimate_key = (table & key).fetch1("KEY")
     row = (
-        (table & estimate_key)
+        (table & key)
         .proj(
             "motion",
             "resolved_params",
@@ -82,6 +81,7 @@ def motion_estimate_report(
         )
         .fetch1()
     )
+    estimate_key = {name: row[name] for name in table.primary_key}
     lineage = MotionEstimateSelection.resolve_source(estimate_key)
     member_join_frames = ()
     if lineage.kind == "concatenated_recording":

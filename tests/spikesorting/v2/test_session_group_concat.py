@@ -1765,8 +1765,7 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
                 assert int(frames.max()) < member_samples[nwb_file_name]
 
     # Concat curations stay out of the session-scoped merge table: their spike
-    # times use the synthetic concat timeline. Trial rows are discoverable by
-    # the migration audit, demonstrated by force-registering one temporarily.
+    # times use the synthetic concat timeline.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import (
         CONCAT_MERGE_GATE_MESSAGE,
@@ -1779,19 +1778,6 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     assert (
         CONCAT_MERGE_GATE_MESSAGE.format(sorting_id=sort_pk["sorting_id"])
         in caplog.text
-    )
-
-    assert CurationV2.audit_concat_merge_rows() == []
-    SpikeSortingOutput._merge_insert(
-        [curation_key], part_name="CurationV2", skip_duplicates=True
-    )
-    merge_id = (SpikeSortingOutput.CurationV2 & curation_key).fetch1("merge_id")
-    audit_rows = CurationV2.audit_concat_merge_rows()
-    assert sum(row["merge_id"] == merge_id for row in audit_rows) == 1
-    (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(warn=False)
-    assert all(
-        row["merge_id"] != merge_id
-        for row in CurationV2.audit_concat_merge_rows()
     )
 
     # Session-scoped downstream provenance resolves through the anchor member

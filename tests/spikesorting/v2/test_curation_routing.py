@@ -204,7 +204,6 @@ def test_classify_does_not_emit_include_exclude_directive():
         "curation_restriction",
         "artifact_detection_id",
         "motion_corrected_recording_id",
-        "restrict_by_artifact",
         "unresolved_name_warning",
     }
 

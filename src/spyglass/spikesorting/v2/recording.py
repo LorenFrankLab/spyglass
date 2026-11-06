@@ -44,9 +44,6 @@ from spyglass.spikesorting.v2._recording import (
 )
 from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
-from spyglass.spikesorting.v2._recording.geometry import (
-    fetch_interior_bad_channel_ids,
-)
 from spyglass.spikesorting.v2._storage.nwb import (
     _ELECTRICAL_SERIES_PATH,
     StoredTraces,
@@ -57,11 +54,9 @@ from spyglass.spikesorting.v2._recording.types import (
     RecordingComputed,
     RecordingFetched,
 )
-from spyglass.spikesorting.v2._core.selection_identity import (
-    recording_input_hash,
-)
 from spyglass.spikesorting.v2._recording.restriction import (
     compute_recording_save_expectation,
+    intended_save_intervals,
     truncation_tolerance,
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -132,6 +127,55 @@ class DeletionPreview(NamedTuple):
     electrode_rows: int
     cascade_summary: tuple
     cross_team_downstream: tuple
+
+
+def _resolve_override_pair(
+    reference_mode: str | None,
+    reference_electrode_id: int | None,
+    caller: str,
+    hint_suffix: str = "",
+) -> tuple[str, int | None] | None:
+    """Validate a ``set_group_by_*`` call-wide reference override.
+
+    Parameters
+    ----------
+    reference_mode : str or None
+        Call-wide reference mode override; None inherits per group.
+    reference_electrode_id : int or None
+        Electrode id subtracted when ``reference_mode == "specific"``.
+    caller : str
+        Method name prefixed to the error message.
+    hint_suffix : str, optional
+        Caller-specific alternative appended to the "Pass
+        reference_mode='specific' too" hint.
+
+    Returns
+    -------
+    tuple of (str, int or None), or None
+        The ``(reference_mode, reference_electrode_id)`` override pair, or
+        None when no override was requested.
+
+    Raises
+    ------
+    ValueError
+        If ``reference_electrode_id`` is given without ``reference_mode``, or
+        the pair fails ``_validate_reference_fields``.
+    """
+    if reference_mode is not None:
+        _validate_reference_fields(
+            {
+                "reference_mode": reference_mode,
+                "reference_electrode_id": reference_electrode_id,
+            }
+        )
+        return (reference_mode, reference_electrode_id)
+    if reference_electrode_id is not None:
+        raise ValueError(
+            f"{caller}: reference_electrode_id is only meaningful with an "
+            "explicit reference_mode='specific'. Pass "
+            f"reference_mode='specific' too{hint_suffix}."
+        )
+    return None
 
 
 @schema
@@ -393,23 +437,20 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 "set_group_by_shank: pass either a per-group `references` "
                 "mapping or a call-wide `reference_mode` override, not both."
             )
-        override_pair: tuple[str, int | None] | None = None
-        if reference_mode is not None:
-            _validate_reference_fields(
-                {
-                    "reference_mode": reference_mode,
-                    "reference_electrode_id": reference_electrode_id,
-                }
-            )
-            override_pair = (reference_mode, reference_electrode_id)
-        elif reference_electrode_id is not None:
-            raise ValueError(
-                "set_group_by_shank: reference_electrode_id is only "
-                "meaningful with an explicit reference_mode='specific'. Pass "
-                "reference_mode='specific' too, or use a `references` mapping."
-            )
+        override_pair = _resolve_override_pair(
+            reference_mode,
+            reference_electrode_id,
+            "set_group_by_shank",
+            hint_suffix=", or use a `references` mapping",
+        )
 
-        electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch()
+        # The reference electrode itself may be a bad channel (and so absent
+        # from the filtered set below); keep the full electrode set so
+        # omit_ref_electrode_group can still find which group it belongs to.
+        all_electrodes = (
+            Electrode() & {"nwb_file_name": nwb_file_name}
+        ).fetch()
+        electrodes = all_electrodes
         if omit_bad_channels:
             electrodes = electrodes[electrodes["bad_channel"] == "False"]
         if len(electrodes) == 0:
@@ -424,12 +465,6 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
                 + ". "
                 "Check Electrode population and the bad_channel column."
             )
-        # The reference electrode itself may be a bad channel (and so absent
-        # from the filtered set above); fetch the full electrode set so
-        # omit_ref_electrode_group can still find which group it belongs to.
-        all_electrodes = (
-            Electrode() & {"nwb_file_name": nwb_file_name}
-        ).fetch()
 
         proposed, skipped = _plan_sort_groups_by_shank(
             electrodes,
@@ -568,22 +603,11 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             (or its owning electrode group is ambiguous); or if it is itself a
             member of the sort group it would reference.
         """
-        if reference_mode is not None:
-            _validate_reference_fields(
-                {
-                    "reference_mode": reference_mode,
-                    "reference_electrode_id": reference_electrode_id,
-                }
-            )
-            override_pair = (reference_mode, reference_electrode_id)
-        elif reference_electrode_id is not None:
-            raise ValueError(
-                "set_group_by_electrode_table_column: reference_electrode_id "
-                "is only meaningful with an explicit reference_mode="
-                "'specific'. Pass reference_mode='specific' too."
-            )
-        else:
-            override_pair = None
+        override_pair = _resolve_override_pair(
+            reference_mode,
+            reference_electrode_id,
+            "set_group_by_electrode_table_column",
+        )
 
         electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch()
         if len(electrodes) == 0:
@@ -759,10 +783,11 @@ def resolve_recording_input_hash(
     ``interpolate`` bad-channel path) the resolved interior bad-channel set --
     and returns their :func:`recording_input_hash`. Shared by
     ``RecordingSelection.insert_selection`` and ``preflight_v2_pipeline`` so both
-    derive the identical ``recording_id``, and re-run by ``make_fetch`` to reject
-    a drift. Deliberately kept in lock-step with ``make_fetch``'s reads: a
-    divergence would mint an id ``make_fetch`` then rejects as a false drift,
-    which ``test_recording_input_hash_matches_make_fetch`` guards against.
+    derive the identical ``recording_id``. ``make_fetch`` re-reads the same
+    inputs through ``_recording.fetch.resolve_recording_inputs`` to reject a
+    drift; a divergence would mint an id ``make_fetch`` then rejects as a false
+    drift, which ``test_recording_input_hash_matches_make_fetch`` guards
+    against.
 
     Parameters
     ----------
@@ -780,38 +805,9 @@ def resolve_recording_input_hash(
     str
         The 64-char sha256 hex digest of the resolved inputs.
     """
-    sort_group_key = {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": int(sort_group_id),
-    }
-    channel_ids = sorted(
-        (SortGroupV2.SortGroupElectrode & sort_group_key).fetch("electrode_id"),
-        key=int,
-    )
-    reference_mode, reference_electrode_id = (
-        SortGroupV2 & sort_group_key
-    ).fetch1("reference_mode", "reference_electrode_id")
-    preprocessing_params = PreprocessingParamsSchema.model_validate(
-        (
-            PreprocessingParameters
-            & {"preprocessing_params_name": preprocessing_params_name}
-        ).fetch1("params")
-    )
-    interpolated_bad_channel_ids: tuple = ()
-    if preprocessing_params.bad_channel_handling == "interpolate":
-        interpolated_bad_channel_ids = fetch_interior_bad_channel_ids(
-            nwb_file_name, channel_ids
-        )
-    return recording_input_hash(
-        electrode_ids=channel_ids,
-        reference_mode=str(reference_mode),
-        reference_electrode_id=(
-            None
-            if reference_electrode_id is None
-            else int(reference_electrode_id)
-        ),
-        interpolated_bad_channel_ids=interpolated_bad_channel_ids,
-    )
+    return _recording_fetch.resolve_recording_inputs(
+        nwb_file_name, sort_group_id, preprocessing_params_name
+    ).input_hash
 
 
 @schema
@@ -1153,20 +1149,14 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         # The duration we INTENDED to save: the sort interval intersected
         # with the raw valid times AND filtered by ``min_segment_length`` --
         # the SAME filtering ``restrict_recording`` applies to build the
-        # recording. ``Interval`` opens a DB connection on import, so the
-        # intersect stays here; the pure duration / over-request arithmetic
-        # (compared against the saved duration by the ``make_insert`` truncation
-        # guard, so intentionally-dropped slivers are not mis-flagged) lives in
+        # recording. The pure duration / over-request arithmetic (compared
+        # against the saved duration by the ``make_insert`` truncation guard,
+        # so intentionally-dropped slivers are not mis-flagged) lives in
         # ``compute_recording_save_expectation``.
-        from spyglass.common.common_interval import Interval
-
-        intended_intervals = (
-            Interval(sort_valid_times)
-            .intersect(
-                Interval(raw_valid_times),
-                min_length=preprocessing_params.min_segment_length,
-            )
-            .times
+        intended_intervals = intended_save_intervals(
+            sort_valid_times,
+            raw_valid_times,
+            preprocessing_params.min_segment_length,
         )
         expectation = compute_recording_save_expectation(
             intended_intervals,

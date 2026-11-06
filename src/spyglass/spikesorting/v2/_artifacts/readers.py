@@ -227,7 +227,9 @@ def remove_artifact_interval_rows(restrictions):
 
     Companion to ``collect_artifact_interval_rows_to_remove``: removes the
     matching IntervalList rows AFTER the artifact-detection master delete
-    committed. Skips any restriction that matches nothing.
+    committed. All restrictions go through one delete because each
+    ``SpyglassMixin.delete`` call sweeps lab-wide external files; does
+    nothing when no restriction matches a row.
 
     Parameters
     ----------
@@ -241,8 +243,7 @@ def remove_artifact_interval_rows(restrictions):
     # passed it on the detection rows for the same nwb_file_name);
     # safemode=False only skips the re-prompt. ``super_delete`` would skip
     # the check and could delete other users' rows in a shared session.
-    for restriction in restrictions:
-        rows = IntervalList & restriction
-        if len(rows) == 0:
-            continue
-        rows.delete(safemode=False)
+    rows = IntervalList & restrictions
+    if len(rows) == 0:
+        return
+    rows.delete(safemode=False)
