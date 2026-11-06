@@ -1,5 +1,12 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 from ripple_detection import get_multiunit_population_firing_rate
+
+if TYPE_CHECKING:
+    from spyglass.spikesorting._observed_time import ObservationAvailability
 
 
 def firing_rate_from_spike_indicator(
@@ -16,6 +23,11 @@ def firing_rate_from_spike_indicator(
 
     if multiunit:
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+    if spike_indicator.shape[1] == 0:
+        # Zero-unit group (e.g. a v2 require_units=False curation, or all
+        # units label-filtered out): there is nothing to stack, so return an
+        # empty-but-shaped rate instead of letting np.stack([]) raise.
+        return np.zeros((spike_indicator.shape[0], 0))
     return np.stack(
         [
             get_multiunit_population_firing_rate(
@@ -26,4 +38,200 @@ def firing_rate_from_spike_indicator(
             for indicator in spike_indicator.T
         ],
         axis=1,
+    )
+
+
+def contiguous_observed_runs(
+    time: np.ndarray,
+    mask: np.ndarray,
+    sampling_frequency: float,
+) -> list[np.ndarray]:
+    """Split observed samples into maximal contiguous runs.
+
+    A run ends where the next sample is unobserved or where the timestamps
+    jump by more than 1.5 sample periods, so no run spans time the units were
+    not observed over. Smoothing or event detection applied per run therefore
+    never carries information across a gap.
+
+    Parameters
+    ----------
+    time : np.ndarray, shape (n_time,)
+        Bin times, ascending.
+    mask : np.ndarray, shape (n_time,)
+        True for observed samples.
+    sampling_frequency : float
+        Samples per second, used for the gap tolerance (1.5 / fs).
+
+    Returns
+    -------
+    list of np.ndarray
+        One integer index array per run, in time order. Empty when no sample
+        is observed.
+    """
+    time = np.asarray(time)
+    mask = np.asarray(mask, dtype=bool)
+
+    observed = np.flatnonzero(mask)
+    if observed.size == 0:
+        return []
+
+    dt = 1.0 / sampling_frequency
+    breaks = (np.diff(observed) > 1) | (  # an unobserved sample between
+        np.diff(time[observed]) > 1.5 * dt  # or a jump in the clock
+    )
+
+    return np.split(observed, np.flatnonzero(breaks) + 1)
+
+
+def firing_rate_over_runs(
+    spike_indicator: np.ndarray,
+    time: np.ndarray,
+    runs: list[np.ndarray],
+    multiunit: bool = False,
+    smoothing_sigma: float = 0.015,
+) -> np.ndarray:
+    """Smooth spike counts within each contiguous observed run.
+
+    Every sample outside the given runs holds ``np.nan``: it is time the
+    units were not observed over, or time the clock skipped, so no rate is
+    defined there and none is carried across it. Pass the runs from
+    ``contiguous_observed_runs`` so the smoothing splits wherever that
+    splitter says a run ends.
+
+    Parameters
+    ----------
+    spike_indicator : np.ndarray, shape (n_time,) or (n_time, n_units)
+        Per-bin spike counts. Samples outside ``runs`` are never read, so
+        they may hold ``np.nan``.
+    time : np.ndarray, shape (n_time,)
+        Bin times, ascending. Only the median sample period is used.
+    runs : list of np.ndarray
+        One integer index array per contiguous run, in time order.
+    multiunit : bool, optional
+        If True, sum the units into one population rate, by default False.
+    smoothing_sigma : float, optional
+        Standard deviation of the Gaussian smoother in seconds, by default
+        0.015.
+
+    Returns
+    -------
+    np.ndarray, shape (n_time, n_units) or (n_time, 1) when ``multiunit``
+        Firing rate in spikes/second, ``np.nan`` outside ``runs``.
+    """
+    spike_indicator = np.asarray(spike_indicator, dtype=float)
+    if spike_indicator.ndim == 1:
+        spike_indicator = spike_indicator[:, np.newaxis]
+
+    counts = (
+        spike_indicator.sum(axis=1, keepdims=True)
+        if multiunit
+        else spike_indicator
+    )
+    sampling_frequency = 1 / np.median(np.diff(time))
+
+    firing_rate = np.full(counts.shape, np.nan)
+    for run in runs:
+        for unit in range(counts.shape[1]):
+            firing_rate[run, unit] = get_multiunit_population_firing_rate(
+                counts[run, unit, np.newaxis],
+                sampling_frequency,
+                smoothing_sigma,
+            )
+    return firing_rate
+
+
+def observed_spike_indicator(
+    spike_times: list[np.ndarray],
+    time: np.ndarray,
+    observation: ObservationAvailability,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bin each unit's spikes over the population's observed time.
+
+    Bins that any contributing unit was not observed over hold ``np.nan``,
+    not a zero count: an unobserved bin is missing evidence, not evidence of
+    silence. Spikes are counted only inside the population's common observed
+    time, so a spike a single unit happened to observe cannot enter a bin
+    the population did not.
+
+    Parameters
+    ----------
+    spike_times : list of np.ndarray
+        One spike train per unit, in seconds.
+    time : np.ndarray, shape (n_time,)
+        Bin times, ascending. Spikes outside ``[time[0], time[-1]]`` are
+        dropped.
+    observation : ObservationAvailability
+        Common time every unit was observed over.
+
+    Returns
+    -------
+    spike_indicator : np.ndarray, shape (n_time, n_units)
+        Spike counts per bin, ``np.nan`` where ``valid`` is False.
+    valid : np.ndarray of bool, shape (n_time,)
+        True where every unit was observed.
+    """
+    time = np.asarray(time)
+    min_time, max_time = time[[0, -1]]
+    spike_indicator = np.zeros((len(time), len(spike_times)))
+
+    for ind, times in enumerate(spike_times):
+        times = times[
+            (times >= min_time)
+            & (times <= max_time)
+            & observation.contains(times)
+        ]
+        spike_indicator[:, ind] = np.bincount(
+            np.digitize(times, time[1:-1]),
+            minlength=time.shape[0],
+        )
+
+    if spike_indicator.ndim == 1:
+        spike_indicator = spike_indicator[:, np.newaxis]
+
+    valid = observation.valid_bins(time)
+    spike_indicator[~valid, :] = np.nan
+    return spike_indicator, valid
+
+
+def firing_rate_over_observed_runs(
+    spike_indicator: np.ndarray,
+    time: np.ndarray,
+    valid: np.ndarray,
+    multiunit: bool = False,
+    smoothing_sigma: float = 0.015,
+) -> np.ndarray:
+    """Smooth spike counts within each contiguous observed run of ``time``.
+
+    Runs come from ``contiguous_observed_runs``, which ends a run at a
+    timestamp jump as well as at an unobserved sample, so no rate is carried
+    across unobserved time or across a discontinuous time axis even when
+    every bin is observed. The MUA detector splits runs the same way.
+
+    Parameters
+    ----------
+    spike_indicator : np.ndarray, shape (n_time,) or (n_time, n_units)
+        Per-bin spike counts, e.g. from ``observed_spike_indicator``.
+    time : np.ndarray, shape (n_time,)
+        Bin times, ascending.
+    valid : np.ndarray of bool, shape (n_time,)
+        True for observed bins.
+    multiunit : bool, optional
+        If True, sum the units into one population rate, by default False.
+    smoothing_sigma : float, optional
+        Standard deviation of the Gaussian smoother in seconds, by default
+        0.015.
+
+    Returns
+    -------
+    np.ndarray, shape (n_time, n_units) or (n_time, 1) when ``multiunit``
+        Firing rate in spikes/second, ``np.nan`` outside the observed runs.
+    """
+    time = np.asarray(time)
+    runs = contiguous_observed_runs(time, valid, 1 / np.median(np.diff(time)))
+    return firing_rate_over_runs(
+        spike_indicator,
+        time,
+        runs,
+        multiunit=multiunit,
+        smoothing_sigma=smoothing_sigma,
     )

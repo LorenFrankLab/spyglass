@@ -1,0 +1,112 @@
+{
+    "channel_ids": [
+        0,
+        1,
+        2,
+        3
+    ],
+    "sampling_frequency": 29959.314285714285,
+    "num_channels": 4,
+    "num_samples": [
+        15000
+    ],
+    "is_filtered": false,
+    "properties": {
+        "gain_to_uV": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "offset_to_uV": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        "location": [
+            [
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                12.5
+            ],
+            [
+                12.5,
+                0.0
+            ],
+            [
+                12.5,
+                12.5
+            ]
+        ],
+        "group": [
+            0,
+            0,
+            0,
+            0
+        ],
+        "ref_elect_id": [
+            0,
+            0,
+            0,
+            0
+        ],
+        "hwChan": [
+            29,
+            25,
+            28,
+            21
+        ],
+        "probe_electrode": [
+            0,
+            1,
+            2,
+            3
+        ],
+        "probe_shank": [
+            0,
+            0,
+            0,
+            0
+        ],
+        "ntrode_id": [
+            1,
+            1,
+            1,
+            1
+        ],
+        "filtering": [
+            "N",
+            "N",
+            "N",
+            "N"
+        ],
+        "brain_area": [
+            "N",
+            "N",
+            "N",
+            "N"
+        ],
+        "channel_id": [
+            0,
+            1,
+            2,
+            3
+        ],
+        "imp": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        "bad_channel": [
+            false,
+            false,
+            false,
+            false
+        ]
+    }
+}

@@ -106,38 +106,47 @@ def find_float16_datasets(
     return hits
 
 
-def convert_dataset_type(file: h5py.File, dataset_path: str, target_dtype: str):
+def convert_dataset_type(
+    file: h5py.File | h5py.Group, dataset_path: str, target_dtype: str
+):
     """Convert a dataset to a different dtype.
 
     Operation is in-place for the nwb file. The dataset itself is deleted and
-    recreated with the same name, data, and attributes, but with the new dtype.
+    recreated with the same name, data, attributes, and storage layout, but
+    with the new dtype. Chunked datasets retain their resize limits; scalar
+    and contiguous datasets stay unchunked.
 
     Parameters
     ----------
-    file : h5py.File
-        Open HDF5 file handle with write access.
+    file : h5py.File or h5py.Group
+        Open HDF5 file or group with write access.
     dataset_path : str
-        Absolute path of the dataset to convert.
+        Absolute dataset path or a path relative to the supplied group.
     target_dtype : str
         Target dtype (e.g., 'float32', 'int16', etc.)
     """
     dset = file[dataset_path]
-    data = dset[()]  # loads into memory
+    # Validate the conversion before unlinking the original dataset.
+    data = np.asarray(dset[()], dtype=target_dtype)  # loads into memory
     attrs = dict(dset.attrs.items())
-    creation_kwargs = dict(
-        chunks=dset.chunks,
-        compression=dset.compression,
-        compression_opts=dset.compression_opts,
-        shuffle=dset.shuffle,
-        fletcher32=dset.fletcher32,
-        scaleoffset=dset.scaleoffset,
-        fillvalue=dset.fillvalue,
-    )
+    creation_kwargs = {
+        "chunks": dset.chunks,
+        "compression": dset.compression,
+        "compression_opts": dset.compression_opts,
+        "shuffle": dset.shuffle,
+        "fletcher32": dset.fletcher32,
+        "scaleoffset": dset.scaleoffset,
+        "fillvalue": dset.fillvalue,
+    }
+    # Supplying maxshape enables chunking, even for a fixed-size dataset.
+    # Unchunked arrays already have maxshape == shape; scalars cannot chunk.
+    if dset.chunks is not None:
+        creation_kwargs["maxshape"] = dset.maxshape
 
     del file[dataset_path]
     new_dset = file.create_dataset(
         dataset_path,
-        data=np.asarray(data, dtype=target_dtype),
+        data=data,
         dtype=target_dtype,
         **creation_kwargs,
     )

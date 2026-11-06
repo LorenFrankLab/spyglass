@@ -63,6 +63,10 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         self, nwb_file_name: str, group_name: str, keys: list[dict]
     ):
         """Create a group of waveform features for a given session"""
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
         group_key = {
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
@@ -73,6 +77,22 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
                 + "please delete the group before creating a new one",
             )
             return
+        # Consumer-boundary guards: refuse to group multiple curations of one
+        # sort (the same units would be counted more than once in the decode)
+        # and refuse a concat member owned by another session (this group is
+        # keyed by Session, but the part only foreign-keys a merge id, so the
+        # wrong session's wall-clock spikes would otherwise enter the decode).
+        # Both are no-ops for v0/v1 sources. Each UnitWaveformFeatures key
+        # carries the source's ``spikesorting_merge_id``. Runs AFTER the
+        # existing-group short-circuit -- an existing group is a no-op and
+        # never processes ``keys``, so they must not be validated here (and a
+        # caller passing a throwaway ``keys`` for the duplicate path must not
+        # trip the guards).
+        merge_ids = [k.get("spikesorting_merge_id") for k in keys]
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+        SpikeSortingOutput.assert_merge_ids_match_session(
+            merge_ids, nwb_file_name
+        )
         self.insert1(
             group_key,
             skip_duplicates=True,
@@ -639,15 +659,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
         waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ],
-                }
-            )
+            UnitWaveformFeaturesGroup.UnitFeatures
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "waveform_features_group_name": key[
+                    "waveform_features_group_name"
+                ],
+            }
         ).fetch("KEY")
         spike_times, spike_waveform_features = (
             UnitWaveformFeatures & waveform_keys

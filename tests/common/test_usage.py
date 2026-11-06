@@ -344,10 +344,10 @@ def test_intersect_export_populate(populate_intersect_export, common):
 
 
 def test_reexport_deletes_unreferenced_files(common, teardown):
-    """A superseded export's parts are fully removed -- including its
-    ``Export.File`` rows (the leak was a duplicated ``Table`` delete) -- and
-    only the *processed* lesser ids are considered superseded (the overlap
-    set-precedence is correct)."""
+    """A superseded export's parts are fully removed -- its ``Export.File``
+    rows as well as its ``Export.Table`` rows -- and only the *processed*
+    lesser ids are considered superseded (the overlap set-precedence is
+    correct)."""
     from spyglass.common.common_usage import Export, ExportSelection
 
     sel, export = ExportSelection(), Export()
@@ -361,9 +361,9 @@ def test_reexport_deletes_unreferenced_files(common, teardown):
                 "spyglass_version": "test",
             }
         )
-        return (
-            sel & {"paper_id": paper, "analysis_id": analysis_id}
-        ).fetch1("export_id")
+        return (sel & {"paper_id": paper, "analysis_id": analysis_id}).fetch1(
+            "export_id"
+        )
 
     e1 = _make_selection("a1")  # superseded (already exported)
     e2 = _make_selection("a2")  # superseding (max) export
@@ -386,8 +386,8 @@ def test_reexport_deletes_unreferenced_files(common, teardown):
     try:
         overlap = export._delete_superseded_exports([e1, e2], max_export_id=e2)
         # e2 is the max (not processed); only the processed lesser id e1 is
-        # superseded. The buggy `all - ({max} & processed)` precedence would
-        # also include the unprocessed e2 here.
+        # superseded. Evaluating the set expression as
+        # `all - ({max} & processed)` would also include the unprocessed e2.
         assert overlap == {e1}, f"unexpected superseded set {overlap}"
         # BOTH parts removed -- the File part must not leak.
         assert len(export.Table & {"export_id": e1}) == 0
@@ -399,9 +399,7 @@ def test_reexport_deletes_unreferenced_files(common, teardown):
             (export & {"paper_id": paper}).super_delete(
                 warn=False, safemode=False
             )
-            (sel & {"paper_id": paper}).super_delete(
-                warn=False, safemode=False
-            )
+            (sel & {"paper_id": paper}).super_delete(warn=False, safemode=False)
 
 
 def test_reexport_keeps_dandi_referenced_files(common, teardown, caplog):

@@ -6,6 +6,10 @@ mysql_config
 memray*
 root_*.y*ml
 
+# Local planning notes
+.claude/docs/
+spikesorting_v2_audit/
+
 # Notebooks
 *.ipynb
 !notebooks/[0-9]*.ipynb
@@ -62,6 +66,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 tests/_data/*
+tests/_data_release_measure/
 wget-log*
 
 # Translations
@@ -109,6 +114,7 @@ celerybeat-schedule
 # Environments
 .env
 .venv
+.venv-spikesorting-v2
 env/
 venv/
 ENV/
@@ -149,6 +155,11 @@ tests/_data/*
 *.nwb
 *.DS_Store
 
+# Spike sorting v2 simulated fixtures: regenerated locally / in CI, never committed.
+tests/spikesorting/v2/fixtures/*.h5
+tests/spikesorting/v2/fixtures/*.nwb
+# Spike sorting v2 baseline artifacts: commit only the small .pkl/.json baselines.
+!tests/spikesorting/v2/baselines/*.json
 temp_nwb/*s
 
 *.mp4
@@ -158,6 +169,20 @@ temp_nwb/*s
 *.csv
 *.pkl
 *.json
+# Spike sorting v2 baseline pickles are small committed reference artifacts;
+# this must live after the blanket *.pkl ignore above.
+!tests/spikesorting/v2/baselines/*.pkl
+# Tracked baseline snapshot for test_no_legacy_schema_changes; must be
+# committed despite the blanket *.json ignore so CI's fresh checkout has it.
+!tests/spikesorting/v2/baselines/legacy_schemas.json
+# Fixture provenance manifest: the pytest-v2 "smoke fixture did not drift"
+# step reads it via `git show HEAD:...` to compare deterministic hashes, so it
+# must be committed despite the blanket *.json ignore.
+!tests/spikesorting/v2/fixtures/fixtures_manifest.json
+# Development motion-acceptance manifest (seeds 0-2, no gates). Only this file.
+!tests/spikesorting/v2/motion_acceptance_development.json
+# Held-out motion-acceptance manifest (preregistered gates). Only this file.
+!tests/spikesorting/v2/motion_acceptance_held_out.json
 *.gz
 *.pdf
 *.lock
@@ -185,5 +210,13 @@ docs/site/
 !docs/src/images/*png
 temp*
 
+# MEArec scratch (written to CWD by gen_templates)
+tmp_params_path.yaml
+
 # Version
 _version.py
+
+# SpikeInterface 0.99-written extractor folders read by the cross-generation
+# tests; must stay last so it overrides the blanket *.json/*.npy/*.npz/temp*
+# ignores above.
+!tests/spikesorting/fixtures/si099/**

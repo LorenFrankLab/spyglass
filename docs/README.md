@@ -5,8 +5,12 @@
 `mkdocs.yml` is the site configuration file. To add a new page, edit the `nav`
 section of this file. New pages should be either:
 
-1. A markdown file in the `docs/` directory.
-2. A Jupyter notebook in the `notebooks/` directory.
+1. A Markdown file in `docs/src/`.
+2. A Jupyter notebook in `notebooks/`, linked under `docs/src/notebooks/`.
+
+After adding a notebook, run `bash ./docs/link-docs.sh` from the repository root
+and commit the new symlink. Edit notebooks in `notebooks/`; the linked
+documentation uses the same source.
 
 The remainder of `mkdocs.yml` specifies the site's
 [configuration](https://www.mkdocs.org/user-guide/configuration/)
@@ -30,22 +34,35 @@ To test edits to the site, be sure docs dependencies are installed:
 
 ```console
 cd /your/path/to/spyglass
-pip install .[docs]
+pip install -e ".[docs]"
 ```
 
-Then, run the build script:
+From the repository root, build the site without deploying or changing the
+documentation branch:
 
 ```console
-bash ./docs/build-docs.sh serve
+mkdocs build -f ./docs/mkdocs.yml
 ```
 
-Notably, this will make a copy of notebooks in `docs/src/notebooks`. Changes to
-the root notebooks directory may not be reflected when rebuilding.
+Review the build output for broken links and docstring parsing warnings. Use
+`mkdocs build --strict -f ./docs/mkdocs.yml` to make warnings fail the build;
+existing warnings elsewhere on the site may need separate cleanup.
 
-Use a browser to navigate to `localhost:8000/` to inspect the site. For
-auto-reload of markdown files during development, use
-`mkdocs serve -f ./docs/mkdosc.yaml`. The `mike` package used in the build
-script manages versioning, but does not support dynamic reloading.
+For a local preview with automatic reloading, run:
+
+```console
+mkdocs serve -f ./docs/mkdocs.yml
+```
+
+Open `http://localhost:8000/` to inspect navigation, notebook rendering, code
+examples, and narrow-screen layouts. Notebooks render without execution; a
+successful docs build does not verify their code cells. The v2 notebook
+execution checks are described in `tests/README.md`.
+
+The `mike` package used by `docs/build-docs.sh` manages versioned deployments
+and creates commits on the local `documentation` branch. Use that script for
+release/version preview work (`bash ./docs/build-docs.sh serve`), or with `push`
+to publish.
 
 The following items can be commented out in `mkdocs.yml` to reduce build time:
 
