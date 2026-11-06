@@ -343,7 +343,9 @@ def peak_amplitudes_from_analyzer(analyzer):
     array center. The analyzer's asymmetric window (``ms_before=1.0`` !=
     ``ms_after=2.0``) places the peak off the geometric center, so the center
     sample reads ~0.5 ms into the repolarization tail rather than the peak.
-    ``peak_times[unit_id]`` is the spike times (seconds) of THOSE SAME spikes.
+    ``peak_times[unit_id]`` is the spike times of THOSE SAME spikes, in
+    seconds on the recording-relative timeline (sample index / fs) the review
+    views use, so acquisition gaps are not shown.
     The ``waveforms`` extension holds only the ``random_spikes`` subset (capped
     at ``max_spikes_per_unit``), so the times are taken from that subset, not
     the full train -- otherwise the amplitude/time arrays mismatch for any unit
@@ -381,6 +383,7 @@ def burst_pair_metrics_from_analyzer(
     isi_threshold_ms: float = 2.0,
     window_ms: float = 100.0,
     bin_ms: float = 5.0,
+    continuity_spans=None,
 ):
     """Per-pair burst-merge diagnostics computed on the fly (nothing stored).
 
@@ -394,9 +397,13 @@ def burst_pair_metrics_from_analyzer(
       corroboration, not a reproduction of the merge engine's metric: the
       ``similarity_correlograms`` auto-merge preset compares templates with
       ``l1`` (its ``similarity_method`` default), while this reports cosine.
-    - ``isi_violation`` -- refractory-violation fraction of the merged train
-      (violating intervals / (spikes - 1), matching stored unit QC). This pure
-      helper defaults to 2 ms; the evaluation API supplies its recipe's window.
+    - ``isi_violation`` -- refractory-violation fraction of the train a
+      committed merge would store: cross-unit detections within 0.4 ms count
+      once, and intervals are measured on the recording's clock, never across
+      a ``continuity_spans`` join (a concat source's member and acquisition
+      joins), matching stored unit QC (violating intervals / (spikes - 1)).
+      This pure helper defaults to 2 ms; the evaluation API supplies its
+      recipe's window and its source's continuity spans.
     - ``xcorrel_asymm`` -- cross-correlogram left/right asymmetry (burst
       parent/child signature; directional, so computed per ordered pair).
     - ``unit_distance`` -- euclidean distance between ``unit_locations`` (the
@@ -415,8 +422,17 @@ def burst_pair_metrics_from_analyzer(
     from itertools import permutations
 
     from spyglass.spikesorting.utils_burst import calculate_ca
+    from spyglass.spikesorting.v2._core.signal_math import (
+        _MERGE_DEDUP_DELTA_MS,
+        _segment_times_at,
+    )
     from spyglass.spikesorting.v2._curation.metrics import (
+        count_short_isis,
+        isi_continuity_boundaries,
         isi_violation_fraction,
+    )
+    from spyglass.spikesorting.v2._storage.units_nwb import (
+        _dedup_merged_spike_times_and_frames,
     )
 
     for name in ("templates", "template_similarity", "unit_locations"):
@@ -441,11 +457,15 @@ def burst_pair_metrics_from_analyzer(
     # put the innermost negative bin on edge 0 and drop it, biasing every
     # asymmetry positive; centers are never zero for an even bin count.
     bin_centers = (bins[:-1] + bins[1:]) / 2.0
-    fs = analyzer.sampling_frequency
-    spike_times = {
-        u: analyzer.sorting.get_unit_spike_train(u).astype(float) / fs
+    spike_frames = {
+        u: np.asarray(analyzer.sorting.get_unit_spike_train(u), dtype=np.int64)
         for u in unit_ids
     }
+    spike_times = {
+        u: _segment_times_at(analyzer.recording, frames)
+        for u, frames in spike_frames.items()
+    }
+    boundaries = isi_continuity_boundaries(analyzer, continuity_spans)
 
     # The merged train, and so its ISI-violation fraction, does not depend on
     # pair order; compute it once per unordered pair.
@@ -455,11 +475,16 @@ def burst_pair_metrics_from_analyzer(
         i1, i2 = index_of[u1], index_of[u2]
         pair_key = frozenset((u1, u2))
         if pair_key not in isi_violation_by_pair:
-            merged_times = np.sort(
-                np.concatenate([spike_times[u1], spike_times[u2]])
+            merged_times, merged_frames = _dedup_merged_spike_times_and_frames(
+                [spike_times[u1], spike_times[u2]],
+                [spike_frames[u1], spike_frames[u2]],
+                _MERGE_DEDUP_DELTA_MS / 1000.0,
             )
-            violations = np.count_nonzero(
-                np.diff(merged_times) < isi_threshold_ms * 1e-3
+            violations = count_short_isis(
+                merged_times,
+                merged_frames,
+                isi_threshold_ms * 1e-3,
+                boundaries,
             )
             isi_violation_by_pair[pair_key] = float(
                 isi_violation_fraction(violations, len(merged_times))

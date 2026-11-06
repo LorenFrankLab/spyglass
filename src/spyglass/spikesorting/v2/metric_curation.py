@@ -1576,7 +1576,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         The queryable counterpart of v1's ``BurstPair.BurstPairUnit`` part
         table, computed on the fly from the evaluation's display analyzer
         rather than stored: ``wf_similarity`` (SI cosine template similarity),
-        ``isi_violation`` of the merged train, directional ``xcorrel_asymm``,
+        ``isi_violation`` of the train the merge would commit (cross-unit
+        duplicates removed, intervals on the source clock), directional
+        ``xcorrel_asymm``,
         and ``unit_distance`` between unit locations. Ordered pairs are
         distinct rows because the correlogram asymmetry is directional.
         ``pairs`` defaults to every ordered pair. The ISI fraction uses
@@ -1619,7 +1621,23 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 isi_threshold_ms=isi_threshold_ms,
                 window_ms=window_ms,
                 bin_ms=bin_ms,
+                continuity_spans=self._isi_continuity_spans(key),
             )
+
+    def _isi_continuity_spans(self, key):
+        """The evaluated sort's continuity spans when its clock is synthetic.
+
+        As in stored unit QC, a concat source's synthetic clock hides its
+        member and acquisition joins; its continuity spans mark them. Other
+        sources read their own timestamps, so ``None``.
+        """
+        sorting_id = (CurationEvaluationSelection & key).fetch1("sorting_id")
+        lineage, traces = SortingSelection.resolve_effective_source(
+            {"sorting_id": sorting_id}
+        )
+        if lineage.kind != "concatenated_recording":
+            return None
+        return traces.row["continuity_spans"]
 
     def plot_burst_pair_metrics(self, key, pairs=None, **kwargs):
         """Per-pair burst-metrics scatter for the sort (v1 BurstPair analog).

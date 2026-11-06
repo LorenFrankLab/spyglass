@@ -383,36 +383,53 @@ def isi_violation_fraction(isi_violations_count, num_spikes) -> np.ndarray:
     return fraction
 
 
-def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
-    """Count short ISIs from spike timestamps without loading the full clock.
+def isi_continuity_boundaries(analyzer, continuity_spans):
+    """Join frames between ``continuity_spans``, or ``None`` without spans.
 
     Concat-backed sources replace acquisition clocks with a synthetic clock;
     their persisted continuity spans identify pairs across unrelated chunks.
     Artifact exclusions do not split these spans or change elapsed time.
     """
+    if continuity_spans is None:
+        return None
+    spans = np.asarray(continuity_spans)
+    if spans.ndim != 2 or spans.shape[1] != 2 or not len(spans):
+        raise ValueError("ISI continuity_spans must contain frame pairs.")
+    spans = integer_vector(
+        spans.reshape(-1), name="ISI continuity_spans", nonnegative=True
+    ).reshape(-1, 2)
+    if (
+        analyzer.sorting.get_num_segments() != 1
+        or spans[0, 0] != 0
+        or spans[-1, 1] != analyzer.recording.get_num_samples()
+        or np.any(spans[:, 1] <= spans[:, 0])
+        or np.any(spans[1:, 0] != spans[:-1, 1])
+    ):
+        raise ValueError(
+            "ISI continuity_spans must partition the single-segment recording."
+        )
+    return spans[:-1, 1]
+
+
+def count_short_isis(times, frames, threshold_s, boundaries) -> int:
+    """Intervals shorter than ``threshold_s`` in one time-sorted train.
+
+    ``times`` are source-clock seconds of the spikes at ``frames``; a pair
+    straddling a continuity join (``boundaries``) is not an interval.
+    """
+    violations = np.diff(times) < threshold_s
+    if boundaries is not None:
+        spans_for_spikes = np.searchsorted(boundaries, frames, side="right")
+        violations &= spans_for_spikes[1:] == spans_for_spikes[:-1]
+    return int(np.count_nonzero(violations))
+
+
+def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
+    """Count short ISIs from spike timestamps without loading the full clock."""
     from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 
     sorting, recording = analyzer.sorting, analyzer.recording
-    boundaries = None
-    if continuity_spans is not None:
-        spans = np.asarray(continuity_spans)
-        if spans.ndim != 2 or spans.shape[1] != 2 or not len(spans):
-            raise ValueError("ISI continuity_spans must contain frame pairs.")
-        spans = integer_vector(
-            spans.reshape(-1), name="ISI continuity_spans", nonnegative=True
-        ).reshape(-1, 2)
-        if (
-            sorting.get_num_segments() != 1
-            or spans[0, 0] != 0
-            or spans[-1, 1] != recording.get_num_samples()
-            or np.any(spans[:, 1] <= spans[:, 0])
-            or np.any(spans[1:, 0] != spans[:-1, 1])
-        ):
-            raise ValueError(
-                "ISI continuity_spans must partition the single-segment recording."
-            )
-        boundaries = spans[:-1, 1]
-
+    boundaries = isi_continuity_boundaries(analyzer, continuity_spans)
     counts = np.zeros(len(unit_ids), dtype=float)
     for index, unit_id in enumerate(unit_ids):
         for segment_index in range(sorting.get_num_segments()):
@@ -424,13 +441,9 @@ def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
             times = _segment_times_at(
                 recording, frames, segment_index=segment_index
             )
-            violations = np.diff(times) < threshold_s
-            if boundaries is not None:
-                spans_for_spikes = np.searchsorted(
-                    boundaries, frames, side="right"
-                )
-                violations &= spans_for_spikes[1:] == spans_for_spikes[:-1]
-            counts[index] += np.count_nonzero(violations)
+            counts[index] += count_short_isis(
+                times, frames, threshold_s, boundaries
+            )
     return counts
 
 

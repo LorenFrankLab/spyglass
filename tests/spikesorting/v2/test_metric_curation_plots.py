@@ -383,6 +383,66 @@ def test_burst_pair_isi_uses_interval_count(synthetic_analyzer, monkeypatch):
     assert np.isnan(frame.loc[(1, 2), "isi_violation"])
 
 
+def _merged_isi(analyzer, monkeypatch, trains, **kwargs):
+    from spyglass.spikesorting.v2._curation.metric_plots import (
+        burst_pair_metrics_frame,
+    )
+
+    trains = {2: np.array([], dtype=np.int64), **trains}
+    monkeypatch.setattr(
+        analyzer.sorting, "get_unit_spike_train", trains.__getitem__
+    )
+    frame = burst_pair_metrics_frame(
+        analyzer, pairs=[(0, 1)], isi_threshold_ms=2.0, **kwargs
+    )
+    return frame.loc[(0, 1), "isi_violation"]
+
+
+def test_burst_pair_isi_drops_cross_unit_duplicates(
+    synthetic_analyzer, monkeypatch
+):
+    """A spike both units detected counts once, as a committed merge keeps it.
+
+    Frames 300 and 302 are 0.07 ms apart, inside the merge's 0.4 ms dedup.
+    """
+    trains = {0: np.array([300, 1500]), 1: np.array([302])}
+    assert _merged_isi(synthetic_analyzer, monkeypatch, trains) == 0.0
+
+
+def test_burst_pair_isi_reads_the_recording_clock(
+    synthetic_analyzer, monkeypatch
+):
+    """Spikes either side of an acquisition gap are not a short interval."""
+    recording = synthetic_analyzer.recording
+    sample_clock = recording.sample_index_to_time
+
+    def gapped(frames, segment_index=0):
+        times = np.asarray(sample_clock(frames, segment_index=segment_index))
+        return times + 10.0 * (np.asarray(frames) >= 1000)
+
+    monkeypatch.setattr(recording, "sample_index_to_time", gapped)
+    trains = {0: np.array([990]), 1: np.array([1010])}
+    assert _merged_isi(synthetic_analyzer, monkeypatch, trains) == 0.0
+
+
+def test_burst_pair_isi_ignores_pairs_across_continuity_joins(
+    synthetic_analyzer, monkeypatch
+):
+    """A concat member join is not a short interval on the synthetic clock."""
+    n = synthetic_analyzer.get_num_samples()
+    trains = {0: np.array([990]), 1: np.array([1010])}
+    assert _merged_isi(synthetic_analyzer, monkeypatch, trains) == 1.0
+    assert (
+        _merged_isi(
+            synthetic_analyzer,
+            monkeypatch,
+            trains,
+            continuity_spans=[[0, 1000], [1000, n]],
+        )
+        == 0.0
+    )
+
+
 def test_burst_pair_metrics_frame_is_pair_indexed(synthetic_analyzer):
     """The data form of the burst diagnostics is a ``(unit1, unit2)`` frame.
 
@@ -435,6 +495,9 @@ def _patch_evaluation_display_analyzer(monkeypatch, analyzer):
         yield analyzer
 
     monkeypatch.setattr(CurationEvaluation, "_display_analyzer", _display)
+    monkeypatch.setattr(
+        CurationEvaluation, "_isi_continuity_spans", lambda self, key: None
+    )
     return CurationEvaluation
 
 
