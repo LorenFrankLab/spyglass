@@ -84,6 +84,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Document admin-only table declaration and MySQL role activation #1678
 - Rewrite the Data Sync notebook for the shared-store workflow, keeping kachery
     in an appendix #1686
+- Fix `Export.md` example calls: `stop_export`, quoted key names, and the
+    `list_file_paths` and `populate_paper` arguments #PRNUM
 
 ### Infrastructure
 
@@ -127,6 +129,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Fix `Export` re-export cleanup, which deleted superseded `Export.Table` rows
+    twice and never `Export.File` rows. `File` rows still referenced by
+    `DandiPath` are kept #PRNUM
+- Fix `RestrGraph` cascade abort ("already exists") across a renamed foreign
+    key whose target name the table already has; restrict by the renamed
+    values instead #PRNUM
 
 ### Pipelines
 

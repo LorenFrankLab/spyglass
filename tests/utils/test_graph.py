@@ -120,6 +120,49 @@ def test_rg_add_list(add_graph_rgs, add_graph_tables):
     ), "Unexpected child restricted table length for union of rg_1 and rg_2."
 
 
+def _renamed_fk_graph(tables, restr):
+    from spyglass.utils.dj_graph import RestrGraph
+
+    pair = tables["UnitPair"]
+    return RestrGraph(
+        seed_table=pair,
+        leaves={pair.full_table_name: restr},
+        direction="up",
+        cascade=True,
+        verbose=False,
+    )
+
+
+def _restricted_keys(graph, table):
+    ft = graph._get_ft(table.full_table_name, with_restr=True)
+    return {
+        (int(s), int(u)) for s, u in zip(*ft.fetch("session_id", "unit_id"))
+    }
+
+
+def test_rg_cascades_renamed_fk_onto_existing_attr(renamed_fk_tables):
+    """Up-cascade does not raise when a rename targets an existing attr."""
+    graph = _renamed_fk_graph(renamed_fk_tables, "unit_id = 10")
+    kept = _restricted_keys(graph, renamed_fk_tables["KeptUnit"])
+    assert kept == {(0, 10), (1, 10)}, "Clean FK path failed to restrict."
+
+
+@pytest.mark.parametrize(
+    "restr, expected",
+    [
+        ("unit_id = 10", {(0, 1), (1, 2)}),  # each contributor, own session
+        ("session_id = 1", {(1, 2)}),  # shared key still restricts
+    ],
+)
+def test_rg_renamed_fk_restricts_referenced_parents(
+    renamed_fk_tables, restr, expected
+):
+    """Parent rows equal exactly those referenced through the renamed FK."""
+    graph = _renamed_fk_graph(renamed_fk_tables, restr)
+    units = _restricted_keys(graph, renamed_fk_tables["Unit"])
+    assert units == expected, f"Renamed FK restricted {units}"
+
+
 def test_rg_revisits_with_expanded_restriction(graph_tables):
     from spyglass.utils.dj_graph import RestrGraph
 

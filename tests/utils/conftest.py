@@ -332,3 +332,38 @@ def add_graph_tables(SpyglassMixin):
         "B1": B1(),
         "B2": B2(),
     }
+
+
+@pytest.fixture(scope="module")
+def renamed_fk_tables(SpyglassMixin, dj_conn, teardown):
+    """Child whose renamed foreign key targets an attribute it already has."""
+    schema = dj.Schema("test_renamed_fk", connection=dj_conn)
+
+    @schema
+    class Unit(SpyglassMixin, dj.Lookup):
+        definition = """
+        session_id: int
+        unit_id: int
+        """
+        contents = [(s, u) for s in range(2) for u in range(4)]
+
+    @schema
+    class KeptUnit(SpyglassMixin, dj.Lookup):
+        definition = """
+        session_id: int
+        unit_id: int
+        """
+        contents = [(s, u) for s in range(2) for u in range(10, 14)]
+
+    @schema
+    class UnitPair(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> KeptUnit
+        -> Unit.proj(contributor_id='unit_id')
+        """
+        contents = [(0, 10, 1), (1, 10, 2), (0, 12, 2)]
+
+    yield {"Unit": Unit(), "KeptUnit": KeptUnit(), "UnitPair": UnitPair()}
+
+    if teardown:
+        schema.drop(force=True)
