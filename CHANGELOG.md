@@ -75,7 +75,7 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
-#### `Merge.fetch_nwb` Requires `multi_source=True` Across Sources (#PRNUM)
+#### `Merge.fetch_nwb` Requires `multi_source=True` Across Sources (#1715)
 
 `Merge.fetch_nwb` drops the unused `disable_warning` argument. A restriction
 that spans more than one source part now raises a `ValueError` naming the
@@ -146,7 +146,7 @@ nwbs = (LFPOutput & merge_keys).fetch_nwb(multi_source=True)
 - Implement `multi_source` in `Merge.fetch_nwb`; `return_merge_ids` pairs each
     file with its own merge id. Parent-attribute and string restrictions select
     their own source; an unknown column raises, and a skipped source warns
-    #PRNUM
+    #1715
 
 ### Pipelines
 
@@ -189,7 +189,7 @@ nwbs = (LFPOutput & merge_keys).fetch_nwb(multi_source=True)
         #1678
     - `SortedSpikesGroup` and `SpikeSortingOutput.get_spike_times` fetch across
         source parts; `UnitAnnotation.fetch_unit_spikes` raises on annotations
-        that span sources #PRNUM
+        that span sources #1715
 
 ## [0.6.0] (Sep 1st 2026)
 
