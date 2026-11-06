@@ -84,5 +84,12 @@ def apply_manual_exclusions(valid_times, excluded_times, min_length_s):
     # piece at the predecessor float, distinguishing a deliberately excluded
     # final sample from an inclusive recording/chunk endpoint.
     kept = subtract_intervals(valid_times, exclusions, inclusive_stop=True)
+    # Only pieces an exclusion cut are dropped as slivers; an untouched
+    # interval was already accepted upstream.
+    untouched = {(float(start), float(stop)) for start, stop in valid_times}
     times = np.asarray(kept, dtype=float).reshape(-1, 2)
-    return times[(times[:, 1] - times[:, 0]) >= min_length_s]
+    keep = [
+        stop - start >= min_length_s or (start, stop) in untouched
+        for start, stop in kept
+    ]
+    return times[np.asarray(keep, dtype=bool)]

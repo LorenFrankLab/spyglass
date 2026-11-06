@@ -371,13 +371,15 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
 
     # Drop slivers shorter than ``min_length_s``: a noisy recording otherwise
     # leaves millisecond intervals the mask iterates one by one, and SI
-    # sorters may crash on them.
-    if kept:
-        kept = [
-            [start, end]
-            for start, end in kept
-            if (end - start) >= validated.min_length_s
-        ]
+    # sorters may crash on them. A chunk no artifact touched stays, as it
+    # does when the scan finds nothing: the preprocessing recipe already
+    # chose which short chunks to keep.
+    untouched = {(float(start), float(end)) for start, end in base_intervals}
+    kept = [
+        [start, end]
+        for start, end in kept
+        if (end - start) >= validated.min_length_s or (start, end) in untouched
+    ]
     if not kept:
         # Surface the cause now rather than as an
         # EmptyArtifactValidTimesError at sort time.

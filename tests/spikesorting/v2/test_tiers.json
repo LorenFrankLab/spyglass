@@ -198,6 +198,7 @@
         "test_compute_artifact_chunk_finite_recording_unaffected": "unit",
         "test_compute_artifact_chunk_raises_on_all_nan_chunk": "unit",
         "test_compute_artifact_chunk_raises_on_single_nan_sample": "unit",
+        "test_detect_artifacts_keeps_short_chunk_no_artifact_touched": "unit",
         "test_detect_artifacts_no_proportion_warning_on_tetrode": "unit",
         "test_detect_artifacts_raises_on_single_channel_zscore_only": "unit",
         "test_detect_artifacts_raises_on_two_channel_zscore_only": "unit",

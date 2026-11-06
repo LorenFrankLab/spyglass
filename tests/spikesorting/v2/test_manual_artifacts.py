@@ -56,6 +56,20 @@ def test_manual_exclusions_mask_exact_samples_and_keep_detected_artifacts(
     np.testing.assert_array_equal(members[0].get_times(), times)
 
 
+def test_manual_exclusion_keeps_short_interval_it_does_not_touch():
+    """``min_length_s`` drops slivers an exclusion cuts, not an untouched
+    valid interval shorter than it."""
+    from spyglass.spikesorting.v2._artifacts.manual import (
+        apply_manual_exclusions,
+    )
+
+    valid = np.array([[0.0, 10.0], [20.0, 20.5], [30.0, 40.0]])
+    updated = apply_manual_exclusions(valid, [[35.0, 39.5]], 1.0)
+    np.testing.assert_array_equal(
+        updated, [[0.0, 10.0], [20.0, 20.5], [30.0, 35.0]]
+    )
+
+
 def test_manual_exclusion_normalization_and_identity():
     import uuid
 

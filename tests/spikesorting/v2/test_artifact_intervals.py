@@ -334,6 +334,37 @@ def test_detect_artifacts_warns_when_min_length_drops_all_valid_time(caplog):
     )
 
 
+def test_detect_artifacts_keeps_short_chunk_no_artifact_touched():
+    """``min_length_s`` drops slivers that artifact removal cuts, not a clean
+    recorded chunk the preprocessing recipe kept: a short chunk survives the
+    same whether or not an artifact lands in another chunk."""
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
+
+    fs = 1000.0
+    # Chunks [0, 10), [20, 20.5) and [30, 40) s split by wall-clock gaps.
+    times = np.concatenate(
+        [
+            np.arange(10000) / fs,
+            20 + np.arange(500) / fs,
+            30 + np.arange(10000) / fs,
+        ]
+    )
+    params = _artifact_params(min_length_s=1.0)  # amplitude_threshold_uv=1000
+
+    def valid_times(with_artifact):
+        traces = np.zeros((times.size, 4), dtype="float32")
+        if with_artifact:
+            traces[15000:15010] = 5000.0  # inside the last chunk
+        return detect_artifacts(_rec(traces, fs=fs, times=times), params)
+
+    short_chunk = [times[10000], times[10499]]
+    for with_artifact in (False, True):
+        vt = valid_times(with_artifact)
+        assert any(
+            np.allclose(row, short_chunk) for row in vt
+        ), f"with_artifact={with_artifact}: short chunk dropped from {vt}"
+
+
 def test_detect_artifacts_raises_on_single_channel_zscore_only():
     """The z-score is computed ACROSS channels within a frame; on a 1-channel
     group it is identically zero, so a z-score-only config would silently
