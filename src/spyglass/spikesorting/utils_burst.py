@@ -1,3 +1,4 @@
+import warnings
 from typing import Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -90,7 +91,11 @@ def plot_burst_pair_peaks(
     pairs: List[Tuple[int, int]], peak_amps: Dict[int, np.ndarray]
 ):
     """Plot peak amplitudes and timestamps for a list of unit pairs."""
-    fig, axes = plt.subplots(len(pairs), 4, figsize=(12, 2 * len(pairs)))
+    n_cols = 4
+    # squeeze=False keeps ``axes`` 2-D for a single pair.
+    fig, axes = plt.subplots(
+        len(pairs), n_cols, figsize=(12, 2 * len(pairs)), squeeze=False
+    )
 
     def get_kwargs(unit, data):
         return dict(
@@ -105,7 +110,8 @@ def plot_burst_pair_peaks(
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        for i in range(min(peak1.shape[1], peak2.shape[1])):
+        # Plot at most n_cols channels.
+        for i in range(min(peak1.shape[1], peak2.shape[1], n_cols)):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
             axes[ind, i].hist(data2, **get_kwargs(u2, data2))
@@ -277,11 +283,38 @@ def calculate_ca(bins: np.ndarray, correl: np.ndarray) -> float:
 
 
 def calculate_isi_violation(
-    peak1: np.ndarray, peak2: np.ndarray, isi_threshold_s: float = 1.5
+    peak1: np.ndarray,
+    peak2: np.ndarray,
+    isi_threshold_ms: float = 1.5,
+    *,
+    isi_threshold_s: float | None = None,
 ) -> float:
-    """Calculate isi violation between two spike trains"""
+    """Fraction of refractory violations in the merged two-unit spike train.
+
+    Parameters
+    ----------
+    peak1, peak2 : np.ndarray
+        Spike times in seconds.
+    isi_threshold_ms : float
+        Refractory window in milliseconds.
+    isi_threshold_s : float, optional
+        Deprecated alias of ``isi_threshold_ms``, also in milliseconds.
+
+    Returns
+    -------
+    float
+        ``violations / total_spikes``.
+    """
+    if isi_threshold_s is not None:
+        warnings.warn(
+            "calculate_isi_violation(isi_threshold_s=...) is deprecated; the "
+            "value was always applied in milliseconds. Use isi_threshold_ms.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        isi_threshold_ms = isi_threshold_s
     spike_train = np.sort(np.concatenate((peak1, peak2)))
     isis = np.diff(spike_train)
     num_spikes = len(spike_train)
-    num_violations = np.sum(isis < (isi_threshold_s * 1e-3))
+    num_violations = np.sum(isis < (isi_threshold_ms * 1e-3))
     return num_violations / num_spikes
