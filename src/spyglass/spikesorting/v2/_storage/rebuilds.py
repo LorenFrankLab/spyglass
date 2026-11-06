@@ -27,15 +27,49 @@ from spyglass.spikesorting.v2._storage.staged_outputs import (
 _VERIFIED_ARTIFACT_PATHS: dict[str, tuple[str, tuple[int, int, int]]] = {}
 
 
+def _restore_object_id(path: str, rebuilt_id: str, stored_id: str) -> None:
+    """Give the rebuilt series the object id the stored row records.
+
+    Spyglass ``fetch_nwb`` finds each ``*object_id`` column's object by that
+    id, so a rebuild that kept its new id made the row unreadable that way.
+    """
+    import h5py
+
+    if rebuilt_id == stored_id:
+        return
+    with h5py.File(path, "r+") as file:
+        found = []
+        file.visititems(
+            lambda name, obj: (
+                found.append(name)
+                if obj.attrs.get("object_id")
+                in (rebuilt_id, rebuilt_id.encode())
+                else None
+            )
+        )
+        if len(found) != 1:
+            raise ValueError(
+                f"Rebuilt file {path!r} has {len(found)} objects with the "
+                f"rebuilt object id {rebuilt_id!r}; expected 1."
+            )
+        file[found[0]].attrs["object_id"] = stored_id
+
+
 def install_rebuilt_recording(
-    temp_abs: str, canonical_abs: str, analysis_file_name: str
+    temp_abs: str,
+    canonical_abs: str,
+    analysis_file_name: str,
+    *,
+    rebuilt_object_id: str,
+    stored_object_id: str,
 ) -> None:
     """Install a verified rebuild and refresh its tracked byte checksum.
 
     The caller holds the recording's artifact lock and has checked that the
-    temp's content fingerprint matches the stored recording. Replace the file
-    atomically, refresh its checksum, then verify that it resolves. On failure,
-    remove the temp or installed file so the next read can retry the rebuild.
+    temp's content fingerprint matches the stored recording. Give the rebuilt
+    series the stored row's object id, replace the file atomically, refresh
+    its checksum, then verify that it resolves. On failure, remove the temp or
+    installed file so the next read can retry the rebuild.
     """
     import os
     from pathlib import Path
@@ -43,6 +77,7 @@ def install_rebuilt_recording(
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     try:
+        _restore_object_id(temp_abs, rebuilt_object_id, stored_object_id)
         os.replace(temp_abs, canonical_abs)
     except Exception:
         Path(temp_abs).unlink(missing_ok=True)
@@ -286,6 +321,8 @@ def rebuild_nwb_artifact(table, key) -> None:
             AnalysisNwbfile.get_abs_path(rebuilt.analysis_file_name),
             canonical_abs,
             analysis_file_name,
+            rebuilt_object_id=rebuilt.object_id,
+            stored_object_id=row["object_id"],
         )
 
         logger.info(
@@ -399,6 +436,8 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
             AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
             canonical_abs,
             analysis_file_name,
+            rebuilt_object_id=computed.object_id,
+            stored_object_id=row["object_id"],
         )
 
 
@@ -548,4 +587,6 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
             AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
             canonical_abs,
             analysis_file_name,
+            rebuilt_object_id=computed.object_id,
+            stored_object_id=row["object_id"],
         )

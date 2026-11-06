@@ -82,7 +82,7 @@ class RecordingArtifactResult(NamedTuple):
     Internal helper result -- NOT a tri-part contract object, so it is never
     splatted into ``make_*``. ``make_compute`` reads these fields by name to
     build :class:`RecordingComputed`, and ``_rebuild_nwb_artifact`` reads only
-    ``content_hash``. Typed/named so the eight values are not threaded through
+    ``content_hash`` and ``object_id``. Typed/named so the eight values are not threaded through
     brittle positional unpacking. Field order intentionally matches
     ``RecordingComputed``'s first eight fields; consumers read these values
     by name.

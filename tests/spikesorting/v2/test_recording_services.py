@@ -151,12 +151,18 @@ def test_rebuilt_recording_install_leaves_retryable_state(
         replace(src, dst)
 
     monkeypatch.setattr(os, "replace", install)
+    # The stand-in file is not HDF5; equal ids leave it unopened.
+    same_object_id = {"rebuilt_object_id": "id", "stored_object_id": "id"}
     if failure:
         with pytest.raises(RuntimeError, match=f"injected {failure} failure"):
-            install_rebuilt_recording(str(temp), str(canonical), canonical.name)
+            install_rebuilt_recording(
+                str(temp), str(canonical), canonical.name, **same_object_id
+            )
         assert not canonical.exists()
     else:
-        install_rebuilt_recording(str(temp), str(canonical), canonical.name)
+        install_rebuilt_recording(
+            str(temp), str(canonical), canonical.name, **same_object_id
+        )
         assert canonical.read_bytes() == b"verified recording"
         assert events == ["replace", "refresh", "verify"]
     assert not temp.exists()

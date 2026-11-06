@@ -315,6 +315,29 @@ def test_rebuild_reconciles_external_checksum(populated_recording):
 
 
 @pytest.mark.slow
+def test_rebuild_keeps_the_rows_object_id(populated_recording):
+    """A rebuilt recording file holds the series the row's object_id names.
+
+    Spyglass ``fetch_nwb`` looks up each ``*object_id`` column in the file. A
+    rebuild that wrote the series with a new object id made it raise
+    ``KeyError``.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    row = (Recording & populated_recording).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    Path(abs_path).unlink()
+
+    Recording()._rebuild_nwb_artifact(populated_recording)
+
+    fetched = (Recording & populated_recording).fetch_nwb()[0]
+    assert fetched["object_id"].object_id == row["object_id"]
+
+
+@pytest.mark.slow
 def test_rebuild_refuses_on_content_drift(populated_recording, monkeypatch):
     """A rebuild whose fingerprint diverges from the stored ``content_hash``
     raises ``RecordingContentDriftError``; the canonical slot is NOT written
