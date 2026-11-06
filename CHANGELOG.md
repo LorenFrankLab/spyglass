@@ -25,7 +25,7 @@ info.connection.query(
 ```
 
 ```python
-# Remap UnitAnnotation unit ids from positions to NWB unit ids (#PRNUM). The
+# Remap UnitAnnotation unit ids from positions to NWB unit ids (#1716). The
 # new UnitAnnotationPositionalIdMigration table is declared on import.
 from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
 
@@ -85,7 +85,7 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
-#### Sorted-Spikes Unit Ids Are NWB Unit Ids (#PRNUM)
+#### Sorted-Spikes Unit Ids Are NWB Unit Ids (#1716)
 
 `SortedSpikesGroup.fetch_spike_data(return_unit_ids=True)` and `UnitAnnotation`
 numbered units by their position in the NWB units table. A curation that
@@ -176,7 +176,7 @@ UnitAnnotationPositionalIdMigration.insert1(
 
     - Pair waveform-feature units with spike times by label, not position #1678
     - `UnitWaveformFeatures.fetch_data` returns two empty lists for a feature
-        set with no units #PRNUM
+        set with no units #1716
 
 - Position
 
@@ -209,13 +209,13 @@ UnitAnnotationPositionalIdMigration.insert1(
         #1678
     - `SortedSpikesGroup.fetch_spike_data` and `UnitAnnotation` use NWB unit
         ids, not positions. Add `UnitAnnotation.migrate_positional_unit_ids` for
-        stored annotations #PRNUM
+        stored annotations #1716
     - `SortedSpikesGroup.fetch_spike_data` skips zero-unit sortings, and
-        applies label filters to curations with no label column #PRNUM
+        applies label filters to curations with no label column #1716
     - Unit criteria exclude missing values in nullable (`pd.NA`) columns
-        #PRNUM
+        #1716
     - `firing_rate_from_spike_indicator` returns a `(n_time, 0)` rate for zero
-        units #PRNUM
+        units #1716
 
 ## [0.6.0] (Sep 1st 2026)
 
