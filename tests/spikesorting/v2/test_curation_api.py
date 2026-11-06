@@ -462,3 +462,69 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
         } == {(unit_ids[0], "mua")}
     finally:
         clear_curations_for(sorting_key)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The merged child is evaluated with the parent's metric waveforms.
+
+    A parent evaluation can name its metric waveform recipe explicitly. The
+    child evaluation used the default recipe instead, so its metrics came from
+    different waveform windows than the parent's.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation_api import (
+        EvaluationResult,
+        create_initial_curation,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
+    clear_curations_for(sorting_key)
+    try:
+        root = create_initial_curation(sorting_key)
+        default_key = CurationEvaluationSelection.insert_by_curation_id(
+            root.sorting_id, root.curation_id, "minimal", "none"
+        )
+        default_recipe = (CurationEvaluationSelection & default_key).fetch1(
+            "metric_waveform_params_name"
+        )
+        recipe = next(
+            name
+            for name in (
+                "franklab_hippocampus_metric_waveforms",
+                "franklab_cortex_metric_waveforms",
+            )
+            if name != default_recipe
+        )
+        parent_key = CurationEvaluationSelection.insert_selection(
+            {
+                "sorting_id": root.sorting_id,
+                "curation_id": root.curation_id,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+                "metric_waveform_params_name": recipe,
+            }
+        )
+        CurationEvaluation.populate(parent_key, reserve_jobs=False)
+
+        receipt = EvaluationResult.from_key(parent_key).merge_and_evaluate(
+            [[unit_ids[0], unit_ids[1]]]
+        )
+
+        child_selection = CurationEvaluationSelection & {
+            "curation_evaluation_id": receipt.evaluation.evaluation_id
+        }
+        assert child_selection.fetch1("metric_waveform_params_name") == recipe
+        assert receipt.evaluation_selection_status == "computed"
+    finally:
+        clear_curations_for(sorting_key)

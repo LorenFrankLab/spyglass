@@ -1147,7 +1147,11 @@ class EvaluationResult:
     def merge_and_evaluate(
         self, groups: Sequence[Sequence[int]]
     ) -> "MergeEvaluateReceipt":
-        """Commit merges and evaluate the child with this exact recipe spec."""
+        """Commit merges and evaluate the child with this exact recipe spec.
+
+        The child uses the parent evaluation's metric and rule recipes and
+        its metric waveform recipe.
+        """
         from spyglass.spikesorting.v2.curation import CurationV2
         from spyglass.spikesorting.v2.metric_curation import (
             CurationEvaluation,
@@ -1178,19 +1182,27 @@ class EvaluationResult:
             else "computed"
         )
         child = CurationRef.from_key(child_key)
-        selection_identity = {
-            **child._unchecked_key(),
-            "metric_params_name": self.spec.metric_params_name,
-            "auto_curation_rules_name": self.spec.auto_curation_rules_name,
-        }
-        selection_existed = bool(
-            CurationEvaluationSelection & selection_identity
+        # The parent may name its metric waveform recipe explicitly; evaluate
+        # the child with the same one, not the preprocessing default.
+        metric_waveform_params_name = (
+            CurationEvaluationSelection & evaluation_key
+        ).fetch1("metric_waveform_params_name")
+        existing_selections = set(
+            (CurationEvaluationSelection & child._unchecked_key()).fetch(
+                "curation_evaluation_id"
+            )
         )
-        selection_key = CurationEvaluationSelection.insert_by_curation_id(
-            child.sorting_id,
-            child.curation_id,
-            self.spec.metric_params_name,
-            self.spec.auto_curation_rules_name,
+        selection_key = CurationEvaluationSelection.insert_selection(
+            {
+                "sorting_id": child.sorting_id,
+                "curation_id": child.curation_id,
+                "metric_params_name": self.spec.metric_params_name,
+                "auto_curation_rules_name": self.spec.auto_curation_rules_name,
+                "metric_waveform_params_name": metric_waveform_params_name,
+            }
+        )
+        selection_existed = (
+            selection_key["curation_evaluation_id"] in existing_selections
         )
         evaluation_existed = bool(CurationEvaluation & selection_key)
         CurationEvaluation.populate(selection_key, reserve_jobs=False)
