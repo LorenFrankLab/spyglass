@@ -380,28 +380,6 @@ def test_staged_analysis_cleanup_is_idempotent(
     assert not staged.exists()
 
 
-def test_partial_artifact_cleanup_preserves_canonical_file(
-    tmp_path, analysis_file_resolver, caplog
-):
-    """The recording-writer wrapper refuses canonical files before lookup."""
-    from spyglass.spikesorting.v2._storage.nwb import _remove_partial_artifact
-
-    canonical = tmp_path / "canonical.nwb"
-    canonical.write_bytes(b"canonical artifact")
-
-    _remove_partial_artifact(canonical.name, canonical.name)
-
-    assert canonical.read_bytes() == b"canonical artifact"
-    assert analysis_file_resolver[1] == []
-    assert "Recording._write_nwb_artifact" in caplog.text
-    assert "refusing to unlink a canonical artifact" in caplog.text
-
-    partial = tmp_path / "partial.nwb"
-    partial.write_bytes(b"failed attempt")
-    _remove_partial_artifact(partial.name, None)
-    assert not partial.exists()
-
-
 def test_units_writer_failure_cleans_staged_file_without_recording_schema(
     tmp_path, monkeypatch, analysis_file_resolver
 ):

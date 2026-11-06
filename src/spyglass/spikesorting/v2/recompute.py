@@ -844,10 +844,7 @@ def _recompute_recording_fingerprint(fetched) -> dict:
     ``fetched`` is ``Recording.make_fetch`` of the recording. The temp file
     is always unlinked and never enters the canonical slot.
     """
-    result = Recording._compute_recording_artifact(
-        fetched,
-        existing_analysis_file_name=None,
-    )
+    result = Recording._compute_recording_artifact(fetched)
     fresh_abs = AnalysisNwbfile.get_abs_path(result.analysis_file_name)
     try:
         return recording_content_fingerprint(

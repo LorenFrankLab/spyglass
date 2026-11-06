@@ -1681,74 +1681,6 @@ def test_changed_second_fetch_leaves_no_staged_recording_file(
         (RecordingSelection & pk).super_delete(warn=False)
 
 
-@pytest.mark.slow
-def test_recording_rebuild_path_keeps_existing_file_on_failure(
-    populated_sorting, monkeypatch
-):
-    """A post-write failure on the rebuild path
-    (``existing_analysis_file_name`` set) keeps the file, which is the
-    canonical cache.
-    """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._core import signal_math as utils_mod
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    recording_id = SortingSelection.resolve_source(populated_sorting).key[
-        "recording_id"
-    ]
-    fetched = Recording().make_fetch({"recording_id": recording_id})
-    nwb_file_name = fetched.sel["nwb_file_name"]
-
-    # A real on-disk file standing in for the canonical cache.
-    existing = AnalysisNwbfile().create(nwb_file_name)
-    existing_abs = AnalysisNwbfile.get_abs_path(existing)
-    assert Path(existing_abs).exists(), "precondition: cache file created"
-
-    captured = {}
-    real_write = Recording._write_nwb_artifact
-    real_ts = utils_mod._get_recording_timestamps
-
-    def _capture_write(*args, **kwargs):
-        result = real_write(*args, **kwargs)
-        captured["written"] = True
-        return result
-
-    def _raise_after_write(*args, **kwargs):
-        if "written" in captured:
-            raise RuntimeError("rebuild post-write boom")
-        return real_ts(*args, **kwargs)
-
-    monkeypatch.setattr(
-        Recording, "_write_nwb_artifact", staticmethod(_capture_write)
-    )
-    monkeypatch.setattr(
-        utils_mod, "_get_recording_timestamps", _raise_after_write
-    )
-
-    try:
-        with pytest.raises(Exception, match="rebuild post-write boom"):
-            Recording()._compute_recording_artifact(
-                fetched,
-                existing_analysis_file_name=existing,  # REBUILD path
-            )
-        assert (
-            "written" in captured
-        ), "precondition: _write_nwb_artifact must have run before the failure"
-        # The rebuild path must NOT unlink the canonical cache file.
-        assert Path(existing_abs).exists(), (
-            "rebuild path unlinked the existing cache file -- it must only "
-            "unlink on the fresh-write (existing is None) path"
-        )
-    finally:
-        Path(existing_abs).unlink(missing_ok=True)
-        # The create() call may have registered an AnalysisNwbfile row.
-        if AnalysisNwbfile & {"analysis_file_name": existing}:
-            (AnalysisNwbfile & {"analysis_file_name": existing}).delete(
-                safemode=False
-            )
-
-
 # ---------- raw-source resolution pinned to Raw.raw_object_id --------------
 
 
@@ -1869,7 +1801,6 @@ def test_raw_source_series_pinned_to_raw_object_id(
                 raw_object_id=second_obj,
                 raw_path=str(path),
             ),
-            existing_analysis_file_name=None,
         )
 
     assert captured["electrical_series_path"] == f"acquisition/{second_name}", (
@@ -1877,44 +1808,6 @@ def test_raw_source_series_pinned_to_raw_object_id(
         f"('acquisition/{second_name}'), not the first acquisition series; got "
         f"{captured['electrical_series_path']!r}"
     )
-
-
-@pytest.mark.usefixtures("dj_conn")
-def test_inplace_writer_does_not_unlink_canonical_on_failure(
-    monkeypatch, tmp_path
-):
-    """A failed in-place rebuild does NOT unlink the canonical artifact.
-
-    The cleanup-on-failure helper must refuse to delete a canonical artifact
-    (``existing_analysis_file_name`` set); only a temp-staged partial
-    (``existing_analysis_file_name is None``) is removed.
-    """
-
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._storage import nwb as rn
-
-    monkeypatch.setattr(
-        AnalysisNwbfile,
-        "get_abs_path",
-        staticmethod(lambda name, from_schema=False: str(tmp_path / name)),
-    )
-
-    canonical = tmp_path / "canonical.nwb"
-    canonical.write_text("canonical artifact")
-    temp = tmp_path / "temp.nwb"
-    temp.write_text("temp partial artifact")
-
-    # In-place rebuild (existing set): canonical must survive.
-    rn._remove_partial_artifact(
-        "canonical.nwb", existing_analysis_file_name="canonical.nwb"
-    )
-    assert (
-        canonical.exists()
-    ), "in-place rebuild must NOT unlink the canonical artifact on failure"
-
-    # Temp-staged rebuild (existing None): the partial temp file is removed.
-    rn._remove_partial_artifact("temp.nwb", existing_analysis_file_name=None)
-    assert not temp.exists(), "temp-staged partial must be cleaned up"
 
 
 # ---------- the compute path filters before it restricts -------------------

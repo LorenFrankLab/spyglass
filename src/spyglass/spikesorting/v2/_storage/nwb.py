@@ -122,21 +122,6 @@ def read_stored_traces(traces: StoredTraces):
     return open_persisted_traces(traces.abs_path, traces.electrical_series_path)
 
 
-def _remove_partial_artifact(
-    analysis_file_name: str, existing_analysis_file_name: str | None
-) -> None:
-    """Best-effort cleanup of a partial artifact after a failed write.
-
-    Never unlinks a canonical artifact (``existing_analysis_file_name`` set).
-    Cleanup failures are logged, not raised.
-    """
-    _unlink_staged_analysis_file(
-        analysis_file_name,
-        context="Recording._write_nwb_artifact",
-        existing_analysis_file_name=existing_analysis_file_name,
-    )
-
-
 # SpikeInterface rebuilds a reloaded recording's channel locations from these;
 # the content fingerprint hashes them.
 _RELATIVE_POSITION_COLUMNS = ("rel_x", "rel_y", "rel_z")
@@ -270,7 +255,6 @@ def _persist_channel_geometry(
 def write_nwb_artifact(
     recording,
     nwb_file_name: str,
-    existing_analysis_file_name: str | None = None,
     timestamps_override=None,
     *,
     filtering_description: str,
@@ -301,8 +285,6 @@ def write_nwb_artifact(
         The preprocessed recording to materialize.
     nwb_file_name : str
         Parent NWB filename (passed to ``AnalysisNwbfile().create``).
-    existing_analysis_file_name : str, optional
-        When set, write into this existing file instead of a new one.
     timestamps_override : array-like, optional
         Persisted timestamps, shape ``(n_samples,)``; may be lazy. ``None``
         uses :func:`_get_recording_timestamps`.
@@ -344,14 +326,10 @@ def write_nwb_artifact(
     # ``create`` writes a stub to disk; any later failure removes it.
     analysis_file_name = AnalysisNwbfile().create(
         nwb_file_name=nwb_file_name,
-        recompute_file_name=existing_analysis_file_name,
         restrict_permission=True,  # 0o644, not world-writable 0o666
     )
     try:
-        analysis_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name,
-            from_schema=bool(existing_analysis_file_name),
-        )
+        analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
         conversion, es_offset = resolve_conversion_and_offset(recording)
 
@@ -447,8 +425,8 @@ def write_nwb_artifact(
             )
         )
     except Exception:
-        _remove_partial_artifact(
-            analysis_file_name, existing_analysis_file_name
+        _unlink_staged_analysis_file(
+            analysis_file_name, context="Recording._write_nwb_artifact"
         )
         raise
 
@@ -507,7 +485,6 @@ def compute_recording_artifact(
     probe_types: tuple,
     electrode_group_names: tuple,
     bad_channel_ids: tuple = (),
-    existing_analysis_file_name: str | None = None,
     provenance_tables=None,
     writer: Callable | None = None,
 ) -> RecordingArtifactResult:
@@ -553,10 +530,6 @@ def compute_recording_artifact(
     bad_channel_ids : tuple, optional
         Interior bad channels to re-include on the ``interpolate``
         path; defaults to ``()`` (empty, the ``remove`` path).
-    existing_analysis_file_name : str or None, optional
-        When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
-        otherwise write into this file in place, never unlinking it on
-        failure.
     provenance_tables : optional
         Source-lineage scratch table(s) to embed in the file (see
         :func:`recording_provenance_table`), passed to the writer.
@@ -667,7 +640,6 @@ def compute_recording_artifact(
         ) = (write_nwb_artifact if writer is None else writer)(
             recording=recording,
             nwb_file_name=nwb_file_name,
-            existing_analysis_file_name=existing_analysis_file_name,
             timestamps_override=timestamps_override,
             filtering_description=filtering_description,
             provenance_tables=provenance_tables,
@@ -690,11 +662,7 @@ def compute_recording_artifact(
         n_channels = int(recording.get_num_channels())
         duration_s = float(saved_end - saved_start)
     except Exception:
-        # Never unlink an existing artifact written in place.
-        if (
-            existing_analysis_file_name is None
-            and analysis_file_name is not None
-        ):
+        if analysis_file_name is not None:
             _unlink_staged_analysis_file(
                 analysis_file_name,
                 context="Recording._compute_recording_artifact",

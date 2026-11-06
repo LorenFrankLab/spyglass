@@ -29,20 +29,11 @@ def unlink_staged_analysis_file(
     analysis_file_name: str,
     *,
     context: str,
-    existing_analysis_file_name: str | None = None,
 ) -> None:
     """Discard a staged analysis file without masking the caller's failure.
 
-    A canonical artifact named by ``existing_analysis_file_name`` is never
-    removed. Failures are logged with ``context``, never raised.
+    Failures are logged with ``context``, never raised.
     """
-    if existing_analysis_file_name:
-        logger.error(
-            f"{context}: in-place rebuild of canonical artifact "
-            f"{analysis_file_name!r} failed; leaving it in place "
-            "(refusing to unlink a canonical artifact on failure)."
-        )
-        return
     try:
         from spyglass.common.common_nwbfile import AnalysisNwbfile
 

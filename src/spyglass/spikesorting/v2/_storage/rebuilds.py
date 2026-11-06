@@ -245,7 +245,6 @@ def rebuild_nwb_artifact(table, key) -> None:
         # Same filesystem as the canonical slot, so install is an atomic rename.
         rebuilt = table._compute_recording_artifact(
             fetched,
-            existing_analysis_file_name=None,  # fresh temp, not the slot
             provenance_tables=recording_provenance_table(
                 recording_id=fetched.sel["recording_id"],
                 raw_object_id=fetched.raw_object_id,

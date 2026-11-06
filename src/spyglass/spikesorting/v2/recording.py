@@ -1230,7 +1230,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         cls,
         fetched: RecordingFetched,
         *,
-        existing_analysis_file_name: str | None = None,
         provenance_tables=None,
     ) -> RecordingArtifactResult:
         """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
@@ -1242,9 +1241,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ----------
         fetched : RecordingFetched
             The inputs :meth:`make_fetch` resolved.
-        existing_analysis_file_name : str or None, optional
-            When ``None`` (default), stage a fresh ``AnalysisNwbfile``;
-            otherwise write into this existing file in place.
         provenance_tables : optional
             Source-lineage scratch table(s) to embed in the file (see
             :func:`._storage.nwb.recording_provenance_table`).
@@ -1268,7 +1264,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             probe_types=fetched.probe_types,
             electrode_group_names=fetched.electrode_group_names,
             bad_channel_ids=fetched.bad_channel_ids,
-            existing_analysis_file_name=existing_analysis_file_name,
             provenance_tables=provenance_tables,
         )
 
@@ -1276,7 +1271,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     def _write_nwb_artifact(
         recording,
         nwb_file_name: str,
-        existing_analysis_file_name: str | None = None,
         timestamps_override=None,
         *,
         filtering_description: str,
@@ -1290,7 +1284,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         return write_nwb_artifact(
             recording,
             nwb_file_name,
-            existing_analysis_file_name,
             timestamps_override,
             filtering_description=filtering_description,
             provenance_tables=provenance_tables,
