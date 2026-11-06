@@ -363,6 +363,66 @@ def test_artifact_detection_populates_and_writes_interval_list(
     assert (retrieved_dict[nwb_file_name] == saved).all()
 
 
+@pytest.mark.slow
+def test_artifact_detection_delete_removes_interval_list_row(
+    populated_recording,
+):
+    """``RecordingArtifactDetection.delete()`` cleans up the matching
+    ``IntervalList`` row (DataJoint does not cascade through
+    ``interval_list_name``-keyed dependencies)."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    ArtifactDetectionParameters.insert_default()
+    existing = (
+        RecordingArtifactSelection
+        & {"recording_id": populated_recording["recording_id"]}
+    ).fetch("KEY", as_dict=True)
+    for row in existing:
+        # cascade: a prior test's populated_sorting may still reference it.
+        (
+            RecordingArtifactDetection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).cascade_delete()
+        (
+            RecordingArtifactSelection
+            & {"artifact_detection_id": row["artifact_detection_id"]}
+        ).super_delete(warn=False)
+
+    pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    RecordingArtifactDetection.populate(pk, reserve_jobs=False)
+
+    nwb_file_name = (RecordingSelection & populated_recording).fetch1(
+        "nwb_file_name"
+    )
+    interval_list_name = f"artifact_detection_{pk['artifact_detection_id']}"
+    assert IntervalList & {
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_list_name,
+    }
+
+    (RecordingArtifactDetection & pk).delete()
+
+    assert not (RecordingArtifactDetection & pk)
+    assert not (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_list_name,
+        }
+    )
+
+
 # ---------- Artifact masking at the signal level -------------------------
 
 
@@ -954,6 +1014,99 @@ def test_detect_artifacts_below_proportion_threshold_ignored(dj_conn):
 # ---------- ArtifactDetection.delete ownership rows -----------------------
 
 
+@pytest.mark.slow
+def test_artifact_detection_delete_uses_interval_ownership_part_rows(
+    populated_recording,
+):
+    """``RecordingArtifactDetection.delete`` cleans via owned part rows.
+
+    Delete cleanup should not reconstruct artifact interval ownership from
+    the source selector or interval naming convention. The generated
+    ``RemovedInterval`` rows are the contract.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    # Start from a detection no sort references (a prior test's
+    # populated_sorting may; that fixture rebuilds its chain on demand).
+    (RecordingArtifactDetection & art_pk).cascade_delete(safemode=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    )
+    assert (
+        part_rows
+    ), "RecordingArtifactDetection.populate must insert ownership rows"
+
+    (RecordingArtifactDetection & art_pk).delete(safemode=False)
+    assert len(RecordingArtifactDetection & art_pk) == 0
+    assert len(IntervalList & part_rows) == 0
+
+
+@pytest.mark.slow
+def test_artifact_detection_delete_requires_interval_ownership_part_rows(
+    populated_recording,
+):
+    """A row without ownership parts is invalid and must fail loudly.
+
+    We intentionally do not reconstruct missing ownership from
+    ``artifact_detection_id``-derived interval names. That would expose the
+    rows to the generic ``IntervalList.cleanup`` orphan problem this part
+    table prevents.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {
+            "recording_id": populated_recording["recording_id"],
+            "artifact_detection_params_name": "none",
+        }
+    )
+    # Start from a detection no sort references (a prior test's
+    # populated_sorting may; that fixture rebuilds its chain on demand).
+    (RecordingArtifactDetection & art_pk).cascade_delete(safemode=False)
+    RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    )
+    assert (
+        part_rows
+    ), "RecordingArtifactDetection.populate must insert ownership rows"
+
+    (RecordingArtifactDetection.RemovedInterval & art_pk).delete_quick()
+
+    try:
+        with pytest.raises(ValueError, match="no RemovedInterval part rows"):
+            (RecordingArtifactDetection & art_pk).delete(safemode=False)
+        assert len(RecordingArtifactDetection & art_pk) == 1
+    finally:
+        # force_masters: the detection registers itself into the
+        # ArtifactDetectionOutput merge at populate, so a raw super_delete must
+        # force through the merge part to reach the detection master.
+        if RecordingArtifactDetection & art_pk:
+            (RecordingArtifactDetection & art_pk).super_delete(
+                warn=False, force_masters=True
+            )
+        (IntervalList & part_rows).delete_quick()
+
+
 # ---------- artifact at recording boundary boundary clamp ----------------
 
 
@@ -1068,6 +1221,112 @@ def test_shared_group_make_compute_reads_fetched_members_without_db(
         group.super_delete(warn=False)
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shared_artifact_group_populate_end_to_end(
+    populated_recording, polymer_smoke_session
+):
+    """End-to-end shared-group populate writes one IntervalList per
+    member ``nwb_file_name``.
+
+    Cross-recording shared-artifact path contract. With a single-
+    recording smoke fixture the shared group has one member, so
+    ``per_member_nwb_files`` has length 1 and one IntervalList row
+    is written. The same code path scales to N members on a
+    multi-recording session (out of scope for the smoke fixture).
+    """
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
+    )
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+
+    ArtifactDetectionParameters.insert_default()
+    group_name = "v2_e2e_shared_group"
+
+    # Clean up any prior group from earlier test runs.
+    (
+        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+    ).super_delete(warn=False)
+
+    SharedArtifactGroup.insert_group(
+        group_name,
+        [{"recording_id": populated_recording["recording_id"]}],
+    )
+
+    art_pk = SharedGroupArtifactSelection.insert_selection(
+        {
+            "shared_artifact_group_name": group_name,
+            "artifact_detection_params_name": "none",
+        }
+    )
+    # ``none`` preset writes a full-window valid interval so the test
+    # is amplitude-fixture-independent.
+    SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+    # Exactly one IntervalList row (one member), keyed by the
+    # member's nwb_file_name with the canonical artifact-named
+    # convention.
+    interval_name = artifact_detection_interval_list_name(
+        art_pk["artifact_detection_id"]
+    )
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    rows = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch(as_dict=True)
+    assert len(rows) == 1
+    assert rows[0]["pipeline"] == "spikesorting_artifact_detection_v2"
+    assert SharedGroupArtifactDetection.RemovedInterval & {
+        "artifact_detection_id": art_pk["artifact_detection_id"],
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_name,
+    }, "SharedGroupArtifactDetection.populate did not insert the ownership part row"
+
+    # ``get_artifact_removed_intervals`` returns a dict keyed by
+    # member nwb_file_name for shared-group sources. Today single
+    # member -> single entry in the dict; the value array equals
+    # the IntervalList row's valid_times.
+    import numpy as np
+
+    shared_intervals = (
+        SharedGroupArtifactDetection().get_artifact_removed_intervals(art_pk)
+    )
+    assert isinstance(shared_intervals, dict), (
+        f"get_artifact_removed_intervals returned {type(shared_intervals)}; "
+        "expected dict for shared-group source."
+    )
+    assert nwb_file_name in shared_intervals
+    np.testing.assert_array_equal(
+        shared_intervals[nwb_file_name], rows[0]["valid_times"]
+    )
+
+    # ``SharedGroupArtifactDetection.delete()`` cleans up the matching
+    # IntervalList rows for ALL member nwb_file_names, not just
+    # the recording-source case.
+    (SharedGroupArtifactDetection & art_pk).delete(safemode=False)
+    remaining = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+        }
+    ).fetch(as_dict=True)
+    assert len(remaining) == 0, (
+        "SharedGroupArtifactDetection.delete() left an orphan IntervalList "
+        "row for a shared-group artifact; the delete-cleanup "
+        "branch for shared sources is broken."
+    )
+
+
 # ---------- error-handling context in warnings and reads -----------------
 
 
@@ -1100,6 +1359,247 @@ def test_artifact_empty_warning_has_context(dj_conn, monkeypatch):
     assert out.shape == (1, 2)  # full window returned on zero artifacts
     assert any("abc-123" in m for m in captured), captured
     assert any("amplitude_threshold_uv" in m for m in captured)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_shared_artifact_group_multi_member_union(
+    populated_recording, polymer_smoke_session, monkeypatch
+):
+    """The union scan reads both members and applies its channel quorum.
+
+    Every existing shared-group populate test has a single member, so the
+    ``si.aggregate_channels`` union-scan branch of ``make_compute`` is
+    untested. Here two time-aligned members are grouped; a supra-threshold
+    separate transients are planted on member A and member B.
+    With ``proportion_above_threshold=0.4`` over the 8-channel union, A's 4
+    channels alone exceed the required count, so the union scan removes the
+    artifact windows. A three-channel excursion on member A stays below the
+    four-of-eight quorum; a per-member denominator would wrongly flag it.
+    The single session writes one shared ``IntervalList`` row that every
+    member resolves to, so all members see identical artifact-removed times.
+
+    The two member recordings are loaded as synthetic SI recordings via a
+    monkeypatched ``Recording.get_recording`` and
+    ``_recording_nwb.read_stored_traces`` (planting a real artifact in
+    fixture data is not otherwise possible); the DB rows / FK chain are
+    real.
+    """
+    import spikeinterface as si
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._params.artifact_detection import (
+        ArtifactDetectionParamsSchema,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        SharedArtifactGroup,
+        SharedGroupArtifactDetection,
+        SharedGroupArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    fs = 30000.0
+    n_samples = 90000  # 3 s
+    n_ch = 4
+    art_lo, art_hi = 45000, 45050  # transient at 1.5 s
+    second_art_lo, second_art_hi = 15000, 15050  # member B at 0.5 s
+    below_quorum_lo, below_quorum_hi = 65000, 65050
+
+    def _synth_recording(with_artifact):
+        traces = np.zeros((n_samples, n_ch), dtype=np.int16)
+        if with_artifact:
+            traces[art_lo:art_hi, :] = 5000
+            traces[below_quorum_lo:below_quorum_hi, :3] = 5000
+        else:
+            traces[second_art_lo:second_art_hi, :] = 5000
+        rec = si.NumpyRecording([traces], sampling_frequency=fs)
+        rec.set_channel_gains([1.0] * n_ch)  # µV == counts
+        rec.set_channel_offsets([0.0] * n_ch)
+        return rec
+
+    # Second Recording row in the SAME session (a distinct recording_id to
+    # group). Its loaded SI object is replaced below; only the DB row /
+    # FK matters here.
+    raw_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    t0 = float(raw_times[0][0])
+    second_interval = "v2_shared_union_window"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": second_interval,
+            "valid_times": np.asarray([[t0, t0 + 2.5]]),
+            "pipeline": "shared_group_union_test",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    second_rec_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": second_interval,
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(second_rec_pk, reserve_jobs=False)
+
+    rid_a = populated_recording["recording_id"]  # member A: artifact
+    rid_b = second_rec_pk["recording_id"]  # member B: separate artifact
+
+    def _fake_get_recording(self, key):
+        return _synth_recording(
+            with_artifact=str(key["recording_id"]) == str(rid_a)
+        )
+
+    # ``insert_group`` validates the members through ``get_recording``; the
+    # detection reads the files its ``make_fetch`` resolved.
+    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
+
+    path_a = Recording().resolve_stored_traces({"recording_id": rid_a}).abs_path
+    monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
+    monkeypatch.setattr(
+        _recording_nwb,
+        "read_stored_traces",
+        lambda traces: _synth_recording(
+            with_artifact=traces.abs_path == path_a
+        ),
+    )
+
+    # Custom param: detect with proportion 0.4 so 4 of 8 union channels
+    # (member A's) suffice to flag a frame; min_length 0.1 s so both
+    # post-split halves survive.
+    params_name = "multi_member_union_test"
+    ArtifactDetectionParameters.insert1(
+        {
+            "artifact_detection_params_name": params_name,
+            "params": ArtifactDetectionParamsSchema(
+                detect=True,
+                amplitude_threshold_uv=1000.0,
+                zscore_threshold=None,
+                proportion_above_threshold=0.4,
+                removal_window_ms=1.0,
+                join_window_ms=1.0,
+                min_length_s=0.1,
+            ).model_dump(),
+            "params_schema_version": 2,
+        },
+        skip_duplicates=True,
+    )
+
+    group_name = "v2_multi_member_union_group"
+
+    def _clear_shared_group():
+        # Master-first cleanup: drop any SharedGroupArtifactDetection +
+        # SharedGroupArtifactSelection referencing this group BEFORE the group
+        # itself, so deleting the group does not block on the selection's
+        # SharedArtifactGroup FK left by an interrupted prior run.
+        stale_art_ids = (
+            SharedGroupArtifactSelection
+            & {"shared_artifact_group_name": group_name}
+        ).fetch("artifact_detection_id")
+        for aid in stale_art_ids:
+            (
+                SharedGroupArtifactDetection & {"artifact_detection_id": aid}
+            ).delete(safemode=False)
+            (
+                SharedGroupArtifactSelection & {"artifact_detection_id": aid}
+            ).super_delete(warn=False)
+        (
+            SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+        ).super_delete(warn=False)
+
+    _clear_shared_group()
+    try:
+        SharedArtifactGroup.insert_group(
+            group_name,
+            [{"recording_id": rid_a}, {"recording_id": rid_b}],
+        )
+        assert (
+            len(
+                SharedArtifactGroup.Member
+                & {"shared_artifact_group_name": group_name}
+            )
+            == 2
+        )
+
+        art_pk = SharedGroupArtifactSelection.insert_selection(
+            {
+                "shared_artifact_group_name": group_name,
+                "artifact_detection_params_name": params_name,
+            }
+        )
+        SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
+
+        interval_name = artifact_detection_interval_list_name(
+            art_pk["artifact_detection_id"]
+        )
+        rows = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": interval_name,
+            }
+        ).fetch(as_dict=True)
+        # Single session -> one shared row covering every member.
+        assert (
+            len(rows) == 1
+        ), f"expected one shared IntervalList row; got {len(rows)}"
+        valid_times = rows[0]["valid_times"]
+
+        # Both members contribute a different artifact window; dropping either
+        # member would leave only two valid intervals.
+        art_mid = 0.5 * (art_lo + art_hi) / fs  # ~1.5 s
+        second_art_mid = 0.5 * (second_art_lo + second_art_hi) / fs
+        assert valid_times.shape == (3, 2), (
+            f"union scan should split into 3 intervals at both artifacts; got "
+            f"valid_times={valid_times.tolist()} (shape {valid_times.shape}). "
+            "Every member's channels must contribute."
+        )
+        for start, end in valid_times:
+            for planted_mid in (art_mid, second_art_mid):
+                assert not (start < planted_mid < end), (
+                    f"a valid interval [{start}, {end}] spans the artifact at "
+                    f"{planted_mid}s; the union scan did not remove it."
+                )
+        # Coverage survives on both sides of the artifact.
+        assert any(s <= 0.2 <= e for s, e in valid_times), "pre-artifact lost"
+        assert any(s <= 2.4 <= e for s, e in valid_times), "post-artifact lost"
+        below_quorum_mid = 0.5 * (below_quorum_lo + below_quorum_hi) / fs
+        assert any(
+            s <= below_quorum_mid <= e for s, e in valid_times
+        ), "three channels must remain valid under the four-of-eight quorum"
+
+        # Every member resolves to the SAME artifact-removed times (single
+        # shared row; the per-member dict has one session entry equal to it).
+        shared = SharedGroupArtifactDetection().get_artifact_removed_intervals(
+            art_pk
+        )
+        assert isinstance(shared, dict) and nwb_file_name in shared
+        np.testing.assert_array_equal(shared[nwb_file_name], valid_times)
+    finally:
+        _clear_shared_group()
+        (
+            ArtifactDetectionParameters
+            & {"artifact_detection_params_name": params_name}
+        ).super_delete(warn=False, safemode=False)
 
 
 # ---------- a raw NaN makes populate raise instead of inserting empty ------

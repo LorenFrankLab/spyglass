@@ -227,6 +227,7 @@ def _clean_session_v2(session_key):
         this session are dropped.
     """
     from spyglass.common import IntervalList
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -237,12 +238,18 @@ def _clean_session_v2(session_key):
     from spyglass.spikesorting.v2.artifact_output import (
         ArtifactDetectionOutput,
     )
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
         Recording,
         RecordingSelection,
         SortGroupV2,
     )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
+    # Step 1: drop any SpikeSortingOutput / CurationV2 / Sorting rows for a
+    # sorting derived from this session, then the SortingSelection master. The
+    # recording source is a ``RecordingSource`` XOR part FK'ing Recording, so the
+    # master must go before Recording to satisfy the master-before-part rule.
     rec_keys = (RecordingSelection & session_key).fetch("KEY", as_dict=True)
     split_artifact_keys = (
         (
@@ -275,6 +282,25 @@ def _clean_session_v2(session_key):
                 (IntervalList & (owner & keys)).fetch("KEY", as_dict=True)
             )
     if rec_keys:
+        sorting_keys = (
+            SortingSelection.RecordingSource
+            & [{"recording_id": r["recording_id"]} for r in rec_keys]
+        ).fetch("KEY", as_dict=True)
+        if sorting_keys:
+            merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
+                "merge_id"
+            )
+            for mid in merge_ids:
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            (CurationV2 & sorting_keys).super_delete(warn=False)
+            (Sorting & sorting_keys).super_delete(warn=False)
+            # Step 2: drop SortingSelection masters BEFORE removing
+            # Recording, otherwise the Recording cascade tries to
+            # delete the orphan RecordingSource part and fails.
+            (SortingSelection & sorting_keys).super_delete(warn=False)
+
         # Step 3: RecordingArtifactSelection/Detection + the
         # ArtifactDetectionOutput merge. Drop the merge MASTER first
         # (force_masters) so the later Recording cascade never hits the merge's
@@ -407,11 +433,17 @@ def clean_session_groups_for_owner(owner: str) -> None:
         concat-backed sortings, curations, and merge rows derived from them)
         are dropped.
     """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
         ConcatenatedRecordingSelection,
         SessionGroup,
     )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     owner_key = {"session_group_owner": owner}
     concat_keys = (ConcatenatedRecordingSelection & owner_key).fetch(
@@ -422,6 +454,32 @@ def clean_session_groups_for_owner(owner: str) -> None:
             {"concat_recording_id": c["concat_recording_id"]}
             for c in concat_keys
         ]
+        sort_keys = (
+            SortingSelection.ConcatenatedRecordingSource & concat_id_restr
+        ).fetch("KEY", as_dict=True)
+        if sort_keys:
+            for mid in (
+                SpikeSortingOutput.ConcatMemberCuration & sort_keys
+            ).fetch("merge_id"):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False, safemode=False
+                )
+            (ConcatMemberCuration & sort_keys).super_delete(
+                warn=False, safemode=False
+            )
+            for mid in (SpikeSortingOutput.CurationV2 & sort_keys).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False, safemode=False
+                )
+            (CurationV2 & sort_keys).super_delete(warn=False, safemode=False)
+            (Sorting & sort_keys).super_delete(warn=False, safemode=False)
+            # Drop SortingSelection masters BEFORE ConcatenatedRecording so its
+            # cascade never hits the orphan ConcatenatedRecordingSource part.
+            (SortingSelection & sort_keys).super_delete(
+                warn=False, safemode=False
+            )
         (ConcatenatedRecording & concat_id_restr).super_delete(
             warn=False, safemode=False
         )
