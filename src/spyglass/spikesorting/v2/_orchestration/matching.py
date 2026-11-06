@@ -40,6 +40,7 @@ def run_v2_unit_match(
     session_group_name: "str | None" = None,
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
+    unit_policy: "str | None" = None,
 ) -> RunV2UnitMatchSummary:
     """Match units across matching inputs in one call, then track them.
 
@@ -90,6 +91,12 @@ def run_v2_unit_match(
     curation_choices : dict
         ``{member_index: {"sorting_id": ..., "curation_id": ...}}`` -- exactly
         one committed curation pinned per member. ``None`` (the default) raises.
+    unit_policy : str, optional
+        Explicit form only: the named unit eligibility policy frozen for each
+        member; it must exclude ``mua``. Default ``None`` uses
+        ``"v2_accepted_single_units"``; choose
+        ``"v2_unflagged_single_units"`` for automatic-only output. A plan
+        carries its own policy.
 
     Returns
     -------
@@ -156,6 +163,7 @@ def run_v2_unit_match(
             session_group_owner is not None
             or session_group_name is not None
             or curation_choices is not None
+            or unit_policy is not None
             or matcher_params_name != "unitmatch_default"
         ):
             raise PipelineInputError(
@@ -233,6 +241,25 @@ def run_v2_unit_match(
         input_unit_selections = list(report.unit_selections)
         expected_input_set_hash = report.input_set_hash
         preflight_warnings = list(report.warnings)
+    else:
+        from spyglass.spikesorting.v2._matching.preflight import (
+            unlabeled_units_warning,
+        )
+        from spyglass.spikesorting.v2.analysis_selection import (
+            resolve_unit_selection,
+        )
+
+        input_unit_selections = [
+            resolve_unit_selection(
+                pin, policy=unit_policy or "v2_accepted_single_units"
+            )
+            for pin in curation_choices.values()
+        ]
+        preflight_warnings = [
+            warning
+            for selection in input_unit_selections
+            if (warning := unlabeled_units_warning(selection.snapshot()))
+        ]
 
     # Partial receipt accumulated for error reporting: _run_stage snapshots
     # it into PipelineStageError.partial_run_summary when a stage fails. The
@@ -375,7 +402,7 @@ def plan_v2_unit_match(
     curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
     manual_curation_choices: "dict | None" = None,
-    unit_policy: str = "v2_unflagged_units",
+    unit_policy: str = "v2_accepted_single_units",
 ) -> "UnitMatchPlan":
     """Build a reviewable plan pinning one curation per member for matching.
 
@@ -414,9 +441,10 @@ def plan_v2_unit_match(
         Only for ``curation_strategy="manual"``:
         ``{member_index: {"sorting_id": ..., "curation_id": ...}}``.
     unit_policy : str, optional
-        Named unit eligibility policy. ``"v2_unflagged_units"`` preserves the
-        existing auto-only workflow and makes its included unlabeled units
-        visible. Choose ``"v2_accepted_single_units"`` for reviewed single units.
+        Named unit eligibility policy; it must exclude ``mua``. Default
+        ``"v2_accepted_single_units"`` matches reviewed single units; choose
+        ``"v2_unflagged_single_units"`` for automatic-only output, whose
+        included unlabeled units are reported.
 
     Returns
     -------
@@ -449,7 +477,7 @@ def plan_v2_unit_match_from_sorts(
     curation_strategy: str,
     matcher_params_name: str = "unitmatch_default",
     manual_curation_choices: "dict | None" = None,
-    unit_policy: str = "v2_unflagged_units",
+    unit_policy: str = "v2_accepted_single_units",
 ) -> "UnitMatchInputPlan":
     """Build a reviewable plan pinning one curation per named sort.
 
@@ -488,9 +516,9 @@ def plan_v2_unit_match_from_sorts(
         Only for ``curation_strategy="manual"``: ``{sorting_id:
         curation_id}`` for every named sort.
     unit_policy : str, optional
-        Named unit eligibility policy. Default ``"v2_unflagged_units"`` keeps
-        the existing auto-only population; reviewed single units should use
-        ``"v2_accepted_single_units"`` or the direct curation-handle planner.
+        Named unit eligibility policy; it must exclude ``mua``. Default
+        ``"v2_accepted_single_units"`` matches reviewed single units; choose
+        ``"v2_unflagged_single_units"`` for automatic-only output.
 
     Returns
     -------
@@ -535,7 +563,8 @@ def plan_v2_unit_match_from_curations(
     snapshots, omitted ``unit_policy`` (``None``) defaults to
     ``'v2_accepted_single_units'``, requiring ``accept`` and excluding MUA and
     flagged units; auto-only workflows must explicitly choose
-    ``unit_policy='v2_unflagged_units'``.
+    ``unit_policy='v2_unflagged_single_units'``. A policy that does not
+    exclude ``mua`` is refused: matching tracks single units.
 
     Read ``plan.summary()`` and ``plan.as_dataframe()`` before running. The
     read-only preflight checks source/frame coverage, physical overlap,

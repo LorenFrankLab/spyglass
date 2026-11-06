@@ -140,7 +140,6 @@ def test_policy_drift_blocks_plan_but_existing_selection_keeps_frozen_units(
     accepted_three_unit_curation, monkeypatch
 ):
     from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.pipeline import (
         plan_v2_unit_match_from_curations,
         preflight_v2_unit_match,
@@ -191,14 +190,6 @@ def test_policy_drift_blocks_plan_but_existing_selection_keeps_frozen_units(
         assert any("changed since planning" in error for error in report.errors)
         assert _selection_count() == before
 
-        def no_live_exclusion_filter(*args, **kwargs):
-            pytest.fail(
-                "Matching must use the frozen selected IDs, not live labels."
-            )
-
-        monkeypatch.setattr(
-            CurationV2, "get_matchable_unit_ids", no_live_exclusion_filter
-        )
         fetched = UnitMatch().make_fetch(selection_key)
         assert fetched.input_plan[0]["matchable_unit_ids"] == [0]
         assert fetched.input_plan[0]["selection_snapshot"] == stored
@@ -270,7 +261,7 @@ def test_preflight_blocks_missing_assets_without_a_geometry_hook(
     try:
         plan = plan_v2_unit_match_from_curations(
             refs,
-            unit_policy="v2_unflagged_units",
+            unit_policy="v2_unflagged_single_units",
             matcher_params_name=params_name,
         )
         assert plan.ok, plan.errors
@@ -296,7 +287,7 @@ def test_preflight_blocks_missing_assets_without_a_geometry_hook(
             )
             blocked_plan = plan_v2_unit_match_from_curations(
                 refs,
-                unit_policy="v2_unflagged_units",
+                unit_policy="v2_unflagged_single_units",
                 matcher_params_name=params_name,
             )
             assert not blocked_plan.ok
@@ -310,7 +301,7 @@ def test_preflight_blocks_missing_assets_without_a_geometry_hook(
             assert repaired_report.ok, repaired_report.errors
             repaired_plan = plan_v2_unit_match_from_curations(
                 refs,
-                unit_policy="v2_unflagged_units",
+                unit_policy="v2_unflagged_single_units",
                 matcher_params_name=params_name,
             )
             assert repaired_plan.ok, repaired_plan.errors
@@ -355,7 +346,7 @@ def test_preflight_blocks_unimportable_matching_runtime_before_inserts(
 
     monkeypatch.setattr(unitmatch_backend, "_require_unitmatch", unavailable)
     plan = plan_v2_unit_match_from_curations(
-        refs, unit_policy="v2_unflagged_units"
+        refs, unit_policy="v2_unflagged_single_units"
     )
     assert not plan.ok
     assert any(

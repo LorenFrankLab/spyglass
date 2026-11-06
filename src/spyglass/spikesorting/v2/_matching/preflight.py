@@ -144,6 +144,22 @@ def _validate_group_plan(plan: UnitMatchPlan) -> None:
     )
 
 
+def unlabeled_units_warning(snapshot) -> "str | None":
+    """Name a frozen population's included units that carry no label."""
+    unlabeled = [
+        unit
+        for unit in snapshot["included_unit_ids"]
+        if not snapshot["labels_by_unit"].get(str(unit), [])
+    ]
+    if not unlabeled:
+        return None
+    return (
+        f"Curation {snapshot['sorting_id']}/{snapshot['curation_id']}: "
+        f"{len(unlabeled)} included units are unlabeled under policy "
+        f"{snapshot['policy_name']!r}."
+    )
+
+
 def preflight_v2_unit_match(
     plan: UnitMatchPlan | UnitMatchInputPlan,
 ) -> UnitMatchPreflightReport:
@@ -169,6 +185,9 @@ def preflight_v2_unit_match(
             + tuple(_not_run_checks()),
         )
 
+    from spyglass.spikesorting.v2._matching.inputs import (
+        assert_matching_policy_excludes_mua,
+    )
     from spyglass.spikesorting.v2.analysis_selection import (
         UnitSelectionSnapshot,
         resolve_unit_selection,
@@ -208,25 +227,18 @@ def preflight_v2_unit_match(
                     )
                 selection.revalidate()
             snapshot = selection.snapshot()
+            assert_matching_policy_excludes_mua(snapshot)
             included = tuple(snapshot["included_unit_ids"])
             if not included:
                 raise ValueError(
                     f"No units satisfy policy {snapshot['policy_name']!r}. "
                     "Accept the intended units in curation review, or choose "
-                    "unit_policy='v2_unflagged_units' explicitly for auto-only "
-                    "output, then rebuild the plan."
+                    "unit_policy='v2_unflagged_single_units' explicitly for "
+                    "auto-only output, then rebuild the plan."
                 )
-            unlabeled = [
-                unit
-                for unit in included
-                if not snapshot["labels_by_unit"].get(str(unit), [])
-            ]
+            unlabeled = unlabeled_units_warning(snapshot)
             if unlabeled:
-                warnings.append(
-                    f"Curation {pin['sorting_id']}/{pin['curation_id']}: "
-                    f"{len(unlabeled)} included units are unlabeled "
-                    f"under policy {snapshot['policy_name']!r}."
-                )
+                warnings.append(unlabeled)
             selections.append(selection)
             checks.append(
                 UnitMatchPreflightCheck(

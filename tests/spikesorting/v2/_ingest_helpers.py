@@ -993,3 +993,22 @@ def build_reference_merged_analyzer(
         role=role,
         analyzer_folder=analyzer_folder,
     )
+
+
+def matched_unit_ids(curation, policy="v2_unflagged_single_units"):
+    """Unit ids a matching run over ``curation`` includes under ``policy``.
+
+    ``curation`` is anything ``resolve_unit_selection`` accepts.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2.analysis_selection import (
+        ensure_v2_unit_selection_policies,
+        resolve_unit_selection,
+    )
+
+    ensure_v2_unit_selection_policies()
+    return np.asarray(
+        resolve_unit_selection(curation, policy=policy).included_unit_ids,
+        dtype=int,
+    )

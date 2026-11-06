@@ -769,11 +769,11 @@ def explicit_matching_plan(monkeypatch):
                 policy
             ].items()
         }
-        included = (
-            [1]
-            if policy == "v2_accepted_single_units"
-            else [1, 2] if policy == "v2_accepted_neural_units" else [1, 2, 4]
-        )
+        included = {
+            "v2_accepted_single_units": [1],
+            "v2_accepted_neural_units": [1, 2],
+            "v2_unflagged_single_units": [1, 4],
+        }.get(policy, [1, 2, 4])
         criteria = kwargs.get("unit_criteria") or {}
         excluded = {
             key: "excluded by reviewed policy"
@@ -900,14 +900,32 @@ def test_explicit_policy_choice_includes_unreviewed_units_visibly(
     )
 
     plan = plan_v2_unit_match_from_curations(
-        explicit_matching_plan.refs, unit_policy="v2_unflagged_units"
+        explicit_matching_plan.refs, unit_policy="v2_unflagged_single_units"
     )
     assert plan.ok
-    assert plan.unit_selections[0].included_unit_ids == (1, 2, 4)
+    assert plan.unit_selections[0].included_unit_ids == (1, 4)
     assert any(
         "included units are unlabeled" in value for value in plan.warnings
     )
-    assert "v2_unflagged_units" in plan.summary()
+    assert "v2_unflagged_single_units" in plan.summary()
+
+
+@pytest.mark.parametrize(
+    "policy", ["v2_accepted_neural_units", "v2_unflagged_units"]
+)
+def test_matching_refuses_a_policy_that_admits_mua(
+    explicit_matching_plan, policy
+):
+    """Matching tracks single units, so a policy keeping MUA is refused."""
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+    )
+
+    plan = plan_v2_unit_match_from_curations(
+        explicit_matching_plan.refs, unit_policy=policy
+    )
+    assert not plan.ok
+    assert any("does not exclude 'mua'" in error for error in plan.errors)
 
 
 @pytest.mark.parametrize(
@@ -947,11 +965,7 @@ def test_explicit_policy_conflicts_reject_supplied_populations(
 
 @pytest.mark.parametrize(
     "policy",
-    [
-        "v2_accepted_single_units",
-        "v2_accepted_neural_units",
-        "v2_unflagged_units",
-    ],
+    ["v2_accepted_single_units", "v2_unflagged_single_units"],
 )
 def test_explicit_policy_agrees_with_supplied_populations(
     explicit_matching_plan, policy
@@ -985,7 +999,7 @@ def test_omitted_policy_preserves_each_supplied_population_policy(
     )
 
     state = explicit_matching_plan
-    policies = ["v2_accepted_single_units", "v2_unflagged_units"]
+    policies = ["v2_accepted_single_units", "v2_unflagged_single_units"]
     populations = [
         resolve_unit_selection(ref, policy=policy)
         for ref, policy in zip(state.refs, policies, strict=True)
@@ -1024,7 +1038,7 @@ def test_explicit_plan_retains_typed_evidence_populations(
     populations = [
         resolve_unit_selection(
             ref,
-            policy="v2_accepted_neural_units",
+            policy="v2_accepted_single_units",
             evaluation=evaluation,
             unit_criteria=criteria,
             annotation_sets=annotations,
@@ -1035,11 +1049,11 @@ def test_explicit_plan_retains_typed_evidence_populations(
         state.refs, unit_selections=populations
     )
     assert plan.ok, plan.errors
-    assert plan.unit_policy == "v2_accepted_neural_units"
+    assert plan.unit_policy == "v2_accepted_single_units"
     assert plan.unit_selections[0] is populations[0]
     assert (
         plan.as_dataframe()["unit_policy"].tolist()
-        == ["v2_accepted_neural_units"] * 2
+        == ["v2_accepted_single_units"] * 2
     )
     assert preflight_v2_unit_match(plan).ok
     for forwarded in state.resolver_kwargs[-2:]:

@@ -308,6 +308,7 @@ reason.
 | `v2_accepted_single_units` (default) | `accept`                                           | `mua`, `noise`, `reject`, `artifact` |
 | `v2_accepted_neural_units`           | `accept` or `mua`                                  | `noise`, `reject`, `artifact`        |
 | `v2_unflagged_units`                 | everything not denied (MUA and unlabeled included) | `noise`, `reject`, `artifact`        |
+| `v2_unflagged_single_units`          | everything not denied (unlabeled included)         | `mua`, `noise`, `reject`, `artifact` |
 | `all_units`                          | everything (explicit expert choice)                | —                                    |
 
 The shipped rule sets only **flag** bad units; they never write `accept`. So
@@ -315,6 +316,9 @@ after auto-labeling alone the two `accepted` policies select nothing — accept
 units in the browser review first, or choose `v2_unflagged_units` to state
 explicitly that rule-passing, never-reviewed units count. Unlabeled units are
 excluded by the `accepted` policies and listed on the receipt either way.
+Cross-session matching accepts only the policies that deny `mua`
+(`v2_accepted_single_units`, or `v2_unflagged_single_units` for automatic-only
+output).
 
 ```python
 from spyglass.spikesorting.v2.pipeline import select_units_for_analysis

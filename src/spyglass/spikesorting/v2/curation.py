@@ -57,7 +57,6 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    import numpy as np
     import pandas as pd
     import spikeinterface as si
 
@@ -1202,9 +1201,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``values`` is a set of canonical label strings (see
         :meth:`CurationLabel.normalize`). An empty ``values`` returns an
         empty set; the caller decides whether "no labels requested" means
-        all units (include filter) or none (exclude filter). Shared by
-        ``get_unit_brain_regions`` (intersect) and ``get_matchable_unit_ids``
-        (subtract).
+        all units (include filter) or none (exclude filter).
         """
         if not values:
             return set()
@@ -1958,8 +1955,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         include_labels : iterable of str or CurationLabel, optional
             If a non-empty iterable, restrict to units carrying at least
             one of these labels. ``None`` (the default) and an empty
-            iterable both mean no filter (all units), matching
-            ``get_matchable_unit_ids``.
+            iterable both mean no filter (all units).
         allow_anchor_member : bool, optional
             If ``True``, return anchor-member regions for concat-backed
             sortings instead of raising. Defaults to ``False``.
@@ -2000,49 +1996,13 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             # An empty label set means "no filter" (all units), NOT "match
             # nothing": restricting with ``& []`` (an empty DataJoint OrList)
             # would silently return zero rows. Guard on the materialized set's
-            # truthiness, matching ``get_matchable_unit_ids``.
+            # truthiness.
             if include_values:
                 labeled = self._unit_ids_with_labels(key, include_values)
                 unit_restriction = unit_restriction & [
                     {"unit_id": uid} for uid in labeled
                 ]
         return unit_brain_region_df(unit_restriction, resolution)
-
-    def get_matchable_unit_ids(
-        self,
-        key: dict,
-        exclude_labels: "Iterable" = frozenset({"reject", "noise", "artifact"}),
-    ) -> "np.ndarray":
-        """Curated unit IDs with no excluded labels.
-
-        Unlabeled units AND units labeled only ``accept`` / ``mua`` are
-        included. A unit with ANY excluded label is excluded even if it
-        also carries an included label (e.g., a ``mua`` + ``artifact``
-        unit is excluded).
-
-        Parameters
-        ----------
-        key : dict
-            Restriction selecting a single ``CurationV2`` row.
-        exclude_labels : iterable of str or CurationLabel, optional
-            Labels that disqualify a unit. Defaults to
-            ``{"reject", "noise", "artifact"}``.
-
-        Returns
-        -------
-        np.ndarray
-            Sorted 1-D integer array ``(n_units,)`` of unit IDs carrying
-            no excluded label.
-        """
-        import numpy as np
-
-        exclude_values = {
-            CurationLabel.normalize(lbl) for lbl in exclude_labels
-        }
-        all_units = (self.Unit & key).fetch("unit_id")
-        excluded_set = self._unit_ids_with_labels(key, exclude_values)
-        kept = [int(u) for u in all_units if int(u) not in excluded_set]
-        return np.asarray(sorted(kept), dtype=int)
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":

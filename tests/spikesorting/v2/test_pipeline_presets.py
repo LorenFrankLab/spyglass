@@ -1166,6 +1166,7 @@ def test_run_v2_unit_match_unknown_matcher_raises(dj_conn):
             session_group_name="no_such_group",
             matcher_params_name="definitely_not_a_matcher_2026",
             curation_choices={0: {"sorting_id": "x", "curation_id": 0}},
+            unit_policy="v2_unflagged_single_units",
         )
 
 

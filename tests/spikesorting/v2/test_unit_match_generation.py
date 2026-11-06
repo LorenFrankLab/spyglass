@@ -3,6 +3,7 @@
 import uuid
 
 import pytest
+from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 
 @pytest.fixture
@@ -67,12 +68,14 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
     sorting_key = {"sorting_id": root["sorting_id"]}
     MatcherParameters.insert_default()
     original_uuid = (CurationV2 & child).fetch1("curation_uuid")
-    assert CurationV2().get_matchable_unit_ids(child).tolist() == [1]
+    assert matched_unit_ids(child).tolist() == [1]
     group_key = None
     try:
         if source == "sorts":
             plan = plan_v2_unit_match_from_sorts(
-                [root["sorting_id"]], curation_strategy="final_curated"
+                [root["sorting_id"]],
+                curation_strategy="final_curated",
+                unit_policy="v2_unflagged_single_units",
             )
             pins = plan.curations
         else:
@@ -98,7 +101,9 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
                 ],
             )
             plan = plan_v2_unit_match(
-                **group_key, curation_strategy="final_curated"
+                **group_key,
+                curation_strategy="final_curated",
+                unit_policy="v2_unflagged_single_units",
             )
             pins = list(plan.curation_choices.values())
         assert plan.ok, plan.errors
@@ -117,7 +122,7 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
         assert replacement == child
         replacement_uuid = (CurationV2 & replacement).fetch1("curation_uuid")
         assert replacement_uuid != original_uuid
-        assert CurationV2().get_matchable_unit_ids(replacement).tolist() == [0]
+        assert matched_unit_ids(replacement).tolist() == [0]
 
         # The replacement's actual generation can be selected and frozen.
         pk = UnitMatchSelection.insert_inputs(
@@ -128,6 +133,7 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
                 }
             ],
             "unitmatch_default",
+            unit_policy="v2_unflagged_single_units",
         )
         try:
             assert (UnitMatchSelection.Input & pk).fetch1(
@@ -143,29 +149,38 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
             assert _selection_snapshot() == before
             assert (
                 UnitMatchSelection.insert_inputs(
-                    [replacement], "unitmatch_default"
+                    [replacement],
+                    "unitmatch_default",
+                    unit_policy="v2_unflagged_single_units",
                 )
                 == pk
             )
             if source == "group":
                 fresh_plan = plan_v2_unit_match(
-                    **group_key, curation_strategy="final_curated"
+                    **group_key,
+                    curation_strategy="final_curated",
+                    unit_policy="v2_unflagged_single_units",
                 )
                 assert (
                     UnitMatchSelection.insert_selection(
                         **group_key,
                         matcher_params_name="unitmatch_default",
                         curation_choices=fresh_plan.curation_choices,
+                        unit_policy="v2_unflagged_single_units",
                     )
                     == pk
                 )
             else:
                 fresh_plan = plan_v2_unit_match_from_sorts(
-                    [root["sorting_id"]], curation_strategy="final_curated"
+                    [root["sorting_id"]],
+                    curation_strategy="final_curated",
+                    unit_policy="v2_unflagged_single_units",
                 )
                 assert (
                     UnitMatchSelection.insert_inputs(
-                        fresh_plan.curations, "unitmatch_default"
+                        fresh_plan.curations,
+                        "unitmatch_default",
+                        unit_policy="v2_unflagged_single_units",
                     )
                     == pk
                 )

@@ -329,7 +329,7 @@ if run_unit_match and unitmatch_available:
         match_group_name,
         curation_strategy="auto_curated",
         matcher_params_name=matcher_params_name,
-        unit_policy="v2_unflagged_units",  # explicit automatic-only population
+        unit_policy="v2_unflagged_single_units",  # automatic-only, MUA excluded
     )
     display(plan.as_dataframe())  # one row per member -- review before running
     for (
@@ -423,7 +423,7 @@ if run_daily_match:
         daily_sorting_ids,
         curation_strategy="auto_curated",
         matcher_params_name=matcher_params_name,
-        unit_policy="v2_unflagged_units",  # includes unlabeled units and MUA
+        unit_policy="v2_unflagged_single_units",  # unlabeled included, MUA not
     )
     display(daily_plan.as_dataframe())  # one row per matching input
     for warning in daily_plan.warnings:

@@ -31,6 +31,7 @@ from tests.spikesorting.v2._unitmatch_helpers import (
     restore_matcher_registry as _restore_matcher_registry,
 )
 from tests.spikesorting.v2._sorter_stub import plant_sorter
+from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 
 def test_unitmatch_params_reject_asymmetric_waveform_window():
@@ -952,13 +953,18 @@ def test_insert_selection_idempotent_and_hash_sensitive(
 
     grp = two_session_curated_group
     pk1 = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     pk2 = UnitMatchSelection.insert_selection(
         grp["owner"],
         grp["group_name"],
         "unitmatch_default",
         dict(grp["choices"]),
+        unit_policy="v2_unflagged_single_units",
     )
     assert pk1 == pk2
 
@@ -974,7 +980,11 @@ def test_insert_selection_idempotent_and_hash_sensitive(
         "curation_id": child["curation_id"],
     }
     pk3 = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", changed
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        changed,
+        unit_policy="v2_unflagged_single_units",
     )
     assert pk3["unitmatch_id"] != pk1["unitmatch_id"]
 
@@ -1031,6 +1041,7 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
             grp["group_name"],
             "unitmatch_default",
             accepted_choices,
+            unit_policy="v2_unflagged_single_units",
         )
         fetched = UnitMatch().make_fetch(pk)
         # Member a is recorded before member b, so input_index follows
@@ -1043,9 +1054,7 @@ def test_unitmatch_selection_accepts_curation_evaluation_committed_children(
             plan = plan_by_member[member_index]
             assert plan["sorting_id"] == str(choice["sorting_id"])
             assert int(plan["curation_id"]) == int(choice["curation_id"])
-            expected_matchable = [
-                int(u) for u in CurationV2().get_matchable_unit_ids(choice)
-            ]
+            expected_matchable = [int(u) for u in matched_unit_ids(choice)]
             assert plan["matchable_unit_ids"] == expected_matchable
     finally:
         from spyglass.spikesorting.spikesorting_merge import (
@@ -1238,6 +1247,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
                 grp["group_name"],
                 "unitmatch_default",
                 {0: preview_choice, 1: grp["choices"][1]},
+                unit_policy="v2_unflagged_single_units",
             )
 
         # Site 2: a direct-insert selection (bypassing insert_selection) is
@@ -1250,6 +1260,7 @@ def test_unitmatch_rejects_curation_evaluation_preview_child(
             grp["group_name"],
             "unitmatch_default",
             {0: root_choice, 1: grp["choices"][1]},
+            unit_policy="v2_unflagged_single_units",
         )
         reforge_selection(
             pk,
@@ -1322,9 +1333,7 @@ def test_unitmatch_accepts_committed_merged_child_member(
             "sorting_id": merged0["sorting_id"],
             "curation_id": merged0["curation_id"],
         }
-        expected = [
-            int(u) for u in CurationV2().get_matchable_unit_ids(merged_choice)
-        ]
+        expected = [int(u) for u in matched_unit_ids(merged_choice)]
         assert len(expected) == 1  # two pre-merge units -> one merged unit
 
         pk = UnitMatchSelection.insert_selection(
@@ -1332,6 +1341,7 @@ def test_unitmatch_accepts_committed_merged_child_member(
             grp["group_name"],
             "unitmatch_default",
             {0: merged_choice, 1: grp["choices"][1]},
+            unit_policy="v2_unflagged_single_units",
         )
         try:
             fetched = UnitMatch().make_fetch(pk)
@@ -1365,7 +1375,11 @@ def test_insert_selection_rejects_forged_master_with_mismatched_parts(
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     # Tear down the consistent selection, then re-insert ONLY the master row
     # (same deterministic id + input_set_hash, no parts) -- a raw-insert
@@ -1380,6 +1394,7 @@ def test_insert_selection_rejects_forged_master_with_mismatched_parts(
                 grp["group_name"],
                 "unitmatch_default",
                 grp["choices"],
+                unit_policy="v2_unflagged_single_units",
             )
     finally:
         (UnitMatchSelection & pk).super_delete(warn=False)
@@ -1402,7 +1417,11 @@ def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     template = (
         UnitMatchSelection.InputRecording & pk & {"input_index": 0}
@@ -1422,6 +1441,7 @@ def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
                 grp["group_name"],
                 "unitmatch_default",
                 grp["choices"],
+                unit_policy="v2_unflagged_single_units",
             )
     finally:
         (UnitMatchSelection & pk).super_delete(warn=False)
@@ -1440,7 +1460,11 @@ def test_insert_selection_rejects_wrong_member_curation(
     swapped = {0: grp["choices"][1], 1: grp["choices"][0]}
     with pytest.raises(ValueError, match="belongs to|does not exist"):
         UnitMatchSelection.insert_selection(
-            grp["owner"], grp["group_name"], "unitmatch_default", swapped
+            grp["owner"],
+            grp["group_name"],
+            "unitmatch_default",
+            swapped,
+            unit_policy="v2_unflagged_single_units",
         )
     # Atomic: no master row was created for the rejected selection.
     assert len(UnitMatchSelection()) == before
@@ -1459,7 +1483,8 @@ def test_insert_selection_rejects_incomplete_coverage(
             grp["owner"],
             grp["group_name"],
             "unitmatch_default",
-            {0: grp["choices"][0]},  # member 1 missing
+            {0: grp["choices"][0]},  # member 1 missing,
+            unit_policy="v2_unflagged_single_units",
         )
 
 
@@ -1480,7 +1505,11 @@ def test_make_rechecks_input_provenance(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     fields = (
         "nwb_file_name",
@@ -1531,7 +1560,11 @@ def test_make_rejects_input_set_hash_mismatch(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     reforge_selection(pk, master_edits={"input_set_hash": "0" * 64})
     try:
@@ -1559,7 +1592,11 @@ def test_make_rejects_malformed_input_parts(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     reforge_selection(pk, drop_recordings=[(1, 0)], rehash=True)
     try:
@@ -1584,6 +1621,7 @@ def test_degenerate_single_session_zero_pairs(two_session_curated_group):
         grp["solo_name"],
         "unitmatch_default",
         {0: grp["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     row = (UnitMatch & pk).fetch1()
@@ -1613,7 +1651,11 @@ def test_degenerate_single_session_needs_no_member_traces(
     grp = two_session_curated_group
     choice = grp["choices"][0]
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: choice},
+        unit_policy="v2_unflagged_single_units",
     )
     (UnitMatch & pk).super_delete(warn=False)
     traces = SortingSelection.resolve_effective_source(
@@ -1646,7 +1688,9 @@ def test_selection_without_inputs_is_rejected(two_session_curated_group):
 
     before = len(UnitMatchSelection())
     with pytest.raises(ValueError, match="at least one"):
-        UnitMatchSelection.insert_inputs([], "unitmatch_default")
+        UnitMatchSelection.insert_inputs(
+            [], "unitmatch_default", unit_policy="v2_unflagged_single_units"
+        )
     assert len(UnitMatchSelection()) == before
 
 
@@ -1708,6 +1752,7 @@ def test_unitmatch_records_backend_version(two_session_curated_group):
         grp["solo_name"],
         "unitmatch_default",
         {0: grp["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     row = (UnitMatch & pk).fetch1()
@@ -1749,6 +1794,7 @@ def test_matcher_provenance_is_required_for_new_runs(two_session_curated_group):
         group["solo_name"],
         "unitmatch_default",
         {0: group["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(key, reserve_jobs=False)
     row = (UnitMatch & key).fetch1()
@@ -1832,6 +1878,7 @@ def test_clusterless_unit_semantics_derived_and_warned(
                         "curation_id": curation["curation_id"],
                     }
                 },
+                unit_policy="v2_unflagged_single_units",
             )
         assert any(
             "threshold" in r.getMessage().lower()
@@ -1867,6 +1914,7 @@ def test_raw_pair_insert_rejects_unpinned_endpoint(two_session_curated_group):
         grp["solo_name"],
         "unitmatch_default",
         {0: grp["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     side_a, side_b = grp["choices"][0], grp["choices"][1]
@@ -1926,7 +1974,6 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
     """``TrackedUnit.make`` seeds the node universe from the curated units and,
     with no matches (the solo group), emits one strict singleton per matchable
     unit -- exercising the DB wiring of the pure clique derivation."""
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
@@ -1939,11 +1986,12 @@ def test_tracked_unit_make_seeds_singletons(two_session_curated_group):
         grp["solo_name"],
         "unitmatch_default",
         {0: grp["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     TrackedUnit.populate(pk, reserve_jobs=False)
 
-    n_matchable = len(CurationV2().get_matchable_unit_ids(grp["choices"][0]))
+    n_matchable = len(matched_unit_ids(grp["choices"][0]))
     tracked = (TrackedUnit & pk).fetch(as_dict=True)
     assert len(tracked) == n_matchable
     for row in tracked:
@@ -1971,7 +2019,6 @@ def test_make_runs_full_matcher_table_path(
     from pydantic import BaseModel, ConfigDict, Field
 
     from spyglass.spikesorting.v2 import matcher_protocol as mp
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import (
         MatchPair,
         PreparedMatcherInput,
@@ -1994,8 +2041,8 @@ def test_make_runs_full_matcher_table_path(
         schema_version: int = 1
 
     grp = two_session_curated_group
-    matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
-    matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
+    matchable_a = matched_unit_ids(grp["choices"][0])
+    matchable_b = matched_unit_ids(grp["choices"][1])
     assert len(matchable_a) and len(
         matchable_b
     ), "planted units must be matchable"
@@ -2064,6 +2111,7 @@ def test_make_runs_full_matcher_table_path(
             grp["group_name"],
             "fixture_pairer_params",
             grp["choices"],
+            unit_policy="v2_unflagged_single_units",
         )
 
         UnitMatch.populate(selection_pk, reserve_jobs=False)
@@ -2094,28 +2142,9 @@ def test_make_runs_full_matcher_table_path(
             == 2
         )
 
-        # Purity guard: make_compute must NOT re-derive the matchable unit set
-        # -- make_fetch resolves it and threads it through the carrier. Run
-        # fetch, then break get_matchable_unit_ids, then run compute directly: it
-        # must succeed using the threaded set. Catches a regression that moves
-        # the curation-label DB read back into compute (where DB state could
-        # drift from the fetched carrier).
+        # make_compute runs on make_fetch's carrier alone.
         fetched = UnitMatch().make_fetch(selection_pk)
-        original_matchable = CurationV2.get_matchable_unit_ids
-
-        def _forbidden_matchable(self, *args, **kwargs):
-            raise AssertionError(
-                "UnitMatch.make_compute called get_matchable_unit_ids; the "
-                "matchable set must come from make_fetch's carrier."
-            )
-
-        CurationV2.get_matchable_unit_ids = _forbidden_matchable
-        try:
-            computed = UnitMatch().make_compute(
-                selection_pk, **fetched._asdict()
-            )
-        finally:
-            CurationV2.get_matchable_unit_ids = original_matchable
+        computed = UnitMatch().make_compute(selection_pk, **fetched._asdict())
         # make_compute staged a fresh analysis NWB (separate from the populated
         # one); unlink it so the probe leaves no orphan even if the assertion
         # below fails.
@@ -2194,6 +2223,7 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
             grp["group_name"],
             "fixture_pairer_reads_params",
             grp["choices"],
+            unit_policy="v2_unflagged_single_units",
         )
         table = UnitMatch()
         fetched = table.make_fetch(selection_pk)
@@ -2215,7 +2245,7 @@ def test_make_compute_reads_fetched_members_and_only_stages_output(
             recording, sorting = bundle_inputs[f"input_{index}"]
             expected_recording = CurationV2.get_recording(choice)
             expected_sorting = CurationV2.get_sorting(choice).select_units(
-                CurationV2().get_matchable_unit_ids(choice)
+                matched_unit_ids(choice)
             )
             assert list(recording.channel_ids) == list(
                 expected_recording.channel_ids
@@ -2308,9 +2338,7 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
             }
 
         matchable = {
-            member_index: [
-                int(u) for u in CurationV2().get_matchable_unit_ids(choice)
-            ]
+            member_index: [int(u) for u in matched_unit_ids(choice)]
             for member_index, choice in accepted_choices.items()
         }
         assert all(
@@ -2330,6 +2358,7 @@ def test_full_unitmatch_workflow_with_accepted_evaluation_children(
             grp["group_name"],
             matcher_params_name,
             accepted_choices,
+            unit_policy="v2_unflagged_single_units",
         )
         UnitMatch.populate(selection_pk, reserve_jobs=False)
 
@@ -2443,16 +2472,12 @@ def test_unitmatch_populate_with_committed_merged_child_member(
             "sorting_id": merged0["sorting_id"],
             "curation_id": merged0["curation_id"],
         }
-        merged_matchable = [
-            int(u) for u in CurationV2().get_matchable_unit_ids(merged_choice)
-        ]
+        merged_matchable = [int(u) for u in matched_unit_ids(merged_choice)]
         assert len(merged_matchable) == 1
         merged_uid = merged_matchable[0]
 
         member1_choice = grp["choices"][1]
-        member1_matchable = [
-            int(u) for u in CurationV2().get_matchable_unit_ids(member1_choice)
-        ]
+        member1_matchable = [int(u) for u in matched_unit_ids(member1_choice)]
         assert member1_matchable, "member 1's planted unit must be matchable"
         unit_b = member1_matchable[0]
 
@@ -2469,6 +2494,7 @@ def test_unitmatch_populate_with_committed_merged_child_member(
             grp["group_name"],
             matcher_params_name,
             {0: merged_choice, 1: member1_choice},
+            unit_policy="v2_unflagged_single_units",
         )
         UnitMatch.populate(selection_pk, reserve_jobs=False)
 
@@ -2577,7 +2603,11 @@ def _real_bundle_selection(
         )
         choices = {0: choice0, 1: grp["choices"][1]}
         selection_pk = UnitMatchSelection.insert_selection(
-            grp["owner"], grp["group_name"], matcher_params_name, choices
+            grp["owner"],
+            grp["group_name"],
+            matcher_params_name,
+            choices,
+            unit_policy="v2_unflagged_single_units",
         )
         yield {
             "selection_pk": selection_pk,
@@ -2677,16 +2707,13 @@ def test_excluded_bundle_units_stay_in_frozen_universe(
     row, is in no ``Pair`` row, and becomes a singleton ``TrackedUnit``.
     """
     pytest.importorskip("UnitMatchPy")
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import (
         TrackedUnit,
         UnitMatch,
     )
 
     grp = two_session_curated_group
-    (unit_b,) = [
-        int(u) for u in CurationV2().get_matchable_unit_ids(grp["choices"][1])
-    ]
+    (unit_b,) = [int(u) for u in matched_unit_ids(grp["choices"][1])]
     seen_unit_ids: list[list[int]] = []
     with _real_bundle_selection(
         grp,
@@ -3062,7 +3089,11 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
 
     grp = two_session_curated_group
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+        grp["owner"],
+        grp["group_name"],
+        "unitmatch_default",
+        grp["choices"],
+        unit_policy="v2_unflagged_single_units",
     )
     try:
         members = (UnitMatchSelection.Input & pk).fetch(
@@ -3159,7 +3190,11 @@ def test_tracked_unit_uses_frozen_universe_after_relabel(
     grp = two_session_curated_group
     choice = grp["choices"][0]
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: choice},
+        unit_policy="v2_unflagged_single_units",
     )
     # Solo group -> degenerate make (0 pairs, no matcher backend) but still
     # freezes the MatchableUnit snapshot.
@@ -3176,7 +3211,7 @@ def test_tracked_unit_uses_frozen_universe_after_relabel(
         # Relabel the frozen singleton so the CURRENT matchable set excludes it.
         CurationV2.UnitLabel.insert1(noise_label)
         assert target_unit not in [
-            int(u) for u in CurationV2().get_matchable_unit_ids(choice)
+            int(u) for u in matched_unit_ids(choice)
         ], "relabel should drop the unit from the CURRENT matchable set"
 
         TrackedUnit.populate(pk, reserve_jobs=False)
@@ -3238,7 +3273,11 @@ def test_geometry_preflight_fails_before_extraction(
 
     with pytest.raises(ValueError, match="probe geometry"):
         UnitMatchSelection.insert_selection(
-            grp["owner"], grp["group_name"], "unitmatch_default", grp["choices"]
+            grp["owner"],
+            grp["group_name"],
+            "unitmatch_default",
+            grp["choices"],
+            unit_policy="v2_unflagged_single_units",
         )
 
 
@@ -3326,7 +3365,11 @@ def test_unitmatch_nwb_self_describes(two_session_curated_group):
     grp = two_session_curated_group
     choice = grp["choices"][0]
     pk = UnitMatchSelection.insert_selection(
-        grp["owner"], grp["solo_name"], "unitmatch_default", {0: choice}
+        grp["owner"],
+        grp["solo_name"],
+        "unitmatch_default",
+        {0: choice},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
 
@@ -3378,6 +3421,7 @@ def test_get_unit_brain_regions_keeps_disambiguators(two_session_curated_group):
         grp["solo_name"],
         "unitmatch_default",
         {0: grp["choices"][0]},
+        unit_policy="v2_unflagged_single_units",
     )
     UnitMatch.populate(pk, reserve_jobs=False)
     TrackedUnit.populate(pk, reserve_jobs=False)
@@ -3428,7 +3472,6 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
     from pydantic import BaseModel, ConfigDict, Field
 
     from spyglass.spikesorting.v2 import matcher_protocol as mp
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import (
         MatchPair,
         PreparedMatcherInput,
@@ -3460,8 +3503,8 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             & (member_rows["curation_id"] == pinned["curation_id"])
         ).any()
 
-    matchable_a = CurationV2().get_matchable_unit_ids(grp["choices"][0])
-    matchable_b = CurationV2().get_matchable_unit_ids(grp["choices"][1])
+    matchable_a = matched_unit_ids(grp["choices"][0])
+    matchable_b = matched_unit_ids(grp["choices"][1])
     assert len(matchable_a) and len(
         matchable_b
     ), "planted units must be matchable"
@@ -3539,6 +3582,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             grp["group_name"],
             curation_strategy="root",
             matcher_params_name=matcher_name,
+            unit_policy="v2_unflagged_single_units",
         )
         assert plan.ok, plan.errors
         assert set(plan.curation_choices) == set(grp["choices"])
@@ -3558,6 +3602,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             grp["group_name"],
             curation_strategy="auto_curated",
             matcher_params_name=matcher_name,
+            unit_policy="v2_unflagged_single_units",
         )
         assert not auto_plan.ok
         assert any("auto_curate" in e for e in auto_plan.errors)
@@ -3600,7 +3645,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
         # auto-only policy reports that both root populations are unlabeled.
         assert len(summary["warnings"]) == 2
         assert all(
-            "included units are unlabeled under policy 'v2_unflagged_units'"
+            "included units are unlabeled under policy 'v2_unflagged_single_units'"
             in warning
             for warning in summary["warnings"]
         )
@@ -3621,6 +3666,7 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             session_group_name=grp["group_name"],
             matcher_params_name=matcher_name,
             curation_choices=grp["choices"],
+            unit_policy="v2_unflagged_single_units",
         )
         assert rerun["unit_match_id"] == summary["unit_match_id"]
         assert rerun["unit_match_status"] == "reused"
@@ -3685,6 +3731,7 @@ def test_run_v2_unit_match_warning_survives_stage_failure(
                 session_group_name=grp["group_name"],
                 matcher_params_name="unitmatch_default",
                 curation_choices=grp["choices"],
+                unit_policy="v2_unflagged_single_units",
             )
         err = exc.value
         assert err.stage == "unit_match"

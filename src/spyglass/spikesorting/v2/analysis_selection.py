@@ -11,7 +11,7 @@ decoding / firing-rate consumers), and returns a receipt naming the exact
 curation generation, the policy content, and every included / excluded unit
 with its reason.
 
-Three v2 policies are shipped (``V2_UNIT_SELECTION_POLICIES``); they are new
+Four v2 policies are shipped (``V2_UNIT_SELECTION_POLICIES``); they are new
 rows and never alter the production ``all_units`` / ``exclude_noise`` /
 ``default_exclusion`` rows:
 
@@ -26,6 +26,9 @@ rows and never alter the production ``all_units`` / ``exclude_noise`` /
   ``accept``), so without a browser review the two accepted policies select
   nothing. Choosing it states explicitly that rule-passing, never-reviewed
   units count as analysis units.
+* ``v2_unflagged_single_units`` -- the same auto-label-only handoff with
+  ``mua`` denied too. Cross-session matching tracks single units, so it
+  accepts only policies that deny ``mua``; this is its auto-only choice.
 
 ``all_units`` remains available as an explicit expert choice; the receipt
 always reports which included units were unlabeled so the choice is visible.
@@ -78,6 +81,9 @@ V2_UNIT_SELECTION_POLICIES: Mapping[str, LabelPolicy] = MappingProxyType(
         ),
         "v2_unflagged_units": _label_policy(
             [], ["noise", "reject", "artifact"]
+        ),
+        "v2_unflagged_single_units": _label_policy(
+            [], ["mua", "noise", "reject", "artifact"]
         ),
     }
 )

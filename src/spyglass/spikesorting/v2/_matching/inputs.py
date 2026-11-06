@@ -57,6 +57,7 @@ def insert_inputs(
     session_group: tuple[str, str] | None = None,
     *,
     unit_selections=None,
+    unit_policy: str = "v2_accepted_single_units",
     expected_input_set_hash: str | None = None,
 ) -> dict:
     """Find-existing-or-insert a match over explicit inputs; return its key.
@@ -87,6 +88,7 @@ def insert_inputs(
         curations,
         matcher_params_name,
         unit_selections=unit_selections,
+        unit_policy=unit_policy,
         allow_rebuild=True,
         validate_backend=False,
     )
@@ -171,6 +173,7 @@ def prepare_match_inputs(
     matcher_params_name,
     *,
     unit_selections=None,
+    unit_policy: str = "v2_accepted_single_units",
     allow_rebuild=False,
     validate_backend=True,
 ) -> dict:
@@ -247,7 +250,9 @@ def prepare_match_inputs(
         )
     _check_input_sessions(resolved, ValueError)
 
-    selections = _resolve_unit_selections(resolved, unit_selections)
+    selections = _resolve_unit_selections(
+        resolved, unit_selections, unit_policy
+    )
     for item in resolved:
         item["selection_snapshot"] = selections[str(item["sorting_id"])]
     ordered = chronological_input_order(resolved)
@@ -295,8 +300,33 @@ def prepare_match_inputs(
     }
 
 
-def _resolve_unit_selections(inputs, supplied) -> dict:
-    """Validate generation-pinned population snapshots for every matching input."""
+def assert_matching_policy_excludes_mua(snapshot) -> None:
+    """Refuse a unit-selection policy that can admit multi-unit activity.
+
+    Matching tracks single units across sessions; a ``mua`` unit has no
+    identity to track. Every policy matching uses must therefore deny
+    ``mua`` (``v2_accepted_single_units`` for reviewed curations,
+    ``v2_unflagged_single_units`` for automatic-only output).
+
+    Raises
+    ------
+    ValueError
+        If the snapshot's policy does not exclude ``mua``.
+    """
+    if "mua" not in snapshot["policy"]["exclude_labels"]:
+        raise ValueError(
+            f"Unit matching refuses policy {snapshot['policy_name']!r}: it "
+            "does not exclude 'mua', so multi-unit activity could be matched. "
+            "Use 'v2_accepted_single_units' for reviewed curations or "
+            "'v2_unflagged_single_units' for automatic-only output."
+        )
+
+
+def _resolve_unit_selections(inputs, supplied, unit_policy) -> dict:
+    """Validate generation-pinned population snapshots for every matching input.
+
+    Without ``supplied`` snapshots, ``unit_policy`` is resolved for each input.
+    """
     from spyglass.spikesorting.v2.analysis_selection import (
         resolve_unit_selection,
     )
@@ -312,7 +342,7 @@ def _resolve_unit_selections(inputs, supplied) -> dict:
                     "curation_id": item["curation_id"],
                     "curation_uuid": item["curation_uuid"],
                 },
-                policy="v2_unflagged_units",
+                policy=unit_policy,
             ).snapshot()
             for item in inputs
         ]
@@ -322,6 +352,7 @@ def _resolve_unit_selections(inputs, supplied) -> dict:
         data = validate_unit_selection_snapshot(
             raw.snapshot() if hasattr(raw, "snapshot") else raw
         )
+        assert_matching_policy_excludes_mua(data)
         sorting_id = str(data["sorting_id"])
         if sorting_id in snapshots:
             raise ValueError(

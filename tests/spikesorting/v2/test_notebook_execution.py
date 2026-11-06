@@ -340,14 +340,15 @@ class _NotebookFixtureMatcher:
     name = "notebook_fixture_matcher"
 
     def match(self, session_inputs, params):
-        from spyglass.spikesorting.v2.curation import CurationV2
         from spyglass.spikesorting.v2.matcher_protocol import MatchPair
 
         if len(session_inputs) < 2:
             return []
         a, b = session_inputs[0], session_inputs[1]
-        units_a = CurationV2().get_matchable_unit_ids(a.curation_key)
-        units_b = CurationV2().get_matchable_unit_ids(b.curation_key)
+        from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
+
+        units_a = matched_unit_ids(a.curation_key)
+        units_b = matched_unit_ids(b.curation_key)
         if not len(units_a) or not len(units_b):
             return []
         return [

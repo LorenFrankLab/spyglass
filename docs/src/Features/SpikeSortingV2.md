@@ -1706,8 +1706,10 @@ The direct planner requires `CurationRef` objects. Without supplied population
 snapshots, omitting `unit_policy` selects `"v2_accepted_single_units"`. It
 selects `accept` units and excludes `mua`, `noise`, `reject`, and `artifact`;
 automatic labeling alone normally selects nothing. For automatic-only inputs,
-choose `unit_policy="v2_unflagged_units"` explicitly; that includes unlabeled
-units and MUA. Planning and preflight require local raw NWBs, source recordings,
+choose `unit_policy="v2_unflagged_single_units"` explicitly; that includes
+unlabeled units but not MUA. Matching tracks single units, so every matching
+entry point refuses a policy that does not exclude `mua`
+(`v2_accepted_neural_units`, `v2_unflagged_units`, `all_units`). Planning and preflight require local raw NWBs, source recordings,
 and curated Units artifacts. Multi-input runs also require effective waveform
 traces and persisted statistics spans; a singleton run writes zero pairs without
 consuming those waveform assets. Planning and preflight do not rebuild missing
@@ -1789,8 +1791,9 @@ raises listing `plan.errors`.
 
 `final_curated` means a unique committed non-root leaf; an automatically labeled
 child can satisfy it. It is not evidence that a person completed browser review.
-The group and named-sort planners retain `unit_policy="v2_unflagged_units"` as
-their compatibility default, so name the desired policy explicitly. Group-based
+The group and named-sort planners also default to
+`unit_policy="v2_accepted_single_units"`; name `v2_unflagged_single_units` for
+automatic-only output. Group-based
 discovery searches each member's standalone sorts; use named sorts or exact
 curation handles for daily concatenation parents.
 
@@ -1955,7 +1958,8 @@ approval. The supported handoff is
 reviewed (`run.auto_labeled_curation`, a `FigPackReview` result, or a
 `save_manual_curation` / `commit_merges` child). It applies a named
 `UnitSelectionParams` policy (`v2_accepted_single_units`,
-`v2_accepted_neural_units`, `v2_unflagged_units`, or the expert `all_units`; see
+`v2_accepted_neural_units`, `v2_unflagged_units`, `v2_unflagged_single_units`,
+or the expert `all_units`; see
 the
 [policy table](./SpikeSortingV2_Quickstart.md#4-select-the-analysis-population-then-analyze)),
 builds the `SortedSpikesGroup` that decoding and firing-rate consumers read (one

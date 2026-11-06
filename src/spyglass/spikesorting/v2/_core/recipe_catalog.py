@@ -975,9 +975,9 @@ def auto_curation_default_payloads() -> list[tuple[dict, list[dict]]]:
         (
             # Frank-lab default labeling set: thresholds the lab's ~2% ISI
             # refractory policy in addition to nn_noise_overlap. ISI-violation
-            # units are labeled ``reject`` (not ``mua``) so they fall out of
-            # the default matchable-unit set (CurationV2.get_matchable_unit_ids
-            # excludes reject/noise/artifact). Merges stay a manual step, so
+            # units are labeled ``reject`` (not ``mua``) so every v2 unit
+            # selection policy, analysis and matching alike, denies them.
+            # Merges stay a manual step, so
             # this set runs no auto-merge (auto_merge_preset='none'). The
             # metric-params row it pairs with must compute nn_advanced (for
             # the nn_noise_overlap column) and isi_violation -- the shipped

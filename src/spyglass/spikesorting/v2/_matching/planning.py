@@ -201,7 +201,7 @@ class UnitMatchPlan:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     curation_resolution_errors: tuple[str, ...] = ()
-    unit_policy: str = "v2_unflagged_units"
+    unit_policy: str = "v2_accepted_single_units"
     unit_selections: tuple[Any, ...] = ()
     input_set_hash: str | None = None
     preflight: UnitMatchPreflightReport | None = None
@@ -275,7 +275,7 @@ class UnitMatchInputPlan:
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     curation_resolution_errors: tuple[str, ...] = ()
-    unit_policy: str = "v2_unflagged_units"
+    unit_policy: str = "v2_accepted_single_units"
     unit_selections: tuple[Any, ...] = ()
     input_set_hash: str | None = None
     preflight: UnitMatchPreflightReport | None = None

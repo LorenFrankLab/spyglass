@@ -342,6 +342,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         session_group: tuple[str, str] | None = None,
         *,
         unit_selections=None,
+        unit_policy: str = "v2_accepted_single_units",
         expected_input_set_hash: str | None = None,
     ) -> dict:
         """Find-existing-or-insert a match over explicit inputs; return its key.
@@ -378,9 +379,13 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             Default ``None``.
         unit_selections : sequence, optional
             Frozen snapshots from ``resolve_unit_selection``, one per input.
-            Without them, the compatibility policy ``v2_unflagged_units``
-            is resolved once and frozen. Reviewed curation plans default to
-            ``v2_accepted_single_units``.
+            Without them, ``unit_policy`` is resolved once and frozen. Every
+            snapshot's policy must exclude ``mua``.
+        unit_policy : str, optional
+            Named eligibility policy resolved when ``unit_selections`` is
+            omitted; it must exclude ``mua``. Default
+            ``"v2_accepted_single_units"``; ``"v2_unflagged_single_units"``
+            matches automatic-only output.
         expected_input_set_hash : str, optional
             Reject source or eligibility drift from a reviewed plan before
             inserting any selection rows.
@@ -415,6 +420,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             matcher_params_name,
             session_group=session_group,
             unit_selections=unit_selections,
+            unit_policy=unit_policy,
             expected_input_set_hash=expected_input_set_hash,
         )
 
@@ -427,6 +433,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         curation_choices: dict,
         *,
         unit_selections=None,
+        unit_policy: str = "v2_accepted_single_units",
         expected_input_set_hash: str | None = None,
     ) -> dict:
         """Match one curation per ``SessionGroup`` member; return the key.
@@ -449,6 +456,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             The ``MatcherParameters`` row to use.
         curation_choices : dict[int, dict]
             ``member_index -> {"sorting_id": ..., "curation_id": ...}``.
+        unit_selections, unit_policy, expected_input_set_hash
+            As for :meth:`insert_inputs`.
 
         Returns
         -------
@@ -501,6 +510,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             matcher_params_name,
             session_group=(session_group_owner, session_group_name),
             unit_selections=unit_selections,
+            unit_policy=unit_policy,
             expected_input_set_hash=expected_input_set_hash,
         )
 

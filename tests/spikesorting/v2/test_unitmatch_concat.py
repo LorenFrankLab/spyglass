@@ -33,6 +33,7 @@ from tests.spikesorting.v2._unitmatch_helpers import (
     restore_matcher_registry,
 )
 from tests.spikesorting.v2._sorter_stub import plant_sorter
+from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 pytestmark = pytest.mark.slow
 
@@ -197,7 +198,9 @@ def test_match_inputs_accept_single_and_daily_concat_sorts(
     # single/single: session a (day 1, 12:00) precedes b (day 1, 15:30)
     # whatever order the caller lists them in.
     pk = UnitMatchSelection.insert_inputs(
-        [cur["single_b"], cur["single_a"]], "unitmatch_default"
+        [cur["single_b"], cur["single_a"]],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
     )
     try:
         rows = _input_rows(pk)
@@ -216,7 +219,9 @@ def test_match_inputs_accept_single_and_daily_concat_sorts(
 
     # single/concat: day-1 session b precedes the day-2 concatenation of c.
     pk = UnitMatchSelection.insert_inputs(
-        [cur["concat_day2"], cur["single_b"]], "unitmatch_default"
+        [cur["concat_day2"], cur["single_b"]],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
     )
     try:
         rows = _input_rows(pk)
@@ -234,7 +239,9 @@ def test_match_inputs_accept_single_and_daily_concat_sorts(
 
     # concat/concat: the day-1 concatenation of a precedes day 2's of c.
     pk = UnitMatchSelection.insert_inputs(
-        [cur["concat_day2"], cur["concat_day1"]], "unitmatch_default"
+        [cur["concat_day2"], cur["concat_day1"]],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
     )
     try:
         rows = _input_rows(pk)
@@ -275,7 +282,9 @@ def test_shuffled_inputs_give_the_same_selection(daily_concat_match_inputs):
     seen = set()
     for permutation in itertools.permutations(inputs):
         pk = UnitMatchSelection.insert_inputs(
-            list(permutation), "unitmatch_default"
+            list(permutation),
+            "unitmatch_default",
+            unit_policy="v2_unflagged_single_units",
         )
         try:
             set_hash = (UnitMatchSelection & pk).fetch1("input_set_hash")
@@ -380,7 +389,9 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
             for label, inputs, error, message in cases:
                 with pytest.raises(error, match=message):
                     UnitMatchSelection.insert_inputs(
-                        inputs, "unitmatch_default"
+                        inputs,
+                        "unitmatch_default",
+                        unit_policy="v2_unflagged_single_units",
                     )
                 assert len(UnitMatchSelection()) == rows_before, label
 
@@ -414,7 +425,9 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
             # moved onto session a, hash kept consistent) is refused by
             # make() on the frozen rows, before any bundle is extracted.
             pk = UnitMatchSelection.insert_inputs(
-                [cur["single_a"], cur["single_b"]], "unitmatch_default"
+                [cur["single_a"], cur["single_b"]],
+                "unitmatch_default",
+                unit_policy="v2_unflagged_single_units",
             )
             try:
                 reforge_selection(
@@ -433,7 +446,9 @@ def test_match_inputs_reject_duplicate_and_overlapping_sources(
             # A forged concat input whose member rows no longer match the
             # concatenation is refused the same way.
             pk = UnitMatchSelection.insert_inputs(
-                [cur["concat_day1"], cur["single_b"]], "unitmatch_default"
+                [cur["concat_day1"], cur["single_b"]],
+                "unitmatch_default",
+                unit_policy="v2_unflagged_single_units",
             )
             try:
                 reforge_selection(
@@ -541,6 +556,7 @@ def test_matching_snapshot_survives_live_group_changes(
             group["session_group_name"],
             "unitmatch_default",
             {0: cur["single_b"], 1: cur["single_a"]},
+            unit_policy="v2_unflagged_single_units",
         )
         master = (UnitMatchSelection & pk).fetch1()
         assert (
@@ -633,7 +649,9 @@ def test_matching_snapshot_survives_live_group_changes(
     # A concat input whose boundaries changed after selection is refused.
     concat_key = fx["concat_keys"]["concat_day1"]
     pk = UnitMatchSelection.insert_inputs(
-        [cur["concat_day1"], cur["single_b"]], "unitmatch_default"
+        [cur["concat_day1"], cur["single_b"]],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
     )
     try:
         boundary = {**concat_key, "member_index": 0}
@@ -684,7 +702,9 @@ def test_reselecting_after_a_session_start_correction_gives_a_new_selection(
     inputs = [cur["single_a"], cur["single_b"]]
     old_pk = new_pk = None
     try:
-        old_pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+        old_pk = UnitMatchSelection.insert_inputs(
+            inputs, params_name, unit_policy="v2_unflagged_single_units"
+        )
         recorded = (Session & {"nwb_file_name": nwb_a}).fetch1(
             "session_start_time"
         )
@@ -701,7 +721,9 @@ def test_reselecting_after_a_session_start_correction_gives_a_new_selection(
                 UnitMatch.populate(old_pk, reserve_jobs=False)
             assert len(UnitMatch & old_pk) == 0
 
-            new_pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+            new_pk = UnitMatchSelection.insert_inputs(
+                inputs, params_name, unit_policy="v2_unflagged_single_units"
+            )
             assert new_pk != old_pk
             # The correction keeps a before b, so only a's frozen times move.
             new_inputs = _input_rows(new_pk)
@@ -717,9 +739,9 @@ def test_reselecting_after_a_session_start_correction_gives_a_new_selection(
             UnitMatch.populate(new_pk, reserve_jobs=False)
             assert len(UnitMatch & new_pk) == 1
             # Selecting again under the corrected time is idempotent.
-            assert UnitMatchSelection.insert_inputs(inputs, params_name) == (
-                new_pk
-            )
+            assert UnitMatchSelection.insert_inputs(
+                inputs, params_name, unit_policy="v2_unflagged_single_units"
+            ) == (new_pk)
     finally:
         for pk in (old_pk, new_pk):
             if pk is not None:
@@ -740,7 +762,6 @@ def test_concat_inputs_match_and_track_in_chronological_order(
     day 1, and the tracked unit resolves to all four original recordings."""
     from spyglass.common import Session
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.matcher_protocol import get_input_preparer
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -753,8 +774,8 @@ def test_concat_inputs_match_and_track_in_chronological_order(
     fx = daily_concat_match_inputs
     cur = fx["curations"]
     day1, day2 = cur["concat_day1"], cur["concat_day2"]
-    (unit_day1,) = CurationV2().get_matchable_unit_ids(day1)
-    (unit_day2,) = CurationV2().get_matchable_unit_ids(day2)
+    (unit_day1,) = matched_unit_ids(day1)
+    (unit_day2,) = matched_unit_ids(day2)
     # Distinct planted ids, so a pair stored with its sides swapped fails.
     assert (unit_day1, unit_day2) == (0, DAILY_CONCAT_UNIT_IDS["concat_day2"])
     extracted = []
@@ -783,7 +804,9 @@ def test_concat_inputs_match_and_track_in_chronological_order(
     pk = None
     try:
         pk = UnitMatchSelection.insert_inputs(
-            [day2, day1], "daily_concat_pairer_params"
+            [day2, day1],
+            "daily_concat_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         UnitMatch.populate(pk, reserve_jobs=False)
         assert extracted == [("input_0", [unit_day1]), ("input_1", [unit_day2])]
@@ -895,11 +918,19 @@ def test_deleting_a_group_keeps_its_match_run(
     pk = None
     try:
         pk = UnitMatchSelection.insert_selection(
-            owner, groups[0], "group_survival_pairer_params", choices
+            owner,
+            groups[0],
+            "group_survival_pairer_params",
+            choices,
+            unit_policy="v2_unflagged_single_units",
         )
         assert (
             UnitMatchSelection.insert_selection(
-                owner, groups[1], "group_survival_pairer_params", choices
+                owner,
+                groups[1],
+                "group_survival_pairer_params",
+                choices,
+                unit_policy="v2_unflagged_single_units",
             )
             == pk
         )
@@ -963,7 +994,9 @@ def test_frozen_frames_and_order_are_verified_at_make(
 
     cur = daily_concat_match_inputs["curations"]
     pk = UnitMatchSelection.insert_inputs(
-        [cur["single_a"], cur["single_b"]], "unitmatch_default"
+        [cur["single_a"], cur["single_b"]],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
     )
 
     def _refused(match):
@@ -1028,7 +1061,9 @@ def test_frozen_frames_and_order_are_verified_at_make(
             _refused("valid_times changed")
             _drop(pk)
             pk = UnitMatchSelection.insert_inputs(
-                [cur["single_a"], cur["single_b"]], "unitmatch_default"
+                [cur["single_a"], cur["single_b"]],
+                "unitmatch_default",
+                unit_policy="v2_unflagged_single_units",
             )
             reforge_selection(
                 pk,
@@ -1044,7 +1079,9 @@ def test_frozen_frames_and_order_are_verified_at_make(
             # session time differs from its Session row.
             _drop(pk)
             pk = UnitMatchSelection.insert_inputs(
-                [cur["single_a"], cur["single_b"]], "unitmatch_default"
+                [cur["single_a"], cur["single_b"]],
+                "unitmatch_default",
+                unit_policy="v2_unflagged_single_units",
             )
             start = {
                 int(row["input_index"]): row["input_start_time"]
@@ -1086,6 +1123,7 @@ def test_frozen_frames_and_order_are_verified_at_make(
                 pk = UnitMatchSelection.insert_inputs(
                     [cur["single_a"], cur["concat_multi_day"]],
                     "unitmatch_default",
+                    unit_policy="v2_unflagged_single_units",
                 )
             _refused("session_start_time")
     finally:
@@ -1220,12 +1258,16 @@ def test_insert_inputs_geometry_is_backend_owned(
         if matcher == "unitmatch":
             with pytest.raises(ValueError, match="probe geometry"):
                 UnitMatchSelection.insert_inputs(
-                    [subset, cur["concat_day1"]], matcher_params_name
+                    [subset, cur["concat_day1"]],
+                    matcher_params_name,
+                    unit_policy="v2_unflagged_single_units",
                 )
             assert len(UnitMatchSelection()) == n_selections
         else:
             selection = UnitMatchSelection.insert_inputs(
-                [subset, cur["concat_day1"]], matcher_params_name
+                [subset, cur["concat_day1"]],
+                matcher_params_name,
+                unit_policy="v2_unflagged_single_units",
             )
             assert len(UnitMatchSelection()) == n_selections + 1
             assert len(UnitMatchSelection.Input & selection) == 2
@@ -1282,7 +1324,9 @@ def test_named_sort_plan_runs_without_a_group(
     try:
         with pytest.raises(PipelineInputError, match="no SortingSelection"):
             plan_v2_unit_match_from_sorts(
-                [uuid.uuid4()], curation_strategy="root"
+                [uuid.uuid4()],
+                curation_strategy="root",
+                unit_policy="v2_unflagged_single_units",
             )
         # Named day 2 first: the generation pins retain caller order, while
         # the review table and selection show chronological matching order.
@@ -1290,6 +1334,7 @@ def test_named_sort_plan_runs_without_a_group(
             [concat["sorting_id"], single["sorting_id"]],
             curation_strategy="root",
             matcher_params_name="named_sort_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         assert plan.ok, plan.errors
         assert plan.curations == [
@@ -1349,13 +1394,16 @@ def test_named_sort_plan_runs_without_a_group(
                 concat["sorting_id"]: concat["curation_id"],
                 str(single["sorting_id"]): single["curation_id"],
             },
+            unit_policy="v2_unflagged_single_units",
         )
         assert manual.ok and manual.curations == plan.curations
 
         summary = run_v2_unit_match(plan)
         pk = {"unitmatch_id": summary["unit_match_id"]}
         assert pk == UnitMatchSelection.insert_inputs(
-            [single, concat], "named_sort_pairer_params"
+            [single, concat],
+            "named_sort_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         assert summary["session_group_owner"] is None
         assert summary["session_group_name"] is None
@@ -1491,6 +1539,7 @@ def test_named_plan_checks_every_generation_before_reuse(
                 for child in children.values()
             },
             matcher_params_name="generation_check_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         assert plan.ok, plan.errors
         stale = children[stale_name]
@@ -1510,7 +1559,9 @@ def test_named_plan_checks_every_generation_before_reuse(
         # Set up the current-generation find-existing path independently of
         # the stale plan, then verify chronological ordering and frozen UUIDs.
         pk = UnitMatchSelection.insert_inputs(
-            list(children.values()), "generation_check_pairer_params"
+            list(children.values()),
+            "generation_check_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         selections.append(pk)
         inputs = _input_rows(pk)
@@ -1682,6 +1733,7 @@ def test_concat_pairs_and_input_provenance_round_trip(
             [cur[name]["sorting_id"] for name in named],
             curation_strategy="root",
             matcher_params_name="round_trip_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         summary = run_v2_unit_match(plan)
         pk = {"unitmatch_id": summary["unit_match_id"]}
@@ -1931,6 +1983,7 @@ def test_group_run_receipt_adds_only_its_inputs(
             name,
             curation_strategy="root",
             matcher_params_name="group_receipt_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         summary = run_v2_unit_match(plan)
         pk = UnitMatchSelection.insert_selection(
@@ -1938,6 +1991,7 @@ def test_group_run_receipt_adds_only_its_inputs(
             name,
             "group_receipt_pairer_params",
             {0: cur["single_b"], 1: cur["single_a"]},
+            unit_policy="v2_unflagged_single_units",
         )
         assert set(summary) == {
             "session_group_owner",
@@ -2265,7 +2319,9 @@ def test_daily_bundle_uses_corrected_parent_and_valid_support(
     pk = None
     try:
         pk = UnitMatchSelection.insert_inputs(
-            [masked, concat], "span_edge_pairer_params"
+            [masked, concat],
+            "span_edge_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         UnitMatch.populate(pk, reserve_jobs=False)
         assert UnitMatch & pk
@@ -2384,7 +2440,6 @@ def test_concat_units_are_not_duplicated_in_match_graph(
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCuration,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchPairIntegrityError,
     )
@@ -2399,8 +2454,8 @@ def test_concat_units_are_not_duplicated_in_match_graph(
     concat, masked = sx["curations"]["concat"], sx["curations"]["masked"]
     n_members = len(ConcatMemberCuration & concat)
     assert n_members == 2
-    parent_units = sorted(CurationV2().get_matchable_unit_ids(concat))
-    masked_units = sorted(CurationV2().get_matchable_unit_ids(masked))
+    parent_units = sorted(matched_unit_ids(concat))
+    masked_units = sorted(matched_unit_ids(masked))
     assert parent_units == masked_units == [0, 1, 2]
 
     def _node(curation, unit_id):
@@ -2419,7 +2474,9 @@ def test_concat_units_are_not_duplicated_in_match_graph(
     pk = None
     try:
         pk = UnitMatchSelection.insert_inputs(
-            [masked, concat], "parent_graph_pairer_params"
+            [masked, concat],
+            "parent_graph_pairer_params",
+            unit_policy="v2_unflagged_single_units",
         )
         UnitMatch.populate(pk, reserve_jobs=False)
         TrackedUnit.populate(pk, reserve_jobs=False)
@@ -2848,7 +2905,9 @@ def test_tracked_units_map_to_original_member_times_and_regions(
     try:
         for name in ("day1", "cross_nwb"):
             pk = UnitMatchSelection.insert_inputs(
-                [cur["c"], cur[name]], params_name
+                [cur["c"], cur[name]],
+                params_name,
+                unit_policy="v2_unflagged_single_units",
             )
             runs[name] = pk
             assert [str(row["sorting_id"]) for row in _input_rows(pk)] == [
@@ -3091,13 +3150,17 @@ def test_member_and_source_drift_is_refused_by_selection_make_and_readers(
         # A member edited before selection: the selection is refused.
         with _raw_update(Recording, b_key, "content_hash", "f" * 64):
             with _member_drift_refused(ValueError, "UnitMatchSelection: "):
-                UnitMatchSelection.insert_inputs(inputs, params_name)
+                UnitMatchSelection.insert_inputs(
+                    inputs, params_name, unit_policy="v2_unflagged_single_units"
+                )
         assert (
             len(UnitMatchSelection & {"matcher_params_name": params_name}) == 0
         )
 
         # A member edited between selection and make: make is refused.
-        pk = UnitMatchSelection.insert_inputs(inputs, params_name)
+        pk = UnitMatchSelection.insert_inputs(
+            inputs, params_name, unit_policy="v2_unflagged_single_units"
+        )
         with _raw_update(Recording, b_key, "content_hash", "f" * 64):
             with _member_drift_refused(
                 UnitMatchSelectionIntegrityError,
@@ -3379,6 +3442,7 @@ def _match_days(summaries):
         manual_curation_choices={
             s["sorting_id"]: s["root_curation_id"] for s in summaries.values()
         },
+        unit_policy="v2_unflagged_single_units",
     )
     assert plan.ok, plan.errors
     return plan, run_v2_unit_match(plan)

@@ -34,6 +34,7 @@ from tests.spikesorting.v2._motion_db_helpers import (
     sorter_key,
 )
 from tests.spikesorting.v2._sorter_stub import active_sorter, plant_sorter
+from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 #: The manual artifact exclusion, in seconds after the session start.
 EXCLUDED_S = (20.0, 21.0)
@@ -261,7 +262,6 @@ def _hand_input_plan(curations):
     on sorts of one recording, which a selection would reject as sharing a
     session.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2._matching.fetch import (
         _member_match_files,
@@ -287,7 +287,9 @@ def _hand_input_plan(curations):
         )
         # One input per call: both sorts share a recording, which a
         # multi-input selection would reject.
-        (snapshot,) = _resolve_unit_selections([resolved], None).values()
+        (snapshot,) = _resolve_unit_selections(
+            [resolved], None, "v2_unflagged_single_units"
+        ).values()
         source = SortingSelection.resolve_effective_source(
             {"sorting_id": curation["sorting_id"]}
         )
@@ -310,8 +312,7 @@ def _hand_input_plan(curations):
                     for recording in resolved["recordings"]
                 ],
                 "matchable_unit_ids": [
-                    int(u)
-                    for u in CurationV2().get_matchable_unit_ids(curation)
+                    int(u) for u in matched_unit_ids(curation)
                 ],
                 "selection_snapshot": snapshot,
                 **_member_waveform_traces(source.traces),

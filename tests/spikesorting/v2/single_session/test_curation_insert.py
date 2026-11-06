@@ -7,6 +7,7 @@ import uuid
 import pytest
 
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
+from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 
 @pytest.mark.slow
@@ -271,40 +272,6 @@ def test_curation_v2_parent_validation_and_nonincreasing_ids(populated_sorting):
 
 
 @pytest.mark.slow
-def test_curation_v2_get_matchable_unit_ids_filters_labels(populated_sorting):
-    """``get_matchable_unit_ids`` excludes units carrying any excluded
-    label even when they also carry an included label, and includes
-    untagged units.
-
-    The smoke fixture's MS5 sort can yield a small unit count
-    (commonly 1 on this 4s fixture), so the test exercises the
-    multi-label-collision case on the first unit and asserts
-    untagged passthrough on any remaining units that exist.
-    """
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting
-
-    _clear_curations(populated_sorting)
-    units = sorted(
-        int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
-    )
-    assert len(units) >= 1
-    # Tag the first unit with BOTH an excluded label (artifact) and
-    # an included label (mua). The "any excluded label wins" rule
-    # must surface despite the included label being present.
-    labels = {units[0]: ["mua", "artifact"]}
-    pk = CurationV2.insert_curation(
-        sorting_key=populated_sorting, labels=labels
-    )
-    matchable = CurationV2().get_matchable_unit_ids(pk)
-    matchable_set = set(matchable.tolist())
-    assert units[0] not in matchable_set
-    # Any further units are untagged and pass through.
-    for uid in units[1:]:
-        assert uid in matchable_set
-
-
-@pytest.mark.slow
 def test_curation_v2_get_sort_group_info_returns_all_electrodes(
     populated_sorting,
 ):
@@ -446,15 +413,15 @@ def test_unit_brain_region_df_empty_keeps_full_schema(dj_conn):
 
 @pytest.mark.slow
 def test_curation_v2_all_units_labeled_noise(populated_sorting):
-    """All-noise label set: ``get_matchable_unit_ids`` returns empty
-    AND ``insert_curation`` succeeds without crashing.
+    """All-noise label set: the matching population is empty AND
+    ``insert_curation`` succeeds without crashing.
 
-    Pins two contracts together: (1) the label-based filtering in
-    ``get_matchable_unit_ids`` correctly excludes every unit when
+    Pins two contracts together: (1) the unit-selection policy
+    correctly excludes every unit when
     every unit is labeled ``noise``, and (2) ``insert_curation``
     completes even when every unit is labeled an excluded class.
     The curated Units NWB still contains every unit because the
-    label filter is applied at the *consumer* (``get_matchable_*``)
+    label filter is applied at the *consumer* (``resolve_unit_selection``)
     rather than at NWB-write time; the empty-units guard in
     ``write_curated_units_nwb`` is exercised by the sibling test
     ``test_curation_v2_stages_empty_units_nwb_on_zero_kept_units``.
@@ -479,9 +446,9 @@ def test_curation_v2_all_units_labeled_noise(populated_sorting):
         description="all-noise curation regression",
     )
 
-    # get_matchable_unit_ids filters out noise/artifact/reject, so
-    # the matchable set is empty.
-    matchable = CurationV2().get_matchable_unit_ids(pk)
+    # The matching policy filters out noise/artifact/reject, so the
+    # matchable set is empty.
+    matchable = matched_unit_ids(pk)
     assert list(matchable) == [], (
         f"Expected zero matchable unit ids after labeling every unit "
         f"noise; got {list(matchable)}."

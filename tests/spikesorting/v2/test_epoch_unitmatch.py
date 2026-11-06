@@ -85,9 +85,9 @@ _EPOCH_LABELS = {
         ),
         pytest.param(
             False,
-            "v2_unflagged_units",
+            "v2_unflagged_single_units",
             ([0, 1, 2, 3], [10, 11, 12, 13]),
-            id="auto_only_unflagged",
+            id="auto_only_unflagged_single",
         ),
     ],
 )
@@ -410,7 +410,7 @@ def test_public_epoch_matching_journey(
         overlapping = plan_v2_unit_match_from_curations(
             [whole.root_curation, final_refs[0]],
             matcher_params_name=params_name,
-            unit_policy="v2_unflagged_units",
+            unit_policy="v2_unflagged_single_units",
         )
         assert not overlapping.ok
         assert any("raw samples" in error for error in overlapping.errors)
@@ -618,9 +618,16 @@ def test_disjoint_epochs_match_without_inflating_detected_sessions(
     pk = None
     try:
         # Reverse caller order: original acquisition position must win.
-        pk = UnitMatchSelection.insert_inputs([late, early], params_name)
+        pk = UnitMatchSelection.insert_inputs(
+            [late, early], params_name, unit_policy="v2_unflagged_single_units"
+        )
         assert (
-            UnitMatchSelection.insert_inputs([early, late], params_name) == pk
+            UnitMatchSelection.insert_inputs(
+                [early, late],
+                params_name,
+                unit_policy="v2_unflagged_single_units",
+            )
+            == pk
         )
         recordings = (UnitMatchSelection.InputRecording & pk).fetch(
             as_dict=True, order_by="input_index"
@@ -635,7 +642,9 @@ def test_disjoint_epochs_match_without_inflating_detected_sessions(
         )
         with pytest.raises(OverlappingMatchInputError, match="raw samples"):
             UnitMatchSelection.insert_inputs(
-                [fx["curations"]["single_a"], early], params_name
+                [fx["curations"]["single_a"], early],
+                params_name,
+                unit_policy="v2_unflagged_single_units",
             )
         UnitMatch.populate(pk, reserve_jobs=False)
         TrackedUnit.populate(pk, reserve_jobs=False)
@@ -655,7 +664,7 @@ def test_disjoint_epochs_match_without_inflating_detected_sessions(
         )
         assert all(
             snapshot["included_unit_ids"] == [0]
-            and snapshot["policy_name"] == "v2_unflagged_units"
+            and snapshot["policy_name"] == "v2_unflagged_single_units"
             and snapshot["selection_hash"]
             for snapshot in nwb_inputs["selection_snapshot"]
         )
