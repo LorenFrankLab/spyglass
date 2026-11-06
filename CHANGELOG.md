@@ -129,7 +129,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     #1686
 - Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and `cleanup`,
     `IntervalList.cleanup`) no longer raise when a child table shares a
-    secondary attribute with the parent #PRNUM
+    secondary attribute with the parent #1712
 
 ### Pipelines
 
