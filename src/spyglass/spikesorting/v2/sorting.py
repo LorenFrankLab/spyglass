@@ -102,7 +102,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    find_orphaned_masters,
     optional_part_value,
     restrict_by_leading_args,
     single_source_part,
@@ -584,8 +583,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
     row makes "no ``ArtifactDetectionSource`` row" queryable, joinable, and
     impossible to alias. ``ArtifactDetectionSource`` is independent of the
     recording-source parts -- it is NOT counted by ``resolve_source``
-    (a sort still has exactly one *recording* source) nor by
-    ``prune_orphaned_selections``.
+    (a sort still has exactly one *recording* source).
 
     A ``MotionCorrectionSource`` part (zero-or-one) makes the sort read a
     ``MotionCorrectedRecording`` of its source instead of the source's own
@@ -733,29 +731,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             source_part,
             motion_corrected_recording_id,
         )
-
-    @classmethod
-    def prune_orphaned_selections(cls, dry_run: bool = True) -> list[dict]:
-        """Find or delete master rows that have no source-part row.
-
-        DataJoint cannot enforce "exactly one recording source per master"
-        across the two XOR source parts, so an upstream cascade-delete from
-        ``Recording`` / ``ConcatenatedRecording`` can leave a master row with no
-        source child. The optional ``ArtifactDetectionSource`` and
-        ``MotionCorrectionSource`` parts are not sources: a master left with
-        only those is an orphan too, and deleting it removes them. Dry-run by default; with ``dry_run=False`` runs
-        cautious_delete on each orphan so the cascade preview shows downstream
-        ``Sorting`` / ``CurationV2`` / ``SpikeSortingOutput.CurationV2`` impact.
-        """
-        orphans = find_orphaned_masters(
-            cls,
-            [cls.RecordingSource, cls.ConcatenatedRecordingSource],
-        )
-        if dry_run or not orphans:
-            return orphans
-        for orphan in orphans:
-            (cls & orphan).cautious_delete()
-        return orphans
 
     @classmethod
     def resolve_source(cls, key: dict) -> SourceResolution:
@@ -1855,26 +1830,6 @@ class Sorting(
             )
         return CurationRef.from_key(root.fetch1("KEY"))
 
-    def plot_summary(
-        self, key, *, compute_missing=False, backend=None, **kwargs
-    ):
-        """Delegate to ``visualization.plot_sorting_summary`` for this sort's
-        root curation (the raw units).
-
-        A local-discoverability one-liner; the display-analyzer routing and
-        extension policy live in the ``v2.visualization`` facade, which the
-        notebook/docs teach as the primary surface. ``backend`` is required (SI's
-        ``SortingSummaryWidget`` has no matplotlib backend); see the facade.
-        """
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_sorting_summary(
-            self.root_curation(key),
-            compute_missing=compute_missing,
-            backend=backend,
-            **kwargs,
-        )
-
     def plot_unit_summary(
         self,
         key,
@@ -2041,7 +1996,7 @@ class Sorting(
         or ``SortGroupV2``: the cascade reaches ``Sorting`` through DataJoint
         ``FreeTable`` objects and never dispatches this override. Raw SQL or a
         scripted ``dj.Table.connection.query`` also bypasses it. This periodic
-        audit mirrors ``prune_orphaned_selections`` and reports four classes:
+        audit reports four classes:
 
         - **DB-side orphan**: a ``Sorting`` row whose computed analyzer cache
           folder (``analyzer_path(sorting_id, display_waveform_params_name)``)

@@ -94,8 +94,8 @@ def distinct_recording_dates(session_start_times) -> list:
 
     The multi-day criterion: a set of recordings spans more than one day when
     this returns two or more dates. ``SessionGroup.create_group`` (without
-    ``allow_multi_day``), ``SessionGroup.is_multi_day`` and the UnitMatch
-    same-day check on a concatenation input all apply it.
+    ``allow_multi_day``) and the UnitMatch same-day check on a concatenation
+    input both apply it.
 
     Parameters
     ----------
@@ -281,30 +281,6 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 "member's sort_group_id / interval_list_name / team_name "
                 f"(create the sort groups / team first). ({exc})"
             ) from exc
-
-    @classmethod
-    def is_multi_day(cls, key: dict) -> bool:
-        """Report whether the group's members span two or more dates.
-
-        Dates are derived from each member's ``Session.session_start_time``
-        (the same source ``create_group`` validates against), never from a
-        stored Member column.
-
-        Parameters
-        ----------
-        key : dict
-            Restriction selecting one ``SessionGroup`` (e.g.
-            ``{"session_group_owner": ..., "session_group_name": ...}``).
-
-        Returns
-        -------
-        bool
-            ``True`` iff the group's members span two or more session dates.
-        """
-        start_times = (
-            Session & (cls.Member & key).proj("nwb_file_name")
-        ).fetch("session_start_time")
-        return len(distinct_recording_dates(start_times)) > 1
 
 
 @schema

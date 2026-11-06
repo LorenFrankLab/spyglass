@@ -311,44 +311,6 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             allow_duplicate_params=True,
         )
 
-    @classmethod
-    def available_quality_metrics(cls) -> list[str]:
-        """Return the metric names the installed SpikeInterface exposes."""
-        from spyglass.spikesorting.v2._params.metric_curation import (
-            _available_quality_metric_names,
-        )
-
-        return sorted(_available_quality_metric_names())
-
-    @classmethod
-    def show_available_metrics(cls) -> list[str]:
-        """Return and log the available SpikeInterface quality-metric names.
-
-        Returning the list keeps the v1 notebook-discovery helper visible in
-        Jupyter (a logger-only helper can appear to do nothing depending on the
-        notebook's logging configuration).
-        """
-        names = cls.available_quality_metrics()
-        for name in names:
-            logger.info(name)
-        return names
-
-    @classmethod
-    def available_template_metric_columns(cls) -> list[str]:
-        """Return the SI template (waveform-shape) output COLUMN names.
-
-        These are the valid values for a row's ``template_metric_columns`` and
-        the same vocabulary ``get_metrics`` surfaces -- output *columns*, not
-        metric names. SI's ``half_width`` metric, for example, is surfaced as
-        the ``trough_half_width`` and ``peak_half_width`` columns (the list
-        below includes ``trough_half_width`` but not ``half_width``).
-        """
-        from spyglass.spikesorting.v2._params.metric_curation import (
-            _available_template_metric_columns,
-        )
-
-        return sorted(_available_template_metric_columns())
-
 
 @schema
 class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
@@ -1290,7 +1252,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self,
         key,
         *,
-        labels: dict | None = None,
         description: str = "evaluation labels (replace)",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
@@ -1298,13 +1259,14 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Use the evaluation verdict as the child's full label state.
 
         The authoritative "use this evaluation's labels" path (label-only, no
-        merges) -- the child's labels are exactly ``labels`` (defaulting to the
-        evaluation's proposed labels), CLEARING any label the evaluation does
-        not propose. A unit no longer flagged loses a stale ``reject`` /
-        ``noise`` (v1 "final auto-curation writes the full label state"), so it
-        is not silently dropped from the matchable-unit set. This is the default
+        merges) -- the child's labels are exactly the evaluation's proposed
+        labels, CLEARING any label the evaluation does not propose. A unit no
+        longer flagged loses a stale ``reject`` / ``noise`` (v1 "final
+        auto-curation writes the full label state"), so it is not silently
+        dropped from a unit-selection population. This is the default
         final-metrics path; use :meth:`overlay_evaluation_labels` to instead
-        keep the current labels.
+        keep the current labels. To commit other labels, pass them to
+        :meth:`accept_evaluation_outputs`.
 
         Returns the child's ``{"sorting_id", "curation_id"}``.
         """
@@ -1312,7 +1274,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             key,
             merge_groups=None,
             use_all_suggested_merges=False,
-            labels=labels,
+            labels=None,
             label_policy="replace",
             description=description,
             allow_custom_labels=allow_custom_labels,
@@ -1323,7 +1285,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self,
         key,
         *,
-        labels: dict | None = None,
         description: str = "evaluation labels (overlay)",
         allow_custom_labels: bool = False,
         reuse_existing: bool = True,
@@ -1343,7 +1304,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             key,
             merge_groups=None,
             use_all_suggested_merges=False,
-            labels=labels,
+            labels=None,
             label_policy="inherit",
             description=description,
             allow_custom_labels=allow_custom_labels,
@@ -1546,21 +1507,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         return plot_burst_peak_over_time(
             peak_amps, peak_times, used, overlap=overlap
         )
-
-    def get_peak_amps(self, key):
-        """Return ``(peak_amps, peak_times)`` per unit (v1 BurstPair analog).
-
-        ``peak_amps[unit_id]`` is ``(n_spikes, n_channels)`` sampled at the
-        waveform peak; ``peak_times[unit_id]`` is the seconds-timestamps of
-        those SAME sampled spikes (the ``waveforms`` extension's
-        ``random_spikes`` subset, not the full train), so the two arrays stay
-        aligned. Reads the sort's SortingAnalyzer ``waveforms`` extension.
-        """
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            peak_amplitudes_from_analyzer,
-        )
-
-        return peak_amplitudes_from_analyzer(self._analyzer_for(key))
 
     def get_burst_pair_metrics(
         self,

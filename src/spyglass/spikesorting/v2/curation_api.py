@@ -786,12 +786,6 @@ class EvaluationPlots:
     def suggested_merges(self, **kwargs):
         return self._call("plot_suggested_merges", **kwargs)
 
-    def si_quality_metrics(self, **kwargs):
-        return self._call("plot_si_quality_metrics", **kwargs)
-
-    def si_template_metrics(self, **kwargs):
-        return self._call("plot_si_template_metrics", **kwargs)
-
     def pair_correlograms(self, pairs, **kwargs):
         return self._call("investigate_pair_xcorrel", pairs, **kwargs)
 

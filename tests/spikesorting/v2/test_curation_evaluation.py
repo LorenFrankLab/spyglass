@@ -2247,7 +2247,7 @@ def test_evaluation_acceptance_creates_committed_child(
         assert child_units == {max(unit_ids) + 1}
 
         # Labels-only acceptance -> committed child, full unit set preserved.
-        labeled_child = CurationEvaluation().use_evaluation_labels(
+        labeled_child = CurationEvaluation().accept_evaluation_outputs(
             sel, labels={unit_ids[0]: ["mua"]}
         )
         assert CurationV2.is_committed_curation(labeled_child)
@@ -2516,7 +2516,7 @@ def test_workflow_evaluate_accept_merge_reevaluate_use_evaluation_labels_final_c
 
         # Accept labels into a label-only grandchild (merges_applied=False, but
         # its namespace is the MERGED set {merged_id}).
-        final_child = CurationEvaluation().use_evaluation_labels(
+        final_child = CurationEvaluation().accept_evaluation_outputs(
             eval_merged, labels={merged_id: ["mua"]}
         )
         assert CurationV2.is_committed_curation(final_child)
@@ -2972,14 +2972,18 @@ def test_label_action_names_replace_and_overlay(
         )
         CurationEvaluation.populate(sel, reserve_jobs=False)
 
-        replacement = CurationEvaluation().use_evaluation_labels(sel, labels={})
+        replacement = CurationEvaluation().accept_evaluation_outputs(
+            sel, labels={}
+        )
         replacement_labels = {
             (int(r["unit_id"]), r["curation_label"])
             for r in (CurationV2.UnitLabel & replacement).fetch(as_dict=True)
         }
         assert replacement_labels == set()
 
-        overlay = CurationEvaluation().overlay_evaluation_labels(sel, labels={})
+        overlay = CurationEvaluation().accept_evaluation_outputs(
+            sel, labels={}, label_policy="inherit"
+        )
         overlay_label_rows = {
             (int(r["unit_id"]), r["curation_label"])
             for r in (CurationV2.UnitLabel & overlay).fetch(as_dict=True)
@@ -3030,8 +3034,8 @@ def test_acceptance_requires_populated_evaluation(
         # path that reads the evaluation NWB -- raises the friendly guard.
         for call in (
             lambda: ev.accept_evaluation_outputs(sel, labels={}),
-            lambda: ev.use_evaluation_labels(sel, labels={}),
-            lambda: ev.overlay_evaluation_labels(sel, labels={}),
+            lambda: ev.use_evaluation_labels(sel),
+            lambda: ev.overlay_evaluation_labels(sel),
             lambda: ev.accept_merges(sel, merge_groups=merge),
             lambda: ev.accept_all_suggested_merges(sel),
             lambda: ev.preview_merges(sel, merge_groups=merge),

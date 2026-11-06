@@ -391,47 +391,6 @@ def test_sorting_get_analyzer_loads_folder(populated_sorting):
 
 
 @pytest.mark.slow
-def test_prune_orphaned_selections_finds_and_cleans(populated_recording):
-    """``prune_orphaned_selections`` finds master rows with no source
-    part and removes them when called with ``dry_run=False``.
-
-    Source-part atomicity is enforced at insert time, so orphans only
-    arise from upstream maintenance (e.g. a cascade delete from
-    Recording that removes the source-part row but leaves the master).
-    The helper backs the orphan-master cleanup path.
-    """
-    import uuid
-
-    from spyglass.spikesorting.v2.sorting import (
-        SorterParameters,
-        SortingSelection,
-    )
-
-    SorterParameters.insert_default()
-
-    # Inject an orphan directly via insert1 (bypassing insert_selection --
-    # this is what an upstream cascade-delete leaves behind in production).
-    orphan_sorting = uuid.uuid4()
-    # The SortingSelection master has no artifact_detection_id FK (artifact state
-    # lives on the ArtifactDetectionSource part); a master row with no source part
-    # is exactly the orphan this exercises.
-    SortingSelection().insert1(
-        {
-            "sorting_id": orphan_sorting,
-            "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_30khz_ms5_2026_06",
-        },
-        allow_direct_insert=True,
-    )
-
-    dry = SortingSelection.prune_orphaned_selections(dry_run=True)
-    assert {"sorting_id": orphan_sorting} in dry
-    deleted = SortingSelection.prune_orphaned_selections(dry_run=False)
-    assert {"sorting_id": orphan_sorting} in deleted
-    assert not (SortingSelection & {"sorting_id": orphan_sorting})
-
-
-@pytest.mark.slow
 def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
     """Clusterless-thresholder finds peaks and round-trips through the
     pipeline.
