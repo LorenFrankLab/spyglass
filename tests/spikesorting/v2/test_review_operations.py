@@ -365,3 +365,29 @@ def test_operation_steps_reach_the_journal_with_timing(tmp_path, monkeypatch):
     with _acquire_operation_lock(tmp_path):  # the worker still owns it
         state = ReviewOperationService("review", tmp_path, {}).status()
     assert 74 <= state["elapsed_s"] <= 80
+
+
+def test_rewritten_review_files_stay_readable_by_other_reviewers(tmp_path):
+    """Draft and journal rewrites keep shared-folder permissions.
+
+    Two reviewers of one curation share its bundle folder. A rewrite that left
+    the file owner-only stopped the other reviewer from opening the draft.
+    """
+    import os
+    import stat
+
+    from spyglass.spikesorting.v2._core.json_io import write_json
+
+    previous_umask = os.umask(0o002)
+    try:
+        existing = tmp_path / "annotations.json"
+        existing.write_text("{}")
+        existing.chmod(0o664)
+        write_json(existing, {"labels": {}})
+        assert stat.S_IMODE(existing.stat().st_mode) == 0o664
+
+        created = tmp_path / "spyglass_review_result.json"
+        write_json(created, {"done": True})
+        assert stat.S_IMODE(created.stat().st_mode) == 0o664
+    finally:
+        os.umask(previous_umask)
