@@ -391,3 +391,52 @@ def test_rewritten_review_files_stay_readable_by_other_reviewers(tmp_path):
         assert stat.S_IMODE(created.stat().st_mode) == 0o664
     finally:
         os.umask(previous_umask)
+
+
+def test_review_result_refuses_a_draft_edited_after_its_commit(
+    tmp_path, monkeypatch
+):
+    """review.result() does not return a commit older than the saved draft.
+
+    After a commit, further edits saved to the draft are not in the committed
+    curation. Returning that curation as the review's result hid the edits.
+    """
+    from spyglass.spikesorting.v2 import review_api
+    from spyglass.spikesorting.v2._review.operations import (
+        RESULT_FILE,
+        committed_review_result,
+        run_operation,
+    )
+
+    child = SimpleNamespace(
+        sorting_id="sort", curation_id=2, curation_uuid="generation"
+    )
+    changes = SimpleNamespace(
+        annotations_hash="hash-at-commit",
+        merge_groups=(),
+        commit=lambda **kwargs: SimpleNamespace(
+            curation=child, needs_merge_verification=False
+        ),
+    )
+    review = SimpleNamespace(
+        uri=str(tmp_path), review_id="review", preview_import=lambda: changes
+    )
+    monkeypatch.setattr(
+        review_api.FigPackReview, "resume", lambda review_id: review
+    )
+    run_operation(
+        review_id="review",
+        bundle=str(tmp_path),
+        request={
+            "action": "commit",
+            "annotations_hash": "hash-at-commit",
+            "confirm_no_changes": True,
+        },
+        operation_id="commit",
+    )
+    result = json.loads((tmp_path / RESULT_FILE).read_text())
+    assert result["annotations_hash"] == "hash-at-commit"
+
+    (tmp_path / "annotations.json").write_text(json.dumps({"edited": True}))
+    with pytest.raises(ValueError, match="changed after"):
+        committed_review_result(review)

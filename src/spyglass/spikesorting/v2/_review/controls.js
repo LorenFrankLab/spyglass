@@ -90,6 +90,8 @@ window.figpack_p1.registerFPViewComponent({
         if (!response.ok) throw new Error(`Draft was not saved (HTTP ${response.status}). Retry before committing.`);
         session.saved = snapshot;
         session.revision = response.headers.get("ETag");
+        // New edits are not in an earlier commit; stop showing it as ready.
+        if (session.operation?.result) session.operation = null;
       } finally {
         session.saving = false;
         session.render();

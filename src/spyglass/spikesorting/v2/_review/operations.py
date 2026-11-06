@@ -336,6 +336,7 @@ def _run_action(*, review_id, root, request, state, report):
                         root / RESULT_FILE,
                         {
                             "curation": identity,
+                            "annotations_hash": changes.annotations_hash,
                             "needs_merge_verification": bool(
                                 changes.merge_groups
                             ),
@@ -366,6 +367,7 @@ def _run_action(*, review_id, root, request, state, report):
                 )
                 result = {
                     "curation": _curation_identity(receipt.curation),
+                    "annotations_hash": changes.annotations_hash,
                     "needs_merge_verification": receipt.needs_merge_verification,
                     "pending": False,
                 }
@@ -443,7 +445,13 @@ def _run_action(*, review_id, root, request, state, report):
 
 
 def committed_review_result(review):
-    """Follow this review's explicit verification chain, never a latest child."""
+    """Follow this review's explicit verification chain, never a latest child.
+
+    Refuses a review whose saved draft changed after its last commit.
+    """
+    from spyglass.spikesorting.v2._review.annotations import (
+        annotations_payload_hash,
+    )
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.review_api import FigPackReview
 
@@ -456,6 +464,17 @@ def committed_review_result(review):
         if not value or value.get("pending"):
             raise ValueError(
                 "This browser review has not completed. Resume its commit or verification action."
+            )
+        committed_hash = value.get("annotations_hash")
+        draft = read_json(Path(review.uri) / "annotations.json")
+        if (
+            committed_hash is not None
+            and committed_hash != annotations_payload_hash(draft)
+        ):
+            raise ValueError(
+                "The saved draft changed after its last commit, so the "
+                "committed curation does not hold those edits. Preview and "
+                "commit the current draft, then call review.result() again."
             )
         if value.get("needs_merge_verification"):
             review = FigPackReview.resume(value["verification_review_id"])
