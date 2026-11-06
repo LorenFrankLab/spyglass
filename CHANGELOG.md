@@ -249,11 +249,6 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
     a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
     deadlocks #1609
-- Orphan checks (`delete_orphans`, `AnalysisNwbfile.get_orphans` and `cleanup`,
-    `IntervalList.cleanup`) no longer raise when a child table shares a
-    secondary attribute with the parent, as v2's `ConcatMemberCuration` does;
-    which rows count as orphans is otherwise unchanged. Add
-    `spyglass.utils.dj_helper_fn.get_child_references` #1609
 - `cautious_delete` honors an explicit `force_masters=False` instead of always
     forcing master deletion #1609
 - `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
@@ -307,10 +302,6 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 - Common
 
-    - Re-populating `Export` removes superseded `Export.File` rows, keeping rows
-        still referenced downstream #1609
-    - Export cascades no longer abort on a table that holds both sides of a
-        renamed foreign key (regression from #1610) #1609
     - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
         from disk, so a rebuilt file is checked again #1609
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
@@ -385,14 +376,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         units at creation, and `create_group(unit_selections=...)` #1609
     - Group or merge firing rate over zero units returns an `(n_time, 0)` array
         instead of raising #1609
-    - v1 recompute compares only the NWB namespaces a recording embeds, so an
-        unused optional extension no longer blocks every recording #1609
     - v1 `show_available_metrics` skips metrics the installed SpikeInterface does
         not provide #1609
     - `Merge.fetch_nwb` warns when a parent-attribute restriction skips a source
         #1609
-    - Deprecate `calculate_isi_violation(isi_threshold_s=...)` in favor of
-        `isi_threshold_ms` (the value was always milliseconds) #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
