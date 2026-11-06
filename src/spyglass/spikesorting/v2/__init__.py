@@ -12,9 +12,14 @@ is re-exported from the stdlib-only ``_core.enums`` module so notebook users can
 discover the canonical label set without importing a table module.
 """
 
+from importlib import import_module
+
 from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._core.job_config import (
     install_openblas_fork_repair,
+)
+from spyglass.spikesorting.v2._orchestration.exports import (
+    PACKAGE_ROOT_REEXPORTS,
 )
 
 # SpikeInterface's forked workers otherwise deadlock SciPy's OpenBLAS.
@@ -22,16 +27,17 @@ install_openblas_fork_repair()
 
 
 def initialize_v2_defaults() -> None:
-    """Install the default Lookup rows for the v2 spike-sorting stages.
+    """Install the default Lookup rows for every v2 spike-sorting stage.
 
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
     ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
-    ``AutoCurationRules``, the shipped ``CurationReviewProfile``,
-    ``MatcherParameters``, and ``MotionCorrectionParameters`` (with the
+    ``AutoCurationRules``, ``MatcherParameters``, the shipped
+    ``CurationReviewProfile``, and ``MotionCorrectionParameters`` (with the
     estimation and interpolation recipes it names) -- each accepts
     duplicate-row noise -- so a notebook user can run one helper instead of
-    remembering the per-table calls. Idempotent.
+    remembering the per-table calls before the first ``run_v2_pipeline`` /
+    cross-session match or browser review. Idempotent.
 
     Examples
     --------
@@ -69,8 +75,66 @@ def initialize_v2_defaults() -> None:
 
     ensure_v2_unit_selection_policies()
 
+    # ``insert_default`` skips existing-PK rows, so a stored same-name default
+    # whose content has diverged from the shipped content (e.g. a hand-edited
+    # blob) is NOT reseeded and goes unnoticed. Audit for that here and WARN
+    # (non-strict) -- an admin can run
+    # ``verify_v2_default_catalog(strict=True)`` to fail hard.
+    from spyglass.spikesorting.v2._orchestration.reporting import (
+        verify_v2_default_catalog,
+    )
+    from spyglass.utils import logger
+
+    stale = verify_v2_default_catalog(strict=False)
+    if stale:
+        logger.warning(
+            "initialize_v2_defaults: %d stored default row(s) diverge from the "
+            "shipped content and were NOT reseeded (insert_default skips "
+            "existing keys): %s. Drop the stale row(s) and re-run, or call "
+            "verify_v2_default_catalog(strict=True) to inspect.",
+            len(stale),
+            stale,
+        )
+
+
+# Primary orchestration entrypoints re-exported lazily from the ``.pipeline``
+# facade so ``from spyglass.spikesorting.v2 import run_v2_pipeline`` works from
+# the same package root where ``initialize_v2_defaults`` already lives -- a
+# newcomer should not have to learn the ``.pipeline`` submodule split. These are
+# resolved on first access (not at package import), so a bare
+# ``import spyglass.spikesorting.v2`` stays dependency-light: the DataJoint /
+# Pydantic / SpikeInterface layers load only when an entrypoint is actually used.
+_PIPELINE_REEXPORTS = PACKAGE_ROOT_REEXPORTS
+
 
 __all__ = [
     "initialize_v2_defaults",
+    "verify_v2_default_catalog",
     "CurationLabel",
+    *_PIPELINE_REEXPORTS,
 ]
+
+
+def __dir__():
+    # Surface the lazily re-exported names to tab-completion / ``dir()``; the
+    # module globals alone would hide them behind ``__getattr__``.
+    return sorted({*globals(), *__all__})
+
+
+def __getattr__(name):
+    # Lazily re-export ``verify_v2_default_catalog`` from the reporting module so
+    # ``from spyglass.spikesorting.v2 import verify_v2_default_catalog`` works
+    # without importing the DataJoint reporting layer at package import.
+    if name == "verify_v2_default_catalog":
+        from spyglass.spikesorting.v2._orchestration.reporting import (
+            verify_v2_default_catalog,
+        )
+
+        globals()[name] = verify_v2_default_catalog
+        return verify_v2_default_catalog
+    if name in _PIPELINE_REEXPORTS:
+        pipeline = import_module(f"{__name__}.pipeline")
+        value = getattr(pipeline, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
