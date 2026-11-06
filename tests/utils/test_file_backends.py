@@ -101,14 +101,24 @@ def prefer_download():
 
 def test_default_chain_order():
     """Local disk is tried first, then remote sources in fallback order."""
-    assert [b.name for b in get_backends()] == ["local", "kachery", "Dandi"]
+    assert [b.name for b in get_backends()] == [
+        "local",
+        "store",
+        "kachery",
+        "Dandi",
+    ]
 
 
 def test_get_backends_returns_a_copy():
     """Callers cannot mutate the chain in place."""
     got = get_backends()
     got.clear()
-    assert [b.name for b in get_backends()] == ["local", "kachery", "Dandi"]
+    assert [b.name for b in get_backends()] == [
+        "local",
+        "store",
+        "kachery",
+        "Dandi",
+    ]
 
 
 def test_local_backend_has_and_open(tmp_path):

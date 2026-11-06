@@ -602,9 +602,12 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self):
         _ = self.ensure_single_entry()
-        dataframe = self.fetch_nwb()[0]["moseq"]
-        dataframe.set_index("time", inplace=True)
-        return dataframe
+        try:
+            dataframe = self.fetch_nwb()[0]["moseq"]
+            dataframe.set_index("time", inplace=True)
+            return dataframe
+        finally:
+            self.close_nwb()
 
     @staticmethod
     def get_bodyparts_from_dataframe(dataframe):

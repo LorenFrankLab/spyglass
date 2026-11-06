@@ -147,8 +147,12 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
     def fetch_skeleton(self, key=None):
         _ = self.ensure_single_entry()
         key = key or self.fetch1("KEY")
-        skeleton = (self & key).fetch_nwb()[0]["skeleton"]
-        nodes = skeleton.nodes[:]
-        int_edges = skeleton.edges[:]
+        restricted = self & key
+        try:
+            skeleton = restricted.fetch_nwb()[0]["skeleton"]
+            nodes = skeleton.nodes[:]
+            int_edges = skeleton.edges[:]
+        finally:
+            restricted.close_nwb()
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]
         return {"nodes": nodes, "edges": named_edges}

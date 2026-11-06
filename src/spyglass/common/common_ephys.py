@@ -586,11 +586,14 @@ class LFP(SpyglassMixin, dj.Imported):
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP data as a pandas DataFrame."""
         _ = self.ensure_single_entry()
-        nwb_lfp = self.fetch_nwb()[0]
-        return pd.DataFrame(
-            nwb_lfp["lfp"].data,
-            index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
-        )
+        try:
+            nwb_lfp = self.fetch_nwb()[0]
+            return pd.DataFrame(
+                nwb_lfp["lfp"].data,
+                index=pd.Index(nwb_lfp["lfp"].timestamps, name="time"),
+            )
+        finally:
+            self.close_nwb()
 
 
 @schema
@@ -963,10 +966,13 @@ class LFPBand(SpyglassMixin, dj.Computed):
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP band data as a pandas DataFrame."""
         _ = self.ensure_single_entry()
-        filtered_nwb = self.fetch_nwb()[0]
-        return pd.DataFrame(
-            filtered_nwb["filtered_data"].data,
-            index=pd.Index(
-                filtered_nwb["filtered_data"].timestamps, name="time"
-            ),
-        )
+        try:
+            filtered_nwb = self.fetch_nwb()[0]
+            return pd.DataFrame(
+                filtered_nwb["filtered_data"].data,
+                index=pd.Index(
+                    filtered_nwb["filtered_data"].timestamps, name="time"
+                ),
+            )
+        finally:
+            self.close_nwb()

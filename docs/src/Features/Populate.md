@@ -28,6 +28,16 @@ Spyglass's `populate` calls these three methods in sequence. `make_fetch` and
 `make_compute` run outside the transaction; `make_insert` runs inside one. The
 long computation no longer holds a lock, but the database write is still atomic.
 
+A table uses the tri-part pattern as soon as it defines these three methods
+instead of overriding `make`. No class attribute switches it on.
+
+**`make_fetch` runs twice.** DataJoint calls it once before the transaction and
+again inside it, then compares a hash of the two results to detect upstream
+changes during the computation. So the transaction still covers one full read
+plus the insert — which is why each key logs its `make_fetch` messages twice.
+That read is short next to the computation the split moves out, but it is not
+free: keep `make_fetch` cheap, deterministic, and free of side effects.
+
 ## How
 
 ```python
@@ -45,7 +55,8 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     result: float
     """
 
-    _parallel_make = True  # enables tri-part populate
+    # Only needed if make_compute spawns its own child processes. See below.
+    _parallel_make = True
 
     def make_fetch(self, key):
         """Read inputs. No database writes allowed here."""
@@ -72,6 +83,19 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
 4. `make_insert` is the only method that writes to the database.
 5. Each method returns a list; the next method receives those values as
     positional arguments after `key`.
+6. `make_compute` must not return `None`. DataJoint tests the result against
+    `None` to decide whether to compute, so a `None` return computes a second
+    time — inside the transaction — and then skips `make_insert`. Return `[]`
+    when there is nothing to pass along.
+
+## `_parallel_make`
+
+`_parallel_make = True` is unrelated to the tri-part split. It only takes effect
+when `populate(processes=N)` is called with `N > 1`, where it swaps DataJoint's
+daemonic worker pool for a non-daemonic one. Set it when the computation spawns
+child processes of its own — a daemonic process cannot, so without the flag
+those populates fail. Leave it off otherwise. The flag is independent of the
+make pattern; a `dj.Manual` table sets it in `spikesorting/v1/recording.py`.
 
 For a detailed walkthrough with a real Spyglass table, see
 [Custom Pipelines — Make Method](../ForDevelopers/CustomPipelines.md#make-method).
@@ -119,7 +143,8 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     result: float
     """
 
-    _parallel_make = True  # replaces _use_transaction = False
+    # Splitting `make` is what replaces `_use_transaction = False`. Add
+    # `_parallel_make = True` only if make_compute spawns child processes.
 
     def make_fetch(self, key):
         data = (UpstreamTable & key).fetch1("raw_data")

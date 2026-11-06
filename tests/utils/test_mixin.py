@@ -36,6 +36,36 @@ def test_nwb_table_missing(schema_test, Mixin):
         Mixin().fetch_nwb()
 
 
+def test_fetch_nwb_holds_on_first_open(mini_insert, common):
+    """A first fetch holds the file it opens, and close_nwb releases it.
+
+    The hold must be taken where the file is opened: acquiring beforehand is a
+    no-op on a cache miss, which is the usual case in a batch job. Asserting
+    the resolved path is *in* the cache also pins that the hold key and the
+    cache key are the same string.
+    """
+    import spyglass.utils.nwb_helper_fn as helper
+
+    cache = helper.__dict__["__open_nwb_files"]
+    restricted = common.Raw & common.Raw.fetch("KEY")[0]
+    paths = restricted._nwb_paths()
+    assert paths, "no NWB path resolved for this restriction"
+
+    # Drop just these files, so the fetch below is a genuine first open. The
+    # cache is process-wide and other entries may be held by session setup.
+    for path in paths:
+        if path in cache:
+            cache[path].io.close()
+            del cache[path]
+
+    restricted.fetch_nwb()
+    assert all(p in cache for p in paths), "fetch did not cache the path"
+    assert all(cache._cache[p][2] for p in paths), "first fetch took no hold"
+
+    restricted.close_nwb()
+    assert not any(cache._cache[p][2] for p in paths), "hold not released"
+
+
 def test_auto_increment(schema_test, Mixin):
     schema_test(Mixin)
     ret = Mixin()._auto_increment(key={}, pk="id")

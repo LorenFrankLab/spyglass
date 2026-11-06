@@ -133,7 +133,10 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self) -> list[DataFrame]:
         """Fetch the MUA times as a list of dataframes"""
-        return [data["mua_times"] for data in self.fetch_nwb()]
+        try:
+            return [data["mua_times"] for data in self.fetch_nwb()]
+        finally:
+            self.close_nwb()
 
     @classmethod
     def get_firing_rate(cls, key, time):
