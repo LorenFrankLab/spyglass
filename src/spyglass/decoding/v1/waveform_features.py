@@ -1,6 +1,4 @@
-# Deferred annotation evaluation keeps module import working across
-# SpikeInterface versions whose public API no longer exposes some names
-# (e.g. WaveformExtractor) used only in type hints here.
+# Lazy annotations: some SI versions lack hint-only names (WaveformExtractor)
 from __future__ import annotations
 
 import os
@@ -52,13 +50,8 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
     Notes
     -----
-    The ``spike_location`` feature (and the shipped ``"amplitude,
-    spike_location"`` default row) is supported ONLY for v2 (SortingAnalyzer)
-    sources, which expose a ``spike_locations`` extension. Legacy v0/v1
-    ``WaveformExtractor`` sources support only ``amplitude`` / ``full_waveform``;
-    requesting ``spike_location`` for one raises a clear ``NotImplementedError``
-    (SpikeInterface 0.104 computes spike locations only from a
-    ``SortingAnalyzer``). Use the ``"amplitude"`` row for legacy sources.
+    ``spike_location`` (and the ``"amplitude, spike_location"`` row) needs a
+    v2 SortingAnalyzer source; v0/v1 sources raise ``NotImplementedError``.
     """
 
     definition = """
@@ -88,9 +81,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             },
         ],
         [
-            # V2 SortingAnalyzer sources only; legacy v0/v1 users should choose
-            # the ``amplitude`` row because WaveformExtractor has no
-            # ``spike_locations`` extension.
+            # v2 sources only; v0/v1 use the ``amplitude`` row
             "amplitude, spike_location",
             {
                 "waveform_features_params": {
@@ -164,42 +155,21 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
         merge_key = {"merge_id": key["spikesorting_merge_id"]}
 
-        # Consumer-boundary guard: refuse to build clusterless marks from a v2
-        # preview (apply_merge=False) curation, whose oversplit units would
-        # silently corrupt the decode. No-op for v0/v1 sources.
         SpikeSortingOutput.assert_decoding_merge_ids_ok(
             [key["spikesorting_merge_id"]]
         )
 
-        # Dispatch the source BEFORE any SpikeInterface call so the v2 branch
-        # runs under SI 0.104. ``merge_get_parent`` / ``fetch1`` are pure DB
-        # reads. The legacy-SI guard is applied only on the v0/v1 branches
-        # (their ``_fetch_waveform`` uses the removed ``si.extract_waveforms``);
-        # the v2 branch extracts waveforms from a SortingAnalyzer instead.
+        # Dispatch before any SI call; only v0/v1 need the legacy SI guard
         source_parent = SpikeSortingOutput().merge_get_parent(merge_key)
         source_key = source_parent.fetch1()
-        # v2 pipeline dispatch. Resolve the source class name the same way
-        # ``SpikeSortingOutput.get_recording``/``get_sorting`` do --
-        # ``to_camel_case(table_name)`` keyed against the merge source set --
-        # so the branch is robust to the table_name's tier prefix
-        # (``CurationV2`` is a ``dj.Manual`` -> ``curation_v2``, not the
-        # part-table ``__curation_v2``) and matches exactly (a future
-        # ``MetricCurationV2`` source would not collide).
+        # Same source-name resolution as SpikeSortingOutput.get_recording
         from datajoint.utils import to_camel_case
 
         source_name = to_camel_case(source_parent.table_name)
         is_v2 = source_name in {"CurationV2", "ConcatMemberCuration"}
 
         if is_v2:
-            # v2 pipeline. Unit-id indexing below uses NWB ``.id`` (the true
-            # unit_id); v2 merge-applied sortings produce sparse unit_ids, so
-            # any callsite that mapped a positional index back to a unit_id
-            # would mis-index here.
-            # The v2 SortingAnalyzer path serves the ``get_waveforms``-based
-            # features (amplitude, full_waveform) plus ``spike_location`` (an
-            # optional clusterless mark), which the accessor computes lazily
-            # from the analyzer's ``spike_locations`` extension. Any other
-            # feature is rejected explicitly rather than crashing deep in SI.
+            # v2 unit_ids can be sparse: index by NWB ``.id``, not position
             unsupported = set(params["waveform_features_params"]) - {
                 "amplitude",
                 "full_waveform",
@@ -212,10 +182,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                     "{'amplitude', 'full_waveform', 'spike_location'}."
                 )
 
-            # Each v2 source owns its source-part walk. For a concat-member
-            # output this resolves the MEMBER recording/NWB, not the concat
-            # anchor, so extracted waveforms and output provenance are aligned
-            # to the same session as its wall-clock spike times.
+            # Concat members resolve the member's session, not the anchor's
             sorter, nwb_file_name = source_class_dict[
                 source_name
             ].get_sort_metadata(source_key)
@@ -257,12 +224,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
         nwb = SpikeSortingOutput().fetch_nwb(merge_key)[0]
         units = nwb.get(analysis_nwb_key)
-        # A zero-unit sorting or curation (v1 with no units, or v2's
-        # ``require_units=False`` path) writes an empty Units table with no
-        # ``spike_times`` column; indexing it would raise
-        # ``KeyError: 'spike_times'``. Guard on the column, not just the key,
-        # so a zero-unit source yields an empty-but-valid feature row
-        # (matches the ``SpikeSortingOutput.get_spike_times`` zero-unit guard).
+        # Zero-unit Units tables have no ``spike_times`` column
         spike_times = (
             units["spike_times"]
             if units is not None and "spike_times" in units
@@ -314,39 +276,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     ) -> "_AnalyzerWaveformAccessor":
         """Build a v2 (SI 0.104) per-spike waveform accessor.
 
-        Replaces the removed ``si.extract_waveforms`` path for v2 sources.
-        Builds a fresh in-memory ``SortingAnalyzer`` from the merge source's
-        recording + sorting and computes the ``random_spikes`` + ``waveforms``
-        extensions, then wraps it so the shared per-feature helpers
-        (``_get_peak_amplitude`` / ``_get_full_waveform``) and the NWB writer
-        run unchanged.
-
-        A fresh analyzer is built rather than reusing the persisted v2
-        ``Sorting`` analyzer because that one subsamples waveforms
-        (``max_spikes_per_unit``, 20000 in the shipped recipes) with the
-        recipe's waveform window, whereas
-        clusterless decoding needs every spike's amplitude (``method="all"``)
-        aligned 1:1 with the full ``spike_times``. ``sparse=False`` keeps the
-        full per-channel mark for every unit.
-
-        Amplitudes are returned in microvolts (``return_in_uV=True``), unlike
-        the legacy v0/v1 path which reads raw ADC counts. Decoding is
-        scale-consistent as long as the encoding and decoding models use the
-        same pipeline version, but v2 feature magnitudes are NOT comparable to
-        v1 ones -- a model trained on v1 marks cannot be applied to v2 marks
-        without rescaling.
-
-        ``max_spikes_per_unit`` must stay ``None`` for clusterless decoding:
-        any finite value would subsample the waveforms so they no longer align
-        1:1 with ``spike_times``, so it is rejected up front here (rather than
-        doing the full analyzer build and only failing at the write-time 1:1
-        check in ``_write_waveform_features_to_nwb``). ``_get_peak_amplitude``
-        reads the spike-aligned sample via the accessor's ``nbefore``, so an
-        asymmetric window is supported.
-
-        Returns an empty accessor (no analyzer) for a zero-unit sort:
-        ``create_sorting_analyzer`` cannot build over zero units, and a
-        zero-unit curation must still yield an empty-but-valid features row.
+        - Builds a fresh dense ``SortingAnalyzer`` over every spike, since the
+          persisted v2 analyzer subsamples spikes.
+        - Amplitudes are in microvolts; v0/v1 marks are not comparable.
+        - ``max_spikes_per_unit`` must be None so waveforms align 1:1 with
+          ``spike_times``.
+        - Returns an accessor without an analyzer for a zero-unit sort.
         """
         import spikeinterface as si
 
@@ -362,10 +297,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         ms_before = params.pop("ms_before", 0.5)
         ms_after = params.pop("ms_after", 0.5)
         max_spikes_per_unit = params.pop("max_spikes_per_unit", None)
-        # Clusterless decoding needs EVERY spike's waveform aligned 1:1 with
-        # spike_times. A finite max_spikes_per_unit would subsample, breaking
-        # that alignment. Reject it here with an actionable error rather than
-        # after the full analyzer build, at the write-time 1:1 check.
+        # Fail before the analyzer build, not at the write-time 1:1 check
         if max_spikes_per_unit is not None:
             raise ValueError(
                 "WaveformFeaturesParams['waveform_extraction_params']"
@@ -373,9 +305,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 "None for clusterless decoding so every spike's waveform "
                 "aligns 1:1 with spike_times. Remove it (or set None)."
             )
-        # Remaining keys (n_jobs, chunk_duration, total_memory, ...) are SI
-        # job kwargs forwarded to ``compute``. Drop ``None`` values (the
-        # legacy default carries ``max_spikes_per_unit=None``, already popped).
+        # Remaining keys are SI job kwargs
         job_kwargs = {k: v for k, v in params.items() if v is not None}
 
         return _build_clusterless_waveform_accessor(
@@ -422,11 +352,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 self.close_nwb()
 
         per_unit = list(chain(*converted_units()))
-        # ``zip(*[])`` collapses to an empty tuple ``()``; consumers (e.g.
-        # ``ClusterlessDecodingV1.fetch_spike_data``) unpack the result into
-        # ``spike_times, spike_waveform_features``, which would raise on ``()``.
-        # An all-zero-unit feature set yields no per-unit rows, so return two
-        # empty sequences explicitly.
+        # zip(*[]) gives (), which callers cannot unpack into two values
         if not per_unit:
             return [], []
         return tuple(zip(*per_unit))
@@ -453,17 +379,8 @@ def _build_clusterless_waveform_accessor(
 ) -> "_AnalyzerWaveformAccessor":
     """Extract every spike's full-channel waveform into a disk-backed scratch.
 
-    The analyzer extracts EVERY spike's full multi-channel waveform
-    (``method="all"``, ``sparse=False`` -- mandated for the 1:1
-    spike<->feature alignment), which for a noisy 1 h tetrode is millions of
-    crossings, several GB. ``format="binary_folder"`` is the one SpikeInterface
-    format whose waveform extraction is genuinely out-of-core: it writes
-    ``waveforms.npy`` through a memmap (``mode="memmap", copy=False``). The
-    zarr format is disk-backed only at rest -- ``ComputeWaveforms._run``
-    extracts into shared memory and then copies the whole array into RAM
-    before writing -- so it would not bound memory. The accessor holds the
-    TemporaryDirectory so it survives feature extraction and is removed when
-    the accessor is collected.
+    ``binary_folder`` memmaps the waveforms, so memory stays bounded. The
+    accessor owns the TemporaryDirectory, removed when it is collected.
     """
     import tempfile
     from pathlib import Path as _Path
@@ -471,9 +388,7 @@ def _build_clusterless_waveform_accessor(
     tmpdir = tempfile.TemporaryDirectory(
         prefix="v2_clusterless_wf_", dir=temp_dir
     )
-    # Until the accessor takes ownership (below), an exception during
-    # build/compute would leave the on-disk scratch folder orphaned until GC;
-    # clean it up deterministically and re-raise.
+    # Clean up the scratch folder if the build fails before handoff
     try:
         analyzer = si.create_sorting_analyzer(
             sorting=sorting,
@@ -501,54 +416,30 @@ def _build_clusterless_waveform_accessor(
 class _AnalyzerWaveformAccessor:
     """Minimal ``WaveformExtractor``-shaped view over a v2 SortingAnalyzer.
 
-    The shared per-feature helpers and ``_write_waveform_features_to_nwb`` use
-    only two surfaces of the legacy ``WaveformExtractor``: ``.sorting`` (to
-    enumerate true unit_ids) and ``.get_waveforms(unit_id)`` (per-spike
-    waveforms, shape ``(n_spikes, n_samples, n_channels)``). Adapting a SI
-    0.104 ``SortingAnalyzer`` to that surface lets the v2 path reuse those
-    helpers verbatim while the v0/v1 WaveformExtractor path stays unchanged.
-
-    Built with ``analyzer=None`` for a zero-unit sort (no waveforms extension
-    exists); ``get_waveforms`` is then never reached because there are no
-    units to iterate.
+    Exposes ``.sorting``, ``.nbefore`` and ``.get_waveforms(unit_id)`` for the
+    shared feature helpers. ``analyzer=None`` means a zero-unit sort.
     """
 
     def __init__(self, sorting, analyzer=None, tmpdir=None):
-        # ``analyzer=None`` is the zero-unit mode (no waveforms extension can
-        # be built over zero units). Pairing it with a non-empty sorting would
-        # make ``get_waveforms`` raise a misleading "zero-unit" error for a
-        # sort that actually has units, so reject that construction up front.
         if analyzer is None and sorting.get_num_units() != 0:
             raise ValueError(
                 "_AnalyzerWaveformAccessor built with analyzer=None requires "
                 f"a zero-unit sorting; got {sorting.get_num_units()} unit(s)."
             )
         self.sorting = sorting
-        # Keep a strong reference to the analyzer. SI's ``waveforms`` extension
-        # holds only a *weakref* back to its SortingAnalyzer; once the builder
-        # (``_fetch_waveform_v2``) returns, this attribute is the only thing
-        # keeping the analyzer alive, so ``get_waveforms_one_unit`` does not
-        # fail with "extension has lost its SortingAnalyzer". Do NOT drop it
-        # as unused -- it is held for lifetime, not read.
+        # Held for lifetime: SI extensions only weakref their analyzer
         self._analyzer = analyzer
-        # Keep a strong reference to the scratch TemporaryDirectory (if
-        # the analyzer is disk-backed) so it is not cleaned up while the
-        # analyzer still reads waveforms from it. Cleaned when this accessor is
-        # garbage-collected (TemporaryDirectory finalizer) -- i.e. after make()
-        # has written the features and returns.
+        # Held so the scratch folder outlives the analyzer's reads
         self._tmpdir = tmpdir
         self._waveforms = (
             analyzer.get_extension("waveforms")
             if analyzer is not None
             else None
         )
-        # Lazily filled on the first ``get_spike_locations`` call.
         self._spike_locations_by_unit = None
 
     def __del__(self):
-        # Unmap the waveforms before the scratch folder's finalizer runs: on
-        # NFS a still-mapped file blocks the folder's removal, and attributes
-        # are otherwise released in assignment order (``_tmpdir`` first).
+        # Unmap before the scratch finalizer; NFS blocks removing mapped files
         self._waveforms = None
         self._analyzer = None
 
@@ -563,11 +454,7 @@ class _AnalyzerWaveformAccessor:
         return int(self._waveforms.nbefore)
 
     def get_waveforms(self, unit_id) -> np.ndarray:
-        """Per-spike waveforms for ``unit_id``, ``(n_spikes, n_samples, n_ch)``.
-
-        ``force_dense`` is unnecessary: the analyzer is built ``sparse=False``,
-        so ``get_waveforms_one_unit`` already returns all channels.
-        """
+        """Waveforms for ``unit_id``, shape ``(n_spikes, n_samples, n_ch)``."""
         if self._waveforms is None:
             raise RuntimeError(
                 "_AnalyzerWaveformAccessor.get_waveforms called on a "
@@ -578,11 +465,7 @@ class _AnalyzerWaveformAccessor:
     def get_spike_locations(self, unit_id) -> np.ndarray:
         """Per-spike locations for ``unit_id``, shape ``(n_spikes, 2 or 3)``.
 
-        Lazily computes the ``spike_locations`` extension (and its
-        ``templates`` parent) on first call, then caches the per-unit result.
-        The analyzer is single-segment (the recording is concatenated
-        upstream), so every spike for a unit lands in one array aligned 1:1
-        with that unit's ``spike_times``.
+        Computes and caches the ``spike_locations`` extension on first call.
         """
         if self._analyzer is None:
             raise RuntimeError(
@@ -598,9 +481,7 @@ class _AnalyzerWaveformAccessor:
                 "spike_locations"
             ).get_data(outputs="by_unit")
             merged: dict = {}
-            # ``by_unit`` is keyed {segment: {unit_id: structured (x,y[,z])}}.
-            # Concatenate across segments (single-segment here) and convert the
-            # structured array to a plain (n_spikes, ndim) float array.
+            # {segment: {unit_id: structured (x, y[, z])}} -> (n_spikes, ndim)
             for segment in by_segment.values():
                 for uid, structured in segment.items():
                     columns = np.column_stack(
@@ -643,11 +524,7 @@ def _get_spike_locations(
 ) -> np.ndarray:
     """Returns per-spike locations in 2D or 3D space, shape (n_spikes, 2 or 3).
 
-    For v2 sources this reads the SortingAnalyzer's ``spike_locations``
-    extension via the accessor's ``get_spike_locations``. A legacy v0/v1
-    ``WaveformExtractor`` has no such accessor and is not supported:
-    SpikeInterface 0.104's ``compute_spike_locations`` takes a
-    ``SortingAnalyzer``, not a ``WaveformExtractor``.
+    v2 sources only; SI 0.104 computes spike locations from a SortingAnalyzer.
 
     Parameters
     ----------
@@ -725,13 +602,7 @@ def _write_waveform_features_to_nwb(
             + f"upstream sorting: {missing_ids}"
         )
 
-    # On the v2 path the per-spike features come from a freshly built analyzer
-    # while ``spike_times`` come from the persisted units table -- two
-    # independent reads of the same sort. Clusterless decoding requires them
-    # 1:1 per unit; a mismatch (a border spike dropped during frame
-    # conversion, or ``max_spikes_per_unit`` subsampling) would silently write
-    # misaligned marks. Fail loud here. Scoped to the v2 adapter; the
-    # legacy v0/v1 WaveformExtractor path does not run this check.
+    # v2 features and spike_times are separate reads; they must align 1:1
     if (
         isinstance(waveforms, _AnalyzerWaveformAccessor)
         and waveform_features is not None

@@ -87,15 +87,7 @@ logging.shutdown = _no_shutdown
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
-# Module-level default so `pytest_unconfigure` never references an unbound name.
-# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
-# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
-# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
-# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
-# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
-# defined`, a second traceback that buries the real configuration error. The
-# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
-# real error instead.
+# Default so `pytest_unconfigure` does not mask a configure error with NameError.
 SERVER = None
 _UNIT_DATABASE_METHODS = {}
 
@@ -494,22 +486,15 @@ def pytest_configure(config):
             stacklevel=2,
         )
 
-    # pytest-xdist: the controller runs no tests, so it starts no server; each
-    # worker gets its own server and data directory. v2 derives analyzer
-    # folders and selection keys from content, so two workers sharing either
-    # would write the same rows and paths.
-    # ``workerinput`` exists only on an xdist worker's own config; the
-    # PYTEST_XDIST_WORKER variable also leaks into pytest subprocesses that
-    # tests start, which are not workers.
+    # Each xdist worker gets its own server and data directory. Use
+    # ``workerinput``: PYTEST_XDIST_WORKER also leaks into test subprocesses.
     workerinput = getattr(config, "workerinput", None)
     xdist_worker = workerinput["workerid"] if workerinput else None
     xdist_controller = (
         bool(getattr(config.option, "numprocesses", None)) and not xdist_worker
     )
     if xdist_controller:
-        # Workers inherit this environment when they start. Without a cap,
-        # every worker's BLAS, torch and numba pools size themselves to the
-        # whole machine and the workers oversubscribe the cores.
+        # Workers inherit these caps, so their thread pools share the cores.
         threads = str(
             max(1, (os.cpu_count() or 1) // config.option.numprocesses)
         )
@@ -576,12 +561,7 @@ def pytest_configure(config):
 
 
 def _link_shared_downloads(shared_base: Path, worker_base: Path) -> None:
-    """Link a worker's downloaded inputs to the shared copies, if present.
-
-    The downloads are read-only inputs (the raw session and its videos), so
-    workers share them instead of each fetching its own copy. Anything not yet
-    downloaded is fetched into the worker's own directory as usual.
-    """
+    """Symlink a worker's read-only downloads to the shared copies, if present."""
     for entry in FILE_PATHS:
         source = shared_base / entry["relative_dir"] / entry["target_name"]
         target = worker_base / entry["relative_dir"] / entry["target_name"]
@@ -816,9 +796,7 @@ def dj_config(verbose, worker_id):
     if branch_name := SERVER.branch_name:
         config_file = f"dj_local_conf_{branch_name}.json"
     if worker_id != "master":
-        # Each xdist worker has its own server. A shared file lets one worker
-        # overwrite it between another's save and load, so that worker would
-        # connect to the wrong server.
+        # Each worker has its own server, so it needs its own config file.
         config_file = config_file.replace(".json", f"_{worker_id}.json")
 
     if Path(config_file).exists():
@@ -888,10 +866,7 @@ def no_dlc(request):
     yield NO_DLC
 
 
-# String condition (evaluated lazily in pytest's namespace, where
-# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
-# truthy callable that ``skipif`` never calls, so every DLC test skipped
-# unconditionally regardless of ``--no-dlc``.
+# String condition, evaluated lazily; ``skipif`` never calls a lambda.
 skip_if_no_dlc = pytest.mark.skipif(
     "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",

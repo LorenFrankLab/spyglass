@@ -1,12 +1,7 @@
 """Merge-group bookkeeping shared by the v1 and v2 curation pipelines.
 
-Curation stores merges either as a list of merge groups
-(``[[1, 2, 3], [4, 5]]``) or as a per-unit association map
-(``{1: [2, 3], 4: [5]}``); these helpers convert the map form into
-connected-component merge groups.
-
-This module uses only the standard library: it declares no ``dj.schema`` and
-imports no schema module, so database-free code can import it.
+Converts a per-unit association map (``{1: [2, 3], 4: [5]}``) into merge
+groups (``[[1, 2, 3], [4, 5]]``). Standard library only, no schema imports.
 """
 
 from typing import List
@@ -15,9 +10,7 @@ from typing import List
 def _union_intersecting_lists(lists):
     """Union groups that share any member (connected components).
 
-    Each output group is a ``list`` built from a ``set``, so member order
-    within a group is not defined. Groups appear in the order of their first
-    input list.
+    Member order within a group is undefined; groups keep first-input order.
     """
     result = []
 

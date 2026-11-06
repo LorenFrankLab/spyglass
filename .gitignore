@@ -6,9 +6,8 @@ mysql_config
 memray*
 root_*.y*ml
 
-# Local planning notes
-.claude/docs/
-spikesorting_v2_audit/
+# Local dev
+.claude/*
 
 # Notebooks
 *.ipynb
@@ -209,9 +208,7 @@ docs/site/
 !docs/src/notebooks/*.ipynb
 !docs/src/images/*png
 temp*
-
-# MEArec scratch (written to CWD by gen_templates)
-tmp_params_path.yaml
+tmp*
 
 # Version
 _version.py

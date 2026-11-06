@@ -1,9 +1,8 @@
 """Compatibility helpers for SpikeInterface APIs renamed after 0.99.
 
-The package pins SpikeInterface 0.104, but existing v0/v1 rows can contain
-recordings and sortings written under 0.99. Read paths must therefore work
-with either API generation. Attribute presence, rather than version parsing,
-selects the available implementation.
+Existing v0/v1 rows hold objects written under SI 0.99, so read paths must
+work with either API generation. Attribute presence, not version parsing,
+selects the implementation.
 """
 
 from __future__ import annotations
@@ -12,11 +11,8 @@ from __future__ import annotations
 def quality_metrics_module():
     """Return SpikeInterface's quality-metrics namespace for either generation.
 
-    SpikeInterface 0.10x split ``qualitymetrics`` into the ``metrics``
-    package. Its parent namespace re-exports both metrics v0/v1 use
-    (``compute_isi_violations`` from ``metrics.quality`` and
-    ``compute_num_spikes`` from ``metrics.spiketrain``), so it is returned
-    rather than the quality submodule, which lacks ``compute_num_spikes``.
+    Returns ``metrics`` rather than ``metrics.quality``, which lacks
+    ``compute_num_spikes``.
 
     Returns
     -------
@@ -63,9 +59,8 @@ def load_waveforms(folder):
     Returns
     -------
     WaveformExtractor | MockWaveformExtractor
-        SpikeInterface 0.99 returns a ``WaveformExtractor``; 0.101 and later
-        return a ``MockWaveformExtractor`` exposing the same ``get_waveforms``
-        / ``nbefore`` / ``nafter`` / ``sorting`` surface.
+        ``MockWaveformExtractor`` under SI 0.101+, with the same
+        ``get_waveforms``, ``nbefore``, ``nafter``, and ``sorting`` API.
 
     Raises
     ------
@@ -95,9 +90,8 @@ def numpy_sorting_from_samples_and_labels(
 ):
     """Build a ``NumpySorting`` from sample indices and unit labels.
 
-    SpikeInterface 0.99 calls this constructor ``from_times_labels`` while
-    0.101 and later call it ``from_samples_and_labels``. Both versions share
-    the same positional argument semantics.
+    SI 0.99 names it ``from_times_labels``; 0.101+ uses
+    ``from_samples_and_labels`` with the same positional arguments.
     """
     from spikeinterface.core import NumpySorting
 

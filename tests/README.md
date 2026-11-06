@@ -91,9 +91,9 @@ to a heavier tier in `test_tiers.json` or make its setup cheaper. With
 tier's timeout (`TIER_TIMEOUTS_S`), so a hang fails instead of stalling the run.
 
 Architecture checks require canonical owner imports and docstring-only private
-package initializers. Current recording dictionary and pickle round trips must
-preserve independently expected traces and timestamps; library-version adapters
-for SpikeInterface and DataJoint remain separately tested. See the
+package initializers. Recording dictionary and pickle round trips must preserve
+independently expected traces and timestamps; SpikeInterface and DataJoint
+version adapters have their own tests. See the
 [architecture map](../docs/src/ForDevelopers/SpikeSortingV2Architecture.md).
 
 Integration scenarios declare their expected outcomes before calling the public
@@ -153,21 +153,17 @@ neurons with similar templates. Recovery for those two difficult cases is
 reported as diagnostics, without a passing recall requirement. Their presence in
 the fixture does not establish reliable recovery under drift or ambiguity.
 
-The motion acceptance manifests pin benchmark runner/helper files. The
-canonical import migration preserves their scientific AST and refreshes hashes
-that were already stale. A pin's `git_commit` identifies the checkout base;
-`files` identifies exact working-tree bytes, including uncommitted edits. The
-original `279a520` reference remains historical provenance. The refresh changes
-no seeds, thresholds or gates and provides no new acceptance run or evidence
-that historical gates pass the current harness.
+The motion acceptance manifests pin the benchmark runner and helper files. A
+pin's `git_commit` identifies the checkout base; `files` identifies exact
+working-tree bytes, including uncommitted edits. Matching hashes are not
+evidence that historical gates pass the current harness.
 
 The unpinned `_motion_acceptance_reuse.py` wrapper also requires a complete
 runtime receipt and matching fingerprint before reusing results. Python,
 dependency/code versions, platform, BLAS/thread settings and the explicit
 benchmark job/recipe settings must match. Existing results without these
 receipts must be rerun. Failed runs never attach new receipts to old metrics,
-and runtime/source drift during execution leaves results unstamped. The pinned
-scientific runner, manifests, seeds and gates are unchanged by this bookkeeping.
+and runtime/source drift during execution leaves results unstamped.
 
 Reviewed module defaults, function overrides and fixture minimums live in
 [`spikesorting/v2/test_tiers.json`](spikesorting/v2/test_tiers.json). Collection
@@ -180,8 +176,8 @@ updated. Named overrides use `ClassName::test_name` for class methods and omit
 parameter IDs. Use an override when lowering a module default for a pure test.
 
 Lint rules live in `pyproject.toml` and are shared by local pre-commit and CI.
-The initial type-checking gate covers pipeline value types, recording value
-types and the matcher protocol:
+The type-checking gate covers pipeline value types, recording value types and
+the matcher protocol:
 
 ```bash
 python -m pip install ruff==0.14.13 mypy==2.3.1
@@ -276,6 +272,22 @@ function-scoped fixtures for mutable state. Repository fixtures live in
 - `lfp`: spyglass.lfp module
 - `sgl`: spyglass.linearization module
 
+### Shared Fixture Notes
+
+- `imported_merge_id` (`tests/decoding/conftest.py`) appends units to a copy of
+    the shared minirec `_` file and swaps it in with `os.replace`. Under the
+    full suite, LFP `*_raw` fixtures hold their analysis files open read-only
+    inside `NWBHDF5IO`, outside Spyglass's handle cache, and those files
+    external-link the raw ephys. `close_nwb_files` cannot release them, and HDF5
+    refuses `mode="a"` on a file open `"r"` in the same process. `os.replace` is
+    atomic on one filesystem; readers keep the old inode.
+- `fetch_spike_data` (`spikesorting/analysis/v1/group.py`) skips label filtering
+    in test mode. The shared `default_exclusion` groups exclude noise/mua over
+    curations carrying those labels, so filtering would empty them and break
+    `test_fetch_data` and sorted-spikes decoding. `test_filter_units` covers
+    filtering directly. The branch for curations without a label column is not
+    gated: an exclude filter over empty labels keeps every unit.
+
 ______________________________________________________________________
 
 ## Mocking Infrastructure
@@ -321,19 +333,14 @@ ______________________________________________________________________
 
 **File**: `.github/workflows/test-conda.yml`
 
-**Trigger Modes** (the `run-tests` job — the general suite):
+**Trigger Modes** (the general `run-tests` job):
 
 - `push`: Runs fast tests only (`-m "not slow and not very_slow"`)
 - `pull_request` (closed + merged): Runs full test suite
 - `workflow_dispatch`: Manual trigger with mode selection (fast/full)
 
-The `fast`/`full` selection applies **only to the general `run-tests` job**. The
-separate `pytest-v2` and `pytest-legacy` jobs ignore it and always run their full
-applicable suite; what they cover is keyed on the *event*, not the mode — `push`
-runs the smoke-fixture tier, `schedule` (nightly) adds the 60s fixture, and a
-manual `workflow_dispatch` additionally pulls the scenario fixtures
-(Neuropixels / tetrode) and requires them, so a manual dispatch is the most
-thorough v2 run regardless of the `fast`/`full` choice.
+The `fast`/`full` selection applies only to `run-tests`. The spike sorting jobs
+select by event instead; see [Spike sorting lanes](#spike-sorting-lanes).
 
 **Optimizations:**
 
@@ -345,6 +352,103 @@ thorough v2 run regardless of the `fast`/`full` choice.
 
 - Via GitHub UI: Actions → test-conda.yml → Run workflow
 - Select: fast or full
+
+### Spike sorting lanes
+
+`pytest-v2` is one matrix job (`fail-fast: false`, so one lane's failure does
+not cancel the others). Tier selection by event is described under
+[Spike sorting v2](#spike-sorting-v2). Each lane uploads JUnit XML with per-test
+durations.
+
+**Workload shards** (`single-session`, `integration`, `unit`)
+
+- Balanced by runtime, not test count. `run_ci_shard.py` routes
+    `single_session/` to `single-session`, `INTEGRATION_MODULES` to
+    `integration`, and every other file to `unit`. Add a new full-sort test file
+    to `INTEGRATION_MODULES`.
+- Env: `environments/environment_spikesorting_v2.yml` (Python 3.11, extras
+    `test`, `spikesorting-v2`, `spikesorting-v2-validation`). NEURON and LFPy
+    are left out: they only generate fixtures, which CI downloads.
+- The verify step runs `pip check` and a real MountainSort5 sort, so a broken
+    sorter runtime fails instead of skipping.
+
+**Fixtures** (all v2 lanes)
+
+- `fixtures/_fetch.py` downloads from Box, checks sha256 against
+    `fixtures_manifest.json` and retries transient errors. A hash mismatch or an
+    HTTP 4xx fails the job.
+- No regeneration fallback: it would hide a corrupt or rotated artifact behind a
+    green run and pull NEURON/LFPy into CI. Regenerate by hand with
+    `generate_mearec.py` (see `fixtures/README.md`).
+- The cache key covers the manifest, `_fetch.py` and the event, so per-PR and
+    nightly/manual caches do not overwrite each other.
+- Per event: push and PR use `mearec_polymer_smoke`; nightly adds
+    `mearec_polymer_128ch_60s` and the real session `minirec20230622`; manual
+    dispatch adds `mearec_neuropixels_60s` and `mearec_tetrode_60s`.
+- `SPYGLASS_V2_REQUIRE_FIXTURES` lists the event's fixtures and
+    `pytest_sessionstart` fails if one is missing, so a green run means their
+    tests ran. Elsewhere, a test whose fixture is absent skips.
+- `minirec20230622` has tetrode contacts in the x-z plane, which an x-y
+    projection collapses. It drives the geometry round trip in
+    `single_session/test_recording.py`; per-PR runs cover the repair on a
+    synthesized all-zero tetrode.
+
+**`matching`**
+
+- Own conda env, so the `spikesorting-v2-matching` extra's weight stays out of
+    the default env. It is the only env with UnitMatchPy, so it owns the matcher
+    tests and the cross-session notebook.
+- `test_optional_matching_extra_resolution` checks that the extra resolves with
+    numpy >= 2.
+- `SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1` turns the missing-extra skip into
+    a failure, so the install may tolerate transient errors (`|| true`) while a
+    broken extra still fails.
+- Nightly/manual: `test_v2_unitmatch_polymer_mearec_ground_truth` requires
+    `mearec_polymer_128ch_2sessions_{s1,s2}`, which have no URL in `_fetch.py`.
+    The step fails until they are hosted.
+
+**`curation`**
+
+- Own env, so the FigPack pins do not couple to the default env. Only lane that
+    runs the FigPack table layer and the Playwright browser tests.
+- The install has no `|| true`, and `SPYGLASS_REQUIRE_BROWSER_TESTS=1` fails
+    browser tests on a missing figpack, Playwright or browser, so they cannot
+    skip green.
+- Nightly/manual: `tests/spikesorting/v2/acceptance` with `--run-acceptance`
+    sorts `mearec_tetrode_60s` end to end. Without the flag these tests are
+    collected as skipped. `test_database_and_file_restore` skips in CI: with
+    `--no-docker` there is no Docker client for its restore.
+
+**`motion-benchmark`** (manual dispatch only)
+
+- `SPYGLASS_V2_MOTION_BENCHMARK=1` runs `test_motion_acceptance.py` on the
+    development manifest (seeds 0-2, 117 cases, each in its own process; about
+    50 min) plus the drift fixture.
+- Publishes the `motion-benchmark-development` artifact (motion error, sorting
+    accuracy, runtime, memory). It is development evidence, not validation: the
+    manifest has no gates, so `test_benchmark_meets_manifest_gates` skips and
+    only a case that fails to run fails.
+- The held-out manifest is not run. A new held-out evaluation needs a new
+    manifest with unused seeds, committed before it runs.
+
+**`v2-supported-python`**
+
+- Python 3.10 and 3.12 install the `spikesorting-v2` extra and run DB-free
+    contract tests and a sorter smoke script. The full suite uses 3.11.
+
+**`pytest-legacy`**
+
+- v0/v1 compute paths call `_require_legacy_si_environment`, which raises under
+    SI 0.101 and later, so `run-tests` ignores `tests/spikesorting/v0` and `v1`;
+    this job runs them on SI 0.99.
+- A `sed` step relaxes the SI and probeinterface pins in its checkout so the env
+    resolves SI 0.99 in one pass. Installing 0.104 and then downgrading leaves
+    an incompatible numpy 2 stack.
+- The verify step asserts SI < 0.100 (0.100 breaks `NwbRecordingExtractor`
+    timestamps), probeinterface < 0.3 and numpy < 2.
+- Also runs `tests/spikesorting/v2/test_clusterless_waveform_features.py` for
+    its legacy-guard test. Its v2 imports are lazy, and passing it by path keeps
+    other SI 0.104 modules from being collected.
 
 ______________________________________________________________________
 

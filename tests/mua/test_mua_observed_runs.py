@@ -78,9 +78,7 @@ def test_many_short_runs_split_one_index_per_observed_sample():
 def detection():
     """The DB-free detection module.
 
-    Imported inside a fixture: ``spyglass.mua.v1.__init__`` pulls in the
-    schema module, which needs a live database connection, and collection
-    runs before the session fixtures bring one up.
+    Imported lazily: ``spyglass.mua.v1`` needs a database at import.
     """
     from spyglass.mua.v1 import _detection
 
@@ -360,8 +358,7 @@ def test_event_numbers_unique_after_concat_nwb_round_trip(
                 "minimum_duration": 0.015,
                 "zscore_threshold": 2.0,
                 "close_event_threshold": 0.0,
-                "speed_threshold": 1e6,  # keep every event: speed is not
-                # what this test is about
+                "speed_threshold": 1e6,  # keep every event
             },
         },
         skip_duplicates=True,

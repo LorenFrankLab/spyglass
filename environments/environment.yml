@@ -19,7 +19,7 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
-  - jax<0.10  # non_local_detector 0.6.9 calls clip(a_min=..., a_max=...), keywords JAX 0.10 removed
+  - jax<0.10  # NLD 0.6.9 uses clip(a_min=, a_max=), removed in 0.10
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
@@ -30,16 +30,11 @@ dependencies:
   - pydotplus
   - python>=3.10,<3.13
   - ripple_detection
-  - scipy>=1.13  # numpy>=2 (the v2 SI 0.104 stack) needs scipy>=1.13; the legacy SI 0.99 env is environments/environment_spikesorting_legacy.yml
+  - scipy>=1.13  # numpy>=2; SI 0.104 needs scipy>=1.13
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
-      # torch is installed via pip, not conda: conda ``pytorch>=2`` does not
-      # solve against ``numpy>=2`` on the enabled channels (conda-forge/franklab/
-      # edeno) -- it drags in a numpy<2 pin -- whereas the pip ``torch>=2``
-      # wheels are numpy>=2-compatible. The v2 SI 0.104 stack needs torch>=2.
-      - torch>=2
-      # For native MountainSort4/MountainSort5, install ..[spikesorting-v2].
-      - ..
+      - torch>=2  # pip, not conda: conda pytorch>=2 forces numpy<2
+      - ..  # ..[spikesorting-v2] adds MountainSort4/5

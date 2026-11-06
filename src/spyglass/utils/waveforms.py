@@ -1,6 +1,4 @@
-# Deferred annotation evaluation keeps module import working across
-# SpikeInterface versions whose public API no longer exposes some names
-# (e.g. WaveformExtractor) used only in type hints here.
+# Lazy annotations: some SI versions lack hint-only names (WaveformExtractor)
 from __future__ import annotations
 
 import numpy as np
@@ -49,9 +47,8 @@ def _get_peak_amplitude(
         values, counts = np.unique(peak_inds, return_counts=True)
         spike_peak_ind = values[counts.argmax()]
     else:
-        # The spike is aligned at nbefore, which only equals the midpoint for
-        # a symmetric window. Both SI 0.99's WaveformExtractor and the 0.10x
-        # waveforms extension expose it.
+        # Spike sits at nbefore, the midpoint only for symmetric windows.
+        # SI 0.99 and 0.10x both expose nbefore.
         spike_peak_ind = waveform_extractor.nbefore
 
     return waveforms[:, spike_peak_ind]

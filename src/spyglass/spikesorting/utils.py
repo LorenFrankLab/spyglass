@@ -273,16 +273,10 @@ def read_raw_nwb_recording(
 ):
     """Read the raw acquisition ElectricalSeries as a SpikeInterface recording.
 
-    A version-agnostic wrapper over
-    ``spikeinterface.extractors.read_nwb_recording`` that explicitly selects
-    the raw acquisition ``ElectricalSeries``. NWB files may store additional
-    ``ElectricalSeries`` (e.g. LFP under ``processing``): SpikeInterface >=
-    0.100 raises when asked to read such a file without naming the series,
-    while 0.99.x silently picks the first. Naming the raw acquisition series
-    makes the read deterministic across SpikeInterface versions -- and the
-    parameter that carries the name was renamed from ``electrical_series_name``
-    (SI 0.99.x) to ``electrical_series_path`` (SI >= 0.100), so the right one
-    is chosen by inspecting the installed signature.
+    The series is named explicitly because SI >= 0.100 raises on files with
+    several ElectricalSeries (e.g. LFP) and SI 0.99 picks the first. The
+    keyword is ``electrical_series_name`` in SI 0.99 and
+    ``electrical_series_path`` in SI >= 0.100.
 
     Parameters
     ----------

@@ -1,19 +1,8 @@
 """Multiunit event detection over observed time only.
 
-`ripple_detection.multiunit_HSE_detector` assumes every sample it is given
-is contiguous evidence. A group whose units were not observed for the whole
-time axis carries NaN in those bins, and handing that straight to the
-detector corrupts the result twice over: `gaussian_smooth` (truncate=8)
-spreads each NaN bin over +/- 8 sigma of the smoothed rate, and the
-z-score's `nan_policy="omit"` then renormalizes over whatever survived. On
-synthetic data with two bursts straddling a 380 ms unobserved interval, the
-detector erased both bursts and reported two background fluctuations as
-events in their place.
-
-The functions here run the detector's own steps over each contiguous
-observed run instead, sharing one normalization across all observed
-samples, so unobserved time removes no real event and invents none. They
-hold no DataJoint tables, so the logic is unit testable without a database.
+Runs `ripple_detection.multiunit_HSE_detector`'s steps per contiguous
+observed run with one shared normalization, because the detector smears NaN
+(unobserved) bins across the smoothed rate.
 """
 
 import warnings
@@ -32,8 +21,7 @@ from ripple_detection.detectors import _get_event_stats
 
 from spyglass.utils.spikesorting import contiguous_observed_runs
 
-# The detector's own text, re-emitted so the deprecated parameter behaves
-# identically here (ripple_detection.detectors.multiunit_HSE_detector).
+# Same text as ripple_detection's multiunit_HSE_detector warning
 SPEED_NORMALIZATION_DEPRECATION = (
     "The 'use_speed_threshold_for_zscore' parameter is deprecated. "
     "Use 'normalization_mask=speed < speed_threshold' instead."
@@ -55,11 +43,8 @@ def normalize_observed_rate(
 ) -> tuple[np.ndarray, list[np.ndarray]]:
     """Smooth the population rate per observed run, normalize it once.
 
-    The Gaussian kernel is applied to each contiguous observed run on its
-    own, so smoothed values never mix spikes from either side of a gap. The
-    normalization statistics then come from all observed samples at once,
-    including runs too short to hold an event: they carry baseline
-    information even when no event can be extracted from them.
+    Normalization uses all observed samples, including runs too short to
+    hold an event.
 
     Parameters
     ----------
@@ -76,10 +61,8 @@ def normalize_observed_rate(
         True for observed samples.
     speed_threshold, smoothing_sigma, use_speed_threshold_for_zscore, \
 normalization_method, normalization_mask, normalization_time_range
-        As in `ripple_detection.multiunit_HSE_detector`. Selector precedence
-        and validation stay the detector's own: a user mask or time range
-        wins over the deprecated speed threshold, and supplying both
-        selectors raises.
+        As in `ripple_detection.multiunit_HSE_detector`, including its
+        selector precedence and validation.
 
     Returns
     -------
@@ -137,8 +120,7 @@ normalization_method, normalization_mask, normalization_time_range
         normalization_mask = np.asarray(normalization_mask)
         if normalization_mask.shape[0] == time.shape[0]:
             normalization_mask = normalization_mask[observed]
-        # A mask of any other length is passed through unsliced so that
-        # normalize_signal raises its own length error.
+        # Other lengths pass through so normalize_signal raises
 
     normalized[observed] = normalize_signal(
         rate[observed],
@@ -169,16 +151,11 @@ def detect_multiunit_events_in_observed_runs(
 ) -> pd.DataFrame:
     """Detect high synchrony events within each contiguous observed run.
 
-    Reproduces `ripple_detection.multiunit_HSE_detector` exactly when every
-    sample is observed and the timestamps never jump by more than 1.5 sample
-    periods. Otherwise events are extracted from each observed run
-    separately, so no event can span time the units were not observed over.
-    A jump in the timestamps (for example a dropped position frame) also ends
-    a run, so an event across a jump is split in two. Runs shorter than `minimum_duration` cannot hold an event and are
-    skipped at extraction, after they have contributed to the shared
-    normalization. `close_event_threshold` merges events within a run and
-    never across a gap: two events on either side of unobserved time stay
-    two events however close their timestamps are.
+    - Matches `ripple_detection.multiunit_HSE_detector` when every sample is
+      observed and timestamps never jump over 1.5 sample periods.
+    - Events never span a gap or timestamp jump; `close_event_threshold`
+      merges only within a run.
+    - Runs shorter than `minimum_duration` still feed the normalization.
 
     Parameters
     ----------
@@ -246,9 +223,7 @@ normalization_method, normalization_mask, normalization_time_range
             [], time[observed], normalized[observed], speed[observed]
         )
 
-    # Each run's table restarts its one-based event_number, so two runs
-    # would carry duplicate indices into the NWB table. Renumber
-    # chronologically after concatenation.
+    # Per-run tables each restart event_number at 1
     detected = pd.concat(event_stats, ignore_index=True).sort_values(
         "start_time", kind="stable"
     )

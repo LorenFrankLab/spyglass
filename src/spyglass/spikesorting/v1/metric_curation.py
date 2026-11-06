@@ -35,10 +35,7 @@ sq = _si_compat.quality_metrics_module()
 schema = dj.schema("spikesorting_v1_metric_curation")
 
 
-# Resolve SpikeInterface quality-metric callables lazily so this module imports
-# under SpikeInterface 0.104, which renamed/removed some legacy entry points.
-# v1 metric computation only runs under SI 0.99; any missing entries surface as
-# a clear error only when the metric is actually invoked.
+# getattr lets this module import under SI 0.104; missing metrics are None.
 _metric_name_to_func = {
     "snr": getattr(sq, "compute_snrs", None),
     "isi_violation": compute_isi_violation_fractions,
@@ -165,9 +162,7 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
         """Prints the available metrics and their descriptions."""
         for metric, func in _metric_name_to_func.items():
             if func is None:
-                # The metric's SpikeInterface callable is absent on this SI
-                # version (resolved via ``getattr(sq, name, None)``); report
-                # it rather than crash on ``None.__doc__``.
+                # Callable is absent on this SpikeInterface version.
                 logger.info(f"{metric} : (unavailable on this SpikeInterface)")
                 continue
             metric_doc = (func.__doc__ or "").split("\n")[0]
@@ -363,10 +358,8 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         Notes
         -----
-        Reading an already-extracted waveform folder (``overwrite=False`` and a
-        non-empty folder) works under the pinned SpikeInterface. Extraction
-        still calls APIs removed after 0.99 and therefore requires the legacy
-        SpikeInterface environment.
+        Reading an existing waveform folder works under SI 0.104; extraction
+        requires the legacy SpikeInterface environment.
         """
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):

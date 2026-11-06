@@ -1,13 +1,7 @@
 """DB-free unit tests for the UnitAnnotation spike-selection helper.
 
-``UnitAnnotation.fetch_unit_spikes`` selects spike-time arrays by the NWB units
-table's TRUE unit id (a dict keyed by real ids), not by a positional index into
-the spike-times list -- positional indexing is wrong for the sparse /
-non-contiguous id sets that v2 and merge-applied v0/v1 curations produce. The
-per-id validation is extracted here so the "requested id is not a true id" path
-(an old positional annotation on a sparse curation) raises an actionable error
-rather than a bare ``KeyError``, and is pinned without the (JAX-skipped) v1
-integration fixture.
+``fetch_unit_spikes`` selects spikes by true NWB unit id, not position, so
+sparse id sets (v2, merge-applied v0/v1 curations) resolve correctly.
 """
 
 import pytest
@@ -20,9 +14,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_selects_by_true_id_not_position():
-    """Spikes are selected by the NWB true unit id; a sparse id set {2,4} is
-    resolved by value, so requesting 4 returns the 4-keyed spikes (a positional
-    index would return the wrong array)."""
+    """A sparse id set {2, 4} is resolved by value, not position."""
     mapping = {2: "spikes_2", 4: "spikes_4"}
     assert spikes_for_requested_units(mapping, [4, 2], merge_id="m") == [
         "spikes_4",
@@ -31,9 +23,7 @@ def test_selects_by_true_id_not_position():
 
 
 def test_raises_actionable_error_on_missing_id():
-    """A requested id absent from the true-id set raises an actionable
-    ValueError -- naming the valid ids and the positional->true-id change --
-    not a bare KeyError."""
+    """A missing id raises a ValueError naming the valid ids."""
     mapping = {2: "spikes_2", 4: "spikes_4"}
     with pytest.raises(ValueError, match="not a unit id"):
         spikes_for_requested_units(mapping, [3], merge_id="abc")
@@ -44,8 +34,7 @@ def test_raises_actionable_error_on_missing_id():
 
 
 def test_numpy_and_python_ids_interchangeable():
-    """A numpy requested id matches the plain-int key (and vice versa), so a
-    fetched-then-requested id is not spuriously reported missing."""
+    """A numpy id matches the plain-int key, and vice versa."""
     np = pytest.importorskip("numpy")
     assert spikes_for_requested_units(
         {np.int64(2): "s"}, [2], merge_id="m"

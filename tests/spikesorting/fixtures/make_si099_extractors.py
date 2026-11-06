@@ -7,13 +7,9 @@ Run ONLY in the legacy environment (SpikeInterface 0.99)::
 
 The script writes ``tests/spikesorting/fixtures/si099/``:
 
-- ``recording/``: a ``BinaryFolderRecording`` holding 4 channels and a short
-  frame range of ``tests/_data/raw/minirec20230622.nwb``, read with the SI 0.99
-  NWB recording extractor (with its time vector, as v0
-  ``SpikeSortingRecording`` reads it) and saved with ``save(format="binary")``,
-  so the folder carries the properties, probe and time files of a real v0
-  recording folder. As v0 does for a 4-channel ``tetrode_12.5`` group, the NWB
-  probe is replaced by a 2D tetrode probe with unique contact positions.
+- ``recording/``: a ``BinaryFolderRecording`` of 4 channels and a short frame
+  range of ``tests/_data/raw/minirec20230622.nwb``, read, probed and saved as
+  v0 ``SpikeSortingRecording`` does.
 - ``sorting/``: a ``NumpyFolderSorting`` with 3 units (ids 7, 2, 11 in that
   order) at fixed spike frames.
 - ``waveforms/``: an SI 0.99 ``WaveformExtractor`` over the two folders above,
@@ -80,14 +76,10 @@ def _spike_frames(rng: np.random.Generator) -> dict[int, np.ndarray]:
 
 
 def _set_v0_tetrode_probe(recording, channel_ids):
-    """Replace the NWB probe as v0 ``SpikeSortingRecording`` does.
+    """Replace the NWB probe as v0 ``_get_filtered_recording`` does.
 
-    Mirrors ``src/spyglass/spikesorting/v0/spikesorting_recording.py:865-900``
-    (``_get_filtered_recording``): a sort group of exactly 4 channels, all of
-    probe type ``tetrode_12.5`` and in one electrode group, gets a 2D tetrode
-    probe with unique contact positions. The NWB probe of a tetrode projects
-    its 3D contacts onto 2D with duplicate positions, which SpikeInterface
-    0.104 (probeinterface 0.3) refuses to load.
+    A 4-channel ``tetrode_12.5`` group gets a 2D tetrode probe with unique
+    contact positions; SI 0.104 refuses the NWB probe's duplicate positions.
     """
     import probeinterface as pi
     from pynwb import NWBHDF5IO
@@ -124,13 +116,9 @@ def _write_recording(se, folder: Path):
     source = recording.channel_slice(channel_ids).frame_slice(0, N_FRAMES)
     source = _set_v0_tetrode_probe(source, channel_ids)
     saved = source.save(folder=folder, format="binary")
-    # SI 0.99 dumps provenance.json with absolute paths
-    # (spikeinterface/core/base.py:853-855). Re-dump it through SI's own
-    # serializer relative to the repository root so no machine path is
-    # committed; loaders read binary.json, not provenance.json.
+    # SI 0.99 writes absolute paths here; commit repo-relative ones instead.
     source.dump_to_json(folder / "provenance.json", relative_to=REPO_ROOT)
-    # Reference times come from the NWB-read recording, not from the saved
-    # times file that the loaders under test read.
+    # From the NWB read, not the saved times file the loaders read.
     times = source.get_times()
     if not (
         saved.has_time_vector() and np.array_equal(saved.get_times(), times)

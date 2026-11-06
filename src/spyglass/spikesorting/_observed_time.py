@@ -1,11 +1,8 @@
 """Observed-time availability shared by the merge table and unit groups.
 
-Intervals here are half-open seconds. A unit's observation snapshot stores
-each distinct interval mask once, with per-unit references into it; a
-population's availability is the intersection of its selected units' masks.
-
-This module depends only on NumPy: it declares no ``dj.schema`` and imports no
-schema module, so database-free code can import it.
+- Intervals are half-open, in seconds.
+- A snapshot stores each distinct interval mask once, referenced per unit.
+- Population availability is the intersection of its units' masks.
 """
 
 from __future__ import annotations
@@ -38,7 +35,7 @@ def compact_observation_intervals(intervals_by_unit):
 
 
 def normalize_observation_provenance(provenance):
-    """Read the former per-unit representation without changing its content."""
+    """Convert ``observed_intervals_by_unit`` provenance to the compact form."""
     if "observed_intervals_by_unit" not in provenance:
         return provenance
     normalized = dict(provenance)
@@ -50,10 +47,9 @@ def normalize_observation_provenance(provenance):
 
 
 def contains_times(intervals, times):
-    """Membership without a mask at the recording's acquisition rate."""
+    """Return whether each time falls inside ``intervals``."""
     intervals = finite_intervals(intervals, name="contains_times intervals")
-    # Membership queries retain their scalar/array shape; the event-vector
-    # requirement belongs to observed_metrics rather than this predicate.
+    # Keep the input shape of ``times``.
     times = np.asarray(times)
     shape = times.shape
     times = finite_vector(
@@ -69,10 +65,9 @@ def contains_times(intervals, times):
 class ObservationAvailability:
     """Common availability of selected units; None means unknown coverage.
 
-    Unknown sources do not invent restrictions. Known restrictions still
-    apply in a mixed population, and unknown sources remain explicit. Known
-    windows must be finite, forward, sorted, and disjoint. Stored arrays are
-    owned read-only snapshots, independent of the caller's array.
+    Unknown sources add no restriction and are listed in ``unknown_sources``.
+    Intervals must be finite, forward, sorted, and disjoint; they are stored
+    as a read-only copy.
     """
 
     intervals: np.ndarray | None
@@ -131,8 +126,7 @@ class ObservationAvailability:
             return np.ones(time.shape, dtype=bool)
         if not len(self.intervals) or not len(time):
             return np.zeros(time.shape, dtype=bool)
-        # Match SortedSpikesGroup's digitize(time[1:-1]) convention. Its final
-        # output slot has zero width; represent its timestamp's availability.
+        # Matches SortedSpikesGroup's digitize(time[1:-1]); last bin is empty.
         ends = np.r_[time[1:], time[-1]]
         indices = np.searchsorted(self.intervals[:, 0], time, side="right") - 1
         return self.contains(time) & (

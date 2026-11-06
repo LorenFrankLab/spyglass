@@ -1130,11 +1130,10 @@ class SpyglassConfig:
 
     @property
     def figpack_api_key(self) -> "str | None":
-        """API key for publishing hosted figpack.org figures.
+        """API key for publishing figpack.org figures, or None if unset.
 
-        Read from `dj.config['custom']['figpack_api_key']`, falling back to the
-        `FIGPACK_API_KEY` environment variable that FigPack's own tools use.
-        None when neither is set.
+        Read from `dj.config['custom']['figpack_api_key']`, else the
+        `FIGPACK_API_KEY` environment variable.
         """
         return dj.config.get("custom", {}).get(
             "figpack_api_key"

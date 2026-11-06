@@ -1,28 +1,9 @@
-"""Runtime guard for v0/v1 spike-sorting paths that require legacy SpikeInterface.
+"""Guard for v0/v1 entry points that need SpikeInterface < 0.101.
 
-Several v0 and v1 active populate / curation / recompute paths still call
-SpikeInterface APIs that were removed or renamed in SpikeInterface 0.101+
-(``WaveformExtractor`` construction / ``extract_waveforms`` /
-``ChunkRecordingExecutor`` signature widening / quality-metric renames). Those
-entry points are gated behind an explicit legacy-environment error rather than
-allowed to crash with an opaque ``AttributeError`` or ``AssertionError`` from
-inside SpikeInterface. Reading a previously saved binary waveform folder is
-*not* among them: 0.101+ reads those back as a ``MockWaveformExtractor``, so
-that read is routed through ``_si_compat.load_waveforms`` and left ungated.
-
-The guard is intentionally narrow:
-
-- Read-only / query paths that do not invoke removed APIs continue to work and
-  are not guarded. Renamed loading and ``NumpySorting`` APIs are routed through
-  ``spyglass.spikesorting._si_compat`` so those paths work under both
-  SpikeInterface 0.99 and 0.101+.
-- v0/v1 schemas are unchanged; ``SpikeSortingOutput`` merge queries on existing
-  rows keep functioning.
-- Modern (v2) spike-sorting code is unaffected.
-
-Callers add ``_require_legacy_si_environment()`` as the first statement of any
-``make()`` / public entry point that needs the legacy SpikeInterface runtime.
-The helper is a no-op when running under SpikeInterface < 0.101.
+- Compute paths that call APIs removed in SI 0.101 (``extract_waveforms``,
+  ``WaveformExtractor``, quality-metric renames) raise a clear error instead
+  of failing inside SpikeInterface.
+- Read paths are not guarded; renamed APIs go through ``_si_compat``.
 """
 
 from __future__ import annotations
@@ -56,16 +37,13 @@ def _require_legacy_si_environment(component: str) -> None:
     Parameters
     ----------
     component : str
-        Human-readable name of the guarded entry point, e.g.
-        ``"v1 SpikeSorting.make"``. Used in the error message so the
-        traceback points at the workflow the caller invoked.
+        Name of the guarded entry point for the error message, e.g.
+        ``"v1 SpikeSorting.make"``.
 
     Raises
     ------
     RuntimeError
-        When the installed SpikeInterface version is at or past 0.101 (the
-        first release that removed the WaveformExtractor-era APIs the v0/v1
-        active runtime paths still depend on).
+        When the installed SpikeInterface is 0.101 or later.
     """
     import spikeinterface
 

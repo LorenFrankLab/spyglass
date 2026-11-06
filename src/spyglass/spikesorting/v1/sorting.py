@@ -289,8 +289,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         sorter_params: dict,
         recording_key: dict,
     ):
-        # SpikeInterface 0.101+ run_sorter rejects the output_folder argument
-        # used below. Peak detection for clusterless_thresholder still works.
+        # Only run_sorter needs legacy SI (rejects output_folder in 0.101+).
         if sorter != "clusterless_thresholder":
             _require_legacy_si_environment("v1 SpikeSorting.make")
         sorting, timestamps = self._run_spike_sorter(

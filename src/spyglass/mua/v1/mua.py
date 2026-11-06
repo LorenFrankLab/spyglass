@@ -83,11 +83,8 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
             - Valid times from IntervalList
             - Parameters from MuaEventsParameters
 
-        Events are detected within each contiguous run of observed samples,
-        using the steps of ripple_detection's multiunit_HSE_detector. An
-        event therefore cannot span time the group's units were not
-        observed over: the detection interval and the units' observation
-        intervals both bound it.
+        Events are detected per contiguous observed run (ripple_detection's
+        multiunit_HSE_detector steps), so none spans unobserved time.
         """
         speed = self.get_speed(key)
         time = speed.index.to_numpy()
@@ -175,14 +172,8 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     ):
         """Create a FigURL for the MUA detection.
 
-        Bins the group's units were not observed over hold NaN in the firing
-        rate. They are z-scored out of the statistics and left out of the
-        plotted series, so the rate line breaks over unobserved time instead
-        of drawing a value the data does not support.
-
-        The rate is drawn as one line segment per contiguous observed run, so
-        no segment spans unobserved time: a single series over the surviving
-        samples would join across each gap. All runs share one legend entry.
+        Unobserved bins are NaN, excluded from the z-score, and the rate is
+        drawn as one segment per observed run so the line breaks over gaps.
         """
         key = self.fetch1("KEY")
         speed = self.get_speed(key)

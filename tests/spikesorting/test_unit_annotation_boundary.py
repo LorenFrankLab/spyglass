@@ -1,10 +1,8 @@
 """Database-backed tests for the UnitAnnotation unit-id read/write boundary.
 
-``UnitAnnotation`` stores true NWB unit ids. Rows written under the older
-positional contract mean something different, so a merge still carrying them
-must not serve spikes or accept a new annotation until it is migrated. A merge
-whose first-ever annotation is written under the true-id contract must be
-recorded as needing nothing.
+- A merge with positional-id rows serves no spikes and takes no new
+  annotation until migrated.
+- A merge first annotated under true ids is recorded as needing nothing.
 """
 
 from contextlib import contextmanager
@@ -22,9 +20,7 @@ from tests.spikesorting._annotation_fixtures import (
 
 pytestmark = pytest.mark.integration
 
-# A namespace whose true ids differ from their positions: stored id 2 means
-# the third unit under the old contract and the unit named 2 under the new
-# one, so the two contracts are distinguishable.
+# True ids differ from positions, so the two contracts are distinguishable.
 SPARSE_TRUE_IDS = [0, 2, 5, 7]
 DENSE_TRUE_IDS = [0, 1, 2, 3]
 POSITIONAL_IDS = [0, 1, 2, 3]

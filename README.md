@@ -129,10 +129,10 @@ For manual installation and advanced configuration:
 
 ## Quick example
 
-Spike sorting is a common starting point for ephys analyses. The v2 pipeline is
-the recommended path for new sorts under SpikeInterface 0.104: one call
-preprocesses the recording, detects artifacts, runs the sorter, writes the
-initial curation, and registers the result on the spike-sorting merge table.
+The v2 spike sorting pipeline (SpikeInterface 0.104) is recommended for new
+sorts. One call preprocesses the recording, detects artifacts, runs the sorter,
+writes the initial curation, and registers the result on the spike-sorting merge
+table.
 
 Install the `spikesorting-v2` extra
 (`pip install "spyglass-neuro[spikesorting-v2]"`), which provides the default
@@ -157,8 +157,7 @@ initialize_v2_defaults()  # install the default parameter rows
 LabTeam.insert1(
     {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
 )
-# set_group_by_shank refuses to overwrite existing sort groups, so guard the
-# re-run. Review existing groups before explicitly recreating them.
+# set_group_by_shank refuses to overwrite existing sort groups.
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
@@ -168,7 +167,7 @@ sort_group_id = None  # replace with a reviewed ID from the table above
 if sort_group_id not in list(sort_groups["sort_group_id"]):
     raise ValueError("Choose a sort_group_id from the displayed table before sorting.")
 
-# Run this cell after reviewing the group and matching its region/rate to a preset.
+# Choose a preset that matches the group's region and sampling rate.
 analysis_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
@@ -177,8 +176,7 @@ analysis_summary = run_v2_pipeline(
     pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
     auto_curate=True,
 )
-# Auto-labeling commits suggestions and keeps every unit in the child.
-# This explicitly selects an unreviewed, rule-passing population. For human
+# Selects unreviewed units that pass the auto-curation rules. For human
 # review, follow the quickstart and select review.result() instead.
 receipt = select_units_for_analysis(
     analysis_summary.auto_labeled_curation, policy="v2_unflagged_units"

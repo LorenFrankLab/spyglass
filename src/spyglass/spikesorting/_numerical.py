@@ -1,8 +1,7 @@
-"""Native numerical contracts shared by scientific computation boundaries.
+"""Input validators for numerical arrays and scalars.
 
-Validation preserves input order and repeated events. It never rounds frame or
-unit identifiers, guesses array dimensions, or repairs nonfinite observations.
-Only the standard library and NumPy are required; no table or I/O dependencies.
+Validation preserves order and duplicates. It never rounds identifiers,
+guesses dimensions, or repairs nonfinite values. NumPy only.
 """
 
 from __future__ import annotations
@@ -36,9 +35,8 @@ def _array(values, *, name):
 def integer_vector(values, *, name: str, nonnegative: bool = False):
     """Return a 1D int64 vector without lossy conversion or reordering.
 
-    Python sequences are checked before NumPy can merge booleans with integers
-    or cast large unsigned values. Native integer ndarrays use vector checks.
-    Empty 1D inputs remain valid regardless of their inferred dtype.
+    Python sequences are checked element-wise so NumPy cannot coerce
+    booleans or cast large unsigned values. Empty 1D inputs are valid.
     """
     array = _array(values, name=name)
     if array.ndim != 1:

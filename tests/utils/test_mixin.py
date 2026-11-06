@@ -236,7 +236,7 @@ def test_mixin_del_orphans_with_shared_secondary_attr(schema_test):
 
 def test_mixin_del_orphans_renamed_foreign_key(schema_test):
     """A child that renames the foreign key still protects every parent row
-    sharing its other attributes, as subtracting the whole child table did."""
+    sharing its other attributes."""
     from spyglass.utils import SpyglassMixin
 
     class RenamedParent(SpyglassMixin, dj.Lookup):

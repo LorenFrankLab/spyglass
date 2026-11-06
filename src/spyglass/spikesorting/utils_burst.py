@@ -91,8 +91,7 @@ def plot_burst_pair_peaks(
 ):
     """Plot peak amplitudes and timestamps for a list of unit pairs."""
     n_cols = 4
-    # squeeze=False keeps ``axes`` 2-D even for a single pair (otherwise
-    # ``plt.subplots(1, 4)`` returns a 1-D array and ``axes[ind, i]`` raises).
+    # squeeze=False keeps ``axes`` 2-D for a single pair.
     fig, axes = plt.subplots(
         len(pairs), n_cols, figsize=(12, 2 * len(pairs)), squeeze=False
     )
@@ -110,8 +109,7 @@ def plot_burst_pair_peaks(
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        # Cap at ``n_cols`` so a >4-channel (polymer/sparse) unit does not index
-        # past the column grid.
+        # Cap at n_cols for units with more than 4 channels.
         for i in range(min(peak1.shape[1], peak2.shape[1], n_cols)):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
@@ -292,14 +290,21 @@ def calculate_isi_violation(
 ) -> float:
     """Fraction of refractory violations in the merged two-unit spike train.
 
-    ``peak1`` / ``peak2`` are spike times in SECONDS; ``isi_threshold_ms`` is
-    the refractory window in MILLISECONDS. The v1 arg was named
-    ``isi_threshold_s`` despite being applied as ms via ``* 1e-3``; that name is
-    kept as a deprecated keyword-only alias (same value, same behavior) so
-    external callers do not break. Returns ``violations / total_spikes`` of the
-    concatenated train: low for a clean oversplit (merging recovers a
-    refractory train), higher for two distinct cells (merging manufactures
-    chance coincidences within the refractory window).
+    Low for an oversplit unit, higher for two distinct cells.
+
+    Parameters
+    ----------
+    peak1, peak2 : np.ndarray
+        Spike times in seconds.
+    isi_threshold_ms : float
+        Refractory window in milliseconds.
+    isi_threshold_s : float, optional
+        Deprecated alias of ``isi_threshold_ms``, also in milliseconds.
+
+    Returns
+    -------
+    float
+        ``violations / total_spikes``.
     """
     if isi_threshold_s is not None:
         import warnings

@@ -1,13 +1,7 @@
 """Modern SpikeInterface reads extractor folders written by SpikeInterface 0.99.
 
-Existing v0/v1 rows point at recording, sorting and waveform folders that
-SpikeInterface 0.99 wrote. The default install pins a newer SpikeInterface,
-so ``spyglass.spikesorting._si_compat`` has to read those folders across the
-API generation change. These tests load real 0.99-written folders (committed
-under ``fixtures/si099``; see its README) and compare what the modern
-SpikeInterface reads against what 0.99 itself read back when writing them.
-
-Runs in the main ``run-tests`` job (SpikeInterface 0.104).
+Loads the committed ``fixtures/si099`` folders and compares against what
+SI 0.99 read back when writing them.
 """
 
 from __future__ import annotations
@@ -28,9 +22,7 @@ if Version(si.__version__) < Version("0.101"):
 
 SI099_DIR = Path(__file__).parent / "fixtures" / "si099"
 
-# Written with ms_before = ms_after = 1.0 at the minirec sampling rate
-# (29959.314 Hz): SpikeInterface computes int(1.0 * fs / 1000) = 29 samples on
-# each side of the peak.
+# ms_before = ms_after = 1.0 at 29959.314 Hz: int(1.0 * fs / 1000) = 29.
 N_SPIKES_PER_UNIT = 20
 N_SIDE_SAMPLES = 29
 N_CHANNELS = 4
@@ -62,8 +54,7 @@ def test_load_extractor_reads_si099_recording(si099, reference):
     np.testing.assert_array_equal(
         recording.get_channel_ids(), reference["channel_ids"]
     )
-    # Absolute NWB timestamps, not frame / fs: v0 converts frames to seconds
-    # with get_times().
+    # v0 converts frames to seconds with get_times(), not frame / fs.
     assert recording.has_time_vector()
     np.testing.assert_array_equal(recording.get_times(), reference["times"])
 

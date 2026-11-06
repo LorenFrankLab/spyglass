@@ -103,9 +103,7 @@ def test_merge_get_firing_rate(spike_merge, pop_spike_merge, merge_times):
 def test_merge_close_nwb(spike_merge, pop_spike_merge):
     """close_nwb on a merge table releases through the source fetch_nwb read.
 
-    A merge master has no NWB foreign key, so inheriting
-    FetchMixin.close_nwb raised NotImplementedError before a release could
-    happen.
+    A merge master has no NWB foreign key of its own.
     """
     import spyglass.utils.nwb_helper_fn as helper
 
@@ -116,7 +114,6 @@ def test_merge_close_nwb(spike_merge, pop_spike_merge):
         return {p for p, (_, _, is_held) in cache._cache.items() if is_held}
 
     # The cache is process-wide, so ignore whatever other tests are holding.
-    # This call must also not raise -- that was the reported failure.
     restricted.close_nwb()
     before = held_paths()
 

@@ -1,8 +1,7 @@
 """Interval-set algebra shared by the v1 and v2 pipelines.
 
-Intervals are ``(start, stop)`` rows in seconds or frames. This module depends
-only on NumPy: it declares no ``dj.schema`` and imports no schema module, so
-database-free code can import it.
+Intervals are ``(start, stop)`` rows in seconds or frames. NumPy only, no
+schema imports.
 """
 
 from __future__ import annotations
@@ -13,11 +12,7 @@ import numpy as np
 def merge_sorted_intervals(intervals) -> list[list]:
     """Merge start-sorted ``(start, stop)`` rows that overlap or touch.
 
-    A row whose start is at or before the running stop extends it, so
-    touching rows (``start == previous stop``) merge too. Rows are taken as
-    given -- nothing is sorted, validated, or dropped, so a caller that must
-    discard empty rows filters them first -- and the values are not
-    converted, so integer frames stay ints and Python floats stay floats.
+    Rows are not sorted, validated, filtered, or type-converted.
 
     Parameters
     ----------
@@ -39,15 +34,9 @@ def merge_sorted_intervals(intervals) -> list[list]:
 
 
 def _normalize(intervals, *, merge=True):
-    """Sort by start, merge overlapping/adjacent/duplicate rows, drop
-    zero-length rows.
+    """Drop zero-length rows, sort by start, and merge overlaps.
 
-    Guards :func:`intersect_intervals` (and every intersection built on
-    it) against a caller-supplied interval set
-    that is unsorted or carries overlapping/duplicate rows -- notably the
-    identical-input fast path below, which would otherwise return duplicate
-    rows unchanged when both operands are identically duplicated. With
-    ``merge=False`` the rows are only filtered and sorted.
+    With ``merge=False`` the rows are only filtered and sorted.
     """
     intervals = np.asarray(intervals, dtype=float).reshape(-1, 2)
     intervals = intervals[intervals[:, 1] > intervals[:, 0]]
@@ -64,12 +53,9 @@ def _normalize(intervals, *, merge=True):
 def intersect_intervals(left, right, *, merge=True):
     """Intersect two interval sets, omitting zero-length overlaps.
 
-    Each operand is sorted and stripped of zero-length rows first. By
-    default its overlapping or touching rows are also merged, so the result
-    has no touching rows. With ``merge=False`` touching rows stay separate
-    and every shared edge survives in the result (e.g. ``[(0, 10)]`` with
-    ``[(0, 5), (5, 10)]`` gives both halves); each operand must then
-    already be disjoint.
+    Each operand is normalized first (see :func:`_normalize`). With
+    ``merge=False`` touching rows stay separate (``[(0, 10)]`` with
+    ``[(0, 5), (5, 10)]`` gives both halves); operands must then be disjoint.
     """
     left = _normalize(left, merge=merge)
     right = _normalize(right, merge=merge)

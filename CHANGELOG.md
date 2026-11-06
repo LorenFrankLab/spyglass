@@ -84,10 +84,10 @@ info.connection.query(
 
 #### SpikeInterface 0.104 and NumPy 2 (#1609)
 
-Spyglass now pins `spikeinterface==0.104.3` (was `>=0.99.1,<0.100`) and allows
-NumPy 2. Existing v0/v1 rows, and their saved recordings, sortings and
-binary-folder waveforms, stay readable under the new pin, including through
-`SpikeSortingOutput` and `SortedSpikesGroup`.
+Spyglass now pins `spikeinterface==0.104.3` and allows NumPy 2. Existing
+v0/v1 rows, and their saved recordings, sortings and binary-folder waveforms,
+stay readable under the new pin, including through `SpikeSortingOutput` and
+`SortedSpikesGroup`.
 
 These v0/v1 entry points raise `RuntimeError` under SpikeInterface 0.104 and
 must be run in the legacy environment:

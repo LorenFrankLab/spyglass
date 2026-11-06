@@ -301,12 +301,9 @@ def sanitize_nwb_object_name(name):
 def assert_safe_nwb_file_name(nwb_file_name: str) -> None:
     """Reject a caller-supplied NWB file name that is not a bare basename.
 
-    NWB file names are joined onto a base directory by naive string concat in
-    several places, so a name with a path separator, a ``..`` component, or an
-    absolute path could escape the intended directory. This is accident
-    prevention under the trusted-operator model -- it guards the filename
-    *acceptance* boundary, not the internal random-name generator -- so it must
-    not reject a legitimate basename.
+    NWB file names are joined onto a base directory by string concatenation,
+    so a path separator, ``..`` or an absolute path could escape it. Applied
+    where callers pass names in, not to generated names.
 
     Raises
     ------
@@ -645,12 +642,8 @@ def get_raw_eseries(nwbfile):
 def get_raw_eseries_path(nwb_file_path, object_id=None):
     """Return the in-file path of the raw acquisition ElectricalSeries.
 
-    The returned path (e.g. ``"acquisition/e-series"``) names the wideband
-    ``ElectricalSeries`` stored directly under ``acquisition`` -- the raw
-    recording that spike sorting operates on. Naming it lets SpikeInterface
-    disambiguate files that also store derived ``ElectricalSeries`` such as
-    LFP under ``processing`` (SpikeInterface >= 0.100 refuses to guess and
-    raises when more than one ``ElectricalSeries`` is present).
+    SpikeInterface >= 0.100 raises when a file holds more than one
+    ``ElectricalSeries`` (e.g. raw plus LFP) unless the path is named.
 
     Parameters
     ----------
@@ -682,10 +675,8 @@ def raw_eseries_path_and_timestamp_mode(
 ) -> tuple[str, bool]:
     """Return the raw ElectricalSeries' in-file path and timestamp mode.
 
-    Selects the series exactly as :func:`get_raw_eseries_path` does and also
-    reports whether it stores an explicit ``timestamps`` dataset. A rate-based
-    series stores ``starting_time`` + ``rate`` instead, so a reader does not
-    need to load a full time vector for it.
+    Selects the series as :func:`get_raw_eseries_path` does. A series without
+    explicit ``timestamps`` stores ``starting_time`` + ``rate`` instead.
 
     Parameters
     ----------
@@ -706,10 +697,7 @@ def raw_eseries_path_and_timestamp_mode(
     ValueError
         As :func:`get_raw_eseries_path`.
     """
-    # Read the file layout directly with h5py rather than ``get_nwb_file``: this
-    # stays a pure file inspection (no database, no pynwb namespace load), and
-    # the returned ``group/name`` path is exactly the backend path SpikeInterface
-    # matches ``electrical_series_path`` against.
+    # h5py avoids a DB/pynwb load and yields SI's electrical_series_path form
     import h5py
 
     def _attr(obj, key):

@@ -1,33 +1,14 @@
 """v1 clusterless amplitudes from the real ``UnitWaveformFeatures.populate``.
 
-Runs the v1 chain on the minirec session (recording -> no-op artifact
-detection -> ``clusterless_thresholder`` sort -> ``CurationV1`` -> merge ->
-``UnitWaveformFeatures``) under SpikeInterface 0.99, where the v0/v1
-``WaveformExtractor`` path lives, and checks each stored per-spike amplitude
-against the recording traces.
+Runs the v1 clusterless chain on minirec under SpikeInterface 0.99. The
+oracle is ``recording.get_traces(return_scaled=True)[frame, :]`` for interior
+spikes and zeros for edge spikes:
 
-What v1 stores as "amplitude" (feature row ``amplitude`` with
-``estimate_peak_time=False``, forced for ``clusterless_thresholder``):
-
-* ``UnitWaveformFeatures._fetch_waveform`` calls ``si.extract_waveforms`` on
-  ``SpikeSortingOutput.get_recording`` -- the filtered, referenced v1
-  ``SpikeSortingRecording`` NWB series, not whitened -- with SI's default
-  ``return_scaled=True``, so waveforms are ``gain * raw + offset``. The
-  minirec series is stored with gain 1 and offset 0, so this fixture cannot
-  tell scaled from unscaled samples.
-* ``_get_peak_amplitude`` returns ``waveforms[:, nbefore]``: every channel at
-  the spike frame, sign preserved (``peak_sign`` only matters when the peak
-  time is estimated).
-* SI 0.99 cuts ``nbefore = int(ms_before * fs / 1000)`` samples before the
-  spike and leaves spikes whose window crosses the recording edge as zeros.
-* Spike frames come from the stored spike times via ``np.searchsorted``
-  against the recording timestamps (``spike_times_to_valid_samples``).
-
-So the oracle is ``recording.get_traces(return_scaled=True)[frame, :]`` for
-interior spikes and zeros for edge spikes.
-
-Only the legacy spike-sorting job (SpikeInterface 0.99) collects
-``tests/spikesorting/v1``.
+- Waveforms are extracted, scaled and unwhitened, from the filtered,
+  referenced recording (minirec has gain 1, offset 0).
+- ``_get_peak_amplitude`` takes every channel at ``nbefore``, sign preserved.
+- SI 0.99 leaves spikes whose window crosses the recording edge as zeros.
+- Frames come from ``np.searchsorted`` against the recording timestamps.
 """
 
 import numpy as np

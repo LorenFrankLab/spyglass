@@ -519,26 +519,18 @@ class Export(SpyglassMixin, dj.Computed):
         )
 
     def _delete_superseded_exports(self, all_export_ids, max_export_id):
-        """Delete the part rows of already-exported, superseded ids.
+        """Delete part rows of exported ids superseded by ``max_export_id``.
 
-        For a paper's ``all_export_ids``, any id (other than ``max_export_id``)
-        that already has ``Table``/``File`` part rows is superseded by this
-        export; its parts are removed so it collapses to a null (master-only)
-        entry.
+        - ``Table`` rows are always removed.
+        - ``File`` rows are kept while a child table (e.g. DANDI validation)
+          still references them.
 
-        ``Table`` rows are always removed. ``File`` rows are removed only when
-        no downstream table still references them; DANDI validation and path
-        rows are provenance and must survive a re-export.
-
-        Returns the set of export ids processed as superseded.
+        Returns the set of superseded export ids.
         """
         processed_ids = set(
             list(self.Table.fetch("export_id"))
             + list(self.File.fetch("export_id"))
         )
-        # Parenthesize the difference: ``&`` binds tighter than ``-``, so the
-        # bare ``all - {max} & processed`` form computes ``all - ({max} &
-        # processed)`` and would consider unprocessed ids for deletion.
         overlap = (set(all_export_ids) - {max_export_id}) & processed_ids
         if overlap:
             logger.info(f"Overwriting export_ids {overlap}")
@@ -579,8 +571,7 @@ class Export(SpyglassMixin, dj.Computed):
             self.insert1(key)
             return
 
-        # If lesser, already-exported ids are present, delete their parts so
-        # they collapse to null (master-only) entries superseded by this export.
+        # Lesser, already-exported ids collapse to null entries
         self._delete_superseded_exports(all_export_ids, max_export_id)
 
         logger.debug(f"Building restr graph for {key['export_id']}")

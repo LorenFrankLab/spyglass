@@ -28,7 +28,7 @@ for path in sorted(Path("src/spyglass/").glob("**/*.py")):
     if rel_path.parts[:2] == ("spikesorting", "v2") and any(
         part.startswith("_") for part in rel_path.parts[2:]
     ):
-        # The v2 API map promises stability only for public import paths.
+        # Only public v2 import paths are stable API.
         continue
 
     # parts[0] is the src directory, ignore as of mkdocstrings-python 1.9.1

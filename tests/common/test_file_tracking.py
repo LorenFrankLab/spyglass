@@ -352,13 +352,10 @@ def test_check_path_deleted_file(file_tracking_module):
 def test_check_path_deleted_but_rebuilt_is_tracked(
     file_tracking_module, tmp_path
 ):
-    """A recompute-deleted file that is back on disk (an on-demand rebuild) is
-    NOT skipped -- a stale ``deleted=1`` flag must not hide a live, corrupt file.
-    """
+    """A deleted-flagged file that is back on disk is checked, not skipped."""
     f = tmp_path / "rebuilt.nwb"
     f.write_bytes(b"rebuilt-bytes")
-    # Present + flagged deleted + a MISMATCHED stored hash: the presence-aware
-    # skip falls through to checksum tracking instead of hiding the file.
+    # Present, flagged deleted, and with a mismatched stored hash.
     result = file_tracking_module._check_path(
         fname=str(f),
         analysis_file_name="rebuilt.nwb",

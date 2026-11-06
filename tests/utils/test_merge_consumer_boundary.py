@@ -1,21 +1,11 @@
 """Tests for ``_Merge.fetch_nwb`` across multiple merge source types.
 
-The behavior lives in the generic merge-table layer
-(``spyglass.utils.dj_merge_tables``) and is therefore exercised here, on a
-hermetic two-source merge table, rather than against any one pipeline's
-merge master. Two failure modes are guarded: a restriction spanning >=2
-source part types must not fail with a cryptic "Found N potential parents"
-from ``merge_get_parent``, and ``return_merge_ids`` must resolve each file's
-merge_id against the current source's files, not a cumulative ``nwb_list``.
-The contract:
+Uses a hermetic two-source merge table. The contract:
 
-  - ``multi_source=False`` (default) + a restriction spanning >1 source
-    raises before fetching unrelated parent tables.
-  - ``multi_source=True`` iterates source-by-source, scoping the parent
-    resolution to one source per loop, and returns ``len(merge_ids) ==
-    len(nwb_list)`` with each id the owner of its paired file.
-  - the single-source path (used by every real merge master) returns
-    aligned ``(nwb_list, merge_ids)``.
+- ``multi_source=False`` (default) raises on a restriction spanning >1 source.
+- ``multi_source=True`` iterates per source and returns one merge_id per file,
+  each the owner of its paired file.
+- The single-source path returns aligned ``(nwb_list, merge_ids)``.
 """
 
 from __future__ import annotations
@@ -30,16 +20,10 @@ from datajoint.errors import DataJointError
 
 @pytest.fixture(scope="module")
 def two_source_merge(dj_conn, mini_dict):
-    """A hermetic ``_Merge`` table with two distinct Nwbfile-backed sources.
+    """A hermetic ``_Merge`` table with two Nwbfile-backed sources.
 
-    ``LeafA`` and ``LeafB`` are two different part-table source types, each
-    pointing at the same already-ingested sample raw NWB file (so
-    ``fetch_nwb`` finds a real file on disk without building analysis
-    files). One row is inserted into each source, giving the merge master
-    the >=2 source types that the multi-source ``fetch_nwb`` path needs.
-
-    Yields a dict with the activated classes and the two merge_ids
-    (``merge_id_a`` owns the ``LeafA`` file, ``merge_id_b`` the ``LeafB``).
+    ``LeafA`` and ``LeafB`` each hold one row pointing at the sample raw NWB.
+    Yields a dict with the classes, ``merge_id_a`` and ``merge_id_b``.
     """
     from spyglass.common import Nwbfile
     from spyglass.utils import SpyglassMixin, _Merge
@@ -89,22 +73,15 @@ def two_source_merge(dj_conn, mini_dict):
         "LeafB": LeafB,
         "TwoSourceMerge": TwoSourceMerge,
     }
-    # NB: the schema name must NOT contain the merge master's table_name
-    # ("two_source_merge") as a substring. ``_merge_restrict_parents`` filters
-    # part-parents with ``cls().table_name not in parent.full_table_name``; a
-    # schema named e.g. "test_two_source_merge" embeds it and would wrongly
-    # exclude the leaf parents (real merge masters never collide because the
-    # schema name differs from the table name).
+    # Schema name must not contain the master's table_name:
+    # ``_merge_restrict_parents`` excludes parents by substring match.
     schema = dj.Schema(
         "test_merge_boundary", context=context, connection=dj_conn
     )
     for table in (LeafA, LeafB, TwoSourceMerge):
         schema(table)
 
-    # ``Merge.source_class_dict`` resolves each part's parent class via
-    # ``getattr(getmodule(self), part_name)``. The leaf classes are declared
-    # inside this fixture (per the conftest "declare within fixture" pattern),
-    # so expose them on this module for that lookup to succeed.
+    # ``source_class_dict`` looks up parents on the module, so expose them.
     import sys
 
     _mod = sys.modules[__name__]
@@ -153,7 +130,7 @@ def test_fetch_nwb_multi_source_raises_without_opt_in(two_source_merge):
 
 
 def test_fetch_nwb_has_no_disable_warning_kwarg():
-    """The removed warning escape hatch is absent from the public API."""
+    """``fetch_nwb`` takes no ``disable_warning`` argument."""
     from spyglass.utils.dj_merge_tables import _Merge
 
     params = inspect.signature(_Merge.fetch_nwb).parameters
@@ -176,9 +153,7 @@ def test_fetch_nwb_multi_source_aligned(two_source_merge):
 
     assert len(nwb_list) == 2
     assert len(merge_ids) == len(nwb_list)
-    # Each merge_id owns its paired file: the LeafA file pairs with
-    # merge_id_a, the LeafB file with merge_id_b (the two sources are
-    # distinguishable by which leaf-id key the fetched row carries).
+    # The leaf-id key in each fetched row identifies its source.
     for file, merge_id in zip(nwb_list, merge_ids):
         if "leaf_a_id" in file:
             assert merge_id == merge_id_a
@@ -194,21 +169,14 @@ def test_fetch_nwb_multi_source_aligned(two_source_merge):
 def test_fetch_nwb_parent_key_restriction_resolves_one_source(
     two_source_merge,
 ):
-    """A parent-key restriction that uniquely identifies one source resolves
-    to just that source -- it neither (default) raises "multiple sources" nor
-    (multi_source=True) leaks files from the other source.
+    """A parent-key restriction naming one source resolves to that source.
 
-    Source discovery must apply the FULL restriction through the parts;
-    ``extract_merge_id`` alone collapses a parent-key restriction to a
-    universal set and would surface every source.
+    ``extract_merge_id`` alone would collapse it and surface every source.
     """
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
 
-    # The restriction is passed as the fetch_nwb argument: a parent-key (here
-    # leaf_a_id) is not in the merge master's heading, so ``Merge & {...}``
-    # would silently drop it -- consumers pass it through ``fetch_nwb`` /
-    # ``get_restricted_merge_ids`` instead.
+    # Passed to fetch_nwb: ``Merge & {...}`` would drop a parent key.
 
     # Default (no multi_source): leaf_a_id picks LeafA only -> no raise.
     nwb_list, merge_ids = Merge().fetch_nwb(
@@ -230,13 +198,9 @@ def test_fetch_nwb_parent_key_restriction_resolves_one_source(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_string_parent_key_restriction(two_source_merge):
-    """A STRING restriction naming a parent key resolves like the dict form.
+    """A string restriction naming a parent key resolves like the dict form.
 
-    ``fetch_nwb`` documents accepting parent-attribute restrictions, but a
-    string (e.g. ``"leaf_a_id = 0"``) is un-introspectable, so it must NOT be
-    applied raw to the master (which has no ``leaf_a_id`` column) during source
-    discovery. It resolves to just the owning source, not a crash and not the
-    other source's file.
+    It must not be applied raw to the master, which lacks the column.
     """
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
@@ -252,12 +216,9 @@ def test_fetch_nwb_string_parent_key_restriction(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_string_unknown_column_raises(two_source_merge):
-    """A string restriction naming a column NO source's parent has re-raises the
-    original DataJointError -- a typo must not silently read as a no-match.
+    """A string restriction on a column no parent has raises DataJointError.
 
-    The string-restriction fallback probes each source; if the restriction is
-    evaluable against neither the master nor any source's parent, it re-raises
-    rather than returning an empty result (which would hide the typo).
+    A typo must not read as an empty result.
     """
     Merge = two_source_merge["Merge"]
     with pytest.raises(DataJointError):
@@ -267,9 +228,7 @@ def test_fetch_nwb_string_unknown_column_raises(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_string_valid_column_no_match_is_empty(two_source_merge):
-    """A string restriction on a REAL parent column that matches no rows returns
-    an empty result (not an error) -- the genuine-no-match case must stay empty
-    even though a typo'd column (above) raises."""
+    """A string restriction on a real parent column with no match is empty."""
     Merge = two_source_merge["Merge"]
     nwb_list, merge_ids = Merge().fetch_nwb(
         "leaf_a_id = 999999", return_merge_ids=True
@@ -281,10 +240,10 @@ def test_fetch_nwb_string_valid_column_no_match_is_empty(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_mixed_master_and_parent_restriction(two_source_merge):
-    """A restriction mixing a master column (merge_id) and a parent key
-    (leaf_a_id) resolves correctly -- the source whose parent lacks merge_id
-    must NOT be skipped (master and parent attributes are evaluated on the
-    master+part+parent relation, not all required on the parent)."""
+    """A restriction mixing merge_id and a parent key resolves correctly.
+
+    Attributes are evaluated on master * part * parent, not on the parent.
+    """
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
 
@@ -299,13 +258,9 @@ def test_fetch_nwb_mixed_master_and_parent_restriction(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_parent_secondary_restriction(two_source_merge):
-    """A restriction on a parent SECONDARY attribute (nwb_file_name -- not
-    propagated to the part heading) is applied through the part*parent join
-    for both discovery and the fetch, rather than being silently dropped.
+    """A parent secondary-attribute restriction applies through part * parent.
 
-    Both leaves point at the sample NWB, so it matches both sources; this
-    exercises the secondary-attribute path end-to-end (discovery, fetch, and
-    aligned merge_id resolution) under multi_source=True.
+    ``nwb_file_name`` is not in the part heading; here it matches both sources.
     """
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
@@ -330,10 +285,7 @@ def test_fetch_nwb_parent_secondary_restriction(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_source_plus_parent_restriction(two_source_merge):
-    """A restriction mixing the master ``source`` column with a parent
-    attribute resolves to that one source. Both leaves share the sample NWB,
-    so only the ``source`` clause distinguishes them -- it must be applied
-    (the discovery join includes the merge master)."""
+    """Master ``source`` plus a shared parent attribute selects one source."""
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
     nwb_file_name = two_source_merge["nwb_file_name"]
@@ -351,9 +303,7 @@ def test_fetch_nwb_source_plus_parent_restriction(two_source_merge):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_fetch_nwb_or_restriction_across_sources(two_source_merge):
-    """An OR-list of parent keys for DIFFERENT sources matches each branch
-    against its own source, rather than requiring every parent to carry every
-    attribute (which would return nothing)."""
+    """An OR-list of parent keys matches each branch against its own source."""
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
     merge_id_b = two_source_merge["merge_id_b"]
@@ -368,13 +318,7 @@ def test_fetch_nwb_or_restriction_across_sources(two_source_merge):
 
 
 def test_fetch_nwb_return_merge_ids_single_source_unchanged(two_source_merge):
-    """A single-source restriction returns aligned ``(nwb_list, merge_ids)``.
-
-    Scoping merge_id resolution to the current source must leave the
-    single-source path (the one every real merge master uses) returning
-    aligned results. This checks that preserved behavior; the multi-source
-    tests above check the per-source scoping itself.
-    """
+    """A single-source restriction returns aligned ``(nwb_list, merge_ids)``."""
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
 
@@ -389,10 +333,7 @@ def test_fetch_nwb_return_merge_ids_single_source_unchanged(two_source_merge):
 
 @pytest.fixture(scope="module")
 def same_file_two_row_source(dj_conn, mini_dict):
-    """A merge master whose single source has TWO rows pointing at the SAME NWB
-    file, so ``return_merge_ids`` alignment must key off the parent PK, not the
-    (shared) file or a widened source restriction.
-    """
+    """A merge master whose single source has two rows on the same NWB file."""
     from spyglass.common import Nwbfile
     from spyglass.utils import SpyglassMixin, _Merge
 
@@ -467,16 +408,9 @@ def same_file_two_row_source(dj_conn, mini_dict):
 def test_fetch_nwb_string_return_merge_ids_aligns_by_parent_pk(
     same_file_two_row_source,
 ):
-    """A string restriction + return_merge_ids resolves the CORRECT merge_id even
-    when two rows in the source share an NWB file.
-
-    The string fallback must align each file's merge_id by the parent PK (the
-    parent-attribute branch's method), not by the shared file against a widened
-    source restriction (``extract_merge_id(str) == True``) -- which would match
-    both rows and make fetch1 raise or mis-pick.
-    """
+    """A string restriction aligns merge_ids by parent PK, not by shared file."""
     Merge = same_file_two_row_source["Merge"]
-    # Precondition: the ambiguity is real -- two merge rows, one shared file.
+    # Precondition: two merge rows share one file.
     assert len(Merge()) == 2
 
     nwb_list, merge_ids = Merge().fetch_nwb(
@@ -491,15 +425,7 @@ def test_fetch_nwb_string_return_merge_ids_aligns_by_parent_pk(
 def test_fetch_nwb_warns_when_restriction_skips_a_source(
     two_source_merge, caplog
 ):
-    """A clause naming an attribute one parent lacks skips that source LOUDLY.
-
-    ``leaf_a_id`` exists only on ``LeafA``'s parent, so ``LeafB`` is dropped
-    from the search entirely. That is the right behavior for a multi-source
-    merge (the caller may legitimately be naming one source's key), but a
-    silent skip makes the returned list read as "all the files matching",
-    hiding a source the caller may have meant to include. The partial result
-    must therefore be accompanied by a warning naming the skipped source.
-    """
+    """A clause naming an attribute one parent lacks warns about the skip."""
     Merge = two_source_merge["Merge"]
     merge_id_a = two_source_merge["merge_id_a"]
 
@@ -508,7 +434,7 @@ def test_fetch_nwb_warns_when_restriction_skips_a_source(
             {"leaf_a_id": 0}, return_merge_ids=True
         )
 
-    # The matching source's file is still returned -- this warns, not raises.
+    # Warns, not raises: the matching file is still returned.
     assert len(nwb_list) == 1
     assert "leaf_a_id" in nwb_list[0]
     assert merge_ids == [merge_id_a]

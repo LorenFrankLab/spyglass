@@ -265,11 +265,9 @@ def fetch_nwb(*attrs, **kwargs):
 def get_child_references(table):
     """Get each child table projected to the attributes it shares with table.
 
-    Subtracting the list from ``table`` leaves rows no child references. Each
-    child is matched on every attribute name it shares with ``table``, as when
-    subtracting the child tables themselves, except an attribute that is
-    secondary in both: DataJoint refuses to join on that, so it is left out
-    and the remaining shared attributes decide the match.
+    ``table - get_child_references(table)`` leaves unreferenced rows.
+    Attributes secondary in both tables are dropped because DataJoint refuses
+    to join on them.
     """
     table = table() if inspect.isclass(table) else table
     parent_secondary = set(table.heading.secondary_attributes)

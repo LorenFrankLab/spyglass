@@ -1,14 +1,7 @@
 """v0/v1 waveform *reads* are not gated behind the legacy SpikeInterface env.
 
-The default install pins SpikeInterface 0.104. Waveform *extraction* still
-needs the 0.99 runtime and stays gated, but a waveform folder written earlier
-is readable under SpikeInterface 0.104 through
-``spyglass.spikesorting._si_compat.load_waveforms``. This module pins that
-split: the read paths return usable waveforms, and only the extraction branch
-raises the legacy-environment error.
-
-Runs in the main ``run-tests`` job (SI 0.104); under SI 0.99 there is no gate
-to exercise, so the tests skip.
+Saved waveform folders read under SI 0.104 via ``_si_compat.load_waveforms``;
+only extraction raises the legacy-environment error. Skipped under SI 0.99.
 """
 
 from __future__ import annotations
@@ -51,11 +44,7 @@ def test_v0_load_waveforms_not_gated(dj_conn, monkeypatch, written_waveforms):
 
 
 class _FakeMetricCurationQuery:
-    """Stand-in for ``(MetricCurationSelection & key) * WaveformParameters``.
-
-    ``get_waveforms`` needs exactly the surface implemented here on the
-    cached-read path: a length of one and ``fetch1("waveform_params")``.
-    """
+    """Stand-in for ``(MetricCurationSelection & key) * WaveformParameters``."""
 
     def __init__(self, waveform_params: dict):
         self._waveform_params = waveform_params

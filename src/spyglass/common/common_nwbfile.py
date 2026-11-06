@@ -174,9 +174,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        # Confine the caller-supplied name to a bare basename before the naive
-        # ``raw_dir + "/" + nwb_file_name`` join below, so a separator / ``..`` /
-        # absolute path cannot escape the raw-data directory.
         assert_safe_nwb_file_name(nwb_file_name)
         file_path = raw_dir + "/" + nwb_file_name
         if new_file:

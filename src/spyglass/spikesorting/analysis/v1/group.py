@@ -93,11 +93,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         """
 
     class UnitSelection(SpyglassMixinPart):
-        """Frozen membership, including an explicitly empty selection.
+        """Unit membership frozen at group creation; may be empty.
 
-        Groups without these rows evaluate UnitSelectionParams against their
-        NWB columns each time spikes are fetched. A snapshot records the decision made at
-        group creation, so later recipe edits cannot change a population.
+        Groups without these rows apply UnitSelectionParams at each fetch.
         """
 
         definition = """
@@ -130,11 +128,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 f"Group {nwb_file_name}: {group_name} already exists "
                 + "please delete the group before creating a new one",
             )
-        # Consumer-boundary guard: refuse to build a group from v2 preview
-        # (apply_merge=False) curations or from multiple curations of one sort
-        # (which would double-count units in the decode). No-op for v0/v1.
-        # Runs AFTER the existing-group short-circuit -- an existing group is a
-        # no-op and never processes ``keys``, so they must not be validated here.
+        # Validate only new groups; an existing group ignores ``keys``.
         merge_ids = [
             k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys
         ]
@@ -313,9 +307,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
-        # A group may span multiple SpikeSortingOutput source parts (e.g.
-        # CurationV1 + CurationV2); multi_source=True fetches across them with
-        # each merge_id aligned to its file.
+        # A group may span source parts (e.g. CurationV1 and CurationV2).
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
             return_merge_ids=True, multi_source=True
         )
@@ -328,9 +320,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 continue
 
             units_df = nwb_file[nwb_field_name]
-            # A zero-unit sorting or curation (v1 or v2) has a real, empty
-            # Units table but no ``spike_times`` column. It contributes no
-            # units to the group.
+            # A zero-unit sorting has an empty Units table without spike_times.
             if "spike_times" not in units_df:
                 continue
 
@@ -364,14 +354,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     ),
                     None,
                 )
-                # NOTE: the ``not test_mode`` guard is load-bearing. The shared
-                # base-env test fixtures build ``default_exclusion`` groups
-                # (exclude ``noise``/``mua``) over curations whose units carry
-                # those labels, so running the filter under pytest would empty
-                # the group and break ``test_fetch_data`` / sorted-spikes
-                # decoding (np.concatenate on []). Filtering is exercised
-                # directly via ``test_filter_units`` instead. The guard was
-                # added for this reason in PR #1209.
+                # Skipped in test_mode: it would empty the shared fixtures'
+                # default_exclusion groups. test_filter_units covers it.
                 if group_col is not None:
                     if not test_mode:
                         include_unit &= SortedSpikesGroup.filter_units(
@@ -380,15 +364,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                             exclude_labels,
                         )
                 else:
-                    # An all-unlabeled curated NWB omits the label column, so the
-                    # filter above is skipped and an include-only selection would
-                    # wrongly return ALL units. Synthesize empty per-unit label
-                    # lists so the filter still applies: include-only -> no units,
-                    # exclude-only -> all units. This runs regardless of test_mode
-                    # -- unlike the column-present path, an exclude filter over
-                    # empty labels keeps EVERY unit, so it cannot empty the shared
-                    # default_exclusion fixtures (whose units carry labels in a
-                    # present column, handled above).
+                    # Unlabeled curations omit the label column. Filter on
+                    # empty labels so an include-only selection returns none.
                     include_filter = (
                         list(include_labels)
                         if include_labels is not None
@@ -448,11 +425,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     def get_observation_intervals(cls, key, *, unit_ids=None):
         """Common usable time for the frozen population, in session seconds.
 
-        Only selected units contribute restrictions. Members without an
-        observation snapshot contribute no restriction and are listed as
-        unknown.
-        Pass identities from ``fetch_spike_data(return_unit_ids=True)`` when
-        already loaded, to avoid reading legacy spike data a second time.
+        Members without an observation snapshot add no restriction and are
+        listed as unknown. Pass ``unit_ids`` from
+        ``fetch_spike_data(return_unit_ids=True)`` to avoid a second read.
         """
         from spyglass.spikesorting._observed_time import (
             population_availability,
@@ -636,14 +611,8 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
 
 
 def _get_nwb_unit_ids(nwb_file, nwb_field_name) -> list[int]:
-    """Return the NWB units table's unit_id list (true ids, not positional).
+    """Return the NWB units table's ids, not positions.
 
-    v2 merge-applied sortings produce sparse unit_id sets (the kept
-    unit retains the head id, contributors disappear from the keep
-    set); any caller mapping a positional index back to a unit_id
-    would mis-label them. The DataFrame returned by
-    ``SpyglassMixin.fetch_nwb`` is indexed by the NWB ``id``
-    column for both v1 and v2 writers, so this helper centralizes
-    the "read the true ids" idiom.
+    Merged sortings have sparse ids, so positions do not map to ids.
     """
     return [int(uid) for uid in nwb_file[nwb_field_name].index]

@@ -1,8 +1,6 @@
-"""Label-based unit filtering shared by ``SortedSpikesGroup`` and the v2 handoff.
+"""Unit filtering shared by ``SortedSpikesGroup`` and the v2 handoff.
 
-DB-free: ``SortedSpikesGroup.filter_units`` delegates here so the v2
-``select_units_for_analysis`` receipt can compute its verdicts with the exact
-function ``fetch_spike_data`` applies, without importing the schema module.
+No schema imports, so v2 can apply the same filter as ``fetch_spike_data``.
 """
 
 from __future__ import annotations
@@ -191,8 +189,7 @@ def filter_units_by_criteria(
         values = units_df[column].to_numpy()
         present = units_df[column].notna().to_numpy(dtype=bool)
         include_mask &= present
-        # Nullable pandas scalars cannot participate in NumPy comparisons.
-        # Evaluate only present values; missing evidence fails every operator.
+        # pd.NA breaks NumPy comparisons; missing values fail every operator.
         values = values[present]
 
         for operator, value in criterion.items():

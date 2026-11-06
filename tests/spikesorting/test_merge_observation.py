@@ -339,11 +339,9 @@ def test_merge_firing_rate_splits_a_jump_with_every_bin_observed(
 def test_merge_observation_failure_names_the_merge(
     merge_table, plant_members, monkeypatch
 ):
-    """An unreadable recording raises a message pointing somewhere useful.
+    """An unreadable recording raises, naming the merge and the alternative.
 
-    Reporting full coverage instead would hide exactly the defect the
-    observed-time contract exists to catch, so the read still raises -- but
-    it names the merge and the snapshot-backed alternative.
+    Reporting full coverage would hide the defect this contract catches.
     """
     from spyglass.spikesorting.v2._storage import (
         observation_io as _observation_io,

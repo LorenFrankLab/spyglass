@@ -218,8 +218,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         self, key: dict, recording_path, artifact_times, sorter, sorter_params
     ):
         """Compute method to run spike sorting and save the results."""
-        # SpikeInterface 0.101+ run_sorter rejects the output_folder argument
-        # used below. Peak detection for clusterless_thresholder still works.
+        # Only run_sorter needs legacy SI (rejects output_folder in 0.101+).
         if sorter != "clusterless_thresholder":
             _require_legacy_si_environment("v0 SpikeSorting.make")
         recording = _si_compat.load_extractor(recording_path)

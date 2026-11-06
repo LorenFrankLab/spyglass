@@ -75,24 +75,13 @@ def decode_v1(common, trodes_pos_v1):
 # ============================================================================
 # Synthetic, SpikeInterface-version-agnostic spike fixtures
 # ============================================================================
-# The legacy v1 spikesorting pipeline (SpikeSorting -> CurationV1 -> waveform
-# extraction) uses SpikeInterface APIs removed in SI >= 0.101, which produces
-# setup ERRORs under the SI 0.104 CI job. These fixtures synthesize the
-# decoding inputs directly on the minirec session (which already carries Trodes
-# position) so the decoding tests run under ANY SI version. minirec supplies
-# position; we synthesize the spikes. Everything keys off the single minirec
-# ``nwb_file_name`` so the decoding selections' same-session FKs hold.
+# - Synthetic spikes on minirec (which supplies position), so decoding tests
+#   do not need the v1 sorting pipeline (SI < 0.101 only).
 
 
 @pytest.fixture(scope="session")
 def synthetic_spike_window(common, mini_dict, pos_interval, decode_interval):
-    """Time window that lies inside BOTH the encoding and decoding intervals.
-
-    Synthetic spike times must fall inside the encoding interval
-    (``pos_interval``) and the decoding interval (``decode_interval``) so they
-    survive ``fetch_spike_data``'s interval filtering. Return the overlap
-    ``[max(starts), min(ends)]`` of the two intervals' valid_times.
-    """
+    """``(start, end)`` overlap of the encoding and decoding intervals."""
     enc = (
         common.IntervalList & {**mini_dict, "interval_list_name": pos_interval}
     ).fetch1("valid_times")
@@ -110,21 +99,9 @@ def synthetic_spike_window(common, mini_dict, pos_interval, decode_interval):
 def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
     """Synthetic ImportedSpikeSorting -> SpikeSortingOutput merge_id on minirec.
 
-    Appends a single synthetic ``units`` table (one unit, id 0) to the
-    already-registered minirec ``_`` copy on disk, reconciles the DataJoint
-    ``filepath@raw`` external checksum to the modified file, then ingests it via
-    ``ImportedSpikeSorting.insert_from_nwbfile``. That method already runs
-    ``SpikeSortingOutput._merge_insert``, so the merge_id is available from the
-    merge part table.
-
-    External-store checksum: ``ImportedSpikeSorting.fetch_nwb`` resolves the
-    raw file through the external store (``download_filepath``), which checks
-    the stored ``size``/``contents_hash`` against the on-disk file. Appending
-    units changes both, so the fixture edits the file in place and then
-    updates the external row to match. ``Nwbfile.get_abs_path`` (used by the
-    position reads) builds the path from ``raw_dir + name`` and never touches
-    the external store, so position reads are unaffected and the units need not
-    be written before the file is registered.
+    Appends one unit (id 0) to the registered minirec file, updates the
+    ``filepath@raw`` external checksum to match, then ingests it via
+    ``ImportedSpikeSorting.insert_from_nwbfile``.
     """
     import os
     import shutil
@@ -141,34 +118,16 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
     nwb_file_name = mini_dict["nwb_file_name"]
     start, end = synthetic_spike_window
 
-    # 30 spikes evenly spaced inside the overlap window (margin off the edges)
     margin = 0.05 * (end - start)
     spike_times = np.linspace(start + margin, end - margin, 30)
 
     abs_path = Nwbfile.get_abs_path(nwb_file_name)
 
-    # The registered ``_`` copy is the SHARED minirec session file. Under the
-    # full test suite other session-scoped fixtures hold it open read-only for
-    # the whole session -- not Spyglass's own cached handles (those are closed
-    # below), but handles OUTSIDE that cache: e.g. the LFP/analysis ``*_raw``
-    # fixtures ``yield`` an nwbfile inside ``with NWBHDF5IO(...)`` and those
-    # analysis files HDF5-external-link the raw ephys, so the open handle
-    # transitively holds this file. HDF5 refuses to open a file ``mode="a"``
-    # while it is open ``"r"`` in the same process, so appending IN PLACE
-    # deadlocks ("file is already open for read-only") -- only under the full
-    # suite, not when the decoding tests run alone, which is why it slipped
-    # through. ``close_nwb_files`` cannot help (the leaked handle is not in its
-    # cache, and the holder keeps a live reference so it will not be GC'd).
-    #
-    # Fix: append the synthetic units to a fresh COPY and atomically swap it in.
-    # The copy has no open handle so ``mode="a"`` always succeeds; ``os.replace``
-    # is atomic on the same filesystem and does not disturb any reader still
-    # holding the old inode.
-    close_nwb_files()  # release Spyglass's own cached handles (best-effort)
+    # Other fixtures hold this file open read-only, so HDF5 refuses mode="a".
+    # Append to a copy and swap it in with os.replace.
+    close_nwb_files()
 
-    # Idempotent across --no-teardown reruns where the persistent file already
-    # carries the synthetic units. A read-only probe is safe even when another
-    # handle holds the file open read-only (concurrent read opens are allowed).
+    # Skip if a --no-teardown rerun already added the units.
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         already_has_units = getattr(io.read(), "units", None) is not None
 
@@ -189,9 +148,7 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
             Path(tmp_path).unlink(missing_ok=True)
     close_nwb_files()
 
-    # Reconcile the external ``filepath@raw`` row to the current on-disk file.
-    # Done unconditionally so a prior partial run (units appended but external
-    # row not yet refreshed) is also healed before ingestion reads the file.
+    # Unconditional, so a partial earlier run is also repaired.
     ext = nwbfile_schema.external["raw"]
     ext_key = (ext & 'filepath = "%s"' % Path(abs_path).name).fetch1("KEY")
     ext.update1(
@@ -202,8 +159,7 @@ def imported_merge_id(common, mini_dict, mini_insert, synthetic_spike_window):
         }
     )
 
-    # Idempotent across --no-teardown reruns: ``insert_from_nwbfile`` inserts
-    # with ``skip_duplicates=False`` and would raise on a pre-existing row.
+    # ``insert_from_nwbfile`` raises on an existing row (--no-teardown reruns).
     if not (ImportedSpikeSorting & mini_dict):
         ImportedSpikeSorting().insert_from_nwbfile(nwb_file_name)
 
@@ -249,12 +205,7 @@ def waveform_params(waveform_params_tbl):
 
 @pytest.fixture(scope="session")
 def clusterless_params():
-    """No-op restriction.
-
-    With the synthetic pipeline there is no sorter parameter set to restrict
-    on; the merge_id comes from ``imported_merge_id`` instead. Kept (yielding
-    ``{}``) so dependent fixtures/keys that spread it stay valid.
-    """
+    """Empty restriction, kept for fixtures that spread it."""
     yield {}
 
 
@@ -268,12 +219,8 @@ def clusterless_mergeids(imported_merge_id):
 def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids, mini_dict):
     """Direct-insert synthetic ``UnitWaveformFeatures`` rows (no populate).
 
-    Reuses the production writer ``_write_waveform_features_to_nwb`` to build a
-    units table carrying ``spike_times`` plus an ``amplitude`` feature of shape
-    ``(n_spikes, 3)``, then inserts the selection + computed rows directly (a
-    fixture shortcut for ``UnitWaveformFeatures.make``). Avoids all SI waveform
-    extraction so this works under any SI version. Exactly one merge_id, one
-    feature row, one unit (id 0) -> clusterless group resolves to a single unit.
+    Uses the production writer with an ``amplitude`` feature of shape
+    ``(n_spikes, 3)``, skipping SI waveform extraction. One unit (id 0).
     """
     import pandas as pd
 
@@ -287,9 +234,7 @@ def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids, mini_dict):
     nwb_file_name = mini_dict["nwb_file_name"]
 
     class _StubWaveforms:
-        """Minimal ``waveforms`` surface used by the writer when features are
-        supplied: only ``.sorting.get_unit_ids()`` is read (the SI waveform
-        extraction path is not entered)."""
+        """Writer reads only ``.sorting.get_unit_ids()`` when given features."""
 
         class _Sorting:
             @staticmethod
@@ -300,8 +245,7 @@ def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids, mini_dict):
 
     sel_keys = []
     for merge_id in clusterless_mergeids:
-        # Read this unit's spike_times back from the synthetic units table so
-        # the feature rows align 1:1 with the persisted spikes.
+        # Align feature rows 1:1 with the stored spikes.
         nwb_file = (SpikeSortingOutput & {"merge_id": merge_id}).fetch_nwb()[0]
         unit_field = "object_id" if "object_id" in nwb_file else "units"
         unit_spike_times = np.asarray(
@@ -309,11 +253,7 @@ def pop_unitwave(decode_v1, waveform_params, clusterless_mergeids, mini_dict):
         )
         n_spikes = len(unit_spike_times)
 
-        # ``_write_waveform_features_to_nwb`` calls ``spike_times.loc[unit_id]``
-        # and expects the per-unit spike array back. Production passes
-        # ``units["spike_times"]`` -- a pandas *Series* indexed by unit_id whose
-        # cells are 1D arrays -- so mirror that (a DataFrame would yield a
-        # Series row and break ``add_unit``).
+        # The writer expects a Series indexed by unit_id, as in production.
         spike_times_df = pd.Series({0: unit_spike_times}, name="spike_times")
         waveform_features = {
             "amplitude": {
@@ -372,13 +312,9 @@ def group_unitwave(
 
 @pytest.fixture(scope="session")
 def pop_spikes_group(group_name, mini_dict, imported_merge_id):
-    """Build the sorted ``SortedSpikesGroup`` from the synthetic merge_id.
+    """Build the ``SortedSpikesGroup`` from the synthetic merge_id.
 
-    Shadows the root SI-pipeline ``pop_spikes_group`` (tests/conftest.py),
-    which is built on ``pop_spike_merge`` (CurationV1 -> SI waveform path) and
-    errors under SI >= 0.101. The root chain is left untouched for the
-    spikesorting suite; this override only changes how the decoding suite's
-    sorted group is sourced.
+    Shadows the root ``pop_spikes_group``, which needs SI < 0.101.
     """
     from spyglass.spikesorting.analysis.v1 import group as spike_v1_group
 
@@ -475,11 +411,7 @@ def decode_clusterless_params_insert(decode_v1, track_graph):
 @pytest.fixture(scope="session")
 def decode_interval(common, mini_dict):
     decode_interval_name = "decode"
-    # Restrict to THIS session's NWB. A bare ``interval_list_name LIKE
-    # "raw%"`` matches every session's raw interval, so on a shared DB that
-    # also holds other suites' sessions (e.g. the spikesorting-v2 mearec
-    # smoke sessions) ``fetch1`` would see multiple ``raw data valid times``
-    # rows and raise "3 tuples found".
+    # Restrict to this session: a shared DB holds other sessions' raw rows.
     raw_begin = (
         common.IntervalList & mini_dict & 'interval_list_name LIKE "raw%"'
     ).fetch1("valid_times")[0][0]
@@ -745,11 +677,8 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     # n_state_bins is the product of position bins and states
     n_state_bins = n_position_bins * n_states
 
-    # ``state_bins`` is a ``(state, position)`` MultiIndex in
-    # non_local_detector output. Build it explicitly (state-major to match the
-    # posterior block layout below) so consumers that ``unstack("state_bins")``
-    # -- e.g. ``DecodingOutput.create_decoding_view`` -- get back ``state`` and
-    # ``position`` dimensions. A plain integer coordinate cannot be unstacked.
+    # State-major ``(state, position)`` MultiIndex, as in non_local_detector,
+    # so ``unstack("state_bins")`` works.
     state_per_bin = np.repeat(state_names, n_position_bins)
     position_per_bin = np.tile(np.arange(n_position_bins), n_states)
     state_bins_index = pd.MultiIndex.from_arrays(
@@ -780,7 +709,6 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         posterior[t] /= posterior[t].sum()
 
     # Create results matching non_local_detector output structure
-    # Primary dimensions: time, state_bins (a (state, position) MultiIndex).
     results = xr.Dataset(
         {
             "acausal_posterior": (["time", "state_bins"], posterior),
@@ -788,15 +716,11 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         },
         coords={"time": time},
     )
-    # Attach the (state, position) MultiIndex on state_bins. Modern xarray
-    # requires building it via ``Coordinates.from_pandas_multiindex`` rather
-    # than passing a raw ``pd.MultiIndex`` into the coords dict.
+    # xarray needs ``from_pandas_multiindex``, not a raw pd.MultiIndex.
     results = results.assign_coords(
         xr.Coordinates.from_pandas_multiindex(state_bins_index, "state_bins")
     )
-    # Keep the separate ``states`` coordinate (state names) that the
-    # ``result_coordinates`` contract expects; ``state`` (singular) above is a
-    # MultiIndex level, distinct from this ``states`` dimension coord.
+    # ``states`` is required by ``result_coordinates``; distinct from ``state``.
     results = results.assign_coords(states=("states", state_names))
 
     return results

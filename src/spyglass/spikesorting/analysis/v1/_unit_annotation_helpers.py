@@ -1,8 +1,7 @@
 """DB-free helpers for ``UnitAnnotation`` spike selection.
 
-Isolated from :mod:`unit_annotation` (which activates a DataJoint schema on
-import) so the per-id validation is unit-testable without a database or the
-JAX-dependent v1 integration fixture. Imports only the standard library.
+Kept apart from :mod:`unit_annotation`, which activates a schema on import,
+so it is testable without a database.
 """
 
 from __future__ import annotations
@@ -11,16 +10,10 @@ from __future__ import annotations
 def spikes_for_requested_units(
     unit_id_to_spike_times: dict, requested_unit_ids, merge_id
 ) -> list:
-    """Select spike-time arrays for ``requested_unit_ids`` by TRUE unit id.
+    """Select spike-time arrays for ``requested_unit_ids`` by NWB unit id.
 
-    ``UnitAnnotation.unit_id`` is the NWB units-table id, not a positional index
-    into the spike-times list: positional indexing is wrong for the sparse /
-    non-contiguous id sets that v2 and merge-applied v0/v1 curations produce (a
-    v1 merge assigns ``max(ids)+1`` and drops constituents). This looks each
-    requested id up in the true-id -> spike-times map and raises an actionable
-    error -- naming the valid ids and explaining that ``unit_id`` is a true id,
-    not a position -- instead of a bare ``KeyError`` when a row written under
-    the older positional contract misses on such a curation.
+    ``UnitAnnotation.unit_id`` is the NWB units-table id, not a position.
+    Merged curations have sparse ids, so a positional id may be missing.
 
     Parameters
     ----------

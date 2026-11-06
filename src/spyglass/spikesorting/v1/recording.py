@@ -597,9 +597,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - apply referencing depending on the option chosen by the user
         # - apply bandpass filter
         # - set probe to recording
-        # Read the raw acquisition series explicitly: the source NWB may also
-        # hold derived ElectricalSeries (e.g. LFP), which SpikeInterface >=
-        # 0.100 refuses to disambiguate on its own.
         recording = read_raw_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )

@@ -24,9 +24,7 @@ def firing_rate_from_spike_indicator(
     if multiunit:
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
     if spike_indicator.shape[1] == 0:
-        # Zero-unit group (e.g. a v2 require_units=False curation, or all
-        # units label-filtered out): there is nothing to stack, so return an
-        # empty-but-shaped rate instead of letting np.stack([]) raise.
+        # Zero-unit group: np.stack([]) would raise
         return np.zeros((spike_indicator.shape[0], 0))
     return np.stack(
         [
@@ -48,10 +46,8 @@ def contiguous_observed_runs(
 ) -> list[np.ndarray]:
     """Split observed samples into maximal contiguous runs.
 
-    A run ends where the next sample is unobserved or where the timestamps
-    jump by more than 1.5 sample periods, so no run spans time the units were
-    not observed over. Smoothing or event detection applied per run therefore
-    never carries information across a gap.
+    A run ends at an unobserved sample or a timestamp jump over 1.5 sample
+    periods, so per-run processing never crosses a gap.
 
     Parameters
     ----------
@@ -90,13 +86,9 @@ def firing_rate_over_runs(
     multiunit: bool = False,
     smoothing_sigma: float = 0.015,
 ) -> np.ndarray:
-    """Smooth spike counts within each contiguous observed run.
+    """Smooth spike counts within each run from ``contiguous_observed_runs``.
 
-    Every sample outside the given runs holds ``np.nan``: it is time the
-    units were not observed over, or time the clock skipped, so no rate is
-    defined there and none is carried across it. Pass the runs from
-    ``contiguous_observed_runs`` so the smoothing splits wherever that
-    splitter says a run ends.
+    Samples outside ``runs`` are ``np.nan``.
 
     Parameters
     ----------
@@ -147,11 +139,8 @@ def observed_spike_indicator(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Bin each unit's spikes over the population's observed time.
 
-    Bins that any contributing unit was not observed over hold ``np.nan``,
-    not a zero count: an unobserved bin is missing evidence, not evidence of
-    silence. Spikes are counted only inside the population's common observed
-    time, so a spike a single unit happened to observe cannot enter a bin
-    the population did not.
+    - Bins any unit was not observed over are ``np.nan``, not zero.
+    - Only spikes inside the population's common observed time are counted.
 
     Parameters
     ----------
@@ -202,10 +191,7 @@ def firing_rate_over_observed_runs(
 ) -> np.ndarray:
     """Smooth spike counts within each contiguous observed run of ``time``.
 
-    Runs come from ``contiguous_observed_runs``, which ends a run at a
-    timestamp jump as well as at an unobserved sample, so no rate is carried
-    across unobserved time or across a discontinuous time axis even when
-    every bin is observed. The MUA detector splits runs the same way.
+    Runs split at unobserved bins and at timestamp jumps, as in MUA detection.
 
     Parameters
     ----------

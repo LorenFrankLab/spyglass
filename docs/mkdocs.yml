@@ -105,9 +105,11 @@ nav:
     - Understanding a Schema: ForDevelopers/Schema.md
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Spike Sorting v2 Architecture: ForDevelopers/SpikeSortingV2Architecture.md
+    - Spike Sorting v2 in Shared Code: ForDevelopers/SpikeSortingV2SharedCode.md
     - Using NWB: ForDevelopers/UsingNWB.md
     - File Backends: ForDevelopers/FileBackends.md
     - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
+    - Dependency Pins: ForDevelopers/Dependencies.md
   - Fixing Bugs:
     - Overview: FixingBugs/index.md
     - Label Repair (#1513): FixingBugs/LabelRepair.md

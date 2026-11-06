@@ -487,9 +487,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         Returns
         -------
         we : WaveformExtractor or MockWaveformExtractor
-            SpikeInterface 0.99 returns a ``WaveformExtractor`` while 0.101 and
-            later return a ``MockWaveformExtractor`` over the same saved
-            folder, so the read works under either installed generation.
+            ``MockWaveformExtractor`` under SpikeInterface 0.101+.
         """
         we_path = self._get_waveform_path(key)
         we = _si_compat.load_waveforms(we_path)
@@ -582,8 +580,7 @@ class MetricParameters(SpyglassMixin, dj.Manual):
             if metric in self.available_metrics:
                 func = _metric_name_to_func[metric]
                 if func is None:
-                    # The metric's SpikeInterface callable is absent on this SI
-                    # version; report it rather than crash on ``None.__doc__``.
+                    # Callable is absent on this SpikeInterface version.
                     logger.info(
                         f"{metric} : (unavailable on this SpikeInterface)\n"
                     )
@@ -843,10 +840,7 @@ def _get_num_spikes(
     return cluster_spikes
 
 
-# Quality-metric callables are resolved lazily so this module imports under
-# SpikeInterface 0.104, which renamed/removed some legacy entry points. v0
-# metric computation only runs under SI 0.99; any missing entries surface as a
-# clear error only when the metric is actually invoked.
+# getattr lets this module import under SI 0.104; missing metrics are None.
 _metric_name_to_func = {
     "snr": getattr(sq, "compute_snrs", None),
     "isi_violation": _compute_isi_violation_fractions,

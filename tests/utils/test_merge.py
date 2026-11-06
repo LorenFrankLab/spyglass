@@ -88,10 +88,6 @@ def test_merge_get_class(merge_table):
 
 
 def test_merge_get_class_invalid(spike_merge):
-    # merge_get_parent_class resolves a source name against the merge table's
-    # static part definitions, so no populated rows are needed. Do NOT depend
-    # on pop_spike_merge: it runs the v1 spikesorting pipeline, which uses
-    # SpikeInterface APIs removed in SI >= 0.101 and so fails under the SI
-    # 0.104 run-tests job.
+    # No populated rows needed; pop_spike_merge would require SI < 0.101.
     ret = spike_merge.merge_get_parent_class("bad")
     assert ret is None, "Should return None for invalid part name."

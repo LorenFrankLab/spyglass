@@ -15,9 +15,7 @@ from spyglass.utils.nwb_helper_fn import (
 def _nwbfile_with_optional_lfp(with_lfp, acquisition_names=("e-series",)):
     """NWBFile with a raw acquisition ElectricalSeries (+ optional LFP).
 
-    The raw series ``e-series`` lives under ``acquisition``; when ``with_lfp``
-    is True a second ElectricalSeries is added under
-    ``processing/ecephys/LFP``, mirroring a real raw NWB that also stores LFP.
+    With ``with_lfp``, a second series is added under ``processing/ecephys``.
     """
     nwbfile = pynwb.NWBFile(
         session_description="d",
@@ -72,10 +70,8 @@ def _nwbfile_with_optional_lfp(with_lfp, acquisition_names=("e-series",)):
 def test_get_raw_eseries_path_selects_acquisition(tmp_path, with_lfp):
     """Resolves the raw acquisition series even when an LFP series is present.
 
-    This is the path threaded to ``read_nwb_recording`` so spike sorting reads
-    the wideband recording. SpikeInterface >= 0.100 raises on a multi-series
-    file unless the series is named, so the LFP case is the one that checks
-    the series is selected by name.
+    SpikeInterface >= 0.100 raises on a multi-series file unless the series
+    is named.
     """
     path = tmp_path / "rec.nwb"
     with pynwb.NWBHDF5IO(str(path), "w") as io:

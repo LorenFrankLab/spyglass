@@ -1,8 +1,4 @@
-"""Whole-recording timestamps shared by the v0, v1, and v2 pipelines.
-
-This module depends only on NumPy: it declares no ``dj.schema`` and imports no
-schema module, so database-free code can import it.
-"""
+"""Whole-recording timestamps shared by the v0, v1, and v2 pipelines."""
 
 import numpy as np
 
@@ -10,9 +6,7 @@ import numpy as np
 def _get_recording_timestamps(recording):
     """Return the timestamps of every segment of ``recording``, concatenated.
 
-    ``recording.get_times()`` returns only one segment's times, so a
-    multi-segment recording is stitched into a single ``(total_frames,)``
-    float64 array. A single-segment recording returns ``get_times()``.
+    ``recording.get_times()`` returns only one segment's times.
 
     Parameters
     ----------

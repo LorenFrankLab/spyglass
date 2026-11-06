@@ -344,10 +344,10 @@ def test_intersect_export_populate(populate_intersect_export, common):
 
 
 def test_reexport_deletes_unreferenced_files(common, teardown):
-    """A superseded export's parts are fully removed -- its ``Export.File``
-    rows as well as its ``Export.Table`` rows -- and only the *processed*
-    lesser ids are considered superseded (the overlap set-precedence is
-    correct)."""
+    """Superseded exports lose both File and Table parts.
+
+    Only processed lesser ids count as superseded.
+    """
     from spyglass.common.common_usage import Export, ExportSelection
 
     sel, export = ExportSelection(), Export()
@@ -368,7 +368,6 @@ def test_reexport_deletes_unreferenced_files(common, teardown):
     e1 = _make_selection("a1")  # superseded (already exported)
     e2 = _make_selection("a2")  # superseding (max) export
 
-    # Seed the superseded export (e1) with BOTH a Table and a File part.
     export.insert1(
         {"export_id": e1, "paper_id": paper}, allow_direct_insert=True
     )
@@ -385,11 +384,8 @@ def test_reexport_deletes_unreferenced_files(common, teardown):
 
     try:
         overlap = export._delete_superseded_exports([e1, e2], max_export_id=e2)
-        # e2 is the max (not processed); only the processed lesser id e1 is
-        # superseded. Evaluating the set expression as
-        # `all - ({max} & processed)` would also include the unprocessed e2.
+        # `all - ({max} & processed)` would wrongly include the unprocessed e2.
         assert overlap == {e1}, f"unexpected superseded set {overlap}"
-        # BOTH parts removed -- the File part must not leak.
         assert len(export.Table & {"export_id": e1}) == 0
         assert (
             len(export.File & {"export_id": e1}) == 0

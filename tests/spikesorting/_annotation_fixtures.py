@@ -1,10 +1,8 @@
 """Shared scaffolding for the UnitAnnotation unit-id contract tests.
 
-Both the id-migration suite and the write-boundary suite need the same
-apparatus: an isolated DataJoint table carrying the *production*
-``UnitAnnotation`` methods, a throwaway migration-marker table, and a stand-in
-for ``SpikeSortingOutput`` that serves synthetic NWB payloads. Keeping it here
-means the two suites exercise one scaffolding, not two drifting copies.
+An isolated table carrying the production ``UnitAnnotation`` methods, a
+throwaway migration-marker table, and a ``SpikeSortingOutput`` stand-in that
+serves synthetic NWB payloads.
 """
 
 import datajoint as dj

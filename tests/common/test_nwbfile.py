@@ -138,9 +138,7 @@ def test_nwbfile_cleanup(common_nwbfile):
 def test_conda_export_failure_does_not_abort_write(
     common_nwbfile, monkeypatch, exc
 ):
-    """A conda-less / uv-only environment can still write analysis NWB: a
-    failed ``conda env export`` records an 'environment capture unavailable'
-    marker rather than raising and aborting the write."""
+    """A failed ``conda env export`` records a marker instead of raising."""
     analysis_tbl = common_nwbfile.AnalysisNwbfile()
 
     def _boom(*args, **kwargs):
@@ -151,7 +149,6 @@ def test_conda_export_failure_does_not_abort_write(
     info = analysis_tbl._logged_env_info()
 
     assert "environment capture unavailable" in info
-    # The rest of the env info is still produced (write is not aborted).
     assert "spyglass=" in info
 
 

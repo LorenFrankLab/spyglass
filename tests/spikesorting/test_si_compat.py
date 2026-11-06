@@ -1,11 +1,8 @@
 """The waveform-folder loader works under either SpikeInterface generation.
 
-``_si_compat.load_waveforms`` is the read path v0 and v1 use for waveform
-folders written before the SpikeInterface 0.104 pin. SI 0.99 returns a
-``WaveformExtractor``; 0.101+ returns a ``MockWaveformExtractor`` over a
-``SortingAnalyzer``. Both expose the ``get_waveforms`` / ``nbefore`` / ``nafter``
-surface the callers use, so this module asserts on that surface rather than on
-the concrete class.
+Asserts on the ``get_waveforms`` / ``nbefore`` / ``nafter`` surface, not the
+class: SI 0.99 returns a ``WaveformExtractor``, 0.101+ a
+``MockWaveformExtractor``.
 """
 
 from __future__ import annotations
@@ -51,6 +48,5 @@ def test_load_waveforms_zarr_raises_legacy_message(tmp_path):
     message = str(excinfo.value)
     assert "Zarr" in message
     assert "legacy SpikeInterface 0.99" in message
-    # The guard must not tell the user that saved waveforms are unreadable:
-    # binary-folder waveforms are, and only extraction is gated.
+    # Binary-folder waveforms stay readable; only extraction is gated.
     assert "binary-folder waveforms, remain readable" in message
