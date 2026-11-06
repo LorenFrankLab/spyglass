@@ -7,7 +7,7 @@ the scientific computations owned by the tables."""
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, get_args
 
 from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
@@ -387,6 +387,52 @@ def _run_root_curation_stage(
     return curation_key
 
 
+def _auto_curation_description(
+    pipeline_preset: str, existing: set[str], presets: Mapping
+) -> str:
+    """Description for the pipeline's auto-labeled child curation.
+
+    The description names the preset that ran. A twin preset (same metric and
+    rule recipes, for example the tetrode and probe labels of one recipe) gives
+    the same child, and child reuse matches on the description, so return an
+    existing twin's description to reuse its child.
+
+    Parameters
+    ----------
+    pipeline_preset : str
+        The preset of this run.
+    existing : set of str
+        Descriptions of the root curation's existing children.
+    presets : Mapping
+        Preset name to preset bundle.
+
+    Returns
+    -------
+    str
+        The description to pass when accepting the evaluation labels.
+    """
+
+    def describe(name):
+        return f"run_v2_pipeline auto-curation (pipeline_preset={name})"
+
+    own = describe(pipeline_preset)
+    if own in existing or pipeline_preset not in presets:
+        return own
+
+    def recipes(name):
+        bundle = presets[name]
+        return (bundle.metric_params_name, bundle.auto_curation_rules_name)
+
+    for name in sorted(presets):
+        if (
+            name != pipeline_preset
+            and recipes(name) == recipes(pipeline_preset)
+            and describe(name) in existing
+        ):
+            return describe(name)
+    return own
+
+
 def _run_auto_curation_stage(
     sorting_key: dict,
     curation_key: dict,
@@ -409,6 +455,9 @@ def _run_auto_curation_stage(
         If the evaluation, the label acceptance or the child's merge
         registration fails (stage ``"auto_curation"``).
     """
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import PipelineStageError
     from spyglass.spikesorting.v2.metric_curation import (
@@ -441,13 +490,21 @@ def _run_auto_curation_stage(
         children_before = set(
             (CurationV2 & sorting_restriction).fetch("curation_id")
         )
-        child = CurationEvaluation().use_evaluation_labels(
-            eval_key,
-            description=(
-                "run_v2_pipeline auto-curation "
-                f"(pipeline_preset={pipeline_preset})"
+        description = _auto_curation_description(
+            pipeline_preset,
+            set(
+                (
+                    CurationV2
+                    & {
+                        **sorting_restriction,
+                        "parent_curation_id": curation_key["curation_id"],
+                    }
+                ).fetch("description")
             ),
-            reuse_existing=True,
+            _PIPELINE_PRESETS,
+        )
+        child = CurationEvaluation().use_evaluation_labels(
+            eval_key, description=description, reuse_existing=True
         )
         auto_merge_id = _curation_merge_id(
             child, is_concat=is_concat, warnings_list=warnings_list

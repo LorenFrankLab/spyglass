@@ -1401,3 +1401,50 @@ def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     detail = describe_pipeline_preset(new_name)
     assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
     assert (detail["stage"] == "artifact_detection").sum() == 0
+
+
+def test_auto_curation_reuses_a_twin_presets_child_description():
+    """A twin preset's auto-labeled child is found again, not duplicated.
+
+    Twin presets (the tetrode and probe labels of one recipe) give the same
+    child curation. Its description names the preset, and reuse matches on the
+    description, so the second twin made a duplicate child.
+    """
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._orchestration.stages import (
+        _auto_curation_description,
+    )
+
+    def preset(metric, rules):
+        return SimpleNamespace(
+            metric_params_name=metric, auto_curation_rules_name=rules
+        )
+
+    presets = {
+        "probe_twin": preset("franklab_default", "franklab_rules"),
+        "tetrode_twin": preset("franklab_default", "franklab_rules"),
+        "other_rules": preset("franklab_default", "other"),
+    }
+
+    def describe(name):
+        return f"run_v2_pipeline auto-curation (pipeline_preset={name})"
+
+    # First run: the description names the preset that ran.
+    assert _auto_curation_description("probe_twin", set(), presets) == (
+        describe("probe_twin")
+    )
+    # The twin finds the existing child's description.
+    assert _auto_curation_description(
+        "tetrode_twin", {describe("probe_twin")}, presets
+    ) == describe("probe_twin")
+    # Its own description wins when both exist.
+    assert _auto_curation_description(
+        "tetrode_twin",
+        {describe("probe_twin"), describe("tetrode_twin")},
+        presets,
+    ) == describe("tetrode_twin")
+    # A preset with other rules gives another child.
+    assert _auto_curation_description(
+        "other_rules", {describe("probe_twin")}, presets
+    ) == describe("other_rules")
