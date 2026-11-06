@@ -41,7 +41,6 @@ def test_sorting_populates_with_mountainsort5(populated_recording):
     """``Sorting.make`` runs MountainSort5 on the smoke fixture and writes
     a fresh Units NWB + SortingAnalyzer folder. ``Sorting.Unit`` is
     populated with the peak electrode + amplitude per unit."""
-    from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         RecordingArtifactDetection,
@@ -147,7 +146,6 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 
     from spyglass.spikesorting.v2.recording import (
         Recording,
-        RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import (
         Sorting,
@@ -554,7 +552,6 @@ def test_sorting_make_rollback_cleans_units_nwb(
     import pathlib
 
     from spyglass.common.common_lab import LabTeam
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
@@ -1482,7 +1479,6 @@ def test_write_units_nwb_handles_zero_unit_sorter(populated_recording):
     before the guard, the same failure the CurationV2 test guards)
     would crash on real datasets where the sorter finds no units.
     """
-    import numpy as np
     import pynwb
     import spikeinterface as si
 

@@ -1,7 +1,5 @@
 """The CI shards partition the suite, including newly added test modules."""
 
-from pathlib import Path
-
 import pytest
 
 from tests.spikesorting.v2.scripts.run_ci_shard import (

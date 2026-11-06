@@ -135,7 +135,6 @@ def test_truncation_tolerance_scales_with_interval_count():
     from spyglass.spikesorting.v2._recording.restriction import (
         truncation_tolerance,
     )
-    from spyglass.spikesorting.v2.recording import Recording
 
     fs = 30000.0
     T = 1.0 / fs

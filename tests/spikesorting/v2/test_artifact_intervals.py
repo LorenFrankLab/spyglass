@@ -867,7 +867,6 @@ def test_artifact_scan_multiprocess_worker_path_runs(dj_conn, tmp_path):
     frames equal the n_jobs=1 result -- proving the worker rehydrates and the
     chunked output is worker-count-invariant.
     """
-    import spikeinterface as si
 
     from spyglass.spikesorting.v2._params.artifact_detection import (
         ArtifactDetectionParamsSchema,

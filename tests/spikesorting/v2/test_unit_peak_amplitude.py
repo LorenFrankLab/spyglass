@@ -29,7 +29,6 @@ import pytest
 @pytest.mark.slow
 @pytest.mark.integration
 def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
-    import spikeinterface as si
 
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,

@@ -453,10 +453,6 @@ def test_concat_selection_inserts_and_is_idempotent(same_day_group):
     dict and a repeat call returns the SAME concat_recording_id."""
     import uuid
 
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
-    )
-
     grp = same_day_group
     request = {
         **grp["group_key"],
@@ -627,7 +623,6 @@ def test_concat_selection_missing_recording_raises(chronic_2_session_minirec):
         MissingRecordingForConcatError,
     )
     from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
         SessionGroup,
     )
     from tests.spikesorting.v2._ingest_helpers import (
@@ -803,7 +798,6 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
     from spyglass.spikesorting.v2 import session_group as sg
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
     )
 
     # The members match at selection time (insert_selection's check passes).
@@ -1646,7 +1640,6 @@ def test_concat_make_raises_on_sample_count_drift(same_day_group, monkeypatch):
     import spyglass.spikesorting.v2._recording.concat as concat_mod
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
     )
 
     def _drifted(recordings):
@@ -1727,7 +1720,6 @@ def test_concat_sort_end_to_end_and_split(same_day_group, caplog):
     from spyglass.spikesorting.v2.exceptions import (
         ConcatBrainRegionAmbiguousError,
     )
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
     from tests.spikesorting.v2._smoke_constants import (
@@ -2136,7 +2128,6 @@ def test_concat_chronic_real_dataset_memory_runtime(request, dj_conn):
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
         SessionGroup,
     )
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection

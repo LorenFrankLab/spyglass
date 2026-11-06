@@ -359,7 +359,7 @@ def test_all_consumers_resolve_selected_correction(
         _recompute_analyzer_hashes,
         _resolve_analyzer_regen_inputs,
     )
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
     from spyglass.spikesorting.v2._matching.compute import extract_and_match
 

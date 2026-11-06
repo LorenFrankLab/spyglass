@@ -207,7 +207,6 @@ def test_run_si_sorter_restores_global_job_kwargs_on_success(
     dj_conn, monkeypatch
 ):
     """SI's global job_kwargs are restored after a successful sort too."""
-    import spikeinterface.sorters as sis
 
     import spikeinterface as si
 

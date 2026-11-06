@@ -18,7 +18,6 @@ from spyglass.spikesorting.v2._params.analyzer_waveform import (
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
     CORTEX_DISPLAY_WAVEFORMS,
-    CORTEX_PREPROC,
     HIPPOCAMPUS_DISPLAY_WAVEFORMS,
     HIPPOCAMPUS_METRIC_WAVEFORMS,
     HIPPOCAMPUS_PREPROC,

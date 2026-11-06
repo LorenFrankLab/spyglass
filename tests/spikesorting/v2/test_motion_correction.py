@@ -17,7 +17,6 @@ import pytest
 from tests.spikesorting.v2._motion_db_helpers import (
     CONCAT_GROUP,
     DRIFT_DURATION_S,
-    DRIFT_NWB,
     MEMBER_A_INTERVAL,
     MEMBER_B_INTERVAL,
     MOTION_TEAM,

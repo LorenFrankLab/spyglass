@@ -20,7 +20,6 @@ def concat_member_curation(chronic_2_session_minirec):
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
-        ConcatenatedRecordingSelection,
         SessionGroup,
     )
     from spyglass.spikesorting.v2.sorting import (

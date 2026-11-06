@@ -15,9 +15,6 @@ from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
 from spyglass.spikesorting.v2._core.recipe_catalog import (
     CORTEX_DISPLAY_WAVEFORMS,
 )
-from tests.spikesorting.v2._ingest_helpers import (
-    _plant_concat_sorting_selection,
-)
 
 # Every sort exercised here uses the 'default' preprocessing recipe, which is
 # not in the region map -> the wide cortex display recipe (see

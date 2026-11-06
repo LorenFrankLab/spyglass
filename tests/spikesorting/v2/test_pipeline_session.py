@@ -26,7 +26,6 @@ import datajoint as dj
 import pytest
 
 import spyglass.spikesorting.v2._orchestration.session as plr
-import spyglass.spikesorting.v2.pipeline as pl
 from spyglass.spikesorting.v2._orchestration.preflight import (
     _resolve_session_sort_group_ids,
 )

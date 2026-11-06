@@ -1919,7 +1919,7 @@ def test_recording_rebuild_path_keeps_existing_file_on_failure(
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._core import signal_math as utils_mod
-    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
@@ -2126,7 +2126,6 @@ def test_inplace_writer_does_not_unlink_canonical_on_failure(
     (``existing_analysis_file_name`` set); only a temp-staged partial
     (``existing_analysis_file_name is None``) is removed.
     """
-    import pathlib
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._storage import nwb as rn

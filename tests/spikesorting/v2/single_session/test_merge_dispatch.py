@@ -55,7 +55,6 @@ def test_spike_sorting_output_get_spike_times_v2_dispatch(populated_sorting):
     # regression to relative storage on any non-zero-start session.
     from spyglass.spikesorting.v2.recording import (
         Recording,
-        RecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -209,7 +208,6 @@ def test_imported_dispatch_survives_v2_module_loaded(populated_sorting):
     because the v2 environment has SpikeInterface 0.104 which is
     incompatible with the SI 0.99-based v0/v1 production code.
     """
-    from spyglass.spikesorting.imported import ImportedSpikeSorting
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
         source_class_dict,
