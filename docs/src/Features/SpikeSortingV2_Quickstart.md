@@ -1,4 +1,4 @@
-# Spike Sorting v2 — I have an ingested NWB, what do I run?
+# Spike Sorting v2: I have an ingested NWB, what do I run?
 
 The supported path from an already-ingested session to **selected** spike times:
 configure → sort → review → curate → select units → analyze, using the v2
@@ -196,7 +196,7 @@ without `auto_curate=True` leaves it `None` and gives you only
 
 Off by default. Add `motion_mode="apply"` and a `motion_correction_params_name`
 to sort a motion-corrected recording instead (`"estimate"` saves a
-`MotionEstimate` for inspection without changing the sort). **EXPERIMENTAL** --
+`MotionEstimate` for inspection without changing the sort). **EXPERIMENTAL**:
 no shipped recipe is validated for a probe; see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction) for
 the modes, the resolved presets, and the development findings before relying on
@@ -211,7 +211,7 @@ motion_run = run_v2_pipeline(
 print(motion_run["motion_estimate_id"], motion_run["motion_corrected_recording_id"])
 ```
 
-## 3. Review it in the browser — and reopen the review later
+## 3. Review it in the browser and reopen the review later
 
 `start_review` evaluates the pinned curation with a named review profile and
 saves a seeded FigPack bundle (local by default). `review.open()` serves that
@@ -290,7 +290,7 @@ enables editing only for a `localhost` origin. After restarting the kernel,
 forward the newly printed port, or use `review.open(port=...)` on the first open
 to request the same port again. If you skip the browser, `auto_labeled` (or a
 `save_manual_curation(...)` / `commit_merges(...)` child) is the curation you
-hand to analysis next -- name it `final_curation` deliberately; never infer it
+hand to analysis next. Name it `final_curation` deliberately; never infer it
 from the latest child.
 
 ## 4. Select the analysis population, then analyze
@@ -312,7 +312,7 @@ reason.
 | `all_units`                          | everything (explicit expert choice)                | —                                    |
 
 The shipped rule sets only **flag** bad units; they never write `accept`. So
-after auto-labeling alone the two `accepted` policies select nothing — accept
+after auto-labeling alone the two `accepted` policies select nothing. Accept
 units in the browser review first, or choose `v2_unflagged_units` to state
 explicitly that rule-passing, never-reviewed units count. Unlabeled units are
 excluded by the `accepted` policies and listed on the receipt either way.
@@ -342,8 +342,8 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     `run_v2_concat_pipeline` (with a single-session preset or the experimental
     `franklab_concat_hippocampus_30khz_ms5_2026_09`), optionally adding
     `motion_mode="apply"` (EXPERIMENTAL; see
-    [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
-    — see the
+    [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction)).
+    See the
     [Cross-Session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb);
     `select_units_for_analysis` then returns one group per member.
 - **Clusterless decoding features**: run the `franklab_clusterless_2026_06`
@@ -351,11 +351,11 @@ For a concatenated (multi-member) sort the receipt holds one per-member group
     `merge_id` to `UnitWaveformFeatures`; there is no unit-selection step
     because the thresholder yields one "unit" per channel group.
 
-## That's it — where to go next
+## Where to go next
 
 - **Inspect the run:** `describe_run(run)` renders a receipt (stages, warnings,
-    the effective sorter configuration, the root vs auto-labeled merge ids) — a
-    zero-unit sort can't hide in it.
+    the effective sorter configuration, the root vs auto-labeled merge ids) that
+    makes a zero-unit sort visible.
 - **Fail fast first:** `preflight_v2_pipeline(...)` checks prerequisites before
     any compute; `print(report.summary())` shows the execution plan and
     actionable findings. `run_v2_pipeline(..., preflight=True)` (the default)

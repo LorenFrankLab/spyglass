@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# # Spike Sorting v2 — Curation
+# # Spike Sorting v2: Curation
 #
 # Curate a single-session v2 sort, picking up where the
 # [first-sort walkthrough](./10_Spike_SortingV2.ipynb) leaves off. It re-runs a
@@ -131,7 +131,7 @@ sort_group_id
 
 # ## 2. Run a root sort
 #
-# Run a sort so we have a root curation to work with (idempotent — reuses an
+# Run a sort so we have a root curation to work with (idempotent; reuses an
 # existing sort). See the [first-sort walkthrough](./10_Spike_SortingV2.ipynb)
 # for the details of the recording → artifact → sort stages.
 
@@ -231,9 +231,9 @@ if run_custom_annotation_example:
 # `start_review` resolves the profile, evaluates (or reuses) the exact root,
 # seeds its committed labels, and saves a local review bundle
 # (`upload=False`, the default). `review.open()` serves that bundle from this
-# kernel at a `http://localhost:<port>/` URL -- the exact files the importer
-# reads, nothing copied -- and returns the URL (`open_browser=False` only
-# prints it). Repeated `open()` calls reuse the server; after a kernel
+# kernel at a `http://localhost:<port>/` URL (the exact files the importer
+# reads, nothing copied) and returns the URL (`open_browser=False` only prints
+# it). Repeated `open()` calls reuse the server; after a kernel
 # restart, `FigPackReview.resume(review_id).open()` serves the same bundle
 # again with every saved edit intact.
 #
@@ -243,9 +243,9 @@ if run_custom_annotation_example:
 # 2. Select units in the unit table. Its columns are the profile's official
 #    evaluation metrics, any annotation columns, the rule set's
 #    `proposed_labels` / `proposed_merge_groups`, and `merged_from` (applied
-#    merge provenance) -- all for the **committed curation being reviewed**; a
-#    merge you propose here has no merged metrics yet (the continued review
-#    after commit shows those).
+#    merge provenance). All values describe the **committed curation being
+#    reviewed**; a proposed merge has no merged metrics until it is committed
+#    and the continued review shows them.
 # 3. In the **Curation** pane, tick/untick labels for the selected units, or
 #    select two or more and **Merge Selected**.
 # 4. **Preview and commit**, choose final labels for any conflicting merge,
@@ -263,7 +263,7 @@ if run_custom_annotation_example:
 # Hosted figures save with **Save Annotations** and use the notebook alternative.
 #
 # Remote kernel: forward the port (`ssh -L <port>:localhost:<port> host`) and
-# open the same `localhost` URL on your machine -- the frontend enables local
+# open the same `localhost` URL on your machine. The frontend enables local
 # editing only for a `localhost` origin; a generic Jupyter proxy URL is not
 # equivalent. `upload=True` publishes the identical seeded bundle to
 # figpack.org instead (needs a FigPack API key unless `ephemeral=True`). The
@@ -294,12 +294,12 @@ else:
         "the 'spikesorting-v2-curation' extra to review in a browser."
     )
 
-# Optional notebook/script alternative after **Save draft**. The preview is mutation-free:
-# it reads the saved `annotations.json`, re-verifies the review identity, and
-# reports the diff -- label additions/removals, proposed merges, the resulting
-# unit count, contributor-label conflicts a merge would create, and sibling
-# children other reviewers committed meanwhile. Losing the Python variable is
-# harmless: resume from the printed review id.
+# Optional notebook/script alternative after **Save draft**. The preview is
+# mutation-free: it reads the saved `annotations.json`, re-verifies the review
+# identity, and reports the diff: label additions/removals, proposed merges,
+# the resulting unit count, contributor-label conflicts a merge would create,
+# and sibling children other reviewers committed meanwhile. Losing the Python
+# variable is harmless: resume from the printed review id.
 
 # The guided route previews the saved draft, provides label choices for each
 # conflicting merge, and opens the reevaluated child after committing. A
@@ -337,7 +337,7 @@ if review is not None:
 #
 # Every imported merge is re-evaluated with the same profile, and the receipt
 # says `needs_merge_verification=True`: the merged units have NOT been looked
-# at yet, so the merged child is NOT the result -- `final_curation` becomes
+# at yet, so the merged child is NOT the result. `final_curation` is
 # `None` (pending) until the verification below is committed, and the
 # analysis section refuses to run on a pending result. Until any commit
 # lands, `final_curation` is the reviewed parent itself.
@@ -397,13 +397,13 @@ if verification_panel is not None and verification_panel.receipt is not None:
 # `commit_merge_verification=True` and run this cell: it previews and commits
 # the verification (`confirm_no_changes` when you saved nothing). If that
 # commit imports another merge, the result stays pending and a further review
-# opens -- inspect it and run this cell again. Nothing marks a merge verified
+# opens; inspect it and run this cell again. Nothing marks a merge verified
 # silently.
 #
 # If a committed merge was WRONG, do not label around it: a committed merge
 # is a branch, and the fix is a replacement sibling from THAT merge's parent
 # (a merge committed during verification has the earlier merged child as its
-# parent -- going back to the root would discard the earlier, valid merge).
+# parent; going back to the root would discard the earlier, valid merge).
 # Section 3-recover below does this from the receipt the merge came from.
 
 # +
@@ -456,7 +456,7 @@ if use_connected_browser_result:
 # Replace `None` below with the receipt that committed the mistaken merge:
 # `browser_receipt` for the first commit, or the appropriate
 # `verification_receipt` for a later merge. This opens that merge's own
-# review, whose bundle still holds your other saved edits.
+# review, whose bundle holds your other saved edits.
 
 # Replace with browser_receipt or verification_receipt.
 bad_merge_receipt = None
@@ -516,12 +516,12 @@ if recovery_changes is not None and commit_recovery:
 
 # ### 3-hand-label. Override specific units (optional)
 #
-# When you disagree with a label after the fact -- or want to tag a unit the
-# review did not (e.g. an oversplit fragment as `mua`) -- `save_manual_curation`
-# commits your per-unit labels as a child of `final_curation`, and that child
-# becomes the final result. Keys are unit ids of `final_curation`; values are
-# labels from `CurationV2.label_options()` (pass `allow_custom_labels=True` for
-# one outside that set). `manual_labels` starts EMPTY so a run-all is a no-op.
+# To override a label, or tag a unit the review did not (e.g. an oversplit
+# fragment as `mua`), `save_manual_curation` commits your per-unit labels as a
+# child of `final_curation`, and that child becomes the final result. Keys are
+# unit ids of `final_curation`; values are labels from
+# `CurationV2.label_options()` (pass `allow_custom_labels=True` for one outside
+# that set). `manual_labels` starts EMPTY so a run-all is a no-op.
 
 manual_labels = {}  # e.g. {5: ["noise"], 12: ["mua"]} after inspecting
 
@@ -538,7 +538,7 @@ if manual_labels:
 #
 # `final_curation` is the one result of this notebook: the reviewed parent
 # when nothing was committed, the committed browser child, its verified merged
-# child, or your hand-labeled child on top -- never "the latest child".
+# child, or your hand-labeled child on top; never "the latest child".
 # `select_units_for_analysis` applies a named `UnitSelectionParams` policy to
 # exactly that curation's labels, builds the `SortedSpikesGroup` downstream
 # consumers read, and returns a receipt naming the source generation, the
@@ -549,10 +549,10 @@ if manual_labels:
 # | `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
 # | `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
 # | `v2_unflagged_units` | everything not denied (MUA + unlabeled) | `noise`, `reject`, `artifact` |
-# | `all_units` | everything (explicit expert choice) | -- |
+# | `all_units` | everything (explicit expert choice) | (none) |
 #
 # Rule sets only flag bad units and never write `accept`, so an unreviewed or
-# automatic-only curation selects nothing under the `accepted` policies -- the
+# automatic-only curation selects nothing under the `accepted` policies; the
 # receipt says so and names the alternatives. This cell stops while a merged
 # curation is still pending verification.
 
@@ -580,8 +580,8 @@ selection.group_key
 
 # ## 5. Inspect with the SpikeInterface bridge (`ssviz`)
 #
-# One discoverable namespace -- `visualization` (import it as `ssviz`) -- wraps
-# SpikeInterface's widgets/exporters behind Spyglass keys.
+# The `visualization` namespace (import it as `ssviz`) wraps SpikeInterface's
+# widgets/exporters behind Spyglass keys.
 # `available_visualizations()` catalogs every helper with the key it takes,
 # what it wraps, and whether it accepts `compute_missing=True`.
 #
@@ -726,7 +726,7 @@ analysis_provenance
 # `CurationRef.evaluate` scores a **committed** curation in that curation's own
 # unit namespace (a merged unit is scored over its merged template):
 #
-# 1. **Evaluate** the root -- metrics plus a rule set's label proposals.
+# 1. **Evaluate** the root: metrics plus a rule set's label proposals.
 #    `franklab_default` computes `snr` / `isi_violation` / `firing_rate` /
 #    `num_spikes` / `presence_ratio` / `amplitude_cutoff` / `nn_advanced` (PCA);
 #    `franklab_default_auto_curation_2026_09` labels `nn_noise_overlap > 0.1`
@@ -781,11 +781,11 @@ if run_scripted_curation_example:
 # Over a scripted evaluation, `.metrics` carries `trough_half_width` (seconds,
 # from the unwhitened display analyzer) next to the quality metrics: narrow
 # spikes are fast-spiking interneurons, wide spikes pyramidal cells; with
-# `observed_firing_rate_hz` it gives the classic rate x width view. **The pipeline ships NO
-# cell-type thresholds** -- the boundary below is yours, tuned for hippocampus;
-# other regions need their own. (Trough-to-peak duration and slope columns are
-# available via the metric row's `template_metric_columns` but clip on the
-# hippocampus display window.)
+# `observed_firing_rate_hz` it gives the classic rate x width view. **The
+# pipeline ships NO cell-type thresholds**. The boundary below is yours and
+# tuned for hippocampus; other regions need their own. (Trough-to-peak duration
+# and slope columns are available via the metric row's
+# `template_metric_columns` but clip on the hippocampus display window.)
 
 if run_scripted_curation_example:
     import matplotlib.pyplot as plt

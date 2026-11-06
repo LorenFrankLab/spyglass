@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# # Spike Sorting v2 — single-session walkthrough
+# # Spike Sorting v2: single-session walkthrough
 #
 # This notebook runs the modern (`spyglass.spikesorting.v2`) spike-sorting
 # pipeline end-to-end on **one already-ingested session**, using the high-level
@@ -27,12 +27,12 @@
 #
 # This is the **first-sort path**. For the deeper how-tos, see:
 #
-# - [Curation](./10_Spike_SortingV2_Curation.ipynb) — browser (FigPack) and
+# - [Curation](./10_Spike_SortingV2_Curation.ipynb): browser (FigPack) and
 #   step-by-step evaluate → merge → re-evaluate curation.
-# - [Presets](./10_Spike_SortingV2_Presets.ipynb) — customize a preset
+# - [Presets](./10_Spike_SortingV2_Presets.ipynb): customize a preset
 #   (`clone_pipeline_preset` / `register_pipeline_preset`) and sort a whole
 #   session at once.
-# - [Cross-session](./10_Spike_SortingV2_CrossSession.ipynb) — concatenate
+# - [Cross-session](./10_Spike_SortingV2_CrossSession.ipynb): concatenate
 #   same-day recordings and track units across days.
 
 # +
@@ -72,8 +72,7 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 # Change `pipeline_preset` to any name from `describe_pipeline_presets()` below
 # (e.g. a cortex or 20 kHz preset).
 #
-# To see the intervals available for this session — the valid
-# `interval_list_name` values — list them with
+# List the valid `interval_list_name` values for this session with
 # `IntervalList & {"nwb_file_name": nwb_file_name}`. Leave `sort_group_id =
 # None` to auto-pick when the session has exactly one sort group; with more than
 # one, set it explicitly after reviewing the table and geometry plot in step 2
@@ -181,9 +180,8 @@ sort_group_id
 # ## 3. Pick a Pipeline Preset
 #
 # `describe_pipeline_presets()` returns a table of what each shipping pipeline
-# preset does — the sorter, the parameter rows each stage uses, the intended
-# use, and (a known footgun) the units of the detection threshold — so you can
-# choose one without reading the module source.
+# preset does: the sorter, the parameter rows each stage uses, the intended use,
+# and the units of the detection threshold.
 
 # Native MountainSort4 is the default hippocampus production recipe.
 # For hippocampal polymer probes:
@@ -234,7 +232,7 @@ describe_pipeline_presets()
 # custom one with `register_pipeline_preset`) without hand-editing parameter
 # rows, see the [Presets how-to](./10_Spike_SortingV2_Presets.ipynb).
 
-# ## 4. Preflight — a fast, fail-early check
+# ## 4. Preflight: a fast, fail-early check
 #
 # `preflight_v2_pipeline` verifies in ~1 s (inserting nothing, never calling
 # `populate`) that every prerequisite is in place: the session / interval /
@@ -261,7 +259,7 @@ print(report.summary())
 # `run_v2_pipeline` chains recording → artifact detection → sort → curation into one
 # idempotent call and registers the result on the `SpikeSortingOutput` merge
 # table. With `preflight=True` (the default) it re-runs the check above before
-# any populate. **Re-running with the same inputs is safe** — it finds the
+# any populate. **Re-running with the same inputs is safe**: it finds the
 # existing rows and returns the same run summary (same `root_merge_id`) without
 # inserting duplicates. After a failure, rerun the same inputs to reuse completed
 # stages; a failed sorter restarts its stage, not an internal checkpoint.
@@ -276,28 +274,28 @@ run_summary = run_v2_pipeline(
 
 # ## 6. Read the run summary
 #
-# `describe_run(run_summary)` renders the run as a receipt: a leading summary row
-# with `n_units`, `root_merge_id` (the uncurated root), and `auto_labeled_merge_id`
-# (the auto-labeled child — `None` until you curate), plus a `"root only"` /
-# `"auto-labeled"` status; one row per stage (its `*_status` is `"computed"` if
-# the stage ran this call, `"reused"` if its row already existed, or `"skipped"`
-# if the preset has no such stage (e.g. artifact detection for a no-artifact
-# preset), with the wall-clock `seconds` spent **this call** —
-# ≈0 on an idempotent re-run, not cumulative cost), and one row per advisory
-# `warning`, and one `config` row per effective sorter setting (the kwargs
-# SpikeInterface received, whiten routing, seed, job kwargs, backend). Because
-# warnings are their own rows, a **zero-unit** sort — a
-# legitimate quiet-shank result that still writes an empty-but-real curation +
-# merge row — is impossible to miss. Pass `require_units=True` to
-# `run_v2_pipeline` to turn zero units into a hard error instead.
+# `describe_run(run_summary)` renders the run as a receipt with:
+#
+# - a summary row: `n_units`, `root_merge_id` (the uncurated root),
+#   `auto_labeled_merge_id` (the auto-labeled child, `None` until you curate),
+#   and a `"root only"` / `"auto-labeled"` status;
+# - one row per stage: `*_status` is `"computed"` (ran this call), `"reused"`
+#   (row already existed) or `"skipped"` (the preset has no such stage), and
+#   `seconds` is wall-clock time for **this call** (≈0 on a re-run);
+# - one row per advisory `warning`;
+# - one `config` row per effective sorter setting (the kwargs SpikeInterface
+#   received, whiten routing, seed, job kwargs, backend).
+#
+# A **zero-unit** sort is a legitimate quiet-shank result (it still writes an
+# empty curation and merge row) and appears as a warning row. Pass
+# `require_units=True` to `run_v2_pipeline` to make zero units an error.
 #
 # Below the receipt, `describe_units(...)` shows the per-unit, sort-time detail:
-# one row per unit with `n_spikes`, `firing_rate_hz` (over the duration the sort
-# actually observed — artifact-removed when masking ran, so the rate is not
-# inflated by blanked segments), `peak_amplitude_uv`, `peak_electrode_id`, and
-# `brain_region`. It reads only sort-time metadata (no waveform recompute);
-# deeper SNR / ISI / nearest-neighbour metrics are computed by the
-# curation-evaluation step in section 7 below (`CurationEvaluation`). The raw
+# one row per unit with `n_spikes`, `firing_rate_hz` (over the observed
+# duration, which excludes masked artifact segments), `peak_amplitude_uv`,
+# `peak_electrode_id`, and `brain_region`. It reads only sort-time metadata (no
+# waveform recompute); deeper SNR / ISI / nearest-neighbour metrics are computed
+# by the curation-evaluation step in section 7 below (`CurationEvaluation`). The raw
 # `run_summary` dict carries the same fields programmatically
 # (`run_summary["root_merge_id"]`, `run_summary["auto_labeled_merge_id"]`,
 # `run_summary["n_units"]`).
@@ -313,9 +311,8 @@ describe_units(run_summary["sorting_id"])
 # the summary's `root_curation_id` (a run summary has no bare `curation_id`,
 # since one run can yield a root and an auto-labeled child).
 #
-# The quickest path is **one-call auto-curation** below. For the other two paths —
-# labeling/merging **in a browser** with FigPack, and the hands-on **step-by-step**
-# evaluate → merge → re-evaluate loop — see the
+# The quickest path is **one-call auto-curation** below. For browser (FigPack)
+# curation and the **step-by-step** evaluate → merge → re-evaluate loop, see the
 # [Curation how-to](./10_Spike_SortingV2_Curation.ipynb).
 
 root_key = {
@@ -331,13 +328,13 @@ CurationV2.summarize_curation(root_key)
 # root curation with the preset's metric + auto-curation rows and commits a child
 # curation whose labels ARE the rule set's verdict. The run summary then points
 # `auto_labeled_curation_id` / `auto_labeled_merge_id` (and the pinned
-# `auto_labeled_curation_uuid`) at that child, alongside the root keys. It is idempotent like the rest of the pipeline, so this reuses
-# the sort already computed above and only adds the curation step.
+# `auto_labeled_curation_uuid`) at that child, alongside the root keys. The
+# call is idempotent, so it reuses the sort above and only adds the curation
+# step.
 #
-# Two things the name says on purpose: automatic labels are **suggestions written
-# as labels, not approval**, and the child still holds **every** unit -- noise,
-# reject and artifact included. Choosing the analysis population is a separate,
-# explicit step (section 9).
+# Automatic labels are **suggestions written as labels, not approval**, and the
+# child holds **every** unit, including noise, reject and artifact. Choosing the
+# analysis population is a separate, explicit step (section 9).
 
 auto_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
@@ -357,18 +354,17 @@ auto_labeled
 # `start_review` evaluates the pinned curation with a named review profile and
 # builds a seeded FigPack view (a local bundle by default). The review is
 # persisted by identity: `FigPackReview.resume(review_id)` reopens it from a
-# fresh process -- the same parent generation, profile snapshot, evaluation and
-# display budget. `review.open()` serves the bundle from this kernel at a
+# fresh process with the same parent generation, profile snapshot, evaluation
+# and display budget. `review.open()` serves the bundle from this kernel at a
 # `http://localhost:<port>/` URL and returns it (`open_browser=False` only
 # prints it). Select units, edit labels / merges, then **Preview and commit**.
 # Merge commits open a reevaluated child to inspect and record as reviewed.
 # **Save draft** keeps unfinished edits. After completing the browser sequence,
 # `review.result()` returns the exact reviewed curation for analysis. Hosted
 # figures use **Curate Figure**, **Save Annotations**, and the notebook commit
-# panel instead. The full
-# walkthrough -- commit, merged-unit verification, and handing the reviewed
-# result to analysis -- is the [Curation](./10_Spike_SortingV2_Curation.ipynb)
-# notebook. The review packages are optional
+# panel instead. The [Curation](./10_Spike_SortingV2_Curation.ipynb) notebook
+# covers commit, merged-unit verification, and the handoff to analysis. The
+# review packages are optional
 # (`pip install "spyglass-neuro[spikesorting-v2-curation]"`), so this cell is
 # skipped when they are absent.
 
@@ -410,7 +406,7 @@ else:
 # ## 9. Select the analysis population, then analyze
 #
 # `SpikeSortingOutput().get_spike_times({"merge_id": ...})` returns **every**
-# unit of a curation, labels ignored -- fine for a quick look, wrong for an
+# unit of a curation, labels ignored. Use it for a quick look, not for
 # analysis. The supported handoff is `select_units_for_analysis`: it applies a
 # named `UnitSelectionParams` policy to the curation's labels, builds the
 # `SortedSpikesGroup` that decoding and firing-rate consumers read, and returns
@@ -422,10 +418,10 @@ else:
 # | `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
 # | `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
 # | `v2_unflagged_units` | everything not denied (MUA and unlabeled included) | `noise`, `reject`, `artifact` |
-# | `all_units` | everything (explicit expert choice) | -- |
+# | `all_units` | everything (explicit expert choice) | (none) |
 #
 # The shipped rule sets only **flag** bad units; they never write `accept`, so
-# after auto-labeling alone the two `accepted` policies select nothing -- accept
+# after auto-labeling alone the two `accepted` policies select nothing. Accept
 # units in the browser review (section 8) and hand that child over with the
 # default policy, or choose `v2_unflagged_units` to state explicitly that
 # rule-passing, never-reviewed units count. Unlabeled units are excluded by the
@@ -476,7 +472,7 @@ receipt.group_key
 
 # ## Next steps
 #
-# - Curate the sort — browser (FigPack) or step-by-step — with
+# - Curate the sort in the browser (FigPack) or step by step with
 #   [Curation](./10_Spike_SortingV2_Curation.ipynb).
 # - Customize a preset, or sort a whole session at once, with
 #   [Presets](./10_Spike_SortingV2_Presets.ipynb).
@@ -484,16 +480,15 @@ receipt.group_key
 #   [Cross-Session Spike Sorting](./10_Spike_SortingV2_CrossSession.ipynb).
 # - Organize sorts across sessions and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb)
-#   (`SortedSpikesGroup` -- `select_units_for_analysis` builds these groups
-#   for you).
+#   (`select_units_for_analysis` builds the `SortedSpikesGroup` for you).
 # - Supported workload differences: tetrodes use the
-#   `franklab_tetrode_hippocampus_30khz_ms5_2026_06` preset (same rows as the
+#   `franklab_tetrode_hippocampus_30khz_ms4_2026_06` preset (same rows as the
 #   probe preset; `probe_type` is informational); probes with drift can add the
 #   optional, experimental motion stage (`motion_mode`; see "Optional motion
 #   correction" in `docs/src/Features/SpikeSortingV2.md`), and same-day blocks
 #   can be concatenated in the Cross-Session notebook; clusterless decoding
 #   features run the `clusterless_thresholder` preset (see Presets) and hand
-#   the root curation's `merge_id` to `UnitWaveformFeatures` -- there is no
+#   the root curation's `merge_id` to `UnitWaveformFeatures`; there is no
 #   unit selection step because the thresholder yields one "unit" per channel
 #   group.
 # - Stage-by-stage internals (ADC phase-shift, bad-channel handling, drift QC):

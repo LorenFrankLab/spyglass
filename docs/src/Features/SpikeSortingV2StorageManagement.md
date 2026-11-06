@@ -1,4 +1,4 @@
-# Spike Sorting v2 — Storage Management
+# Spike Sorting v2 Storage Management
 
 Chronic recordings make spike-sorting artifacts large. Spyglass v2 lets you
 reclaim that disk space *safely*: an artifact is deleted only after a verified
@@ -23,16 +23,15 @@ regeneration *before* anything is deleted.
 | `RecordingArtifactRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` (a `rounding` precision applies to the analyzer trio only). |
 | `RecordingArtifactRecompute`          | `SortingAnalyzerRecompute`          | Regenerate, compare content hashes, record `matched` / `deleted`.                                             |
 
-The comparison uses reproducible **content** — for recordings the content
+The comparison uses reproducible **content**: for recordings, the content
 fingerprint (traces, timestamps, persisted probe geometry, and scaling metadata)
-that defines `Recording.content_hash`, and for analyzers the deterministic
+that defines `Recording.content_hash`; for analyzers, the deterministic
 extension data, including the seed-pinned `noise_levels` estimate. Neither uses
 a whole-file digest, which folds in volatile NWB metadata (`object_id`,
 timestamps) and is not reproducible across regenerations. The recording
-identity has no `rounding` knob —
-its precision is fixed by the fingerprint's `TRACE_ROUNDING` /
-`TIMESTAMP_ROUNDING` constants; `rounding` applies only to the analyzer
-extension comparison.
+identity has no `rounding` knob; its precision is fixed by the fingerprint's
+`TRACE_ROUNDING` / `TIMESTAMP_ROUNDING` constants. `rounding` applies only to
+the analyzer extension comparison.
 
 Analyzer extension hashes use the version-tagged `array-v2` format: array
 shapes, dtypes, and boundaries are hashed with canonical little-endian values.
@@ -126,7 +125,7 @@ whole volume into RAM. Measured on a 415 MB waveform volume
 dirty pages included) versus ~2.3x for `zarr`; a lazy load plus one unit's read
 costs ~0.17x versus >= 1x for an eager load. The scientific waveform sample
 (`max_spikes_per_unit`, the recipe window, sparsity) is never reduced to meet a
-memory target -- the savings come only from the storage format and load path.
+memory target; the savings come only from the storage format and load path.
 
 The analyzer's recording reference is saved as `recording.pickle`, including
 artifact exclusions and recipe preprocessing. This avoids SI 0.104.3's JSON loss
@@ -225,11 +224,11 @@ The recording cache is **content-addressed and fail-closed on drift**.
 `Recording.get_recording()` rebuilds only when the cached file is missing; the
 rebuild regenerates to a private temp file, fingerprints it, and installs it
 (atomic `os.replace`) only if the fingerprint matches the row's stored
-`content_hash` — then reconciles the DataJoint `~external` byte checksum so the
+`content_hash`, then reconciles the DataJoint `~external` byte checksum so the
 next checksum-validated read succeeds. If the rebuild **diverges** from
 `content_hash` (e.g. a SpikeInterface/BLAS upgrade, an edited raw NWB, or
 changed upstream construction inputs), it raises `RecordingContentDriftError`
-(naming the file and the recovery options) and never serves the drifted bytes —
+(naming the file and the recovery options) and never serves the drifted bytes;
 the canonical slot is left untouched. Rebuild, read-repair, and recompute
 deletion are serialized per recording (`recording_artifact_lock`) and publish
 atomically, so a reclamation can never race a rebuild. There is no hash-mutating
@@ -239,10 +238,10 @@ atomically, so a reclamation can never race a rebuild. There is no hash-mutating
 
 The cross-session `ConcatenatedRecording` cache (a masked, unwhitened
 `ElectricalSeries` stitched from the ordered member recordings; concatenation
-never corrects motion itself -- see
+never corrects motion itself; see
 [Motion-correction artifacts](#motion-correction-artifacts) below for the
 optional stage on top of it) is a third regeneratable family, with the same
-fail-closed lifecycle as the single-session recording — plus a frozen member set
+fail-closed lifecycle as the single-session recording, plus a frozen member set
 tied into its identity.
 
 - **Identity = the ordered member set.** `concat_recording_id` is content-
@@ -255,8 +254,8 @@ tied into its identity.
     choices participate in `member_set_hash`; changing a mask creates a
     different concat and downstream sort. A different ordered member set is also
     a different concat; editing `SessionGroup.Member` afterward does not change
-    or invalidate an existing concat — it just mints a new id on the next
-    `insert_selection`.
+    or invalidate an existing concat; the next `insert_selection` mints a new
+    id.
 - **Reads use the frozen snapshot.** Materialization and split read the frozen
     `MemberSnapshot`, never the live group, so a later group edit cannot
     silently re-point an existing concat. If a frozen member's underlying
@@ -278,8 +277,7 @@ tied into its identity.
     locked (`concat_recording_artifact_lock`), atomic (`os.replace`),
     content-`hash`-verified path, raising `RecordingContentDriftError` on a
     fingerprint mismatch instead of installing drifted bytes (the canonical slot
-    is left untouched); an irreproducible rebuild fails loudly here rather than
-    silently.
+    is left untouched).
 - **Split-back conserves spikes.** `split_sorting_by_session()` back-maps a
     concat-frame sorting into per-member local frames; it asserts one strictly-
     increasing boundary per frozen member and that every input spike lands in
@@ -297,33 +295,31 @@ tied into its identity.
     such a bypass, review `AnalysisNwbfile().cleanup(dry_run=True)` before
     applying cleanup.
 - **Recompute/reclamation: not provided.** There is no
-    `ConcatenatedRecordingArtifact*` recompute trio — a concat cache that is
-    deleted out of band is rebuilt and verified on demand by `get_recording()`,
-    which covers correctness. There is no dedicated audit + `delete_files`
-    reclamation surface (the analogue of the recording trio above); one is worth
-    adding once concat outputs are retained at scale, and it should reuse the
-    shared recompute helpers rather than a bespoke table family.
+    `ConcatenatedRecordingArtifact*` recompute trio. A concat cache deleted out
+    of band is rebuilt and verified on demand by `get_recording()`, which covers
+    correctness. There is no dedicated audit + `delete_files` reclamation
+    surface (the analogue of the recording trio above).
 
 ## Motion-correction artifacts
 
 The optional motion stage (see
 [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
-adds two opt-in artifact families -- nothing is written unless a run passes
+adds two opt-in artifact families; nothing is written unless a run passes
 `motion_mode="estimate"` or `"apply"`.
 
-- **`MotionEstimate`** -- a relational row per saved estimate: the
+- **`MotionEstimate`**: a relational row per saved estimate: the
     SpikeInterface `Motion` blob, resolved configuration, spans, and peak-count
     diagnostics (never a raw peak array). This is DataJoint blob storage, not a
     separate NWB artifact, so it has no `AnalysisNwbfile` lifecycle of its own.
-- **`MotionCorrectedRecording`** -- a full NWB-resident `ElectricalSeries`
+- **`MotionCorrectedRecording`**: a full NWB-resident `ElectricalSeries`
     artifact, one **AnalysisNwbfile-sized cost per corrected recording**: it
     persists the corrected, masked, unwhitened traces at the source's own sample
     count and rate, i.e. roughly the same disk footprint as the `Recording` (or
     `ConcatenatedRecording`) it was computed from. A single-session sort in
     `"apply"` mode therefore keeps both the original `Recording` artifact (other
-    consumers still read it) and the corrected one on disk.
+    consumers read it) and the corrected one on disk.
 - **Write-buffer memory (transient, not disk).** Applying motion is lazy but
-    still holds about two float32 copies of each write buffer (the parent read
+    holds about two float32 copies of each write buffer (the parent read
     plus the interpolation output) while writing: roughly 2 x n_channels x 4
     bytes/frame for a buffer of ~4 s at 128 channels and ~2.4 s at 384, i.e.
     **~120 MB at 128 channels and ~220 MB at 384 channels** (plus a smaller
@@ -343,10 +339,9 @@ adds two opt-in artifact families -- nothing is written unless a run passes
     DataJoint delete without `force_masters` is refused ("Attempt to delete part
     table ... before deleting from its master"). Spyglass's `cautious_delete`
     sets `force_masters=True`, so deleting a corrected recording that a sort
-    reads cascades up through that sort's `SortingSelection`/`Sorting` -- a sort
-    can never end up pointing at a deleted corrected recording. The same
-    protection covers a `MotionEstimate` a `MotionCorrectedRecordingSelection`
-    still references.
+    reads cascades up through that sort's `SortingSelection`/`Sorting`; no sort
+    points at a deleted corrected recording. The same protection covers a
+    `MotionEstimate` a `MotionCorrectedRecordingSelection` references.
 - **Recompute/reclamation: not provided, like concat.** There is no
     `MotionCorrectedRecordingArtifact*` recompute trio; a missing artifact is
     rebuilt and verified on demand as above, which covers correctness. As for
@@ -362,4 +357,4 @@ adds two opt-in artifact families -- nothing is written unless a run passes
 
 Destructive recompute paths must run under a temporary `SPYGLASS_BASE_DIR`
 (never shared lab storage); tests prefer `dry_run=True` unless deletion is the
-behavior under test (issue #1573).
+behavior under test.

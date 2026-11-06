@@ -15,10 +15,9 @@
 # # Cross-session spike sorting: concatenate and track units across sessions
 #
 # Four chronic workflows that build on the single-session pipeline from
-# [Spike Sorting v2](./10_Spike_SortingV2.ipynb). They compose — a daily
-# concatenation from Part A is a valid matching input for Part B/C — so this
-# notebook keeps them in separate parts. Part C's demonstration reuses A/B;
-# Part D can run independently:
+# [Spike Sorting v2](./10_Spike_SortingV2.ipynb). They compose: a daily
+# concatenation from Part A is a valid matching input for Part B/C. Part C's
+# demonstration reuses A/B; Part D can run independently:
 #
 # 1. **Concatenate same-day recordings and sort them as one** (Part A). When an
 #    animal was recorded in several NWB files on the *same day* on the same
@@ -33,12 +32,12 @@
 #    days, sort each day independently and match them with UnitMatch (Parts B/C).
 # 2. **Match units across sessions via a `SessionGroup`** (Part B). Sort each
 #    session independently, then link the same biological unit across
-#    sessions — typically **across days** — into a *tracked unit*, the basis
+#    sessions (typically **across days**) into a *tracked unit*, the basis
 #    for following a cell over time.
 # 3. **Match independently sorted sorts directly, without a group** (Part C).
 #    The group-less counterpart of Part B: name the already-curated
-#    `sorting_id`s to match — each one a single-recording sort *or* a same-day
-#    concatenation sort from Part A — and match them directly. This is the
+#    `sorting_id`s to match (each one a single-recording sort *or* a same-day
+#    concatenation sort from Part A) and match them directly. This is the
 #    direct path for two or more **daily concatenations** (sort each day's
 #    blocks as one concatenation via Part A, curate each day, then match the
 #    days' concatenation sorts here), and it also reads back each tracked
@@ -96,7 +95,7 @@ dj.config["display.limit"] = 12
 team_name = "my_team"
 session_group_owner = team_name
 
-# Part A — same-day recordings to concatenate and sort as ONE. Each member is a
+# Part A: same-day recordings to concatenate and sort as ONE. Each member is a
 # (session, sort group/shank, interval) tuple, recorded the same day on the same
 # probe. Same-day is the default (allow_multi_day stays False).
 same_day_members = [
@@ -118,7 +117,7 @@ concat_group_name = "day1_blocks"
 # single-session or a concat preset.
 concat_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
 
-# Part B — sessions to sort INDEPENDENTLY and match, typically across days (same
+# Part B: sessions to sort INDEPENDENTLY and match, typically across days (same
 # animal + probe). The match group allows multiple days.
 match_members = [
     {
@@ -156,11 +155,11 @@ LabTeam.insert1(
     skip_duplicates=True,
 )
 
-# ## Part A — Concatenate same-day recordings and sort
+# ## Part A: Concatenate same-day recordings and sort
 #
 # `SessionGroup.create_group` records the members in order and validates them: it
 # rejects a member whose session is not ingested or whose sort group / interval
-# does not exist, and — because concatenation is intended for same-day blocks —
+# does not exist, and, because concatenation is intended for same-day blocks,
 # leaves `allow_multi_day=False`, so it raises if these members span dates.
 # (Recording dates are derived from each session, never supplied.)
 #
@@ -168,11 +167,12 @@ LabTeam.insert1(
 # it preprocesses each member, detects artifacts and masks that member, then
 # concatenates the masked traces (motion correction, if requested via
 # motion_mode, then runs on the concatenation before sorting). The summary
-# is concat-shaped — `member_recording_ids` and `concat_recording_id` in place of
+# is concat-shaped: `member_recording_ids` and `concat_recording_id` in place of
 # the single-session `recording_id`, plus `member_artifacts` with exact detection
 # IDs, statuses and masked durations. Inspect the scientific setup in the receipt.
-# Detection choices are frozen; no mask is inherited from an earlier sort. The synthetic concat curation itself stays out of `SpikeSortingOutput`;
-# the summary instead returns one wall-clock-aligned `member_merge_ids` entry per
+# Detection choices are frozen; no mask is inherited from an earlier sort. The
+# synthetic concat curation itself stays out of `SpikeSortingOutput`; the
+# summary instead returns one wall-clock-aligned `member_merge_ids` entry per
 # frozen member, keyed by `member_index`. `auto_curate=True` makes those member
 # IDs point to the auto-curated child. Idempotent, like every pipeline run.
 
@@ -218,8 +218,8 @@ if run_concat:
     # this automatic-only run names `v2_unflagged_units`: everything not
     # flagged, MUA and unlabeled included. The receipt carries one
     # SortedSpikesGroup per member (same curated unit ids; spike times on that
-    # member's own NWB clock) -- `all_units` remains the explicit expert
-    # choice that ignores labels entirely.
+    # member's own NWB clock). `all_units` is the expert choice that ignores
+    # labels.
     concat_selection = select_units_for_analysis(
         concat_summary.auto_labeled_curation, policy="v2_unflagged_units"
     )
@@ -232,20 +232,21 @@ if run_concat:
     member_spikes = concat_selection.groups[0].fetch_spike_data()
     print(f"member 0: {len(member_spikes)} selected unit(s)")
 
-# ## Part B — Match units across sessions
+# ## Part B: Match units across sessions
 #
 # The alternative to concatenation is to sort each session **independently** and
-# then match units across them — the right path when sessions are days apart
-# (multi-day concatenation is supported but experimental, and concatenation
-# never corrects motion), or when you want each session's units kept distinct
-# and simply *linked*. The match group is created with `allow_multi_day=True`.
+# then match units across them. This is the right path when sessions are days
+# apart (multi-day concatenation is supported but experimental, and
+# concatenation never corrects motion), or when you want each session's units
+# kept distinct and simply *linked*. The match group is created with
+# `allow_multi_day=True`.
 
 # ### Group the sessions and sort each one
 #
 # Sort each member with the single-session preset and `auto_curate=True`, so each
 # member contributes an **auto-labeled** curation to the match
 # rather than the uncurated root (these reuse anything already computed). We drive
-# Part B off the group's **persisted** members — the rows `create_group` stored —
+# Part B off the group's **persisted** members (the rows `create_group` stored),
 # not the parameter list, so editing the group (or a member carrying its own
 # `team_name`) sorts exactly the set that will be matched.
 
@@ -300,23 +301,24 @@ elif run_unit_match:
 
 # ### Plan the curations to match
 #
-# `plan_v2_unit_match` pins one curation per member by a named **curation strategy** and
-# returns a reviewable **plan** — the plan-then-run shape mirroring the rest of
-# v2 (describe → plan → run). Here the curation strategy is `"auto_curated"`: each member's
-# auto-curated child from the sorting step. Pick the curation strategy that matches your intent:
+# `plan_v2_unit_match` pins one curation per member by a named **curation
+# strategy** and returns a reviewable **plan**, matching v2's describe → plan →
+# run shape. Here the curation strategy is `"auto_curated"`: each member's
+# auto-curated child from the sorting step. Pick the curation strategy that
+# matches your intent:
 #
-# - `final_curated` — the member's single terminal curated curation.
-# - `auto_curated` — the auto-curated child produced above.
-# - `root` — the uncurated root (warns loudly).
-# - `manual` — pin `manual_curation_choices={member_index: {...}}` explicitly.
+# - `final_curated`: the member's single terminal curated curation.
+# - `auto_curated`: the auto-curated child produced above.
+# - `root`: the uncurated root (warns loudly).
+# - `manual`: pin `manual_curation_choices={member_index: {...}}` explicitly.
 #
-# A curation strategy never picks an implicit "latest" — a member it can't resolve to
-# exactly one curation is a **blocking error** on the plan (`plan.ok` is `False`,
-# listed in `plan.errors`), so a wrong or ambiguous pin surfaces here, not
-# silently in the match. `plan.as_dataframe()` shows the per-member pins to review
-# before running. `describe_unit_match_choices` still shows every pinnable
-# curation (a table, one row per member x curation) if you want to inspect them
-# or build a `manual` plan by hand.
+# A curation strategy never picks an implicit "latest"; a member it can't
+# resolve to exactly one curation is a **blocking error** on the plan
+# (`plan.ok` is `False`, listed in `plan.errors`), so a wrong or ambiguous pin
+# surfaces here, not silently in the match. `plan.as_dataframe()` shows the
+# per-member pins to review before running. `describe_unit_match_choices` shows
+# every pinnable curation (a table, one row per member x curation) if you want
+# to inspect them or build a `manual` plan by hand.
 
 if run_unit_match and unitmatch_available:
     display(describe_unit_match_choices(session_group_owner, match_group_name))
@@ -331,7 +333,7 @@ if run_unit_match and unitmatch_available:
         matcher_params_name=matcher_params_name,
         unit_policy="v2_unflagged_single_units",  # automatic-only, MUA excluded
     )
-    display(plan.as_dataframe())  # one row per member -- review before running
+    display(plan.as_dataframe())  # one row per member; review before running
     for (
         warning
     ) in plan.warnings:  # e.g. the "root" curation strategy warns loudly
@@ -343,7 +345,7 @@ if run_unit_match and unitmatch_available:
 # ### Match and track
 #
 # `run_v2_unit_match(plan)` takes the reviewed plan, pins those curations, runs
-# the matcher across the members, and derives **tracked units** — one identity per
+# the matcher across the members, and derives **tracked units**: one identity per
 # biological unit, with the per-session units that compose it. (A not-ok plan
 # raises here rather than running a partial match.) The default `unitmatch_default`
 # matcher uses [UnitMatchPy](https://github.com/EnnyvanBeest/UnitMatch), an
@@ -372,12 +374,12 @@ elif run_unit_match:
         "'spikesorting-v2-matching' extra to match units across sessions."
     )
 
-# ## Part C — Match independently sorted daily concatenations directly
+# ## Part C: Match independently sorted daily concatenations directly
 #
 # `plan_v2_unit_match_from_sorts` is the group-less counterpart of
 # `plan_v2_unit_match`: name the already-curated `sorting_id`s to match, in any
-# order, with no `SessionGroup` step at all. Each named sort — a
-# single-recording sort *or* a same-day concatenation sort — becomes one
+# order, with no `SessionGroup` step at all. Each named sort (a
+# single-recording sort *or* a same-day concatenation sort) becomes one
 # **matching input**; a two-block daily concatenation contributes exactly one
 # input, not two. This is the direct path when each day was independently
 # concatenated (Part A) and sorted: sort and curate every day first, then match
@@ -388,7 +390,7 @@ elif run_unit_match:
 #
 # For a runnable example without a second concatenation to configure, this
 # matches Part A's same-day concatenation directly against one of Part B's
-# independently sorted, independently curated sessions — the first one whose
+# independently sorted, independently curated sessions: the first one whose
 # session is not among the concatenation's members (if every Part B session
 # is, the part is skipped with a message). Substitute another day's
 # concatenation `sorting_id` for a concatenation-vs-concatenation match.
@@ -468,7 +470,7 @@ elif run_concat and run_unit_match and not unitmatch_available:
         "'spikesorting-v2-matching' extra to match sorts directly."
     )
 
-# ## Part D — Match independently reviewed epochs in one NWB
+# ## Part D: Match independently reviewed epochs in one NWB
 #
 # This part is independent of A/B/C and disabled by default. First inspect
 # `describe_epochs(epoch_nwb_file_name, sort_group_id=epoch_sort_group_id)`.
@@ -577,14 +579,13 @@ if run_epoch_match:
             print(selection.summary())
 # -
 
-# Matching is a computational plan and result readback. There is currently no
+# Matching is a computational plan and result readback. There is no
 # browser interface for editing match pairs or approving tracked identities.
 
 # ## Next steps
 #
 # - Curate the concatenated sort (Part A) or any member/named sort (Parts B/C)
-#   with the inspect-and-curate tools in
-#   [Spike Sorting v2](./10_Spike_SortingV2.ipynb).
+#   with [Curation](./10_Spike_SortingV2_Curation.ipynb).
 # - Organize sorts and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb).
 # - For the matcher's parameters, internals, overlap restrictions, and the

@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# # Spike Sorting v2 — Presets & whole-session sorting
+# # Spike Sorting v2: Presets & whole-session sorting
 #
 # Two how-tos that build on the
 # [first-sort walkthrough](./10_Spike_SortingV2.ipynb): **customizing a pipeline
@@ -143,9 +143,8 @@ sort_groups
 # ## 2. Pick a pipeline preset
 #
 # `describe_pipeline_presets()` returns a table of what each shipping pipeline
-# preset does — the sorter, the parameter rows each stage uses, the intended
-# use, and (a known footgun) the units of the detection threshold — so you can
-# choose one without reading the module source.
+# preset does: the sorter, the parameter rows each stage uses, the intended use,
+# and the units of the detection threshold.
 
 # Native MountainSort4 is the default hippocampus production recipe.
 # For hippocampal polymer probes:
@@ -178,7 +177,7 @@ describe_pipeline_preset(pipeline_preset)
 # new parameter rows that differ, reusing the base preset's rows for every
 # untouched stage. Here we lower the MountainSort4 detection threshold (a common
 # tweak for low-amplitude units). The clone is then selectable by name like any
-# shipping preset — set `pipeline_preset` to it to use it below. (Registering a
+# shipping preset; set `pipeline_preset` to it to use it below. (Registering a
 # name that already exists raises, so each cell is guarded to be safe to re-run.)
 
 if "my_lab_ms4_lower_threshold" not in list_pipeline_presets():
@@ -189,12 +188,12 @@ if "my_lab_ms4_lower_threshold" not in list_pipeline_presets():
     )
 describe_pipeline_preset("my_lab_ms4_lower_threshold")
 
-# For a fully custom pipeline — a different sorter, or a stage combination no
-# shipping preset covers — `register_pipeline_preset(name, {...})` adds a preset from the
-# parameter-row names you choose (each must already exist; `initialize_v2_defaults`
-# seeded the rows below). The registration lives for this session; to ship a
-# durable recipe, add it to the preset catalog. The mapping is the stages a run
-# touches:
+# For a fully custom pipeline (a different sorter, or a stage combination no
+# shipping preset covers), `register_pipeline_preset(name, {...})` adds a preset
+# from the parameter-row names you choose (each must already exist;
+# `initialize_v2_defaults` seeded the rows below). The registration lives for
+# this session; to ship a durable recipe, add it to the preset catalog. The
+# mapping is the stages a run touches:
 
 if "my_lab_custom" not in list_pipeline_presets():
     register_pipeline_preset(
@@ -217,7 +216,7 @@ if "my_lab_custom" not in list_pipeline_presets():
 # an `outcome` of `"ok"` or `"failed"`. With `continue_on_error=True` a failed
 # group is recorded (with `error_type`, `error`, and `partial_run_summary`)
 # instead of stopping the batch. Pick `pipeline_preset` explicitly from
-# `describe_pipeline_presets()` — the session runner infers no default.
+# `describe_pipeline_presets()`; the session runner infers no default.
 # `describe_run(session_results)` renders the whole batch as one receipt: a
 # summary row with the ok / failed / zero-unit / with-warnings counts, then a
 # row per group (and per warning), so failed and zero-unit groups don't hide in

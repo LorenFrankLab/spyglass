@@ -1,7 +1,7 @@
 # Spike Sorting v1 → v2 Migration Guide
 
 A guide for notebook users porting a v1 spike-sorting workflow to
-`spyglass.spikesorting.v2`. It covers the deltas you actually touch in a
+`spyglass.spikesorting.v2`. It covers the differences you touch in a
 notebook; for changes to existing v0/v1 behavior, see the
 [CHANGELOG](../CHANGELOG.md). For the pipeline overview, see
 [Spike Sorting v2](./SpikeSortingV2.md).
@@ -51,17 +51,17 @@ which bundles the algorithm and runs natively on NumPy 2 through v2's scoped
 legacy environment is needed for producing new v0/v1 output, not for native MS4
 in v2.
 
-The legacy environment file currently requires relaxing the SI/probeinterface
+The legacy environment file requires relaxing the SI/probeinterface
 pins in `pyproject.toml` before the environment build (see the comments at the
 top of that file). That is a development-time procedure for the legacy suite,
 **not** the normal user path: users who only need to *read* v0/v1 results use
 the modern install; users who must *produce* new v0/v1 output should follow the
 legacy file verbatim and restore `pyproject.toml` afterwards. Packaging both
-stacks as installable profiles from unchanged metadata is not yet supported.
+stacks as installable profiles from unchanged metadata is not supported.
 
 ### Porting a v1 sort to v2
 
-1. Reuse the v1 sort's identity — session (`nwb_file_name`), sort group,
+1. Reuse the v1 sort's identity: session (`nwb_file_name`), sort group,
     interval, and `team_name`.
 
 2. Build v2 sort groups (`SortGroupV2.set_group_by_shank`) and call
@@ -70,7 +70,7 @@ stacks as installable profiles from unchanged metadata is not yet supported.
     curation; `auto_labeled_merge_id` is `None` until you curate (there is no
     bare `merge_id` to grab).
 
-3. Curate from that root — evaluate + label, then merge (see the
+3. Curate from that root: evaluate + label, then merge (see the
     [curation flow](./SpikeSortingV2.md#the-scripted-evaluate-merge-evaluate-label-flow)),
     review in the browser (`run.start_review(...)`), or pass
     `auto_curate=True` to get an auto-labeled child in one call. The **final
@@ -90,7 +90,7 @@ stacks as installable profiles from unchanged metadata is not yet supported.
     The receipt's `SortedSpikesGroup` is what decoding reads. A curation's
     `merge_id` still resolves through `SpikeSortingOutput` like a v1 row, but
     `SpikeSortingOutput.get_spike_times({"merge_id": ...})` returns **every**
-    unit, labels ignored — use it for inspection, not analysis. Exports
+    unit, labels ignored. Use it for inspection, not analysis. Exports
     (`ssviz.export_to_phy(curated, ...)`) are curation-scoped and do not apply
     the selection policy either.
 
@@ -110,17 +110,17 @@ stacks as installable profiles from unchanged metadata is not yet supported.
     by that gain in µV per raw unit. Unequal gains or nonzero offsets do not
     have a single equivalent amplitude threshold in µV.
 
-- **Parameter rows are named differently — no back-compat aliases.** Every
+- **Parameter rows are named differently, with no back-compat aliases.** Every
     Frank-lab row has a dated, content-stable name, and no alias maps the v1
-    names onto them, so v1 strings do not resolve — update them:
+    names onto them, so v1 strings do not resolve. Update them:
 
     - `PreprocessingParameters`: v1's single `default` → `default`; the production
         region recipes are `franklab_hippocampus_2026_06` (600 Hz high-pass) and
         `franklab_cortex_2026_06` (300 Hz).
     - `SorterParameters` (MountainSort4): the region-encoded
         `franklab_tetrode_hippocampus_30kHz_ms4` / `franklab_probe_ctx_30kHz_ms4`
-        rows — and v1's bare `franklab_tetrode_hippocampus_30KHz` /
-        `franklab_probe_ctx_30KHz` — → the rate-keyed `franklab_30khz_ms4_2026_06`
+        rows (and v1's bare `franklab_tetrode_hippocampus_30KHz` /
+        `franklab_probe_ctx_30KHz`) → the rate-keyed `franklab_30khz_ms4_2026_06`
         / `franklab_20khz_ms4_2026_06`. MS4 runs `filter=False`, so the row is
         region-agnostic; the high-pass band lives on the preproc row, not the
         sorter row.
@@ -147,7 +147,7 @@ stacks as installable profiles from unchanged metadata is not yet supported.
     (matching v1). `SortGroupV2.set_group_by_shank` and
     `set_group_by_electrode_table_column` read each group's
     `Electrode.original_reference_electrode` and map it per group to a
-    `reference_mode` — `-1` / `None` → `"none"`, `-2` → `"global_median"`, a
+    `reference_mode`: `-1` / `None` → `"none"`, `-2` → `"global_median"`, a
     non-negative id → `"specific"` (that electrode). Override knobs:
     `set_group_by_shank` accepts v1's per-group
     `references={electrode_group: ref_id}` dict, and both helpers accept a
@@ -157,8 +157,8 @@ stacks as installable profiles from unchanged metadata is not yet supported.
     electrodes in one group with *mixed* configured references raise instead of
     silently mis-referencing (v1 built a `ValueError` but never raised it); a
     `"specific"` reference that is itself a member of the sort group raises (it
-    would be subtracted then dropped, silently shrinking the group) — use
-    `omit_ref_electrode_group=True` or a cross-group reference; and a
+    would be subtracted then dropped, silently shrinking the group; use
+    `omit_ref_electrode_group=True` or a cross-group reference); and a
     `"specific"` reference electrode that does not exist in the session, or
     whose owning electrode group is ambiguous (the same `electrode_id` under two
     electrode groups), raises here instead of failing later inside
@@ -175,7 +175,7 @@ stacks as installable profiles from unchanged metadata is not yet supported.
 
     This inserts `('<sorter>', 'default')` rows for installed SI sorters outside
     v2's curated set (e.g. `kilosort2_5`), replicating v1's auto-insert. It is
-    **opt-in** — `initialize_v2_defaults()` does not call it, so users who do
+    **opt-in**: `initialize_v2_defaults()` does not call it, so users who do
     not need v1 sorter names pay nothing.
 
 ## 2. What you query differently
@@ -189,7 +189,7 @@ per-unit caps. `SortedSpikesGroup.UnitSelection` snapshots include observed
 intervals in `selection_provenance`.
 
 The connected local browser writes operation/result journals beside the saved
-bundle, without a workflow-status table. Hosted bundles still require the
+bundle, without a workflow-status table. Hosted bundles require the
 notebook import path. See
 [observed-time behavior](./SpikeSortingV2.md#observed-time-metrics-and-downstream-analysis)
 for metric definitions, bin validity, and decoder restrictions.
@@ -271,8 +271,8 @@ for metric definitions, bin validity, and decoder restrictions.
     subsample come from a named, DB-tracked `AnalyzerWaveformParameters` row
     resolved from the sort's preprocessing recipe (hippocampus `0.5/0.5 ms`,
     cortex `1.0/2.0 ms`; both 20000 spikes), recorded on
-    `Sorting.display_waveform_params_name`. Template-derived values —
-    `peak_amplitude_uv`, SNR, amplitude — depend on that window and subsample;
+    `Sorting.display_waveform_params_name`. Template-derived values
+    (`peak_amplitude_uv`, SNR, amplitude) depend on that window and subsample;
     spike-train metrics (firing rate, ISI, presence ratio) do not.
 
 ## 4. What has a v2 replacement
@@ -281,7 +281,7 @@ The post-sort (curation / metric) surfaces have v2 replacements. The only
 surface that stays v1-only is the stored per-pair burst metrics
 (`BurstPairUnit`); everything else below has a v2 path.
 
-- **Available in v2** — `metric_curation` provides `QualityMetricParameters`,
+- **Available in v2:** `metric_curation` provides `QualityMetricParameters`,
     `AutoCurationRules`, `CurationEvaluationSelection`, and
     `CurationEvaluation`. This replaces v1 `MetricCuration` for SI quality
     metrics, auto-labels, and merge suggestions. Both score a curated sorting
@@ -297,10 +297,9 @@ surface that stays v1-only is the stored per-pair burst metrics
     voltage/spike-train metrics (`snr`, `amplitude_cutoff`, `firing_rate`,
     `isi_violation`, …) stay on the unwhitened display analyzer. The metric
     recipe is tracked on
-    `CurationEvaluationSelection.metric_waveform_params_name`. Quality-metric
-    curation is provided by `CurationEvaluation`.
-- **Folded into CurationEvaluation** — the v1 `BurstPair` table was not cloned
-    as a new DataJoint table. Its notebook plotting helpers are available from
+    `CurationEvaluationSelection.metric_waveform_params_name`.
+- **Folded into CurationEvaluation:** v2 has no `BurstPair` table. The v1
+    notebook plotting helpers are available from
     `CurationEvaluation` (`plot_correlograms`, `investigate_pair_xcorrel`,
     `investigate_pair_peaks`, `plot_peak_over_time`). Retrieve per-pair numbers
     with `evaluation.burst_pair_metrics(pairs=[...])`; v2 computes this
@@ -308,14 +307,14 @@ surface that stays v1-only is the stored per-pair burst metrics
     fraction uses violating intervals / (`spikes - 1`) and the evaluation's
     refractory window, matching v2 unit QC. The legacy v1 burst utility divides
     by spike count.
-- **Available in v2** — `RecordingRecompute` is replaced by two explicit
+- **Available in v2:** `RecordingRecompute` is replaced by two explicit
     verification families: `RecordingArtifactRecompute*` for recording/artifact
     NWB files and `SortingAnalyzerRecompute*` for analyzer folders.
-- **Available in v2** — cross-session unit matching: `unit_matching` and
+- **Available in v2:** cross-session unit matching: `unit_matching` and
     `matcher_protocol` back the `UnitMatch` / `TrackedUnit` tables, and
     `ConcatenatedRecording` / `SessionGroup` implement same-day chronic
     concatenate-and-sort.
-- **Available in v2** — `RunResult.start_review(...)` is the browser-first v1
+- **Available in v2:** `RunResult.start_review(...)` is the browser-first v1
     FigURL replacement. One immutable review profile evaluates the selected
     curation, seeds current labels, puts its metrics and suggestions in the
     selectable unit table, and returns a resumable FigPack handle.
@@ -333,7 +332,7 @@ surface that stays v1-only is the stored per-pair burst metrics
     share a port. Needs the `spikesorting-v2-curation` extra. The table-level
     `FigPackCurationSelection` and `FigPackCuration` APIs remain the expert
     layer.
-- **Available in v2** — lab-specific computed unit properties use immutable
+- **Available in v2:** lab-specific computed unit properties use immutable
     `CurationUnitAnnotationSet` rows over exact curated-unit namespaces. Reads
     and FigPack display require explicit set references; annotations are not
     labels and do not change curation identity or `merge_id`.
@@ -354,13 +353,12 @@ If you compare v1 and v2 outputs on the same input, expect these **intentional,
 correct** differences:
 
 - **v2 bandpass-filters BEFORE referencing** (v1 referenced first). The
-    *reasoning*: the spatial common reference should be estimated from the
-    band-limited spike signal, so out-of-band drift and DC offset are filtered
-    out first and do not leak into the reference subtracted from every channel —
-    the signal-processing-preferred order, an intentional divergence from v1.
+    spatial common reference is estimated from the band-limited spike signal,
+    so out-of-band drift and DC offset do not leak into the reference
+    subtracted from every channel.
     Changing this order affects the **`global_median` common reference** because
     the per-sample median is non-linear. `specific`-electrode and `none`
-    references (and a global *average* reference — `global_median` with
+    references (and a global *average* reference, `global_median` with
     `operator="average"`) commute with the filter in exact arithmetic when the
     filter settings, channels, and temporal context match. This does not
     guarantee identical v1/v2 recordings: other recipe and interval-handling
@@ -389,13 +387,13 @@ correct** differences:
     recorded-chunk boundaries, so observation durations and firing-rate windows
     exclude the inter-interval wall-clock gaps (v1 could report a single
     gap-spanning envelope).
-- **KS4 may differ after a SpikeInterface version bump** — caught by the
-    pinned-version snapshot test rather than appearing silently.
+- **KS4 may differ after a SpikeInterface version bump.** The pinned-version
+    snapshot test catches this.
 - **Seed pinning improves preprocessing reproducibility, but MS4/MS5/KS4 are not
     exact oracles.** v2 pins SI's whitening and noise-level seeds, which removes
-    the run-to-run drift those steps introduced. The sorters themselves (MS4's
+    run-to-run variation in those steps. The sorters themselves (MS4's
     `isosplit`, MS5, KS4) remain non-deterministic and must **not** be used as
-    an exact rerun or v1↔v2 parity oracle — bound any comparison by qualitative
+    an exact rerun or v1↔v2 parity oracle. Bound any comparison by qualitative
     metrics (unit-count order, firing-rate distribution shape), not
     spike-by-spike equality. The deterministic `clusterless_thresholder` path is
     the tight parity reference.
@@ -404,14 +402,14 @@ The whole-session and curation notebooks show the complete population handoff
 and detailed inspection routes. Metric predicates passed to
 `select_units_for_analysis` with an explicit evaluation persist the selected
 population; decoding reads the same membership. Native split/per-spike edits and
-Phy edit re-import remain unsupported.
+Phy edit re-import are unsupported.
 
 Concat selections require explicit per-member artifact detection IDs (or
 explicit `None` values). The standard runner resolves these automatically from
 the preset. Masks precede concatenation, participate in concat identity, and
 survive rebuilds and per-session exports as `obs_intervals`. Concatenation
-itself does not correct motion -- that is a separate, optional stage (see
-[Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
+itself does not correct motion. Motion correction is a separate, optional stage
+(see [Optional motion correction](./SpikeSortingV2.md#optional-motion-correction))
 that can layer on top of either a single-session `Recording` or a
 `ConcatenatedRecording`; if you apply it to a concat, its estimate/correction
 reads the same masks. Raw SI duration metrics retain SI definitions. V2

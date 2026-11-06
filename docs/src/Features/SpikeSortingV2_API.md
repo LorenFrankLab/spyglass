@@ -70,11 +70,11 @@ first use, so `import spyglass.spikesorting.v2` stays lightweight.
 | `select_units_for_analysis`                               | Hand a reviewed curation to downstream analysis under a named label policy (see [Hand off to analysis](#hand-off-to-analysis)).                    |
 | `open_curation_analyzer`                                  | Open a disk-backed working copy of a curation's SpikeInterface analyzer, for debugging.                                                            |
 
-The typed result and plan classes these functions return -- `RunResult`,
-`PreflightReport`, `PreflightSessionReport`, `UnitMatchPlan`,
+The typed result and plan classes these functions return are importable from
+`spyglass.spikesorting.v2.pipeline` for type hints and `isinstance` checks:
+`RunResult`, `PreflightReport`, `PreflightSessionReport`, `UnitMatchPlan`,
 `UnitMatchInputPlan`, `UnitMatchPreflightReport`, `EstimateMotionReceipt`, and
-the `RunV2*` summaries -- are importable from
-`spyglass.spikesorting.v2.pipeline` for type hints and `isinstance` checks.
+the `RunV2*` summaries.
 
 ## Curate and review
 
@@ -195,6 +195,6 @@ with `attempt_all` instead. Parameter tables provide `insert_default()`. See
 artifact-detection tables; `SortingSelection` resolves it for you, so user code
 does not need it.
 
-The remaining public names in the table modules -- insert guards, integrity
-audits, and helpers the tables call while computing -- support the tables
+The remaining public names in the table modules (insert guards, integrity
+audits, and helpers the tables call while computing) support the tables
 themselves and are not entry points.
