@@ -407,7 +407,11 @@ def _run_action(*, review_id, root, request, state, report):
                         "This is the root curation; there is no earlier parent to review."
                     )
                 parent_review = parent.start_review(
-                    review.profile, display_options=review.display_options
+                    review.profile,
+                    metric_waveform_params_name=(
+                        review.evaluation._metric_waveform_params_name()
+                    ),
+                    display_options=review.display_options,
                 )
             state["destination"] = {
                 "bundle": parent_review.uri,

@@ -523,14 +523,21 @@ class CurationRef:
         *,
         metric_params_name: str,
         auto_curation_rules_name: str,
+        metric_waveform_params_name: str | None = None,
     ) -> "EvaluationResult":
-        """Create/reuse and populate an evaluation over this curation."""
+        """Create/reuse and populate an evaluation over this curation.
+
+        ``metric_waveform_params_name`` names the metric waveform recipe;
+        ``None`` uses this curation's default one.
+        """
         self.as_key()
         spec = EvaluationSpec(
             metric_params_name=metric_params_name,
             auto_curation_rules_name=auto_curation_rules_name,
         )
-        return _evaluate_curation(self, spec)
+        return _evaluate_curation(
+            self, spec, metric_waveform_params_name=metric_waveform_params_name
+        )
 
     def start_review(
         self,
@@ -538,11 +545,14 @@ class CurationRef:
         *,
         upload: bool = False,
         ephemeral: bool = False,
+        metric_waveform_params_name: str | None = None,
         annotation_sets=(),
         display_options=None,
     ):
         """Start/reuse a seeded browser review over this exact generation.
 
+        ``metric_waveform_params_name`` picks the evaluation's metric
+        waveform recipe (``None`` uses this curation's default).
         ``display_options`` (``ReviewDisplayOptions`` / mapping / ``None``)
         bounds the browser payload and is persisted with the review.
         """
@@ -553,6 +563,7 @@ class CurationRef:
             profile,
             upload=upload,
             ephemeral=ephemeral,
+            metric_waveform_params_name=metric_waveform_params_name,
             annotation_sets=annotation_sets,
             display_options=display_options,
         )
@@ -1026,6 +1037,17 @@ class EvaluationResult:
             proposed_labels=proposed_labels,
         )
 
+    def _metric_waveform_params_name(self) -> str:
+        """The metric waveform recipe this evaluation was computed with."""
+        from spyglass.spikesorting.v2.metric_curation import (
+            CurationEvaluationSelection,
+        )
+
+        return (
+            CurationEvaluationSelection
+            & {"curation_evaluation_id": self.evaluation_id}
+        ).fetch1("metric_waveform_params_name")
+
     def _current_evaluation_key(self) -> dict[str, uuid.UUID]:
         from spyglass.spikesorting.v2.metric_curation import (
             CurationEvaluation,
@@ -1182,9 +1204,7 @@ class EvaluationResult:
         child = CurationRef.from_key(child_key)
         # The parent may name its metric waveform recipe explicitly; evaluate
         # the child with the same one, not the preprocessing default.
-        metric_waveform_params_name = (
-            CurationEvaluationSelection & evaluation_key
-        ).fetch1("metric_waveform_params_name")
+        metric_waveform_params_name = self._metric_waveform_params_name()
         existing_selections = set(
             (CurationEvaluationSelection & child._unchecked_key()).fetch(
                 "curation_evaluation_id"
@@ -1432,20 +1452,24 @@ def _insert_merge_child(
 
 
 def _evaluate_curation(
-    curation: CurationRef, spec: EvaluationSpec
+    curation: CurationRef,
+    spec: EvaluationSpec,
+    *,
+    metric_waveform_params_name: str | None = None,
 ) -> EvaluationResult:
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
     )
 
-    key = curation.as_key()
-    selection = CurationEvaluationSelection.insert_by_curation_id(
-        key["sorting_id"],
-        key["curation_id"],
-        spec.metric_params_name,
-        spec.auto_curation_rules_name,
-    )
+    selection = {
+        **curation.as_key(),
+        "metric_params_name": spec.metric_params_name,
+        "auto_curation_rules_name": spec.auto_curation_rules_name,
+    }
+    if metric_waveform_params_name is not None:
+        selection["metric_waveform_params_name"] = metric_waveform_params_name
+    selection = CurationEvaluationSelection.insert_selection(selection)
     CurationEvaluation.populate(selection, reserve_jobs=False)
     return EvaluationResult.from_key(selection)
 
@@ -1455,6 +1479,7 @@ def merge_and_evaluate(
     parent_curation: CurationRef,
     spec: EvaluationSpec,
     groups: Sequence[Sequence[int]],
+    metric_waveform_params_name: str | None = None,
 ) -> MergeEvaluateReceipt:
     """Commit merges and evaluate the child, with an explicit parent and spec.
 
@@ -1478,6 +1503,9 @@ def merge_and_evaluate(
     groups : sequence of sequence of int
         Disjoint merge groups of ``parent_curation`` unit ids, each with at
         least two distinct ids.
+    metric_waveform_params_name : str, optional
+        Metric waveform recipe for both evaluations. Default ``None`` uses
+        ``parent_curation``'s default recipe.
 
     Returns
     -------
@@ -1510,7 +1538,9 @@ def merge_and_evaluate(
             "metric and auto-curation rule recipe names."
         )
     _require_outside_merge_evaluation_transaction()
-    return _evaluate_curation(parent, spec).merge_and_evaluate(groups)
+    return _evaluate_curation(
+        parent, spec, metric_waveform_params_name=metric_waveform_params_name
+    ).merge_and_evaluate(groups)
 
 
 def create_initial_curation(

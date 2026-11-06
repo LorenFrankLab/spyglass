@@ -528,3 +528,69 @@ def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
         assert receipt.evaluation_selection_status == "computed"
     finally:
         clear_curations_for(sorting_key)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_merge_and_evaluate_function_uses_a_requested_recipe(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The function form evaluates parent and child with a named recipe.
+
+    Without it, a parent already evaluated under a non-default metric
+    waveform recipe was re-evaluated, and its child scored, under the
+    default recipe.
+    """
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2.curation_api import (
+        EvaluationSpec,
+        create_initial_curation,
+        merge_and_evaluate,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
+    clear_curations_for(sorting_key)
+    try:
+        root = create_initial_curation(sorting_key)
+        default_key = CurationEvaluationSelection.insert_by_curation_id(
+            root.sorting_id, root.curation_id, "minimal", "none"
+        )
+        default_recipe = (CurationEvaluationSelection & default_key).fetch1(
+            "metric_waveform_params_name"
+        )
+        recipe = next(
+            name
+            for name in (
+                "franklab_hippocampus_metric_waveforms",
+                "franklab_cortex_metric_waveforms",
+            )
+            if name != default_recipe
+        )
+
+        receipt = merge_and_evaluate(
+            parent_curation=root,
+            spec=EvaluationSpec("minimal", "none"),
+            groups=[[unit_ids[0], unit_ids[1]]],
+            metric_waveform_params_name=recipe,
+        )
+
+        parent_recipes = set(
+            (
+                CurationEvaluationSelection * CurationEvaluation.proj()
+                & root.as_key()
+            ).fetch("metric_waveform_params_name")
+        )
+        assert parent_recipes == {recipe}
+        child_selection = CurationEvaluationSelection & {
+            "curation_evaluation_id": receipt.evaluation.evaluation_id
+        }
+        assert child_selection.fetch1("metric_waveform_params_name") == recipe
+    finally:
+        clear_curations_for(sorting_key)

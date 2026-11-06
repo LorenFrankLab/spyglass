@@ -477,3 +477,211 @@ def test_review_explicit_annotation_set_identity_and_display(
         assert annotation_set.column_name in serialized
     finally:
         clear_curations_for(sorting_key)
+
+
+def _non_default_metric_waveform_recipe(curation) -> str:
+    """A metric waveform recipe other than the curation's default one."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+    )
+
+    default_key = CurationEvaluationSelection.insert_by_curation_id(
+        curation.sorting_id, curation.curation_id, "minimal", "none"
+    )
+    default_recipe = (CurationEvaluationSelection & default_key).fetch1(
+        "metric_waveform_params_name"
+    )
+    return next(
+        name
+        for name in (
+            "franklab_hippocampus_metric_waveforms",
+            "franklab_cortex_metric_waveforms",
+        )
+        if name != default_recipe
+    )
+
+
+def _evaluate_with_recipe(curation, recipe: str) -> dict:
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+
+    key = CurationEvaluationSelection.insert_selection(
+        {
+            **curation.as_key(),
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+            "metric_waveform_params_name": recipe,
+        }
+    )
+    CurationEvaluation.populate(key, reserve_jobs=False)
+    return key
+
+
+def test_start_review_reports_the_evaluation_it_displays(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The evaluation stage describes the evaluation the review shows.
+
+    An evaluation of the parent under another metric waveform recipe is a
+    different evaluation: it must not make the review's own evaluation look
+    reused. A supplied, populated evaluation is reused, not computed.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        profile = _ensure_test_profile()
+        other_key = _evaluate_with_recipe(
+            root, _non_default_metric_waveform_recipe(root)
+        )
+
+        review = root.start_review(profile, upload=False)
+        assert str(review.evaluation.evaluation_id) != str(
+            other_key["curation_evaluation_id"]
+        )
+        assert {stage.name: stage.status for stage in review.stages}[
+            "evaluation_populated"
+        ] == "computed"
+
+        supplied = EvaluationResult.from_key(other_key).start_review(
+            profile, upload=False
+        )
+        assert {stage.name: stage.status for stage in supplied.stages}[
+            "evaluation_populated"
+        ] == "reused"
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def test_review_commit_evaluates_the_merged_child_with_the_review_recipe(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """A committed merge is evaluated with the reviewed evaluation's recipe.
+
+    A review can display an evaluation with an explicit metric waveform
+    recipe. The merged child's evaluation must use the same recipe, or its
+    metrics come from different waveform windows than the ones reviewed.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+    )
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        units = sorted(
+            map(int, (CurationV2.Unit & root.as_key()).fetch("unit_id"))
+        )
+        recipe = _non_default_metric_waveform_recipe(root)
+        review = EvaluationResult.from_key(
+            _evaluate_with_recipe(root, recipe)
+        ).start_review(_ensure_test_profile(), upload=False)
+        _write_edits(review.uri, {unit: ["accept"] for unit in units}, [units])
+
+        receipt = review.preview_import().commit()
+
+        assert receipt.evaluation.curation == receipt.curation
+        child_selection = CurationEvaluationSelection & {
+            "curation_evaluation_id": receipt.evaluation.evaluation_id
+        }
+        assert child_selection.fetch1("metric_waveform_params_name") == recipe
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def test_continue_review_after_label_commit_keeps_the_review_recipe(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """The follow-up review of a label-only commit uses the reviewed recipe.
+
+    A label-only commit carries no child evaluation, so ``continue_review``
+    evaluates the child itself. It must use the reviewed evaluation's metric
+    waveform recipe, not the sort's default one.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+    )
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        units = sorted(
+            map(int, (CurationV2.Unit & root.as_key()).fetch("unit_id"))
+        )
+        recipe = _non_default_metric_waveform_recipe(root)
+        review = EvaluationResult.from_key(
+            _evaluate_with_recipe(root, recipe)
+        ).start_review(_ensure_test_profile(), upload=False)
+        _write_edits(review.uri, {unit: ["accept"] for unit in units}, [])
+        receipt = review.preview_import().commit()
+        assert receipt.evaluation is None
+
+        child_review = receipt.continue_review()
+
+        assert child_review.evaluation.curation == receipt.curation
+        assert child_review.evaluation._metric_waveform_params_name() == recipe
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def test_start_review_evaluates_with_a_requested_recipe(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """``start_review`` without an evaluation can name the waveform recipe.
+
+    Reopening a parent from one of its reviews evaluates it this way, so the
+    parent review shows metrics from the same waveform windows.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        recipe = _non_default_metric_waveform_recipe(root)
+        other_key = _evaluate_with_recipe(root, recipe)
+
+        review = root.start_review(
+            _ensure_test_profile(),
+            upload=False,
+            metric_waveform_params_name=recipe,
+        )
+
+        assert str(review.evaluation.evaluation_id) == str(
+            other_key["curation_evaluation_id"]
+        )
+        assert {stage.name: stage.status for stage in review.stages}[
+            "evaluation_populated"
+        ] == "reused"
+    finally:
+        clear_curations_for(sorting_key)

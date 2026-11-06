@@ -796,6 +796,11 @@ class ReviewImportReceipt:
             upload=self.changes.review.upload,
             ephemeral=self.changes.review.ephemeral,
             evaluation=self.evaluation,
+            # A label-only commit has no child evaluation yet; evaluate the
+            # child with the waveform windows the reviewer saw.
+            metric_waveform_params_name=(
+                self.changes.review.evaluation._metric_waveform_params_name()
+            ),
             # The display budget is part of the review the user configured;
             # continuing onto the committed child must not silently revert it.
             display_options=self.changes.review.display_options,
@@ -862,6 +867,7 @@ def start_review(
     upload: bool = False,
     ephemeral: bool = False,
     evaluation: EvaluationResult | None = None,
+    metric_waveform_params_name: str | None = None,
     annotation_sets: Sequence[Any] = (),
     display_options: ReviewDisplayOptions | Mapping | None = None,
 ) -> FigPackReview:
@@ -895,6 +901,10 @@ def start_review(
         An existing evaluation to display. It must cover ``parent`` with the
         profile's exact recipe names. Default ``None`` creates or reuses the
         profile's evaluation of ``parent`` and populates it.
+    metric_waveform_params_name : str, optional
+        Metric waveform recipe for the evaluation. Default ``None`` uses the
+        supplied ``evaluation``'s recipe, or ``parent``'s default recipe when
+        none is supplied.
     annotation_sets : sequence, optional
         Annotation-set references (anything ``AnnotationSetRef.from_key``
         accepts) to include in the review. Each must belong to ``parent``
@@ -927,7 +937,8 @@ def start_review(
         set belongs to a different curation or is listed twice; ``profile``
         does not resolve to exactly one ``CurationReviewProfile`` row or no
         longer matches its pinned hash; ``evaluation`` is not over
-        ``parent`` with the profile's recipe names; or ``parent`` is an
+        ``parent`` with the profile's recipe names or with
+        ``metric_waveform_params_name``; or ``parent`` is an
         uncommitted merge preview.
     CurationNotFoundError
         If ``parent`` no longer identifies its curation generation (the row
@@ -958,27 +969,37 @@ def start_review(
     resolved_annotation_sets = _resolve_annotation_sets(parent, annotation_sets)
     resolved_profile = ReviewProfileRef.resolve(profile)
     spec = resolved_profile.evaluation_spec
-    evaluation_identity = {
-        **parent.as_key(),
-        "metric_params_name": spec.metric_params_name,
-        "auto_curation_rules_name": spec.auto_curation_rules_name,
-    }
-    existing_evaluation_ids = (
-        CurationEvaluationSelection & evaluation_identity
-    ).fetch("curation_evaluation_id")
-    evaluation_existed = any(
-        CurationEvaluation & {"curation_evaluation_id": evaluation_id}
-        for evaluation_id in existing_evaluation_ids
-    )
+    # A supplied evaluation must already be populated (checked below).
+    evaluation_existed = evaluation is not None
     if evaluation is None:
+        # The exact selection ``parent.evaluate`` uses, so an evaluation under
+        # another metric waveform recipe does not count as this one.
+        selection = {
+            **parent.as_key(),
+            "metric_params_name": spec.metric_params_name,
+            "auto_curation_rules_name": spec.auto_curation_rules_name,
+        }
+        if metric_waveform_params_name is not None:
+            selection["metric_waveform_params_name"] = (
+                metric_waveform_params_name
+            )
+        selection_key = CurationEvaluationSelection.insert_selection(selection)
+        evaluation_existed = bool(CurationEvaluation & selection_key)
         evaluation = parent.evaluate(
             metric_params_name=spec.metric_params_name,
             auto_curation_rules_name=spec.auto_curation_rules_name,
+            metric_waveform_params_name=metric_waveform_params_name,
         )
-    elif evaluation.curation != parent or evaluation.spec != spec:
+    elif (
+        evaluation.curation != parent
+        or evaluation.spec != spec
+        or metric_waveform_params_name
+        not in (None, evaluation._metric_waveform_params_name())
+    ):
         raise ValueError(
             "EvaluationResult.start_review requires an evaluation over this "
-            "same curation using the chosen profile's exact recipe names."
+            "same curation using the chosen profile's exact recipe names "
+            "and the requested metric waveform recipe."
         )
     evaluation_populated = bool(
         CurationEvaluation
@@ -1386,12 +1407,16 @@ def _commit_change_set(
         ReviewStageStatus("child_committed", child_status),
     ]
     if changes.merge_groups:
+        # Evaluate the merged units with the waveform windows the reviewer saw.
         evaluation = child.evaluate(
             metric_params_name=(
                 changes.review.profile.evaluation_spec.metric_params_name
             ),
             auto_curation_rules_name=(
                 changes.review.profile.evaluation_spec.auto_curation_rules_name
+            ),
+            metric_waveform_params_name=(
+                changes.review.evaluation._metric_waveform_params_name()
             ),
         )
         stages.extend(
