@@ -38,6 +38,10 @@ class DockerMySQLManager:
         Parent directory for the container's MySQL data dir, bind-mounted as
         `<vol_dir>/<container_name>` -> /var/lib/mysql. Default None, letting
         Docker manage storage on its own root disk.
+    name_suffix : str
+        Appended to the container name, e.g. a pytest-xdist worker id, so
+        parallel workers each get their own server (and, since the port is
+        derived from the name, their own port). Default None.
     """
 
     def __init__(
@@ -51,6 +55,7 @@ class DockerMySQLManager:
         container_name: str = None,
         port: int = None,
         vol_dir: str = None,
+        name_suffix: str = None,
     ) -> None:
         self.image_name = image_name
         self.mysql_version = mysql_version
@@ -66,6 +71,8 @@ class DockerMySQLManager:
 
         if container_name is None:
             container_name = self._resolve_container_name()
+        if name_suffix:
+            container_name = f"{container_name}-{name_suffix}"
         if port is None:
             port = self._resolve_port(container_name)
 
@@ -406,8 +413,15 @@ class DockerMySQLManager:
                 logline = f"Container {self.container_name} (exited)"
 
             if remove:
-                self.container.remove()
-                logline += " and removed"
+                # ``v=True`` also removes the container's ANONYMOUS volumes.
+                # The datajoint/mysql image declares ``VOLUME /var/lib/mysql``,
+                # so a run WITHOUT a ``vol_dir`` bind mount (the default)
+                # creates a ~4 GB anonymous volume per container; without this
+                # every suite run leaks one until the Docker partition fills.
+                # A bind mount is not a managed volume, so ``vol_dir`` runs are
+                # unaffected and are still cleared by ``_clear_vol_dir``.
+                self.container.remove(v=True)
+                logline += " and removed (with volumes)"
 
             print(f"{logline}.")
 

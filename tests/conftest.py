@@ -27,15 +27,6 @@ os.environ.setdefault("DISPLAY", ":0")
 # Disable all tqdm progress bars; they pollute test output.
 os.environ.setdefault("TQDM_DISABLE", "1")
 
-# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
-# warnings don't bleed through even during GC finalisation.
-_existing = os.environ.get("PYTHONWARNINGS", "")
-_rw_filter = "ignore::ResourceWarning"
-if _rw_filter not in _existing:
-    os.environ["PYTHONWARNINGS"] = (
-        f"{_existing},{_rw_filter}" if _existing else _rw_filter
-    )
-
 # ---------------------------------------------------------------------------
 
 import sys
@@ -61,7 +52,7 @@ from pandas.errors import PerformanceWarning
 
 from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
-from .data_downloader import DataDownloader
+from .data_downloader import FILE_PATHS, DataDownloader
 
 # --------- Fix DeepLabCut's reload of the logging module ---------------------
 # deeplabcut.pose_estimation_tensorflow.training.train_network runs
@@ -95,6 +86,18 @@ importlib.reload = _reload_except_logging
 logging.shutdown = _no_shutdown
 
 # ------------------------------- TESTS CONFIG -------------------------------
+
+# Module-level default so `pytest_unconfigure` never references an unbound name.
+# `pytest_configure` sets TEARDOWN early but binds SERVER late (after building
+# the Docker MySQL manager). If configure raises in between -- e.g. Docker is
+# unavailable, so `DockerMySQLManager(...)` raises before the assignment -- pytest
+# still runs `pytest_unconfigure` from `wrap_session`'s finally. Without this
+# default the teardown's `SERVER.stop()` raises `NameError: name 'SERVER' is not
+# defined`, a second traceback that buries the real configuration error. The
+# default + the `SERVER is not None` guard in `pytest_unconfigure` surface the
+# real error instead.
+SERVER = None
+_UNIT_DATABASE_METHODS = {}
 
 
 # ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
@@ -217,10 +220,11 @@ class _ModuleWarningsProxy:
         return getattr(warnings, name)
 
 
-# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+# (1) Suppress only the old fixture's missing source_script_file_name warning.
 _hdmf_objectmapper.warnings = _ModuleWarningsProxy(
     lambda msg, *a, **kw: (
-        a
+        "source_script_file_name" in str(msg)
+        and a
         and isinstance(a[0], type)
         and issubclass(a[0], MissingRequiredBuildWarning)
     )
@@ -239,13 +243,13 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
 #     NO_DLC
 
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.simplefilter("ignore", category=ResourceWarning)
-warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", module="tensorflow")
 
 warnings.filterwarnings(
-    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    "ignore",
+    message=".*source_script_file_name.*",
+    category=MissingRequiredBuildWarning,
+    module="hdmf",
 )
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
@@ -282,9 +286,8 @@ warnings.filterwarnings(
 # numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
 # `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
 # This fires a DeprecationWarning at process exit.  We could filter it, but
-# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
-# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
-# our filters and they are not restored before atexit fires.
+# ms4alg.py calls `warnings.resetwarnings()` during sorting; warning-filter
+# restoration during tests does not cover handlers that run at process exit.
 # Unregistering the atexit handler is cleaner: blosc._init() has already run,
 # and skipping _destroy() in the test process is harmless.
 try:
@@ -316,6 +319,25 @@ def pytest_addoption(parser):
         'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
+    parser.addoption(
+        "--v2-tier",
+        choices=("unit", "db_unit", "stage", "pipeline", "regression_gate"),
+        default=None,
+        help=(
+            "Run one spikesorting v2 test tier. The unit tier starts no Docker "
+            "server, fetches no datasets and rejects DataJoint connections."
+        ),
+    )
+    parser.addoption(
+        "--v2-tier-budgets",
+        action="store_true",
+        dest="v2_tier_budgets",
+        default=False,
+        help=(
+            "Fail the session when a spikesorting v2 test exceeds its tier's "
+            "time budget (TIER_BUDGETS_S in tests/spikesorting/v2/_test_tiers.py)."
+        ),
+    )
     parser.addoption(
         "--quiet-spy",
         action="store_true",
@@ -373,6 +395,30 @@ def pytest_addoption(parser):
         dest="container_port",
         help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
     )
+    parser.addoption(  # opt-in for the slow real-chronic memory/runtime test
+        "--run-chronic",
+        action="store_true",
+        dest="run_chronic",
+        default=False,
+        help=(
+            "Run the slow real-chronic-dataset memory/runtime test for "
+            "spike-sorting v2 concatenation. Requires a real dataset via the "
+            "SPIKESORTING_V2_CHRONIC_TEST_PATH env var; skipped by default."
+        ),
+    )
+    parser.addoption(  # opt-in for the v2 end-to-end acceptance probes
+        "--run-acceptance",
+        action="store_true",
+        dest="run_acceptance",
+        default=False,
+        help=(
+            "Run the spike-sorting v2 end-to-end acceptance probes "
+            "(tests marked `acceptance`, in tests/spikesorting/v2/acceptance). "
+            "Requires the MEArec tetrode and smoke fixtures, the "
+            "spikesorting-v2-curation extras and a Chromium for Playwright; "
+            "skipped by default."
+        ),
+    )
     parser.addoption(  # Keeps MySQL data off a potentially small root disk
         "--container-vol-dir",
         action="store",
@@ -407,13 +453,14 @@ def _refuse_preimported_spyglass(modules=None):
 
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
-    global NO_DLC
+    global NO_DLC, DATA_CLEANUP_ROOT
 
     TEST_FILE = "minirec20230622.nwb"
-    TEARDOWN = not config.option.no_teardown
+    unit_only = getattr(config.option, "v2_tier", None) == "unit"
+    TEARDOWN = not config.option.no_teardown and not unit_only
     VERBOSE = not config.option.quiet_spy
 
-    NO_DLC = config.option.no_dlc
+    NO_DLC = config.option.no_dlc or unit_only
     pytest.NO_DLC = NO_DLC
 
     # Validate the requested base dir before anything is created or
@@ -447,7 +494,47 @@ def pytest_configure(config):
             stacklevel=2,
         )
 
+    # pytest-xdist: the controller runs no tests, so it starts no server; each
+    # worker gets its own server and data directory. v2 derives analyzer
+    # folders and selection keys from content, so two workers sharing either
+    # would write the same rows and paths.
+    # ``workerinput`` exists only on an xdist worker's own config; the
+    # PYTEST_XDIST_WORKER variable also leaks into pytest subprocesses that
+    # tests start, which are not workers.
+    workerinput = getattr(config, "workerinput", None)
+    xdist_worker = workerinput["workerid"] if workerinput else None
+    xdist_controller = (
+        bool(getattr(config.option, "numprocesses", None)) and not xdist_worker
+    )
+    if xdist_controller:
+        # Workers inherit this environment when they start. Without a cap,
+        # every worker's BLAS, torch and numba pools size themselves to the
+        # whole machine and the workers oversubscribe the cores.
+        threads = str(
+            max(1, (os.cpu_count() or 1) // config.option.numprocesses)
+        )
+        for name in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMBA_NUM_THREADS",
+        ):
+            os.environ.setdefault(name, threads)
+    if xdist_worker and config.option.no_docker and not unit_only:
+        raise pytest.UsageError(
+            "pytest-xdist workers need their own database server, so "
+            "--no-docker (one shared server) only works with --v2-tier unit."
+        )
+
     BASE_DIR = _requested_base
+    DATA_CLEANUP_ROOT = None  # None: teardown cleans only canonical tests/_data
+    if xdist_worker:
+        BASE_DIR = _requested_base / "xdist" / xdist_worker
+        _link_shared_downloads(_requested_base, BASE_DIR)
+        # A worker owns its directory under the canonical base, so it gets the
+        # canonical cleanup; under a custom --base-dir nothing is removed.
+        if _requested_base == (Path(__file__).parent / "_data").resolve():
+            DATA_CLEANUP_ROOT = BASE_DIR
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
 
@@ -460,8 +547,9 @@ def pytest_configure(config):
         vol_dir=config.option.container_vol_dir,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_docker,
+        null_server=config.option.no_docker or unit_only or xdist_controller,
         verbose=VERBOSE,
+        name_suffix=xdist_worker,
     )
     # Apply credentials now so that dj.config["custom"]["test_mode"] = True
     # is visible when spyglass is first imported (triggered by fixtures such as
@@ -483,6 +571,38 @@ def pytest_configure(config):
         download_dlc=not NO_DLC,
     )
 
+    if unit_only:
+        _block_unit_database_access()
+
+
+def _link_shared_downloads(shared_base: Path, worker_base: Path) -> None:
+    """Link a worker's downloaded inputs to the shared copies, if present.
+
+    The downloads are read-only inputs (the raw session and its videos), so
+    workers share them instead of each fetching its own copy. Anything not yet
+    downloaded is fetched into the worker's own directory as usual.
+    """
+    for entry in FILE_PATHS:
+        source = shared_base / entry["relative_dir"] / entry["target_name"]
+        target = worker_base / entry["relative_dir"] / entry["target_name"]
+        if source.is_file() and not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(source)
+
+
+def _block_unit_database_access():
+    """Refuse collection- or runtime-time database access in the unit lane."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(
+            "The v2 unit tier attempted DataJoint database access. "
+            "Move this test to a database tier or isolate its DB boundary."
+        )
+
+    for name in ("connect", "query"):
+        _UNIT_DATABASE_METHODS[name] = getattr(dj.Connection, name)
+        setattr(dj.Connection, name, refuse)
+
 
 def pytest_sessionfinish(session, exitstatus):
     # Stash the session so pytest_unconfigure (which only receives ``config``)
@@ -494,6 +614,9 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def pytest_unconfigure(config):
+    for name, method in _UNIT_DATABASE_METHODS.items():
+        setattr(dj.Connection, name, method)
+    _UNIT_DATABASE_METHODS.clear()
     server = globals().get("SERVER")
     if server is None:
         return
@@ -510,7 +633,13 @@ def pytest_unconfigure(config):
     steps = [("close_nwb_files", close_nwb_files)]
     if teardown:
         steps.append(("server.stop", server.stop))
-        steps.append(("data cleanup", lambda: _teardown_test_data(base_dir)))
+        cleanup_root = globals().get("DATA_CLEANUP_ROOT")
+        steps.append(
+            (
+                "data cleanup",
+                lambda: _teardown_test_data(base_dir, data_root=cleanup_root),
+            )
+        )
 
     for label, action in steps:
         try:
@@ -671,9 +800,7 @@ def worker_id(request):
     """Get unique worker ID for pytest-xdist parallelization.
 
     Returns 'master' for serial execution, or 'gwN' for parallel workers.
-    This enables worker-specific database schema isolation.
-
-    NOTE: Not currently in use, but set up for future parallel test runs.
+    Names each worker's DataJoint config file (see ``dj_config``).
     """
     if hasattr(request.config, "workerinput"):
         return request.config.workerinput["workerid"]
@@ -681,14 +808,18 @@ def worker_id(request):
 
 
 @pytest.fixture(scope="session")
-def dj_config(verbose):
+def dj_config(verbose, worker_id):
     """Fixture for branch-specific config name"""
     SERVER.wait()  # ensure MySQL is ready before any test uses these credentials
 
-    # Worker-specific config file to avoid conflicts
     config_file = "dj_local_conf.json"
     if branch_name := SERVER.branch_name:
         config_file = f"dj_local_conf_{branch_name}.json"
+    if worker_id != "master":
+        # Each xdist worker has its own server. A shared file lets one worker
+        # overwrite it between another's save and load, so that worker would
+        # connect to the wrong server.
+        config_file = config_file.replace(".json", f"_{worker_id}.json")
 
     if Path(config_file).exists():
         os.remove(config_file)
@@ -707,10 +838,17 @@ def dj_config(verbose):
 def dj_conn(dj_config):
     """Fixture for datajoint connection with pytest-xdist support.
 
-    For parallel execution, each worker gets its own database schema prefix
-    to avoid race conditions and ensure test isolation.
+    For parallel execution, each worker connects to its own server, which
+    keeps workers isolated; the port check below makes a mix-up loud.
     """
     dj.config.load(dj_config)
+    expected_port = SERVER.credentials["database.port"]
+    if int(dj.config["database.port"]) != expected_port:
+        pytest.exit(
+            f"{dj_config} names port {dj.config['database.port']}, but this "
+            f"session's server is on {expected_port}; another session "
+            "rewrote the config file."
+        )
 
     try:
         dj.conn().ping()
@@ -750,8 +888,12 @@ def no_dlc(request):
     yield NO_DLC
 
 
+# String condition (evaluated lazily in pytest's namespace, where
+# ``pytest_configure`` sets ``pytest.NO_DLC``). A ``lambda`` here would be a
+# truthy callable that ``skipif`` never calls, so every DLC test skipped
+# unconditionally regardless of ``--no-dlc``.
 skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
+    "getattr(pytest, 'NO_DLC', False)",
     reason="Skipping DLC-dependent tests.",
 )
 

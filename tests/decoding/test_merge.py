@@ -30,6 +30,11 @@ def test_decode_merge_fetch_results(
 
 
 def test_decode_merge_fetch_model(decode_merge_restr, decode_merge_key):
+    # In a clean run the decode fixture populate runs the real decode and
+    # saves a real ``non_local_detector`` model, which ``fetch_model``
+    # loads back. (Stale local DB state can leave a mock-format row that
+    # returns the conftest ``FakeClassifier``; that is a local-rerun
+    # artifact, not the contract -- CI's fresh DB returns the real type.)
     from non_local_detector.models.base import ClusterlessDetector
 
     assert isinstance(

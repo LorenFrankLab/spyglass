@@ -16,6 +16,10 @@ from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
+from spyglass.spikesorting import _si_compat
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.v1.recording import (  # noqa: F401
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
@@ -285,6 +289,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         sorter_params: dict,
         recording_key: dict,
     ):
+        # SpikeInterface 0.101+ run_sorter rejects the output_folder argument
+        # used below. Peak detection for clusterless_thresholder still works.
+        if sorter != "clusterless_thresholder":
+            _require_legacy_si_environment("v1 SpikeSorting.make")
         sorting, timestamps = self._run_spike_sorter(
             recording_key=recording_key,
             artifact_removed_intervals=artifact_removed_intervals,
@@ -409,10 +417,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
-            sorting = si.NumpySorting.from_times_labels(
-                times_list=detected_spikes["sample_index"],
-                labels_list=np.zeros(len(detected_spikes), dtype=np.int32),
-                sampling_frequency=recording.get_sampling_frequency(),
+            sorting = _si_compat.numpy_sorting_from_samples_and_labels(
+                detected_spikes["sample_index"],
+                np.zeros(len(detected_spikes), dtype=np.int32),
+                recording.get_sampling_frequency(),
             )
         else:
             sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)

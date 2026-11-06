@@ -26,6 +26,8 @@ order to develop your own.
 
 - [Mixin Architecture](./Classes.md) explains the mixin-based class
     architecture, including design goals, organization, and usage patterns.
+- [Spike sorting v2 architecture](./SpikeSortingV2Architecture.md) describes
+    domain ownership, dependency direction, and computation/storage boundaries.
 - [Code for Reuse](./Reuse.md) discusses good practice for writing readable and
     reusable code in Python.
 - [Table Types](./TableTypes.md) explains the different table motifs in Spyglass
