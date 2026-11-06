@@ -252,7 +252,11 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             finally:
                 self.close_nwb()
 
-        return tuple(zip(*list(chain(*converted_units()))))
+        per_unit = list(chain(*converted_units()))
+        # zip(*[]) gives (), which callers cannot unpack into two values
+        if not per_unit:
+            return [], []
+        return tuple(zip(*per_unit))
 
     @staticmethod
     def _convert_data(nwb_data) -> list[tuple[np.ndarray, np.ndarray]]:

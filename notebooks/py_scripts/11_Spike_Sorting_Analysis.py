@@ -154,7 +154,7 @@ SortedSpikesGroup().fetch_spike_data(group_key)
 #
 # Spyglass uses the unit identification system:
 # `{"spikesorting_merge_id" : merge_id, "unit_id" : unit_id}"`,
-# where `unit_id` is the index of a units in the saved nwb file. `fetch_spike_data`
+# where `unit_id` is the id of a unit in the saved NWB units table. `fetch_spike_data`
 # can return these identifications by setting `return_unit_ids = True`
 
 spike_times, unit_ids = SortedSpikesGroup().fetch_spike_data(

@@ -24,6 +24,16 @@ info.connection.query(
 )
 ```
 
+```python
+# Remap UnitAnnotation unit ids from positions to NWB unit ids (#1716). The
+# new UnitAnnotationPositionalIdMigration table is declared on import.
+from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+UnitAnnotation.audit_positional_unit_ids()  # merges that need a decision
+UnitAnnotation.migrate_positional_unit_ids()  # dry run: {merge_id: {old: new}}
+UnitAnnotation.migrate_positional_unit_ids(dry_run=False)
+```
+
 ### Breaking Changes
 
 #### `LabMemberInfo` Takes Five Values (#1686)
@@ -73,6 +83,36 @@ info = (
 
 # ... or keep every electrode of the group
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
+```
+
+#### Sorted-Spikes Unit Ids Are NWB Unit Ids (#1716)
+
+`SortedSpikesGroup.fetch_spike_data(return_unit_ids=True)` and `UnitAnnotation`
+numbered units by their position in the NWB units table. A curation that
+applies merges has sparse unit ids, so a position could name another unit, and
+an annotation could return another unit's spikes. `unit_id` is now the NWB
+units-table id, the same id `CurationV1` uses.
+
+**Impact**: nothing changes for sortings whose ids are `0..n-1`. For others,
+the returned `unit_id`s change, and stored `UnitAnnotation` rows need
+migrating. Until a merge is migrated, `fetch_unit_spikes` and `add_annotation`
+raise on it. `UnitAnnotationPositionalIdMigration` records migrated merges.
+`add_annotation` now runs inside a caller's open transaction, so the caller
+must roll back if it fails.
+Separately, `include_labels` on a curation with no labels now returns none of
+its units, with a warning naming the merge id; it returned every unit.
+
+**Migration guide**: run the Release Notes snippet. If the audit lists a merge
+whose `stored_unit_ids` already are NWB ids, mark it instead of remapping it:
+
+```python
+from spyglass.spikesorting.analysis.v1.unit_annotation import (
+    UnitAnnotationPositionalIdMigration,
+)
+
+UnitAnnotationPositionalIdMigration.insert1(
+    {"spikesorting_merge_id": merge_id, "migration_version": 1}
+)
 ```
 
 ### Documentation
@@ -137,6 +177,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Decoding
 
     - Pair waveform-feature units with spike times by label, not position #1678
+    - `UnitWaveformFeatures.fetch_data` returns two empty lists for a feature
+        set with no units #1716
 
 - Position
 
@@ -167,6 +209,15 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - `SortedSpikesGroup.fetch_spike_data` and `UnitAnnotation` use NWB unit
+        ids, not positions. Add `UnitAnnotation.migrate_positional_unit_ids` for
+        stored annotations #1716
+    - `SortedSpikesGroup.fetch_spike_data` skips zero-unit sortings, and
+        applies label filters to curations with no label column #1716
+    - Unit criteria exclude missing values in nullable (`pd.NA`) columns
+        #1716
+    - `firing_rate_from_spike_indicator` returns a `(n_time, 0)` rate for zero
+        units #1716
 
 ## [0.6.0] (Sep 1st 2026)
 
