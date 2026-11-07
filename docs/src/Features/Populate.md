@@ -88,6 +88,30 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     time — inside the transaction — and then skips `make_insert`. Return `[]`
     when there is nothing to pass along.
 
+## Files written in `make_compute`
+
+A file `make_compute` writes is on disk before `make_insert` registers it. If
+the populate then fails (the second `make_fetch` differs, or `make_insert`
+raises), the file is left behind with no row. To remove it, define
+`_staged_outputs`, which maps a `make_compute` result to what it wrote:
+
+```python
+from spyglass.utils.mixins.populate import StagedOutputs
+
+
+class MyTable(SpyglassMixin, dj.Computed):
+    def _staged_outputs(self, computed):
+        analysis_file_name, results_path = computed
+        return StagedOutputs(
+            analysis_file_names=(analysis_file_name,),  # AnalysisNwbfile names
+            paths=(results_path,),  # other files or folders
+        )
+```
+
+Only list outputs unique to this attempt: they are deleted if the populate does
+not succeed. Outputs are kept once `make_insert` returns, so a failed commit
+after it, or a killed process, can still leave a file behind.
+
 ## `_parallel_make`
 
 `_parallel_make = True` is unrelated to the tri-part split. It only takes effect
