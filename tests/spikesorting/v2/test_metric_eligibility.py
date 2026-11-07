@@ -230,17 +230,17 @@ def _nn_metrics(analyzer, metric_kwargs=_SHIPPED_NN_KWARGS):
         patch_nn_noise_overlap_sparsity,
     )
 
-    patch_nn_noise_overlap_sparsity()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        return compute_quality_metrics(
-            analyzer,
-            metric_names=["nn_advanced"],
-            metric_params=dict(metric_kwargs),
-            skip_pc_metrics=False,
-            delete_existing_metrics=True,
-            n_jobs=1,
-        )
+    with patch_nn_noise_overlap_sparsity():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return compute_quality_metrics(
+                analyzer,
+                metric_names=["nn_advanced"],
+                metric_params=dict(metric_kwargs),
+                skip_pc_metrics=False,
+                delete_existing_metrics=True,
+                n_jobs=1,
+            )
 
 
 def _classify(analyzer, rule_columns, metric_kwargs):
@@ -484,19 +484,23 @@ def _applied_metric_params(analyzer, metric_kwargs):
         patch_nn_noise_overlap_sparsity,
     )
 
-    patch_nn_noise_overlap_sparsity()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        compute_quality_metrics(
-            analyzer,
-            metric_names=["presence_ratio", "nn_advanced"],
-            metric_params=metric_kwargs,
-            skip_pc_metrics=False,
-            delete_existing_metrics=True,
-            n_jobs=1,
-        )
-    applied = analyzer.get_extension("quality_metrics").params["metric_params"]
-    return {name: applied[name] for name in ("presence_ratio", "nn_advanced")}
+    with patch_nn_noise_overlap_sparsity():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            compute_quality_metrics(
+                analyzer,
+                metric_names=["presence_ratio", "nn_advanced"],
+                metric_params=metric_kwargs,
+                skip_pc_metrics=False,
+                delete_existing_metrics=True,
+                n_jobs=1,
+            )
+        applied = analyzer.get_extension("quality_metrics").params[
+            "metric_params"
+        ]
+        return {
+            name: applied[name] for name in ("presence_ratio", "nn_advanced")
+        }
 
 
 def _current_defaults():

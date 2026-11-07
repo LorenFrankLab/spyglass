@@ -1,7 +1,8 @@
 """Local fixes for SpikeInterface 0.104 quality metrics on sparse or masked sorts.
 
 - ``nn_noise_overlap``: SI indexes the sparse noise cluster with a dense peak
-  channel, so every value is silently NaN on a sparse analyzer. The patched
+  channel, so on a sparse analyzer a value is NaN or uses the wrong channel.
+  The patched
   copy sparsifies the median waveform and draws noise only from the
   statistics spans set by :func:`noise_cluster_spans`.
 - ``sd_ratio``: the template correction counts spikes and samples only inside
@@ -9,8 +10,10 @@
 - :func:`isolated_si_metric_defaults`: SI writes each compute's params into
   class-level defaults; this restores them.
 
-Patched metrics must run with ``n_jobs=1``: spawned workers would not see the
-patches or the spans ``ContextVar``. Remove once a fixed SI is adopted.
+Each ``patch_*`` is a context manager: SI's own function is restored when the
+last active block exits. Patched metrics must run with ``n_jobs=1``: spawned
+workers would not see the patches or the spans ``ContextVar``. Remove once a
+fixed SI is adopted.
 """
 
 from __future__ import annotations
@@ -29,10 +32,9 @@ from spyglass.utils import logger
 #: SI versions these patches are validated against.
 _VALIDATED_SI_PREFIXES = ("0.104",)
 
-_PATCH_FLAG = "_spyglass_v2_nn_noise_overlap_sparsity_patched"
-_ISOLATION_PATCH_FLAG = "_spyglass_v2_isolation_kdtree_patched"
-
-_SD_RATIO_PATCH_FLAG = "_spyglass_v2_sd_ratio_statistics_spans_patched"
+#: ``(id(target), attr) -> [active blocks, SI's original]``.
+_ACTIVE_PATCHES: dict[tuple[int, str], list] = {}
+_ACTIVE_PATCHES_LOCK = threading.Lock()
 
 #: Serializes Spyglass threads around SI's class-level metric params and
 #: ``warnings.catch_warnings`` (process-wide state). Acquire after
@@ -410,52 +412,48 @@ def _nn_noise_overlap_sparse_fixed(
     )
 
 
-def _install(
-    target, attr: str, replacement, *, flag: str, description: str
-) -> None:
-    """Idempotently set ``target.<attr>`` to ``replacement``.
+@contextlib.contextmanager
+def _patched(target, attr: str, replacement, *, description: str):
+    """Set ``target.<attr>`` to ``replacement`` while any block is active.
 
-    No-op once ``target`` carries ``flag``. Outside the validated SI family,
-    logs a warning naming ``description`` and still applies, so a future SI
-    change surfaces.
-
-    Parameters
-    ----------
-    target : module or type
-        The SI module or class whose attribute is replaced.
-    attr : str
-        Attribute name to replace.
-    replacement : object
-        The patched function.
-    flag : str
-        Attribute set to ``True`` on ``target`` once patched.
-    description : str
-        The patch's name in the version warning.
+    Outside the validated SI family, logs a warning naming ``description``
+    and still applies, so a future SI change surfaces.
     """
-    if getattr(target, flag, False):
-        return
-    if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
-        logger.warning(
-            "spikesorting v2: SpikeInterface %s is outside the validated set "
-            "%s for the %s; applying anyway -- re-verify or remove this shim.",
-            si.__version__,
-            _VALIDATED_SI_PREFIXES,
-            description,
-        )
-    setattr(target, attr, replacement)
-    setattr(target, flag, True)
+    key = (id(target), attr)
+    with _ACTIVE_PATCHES_LOCK:
+        entry = _ACTIVE_PATCHES.get(key)
+        if entry is None:
+            if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
+                logger.warning(
+                    "spikesorting v2: SpikeInterface %s is outside the "
+                    "validated set %s for the %s; applying anyway -- "
+                    "re-verify or remove this shim.",
+                    si.__version__,
+                    _VALIDATED_SI_PREFIXES,
+                    description,
+                )
+            entry = _ACTIVE_PATCHES[key] = [0, getattr(target, attr)]
+            setattr(target, attr, replacement)
+        entry[0] += 1
+    try:
+        yield
+    finally:
+        with _ACTIVE_PATCHES_LOCK:
+            entry[0] -= 1
+            if entry[0] == 0:
+                setattr(target, attr, entry[1])
+                del _ACTIVE_PATCHES[key]
 
 
-def patch_nn_noise_overlap_sparsity() -> None:
-    """Idempotently install the sparse-median ``nn_noise_overlap`` fix.
+def patch_nn_noise_overlap_sparsity():
+    """Apply the sparse-median ``nn_noise_overlap`` fix inside the block.
 
     Callers must run the PC/NN metric with ``n_jobs=1``.
     """
-    _install(
+    return _patched(
         _pm,
         "nearest_neighbors_noise_overlap",
         _nn_noise_overlap_sparse_fixed,
-        flag=_PATCH_FLAG,
         description="nn_noise_overlap sparsity patch",
     )
 
@@ -540,16 +538,15 @@ def _compute_isolation_kdtree(
     )
 
 
-def patch_isolation_kdtree() -> None:
-    """Idempotently install :func:`_compute_isolation_kdtree` over SI's.
+def patch_isolation_kdtree():
+    """Use :func:`_compute_isolation_kdtree` over SI's inside the block.
 
     Both nn metrics look ``_compute_isolation`` up on the module at call time.
     """
-    _install(
+    return _patched(
         _pm,
         "_compute_isolation",
         _compute_isolation_kdtree,
-        flag=_ISOLATION_PATCH_FLAG,
         description="k-d tree isolation patch",
     )
 
@@ -707,16 +704,15 @@ def _sd_ratio_statistics_spans(
     )
 
 
-def patch_sd_ratio_statistics_spans() -> None:
-    """Idempotently route SI's ``sd_ratio`` metric through the spans.
+def patch_sd_ratio_statistics_spans():
+    """Route SI's ``sd_ratio`` metric through the spans inside the block.
 
     SI calls ``metric_class.metric_function``, so the ``SDRatio`` attribute is
     replaced; module-level ``compute_sd_ratio`` stays SI's.
     """
-    _install(
+    return _patched(
         _mm.SDRatio,
         "metric_function",
         _sd_ratio_statistics_spans,
-        flag=_SD_RATIO_PATCH_FLAG,
         description="sd_ratio statistics-span patch",
     )

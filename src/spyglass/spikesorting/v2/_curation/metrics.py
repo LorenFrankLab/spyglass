@@ -15,7 +15,7 @@ import math
 import re
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -1142,12 +1142,13 @@ def compute_metrics(
                 peak_sign=peak_sign,
                 job_kwargs=job_kwargs,
             )
+        from spyglass.spikesorting.v2._core.si_metric_patches import (
+            patch_sd_ratio_statistics_spans,
+        )
+
         if "sd_ratio" in voltage_names:
-            # Cache span-only noise std (masked zeros would bias it low) and
-            # patch sd_ratio's template-variance correction to the same spans.
-            from spyglass.spikesorting.v2._core.si_metric_patches import (
-                patch_sd_ratio_statistics_spans,
-            )
+            # Cache span-only noise std (masked zeros would bias it low); the
+            # patch below gives sd_ratio's template correction the same spans.
             from spyglass.spikesorting.v2._sorting.dispatch import (
                 cache_span_noise_levels,
             )
@@ -1159,11 +1160,15 @@ def compute_metrics(
                 seed=noise_seed,
                 method="std",
             )
-            patch_sd_ratio_statistics_spans()
         # SI would otherwise keep this row's kwargs as its defaults for
         # every later compute in the process.
         with (
             noise_cluster_spans(statistics_spans),
+            (
+                patch_sd_ratio_statistics_spans()
+                if "sd_ratio" in voltage_names
+                else nullcontext()
+            ),
             isolated_si_metric_defaults(),
             escalate_si_metric_errors(rule_columns),
         ):
@@ -1201,7 +1206,7 @@ def compute_metrics(
                 "PC metrics are requested."
             )
         # nn_noise_overlap needs a 'median' template, and SI 0.104.3 breaks
-        # on sparse analyzers; install the sparse fix and k-d tree search.
+        # on sparse analyzers; the compute below applies the fix and k-d tree.
         from spyglass.spikesorting.v2._core.job_config import (
             resolve_search_threads,
         )
@@ -1225,8 +1230,6 @@ def compute_metrics(
             metric_analyzer.compute(
                 "templates", operators=[*templates_operators, "median"]
             )
-        patch_nn_noise_overlap_sparsity()
-        patch_isolation_kdtree()
         # ensure_extensions skips a present extension without checking its
         # params, so drop a mismatched PCA first.
         if metric_analyzer.has_extension("principal_components"):
@@ -1250,6 +1253,8 @@ def compute_metrics(
         )
         with (
             noise_cluster_spans(statistics_spans),
+            patch_nn_noise_overlap_sparsity(),
+            patch_isolation_kdtree(),
             isolation_workers(
                 resolve_search_threads()
                 if search_threads is None

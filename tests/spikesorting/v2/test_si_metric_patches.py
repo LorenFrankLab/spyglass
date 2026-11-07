@@ -64,9 +64,9 @@ def test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel(
     assert np.isfinite(value)
 
 
-def test_patch_is_idempotent_and_installs_the_fix():
-    """patch_nn_noise_overlap_sparsity swaps in the patched function and is a
-    no-op when applied twice."""
+def test_patch_applies_inside_the_block_and_restores_spikeinterface():
+    """The fix is active inside nested blocks, and SI's own function is back
+    once the last block exits."""
     import spikeinterface.metrics.quality.pca_metrics as pm
 
     from spyglass.spikesorting.v2._core.si_metric_patches import (
@@ -74,11 +74,20 @@ def test_patch_is_idempotent_and_installs_the_fix():
         patch_nn_noise_overlap_sparsity,
     )
 
-    patch_nn_noise_overlap_sparsity()
-    assert pm.nearest_neighbors_noise_overlap is _nn_noise_overlap_sparse_fixed
-    # Second call must not re-wrap or raise.
-    patch_nn_noise_overlap_sparsity()
-    assert pm.nearest_neighbors_noise_overlap is _nn_noise_overlap_sparse_fixed
+    original = pm.nearest_neighbors_noise_overlap
+    with patch_nn_noise_overlap_sparsity():
+        assert (
+            pm.nearest_neighbors_noise_overlap is _nn_noise_overlap_sparse_fixed
+        )
+        with patch_nn_noise_overlap_sparsity():
+            assert (
+                pm.nearest_neighbors_noise_overlap
+                is _nn_noise_overlap_sparse_fixed
+            )
+        assert (
+            pm.nearest_neighbors_noise_overlap is _nn_noise_overlap_sparse_fixed
+        )
+    assert pm.nearest_neighbors_noise_overlap is original
 
 
 @pytest.mark.parametrize("n_workers", [1, 4])
@@ -100,9 +109,7 @@ def test_isolation_patch_matches_spikeinterface(n_neighbors, n_workers):
     target = rng.normal(size=(3000, 7))
     other = rng.normal(loc=0.8, size=(2500, 7))
 
-    patch_isolation_kdtree()
-    patch_isolation_kdtree()  # idempotent
-    with isolation_workers(n_workers):
+    with patch_isolation_kdtree(), isolation_workers(n_workers):
         result = pm._compute_isolation(target, other, n_neighbors)
     assert result == _SI_COMPUTE_ISOLATION(target, other, n_neighbors)
 
@@ -578,54 +585,58 @@ def _nn_noise_overlap_by_fill(small_ground_truth):
     )
     assert min(len(t) for t in samples) >= 50
 
-    patch_nn_noise_overlap_sparsity()
-    results = {}
-    for fill in ("zeros", "10mV", "nan"):
-        filled = traces.copy()
-        for start, end in ranges:
-            if fill == "zeros":
-                filled[start:end] = 0.0
-            elif fill == "10mV":
-                sign = np.where(np.arange(end - start) % 2 == 0, 1.0, -1.0)
-                filled[start:end] = (10_000.0 * sign)[:, None]
-            else:
-                filled[start:end] = np.nan
-        recording = pinned_whiten(
-            numpy_recording(filled, probe), random_seed=0, spans=spans
-        )
-        analyzer = si.create_sorting_analyzer(
-            kept, recording, format="memory", sparse=True, return_in_uV=False
-        )
-        analyzer.compute("random_spikes", seed=0)
-        analyzer.compute("waveforms")
-        analyzer.compute("templates", operators=["average", "median"])
-        analyzer.compute(
-            "principal_components",
-            n_components=5,
-            mode="by_channel_local",
-            whiten=True,
-            dtype="float32",
-        )
-        for with_spans in (True, False):
-            with noise_cluster_spans(spans if with_spans else None):
-                metrics = compute_quality_metrics(
-                    analyzer,
-                    metric_names=["nn_advanced"],
-                    metric_params={
-                        "nn_advanced": {
-                            "seed": 0,
-                            "n_neighbors": 5,
-                            "n_components": 7,
-                        }
-                    },
-                    skip_pc_metrics=False,
-                    delete_existing_metrics=True,
-                    n_jobs=1,
-                )
-            results[fill, with_spans] = metrics["nn_noise_overlap"].to_numpy(
-                dtype=float
+    with patch_nn_noise_overlap_sparsity():
+        results = {}
+        for fill in ("zeros", "10mV", "nan"):
+            filled = traces.copy()
+            for start, end in ranges:
+                if fill == "zeros":
+                    filled[start:end] = 0.0
+                elif fill == "10mV":
+                    sign = np.where(np.arange(end - start) % 2 == 0, 1.0, -1.0)
+                    filled[start:end] = (10_000.0 * sign)[:, None]
+                else:
+                    filled[start:end] = np.nan
+            recording = pinned_whiten(
+                numpy_recording(filled, probe), random_seed=0, spans=spans
             )
-    return results
+            analyzer = si.create_sorting_analyzer(
+                kept,
+                recording,
+                format="memory",
+                sparse=True,
+                return_in_uV=False,
+            )
+            analyzer.compute("random_spikes", seed=0)
+            analyzer.compute("waveforms")
+            analyzer.compute("templates", operators=["average", "median"])
+            analyzer.compute(
+                "principal_components",
+                n_components=5,
+                mode="by_channel_local",
+                whiten=True,
+                dtype="float32",
+            )
+            for with_spans in (True, False):
+                with noise_cluster_spans(spans if with_spans else None):
+                    metrics = compute_quality_metrics(
+                        analyzer,
+                        metric_names=["nn_advanced"],
+                        metric_params={
+                            "nn_advanced": {
+                                "seed": 0,
+                                "n_neighbors": 5,
+                                "n_components": 7,
+                            }
+                        },
+                        skip_pc_metrics=False,
+                        delete_existing_metrics=True,
+                        n_jobs=1,
+                    )
+                results[fill, with_spans] = metrics[
+                    "nn_noise_overlap"
+                ].to_numpy(dtype=float)
+        return results
 
 
 @pytest.mark.medium
@@ -761,7 +772,7 @@ def test_sd_ratio_patch_replaces_the_dispatched_metric_function():
 
     ``BaseMetric.compute`` calls ``cls.metric_function``, and the
     quality-metrics extension looks the class up in its ``metric_list``,
-    so the module-level ``compute_sd_ratio`` stays SI's own. Idempotent.
+    so the module-level ``compute_sd_ratio`` stays SI's own.
     """
     import spikeinterface.metrics.quality.misc_metrics as mm
     from spikeinterface.metrics.quality.quality_metrics import (
@@ -774,12 +785,13 @@ def test_sd_ratio_patch_replaces_the_dispatched_metric_function():
     )
 
     original = mm.compute_sd_ratio
-    for _ in range(2):
-        patch_sd_ratio_statistics_spans()
+    original_function = mm.SDRatio.metric_function
+    with patch_sd_ratio_statistics_spans():
         metric = ComputeQualityMetrics.get_metric_by_name("sd_ratio")
         assert metric is mm.SDRatio
         assert metric.metric_function is _sd_ratio_statistics_spans
-    assert mm.compute_sd_ratio is original
+        assert mm.compute_sd_ratio is original
+    assert mm.SDRatio.metric_function is original_function
 
 
 @pytest.mark.parametrize("cover", ["none", "whole_recording"])
@@ -831,19 +843,19 @@ def test_sd_ratio_on_masked_sort_matches_clean_twin(sd_ratio_twins):
     )
 
     clean, masked, spans = sd_ratio_twins
-    patch_sd_ratio_statistics_spans()
-    with noise_cluster_spans(spans):
-        metrics = compute_quality_metrics(
-            masked,
-            metric_names=["sd_ratio"],
-            skip_pc_metrics=True,
-            delete_existing_metrics=True,
-        )
-    fixed = metrics["sd_ratio"].to_numpy(dtype=float)
-    target = _si_sd_ratio(clean)
-    uncorrected = _si_sd_ratio(masked)
+    with patch_sd_ratio_statistics_spans():
+        with noise_cluster_spans(spans):
+            metrics = compute_quality_metrics(
+                masked,
+                metric_names=["sd_ratio"],
+                skip_pc_metrics=True,
+                delete_existing_metrics=True,
+            )
+        fixed = metrics["sd_ratio"].to_numpy(dtype=float)
+        target = _si_sd_ratio(clean)
+        uncorrected = _si_sd_ratio(masked)
 
-    np.testing.assert_allclose(fixed, target, rtol=_SD_RATIO_RTOL)
-    assert np.all(
-        uncorrected < target * (1 - _SD_RATIO_RTOL)
-    ), f"fixture does not discriminate: SI {uncorrected} vs clean {target}"
+        np.testing.assert_allclose(fixed, target, rtol=_SD_RATIO_RTOL)
+        assert np.all(
+            uncorrected < target * (1 - _SD_RATIO_RTOL)
+        ), f"fixture does not discriminate: SI {uncorrected} vs clean {target}"
