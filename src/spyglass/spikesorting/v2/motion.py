@@ -51,7 +51,6 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._recording.source import SourceLineage
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
 from spyglass.spikesorting.v2.recording import (
@@ -71,6 +70,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     single_source_part,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.mixins.populate import StagedOutputs
 
 schema = dj.schema("spikesorting_v2_motion")
 

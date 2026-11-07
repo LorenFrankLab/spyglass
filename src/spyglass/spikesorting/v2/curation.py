@@ -35,9 +35,6 @@ from spyglass.spikesorting.v2._curation.transforms import (
     validate_curation_label_rows,
 )
 from spyglass.spikesorting.v2._storage.units_nwb import write_curated_units_nwb
-from spyglass.spikesorting.v2._storage.staged_outputs import (
-    unlink_staged_analysis_file as _unlink_staged_analysis_file,
-)
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2._core.enums import CurationLabel, CurationSource
 from spyglass.spikesorting.v2._core.table_integrity import FactoryOnlyMaster
@@ -45,6 +42,9 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import (
+    unlink_staged_analysis_file as _unlink_staged_analysis_file,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -244,7 +244,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                         "reference a unit in the immediate parent's namespace."
                     )
 
-    def delete(self, *args, safemode=None, **kwargs):
+    def delete(self, *restrictions, safemode=None, **kwargs):
         """Delete curations, refusing to orphan a child's lineage pointer.
 
         Refuses when:
@@ -256,15 +256,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         ``super_delete``, ``delete_quick``, and upstream cascades skip this
         guard; :meth:`audit_orphaned_lineage` finds the orphans they leave.
-        Accepts a leading positional restriction.
+        Positional arguments are restrictions, applied first.
         """
-        from spyglass.spikesorting.v2._core.table_integrity import (
-            restrict_by_leading_args,
-        )
-
-        restricted, args = restrict_by_leading_args(self, args)
-        if restricted is not None:
-            return restricted.delete(*args, safemode=safemode, **kwargs)
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
 
         cls = type(self)
         pk = self.primary_key
@@ -319,7 +316,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             kwargs["safemode"] = safemode
         return ConcatMemberCuration._delete_and_reclaim(
             super().delete,
-            args,
             kwargs,
             member_rows=concat_member_rows,
             merge_ids=merge_ids,

@@ -1029,9 +1029,6 @@
     "test_source_resolution.py": {
       "tier": "unit"
     },
-    "test_split_leading_restrictions.py": {
-      "tier": "unit"
-    },
     "test_staged_outputs.py": {
       "tier": "unit"
     },

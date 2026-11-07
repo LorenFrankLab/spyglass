@@ -56,7 +56,6 @@ from spyglass.spikesorting.v2._core.selection_identity import (
 )
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.exceptions import (
@@ -70,6 +69,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.mixins.populate import StagedOutputs
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -635,7 +635,7 @@ class FigPackCurationComputed(NamedTuple):
     def staged_outputs(self) -> StagedOutputs:
         """The staged offline bundle ``make_insert`` moves into place."""
         return StagedOutputs(
-            folders=(self.staged_bundle,) if self.staged_bundle else ()
+            paths=(self.staged_bundle,) if self.staged_bundle else ()
         )
 
 

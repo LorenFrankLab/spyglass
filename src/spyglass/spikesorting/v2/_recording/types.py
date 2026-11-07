@@ -12,7 +12,7 @@ import numpy as np
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
-from spyglass.spikesorting.v2._storage.staged_outputs import StagedOutputs
+from spyglass.utils.mixins.populate import StagedOutputs
 
 
 class RecordingFetched(NamedTuple):

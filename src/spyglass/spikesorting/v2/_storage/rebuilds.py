@@ -10,7 +10,7 @@ from spyglass.spikesorting.v2._storage.nwb import (
     StoredTraces,
     recording_provenance_table,
 )
-from spyglass.spikesorting.v2._storage.staged_outputs import (
+from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
 

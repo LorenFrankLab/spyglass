@@ -23,7 +23,6 @@ from spyglass.spikesorting.v2._recording.concat import (
 from spyglass.spikesorting.v2._storage.rebuilds import ensure_artifact_file
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2._recording.concat_fetch import (
     resolve_snapshot_recordings,
@@ -42,6 +41,7 @@ from spyglass.spikesorting.v2.session_group import (
 )
 from spyglass.spikesorting.v2.sorting import SortingSelection
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins.populate import StagedOutputs
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -310,20 +310,14 @@ class ConcatMemberCuration(
                     )
         return orphan_names
 
-    def delete(self, *args, **kwargs):
+    def delete(self, *restrictions, **kwargs):
         """Delete member rows and reclaim their orphaned analysis files."""
-        from spyglass.spikesorting.v2._core.table_integrity import (
-            restrict_by_leading_args,
-        )
-
-        restricted, args = restrict_by_leading_args(self, args)
-        if restricted is not None:
-            return restricted.delete(*args, **kwargs)
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(**kwargs)
 
         rows = self.fetch(as_dict=True)
         return self._delete_and_reclaim(
             super().delete,
-            args,
             kwargs,
             member_rows=rows,
             merge_ids=self._merge_ids(rows),
@@ -334,7 +328,6 @@ class ConcatMemberCuration(
     def _delete_and_reclaim(
         cls,
         delete,
-        args: tuple,
         kwargs: dict,
         *,
         member_rows: list[dict],
@@ -351,8 +344,6 @@ class ConcatMemberCuration(
         ----------
         delete : callable
             The cautious delete to run (the caller's ``super().delete``).
-        args : tuple
-            Positional arguments for ``delete``.
         kwargs : dict
             Keyword arguments for ``delete``. ``force_masters`` and
             ``force_parts`` are overridden.
@@ -393,7 +384,7 @@ class ConcatMemberCuration(
         # force_masters=True rolls back with CurationV2's nested parts in
         # DataJoint 0.14; orphaned merge masters are removed afterwards.
         result = delete(
-            *args, **{**kwargs, "force_masters": False, "force_parts": True}
+            **{**kwargs, "force_masters": False, "force_parts": True}
         )
         if not dry_run:
             cls._cleanup_orphaned_merge_masters(merge_ids)

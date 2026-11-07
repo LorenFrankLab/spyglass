@@ -193,7 +193,11 @@ class CautiousDeleteMixin(BaseMixin):
         return SpyglassVersions().is_up_to_date
 
     def cautious_delete(
-        self, force_permission: bool = False, dry_run=False, *args, **kwargs
+        self,
+        *restrictions,
+        force_permission: bool = False,
+        dry_run=False,
+        **kwargs,
     ):
         """Permission check, then delete potential orphans and table rows.
 
@@ -205,15 +209,23 @@ class CautiousDeleteMixin(BaseMixin):
 
         Parameters
         ----------
+        *restrictions : Any
+            Restrictions applied before the permission check, as in
+            ``Table().delete({"nwb_file_name": ...})``.
         force_permission : bool, optional
             Bypass permission check. Default False.
         dry_run : bool, optional
             Default False. If True, return items to be deleted as
             Tuple[Upstream, Downstream, externals['raw'], externals['analysis']]
             If False, delete items.
-        *args, **kwargs : Any
+        **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).cautious_delete(
+                force_permission=force_permission, dry_run=dry_run, **kwargs
+            )
+
         if len(self) == 0:
             self._warn_msg("Table is empty. Nothing to delete.")
             return
@@ -235,7 +247,7 @@ class CautiousDeleteMixin(BaseMixin):
                 external["analysis"].unused(),
             )
 
-        super().delete(*args, **kwargs)  # Confirmation here
+        super().delete(**kwargs)  # Confirmation here
 
         for ext_type in ["raw", "analysis"]:
             external[ext_type].delete(
@@ -244,13 +256,20 @@ class CautiousDeleteMixin(BaseMixin):
 
         return None
 
-    def delete(self, *args, **kwargs):
+    def delete(self, *restrictions, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        self.cautious_delete(*args, **kwargs)
+        self.cautious_delete(*restrictions, **kwargs)
 
-    def super_delete(self, warn=True, *args, **kwargs):
-        """Alias for datajoint.table.Table.delete."""
+    def super_delete(self, *restrictions, warn=True, **kwargs):
+        """Alias for datajoint.table.Table.delete.
+
+        Positional arguments are restrictions, as in ``cautious_delete``.
+        """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).super_delete(
+                warn=warn, **kwargs
+            )
         if warn:
             self._warn_msg("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
-        super().delete(*args, **kwargs)
+        super().delete(**kwargs)

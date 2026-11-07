@@ -148,15 +148,14 @@ def test_staging_tables_remove_outputs_of_failed_populates():
 
     DataJoint re-runs ``make_fetch`` inside the insert transaction and can
     refuse the insert after ``make_compute`` has staged its output; only
-    ``StagedOutputCleanupMixin`` removes that output. Its ``_populate1``
-    must run around DataJoint's, so the mixin must precede the DataJoint
-    bases.
+    ``PopulateMixin``'s cleanup removes that output, and only for a table
+    whose ``_staged_outputs`` hook ``StagedOutputCleanupMixin`` supplies.
+    The mixin must precede ``PopulateMixin``, whose hook is ``None``.
     """
-    from datajoint.autopopulate import AutoPopulate
-
     from spyglass.spikesorting.v2._storage.staged_outputs import (
         StagedOutputCleanupMixin,
     )
+    from spyglass.utils.mixins.populate import PopulateMixin
 
     tables = _v2_autopopulate_tables()
     assert _STAGING_TABLES <= set(tables)
@@ -165,11 +164,11 @@ def test_staging_tables_remove_outputs_of_failed_populates():
         for name in sorted(_STAGING_TABLES)
         if not issubclass(tables[name], StagedOutputCleanupMixin)
         or tables[name].__mro__.index(StagedOutputCleanupMixin)
-        > tables[name].__mro__.index(AutoPopulate)
+        > tables[name].__mro__.index(PopulateMixin)
     ]
     assert (
         not wrong
-    ), f"{wrong} do not use StagedOutputCleanupMixin ahead of AutoPopulate"
+    ), f"{wrong} do not use StagedOutputCleanupMixin ahead of PopulateMixin"
 
     # Beyond the list: the mixin and a carrier that names its staged outputs
     # must go together on every tri-part table.

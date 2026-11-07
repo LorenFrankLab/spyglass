@@ -340,14 +340,17 @@ their lifecycle and serialization checks when changing supported versions.
     the generator, then reruns `make_fetch` inside the transaction and raises
     before `make_insert` if its hash differs. Nothing can clean up inside the
     generator.
-- `_storage.staged_outputs.StagedOutputCleanupMixin` records a table's staged
-    outputs when `make_compute` returns, forgets them when `make_insert`
-    returns, and removes what is still recorded if `_populate1` ends without
-    success. A table's own `make_compute` cleanup covers a compute that raises.
+- The shared `PopulateMixin` cleanup ([Populate](../Features/Populate.md))
+    records a table's staged outputs when `make_compute` returns, forgets them
+    when `make_insert` returns, and removes what is still recorded if
+    `_populate1` ends without success. `_storage.staged_outputs`
+    `StagedOutputCleanupMixin` opts a v2 table in through its carrier's
+    `staged_outputs()`. A table's own `make_compute` cleanup covers a compute
+    that raises.
 - Outputs are forgotten before COMMIT so a failure after a successful commit
     cannot remove a committed row's files. A failed COMMIT, or a process killed
     between compute and insert, leaves staging on disk until swept.
-- The mixin relies on `AutoPopulate._populate1` internals, so the v2 extras
+- The cleanup relies on `AutoPopulate._populate1` internals, so the v2 extras
     bound the DataJoint version (`pyproject.toml`;
     [Dependency Pins](./Dependencies.md)).
 

@@ -66,7 +66,6 @@ from spyglass.spikesorting.v2._recording.source import (
 )
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2._storage.units_nwb import (
     STATISTICS_SPANS_FIELD,
@@ -96,7 +95,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
     optional_part_value,
-    restrict_by_leading_args,
     single_source_part,
 )
 from spyglass.spikesorting.v2._recording.source import SourceResolution
@@ -105,6 +103,7 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import StagedOutputs
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -1584,18 +1583,16 @@ class Sorting(
             self.root_curation(key), output_folder, **kwargs
         )
 
-    def delete(self, *args, safemode=None, **kwargs):
+    def delete(self, *restrictions, safemode=None, **kwargs):
         """Cascade-delete + analyzer-cache cleanup on disk.
 
         The analyzer folder (5-50 GB) is not a tracked column, so this
-        removes it for each deleted row. A leading positional restriction is
-        applied as a restriction; ``cautious_delete`` would otherwise read it
-        as ``force_permission`` and delete every row.
+        removes it for each deleted row.
 
         Parameters
         ----------
-        *args
-            Positional arguments forwarded to ``super().delete``.
+        *restrictions
+            Restrictions applied before the rows are fetched.
         safemode : bool or None, optional
             Forwarded to ``super().delete`` to control the confirmation
             prompt. ``None`` (default) omits the argument so DataJoint's
@@ -1603,9 +1600,10 @@ class Sorting(
         **kwargs
             Keyword arguments forwarded to ``super().delete``.
         """
-        restricted, args = restrict_by_leading_args(self, args)
-        if restricted is not None:
-            return restricted.delete(*args, safemode=safemode, **kwargs)
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
@@ -1615,9 +1613,9 @@ class Sorting(
         # Fetch before the cascade removes the rows.
         rows = self.fetch("KEY", as_dict=True)
         if safemode is None:
-            super().delete(*args, **kwargs)
+            super().delete(**kwargs)
         else:
-            super().delete(*args, safemode=safemode, **kwargs)
+            super().delete(safemode=safemode, **kwargs)
         # A cancelled prompt returns normally; keep folders of surviving rows.
         surviving = set((Sorting & rows).fetch("sorting_id"))
         for row in rows:

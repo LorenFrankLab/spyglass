@@ -30,7 +30,6 @@ from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
 from spyglass.spikesorting.v2._storage.nwb import StoredTraces
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactDetection,  # noqa: F401
@@ -44,6 +43,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.mixins.populate import StagedOutputs
 
 if TYPE_CHECKING:
     import spikeinterface as si

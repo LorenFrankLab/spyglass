@@ -37,7 +37,6 @@ from spyglass.spikesorting.v2._matching import (
 )
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
 )
 from spyglass.spikesorting.v2._matching.compute import (
     _input_recording_spike_counts,
@@ -53,6 +52,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import StagedOutputs
 
 if TYPE_CHECKING:
     import pandas as pd

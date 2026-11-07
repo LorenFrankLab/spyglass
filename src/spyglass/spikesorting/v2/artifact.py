@@ -49,7 +49,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    restrict_by_leading_args,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
@@ -710,14 +709,17 @@ class _ArtifactDetectionMixin:
         )
         return merge_id, n + n_concat
 
-    def delete(self, *args, safemode=None, _cascade_sorts=False, **kwargs):
+    def delete(
+        self, *restrictions, safemode=None, _cascade_sorts=False, **kwargs
+    ):
         """Delete detections, their merge registration and owned intervals.
 
         Refused when a ``SortingSelection``, ``MotionEstimateSelection`` or
         ``ConcatenatedRecordingSelection`` member references a detection;
         delete those first or use :meth:`cascade_delete`. Owned
         ``IntervalList`` rows are removed for detections actually deleted.
-        A leading positional restriction is accepted.
+        Positional arguments are restrictions, applied before rows are
+        fetched and locks taken.
 
         Raises
         ------
@@ -726,13 +728,9 @@ class _ArtifactDetectionMixin:
         AdvisoryLockError
             If a per-detection lifecycle lock cannot be taken in time.
         """
-        restricted, args = restrict_by_leading_args(self, args)
-        if restricted is not None:
-            return restricted.delete(
-                *args,
-                safemode=safemode,
-                _cascade_sorts=_cascade_sorts,
-                **kwargs,
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, _cascade_sorts=_cascade_sorts, **kwargs
             )
 
         from spyglass.spikesorting.v2.artifact_output import (
@@ -773,9 +771,9 @@ class _ArtifactDetectionMixin:
 
             # force_masters cascade removes the merge registration too.
             if safemode is None:
-                super().delete(*args, **kwargs)
+                super().delete(**kwargs)
             else:
-                super().delete(*args, safemode=safemode, **kwargs)
+                super().delete(safemode=safemode, **kwargs)
 
         remove_artifact_interval_rows(
             [

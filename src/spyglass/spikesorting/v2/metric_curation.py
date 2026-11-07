@@ -58,7 +58,6 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._recording.source import EffectiveTraces
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
-    StagedOutputs,
     staged_analysis_file,
 )
 from spyglass.spikesorting.v2._storage.units_nwb import StoredUnits
@@ -81,6 +80,7 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     reject_stale_quality_metric_defaults,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import StagedOutputs
 
 schema = dj.schema("spikesorting_v2_metric_curation")
 

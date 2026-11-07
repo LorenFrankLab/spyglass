@@ -1110,11 +1110,17 @@ class Merge(ExportMixin, dj.Manual):
         successes = (parent_class & keys).fetch("KEY", as_dict=True)
         self.insert(successes)
 
-    def delete(self, force_permission=False, *args, **kwargs):
+    def delete(self, *restrictions, force_permission=False, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete
 
-        Delete all relevant part entries from self.restriction.
+        Delete all relevant part entries from self.restriction. Positional
+        arguments are restrictions, applied first.
         """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                force_permission=force_permission, **kwargs
+            )
+
         if not (
             parts := self.merge_get_part(
                 restriction=self.restriction,
@@ -1129,23 +1135,27 @@ class Merge(ExportMixin, dj.Manual):
             part.delete(
                 force_permission=force_permission,
                 force_parts=True,
-                *args,
                 **kwargs,
             )
 
         # Delete orphaned master entries, no prompt
         kwargs["safemode"] = False
-        (self - self.parts(as_objects=True)).super_delete(*args, **kwargs)
+        (self - self.parts(as_objects=True)).super_delete(**kwargs)
 
-    def super_delete(self, warn=True, *args, **kwargs):
+    def super_delete(self, *restrictions, warn=True, **kwargs):
         """Alias for datajoint.table.Table.delete.
 
-        Added to support MRO of SpyglassMixin
+        Added to support MRO of SpyglassMixin. Positional arguments are
+        restrictions, applied first.
         """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).super_delete(
+                warn=warn, **kwargs
+            )
         if warn:
             self._warn_msg("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
-        super().delete(*args, **kwargs)
+        super().delete(**kwargs)
 
     @classmethod
     def extract_merge_id(cls, restriction) -> Union[dict, list]:

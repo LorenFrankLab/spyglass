@@ -5,6 +5,8 @@ calculations, database operations) but mock the expensive external
 dependencies (non_local_detector, file I/O).
 """
 
+import pytest
+
 
 def test_clusterless_data_processing_mocked(
     decode_v1,
@@ -101,3 +103,79 @@ def test_sorted_spikes_data_processing_mocked(
     # Verify results were inserted
     table = decode_v1.sorted_spikes.SortedSpikesDecodingV1 & selection_key
     assert table, "No results inserted after populate"
+
+
+def test_clusterless_refused_populate_removes_result_files(
+    common,
+    decode_v1,
+    monkeypatch,
+    mock_clusterless_decoder,
+    mock_decoder_save,
+    mini_dict,
+    decode_sel_key,
+    decode_interval,
+    group_name,
+    decode_clusterless_params_insert,
+    pop_pos_group,
+    group_unitwave,
+):
+    """A populate refused after make_compute leaves no result files."""
+    from pathlib import Path
+
+    import numpy as np
+    from datajoint.errors import DataJointError
+
+    _ = pop_pos_group, group_unitwave  # ensure populated
+    table = decode_v1.clusterless.ClusterlessDecodingV1
+
+    monkeypatch.setattr(table, "_run_decoder", mock_clusterless_decoder)
+    saved = []
+
+    def save(self, classifier, results, key):
+        paths = mock_decoder_save(self, classifier, results, key)
+        saved.extend(paths)
+        return paths
+
+    monkeypatch.setattr(table, "_save_decoder_results", save)
+
+    make_fetch = table.make_fetch
+    fetch_calls = []
+
+    def changed_fetch(self, key):
+        # The in-transaction refetch sees a changed decoding interval.
+        fetch_calls.append(key)
+        fetched = make_fetch(self, key)
+        if len(fetch_calls) == 2:
+            fetched = [*fetched[:-1], np.asarray(fetched[-1]) + 1.0]
+        return fetched
+
+    monkeypatch.setattr(table, "make_fetch", changed_fetch)
+
+    # A decoding interval of its own, so no other test has populated the key.
+    interval = (
+        common.IntervalList
+        & {**mini_dict, "interval_list_name": decode_interval}
+    ).fetch1()
+    interval_name = "decode_refused_populate"
+    common.IntervalList.insert1(
+        {**interval, "interval_list_name": interval_name},
+        skip_duplicates=True,
+    )
+    selection_key = {
+        **decode_sel_key,
+        **decode_clusterless_params_insert,
+        "decoding_interval": interval_name,
+        "waveform_features_group_name": group_name,
+        "estimate_decoding_params": False,
+    }
+    decode_v1.clusterless.ClusterlessDecodingSelection.insert1(
+        selection_key, skip_duplicates=True
+    )
+
+    with pytest.raises(DataJointError, match="Referential integrity"):
+        table.populate(selection_key)
+
+    assert len(fetch_calls) == 2
+    assert len(saved) == 2
+    assert not table & selection_key
+    assert [p for p in saved if Path(p).exists()] == []

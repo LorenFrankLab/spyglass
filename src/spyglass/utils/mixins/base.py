@@ -122,3 +122,38 @@ class BaseMixin:
             )
 
         return ret
+
+    def _restrict_delete_args(self, restrictions: tuple):
+        """Return self restricted by the positional arguments of a delete.
+
+        Used by ...
+        - CautiousDeleteMixin
+        - SpyglassMixinPart
+        - Merge
+        - Recompute table deletes
+
+        Parameters
+        ----------
+        restrictions : tuple
+            DataJoint restrictions, combined with AND.
+
+        Returns
+        -------
+        QueryExpression
+            Self restricted by each restriction in turn.
+
+        Raises
+        ------
+        TypeError
+            If a restriction is a bool, which reads as a delete option.
+        """
+        restricted = self
+        for restriction in restrictions:
+            if isinstance(restriction, bool):
+                raise TypeError(
+                    "Pass delete options by keyword, e.g. "
+                    + "force_permission=True or safemode=False. Positional "
+                    + f"arguments are restrictions, got {restriction!r}."
+                )
+            restricted = restricted & restriction
+        return restricted

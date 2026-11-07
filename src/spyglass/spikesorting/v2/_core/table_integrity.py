@@ -12,65 +12,6 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
 )
 
 
-def split_leading_restrictions(args: tuple) -> tuple[list, tuple]:
-    """Peel leading restriction positionals off a ``delete`` arg tuple.
-
-    Spyglass's cautious delete reads a first positional as the truthy
-    ``force_permission``, so ``Table().delete(restriction)`` would delete
-    every row. v2 ``delete`` overrides peel leading ``dict`` / ``list`` /
-    ``str`` positionals into restrictions instead.
-
-    Parameters
-    ----------
-    args : tuple
-        The ``*args`` a ``delete`` override received.
-
-    Returns
-    -------
-    restrictions : list
-        The leading restriction positionals, in order. Empty when ``args``
-        does not start with a restriction (a normal ``.delete()`` call).
-    remaining : tuple
-        The rest of ``args`` after the leading restrictions, untouched.
-    """
-    restrictions = []
-    remaining = args
-    while remaining and isinstance(remaining[0], (dict, list, str)):
-        restrictions.append(remaining[0])
-        remaining = remaining[1:]
-    return restrictions, remaining
-
-
-def restrict_by_leading_args(table, args: tuple) -> tuple[object | None, tuple]:
-    """Apply a ``delete`` call's leading restriction positionals to ``table``.
-
-    A ``delete`` override re-dispatches ``restricted.delete(*remaining)`` when
-    ``restricted`` is not ``None``.
-
-    Parameters
-    ----------
-    table : datajoint.Table
-        The instance whose ``delete`` received ``args``.
-    args : tuple
-        The ``*args`` that ``delete`` received.
-
-    Returns
-    -------
-    restricted : datajoint.Table or None
-        ``table & r1 & r2 & ...`` over the leading restrictions, or ``None``
-        when ``args`` does not start with a restriction.
-    remaining : tuple
-        The rest of ``args`` after the leading restrictions, untouched.
-    """
-    restrictions, remaining = split_leading_restrictions(args)
-    if not restrictions:
-        return None, remaining
-    restricted = table
-    for restriction in restrictions:
-        restricted = restricted & restriction
-    return restricted, remaining
-
-
 def single_source_part(table, key: dict) -> tuple[str, dict]:
     """Return the one XOR source part row of a selection master.
 
