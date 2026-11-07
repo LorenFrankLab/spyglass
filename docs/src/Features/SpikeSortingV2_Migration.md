@@ -563,7 +563,7 @@ through `get_recording`.
 | Sorting                                         | `SpikeSortingOutput().get_sorting({"merge_id": merge_id})`                                                  |
 | Unit brain regions                              | `SpikeSortingOutput.get_unit_brain_regions({"merge_id": merge_id})`                                         |
 | Curation summary                                | `CurationV2.summarize_curation(curation.as_key())`                                                          |
-| Unit-level plots / exports of an exact curation | `ssviz.plot_waveforms(curation, unit_ids=[...])`, `ssviz.export_to_phy(curation, folder)`                   |
+| Unit-level plots / exports of an exact curation | `curation.plots.waveforms([...])`, `ssviz.export_to_phy(curation, folder)`                                  |
 | Analyzer internals                              | `Sorting().get_analyzer({"sorting_id": ...})` (raw sort); `open_curation_analyzer(curation, recipe)` (copy) |
 | v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.curation_api`)                     |
 

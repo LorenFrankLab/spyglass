@@ -613,9 +613,7 @@ final_unit_ids = list(
     CurationV2.get_sorting(final_curation.as_key()).get_unit_ids()
 )
 if final_unit_ids:
-    ssviz.plot_unit_summary(
-        final_curation, final_unit_ids[0], compute_missing=True
-    )
+    final_curation.plots.unit_summary(final_unit_ids[0], compute_missing=True)
 # -
 
 # ### Is this unit neural, noise, or MUA? Does it remain plausible late?
@@ -635,7 +633,7 @@ display(final_evaluation.missing_qc_inputs().to_frame())
 if inspection_unit_ids:
     import spikeinterface.widgets as sw
 
-    ssviz.plot_waveforms(final_curation, unit_ids=inspection_unit_ids)
+    final_curation.plots.waveforms(inspection_unit_ids)
     with final_curation.open_analyzer() as analyzer:
         duration = (
             analyzer.recording.get_num_samples() / analyzer.sampling_frequency
@@ -645,8 +643,7 @@ if inspection_unit_ids:
             {0.0, max(0.0, (duration - width) / 2), max(0.0, duration - width)}
         )
         for start in starts:
-            ssviz.plot_spikes_on_traces(
-                final_curation,
+            final_curation.plots.spikes_on_traces(
                 unit_ids=inspection_unit_ids,
                 time_range=[start, start + width],
                 compute_missing=True,
