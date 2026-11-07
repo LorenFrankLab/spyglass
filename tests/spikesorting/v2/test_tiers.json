@@ -415,6 +415,9 @@
     "test_evaluation_merge_ids.py": {
       "tier": "unit"
     },
+    "test_exceptions.py": {
+      "tier": "unit"
+    },
     "test_export_safety.py": {
       "tier": "db_unit",
       "overrides": {

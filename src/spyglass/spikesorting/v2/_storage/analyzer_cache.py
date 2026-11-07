@@ -11,6 +11,8 @@ them lazily.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
+
 import hashlib
 import json
 import os
@@ -228,7 +230,7 @@ def analyzer_path(sorting_id, waveform_params_name: str) -> Path:
     )
 
 
-class AnalyzerRecordingUnavailableError(ValueError):
+class AnalyzerRecordingUnavailableError(SpikeSortingV2Error, ValueError):
     """A cached analyzer folder loaded without its recording."""
 
 

@@ -6,6 +6,8 @@ imported by their matcher backends, independently of preparing these files.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
+
 import gc
 from pathlib import Path
 
@@ -94,7 +96,7 @@ def _bundle_compute_kwargs(
     return seed, compute_job_kwargs
 
 
-class NoMatchableUnitsError(ValueError):
+class NoMatchableUnitsError(SpikeSortingV2Error, ValueError):
     """No unit of a session can enter the shared waveform bundle.
 
     Every unit has fewer than two sampled spikes with full waveform

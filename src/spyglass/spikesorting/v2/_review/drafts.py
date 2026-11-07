@@ -1,5 +1,7 @@
 """Review-scoped draft storage and atomic revision checks, independent of HTTP."""
 
+from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
+
 import hashlib
 import json
 from pathlib import Path
@@ -7,7 +9,7 @@ from pathlib import Path
 from spyglass.spikesorting.v2._core.json_io import write_json
 
 
-class DraftError(ValueError):
+class DraftError(SpikeSortingV2Error, ValueError):
     """A draft conflict or access refusal with its HTTP status."""
 
     def __init__(self, status, message):

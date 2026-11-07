@@ -7,8 +7,14 @@ message. Each message names the failed invariant and the next action.
 
 from __future__ import annotations
 
+import datajoint as dj
 
-class DuplicateSelectionError(ValueError):
+
+class SpikeSortingV2Error(Exception):
+    """Base class of every v2 exception; catch it for any v2 failure."""
+
+
+class DuplicateSelectionError(SpikeSortingV2Error, ValueError):
     """Raise when ``insert_selection()`` finds duplicate identity rows.
 
     Message names the table and the logical identity fields, and contains
@@ -16,7 +22,7 @@ class DuplicateSelectionError(ValueError):
     """
 
 
-class DuplicateParameterContentError(ValueError):
+class DuplicateParameterContentError(SpikeSortingV2Error, ValueError):
     """Raise when a parameter row duplicates existing content under a new name.
 
     Applies to ``PreprocessingParameters``, ``ArtifactDetectionParameters`` and
@@ -28,7 +34,7 @@ class DuplicateParameterContentError(ValueError):
     """
 
 
-class SchemaBypassError(RuntimeError):
+class SchemaBypassError(SpikeSortingV2Error, RuntimeError):
     """Raise when a source-part master row lacks exactly one source part.
 
     Message names the table, the PK, "expected exactly one source", and
@@ -36,7 +42,7 @@ class SchemaBypassError(RuntimeError):
     """
 
 
-class RecordingTruncatedError(RuntimeError):
+class RecordingTruncatedError(SpikeSortingV2Error, RuntimeError):
     """Raise when a saved ``Recording`` does not cover the requested range.
 
     The saved timestamps do not cover ``IntervalList.valid_times``. Message
@@ -45,7 +51,7 @@ class RecordingTruncatedError(RuntimeError):
     """
 
 
-class EmptyArtifactValidTimesError(RuntimeError):
+class EmptyArtifactValidTimesError(SpikeSortingV2Error, RuntimeError):
     """Raise when artifact detection keeps zero seconds of the recording.
 
     ``apply_artifact_mask`` received empty ``valid_times``; masking would
@@ -55,7 +61,7 @@ class EmptyArtifactValidTimesError(RuntimeError):
     """
 
 
-class ArtifactFractionExceededError(RuntimeError):
+class ArtifactFractionExceededError(SpikeSortingV2Error, RuntimeError):
     """Raise when artifact frames exceed ``_MAX_ARTIFACT_FRAME_FRACTION``.
 
     ``scan_artifact_frames`` and ``apply_artifact_mask`` allocate one int64
@@ -66,7 +72,7 @@ class ArtifactFractionExceededError(RuntimeError):
     """
 
 
-class InsufficientZScoreChannelsError(ValueError):
+class InsufficientZScoreChannelsError(SpikeSortingV2Error, ValueError):
     """Raise when ``zscore_threshold`` is the only detector on <3 channels.
 
     The z-score is computed across channels per frame: identically zero on
@@ -76,7 +82,7 @@ class InsufficientZScoreChannelsError(ValueError):
     """
 
 
-class NonIntegerUnitIDError(ValueError):
+class NonIntegerUnitIDError(SpikeSortingV2Error, ValueError):
     """Raise when a sorting returns unit IDs that are not integers.
 
     ``Sorting.Unit.unit_id`` requires integers. Message names the offending
@@ -84,7 +90,7 @@ class NonIntegerUnitIDError(ValueError):
     """
 
 
-class SessionGroupDateError(ValueError):
+class SessionGroupDateError(SpikeSortingV2Error, ValueError):
     """Raise on a bad recording date in ``SessionGroup.create_group()``.
 
     Raised for a caller-supplied ``recording_date`` or for members spanning
@@ -94,7 +100,7 @@ class SessionGroupDateError(ValueError):
     """
 
 
-class SessionGroupInputError(ValueError):
+class SessionGroupInputError(SpikeSortingV2Error, ValueError):
     """Raise on malformed input to ``SessionGroup.create_group()``.
 
     Covers a member missing ``nwb_file_name`` / ``sort_group_id`` /
@@ -104,7 +110,7 @@ class SessionGroupInputError(ValueError):
     """
 
 
-class ConcatBrainRegionAmbiguousError(RuntimeError):
+class ConcatBrainRegionAmbiguousError(SpikeSortingV2Error, RuntimeError):
     """Raise on ambiguous brain regions for concat-backed data.
 
     Raised by ``Sorting.get_unit_brain_regions()`` and
@@ -115,7 +121,7 @@ class ConcatBrainRegionAmbiguousError(RuntimeError):
     """
 
 
-class MissingRecordingForConcatError(RuntimeError):
+class MissingRecordingForConcatError(SpikeSortingV2Error, RuntimeError):
     """Raise when a concat member has no populated ``Recording`` row.
 
     Raised by ``ConcatenatedRecordingSelection.insert_selection()`` and
@@ -125,7 +131,7 @@ class MissingRecordingForConcatError(RuntimeError):
     """
 
 
-class PipelineInputError(ValueError):
+class PipelineInputError(SpikeSortingV2Error, ValueError):
     """Raise when a pipeline entry point rejects its request before any DB work.
 
     Raised by ``run_v2_pipeline``, ``run_v2_concat_pipeline``,
@@ -136,7 +142,7 @@ class PipelineInputError(ValueError):
     """
 
 
-class PreflightError(ValueError):
+class PreflightError(SpikeSortingV2Error, ValueError):
     """Raise when a preflight check blocks ``run_v2_pipeline``.
 
     Message lists each failed check and its fix. Pass ``preflight=False`` to
@@ -144,7 +150,7 @@ class PreflightError(ValueError):
     """
 
 
-class PipelineStageError(RuntimeError):
+class PipelineStageError(SpikeSortingV2Error, RuntimeError):
     """A run_v2_pipeline stage failed during populate/insert.
 
     Carries the failing ``stage`` and the ``partial_run_summary`` of stages
@@ -172,7 +178,7 @@ class PipelineStageError(RuntimeError):
         )
 
 
-class ZeroUnitSortError(RuntimeError):
+class ZeroUnitSortError(SpikeSortingV2Error, RuntimeError):
     """Raise when a sort finds zero units and ``require_units=True``.
 
     By default a zero-unit sort is a valid result: ``run_v2_pipeline`` writes
@@ -182,7 +188,7 @@ class ZeroUnitSortError(RuntimeError):
     """
 
 
-class ZeroUnitAnalyzerError(RuntimeError):
+class ZeroUnitAnalyzerError(SpikeSortingV2Error, RuntimeError):
     """Raise when ``get_analyzer()`` is called on a zero-unit sort.
 
     SpikeInterface cannot build a ``SortingAnalyzer`` over zero units, so no
@@ -190,7 +196,7 @@ class ZeroUnitAnalyzerError(RuntimeError):
     """
 
 
-class CurationNotFoundError(LookupError):
+class CurationNotFoundError(SpikeSortingV2Error, LookupError):
     """Raise when a curation handle no longer names the same row generation.
 
     Covers a deleted row and a numeric ``curation_id`` reused for a different
@@ -198,14 +204,14 @@ class CurationNotFoundError(LookupError):
     """
 
 
-class UnsupportedMetricValueError(ValueError):
+class UnsupportedMetricValueError(SpikeSortingV2Error, ValueError):
     """Raise when a metric write receives a non-scalar or non-numeric cell.
 
     Prevents silent NaN conversion that would change auto-curation decisions.
     """
 
 
-class FigPackUploadError(RuntimeError):
+class FigPackUploadError(SpikeSortingV2Error, RuntimeError):
     """Raise when a FigPack hosted upload is requested without credentials.
 
     Raised for ``upload=True`` with no FigPack API key and not ``ephemeral``.
@@ -214,7 +220,7 @@ class FigPackUploadError(RuntimeError):
     """
 
 
-class FigPackIdentityError(ValueError):
+class FigPackIdentityError(SpikeSortingV2Error, ValueError):
     """Raise when a FigPack figure cannot prove its curation identity.
 
     Verified imports require the embedded sorting id, curation UUID,
@@ -222,7 +228,7 @@ class FigPackIdentityError(ValueError):
     """
 
 
-class ReviewChangedSincePreviewError(RuntimeError):
+class ReviewChangedSincePreviewError(SpikeSortingV2Error, RuntimeError):
     """Raise when a review figure changes after its import preview.
 
     ``CurationChangeSet.commit`` re-reads the annotations before writing so
@@ -230,7 +236,7 @@ class ReviewChangedSincePreviewError(RuntimeError):
     """
 
 
-class UnresolvedMergeLabelConflictError(ValueError):
+class UnresolvedMergeLabelConflictError(SpikeSortingV2Error, ValueError):
     """Raise when merged contributors have incompatible unresolved labels.
 
     Provide an explicit label tuple for each merged unit listed in the
@@ -238,7 +244,7 @@ class UnresolvedMergeLabelConflictError(ValueError):
     """
 
 
-class FigPackDisplayedUnitPropertyError(ValueError):
+class FigPackDisplayedUnitPropertyError(SpikeSortingV2Error, ValueError):
     """Raise when requested FigPack unit-table columns cannot be rendered.
 
     SpikeInterface silently drops unavailable ``displayed_unit_properties``;
@@ -247,7 +253,7 @@ class FigPackDisplayedUnitPropertyError(ValueError):
     """
 
 
-class FigPackRetrievalError(RuntimeError):
+class FigPackRetrievalError(SpikeSortingV2Error, RuntimeError):
     """Raise when a figure's ``annotations.json`` cannot be retrieved/parsed.
 
     Only a 404 or missing local file means "no edits". Network errors,
@@ -256,7 +262,7 @@ class FigPackRetrievalError(RuntimeError):
     """
 
 
-class AnalyzerFolderMissingError(RuntimeError):
+class AnalyzerFolderMissingError(SpikeSortingV2Error, RuntimeError):
     """Raise when a no-rebuild analyzer load finds the folder absent.
 
     Raised by ``Sorting.get_analyzer(..., rebuild=False)``, which the
@@ -275,7 +281,18 @@ class AnalyzerFolderInvalidError(AnalyzerFolderMissingError):
     """
 
 
-class UnsupportedDirectInsertError(RuntimeError):
+class ImmutableRowError(SpikeSortingV2Error, dj.errors.DataJointError):
+    """Raise on an in-place edit of a row that deterministic ids depend on.
+
+    Covers ``update1`` of identity-bearing masters and parameter rows and
+    ``insert(replace=True)``. Message names the table and says to insert a
+    new named row instead.
+    """
+
+
+class UnsupportedDirectInsertError(
+    SpikeSortingV2Error, dj.errors.DataJointError, RuntimeError
+):
     """Raise on a direct insert into a structured Lookup with part rows.
 
     Applies to tables such as ``AutoCurationRules`` whose validity depends on
@@ -284,7 +301,7 @@ class UnsupportedDirectInsertError(RuntimeError):
     """
 
 
-class StaleEnvMatchedError(RuntimeError):
+class StaleEnvMatchedError(SpikeSortingV2Error, RuntimeError):
     """Raise when recompute deletion has no current-environment match.
 
     ``delete_files()`` found ``matched=1`` only under non-current
@@ -294,7 +311,7 @@ class StaleEnvMatchedError(RuntimeError):
     """
 
 
-class UnknownMatcherError(ValueError):
+class UnknownMatcherError(SpikeSortingV2Error, ValueError):
     """Raise when a matcher-parameters row names an unregistered matcher.
 
     Raised at ``MatcherParameters.insert1()`` and registry lookup so the
@@ -303,7 +320,7 @@ class UnknownMatcherError(ValueError):
     """
 
 
-class OverlappingMatchInputError(ValueError):
+class OverlappingMatchInputError(SpikeSortingV2Error, ValueError):
     """Matching inputs reuse original raw acquisition samples.
 
     Disjoint epochs of the same NWB are supported. Shared sample ranges are
@@ -311,7 +328,7 @@ class OverlappingMatchInputError(ValueError):
     """
 
 
-class UnitMatchSelectionIntegrityError(RuntimeError):
+class UnitMatchSelectionIntegrityError(SpikeSortingV2Error, RuntimeError):
     """Raise when a match selection's frozen inputs no longer hold.
 
     ``UnitMatch.make()`` re-validates ``UnitMatchSelection.Input`` /
@@ -334,7 +351,7 @@ class UnitMatchSelectionIntegrityError(RuntimeError):
     """
 
 
-class SharedArtifactGroupMemberDriftError(RuntimeError):
+class SharedArtifactGroupMemberDriftError(SpikeSortingV2Error, RuntimeError):
     """Raise when a shared artifact group's member set changed under a fixed id.
 
     The ``artifact_detection_id`` covers params and group name only; the
@@ -344,7 +361,7 @@ class SharedArtifactGroupMemberDriftError(RuntimeError):
     """
 
 
-class UnitMatchPairIntegrityError(RuntimeError):
+class UnitMatchPairIntegrityError(SpikeSortingV2Error, RuntimeError):
     """Raise when a ``UnitMatch.Pair`` row is outside the pinned curation universe.
 
     ``Pair`` endpoints reference ``CurationV2.Unit`` globally, so the
@@ -354,7 +371,7 @@ class UnitMatchPairIntegrityError(RuntimeError):
     """
 
 
-class TrackedUnitBudgetExceededError(RuntimeError):
+class TrackedUnitBudgetExceededError(SpikeSortingV2Error, RuntimeError):
     """Raise when the strict tracked-unit graph exceeds its node budget.
 
     Strict-mode clique search is refused above
@@ -363,7 +380,7 @@ class TrackedUnitBudgetExceededError(RuntimeError):
     """
 
 
-class ConcatMemberDriftError(RuntimeError):
+class ConcatMemberDriftError(SpikeSortingV2Error, RuntimeError):
     """Raise when a frozen concat member's recording content no longer matches.
 
     ``ConcatenatedRecording.make_fetch`` checks each member's current
@@ -375,7 +392,7 @@ class ConcatMemberDriftError(RuntimeError):
     """
 
 
-class ConcatSplitError(RuntimeError):
+class ConcatSplitError(SpikeSortingV2Error, RuntimeError):
     """Raise when splitting a concat sorting back to members would drop spikes.
 
     Raised by ``ConcatenatedRecording.split_sorting_by_session`` and
@@ -386,7 +403,7 @@ class ConcatSplitError(RuntimeError):
     """
 
 
-class RecordingContentDriftError(RuntimeError):
+class RecordingContentDriftError(SpikeSortingV2Error, RuntimeError):
     """Raise when a recording rebuild diverges from its stored ``content_hash``.
 
     ``Recording._rebuild_nwb_artifact`` never writes or serves drifted bytes.
@@ -396,7 +413,7 @@ class RecordingContentDriftError(RuntimeError):
     """
 
 
-class RecordingInputDriftError(RuntimeError):
+class RecordingInputDriftError(SpikeSortingV2Error, RuntimeError):
     """Raise when a recording's resolved construction inputs drifted post-select.
 
     ``recording_id`` includes ``recording_input_hash`` (electrodes, reference,
@@ -406,7 +423,7 @@ class RecordingInputDriftError(RuntimeError):
     """
 
 
-class MissingDisplayExtensionError(RuntimeError):
+class MissingDisplayExtensionError(SpikeSortingV2Error, RuntimeError):
     """A SpikeInterface widget needs analyzer extensions that are not computed.
 
     The message gives the ``add_extensions`` call or the

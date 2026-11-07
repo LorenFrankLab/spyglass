@@ -136,14 +136,16 @@ class _IdentityMasterGuard:
 
         Raises
         ------
-        datajoint.errors.DataJointError
+        UnsupportedDirectInsertError
             If ``allow_direct_insert`` is ``False`` (the default),
             directing the caller to the create path instead.
         """
         if not allow_direct_insert:
-            import datajoint as dj
+            from spyglass.spikesorting.v2.exceptions import (
+                UnsupportedDirectInsertError,
+            )
 
-            raise dj.errors.DataJointError(
+            raise UnsupportedDirectInsertError(
                 f"Direct insert into {type(self).__name__} is not supported: "
                 f"{self._direct_insert_reason()} Pass allow_direct_insert=True "
                 "only for a deliberate maintenance or test bypass."
@@ -171,13 +173,13 @@ class _IdentityMasterGuard:
 
         Raises
         ------
-        datajoint.errors.DataJointError
+        ImmutableRowError
             If ``allow_master_mutation`` is ``False`` (the default).
         """
         if not allow_master_mutation:
-            import datajoint as dj
+            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
 
-            raise dj.errors.DataJointError(
+            raise ImmutableRowError(
                 f"In-place update1 of {type(self).__name__} is not supported: "
                 "its identity-bearing columns feed the deterministic ids (or "
                 "are the provenance roots) that live dependents reference, so "
@@ -257,14 +259,14 @@ class ImmutableParamsLookup:
 
         Raises
         ------
-        datajoint.errors.DataJointError
+        ImmutableRowError
             If ``allow_param_mutation`` is ``False`` (the default),
             directing the caller to insert a new named row instead.
         """
         if not allow_param_mutation:
-            import datajoint as dj
+            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
 
-            raise dj.errors.DataJointError(
+            raise ImmutableRowError(
                 f"In-place update1 of {self.__class__.__name__} is not "
                 "supported: this row's content is folded into the deterministic "
                 "id of downstream selections (directly, or via the named set it "
@@ -294,13 +296,13 @@ class ImmutableParamsLookup:
 
         Raises
         ------
-        datajoint.errors.DataJointError
+        ImmutableRowError
             If ``replace=True``.
         """
         if replace:
-            import datajoint as dj
+            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
 
-            raise dj.errors.DataJointError(
+            raise ImmutableRowError(
                 f"insert(replace=True) on {self.__class__.__name__} is not "
                 "supported: this row's content is folded into the "
                 "deterministic id of downstream selections, so overwriting "
