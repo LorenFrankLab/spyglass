@@ -5,12 +5,23 @@ SpikeInterface is imported inside the functions.
 
 from __future__ import annotations
 
+import copy
+
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
 from spyglass.spikesorting.v2._core.recipe_catalog import _params_schema_version
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _validate_params,
     validate_lookup_rows,
 )
+from spyglass.spikesorting.v2._params.sorter import (
+    GenericSorterParamsSchema,
+    _SORTER_SCHEMAS,
+    reject_reserved_execution_keys,
+    validate_execution_params,
+    validate_sorter_params_against_wrapper,
+)
+from spyglass.spikesorting.v2._sorting.dispatch import MATLAB_SORTERS
+from spyglass.utils import logger
 
 
 def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
@@ -43,13 +54,6 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
     # Unknown sorters get the permissive schema, so check spelling here.
     # available_sorters, not installed: a compute node may have it.
     import spikeinterface.sorters as sis
-
-    from spyglass.spikesorting.v2._params.sorter import (
-        _SORTER_SCHEMAS,
-        reject_reserved_execution_keys,
-        validate_execution_params,
-        validate_sorter_params_against_wrapper,
-    )
 
     valid_sorters = (
         set(sis.available_sorters()) | set(_SORTER_SCHEMAS) | non_si_sorters
@@ -128,17 +132,7 @@ def legacy_si_sorter_rows() -> list:
     list of dict
         Mapping rows ready for ``SorterParameters.insert``.
     """
-    import copy
-
     import spikeinterface.sorters as sis
-
-    from spyglass.spikesorting.v2._params.sorter import (
-        _SORTER_SCHEMAS,
-        GenericSorterParamsSchema,
-        validate_sorter_params_against_wrapper,
-    )
-    from spyglass.spikesorting.v2._sorting.dispatch import MATLAB_SORTERS
-    from spyglass.utils import logger
 
     curated = set(_SORTER_SCHEMAS)  # sorters with their own schemas
     installed = set(sis.installed_sorters())

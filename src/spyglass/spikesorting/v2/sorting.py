@@ -17,9 +17,11 @@ the first frozen ``ConcatenatedRecordingSelection.MemberSnapshot`` member.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
+import datetime as dt
 
 import datajoint as dj
 import numpy as np
+import spikeinterface as si
 
 from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
@@ -104,10 +106,30 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.mixins.populate import StagedOutputs
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._core.runtime import (
+    runtime_environment_provenance,
+)
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+from spyglass.spikesorting.v2._sorting.dispatch import is_container_backend
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    analyzer_publication_transaction,
+    assert_path_safe_waveform_params_name,
+    remove_previous_sort_analyzer_caches,
+)
+from spyglass.spikesorting.v2._storage.rebuilds import ensure_artifact_file
+from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatBrainRegionAmbiguousError,
+    SchemaBypassError,
+)
+from spyglass.spikesorting.v2.recording import RecordingSelection
+from spyglass.spikesorting.v2.session_group import (
+    ConcatenatedRecordingSelection,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
-    import spikeinterface as si
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import StagedAnalyzer
 
@@ -325,10 +347,6 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         """
         import spikeinterface.sorters as sis
 
-        from spyglass.spikesorting.v2._sorting.dispatch import (
-            is_container_backend,
-        )
-
         installed = set(sis.installed_sorters())
         insertable: list = []
         skipped: list = []
@@ -377,10 +395,6 @@ def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
 
     A ``per_row_hook`` for ``validate_lookup_rows``.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        assert_path_safe_waveform_params_name,
-    )
-
     assert_path_safe_waveform_params_name(row["waveform_params_name"])
 
 
@@ -659,8 +673,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``sorting_id`` (a part row inserted or deleted without
             :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
         source = cls.resolve_source(key)
         lineage = SourceLineage(
             kind=source.kind,
@@ -735,10 +747,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             Absolute path of the (present) file, for
             :func:`._recording.source.read_effective_recording`.
         """
-        from spyglass.spikesorting.v2._storage.rebuilds import (
-            ensure_artifact_file,
-        )
-
         return ensure_artifact_file(
             _TRACE_TABLES[traces.kind],
             traces.key,
@@ -799,11 +807,6 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ``RecordingSelection`` or, for a concat source,
         ``ConcatenatedRecordingSelection``.
         """
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecordingSelection,
-        )
-
         source = cls.resolve_source(key)
         if source.kind == "recording":
             return (
@@ -1134,10 +1137,6 @@ class Sorting(
             Resolved job kwargs, shared by the sorter and the analyzer build.
         effective_random_seed : int or None
         """
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
         sorter = sorter_row["sorter"]
         sorter_params = dict(sorter_row["params"])
         sorter_params.pop("schema_version", None)
@@ -1197,12 +1196,6 @@ class Sorting(
         -------
         dict
         """
-        import spikeinterface as si
-
-        from spyglass.spikesorting.v2._core.runtime import (
-            runtime_environment_provenance,
-        )
-
         concat_recording_id = (
             source.key["concat_recording_id"]
             if source.kind == "concatenated_recording"
@@ -1292,11 +1285,6 @@ class Sorting(
         -------
         None
         """
-        from spyglass.spikesorting.v2._storage.analyzer_cache import (
-            analyzer_publication_transaction,
-            remove_previous_sort_analyzer_caches,
-        )
-
         try:
             with analyzer_publication_transaction(self, key["sorting_id"]):
                 self._insert_sorting_rows_transaction(
@@ -1339,8 +1327,6 @@ class Sorting(
         ``_safe_context()`` is a no-op inside ``populate()``; it makes a
         direct call atomic.
         """
-        import datetime as dt
-
         with self._safe_context():
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
             self.insert1(
@@ -1387,8 +1373,6 @@ class Sorting(
             ``False``; otherwise a DataFrame indexed by ``unit_id`` with
             a ``spike_times`` column.
         """
-        import spikeinterface as si
-
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         # A motion-corrected recording keeps its source's sampling rate.
@@ -1539,13 +1523,6 @@ class Sorting(
             analyzer_cache_lock,
         )
         from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
-        from spyglass.spikesorting.v2._core.signal_math import (
-            resolve_peak_sign,
-        )
 
         sorting_id = (self & key).fetch1("sorting_id")
         sorter_params, sorter_job_kwargs = (
@@ -1580,7 +1557,6 @@ class Sorting(
             If no root curation exists.
         """
         from spyglass.spikesorting.v2.curation import CurationV2
-        from spyglass.spikesorting.v2.curation_api import CurationRef
 
         sorting_id = (self & key).fetch1("sorting_id")
         root = CurationV2 & {"sorting_id": sorting_id, "parent_curation_id": -1}
@@ -1721,10 +1697,6 @@ class Sorting(
         ConcatBrainRegionAmbiguousError
             For a concat sort unless ``allow_anchor_member=True``.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            ConcatBrainRegionAmbiguousError,
-        )
-
         source = SortingSelection.resolve_source(key)
         if source.kind == "concatenated_recording":
             if not allow_anchor_member:

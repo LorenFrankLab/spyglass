@@ -28,6 +28,7 @@ from typing import NamedTuple
 
 import datajoint as dj
 import numpy as np
+import h5py
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._motion import (
@@ -71,6 +72,33 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.mixins.populate import StagedOutputs
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._core.selection_identity import (
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._motion import estimation as _motion
+from spyglass.spikesorting.v2._motion.estimation import (
+    displacement_on_source_clock,
+    estimation_clock_from_blob,
+    motion_estimate_parts_mismatch,
+    motion_from_storage_dict,
+    spans_without_evidence,
+    unfiltered_source_problem,
+)
+from spyglass.spikesorting.v2._recording.geometry import flatten_planar_geometry
+from spyglass.spikesorting.v2._recording.restriction import (
+    _LazyRecordingTimestamps,
+)
+from spyglass.spikesorting.v2._storage import rebuilds as _recording_rebuilds
+from spyglass.spikesorting.v2._storage.rebuilds import (
+    ensure_artifact_file,
+    stored_traces,
+)
+from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 
 schema = dj.schema("spikesorting_v2_motion")
 
@@ -246,10 +274,6 @@ def preprocessing_filter_problem(preprocessing_params_name: str) -> str | None:
     str or None
         The problem, or ``None`` when the recipe applies a temporal filter.
     """
-    from spyglass.spikesorting.v2._motion.estimation import (
-        unfiltered_source_problem,
-    )
-
     return unfiltered_source_problem(
         preprocessing_params_name,
         (
@@ -386,10 +410,6 @@ class MotionEstimateSelection(
         DuplicateSelectionError
             If a match has a non-deterministic ``motion_estimate_id``.
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            existing_selection_pk,
-        )
-
         candidates = ((cls * source_part) & master_row & source_key).fetch(
             "motion_estimate_id"
         )
@@ -443,11 +463,6 @@ class MotionEstimateSelection(
             the stored ``motion_estimate_id`` (a raw insert or part-only
             delete bypassing :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2._motion.estimation import (
-            motion_estimate_parts_mismatch,
-        )
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
         master_key = {k: v for k, v in key.items() if k in cls.primary_key}
         kind, source_key = single_source_part(cls, master_key)
         artifact_detection_id = cls.resolve_artifact_detection(master_key)
@@ -552,10 +567,6 @@ def _estimation_clock_of(row: dict):
 
     ``row`` needs only the time-map columns (``_ESTIMATION_CLOCK_COLUMNS``).
     """
-    from spyglass.spikesorting.v2._motion.estimation import (
-        estimation_clock_from_blob,
-    )
-
     return estimation_clock_from_blob(
         {
             field: row[column]
@@ -634,16 +645,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             preprocessing recipe applies no temporal filter (re-checked here
             for rows inserted with ``allow_direct_insert=True``).
         """
-        from spyglass.spikesorting.v2._artifacts.readers import (
-            read_recording_artifact_valid_times,
-        )
-        from spyglass.spikesorting.v2._storage.rebuilds import (
-            ensure_artifact_file,
-        )
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
         lineage = MotionEstimateSelection.resolve_source(key)
         problem = _source_filter_problem(lineage.kind, lineage.key)
         if problem is not None:
@@ -708,7 +709,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             On a stale selection, spans out of acquisition order, or any
             estimation failure (see ``estimate_motion_in_spans``).
         """
-        from spyglass.spikesorting.v2._motion import estimation as _motion
         from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
 
         # 2. Resolve the recipe and refuse a stale selection.
@@ -806,8 +806,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         -------
         MotionEstimateComputed
         """
-        from spyglass.spikesorting.v2._motion import estimation as _motion
-
         channel_ids = recording.channel_ids.tolist()
         channel_locations = np.asarray(
             recording.get_channel_locations(), dtype=np.float64
@@ -869,10 +867,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         -------
         spikeinterface.core.motion.Motion
         """
-        from spyglass.spikesorting.v2._motion.estimation import (
-            motion_from_storage_dict,
-        )
-
         return motion_from_storage_dict((self & key).fetch1("motion"))
 
     def get_estimation_clock(self, key: dict):
@@ -914,10 +908,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             per such span (times on the source's own clock, s); empty when
             every span kept a peak.
         """
-        from spyglass.spikesorting.v2._motion.estimation import (
-            spans_without_evidence,
-        )
-
         return spans_without_evidence(
             (self & key).fetch1("peaks_per_continuity_span"),
             self.get_estimation_clock(key),
@@ -939,10 +929,6 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         -------
         _motion.SourceClockDisplacement
         """
-        from spyglass.spikesorting.v2._motion.estimation import (
-            displacement_on_source_clock,
-        )
-
         return displacement_on_source_clock(
             self.get_motion(key), self.get_estimation_clock(key)
         )
@@ -1155,10 +1141,6 @@ class MotionCorrectedRecordingSelection(
             If a row with the same identity has a non-deterministic id (a raw
             insert bypassing :meth:`insert_selection`).
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            existing_selection_pk,
-        )
-
         return existing_selection_pk(
             list((cls & master_row).fetch("motion_corrected_recording_id")),
             deterministic_id,
@@ -1233,8 +1215,6 @@ class MotionCorrectedComputed(NamedTuple):
 
 def _series_filtering(abs_path: str, electrical_series_path: str) -> str:
     """The ``filtering`` attribute of a persisted ``ElectricalSeries``."""
-    import h5py
-
     with h5py.File(abs_path, "r") as handle:
         value = handle[electrical_series_path].attrs.get("filtering", "")
     return value.decode() if isinstance(value, bytes) else str(value)
@@ -1300,10 +1280,6 @@ class MotionCorrectedRecording(
             If the source's ``content_hash`` changed since the estimate was
             selected.
         """
-        from spyglass.spikesorting.v2._storage.rebuilds import (
-            ensure_artifact_file,
-        )
-
         selection = (MotionCorrectedRecordingSelection & key).fetch1()
         interpolation_params = (
             MotionInterpolationParameters
@@ -1377,15 +1353,9 @@ class MotionCorrectedRecording(
             or an application failure (see
             ``_motion.apply_motion_on_estimation_clock``).
         """
-        from spyglass.spikesorting.v2._recording.geometry import (
-            flatten_planar_geometry,
-        )
         from spyglass.spikesorting.v2._storage.nwb import (
             read_recording_nwb,
             write_nwb_artifact,
-        )
-        from spyglass.spikesorting.v2._recording.restriction import (
-            _LazyRecordingTimestamps,
         )
 
         # 2. Resolve the interpolation recipe and refuse a stale selection.
@@ -1471,8 +1441,6 @@ class MotionCorrectedRecording(
         A direct call (outside ``populate``) must remove a failed attempt's
         staged file itself.
         """
-        from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
-
         row = MotionCorrectedComputed(*computed)._asdict()
         nwb_file_name = row.pop("nwb_file_name")
         with self._safe_context():
@@ -1503,7 +1471,6 @@ class MotionCorrectedRecording(
             ``is_filtered=True``.
         """
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
-        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
 
         return read_stored_traces(
             stored_traces(type(self), key, (self & key).fetch1())
@@ -1515,8 +1482,4 @@ class MotionCorrectedRecording(
         Kept on the class because ``ensure_artifact_file`` calls it on every
         trace-artifact table.
         """
-        from spyglass.spikesorting.v2._storage import (
-            rebuilds as _recording_rebuilds,
-        )
-
         return _recording_rebuilds.rebuild_motion_corrected_artifact(self, key)

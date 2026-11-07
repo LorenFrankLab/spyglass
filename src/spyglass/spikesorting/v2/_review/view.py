@@ -6,6 +6,8 @@ SpikeInterface are imported only when rendering.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from spyglass.spikesorting.v2._review.annotations import (
     FIGPACK_INSTALL_HINT,
     curation_state,
@@ -13,6 +15,14 @@ from spyglass.spikesorting.v2._review.annotations import (
 )
 from spyglass.spikesorting.v2.exceptions import (
     FigPackDisplayedUnitPropertyError,
+)
+from spyglass.spikesorting.v2._review.inspection import (
+    defer_time_views,
+    inspection_view,
+)
+from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
+from spyglass.spikesorting.v2._review.unit_properties import (
+    review_unit_properties,
 )
 
 #: Fixed control height (px). With only ``max_size``, a LayoutItem beside a
@@ -53,8 +63,6 @@ def curation_control(label_options, seed_labels=None):
     shown in the unit table (``merged_from``), and only NEW browser edits may
     populate the control's merge groups.
     """
-    from pathlib import Path
-
     import figpack
 
     extension = figpack.FigpackExtension(
@@ -194,15 +202,6 @@ def build_curation_view(
     table columns, so the evaluation wins over same-named analyzer
     properties.
     """
-    from spyglass.spikesorting.v2._review.inspection import (
-        defer_time_views,
-        inspection_view,
-    )
-    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
-    from spyglass.spikesorting.v2._review.unit_properties import (
-        review_unit_properties,
-    )
-
     display = ReviewDisplayOptions.from_mapping(display_options)
     if review_table is not None:
         # Profile-backed: exactly the review columns, no SI defaults.

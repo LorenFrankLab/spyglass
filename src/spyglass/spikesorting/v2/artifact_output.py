@@ -22,6 +22,7 @@ from spyglass.spikesorting.v2.artifact import (  # noqa: F401 (part FKs)
     SharedGroupArtifactDetection,
 )
 from spyglass.utils import SpyglassMixin, _Merge
+from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
 schema = dj.schema("spikesorting_v2_artifact_output")
 
@@ -123,8 +124,6 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
             duplicate from a raw insert. Distinct from ``KeyError`` so an
             ``except KeyError`` cannot swallow it.
         """
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
         # Scan both parts so a cross-part duplicate raises.
         matches: list = []
         for part_name in ("RecordingSource", "SharedGroupSource"):
@@ -227,8 +226,6 @@ def insert_artifact_bound_selection(
         If the detection is not populated, a duplicate master's parts do not
         match this selection, or an input foreign key is unsatisfied.
     """
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
     table = table_cls.__name__
     art_merge_id = None
     if artifact_detection_id is not None:

@@ -23,9 +23,12 @@ Sort each session independently, then match units across sessions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
+from collections.abc import Mapping
+from pathlib import Path
 
 import datajoint as dj
+import pandas as pd
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
@@ -50,9 +53,38 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.mixins.populate import StagedOutputs
-
-if TYPE_CHECKING:
-    import pandas as pd
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _insert_row_to_dict,
+    lossless_int,
+    validate_lookup_rows,
+)
+from spyglass.spikesorting.v2._core.table_integrity import (
+    _insert_parameter_rows,
+)
+from spyglass.spikesorting.v2._matching.graph import (
+    STRICT_POLICY,
+    derive_tracked_units,
+    divergent_electrode_space_members,
+)
+from spyglass.spikesorting.v2._matching.provenance import (
+    validate_matcher_provenance,
+)
+from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+from spyglass.spikesorting.v2._sorting.fetch import resolve_sort_anchor
+from spyglass.spikesorting.v2._storage.matches_nwb import (
+    read_pairs,
+    write_pairs_table,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import close_nwb_recording
+from spyglass.spikesorting.v2._storage.staged_outputs import (
+    staged_analysis_file,
+)
+from spyglass.spikesorting.v2.exceptions import UnitMatchPairIntegrityError
+from spyglass.spikesorting.v2.matcher_protocol import (
+    _get_matcher_schema,
+    get_geometry_validator,
+)
+from spyglass.spikesorting.v2.sorting import SortingSelection
 
 schema = dj.schema("spikesorting_v2_unit_matching")
 
@@ -143,15 +175,6 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         version and duplicate-content checks match the other v2 parameter
         Lookups.
         """
-        from spyglass.spikesorting.v2.matcher_protocol import (
-            _get_matcher_schema,
-        )
-        from spyglass.spikesorting.v2._core.table_integrity import (
-            _insert_parameter_rows,
-        )
-        from spyglass.spikesorting.v2._core.lookup_validation import (
-            validate_lookup_rows,
-        )
 
         def schema_for(row):
             return _get_matcher_schema(row["matcher"])
@@ -194,10 +217,6 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         Separate from ``insert_default`` so ``describe_parameter_rows`` can
         discover the shipped names.
         """
-        from spyglass.spikesorting.v2._params.matcher import (
-            UnitMatchParamsSchema,
-        )
-
         return [
             {
                 "matcher_params_name": "unitmatch_default",
@@ -478,15 +497,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             return CurationV2.get_sorting_input_recording(
                 curation_key
             ).get_channel_locations()
-        from pathlib import Path
         from spyglass.spikesorting.v2._matching.coverage import (
             stored_analysis_path,
         )
-        from spyglass.spikesorting.v2.sorting import SortingSelection
         from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
-        from spyglass.spikesorting.v2._storage.spikeinterface import (
-            close_nwb_recording,
-        )
 
         traces = SortingSelection.resolve_effective_source(curation_key).traces
         path = stored_analysis_path(traces.row["analysis_file_name"])
@@ -520,9 +534,6 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """
         if len(choices_by_input) < 2:
             return
-        from spyglass.spikesorting.v2.matcher_protocol import (
-            get_geometry_validator,
-        )
 
         validator = get_geometry_validator(matcher_name)
         if validator is None:
@@ -550,11 +561,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         electrodes) and returns the ``(electrode_group_name, electrode_id,
         region)`` signature the concat path uses.
         """
-        from spyglass.spikesorting.v2._sorting.fetch import resolve_sort_anchor
         from spyglass.spikesorting.v2.session_group import (
             _member_electrode_signature,
         )
-        from spyglass.spikesorting.v2.sorting import SortingSelection
 
         anchor = resolve_sort_anchor(
             SortingSelection.resolve_source({"sorting_id": sorting_id})
@@ -576,9 +585,6 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """
         if len(choices_by_input) < 2:
             return []
-        from spyglass.spikesorting.v2._matching.graph import (
-            divergent_electrode_space_members,
-        )
 
         signatures = {
             label: cls._member_electrode_signature(choice[0])
@@ -698,12 +704,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             UnitMatchPairIntegrityError
                 If any row fails a check.
             """
-            from collections.abc import Mapping
-
-            from spyglass.spikesorting.v2._core.lookup_validation import (
-                _insert_row_to_dict,
-            )
-
             if isinstance(rows, Mapping):
                 rows = [rows]
             attr_names = self.heading.names
@@ -717,13 +717,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         def _validate_pair_row(self, row, pinned_cache, seen_edges) -> None:
             """Reject a single ``Pair`` row outside the pinned curation universe."""
-            from spyglass.spikesorting.v2._core.lookup_validation import (
-                lossless_int,
-            )
-            from spyglass.spikesorting.v2.exceptions import (
-                UnitMatchPairIntegrityError,
-            )
-
             unitmatch_id = row.get("unitmatch_id")
             if unitmatch_id is None:
                 # No master key to validate against; the FK layer rejects it.
@@ -895,13 +888,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         backend. Reads only files ``make_fetch`` resolved; the only DB access
         is staging the pairs NWB.
         """
-        from spyglass.spikesorting.v2._storage.matches_nwb import (
-            write_pairs_table,
-        )
-        from spyglass.spikesorting.v2._storage.staged_outputs import (
-            staged_analysis_file,
-        )
-
         # 2. Record the backend that runs and its producer provenance.
         (
             spikeinterface_version,
@@ -993,11 +979,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``populate()`` removes the staged file; a direct call leaves that to
         its caller.
         """
-        from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
-        from spyglass.spikesorting.v2._matching.provenance import (
-            validate_matcher_provenance,
-        )
-
         validate_matcher_provenance(matcher_provenance)
 
         abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
@@ -1035,10 +1016,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     def get_pairs(self, key) -> "pd.DataFrame":
         """Return the cross-session match pairs for one run as a DataFrame."""
-        import pandas as pd
-
-        from spyglass.spikesorting.v2._storage.matches_nwb import read_pairs
-
         row = (self & key).fetch1()
         abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
         return pd.DataFrame(read_pairs(abs_path, row["pairs_object_id"]))
@@ -1142,11 +1119,6 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         detected sessions from ``UnitMatch.RecordingSpikeCount``. Raises if a
         ``Pair`` endpoint is missing from the universe.
         """
-        from spyglass.spikesorting.v2._matching.graph import (
-            STRICT_POLICY,
-            derive_tracked_units,
-        )
-
         # 1. Resolve the tracking threshold and node budget.
         tracking = _unit_match_readers.tracking_params(key)
         # 2. Read the graph: matchable units as nodes, pairs as edges.

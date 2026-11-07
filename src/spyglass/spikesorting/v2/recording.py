@@ -77,6 +77,36 @@ from spyglass.spikesorting.v2._core.reference_resolution import (
     assert_reference_not_member,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _ensure_lookup_row_exists,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    existing_selection_pk,
+    recording_identity_payload,
+)
+from spyglass.spikesorting.v2._core.selection_plan import (
+    build_recording_selection_plan,
+)
+from spyglass.spikesorting.v2._recording.acquisition_spans import (
+    AcquisitionSpanRecording,
+)
+from spyglass.spikesorting.v2._recording.geometry import (
+    assert_unique_contact_positions,
+    maybe_apply_tetrode_geometry,
+    normalize_channel_locations,
+    retained_channel_ids,
+)
+from spyglass.spikesorting.v2._recording.preprocessing import (
+    apply_spatial_preprocessing,
+    apply_temporal_preprocessing,
+    filtering_description,
+)
+from spyglass.spikesorting.v2._recording.restriction import (
+    restrict_recording,
+    select_sort_group_channels,
+)
+from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
+from spyglass.spikesorting.v2.exceptions import RecordingTruncatedError
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -786,16 +816,6 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If an existing row for this identity has a non-deterministic
             ``recording_id`` (a raw ``insert`` bypass).
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            recording_identity_payload,
-        )
-        from spyglass.spikesorting.v2._core.selection_plan import (
-            build_recording_selection_plan,
-        )
-        from spyglass.spikesorting.v2._core.lookup_validation import (
-            _ensure_lookup_row_exists,
-        )
-
         identity = recording_identity_payload(key)
         # Before the hash: the resolver's fetch1 would mask this message.
         _ensure_lookup_row_exists(
@@ -855,10 +875,6 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If any row for this identity has a ``recording_id`` other than
             ``deterministic_id`` (a raw ``insert`` bypass).
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            existing_selection_pk,
-        )
-
         existing = list((cls & keys_minus_uuid).fetch("recording_id"))
         return existing_selection_pk(
             existing,
@@ -1061,22 +1077,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         -------
         RecordingArtifactResult
         """
-        from spyglass.spikesorting.v2._recording.geometry import (
-            assert_unique_contact_positions,
-            maybe_apply_tetrode_geometry,
-            normalize_channel_locations,
-            retained_channel_ids,
-        )
-        from spyglass.spikesorting.v2._recording.preprocessing import (
-            apply_spatial_preprocessing,
-            apply_temporal_preprocessing,
-            filtering_description,
-        )
-        from spyglass.spikesorting.v2._recording.restriction import (
-            restrict_recording,
-            select_sort_group_channels,
-        )
-
         params = fetched.preprocessing_params
         # 1. Read the raw series and keep the sort group's channels.
         recording = _recording_nwb.read_raw_recording(
@@ -1264,10 +1264,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             If the saved duration falls short of ``expected_saved_total``
             by more than the sample-grid tolerance.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingTruncatedError,
-        )
-
         nwb_file_name = sel["nwb_file_name"]
         interval_list_name = sel["interval_list_name"]
 
@@ -1342,8 +1338,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             The present file's absolute path, the stored
             ``electrical_series_path`` and the row's ``content_hash``.
         """
-        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
-
         return stored_traces(type(self), key, (self & key).fetch1())
 
     # ---- visualization delegates (see v2.visualization facade) -----------
@@ -1500,9 +1494,6 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         """
         import spikeinterface.preprocessing as sip
 
-        from spyglass.spikesorting.v2._recording.acquisition_spans import (
-            AcquisitionSpanRecording,
-        )
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         # 2. Open the recording. DREDge fancy-indexes lazy h5py timestamps

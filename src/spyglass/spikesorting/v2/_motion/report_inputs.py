@@ -1,14 +1,21 @@
 """Reads behind ``MotionEstimate.report``.
 
-``_motion.report`` summarizes and draws what these read. DataJoint tables are
-imported inside the functions.
+``_motion.report`` summarizes and draws what these read. ``motion`` imports
+this module, so its tables are imported inside the functions.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 import numpy as np
+
+from spyglass.spikesorting.v2._motion import (
+    estimation as _motion,
+    report as _motion_report,
+)
+from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
 
 def id_restriction(value, field: str):
@@ -18,8 +25,6 @@ def id_restriction(value, field: str):
     ``field`` (e.g. a pipeline receipt) keeps only that field; anything else
     is returned unchanged as a restriction.
     """
-    from collections.abc import Mapping
-
     if isinstance(value, (uuid.UUID, str)):
         return {field: value}
     if isinstance(value, Mapping) and field in value:
@@ -41,10 +46,6 @@ def motion_estimate_report(
     arguments, returns and errors). ``table`` is a ``MotionEstimate``
     instance.
     """
-    from spyglass.spikesorting.v2._motion import (
-        estimation as _motion,
-        report as _motion_report,
-    )
     from spyglass.spikesorting.v2.motion import (
         _ESTIMATION_CLOCK_COLUMNS,
         MotionCorrectedRecording,
@@ -53,7 +54,6 @@ def motion_estimate_report(
         MotionInterpolationParameters,
         _estimation_clock_of,
     )
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
     if trace_window_s is not None and corrected_key is None:
         raise ValueError(
@@ -174,10 +174,6 @@ def read_trace_window(
     the corrected recording has the source's frames. Both are read in
     microvolts (:func:`._motion.recording_in_microvolts`).
     """
-    from spyglass.spikesorting.v2._motion import (
-        estimation as _motion,
-        report as _motion_report,
-    )
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         _estimate_source,

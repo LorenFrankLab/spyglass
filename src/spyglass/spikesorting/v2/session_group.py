@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 import datajoint as dj
+import spikeinterface as si
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
@@ -44,9 +45,24 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.mixins.populate import StagedOutputs
-
-if TYPE_CHECKING:
-    import spikeinterface as si
+from spyglass.spikesorting.v2._core.selection_identity import (
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._recording.concat import (
+    electrode_signature_from_rows,
+    member_split_key,
+    split_unit_spike_trains,
+)
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    sort_group_electrode_regions,
+)
+from spyglass.spikesorting.v2._storage.nwb import write_nwb_artifact
+from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatSplitError,
+    SessionGroupInputError,
+)
+from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
 
 schema = dj.schema("spikesorting_v2_session_group")
 
@@ -59,13 +75,6 @@ def _member_electrode_signature(member: dict) -> tuple:
     animal's sessions, so members of the same implant share a signature. An
     electrode without a region maps to ``None``.
     """
-    from spyglass.spikesorting.v2._recording.concat import (
-        electrode_signature_from_rows,
-    )
-    from spyglass.spikesorting.v2._recording.unit_metadata import (
-        sort_group_electrode_regions,
-    )
-
     electrode_rows = sort_group_electrode_regions(
         {
             "nwb_file_name": member["nwb_file_name"],
@@ -219,8 +228,6 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             If a member dict carries ``recording_date`` (dates are derived),
             or if members span multiple dates without ``allow_multi_day=True``.
         """
-        from spyglass.spikesorting.v2.exceptions import SessionGroupInputError
-
         rows = _session_group_insert.group_member_rows(
             session_group_owner, session_group_name, members, allow_multi_day
         )
@@ -411,10 +418,6 @@ class ConcatenatedRecordingSelection(
         different member sets do not collide. A match whose id is not the
         deterministic one came from a raw insert and is rejected.
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            existing_selection_pk,
-        )
-
         lookup = {**identity, "member_set_hash": member_set_hash}
         master_ids = {
             row["concat_recording_id"]
@@ -636,7 +639,6 @@ class ConcatenatedRecording(
             member_kept_intervals,
             observation_intervals,
         )
-        from spyglass.spikesorting.v2._storage.nwb import write_nwb_artifact
 
         # 2. Load each member's cached recording.
         recordings, member_sample_counts, member_indices = (
@@ -731,8 +733,6 @@ class ConcatenatedRecording(
         ``_safe_context()`` makes a direct (non-populate) call atomic. A
         direct call must remove a failed attempt's staged file itself.
         """
-        from spyglass.spikesorting.v2.recording import _ELECTRICAL_SERIES_PATH
-
         boundary_rows = [
             {
                 **key,
@@ -781,7 +781,6 @@ class ConcatenatedRecording(
             The concatenated, masked, unwhitened recording.
         """
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
-        from spyglass.spikesorting.v2._storage.rebuilds import stored_traces
 
         return read_stored_traces(
             stored_traces(type(self), key, (self & key).fetch1())
@@ -818,14 +817,6 @@ class ConcatenatedRecording(
             team_name)``, with spike times in that member's local frames.
             See :func:`._recording.concat.member_split_key`.
         """
-        import spikeinterface as si
-
-        from spyglass.spikesorting.v2._recording.concat import (
-            member_split_key,
-            split_unit_spike_trains,
-        )
-        from spyglass.spikesorting.v2.exceptions import ConcatSplitError
-
         # Use the frozen members so a SessionGroup.Member edit cannot misalign.
         members = (ConcatenatedRecordingSelection.MemberSnapshot & key).fetch(
             as_dict=True, order_by="member_index"

@@ -28,6 +28,8 @@ from contextlib import contextmanager
 from typing import NamedTuple
 
 import datajoint as dj
+import pandas as pd
+import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v2._curation import (
@@ -81,6 +83,36 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.mixins.populate import StagedOutputs
+from spyglass.spikesorting.utils_burst import (
+    plot_burst_metrics,
+    plot_burst_pair_peaks,
+    plot_burst_peak_over_time,
+)
+from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
+from spyglass.spikesorting.v2._core.runtime import (
+    runtime_environment_provenance,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    assert_supplied_id_matches,
+    deterministic_id,
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._curation.analyzer import display_analyzer_request
+from spyglass.spikesorting.v2._curation.metric_plots import (
+    burst_pair_metrics_frame,
+    peak_amplitudes_from_analyzer,
+    plot_autocorrelograms_figure,
+    plot_pair_correlograms_figure,
+    plot_units_qc_figure,
+    validate_unit_pairs,
+)
+from spyglass.spikesorting.v2._params.metric_curation import (
+    _available_quality_metric_names,
+    _available_template_metric_columns,
+)
+from spyglass.spikesorting.v2._storage.observation_io import (
+    observation_metrics_from_nwb,
+)
 
 schema = dj.schema("spikesorting_v2_metric_curation")
 
@@ -286,10 +318,6 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     @classmethod
     def available_quality_metrics(cls) -> list[str]:
         """Return the metric names the installed SpikeInterface exposes."""
-        from spyglass.spikesorting.v2._params.metric_curation import (
-            _available_quality_metric_names,
-        )
-
         return sorted(_available_quality_metric_names())
 
     @classmethod
@@ -310,10 +338,6 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         These are output column names, not metric names: SI's ``half_width``
         metric gives the ``trough_half_width`` and ``peak_half_width`` columns.
         """
-        from spyglass.spikesorting.v2._params.metric_curation import (
-            _available_template_metric_columns,
-        )
-
         return sorted(_available_template_metric_columns())
 
 
@@ -541,11 +565,6 @@ class CurationEvaluationSelection(
         DuplicateSelectionError
             If an existing row for this identity has a non-deterministic id.
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            assert_supplied_id_matches,
-            deterministic_id,
-        )
-
         metric_waveform_params_name = key.get("metric_waveform_params_name")
         if metric_waveform_params_name is None:
             # [1] is the metric element of the (display, metric) pair.
@@ -566,10 +585,6 @@ class CurationEvaluationSelection(
         # handed back.
         CurationV2.assert_committed_curation(
             parent_key, context="CurationEvaluation"
-        )
-
-        from spyglass.spikesorting.v2._core.observed_time import (
-            OBSERVATION_VERSION,
         )
 
         identity = {
@@ -633,10 +648,6 @@ class CurationEvaluationSelection(
     @classmethod
     def _find_existing_pk(cls, identity, deterministic_id):
         """Return the PK-only dict for ``identity`` or None; guard bad ids."""
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            existing_selection_pk,
-        )
-
         existing_ids = (cls & identity).fetch("curation_evaluation_id")
         return existing_selection_pk(
             [uuid.UUID(str(cid)) for cid in existing_ids],
@@ -725,13 +736,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         No DB writes; every input comes from ``make_fetch``. The only DB
         access stages the output file.
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2._recording.source import (
             read_effective_recording,
-        )
-        from spyglass.spikesorting.v2._storage.observation_io import (
-            observation_metrics_from_nwb,
         )
 
         spikeinterface_version = si.__version__
@@ -1170,10 +1176,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             The provenance header without the observation interval hash,
             analyzer hashes or runtime receipt.
         """
-        from spyglass.spikesorting.v2._core.observed_time import (
-            OBSERVATION_VERSION,
-        )
-
         corrected_id = recording_inputs.traces.key.get(
             "motion_corrected_recording_id"
         )
@@ -1229,9 +1231,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         list
             One ``DynamicTable`` for ``provenance_tables``.
         """
-        from spyglass.spikesorting.v2._core.runtime import (
-            runtime_environment_provenance,
-        )
         from spyglass.spikesorting.v2._storage.provenance import (
             CURATION_EVALUATION_PROVENANCE,
             build_provenance_table,
@@ -1309,8 +1308,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _write_empty(abs_path, *, provenance_tables=None):
-        import pandas as pd
-
         return write_analyzer_curation_tables(
             abs_path,
             metrics_df=pd.DataFrame(),
@@ -1343,10 +1340,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Raw-unit curations reuse the sort analyzer; committed merged
         curations use their own.
         """
-        from spyglass.spikesorting.v2._curation.analyzer import (
-            display_analyzer_request,
-        )
-
         sel = (CurationEvaluationSelection & key).fetch1()
         return display_analyzer_request(
             {
@@ -1399,10 +1392,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Axes keyed by metric name plus ``"scatter"``. A zero-unit sort
             returns ``{"empty": ax}``.
         """
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            plot_units_qc_figure,
-        )
-
         metrics = self.get_metrics(key)
         try:
             with self._display_analyzer(
@@ -1435,10 +1424,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self, key, *, unit_ids=None, window_ms=100.0, bin_ms=5.0
     ):
         """Plot autocorrelograms (one panel per unit). Ported BurstPair view."""
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            plot_autocorrelograms_figure,
-        )
-
         ccgs, bins, ids = self.get_correlograms(
             key, window_ms=window_ms, bin_ms=bin_ms
         )
@@ -1448,11 +1433,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         self, key, pairs, *, window_ms=100.0, bin_ms=5.0
     ):
         """Plot cross-correlograms for unit pairs (ported BurstPair view)."""
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            plot_pair_correlograms_figure,
-            validate_unit_pairs,
-        )
-
         ccgs, bins, ids = self.get_correlograms(
             key, window_ms=window_ms, bin_ms=bin_ms
         )
@@ -1461,12 +1441,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     def investigate_pair_peaks(self, key, pairs):
         """Plot per-channel peak-amplitude histograms for unit pairs."""
-        from spyglass.spikesorting.utils_burst import plot_burst_pair_peaks
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            peak_amplitudes_from_analyzer,
-            validate_unit_pairs,
-        )
-
         analyzer = self._analyzer_for(key)
         used = validate_unit_pairs(list(analyzer.unit_ids), pairs)
         peak_amps, _ = peak_amplitudes_from_analyzer(analyzer)
@@ -1474,12 +1448,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     def plot_peak_over_time(self, key, pairs, overlap: bool = True):
         """Plot peak amplitude over time for unit pairs (ported BurstPair view)."""
-        from spyglass.spikesorting.utils_burst import plot_burst_peak_over_time
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            peak_amplitudes_from_analyzer,
-            validate_unit_pairs,
-        )
-
         analyzer = self._analyzer_for(key)
         used = validate_unit_pairs(list(analyzer.unit_ids), pairs)
         peak_amps, peak_times = peak_amplitudes_from_analyzer(analyzer)
@@ -1495,10 +1463,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         same spikes: the ``waveforms`` extension's random subset, not the full
         train.
         """
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            peak_amplitudes_from_analyzer,
-        )
-
         return peak_amplitudes_from_analyzer(self._analyzer_for(key))
 
     def get_burst_pair_metrics(
@@ -1528,10 +1492,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         pd.DataFrame
             Shape ``(n_pairs, 4)``, MultiIndex ``(unit1, unit2)``.
         """
-        from spyglass.spikesorting.v2._curation.metric_plots import (
-            burst_pair_metrics_frame,
-        )
-
         if isi_threshold_ms is None:
             metric_params_name = (CurationEvaluationSelection & key).fetch1(
                 "metric_params_name"
@@ -1576,8 +1536,6 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Waveform similarity vs cross-correlogram asymmetry, one point per
         pair. ``kwargs`` go to ``get_burst_pair_metrics``.
         """
-        from spyglass.spikesorting.utils_burst import plot_burst_metrics
-
         frame = self.get_burst_pair_metrics(key, pairs=pairs, **kwargs)
         # plot_burst_metrics reads unit1/unit2 per record, which the
         # MultiIndex would otherwise drop from to_dict("records").

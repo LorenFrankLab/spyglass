@@ -1,12 +1,21 @@
 """DB inputs for a ``ConcatenatedRecording`` populate.
 
 DataJoint calls ``make_fetch`` twice and compares the results, so every value
-is deterministic. DataJoint tables are imported inside the functions.
+is deterministic. ``session_group`` imports this module, so its tables are
+imported inside the functions.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatMemberDriftError,
+    MissingRecordingForConcatError,
+    SchemaBypassError,
+)
+from spyglass.spikesorting.v2.recording import Recording
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.session_group import ConcatRecordingFetched
@@ -28,8 +37,6 @@ def fetch_concat_inputs(key: dict) -> ConcatRecordingFetched:
     -------
     ConcatRecordingFetched
     """
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
         ConcatRecordingFetched,
@@ -94,13 +101,6 @@ def resolve_snapshot_recordings(snapshot_rows):
         If a frozen member's current ``Recording.content_hash`` diverges
         from the one captured in the snapshot.
     """
-    from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
-    from spyglass.spikesorting.v2.exceptions import (
-        ConcatMemberDriftError,
-        MissingRecordingForConcatError,
-    )
-    from spyglass.spikesorting.v2.recording import Recording
-
     member_plan = []
     missing: list[dict] = []
     drifted: list[dict] = []

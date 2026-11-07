@@ -1,11 +1,31 @@
 """Insert paths behind the motion selection tables.
 
-DataJoint tables are imported inside the functions.
+``motion`` imports this module, so its tables are imported inside the
+functions.
 """
 
 from __future__ import annotations
 
 import uuid
+
+import datajoint as dj
+
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _ensure_lookup_row_exists,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    reject_unknown_fields,
+)
+from spyglass.spikesorting.v2._motion.estimation import (
+    motion_corrected_selection_identity,
+    motion_estimate_selection_identity,
+)
+from spyglass.spikesorting.v2.artifact import (
+    assert_artifact_detection_covers_recording,
+)
+from spyglass.spikesorting.v2.artifact_output import (
+    insert_artifact_bound_selection,
+)
 
 
 def insert_estimate_selection(table_cls, key: dict) -> dict:
@@ -15,22 +35,10 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
     docstring for the request fields and errors). ``table_cls`` is the
     ``MotionEstimateSelection`` class; ``_find_existing_pk`` is called on it.
     """
-    from spyglass.spikesorting.v2._motion.estimation import (
-        motion_estimate_selection_identity,
-    )
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        reject_unknown_fields,
-    )
-    from spyglass.spikesorting.v2.artifact import (
-        assert_artifact_detection_covers_recording,
-    )
     from spyglass.spikesorting.v2.motion import (
         _SOURCE_TABLES,
         MotionEstimationParameters,
         _source_filter_problem,
-    )
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        _ensure_lookup_row_exists,
     )
 
     caller = "MotionEstimateSelection.insert_selection"
@@ -154,10 +162,6 @@ def insert_estimate_selection_rows(
     Recovery has no savepoint, so the master insert must stay first: the
     deterministic key collides there before any part row is written.
     """
-    from spyglass.spikesorting.v2.artifact_output import (
-        insert_artifact_bound_selection,
-    )
-
     motion_estimate_id = master_row["motion_estimate_id"]
 
     def insert_rows(art_merge_id) -> None:
@@ -197,21 +201,10 @@ def insert_corrected_selection(table_cls, key: dict) -> dict:
     ``MotionCorrectedRecordingSelection`` class; ``_find_existing_pk`` is
     called on it.
     """
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2._motion.estimation import (
-        motion_corrected_selection_identity,
-    )
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        reject_unknown_fields,
-    )
     from spyglass.spikesorting.v2.motion import (
         MotionEstimate,
         MotionInterpolationParameters,
         _estimate_source,
-    )
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        _ensure_lookup_row_exists,
     )
 
     caller = "MotionCorrectedRecordingSelection.insert_selection"

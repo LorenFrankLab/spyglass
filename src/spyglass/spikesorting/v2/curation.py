@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
+from collections import defaultdict
 
 import datajoint as dj
 
@@ -45,6 +46,22 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
+from spyglass.spikesorting.v2._core.runtime import (
+    runtime_environment_provenance,
+)
+from spyglass.spikesorting.v2._curation.plan import (
+    build_curation_header,
+    build_curation_insert_plan,
+    build_curation_summary,
+)
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    sort_group_electrode_regions,
+)
+from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
+from spyglass.spikesorting.v2._sorting.dispatch import unit_semantics_for_sorter
+from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.spikesorting.v2.exceptions import ConcatBrainRegionAmbiguousError
+from spyglass.spikesorting.v2.recording import Recording
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -192,8 +209,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         @staticmethod
         def _validate_parent_provenance(rows):
             """Raise if any row violates the parent-namespace invariants."""
-            from collections import defaultdict
-
             parents_by_curation: dict[tuple, set] = defaultdict(set)
             for row in rows:
                 parents_by_curation[
@@ -486,11 +501,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             raw_sorting_units=sorting_units,
         )
 
-        from spyglass.spikesorting.v2._curation.plan import (
-            build_curation_header,
-            build_curation_insert_plan,
-        )
-
         curation_id, unit_rows, kept_unit_to_contributors, labels = (
             build_curation_insert_plan(
                 sorting_id=sorting_id,
@@ -547,10 +557,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
 
             # Stage outside the transaction to keep it short.
-            from spyglass.spikesorting.v2._core.runtime import (
-                runtime_environment_provenance,
-            )
-
             analysis_file_name, units_object_id, staged_parent_nwb = (
                 cls._stage_curation_artifact(
                     sorting_id=sorting_id,
@@ -1020,9 +1026,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
 
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-        from spyglass.spikesorting.v2._curation.plan import (
-            build_curation_summary,
-        )
 
         pk = {
             "sorting_id": curation_key["sorting_id"],
@@ -1053,7 +1056,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         summary["created_at"] = created_at
         summary["created_by"] = str(created_by)
         if annotation_sets is not None:
-            from spyglass.spikesorting.v2.curation_api import CurationRef
             from spyglass.spikesorting.v2.unit_annotation import (
                 read_unit_properties,
             )
@@ -1139,8 +1141,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ValueError
             If the curation's sort reads a concatenated recording.
         """
-        from spyglass.spikesorting.v2.recording import Recording
-
         sorting_id = (cls & key).fetch1("sorting_id")
         lineage = SortingSelection.resolve_effective_source(
             {"sorting_id": sorting_id}
@@ -1421,8 +1421,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             ``(sorter, nwb_file_name)`` for the underlying sort (anchor-member
             nwb for concat sorts).
         """
-        from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
         sorting_id = key["sorting_id"]
         sorter = (SortingSelection & {"sorting_id": sorting_id}).fetch1(
             "sorter"
@@ -1449,10 +1447,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         str
             ``"clusterless_threshold_crossings"`` or ``"sorted_units"``.
         """
-        from spyglass.spikesorting.v2._sorting.dispatch import (
-            unit_semantics_for_sorter,
-        )
-
         sorter, _ = cls.get_sort_metadata(key)
         return unit_semantics_for_sorter(sorter)
 
@@ -1566,10 +1560,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ConcatBrainRegionAmbiguousError
             For a concat-backed sorting unless ``allow_anchor_member=True``.
         """
-        from spyglass.spikesorting.v2.exceptions import (
-            ConcatBrainRegionAmbiguousError,
-        )
-
         source = SortingSelection.resolve_source(
             {"sorting_id": key["sorting_id"]}
         )
@@ -1621,11 +1611,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             BrainRegion``) covering every electrode in the sort group (the
             anchor member's sort group for concat sorts).
         """
-        from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
-        from spyglass.spikesorting.v2._recording.unit_metadata import (
-            sort_group_electrode_regions,
-        )
-
         sorting_id = (cls & key).fetch1("sorting_id")
         anchor = _sorting_fetch.resolve_sort_anchor(
             SortingSelection.resolve_source({"sorting_id": sorting_id})

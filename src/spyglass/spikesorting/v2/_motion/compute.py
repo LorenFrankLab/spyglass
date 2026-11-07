@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import numpy as np
 
+from spyglass.spikesorting.v2._motion import estimation as _motion
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    artifact_frame_ranges,
+    continuity_from_timestamps,
+    statistics_spans,
+)
+
 
 def stale_fields(checks) -> list[str]:
     """Describe each ``(name, current, selected)`` check whose values differ.
@@ -55,8 +62,6 @@ def stale_corrected_selection_fields(
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._motion import estimation as _motion
-
     checks = [
         (
             "resolved interpolation hash",
@@ -102,8 +107,6 @@ def stale_estimate_selection_fields(
         motion algorithm version; empty when the selection is current.
     """
     import spikeinterface as si
-
-    from spyglass.spikesorting.v2._motion import estimation as _motion
 
     return stale_fields(
         [
@@ -152,8 +155,6 @@ def resolve_estimation_recipe(
     ValueError
         If the selection is stale (:func:`stale_estimate_selection_fields`).
     """
-    from spyglass.spikesorting.v2._motion import estimation as _motion
-
     resolved = _motion.resolve_estimation_params(params)
     resolved_hash = _motion.resolved_params_hash(resolved)
     stale = stale_estimate_selection_fields(selection, resolved_hash)
@@ -196,8 +197,6 @@ def resolve_interpolation_recipe(
     ValueError
         If the selection is stale (:func:`stale_corrected_selection_fields`).
     """
-    from spyglass.spikesorting.v2._motion import estimation as _motion
-
     resolved = _motion.resolve_interpolation_params(interpolation_params)
     stale = stale_corrected_selection_fields(
         selection,
@@ -247,13 +246,6 @@ def estimation_spans(
     statistics : list of tuple of int
         Half-open frame ranges of the valid samples.
     """
-    from spyglass.spikesorting.v2._motion import estimation as _motion
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        artifact_frame_ranges,
-        continuity_from_timestamps,
-        statistics_spans,
-    )
-
     if lineage.kind == "recording":
         continuity, continuity_start_s, continuity_end_s = (
             continuity_from_timestamps(recording)
@@ -383,8 +375,6 @@ def apply_saved_motion(
     ValueError
         If the interpolation changed the sample count.
     """
-    from spyglass.spikesorting.v2._motion import estimation as _motion
-
     statistics = np.asarray(
         estimate["statistics_spans"], dtype=np.int64
     ).reshape(-1, 2)

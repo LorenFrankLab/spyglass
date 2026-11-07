@@ -24,9 +24,12 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
+import urllib.error
 
 import datajoint as dj
+import pandas as pd
+import spikeinterface
 
 from spyglass.spikesorting.v2._storage.analyzer_cache import (
     install_staged_folder,
@@ -70,9 +73,23 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 )
 from spyglass.utils import SpyglassMixin
 from spyglass.utils.mixins.populate import StagedOutputs
-
-if TYPE_CHECKING:
-    import pandas as pd
+from spyglass.settings import sg_config
+from spyglass.spikesorting.v2._review import visualization as _viz
+from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
+from spyglass.spikesorting.v2._storage.analyzer_cache import v2_storage_root
+from spyglass.spikesorting.v2._storage.observation_io import (
+    resolve_review_timeline_inputs,
+    review_timeline_from_inputs,
+)
+from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
+from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
+from spyglass.spikesorting.v2.unit_annotation import (
+    AnnotationSetRef,
+    read_unit_properties,
+)
+from spyglass.utils import logger
+from spyglass.utils.mixins.populate import populate_key_lock
+from spyglass.utils.progress import report_progress
 
 schema = dj.schema("spikesorting_v2_figpack_curation")
 
@@ -95,10 +112,6 @@ def figpack_cache_root() -> Path:
     ``dj.config["custom"]["spikesorting_v2_figpack_dir"]`` when set, else
     ``Path(base_dir) / "spikesorting_v2" / "figpack"``.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        v2_storage_root,
-    )
-
     return v2_storage_root("spikesorting_v2_figpack_dir", "figpack")
 
 
@@ -114,9 +127,6 @@ def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
     Any other failure raises ``FigPackRetrievalError`` so an unreachable
     figure is never read as "no edits".
     """
-    import urllib.error
-    import urllib.request
-
     text = str(uri)
     if text.endswith("index.html"):
         text = text[: -len("index.html")]
@@ -278,7 +288,6 @@ def _curation_view_analyzer(curation_ref):
     Builds or extends the published cache with the sorting-summary
     extensions as needed. Must not be mutated.
     """
-    from spyglass.spikesorting.v2._review import visualization as _viz
     from spyglass.spikesorting.v2._curation.analyzer import (
         curation_analyzer_with_extensions,
         display_analyzer_request,
@@ -300,11 +309,6 @@ def _resolve_curation_view_inputs(
     Returns ``(analyzer_folder, timeline_inputs)``. ``display_options`` is
     validated before any analyzer work.
     """
-    from spyglass.spikesorting.v2._storage.observation_io import (
-        resolve_review_timeline_inputs,
-    )
-    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
-
     require_figpack()
     ReviewDisplayOptions.from_mapping(display_options)
 
@@ -402,15 +406,6 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
     if review_config is None:
         return None
 
-    from spyglass.spikesorting.v2.curation_api import (
-        CurationRef,
-        EvaluationResult,
-    )
-    from spyglass.spikesorting.v2.unit_annotation import (
-        AnnotationSetRef,
-        read_unit_properties,
-    )
-
     evaluation = EvaluationResult.from_key(
         {"curation_evaluation_id": review_config["curation_evaluation_id"]}
     )
@@ -459,8 +454,6 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
         return "; ".join(",".join(map(str, group)) for group in groups)
 
     # Actionable columns first so they stay visible on narrow screens.
-    import pandas as pd
-
     actions = pd.DataFrame(
         {
             "proposed_labels": [
@@ -484,9 +477,6 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
     table = pd.concat([actions, metrics], axis=1)
     coverage = evaluation.missing_qc_inputs().reindex(unit_ids)
     table.insert(0, "unavailable_qc", coverage)
-    from spyglass.spikesorting.v2.metric_curation import (
-        QualityMetricParameters,
-    )
 
     refractory_ms = QualityMetricParameters.get_isi_threshold_ms(
         evaluation.spec.metric_params_name
@@ -533,8 +523,6 @@ def _publish_view(
     folder)``; ``make_insert`` moves it into place.
     """
     if upload:
-        from spyglass.settings import sg_config
-
         api_key = sg_config.figpack_api_key
         if not ephemeral and not api_key:
             raise FigPackUploadError(
@@ -915,14 +903,10 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         import figpack
         import figpack_spike_sorting
-        import spikeinterface
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
             load_analyzer_folder,
-        )
-        from spyglass.spikesorting.v2._storage.observation_io import (
-            review_timeline_from_inputs,
         )
 
         # 2. Load the analyzer; the lock prevents reading a concurrent
@@ -1021,10 +1005,6 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         cls.drop_missing_local_bundle(selection)
         reused = bool(cls & selection)
         if not reused:
-            from spyglass.utils.progress import (
-                report_progress,
-            )
-
             report_progress("Building the review page…")
         cls.populate(selection)
         return FigPackBuildResult(
@@ -1059,9 +1039,6 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             When dropping the row and the user is not on a lab team with the
             session's experimenter (the usual Spyglass delete permission).
         """
-        from spyglass.utils import logger
-        from spyglass.utils.mixins.populate import populate_key_lock
-
         if (FigPackCurationSelection & selection).fetch1("upload"):
             return None
         # Populate's lock, so a concurrent rebuild cannot race the delete.

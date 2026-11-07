@@ -1,6 +1,7 @@
 """Insert path behind ``SortingSelection.insert_selection``.
 
-DataJoint tables are imported inside the functions.
+``sorting`` imports this module, so its tables are imported inside the
+functions.
 """
 
 from __future__ import annotations
@@ -9,6 +10,27 @@ from spyglass.spikesorting.v2._recording.source import (
     SourceLineage,
     correction_lineage_mismatch,
 )
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _ensure_lookup_row_exists,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._core.selection_plan import (
+    build_sorting_selection_plan,
+)
+from spyglass.spikesorting.v2.artifact import (
+    assert_artifact_detection_covers_recording,
+)
+from spyglass.spikesorting.v2.artifact_output import (
+    insert_artifact_bound_selection,
+)
+from spyglass.spikesorting.v2.motion import (
+    MotionCorrectedRecording,
+    MotionCorrectedRecordingSelection,
+)
+from spyglass.spikesorting.v2.recording import Recording
+from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
 
 def insert_selection(table_cls, key: dict) -> dict:
@@ -20,14 +42,6 @@ def insert_selection(table_cls, key: dict) -> dict:
     Duplicate-key recovery has no savepoint, so the master insert must stay
     the transaction's first statement.
     """
-    from spyglass.spikesorting.v2._core.selection_plan import (
-        build_sorting_selection_plan,
-    )
-    from spyglass.spikesorting.v2.artifact_output import (
-        insert_artifact_bound_selection,
-    )
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     plan = build_sorting_selection_plan(key)
@@ -54,10 +68,6 @@ def insert_selection(table_cls, key: dict) -> dict:
         return existing
 
     # Clearer than the FK IntegrityError.
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        _ensure_lookup_row_exists,
-    )
-
     _ensure_lookup_row_exists(
         SorterParameters,
         plan.master_restriction,
@@ -65,10 +75,6 @@ def insert_selection(table_cls, key: dict) -> dict:
         insert_default_path="SorterParameters.insert_default()",
     )
     if plan.source_kind == "recording":
-        from spyglass.spikesorting.v2.artifact import (
-            assert_artifact_detection_covers_recording,
-        )
-
         assert_artifact_detection_covers_recording(
             recording_id=plan.source_restriction["recording_id"],
             artifact_detection_id=plan.artifact_detection_id,
@@ -153,10 +159,6 @@ def find_existing_pk(
     A match with a non-deterministic ``sorting_id`` raises
     ``DuplicateSelectionError``. ``table_cls`` is ``SortingSelection``.
     """
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        existing_selection_pk,
-    )
-
     candidates = (
         (table_cls * source_part) & master_restriction & source_restriction
     ).fetch("KEY", as_dict=True)
@@ -207,10 +209,6 @@ def validate_motion_correction_source(plan) -> None:
     """
     from spyglass.spikesorting.v2._params.sorter import (
         reject_internal_motion_correction,
-    )
-    from spyglass.spikesorting.v2.motion import (
-        MotionCorrectedRecording,
-        MotionCorrectedRecordingSelection,
     )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 

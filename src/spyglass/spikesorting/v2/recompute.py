@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 import datajoint as dj
+import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment
@@ -64,6 +65,19 @@ from spyglass.spikesorting.v2.sorting import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+from spyglass.common.common_device import Probe
+from spyglass.common.common_ephys import Electrode
+from spyglass.spikesorting.v2._recording.fingerprint import (
+    recording_artifact_lock,
+)
+from spyglass.spikesorting.v2._sorting.analyzer import (
+    resolve_canonical_recording,
+)
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    assert_path_safe_waveform_params_name,
+)
+from spyglass.spikesorting.v2.metric_curation import CurationEvaluationSelection
+from spyglass.spikesorting.v2.sorting import SortingSelection
 
 schema = dj.schema("spikesorting_v2_recompute")
 
@@ -822,9 +836,6 @@ def _recording_missing_probe_info(nwb_file_name: str) -> bool:
     The rebuild needs probe geometry, so such an artifact can never be
     regenerated.
     """
-    from spyglass.common.common_device import Probe
-    from spyglass.common.common_ephys import Electrode
-
     return not bool(Electrode * Probe & {"nwb_file_name": nwb_file_name})
 
 
@@ -925,10 +936,6 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         Every sort's display recipe plus every metric recipe a curation
         evaluation that requests PCs references.
         """
-        from spyglass.spikesorting.v2.metric_curation import (
-            CurationEvaluationSelection,
-        )
-
         # OR-list semijoin, not a dj.U union (its headings cannot be joined).
         all_pairs = (AnalyzerWaveformParameters * Sorting).proj()
         is_display = Sorting.proj(
@@ -970,8 +977,6 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         An absent or unloadable folder is inventoried as ``_MISSING_HASH``,
         not rebuilt, so reclaimed disk is not re-materialized.
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2._sorting.analyzer import (
             load_analyzer_folder_no_rebuild,
         )
@@ -1317,9 +1322,6 @@ def _validated_analyzer_recipe(
     ``AnalyzerWaveformParameters`` row, as ``Sorting.get_analyzer`` does,
     before any folder is read.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        assert_path_safe_waveform_params_name,
-    )
     from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
 
     assert_path_safe_waveform_params_name(waveform_params_name)
@@ -1382,10 +1384,6 @@ def _resolve_analyzer_regen_inputs(
 
     A failure stops resolution and is carried as a :class:`FetchFailure`.
     """
-    from spyglass.spikesorting.v2._sorting.analyzer import (
-        resolve_canonical_recording,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2._sorting.fetch import (
         fetch_sorter_analyzer_inputs,
     )
@@ -1614,10 +1612,6 @@ def _delete_files(
     Each unlink and ``deleted=1`` update holds ``recording_artifact_lock`` so
     it cannot interleave with a ``get_recording`` rebuild.
     """
-    from spyglass.spikesorting.v2._recording.fingerprint import (
-        recording_artifact_lock,
-    )
-
     cutoff = _recent_cutoff(days_since_creation)
     authorized, matched = _authorize_artifacts_for_deletion(
         recompute_table,

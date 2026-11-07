@@ -1,6 +1,7 @@
 """DB inputs for a ``UnitMatch`` populate (``UnitMatch.make_fetch``).
 
-DataJoint tables are imported inside the functions.
+``unit_matching`` imports this module, so its tables are imported inside the
+functions.
 """
 
 from __future__ import annotations
@@ -24,6 +25,20 @@ from spyglass.spikesorting.v2._matching.inputs import (
 from spyglass.spikesorting.v2.exceptions import (
     UnitMatchSelectionIntegrityError,
 )
+from spyglass.spikesorting.v2._matching.coverage import (
+    enrich_recording_source_coverage,
+)
+from spyglass.spikesorting.v2._matching.graph import (
+    frozen_order_errors,
+    input_part_structure_errors,
+    input_set_hash,
+    utc_datetime,
+)
+from spyglass.spikesorting.v2._sorting.analyzer import (
+    resolve_canonical_recording,
+)
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.unit_matching import UnitMatchFetched
@@ -45,13 +60,6 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         The matcher recipe, the ``input_index``-ordered ``input_plan`` and the
         selection provenance for the compute step.
     """
-    from spyglass.spikesorting.v2._matching.graph import (
-        frozen_order_errors,
-        input_part_structure_errors,
-        input_set_hash,
-        utc_datetime,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatchFetched,
@@ -132,9 +140,6 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
         )
         if extracts_bundles:
             _add_single_recording_frames(live)
-            from spyglass.spikesorting.v2._matching.coverage import (
-                enrich_recording_source_coverage,
-            )
 
             enrich_recording_source_coverage(
                 live["recordings"], allow_rebuild=True
@@ -294,12 +299,6 @@ def _member_match_files(curation_key: dict) -> dict:
         ``{"sorting_input": CanonicalRecording, "units": StoredUnits,
         "statistics_spans": list of [start, end]}``.
     """
-    from spyglass.spikesorting.v2._sorting.analyzer import (
-        resolve_canonical_recording,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
     sorting_key = {"sorting_id": curation_key["sorting_id"]}
     sorting_input = resolve_canonical_recording(sorting_key)
     return {
@@ -331,9 +330,6 @@ def _input_stored_units(curation_key: dict):
     StoredUnits
         For :func:`._storage.units_nwb.read_stored_units`.
     """
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
     source = SortingSelection.resolve_effective_source(
         {"sorting_id": curation_key["sorting_id"]}
     )

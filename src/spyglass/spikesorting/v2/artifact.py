@@ -22,6 +22,7 @@ from typing import NamedTuple
 
 import datajoint as dj
 import numpy as np
+import spikeinterface as si
 
 from spyglass.common import IntervalList, Session  # noqa: F401
 
@@ -51,6 +52,28 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     _insert_parameter_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.spikesorting.v2._artifacts.manual import (
+    apply_manual_exclusions,
+    normalize_manual_exclusions,
+)
+from spyglass.spikesorting.v2._artifacts.shared_group import (
+    assert_shared_group_recordings_aggregatable,
+    validate_shared_artifact_group_members,
+)
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _ensure_lookup_row_exists,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    artifact_detection_identity_payload,
+    assert_supplied_id_matches,
+    deterministic_id,
+    shared_group_member_set_hash,
+)
+from spyglass.spikesorting.v2.exceptions import (
+    SharedArtifactGroupMemberDriftError,
+)
+from spyglass.spikesorting.v2.recording import RecordingSelection
 
 schema = dj.schema("spikesorting_v2_artifact")
 
@@ -170,14 +193,6 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         RuntimeError
             If a member recording cannot be loaded.
         """
-        from spyglass.spikesorting.v2._artifacts.shared_group import (
-            validate_shared_artifact_group_members,
-        )
-        from spyglass.spikesorting.v2.recording import (
-            Recording,
-            RecordingSelection,
-        )
-
         if not members:
             raise ValueError(
                 "SharedArtifactGroup.insert_group: members list is empty. "
@@ -353,19 +368,6 @@ def _insert_artifact_selection(
     dict
         ``{"artifact_detection_id": ...}``, the content-addressed PK.
     """
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        artifact_detection_identity_payload,
-        assert_supplied_id_matches,
-        deterministic_id,
-    )
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        _ensure_lookup_row_exists,
-    )
-
-    from spyglass.spikesorting.v2._artifacts.manual import (
-        normalize_manual_exclusions,
-    )
-
     exclusions = normalize_manual_exclusions(manual_excluded_times)
     payload = artifact_detection_identity_payload(
         artifact_detection_params_name=artifact_detection_params_name,
@@ -489,10 +491,6 @@ class SharedGroupArtifactSelection(
         dict
             ``{"artifact_detection_id": ...}``, the content-addressed PK.
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            shared_group_member_set_hash,
-        )
-
         group_name = key["shared_artifact_group_name"]
         member_recording_ids = (
             SharedArtifactGroup.Member
@@ -591,19 +589,12 @@ class _ArtifactDetectionMixin:
         np.ndarray
             Artifact-removed ``valid_times``, shape ``(n_intervals, 2)``.
         """
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
-        )
-
         resolved_job_kwargs = _resolved_job_kwargs(artifact_job_kwargs)
         valid_times = detect_artifacts(
             recording,
             validated,
             context=context,
             job_kwargs=resolved_job_kwargs,
-        )
-        from spyglass.spikesorting.v2._artifacts.manual import (
-            apply_manual_exclusions,
         )
 
         return apply_manual_exclusions(
@@ -775,8 +766,6 @@ class RecordingArtifactDetection(
             ``nwb_file_name``, the per-row job kwargs and the resolved
             artifact.
         """
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-
         (
             params_blob,
             artifact_job_kwargs,
@@ -899,14 +888,6 @@ class SharedGroupArtifactDetection(
         SharedArtifactGroupMemberDriftError
             If the live member set differs from ``member_set_hash``.
         """
-        from spyglass.spikesorting.v2._core.selection_identity import (
-            shared_group_member_set_hash,
-        )
-        from spyglass.spikesorting.v2.exceptions import (
-            SharedArtifactGroupMemberDriftError,
-        )
-        from spyglass.spikesorting.v2.recording import RecordingSelection
-
         (
             group_name,
             frozen_hash,
@@ -990,8 +971,6 @@ class SharedGroupArtifactDetection(
             The shared ``valid_times`` plus the distinct member
             ``nwb_file_name`` target list ``make_insert`` writes one row per.
         """
-        import spikeinterface as si
-
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
         if not member_recording_ids:
@@ -1005,9 +984,6 @@ class SharedGroupArtifactDetection(
         per_member_recordings = [
             read_stored_traces(traces) for traces in member_traces
         ]
-        from spyglass.spikesorting.v2._artifacts.shared_group import (
-            assert_shared_group_recordings_aggregatable,
-        )
 
         assert_shared_group_recordings_aggregatable(
             per_member_recordings,

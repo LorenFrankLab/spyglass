@@ -42,6 +42,13 @@ from spyglass.spikesorting.v2.session_group import (
 from spyglass.spikesorting.v2.sorting import SortingSelection
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.mixins.populate import StagedOutputs
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    sort_group_electrode_regions,
+)
+from spyglass.spikesorting.v2._storage.staged_outputs import (
+    staged_analysis_file,
+)
+from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
 if TYPE_CHECKING:
     import spikeinterface as si
@@ -398,8 +405,6 @@ class ConcatMemberCurationV2(
         end_by_index = {int(i): int(end) for i, end in zip(indices, ends)}
         snapshot_indices = {int(row["member_index"]) for row in snapshots}
         if set(end_by_index) != snapshot_indices:
-            from spyglass.spikesorting.v2.exceptions import ConcatSplitError
-
             raise ConcatSplitError(
                 "ConcatMemberCurationV2.make: the MemberBoundary set "
                 f"{sorted(end_by_index)} does not match the frozen member "
@@ -531,9 +536,6 @@ class ConcatMemberCurationV2(
         identity_groups = {
             int(unit_id): [int(unit_id)] for unit_id in local_frames
         }
-        from spyglass.spikesorting.v2._storage.staged_outputs import (
-            staged_analysis_file,
-        )
 
         # 5. Write the member's Units NWB to a staged file.
         with staged_analysis_file(
@@ -736,10 +738,6 @@ class ConcatMemberCurationV2(
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
         """Return all electrodes and regions for this member's sort group."""
-        from spyglass.spikesorting.v2._recording.unit_metadata import (
-            sort_group_electrode_regions,
-        )
-
         snapshot = cls._member_snapshot_row(key)
         return sort_group_electrode_regions(
             {

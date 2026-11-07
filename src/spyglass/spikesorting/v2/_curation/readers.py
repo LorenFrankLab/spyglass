@@ -1,7 +1,6 @@
 """Spike-train readers behind ``CurationV2``.
 
-``table_cls`` is ``CurationV2``. DataJoint tables are imported inside the
-functions.
+``table_cls`` is ``CurationV2``.
 """
 
 from __future__ import annotations
@@ -17,6 +16,10 @@ from spyglass.spikesorting.v2._storage.units_nwb import (
     read_units_abs_times_and_sample_indices,
     sorting_from_units_nwb,
 )
+from spyglass.spikesorting.v2.recording import Recording
+from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+from spyglass.spikesorting.v2.sorting import SortingSelection
+from spyglass.utils import logger
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -31,8 +34,6 @@ def get_sorting(
     The body of ``CurationV2.get_sorting`` (see its docstring).
     """
     import spikeinterface as si
-
-    from spyglass.utils import logger
 
     row = (table_cls & key).fetch1()
     fs, abs_path = load_curation_units_meta(row)
@@ -134,12 +135,6 @@ def _source_sampling_frequency(sorting_id) -> float:
 
     For a concat-backed sort, the ``ConcatenatedRecording``'s rate.
     """
-    from spyglass.spikesorting.v2.recording import Recording
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecording,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
     source = SortingSelection.resolve_source({"sorting_id": sorting_id})
     table = Recording if source.kind == "recording" else ConcatenatedRecording
     return float((table & source.key).fetch1("sampling_frequency"))

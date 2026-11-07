@@ -1,7 +1,8 @@
 """Member validation behind ``SessionGroup.create_group`` and
 ``ConcatenatedRecordingSelection.insert_selection``.
 
-DataJoint tables are imported inside the functions.
+``session_group`` imports this module, so its tables are imported inside the
+functions.
 """
 
 from __future__ import annotations
@@ -9,6 +10,27 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from typing import NamedTuple
+
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._core.selection_identity import deterministic_id
+from spyglass.spikesorting.v2._recording.concat import (
+    member_recording_selection_key,
+    member_set_hash,
+)
+from spyglass.spikesorting.v2.artifact import (
+    RecordingArtifactDetection,
+    RecordingArtifactSelection,
+)
+from spyglass.spikesorting.v2.exceptions import (
+    MissingRecordingForConcatError,
+    SessionGroupDateError,
+    SessionGroupInputError,
+)
+from spyglass.spikesorting.v2.recording import (
+    Recording,
+    RecordingSelection,
+    resolve_recording_input_hash,
+)
 
 
 def group_member_rows(
@@ -49,10 +71,6 @@ def group_member_rows(
         multiple dates without ``allow_multi_day``.
     """
     from spyglass.common import Session
-    from spyglass.spikesorting.v2.exceptions import (
-        SessionGroupDateError,
-        SessionGroupInputError,
-    )
     from spyglass.spikesorting.v2.session_group import (
         distinct_recording_dates,
     )
@@ -174,25 +192,6 @@ def plan_concat_selection(
     -------
     ConcatSelectionPlan
     """
-    from spyglass.spikesorting.v2._recording.concat import (
-        member_recording_selection_key,
-        member_set_hash,
-    )
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        deterministic_id,
-    )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.exceptions import (
-        MissingRecordingForConcatError,
-    )
-    from spyglass.spikesorting.v2.recording import (
-        Recording,
-        RecordingSelection,
-        resolve_recording_input_hash,
-    )
     from spyglass.spikesorting.v2.session_group import (
         SessionGroup,
         assert_members_share_electrode_space,
@@ -232,7 +231,6 @@ def plan_concat_selection(
             f"{group_key} has no members. Create it via "
             "SessionGroup.create_group() with at least one member first."
         )
-    from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 
     artifacts = {
         lossless_int(index, "member_index"): (

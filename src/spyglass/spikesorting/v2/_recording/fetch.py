@@ -1,7 +1,8 @@
 """DB inputs for a ``Recording`` populate (``Recording.make_fetch``).
 
 DataJoint calls ``make_fetch`` twice and compares the results, so every value
-is deterministic. DataJoint tables are imported inside the functions.
+is deterministic. ``recording`` imports this module, so its tables are
+imported inside the functions.
 """
 
 from __future__ import annotations
@@ -23,6 +24,10 @@ from spyglass.spikesorting.v2._core.reference_resolution import (
 )
 
 from spyglass.spikesorting.v2._recording.types import RecordingFetched
+from spyglass.common.common_ephys import Raw
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
 
 
 class ResolvedRecordingInputs(NamedTuple):
@@ -147,9 +152,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
         If the sort group's inputs no longer hash to the selection's
         ``recording_input_hash``.
     """
-    from spyglass.common.common_ephys import Raw
-    from spyglass.common.common_interval import IntervalList
-    from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2.recording import RecordingSelection
 
     sel = (RecordingSelection & key).fetch1()
@@ -199,10 +201,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     stored_input_hash = sel["recording_input_hash"]
     live_input_hash = resolved.input_hash
     if live_input_hash != stored_input_hash:
-        from spyglass.spikesorting.v2.exceptions import (
-            RecordingInputDriftError,
-        )
-
         raise RecordingInputDriftError(
             f"Recording {sel['recording_id']} was selected with input "
             f"fingerprint {stored_input_hash} but the live sort-group "

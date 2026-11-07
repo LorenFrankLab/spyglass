@@ -1,7 +1,8 @@
 """Readers over a populated ``UnitMatch`` run.
 
 Bodies of ``UnitMatch`` / ``TrackedUnit`` methods; ``table`` is the instance
-the method was called on. DataJoint tables are imported inside the functions.
+the method was called on. ``unit_matching`` imports this module, so its
+tables are imported inside the functions.
 """
 
 from __future__ import annotations
@@ -9,7 +10,10 @@ from __future__ import annotations
 import copy
 import json
 import uuid
-from typing import TYPE_CHECKING
+from datetime import datetime
+
+import datajoint as dj
+import pandas as pd
 
 from spyglass.spikesorting.v2._matching.inputs import (
     _input_label,
@@ -19,10 +23,21 @@ from spyglass.spikesorting.v2._matching.inputs import (
 from spyglass.spikesorting.v2.exceptions import (
     UnitMatchSelectionIntegrityError,
 )
-
-if TYPE_CHECKING:
-    import pandas as pd
-
+from spyglass.spikesorting.v2._matching.graph import utc_datetime
+from spyglass.spikesorting.v2._params.tracking import resolve_tracking_params
+from spyglass.spikesorting.v2._recording.concat import (
+    member_spike_times,
+    split_spike_frames_by_spans,
+)
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    sort_group_electrode_regions,
+)
+from spyglass.spikesorting.v2._storage.units_nwb import (
+    read_units_abs_times_and_sample_indices,
+    recording_timestamps,
+)
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.recording import Recording
 
 #: Columns of ``UnitMatch.get_input_provenance``'s per-input frame.
 _INPUT_PROVENANCE_COLUMNS = (
@@ -63,12 +78,7 @@ def get_input_provenance(
     The body of ``UnitMatch.get_input_provenance`` (see its docstring for
     the columns). ``table`` is the ``UnitMatch`` instance.
     """
-    from datetime import datetime
-
-    import pandas as pd
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._matching.graph import utc_datetime
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     run = (table & key).fetch1()
@@ -191,9 +201,6 @@ def tracking_params(key):
     TrackingParamsSchema
         From ``_params.tracking.resolve_tracking_params``.
     """
-    from spyglass.spikesorting.v2._params.tracking import (
-        resolve_tracking_params,
-    )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatchSelection,
@@ -474,8 +481,6 @@ def _member_input_index(input_indices: dict, run: dict, unit_key: dict) -> int:
     datajoint.DataJointError
         The unit does not have exactly one ``UnitMatch.MatchableUnit`` row.
     """
-    import datajoint as dj
-
     indices = input_indices.get(
         (
             run["unitmatch_id"],
@@ -499,12 +504,6 @@ def get_unit_brain_regions(table, tracked_unit_key) -> "pd.DataFrame":
     The body of ``TrackedUnit.get_unit_brain_regions`` (see its docstring).
     ``table`` is the ``TrackedUnit`` instance.
     """
-    import pandas as pd
-
-    from spyglass.spikesorting.v2._recording.unit_metadata import (
-        sort_group_electrode_regions,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
     region_columns = [
@@ -643,19 +642,7 @@ def get_member_spike_times(table, tracked_unit_key) -> "pd.DataFrame":
     The body of ``TrackedUnit.get_member_spike_times`` (see its docstring).
     ``table`` is the ``TrackedUnit`` instance.
     """
-    import pandas as pd
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording.concat import (
-        member_spike_times,
-        split_spike_frames_by_spans,
-    )
-    from spyglass.spikesorting.v2._storage.units_nwb import (
-        read_units_abs_times_and_sample_indices,
-        recording_timestamps,
-    )
-    from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     timestamps_by_recording: dict = {}

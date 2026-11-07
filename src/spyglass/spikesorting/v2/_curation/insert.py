@@ -12,6 +12,7 @@ from spyglass.spikesorting.v2._curation.transforms import (
 )
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2._core.enums import CurationSource
+from spyglass.utils import logger
 
 
 def find_matching_child_curation(
@@ -128,8 +129,6 @@ def validate_parent_or_reuse_root(
     root exists and non-default parameters were passed without
     ``reuse_existing=True``.
     """
-    from spyglass.utils import logger
-
     if parent_curation_id != -1:
         parent_key = {
             "sorting_id": sorting_id,

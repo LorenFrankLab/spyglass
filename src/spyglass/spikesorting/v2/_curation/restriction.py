@@ -5,6 +5,19 @@ Key classification lives in ``_curation.routing``.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._curation.routing import (
+    NO_ARTIFACT_RESTRICTION,
+    NO_MOTION_CORRECTION_RESTRICTION,
+    classify_and_normalize_restriction,
+)
+from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
+from spyglass.spikesorting.v2.recording import RecordingSelection
+from spyglass.spikesorting.v2.session_group import (
+    ConcatenatedRecordingSelection,
+)
+from spyglass.spikesorting.v2.sorting import SortingSelection
+from spyglass.utils import logger
+
 
 def resolve_restriction(
     table_cls,
@@ -19,18 +32,6 @@ def resolve_restriction(
     accepted keys, the ``strict`` / ``restrict_by_artifact`` semantics and
     the errors). ``table_cls`` is ``CurationV2``.
     """
-    from spyglass.spikesorting.v2._curation.routing import (
-        NO_ARTIFACT_RESTRICTION,
-        NO_MOTION_CORRECTION_RESTRICTION,
-        classify_and_normalize_restriction,
-    )
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.session_group import (
-        ConcatenatedRecordingSelection,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-    from spyglass.utils import logger
-
     plan = classify_and_normalize_restriction(
         key, restrict_by_artifact=restrict_by_artifact, strict=strict
     )
@@ -93,10 +94,6 @@ def resolve_restriction(
         else:
             # The part stores the merge id; restricting by the natural id
             # would be silently dropped. An unknown id (None) matches nothing.
-            from spyglass.spikesorting.v2.artifact_output import (
-                ArtifactDetectionOutput,
-            )
-
             try:
                 art_merge_id = ArtifactDetectionOutput.get_merge_id(
                     {"artifact_detection_id": plan.artifact_detection_id}
