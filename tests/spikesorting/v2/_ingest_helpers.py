@@ -103,18 +103,18 @@ def clear_curations_for(sorting_key) -> None:
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
 
     drop_unitmatch_selections_for(sorting_key)
-    for mid in (SpikeSortingOutput.ConcatMemberCuration & sorting_key).fetch(
+    for mid in (SpikeSortingOutput.ConcatMemberCurationV2 & sorting_key).fetch(
         "merge_id"
     ):
         (SpikeSortingOutput & {"merge_id": mid}).super_delete(
             warn=False, safemode=False
         )
-    (ConcatMemberCuration & sorting_key).super_delete(
+    (ConcatMemberCurationV2 & sorting_key).super_delete(
         warn=False, safemode=False
     )
     for mid in (SpikeSortingOutput.CurationV2 & sorting_key).fetch("merge_id"):
@@ -363,7 +363,7 @@ def clean_session_groups_for_owner(owner: str) -> None:
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import (
@@ -388,12 +388,12 @@ def clean_session_groups_for_owner(owner: str) -> None:
         if sort_keys:
             drop_unitmatch_selections_for(sort_keys)
             for mid in (
-                SpikeSortingOutput.ConcatMemberCuration & sort_keys
+                SpikeSortingOutput.ConcatMemberCurationV2 & sort_keys
             ).fetch("merge_id"):
                 (SpikeSortingOutput & {"merge_id": mid}).super_delete(
                     warn=False, safemode=False
                 )
-            (ConcatMemberCuration & sort_keys).super_delete(
+            (ConcatMemberCurationV2 & sort_keys).super_delete(
                 warn=False, safemode=False
             )
             for mid in (SpikeSortingOutput.CurationV2 & sort_keys).fetch(

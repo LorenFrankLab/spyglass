@@ -1365,10 +1365,10 @@ def _commit_change_set(
     # No-op for ordinary sorts; concat-backed curations materialize one
     # session-scoped downstream merge row per frozen member.
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
-    ConcatMemberCuration.populate(child.as_key(), reserve_jobs=False)
+    ConcatMemberCurationV2.populate(child.as_key(), reserve_jobs=False)
 
     evaluation = None
     stages = [

@@ -50,7 +50,7 @@ schema = dj.schema("spikesorting_v2_concat_curation")
 
 
 class ConcatMemberFetched(NamedTuple):
-    """DB inputs of :meth:`ConcatMemberCuration.make_compute`.
+    """DB inputs of :meth:`ConcatMemberCurationV2.make_compute`.
 
     Attributes
     ----------
@@ -94,7 +94,7 @@ class ConcatMemberFetched(NamedTuple):
 
 
 class ConcatMemberComputed(NamedTuple):
-    """The ``ConcatMemberCuration`` secondary fields make_compute returns."""
+    """The ``ConcatMemberCurationV2`` secondary fields make_compute returns."""
 
     analysis_file_name: str
     object_id: str
@@ -107,7 +107,7 @@ class ConcatMemberComputed(NamedTuple):
 
 
 @schema
-class ConcatMemberCuration(
+class ConcatMemberCurationV2(
     StagedOutputCleanupMixin, SpyglassMixin, dj.Computed
 ):
     """Per-member, wall-clock-aligned view of a curated concat sort.
@@ -155,7 +155,7 @@ class ConcatMemberCuration(
             {name: row[name] for name in cls.primary_key} for row in rows
         ]
         return list(
-            (SpikeSortingOutput.ConcatMemberCuration & member_keys).fetch(
+            (SpikeSortingOutput.ConcatMemberCurationV2 & member_keys).fetch(
                 "merge_id"
             )
         )
@@ -248,7 +248,7 @@ class ConcatMemberCuration(
             kwargs,
             member_rows=rows,
             merge_ids=self._merge_ids(rows),
-            context="ConcatMemberCuration.delete",
+            context="ConcatMemberCurationV2.delete",
         )
 
     @classmethod
@@ -276,7 +276,7 @@ class ConcatMemberCuration(
             Keyword arguments for ``delete``. ``force_masters`` and
             ``force_parts`` are overridden.
         member_rows : list[dict]
-            Full ``ConcatMemberCuration`` rows the cascade can reach, fetched
+            Full ``ConcatMemberCurationV2`` rows the cascade can reach, fetched
             before it runs.
         merge_ids : list
             ``SpikeSortingOutput`` merge ids of the rows being deleted,
@@ -392,7 +392,7 @@ class ConcatMemberCuration(
             from spyglass.spikesorting.v2.exceptions import ConcatSplitError
 
             raise ConcatSplitError(
-                "ConcatMemberCuration.make: the MemberBoundary set "
+                "ConcatMemberCurationV2.make: the MemberBoundary set "
                 f"{sorted(end_by_index)} does not match the frozen member "
                 f"set {sorted(snapshot_indices)}. Repopulate the concatenated "
                 "recording before deriving member curations."
@@ -415,7 +415,7 @@ class ConcatMemberCuration(
         member_index = int(key["member_index"])
         if member_index not in member_positions:
             raise ValueError(
-                "ConcatMemberCuration.make: member_index "
+                "ConcatMemberCurationV2.make: member_index "
                 f"{member_index} is absent from the frozen member snapshot."
             )
         member_position = member_positions[member_index]
@@ -510,7 +510,7 @@ class ConcatMemberCuration(
                 recording_abs_path, recording_electrical_series_path
             ),
             context=(
-                f"ConcatMemberCuration.make (member {int(key['member_index'])})"
+                f"ConcatMemberCurationV2.make (member {int(key['member_index'])})"
             ),
         )
         obs_intervals_by_uid = {
@@ -527,7 +527,7 @@ class ConcatMemberCuration(
         )
 
         with staged_analysis_file(
-            nwb_file_name, context="ConcatMemberCuration.make_compute"
+            nwb_file_name, context="ConcatMemberCurationV2.make_compute"
         ) as analysis_file_name:
             _, object_id, _, n_spikes_by_uid = _write_curated_units_nwb_body(
                 analysis_file_name=analysis_file_name,
@@ -548,7 +548,7 @@ class ConcatMemberCuration(
             )
             if set(n_spikes_by_uid) != set(local_frames):
                 raise RuntimeError(
-                    "ConcatMemberCuration.make: staged Units IDs differ from "
+                    "ConcatMemberCurationV2.make: staged Units IDs differ from "
                     "the conserved member split."
                 )
         return ConcatMemberComputed(
@@ -579,7 +579,7 @@ class ConcatMemberCuration(
             self.insert1({**member_key, **row})
             SpikeSortingOutput._merge_insert(
                 [member_key],
-                part_name="ConcatMemberCuration",
+                part_name="ConcatMemberCurationV2",
                 skip_duplicates=True,
             )
 
@@ -615,7 +615,7 @@ class ConcatMemberCuration(
         Parameters
         ----------
         key : dict
-            Restriction selecting a single ``ConcatMemberCuration`` row.
+            Restriction selecting a single ``ConcatMemberCurationV2`` row.
 
         Returns
         -------
@@ -641,7 +641,7 @@ class ConcatMemberCuration(
         Parameters
         ----------
         key : dict
-            Restriction selecting a single ``ConcatMemberCuration`` row.
+            Restriction selecting a single ``ConcatMemberCurationV2`` row.
 
         Returns
         -------
@@ -662,7 +662,7 @@ class ConcatMemberCuration(
         )
         if len(timestamps) != end - start:
             raise ValueError(
-                "ConcatMemberCuration.get_sorting_input_recording: member "
+                "ConcatMemberCurationV2.get_sorting_input_recording: member "
                 f"{row['member_index']} spans concat frames [{start}, {end}) "
                 f"but its Recording has {len(timestamps)} samples."
             )

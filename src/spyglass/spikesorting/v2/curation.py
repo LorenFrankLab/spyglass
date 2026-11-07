@@ -63,7 +63,7 @@ CONCAT_MERGE_GATE_MESSAGE = (
     "SpikeSortingOutput: its spike times are on the concatenated recording's "
     "synthetic 0-based timeline (member wall-clock gaps are dropped), so a "
     "downstream consumer keyed by nwb_file_name would misalign them. Populate "
-    "ConcatMemberCuration for one wall-clock-aligned SpikeSortingOutput row "
+    "ConcatMemberCurationV2 for one wall-clock-aligned SpikeSortingOutput row "
     "per frozen member session."
 )
 
@@ -268,11 +268,11 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         rows = self.fetch("KEY")
         # Snapshot concat members for the dry-run inventory and merge cleanup.
         from spyglass.spikesorting.v2.concat_member_curation import (
-            ConcatMemberCuration,
+            ConcatMemberCurationV2,
         )
 
         concat_member_rows = (
-            (ConcatMemberCuration & list(rows)).fetch(as_dict=True)
+            (ConcatMemberCurationV2 & list(rows)).fetch(as_dict=True)
             if len(rows)
             else []
         )
@@ -280,7 +280,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         merge_ids = list(
             (SpikeSortingOutput.CurationV2 & list(rows)).fetch("merge_id")
-        ) + ConcatMemberCuration._merge_ids(concat_member_rows)
+        ) + ConcatMemberCurationV2._merge_ids(concat_member_rows)
         in_delete_set = {tuple(sorted(row.items())) for row in rows}
         sorting_fields = [k for k in pk if k != "curation_id"]
         children = (
@@ -313,7 +313,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
         if safemode is not None:
             kwargs["safemode"] = safemode
-        return ConcatMemberCuration._delete_and_reclaim(
+        return ConcatMemberCurationV2._delete_and_reclaim(
             super().delete,
             kwargs,
             member_rows=concat_member_rows,
@@ -1121,7 +1121,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         The preprocessed ``Recording`` on its acquisition clock, never
         artifact-masked or motion-corrected. For a concat-backed curation use
-        ``ConcatMemberCuration.get_source_recording`` per member.
+        ``ConcatMemberCurationV2.get_source_recording`` per member.
 
         Parameters
         ----------
@@ -1151,7 +1151,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 f"sorts concatenated recording "
                 f"{lineage.key['concat_recording_id']}, whose original source "
                 "is one recording per member. Call "
-                "ConcatMemberCuration.get_source_recording with each member's "
+                "ConcatMemberCurationV2.get_source_recording with each member's "
                 "key (sorting_id, curation_id, member_index)."
             )
         return Recording().get_recording(lineage.key)
@@ -1163,7 +1163,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         Unwhitened, masked over the pinned artifact exclusions (member masks
         for a concat), and motion-corrected when the sort selected it. On the
         sort's clock: acquisition for a single recording, synthetic for a
-        concat (see ``ConcatMemberCuration.get_sorting_input_recording``).
+        concat (see ``ConcatMemberCurationV2.get_sorting_input_recording``).
         Analyzer rebuilds and UnitMatch extraction start from this recording.
 
         Parameters

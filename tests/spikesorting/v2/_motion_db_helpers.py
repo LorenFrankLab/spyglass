@@ -200,7 +200,7 @@ def drop_pipeline_sorts(sorting_ids) -> None:
     selections (so no part outlives its master)."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
@@ -215,12 +215,17 @@ def drop_pipeline_sorts(sorting_ids) -> None:
             UnitMatchSelection & [{"unitmatch_id": u} for u in set(pinned)]
         ).super_delete(warn=False, safemode=False)
     for part in (
-        SpikeSortingOutput.ConcatMemberCuration,
+        SpikeSortingOutput.ConcatMemberCurationV2,
         SpikeSortingOutput.CurationV2,
     ):
         for merge_id in (part & keys).fetch("merge_id"):
             (SpikeSortingOutput & {"merge_id": merge_id}).super_delete(
                 warn=False, safemode=False
             )
-    for table in (ConcatMemberCuration, CurationV2, Sorting, SortingSelection):
+    for table in (
+        ConcatMemberCurationV2,
+        CurationV2,
+        Sorting,
+        SortingSelection,
+    ):
         (table & keys).super_delete(warn=False, safemode=False)

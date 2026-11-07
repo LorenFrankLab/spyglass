@@ -165,7 +165,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         from datajoint.utils import to_camel_case
 
         source_name = to_camel_case(source_parent.table_name)
-        is_v2 = source_name in {"CurationV2", "ConcatMemberCuration"}
+        is_v2 = source_name in {"CurationV2", "ConcatMemberCurationV2"}
 
         if is_v2:
             # v2 unit_ids can be sparse: index by NWB ``.id``, not position

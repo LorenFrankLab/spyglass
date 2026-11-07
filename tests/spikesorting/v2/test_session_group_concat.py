@@ -2399,7 +2399,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
     from spyglass.spikesorting.v2.curation_api import CurationRef
@@ -2458,8 +2458,10 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             "curation_id": summary["root_curation_id"],
         }
         assert not (SpikeSortingOutput.CurationV2 & curation_key)
-        assert len(ConcatMemberCuration & curation_key) == 2
-        assert len(SpikeSortingOutput.ConcatMemberCuration & curation_key) == 2
+        assert len(ConcatMemberCurationV2 & curation_key) == 2
+        assert (
+            len(SpikeSortingOutput.ConcatMemberCurationV2 & curation_key) == 2
+        )
         assert (
             dict(CurationRef.from_key(curation_key).member_merge_ids)
             == summary["member_merge_ids"]
@@ -2507,10 +2509,10 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             "sorting_id": auto_summary["sorting_id"],
             "curation_id": auto_summary["auto_labeled_curation_id"],
         }
-        assert len(ConcatMemberCuration & child_key) == 2
+        assert len(ConcatMemberCurationV2 & child_key) == 2
         assert len(auto_summary["member_merge_ids"]) == 2
         assert set(
-            (SpikeSortingOutput.ConcatMemberCuration & child_key).fetch(
+            (SpikeSortingOutput.ConcatMemberCurationV2 & child_key).fetch(
                 "merge_id"
             )
         ) == set(auto_summary["member_merge_ids"].values())
@@ -2526,7 +2528,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
             select_units_for_analysis,
         )
         from spyglass.spikesorting.v2.concat_member_curation import (
-            ConcatMemberCuration,
+            ConcatMemberCurationV2,
         )
 
         receipt = select_units_for_analysis(
@@ -2544,7 +2546,7 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
                     == auto_summary["member_merge_ids"][group.member_index]
                 )
                 member_row = (
-                    ConcatMemberCuration
+                    ConcatMemberCurationV2
                     & child_key
                     & {"member_index": group.member_index}
                 ).fetch1()

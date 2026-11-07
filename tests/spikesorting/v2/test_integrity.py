@@ -137,7 +137,7 @@ _STAGING_TABLES = {
     "spyglass.spikesorting.v2.sorting.Sorting",
     "spyglass.spikesorting.v2.motion.MotionCorrectedRecording",
     "spyglass.spikesorting.v2.metric_curation.CurationEvaluation",
-    "spyglass.spikesorting.v2.concat_member_curation.ConcatMemberCuration",
+    "spyglass.spikesorting.v2.concat_member_curation.ConcatMemberCurationV2",
     "spyglass.spikesorting.v2.figpack_curation.FigPackCuration",
     "spyglass.spikesorting.v2.unit_matching.UnitMatch",
 }
@@ -294,7 +294,7 @@ def test_v2_dispatch_classes_wired_into_merge_table():
         source_class_dict,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2 as V2Curation
 
@@ -307,9 +307,9 @@ def test_v2_dispatch_classes_wired_into_merge_table():
         "SpikeSortingOutput.CurationV2 part missing -- v2 entries "
         "cannot be registered into the merge table."
     )
-    assert source_class_dict["ConcatMemberCuration"] is ConcatMemberCuration
-    assert hasattr(SpikeSortingOutput, "ConcatMemberCuration"), (
-        "SpikeSortingOutput.ConcatMemberCuration part missing -- member "
+    assert source_class_dict["ConcatMemberCurationV2"] is ConcatMemberCurationV2
+    assert hasattr(SpikeSortingOutput, "ConcatMemberCurationV2"), (
+        "SpikeSortingOutput.ConcatMemberCurationV2 part missing -- member "
         "outputs cannot be registered into the merge table."
     )
 

@@ -2125,7 +2125,7 @@ def span_edge_sorts(daily_concat_match_inputs):
     curation's member exports are populated.
     """
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import (
@@ -2192,7 +2192,7 @@ def span_edge_sorts(daily_concat_match_inputs):
             }
     finally:
         patch.undo()
-    ConcatMemberCuration.populate(curations["concat"], reserve_jobs=False)
+    ConcatMemberCurationV2.populate(curations["concat"], reserve_jobs=False)
 
     yield {
         "curations": curations,
@@ -2420,7 +2420,7 @@ def test_concat_units_are_not_duplicated_in_match_graph(
     """A concatenation input is one node per parent unit, however many member
     exports it has, and no edge joins two units of one parent curation.
 
-    The concatenation's curation has one ``ConcatMemberCuration`` export per
+    The concatenation's curation has one ``ConcatMemberCurationV2`` export per
     member; ``MatchableUnit`` and the ``TrackedUnit`` graph still hold each
     parent unit once, keyed by the parent ``(sorting_id, curation_id,
     unit_id)``. A raw pair between two units of the parent is refused. (The
@@ -2428,7 +2428,7 @@ def test_concat_units_are_not_duplicated_in_match_graph(
     session directory, and each input is one directory.)
     """
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.exceptions import (
         UnitMatchPairIntegrityError,
@@ -2442,7 +2442,7 @@ def test_concat_units_are_not_duplicated_in_match_graph(
 
     sx = span_edge_sorts
     concat, masked = sx["curations"]["concat"], sx["curations"]["masked"]
-    n_members = len(ConcatMemberCuration & concat)
+    n_members = len(ConcatMemberCurationV2 & concat)
     assert n_members == 2
     parent_units = sorted(matched_unit_ids(concat))
     masked_units = sorted(matched_unit_ids(masked))

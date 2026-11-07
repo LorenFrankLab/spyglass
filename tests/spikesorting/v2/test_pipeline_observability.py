@@ -383,7 +383,7 @@ def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
         SharedGroupArtifactDetection,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
@@ -405,7 +405,7 @@ def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
         ConcatenatedRecording,
         Sorting,
         CurationEvaluation,
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
         FigPackCuration,
         UnitMatch,
         TrackedUnit,

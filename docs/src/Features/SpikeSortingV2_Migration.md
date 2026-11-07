@@ -534,7 +534,7 @@ The Presets notebook shows `run_v2_pipeline_session` and its preflight.
 ### Which recording?
 
 `SpikeSortingOutput.get_recording` depends on the sort. Two accessors have one
-meaning each, on `CurationV2`, `ConcatMemberCuration` and `SpikeSortingOutput`:
+meaning each, on `CurationV2`, `ConcatMemberCurationV2` and `SpikeSortingOutput`:
 
 - `get_source_recording`: the original `Recording` cache (unmasked,
     uncorrected). A concat-backed `CurationV2` raises and points at each
@@ -873,7 +873,7 @@ Table methods (the facade calls these):
     `CurationV2.get_sorting(key, as_dataframe=True)` return a DataFrame indexed
     by `unit_id` with `spike_times` (s), plus `curation_label` for curations.
 - Single-recording curations register on `SpikeSortingOutput.CurationV2`. Concat
-    curations register through `ConcatMemberCuration`, one merge id per member.
+    curations register through `ConcatMemberCurationV2`, one merge id per member.
 - **Handles.** `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its
     `root_curation` and `auto_labeled_curation` are generation-pinned
     `CurationRef`s. `auto_labeled_curation` is `None` until an analysis curation
@@ -1165,7 +1165,7 @@ Sorting.find_orphaned_analyzer_folders(dry_run=False)
     through `SortingAnalyzerRecompute`.
 - Active builds are skipped; ownership is checked by lock, not by PID or age.
     Run reclamation when sorting and rebuild jobs are idle.
-- `CurationV2.delete()` and `ConcatMemberCuration.delete()` list member rows,
+- `CurationV2.delete()` and `ConcatMemberCurationV2.delete()` list member rows,
     merge ids, and analysis files in a dry run, then remove the rows. Their
     analysis files are left for `AnalysisNwbfile().cleanup()`, like any other
     pipeline's.
@@ -1193,7 +1193,7 @@ from spyglass.spikesorting.v2.artifact import (
     RecordingArtifactDetection,
     RecordingArtifactSelection,
 )
-from spyglass.spikesorting.v2.concat_member_curation import ConcatMemberCuration
+from spyglass.spikesorting.v2.concat_member_curation import ConcatMemberCurationV2
 from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecording,
@@ -1251,18 +1251,18 @@ Sorting.populate(sort_key)
 # 5. After curating, one session-aligned output per member. Every member
 #    carries the same unit ids, with empty trains where a unit did not fire.
 curation_key = {"sorting_id": sort_key["sorting_id"], "curation_id": ...}
-ConcatMemberCuration.populate(curation_key)
+ConcatMemberCurationV2.populate(curation_key)
 member_merge_ids = {
     row["member_index"]: row["merge_id"]
     for row in (
-        SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration & curation_key
+        SpikeSortingOutput.ConcatMemberCurationV2 * ConcatMemberCurationV2 & curation_key
     ).fetch(as_dict=True)
 }
 ```
 
 - **The concat curation is not in `SpikeSortingOutput`.** Its synthetic,
     gap-free timeline is unsafe for session-scoped consumers.
-    `ConcatMemberCuration` registers one wall-clock-aligned merge row per
+    `ConcatMemberCurationV2` registers one wall-clock-aligned merge row per
     member; `run_v2_concat_pipeline` returns them as `member_merge_ids`.
 - **Artifacts are masked per member before concatenation.** Each detection is
     frozen in the concat's identity, so a changed mask is a new concat and sort.

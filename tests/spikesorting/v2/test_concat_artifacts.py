@@ -408,7 +408,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         read_units_abs_times_and_sample_indices,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import (
@@ -513,8 +513,8 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         )
         & merged
     )
-    ConcatMemberCuration.populate(merged, reserve_jobs=False)
-    for member in (ConcatMemberCuration & merged).fetch(as_dict=True):
+    ConcatMemberCurationV2.populate(merged, reserve_jobs=False)
+    for member in (ConcatMemberCurationV2 & merged).fetch(as_dict=True):
         path = AnalysisNwbfile.get_abs_path(member["analysis_file_name"])
         times, frames, intervals = read_units_abs_times_and_sample_indices(path)
         i = member["member_index"]
@@ -584,7 +584,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     # just remove one snapshot member and leave a truncated selection behind.
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
-    member_keys = (ConcatMemberCuration & merged).fetch("KEY")
+    member_keys = (ConcatMemberCurationV2 & merged).fetch("KEY")
     (
         RecordingArtifactDetection & {"artifact_detection_id": detection_ids[0]}
     ).delete(safemode=False)
@@ -592,8 +592,8 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     assert not (ConcatenatedRecordingSelection & different)
     assert not (Sorting & sorting_key)
     assert not (CurationV2 & sorting_key)
-    assert not (ConcatMemberCuration & merged)
-    assert not (SpikeSortingOutput.ConcatMemberCuration & member_keys)
+    assert not (ConcatMemberCurationV2 & merged)
+    assert not (SpikeSortingOutput.ConcatMemberCurationV2 & member_keys)
 
 
 @pytest.mark.slow

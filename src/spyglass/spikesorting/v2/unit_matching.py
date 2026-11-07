@@ -1216,7 +1216,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
         Concatenation spike frames are split by the frozen
         ``[start_sample, end_sample)`` spans and mapped onto each member
-        ``Recording``'s timestamps, as ``ConcatMemberCuration`` does. A member
+        ``Recording``'s timestamps, as ``ConcatMemberCurationV2`` does. A member
         the unit did not fire in gets an empty array. Times are read from live
         data, so each input is first checked against its frozen rows.
 

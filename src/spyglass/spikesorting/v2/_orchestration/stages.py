@@ -129,11 +129,11 @@ def _concat_member_merge_ids(curation_key) -> dict[int, Any]:
     """Return the complete frozen-member-index to merge-id mapping."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     rows = (
-        SpikeSortingOutput.ConcatMemberCuration * ConcatMemberCuration
+        SpikeSortingOutput.ConcatMemberCurationV2 * ConcatMemberCurationV2
         & curation_key
     ).fetch("merge_id", "member_index", as_dict=True)
     return {int(row["member_index"]): row["merge_id"] for row in rows}
@@ -452,7 +452,7 @@ def _run_member_curation_stage(
         ``"member_curation"``).
     """
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
@@ -480,11 +480,11 @@ def _run_member_curation_stage(
     # One full PK per populate, as _populate_once requires.
     def _populate_member_curations():
         for member_key in member_keys:
-            _populate_once(ConcatMemberCuration, member_key)
+            _populate_once(ConcatMemberCurationV2, member_key)
         member_merge_ids = _concat_member_merge_ids(member_curation_key)
         if len(member_merge_ids) != len(member_keys):
             raise ValueError(
-                "run_v2_concat_pipeline: ConcatMemberCuration registration is "
+                "run_v2_concat_pipeline: ConcatMemberCurationV2 registration is "
                 f"incomplete for {member_curation_key}: expected "
                 f"{len(member_keys)} member merge rows, found "
                 f"{len(member_merge_ids)}."
@@ -497,7 +497,7 @@ def _run_member_curation_stage(
         stage_seconds["member_curation"],
     ) = _run_stage(
         "member_curation",
-        len(ConcatMemberCuration & member_keys) == len(member_keys),
+        len(ConcatMemberCurationV2 & member_keys) == len(member_keys),
         _populate_member_curations,
         run_summary,
     )

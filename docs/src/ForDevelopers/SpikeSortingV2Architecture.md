@@ -157,7 +157,7 @@ planned with `attempt_all`. Parameter tables provide `insert_default()`.
 | `figpack_curation`                   | `FigPackCurationSelection`, `FigPackCuration` (the layer under `FigPackReview`)                                                                                                                           |
 | `motion`                             | `MotionEstimationParameters`, `MotionInterpolationParameters`, `MotionCorrectionParameters`, `MotionEstimateSelection`, `MotionEstimate`, `MotionCorrectedRecordingSelection`, `MotionCorrectedRecording` |
 | `session_group`                      | `SessionGroup`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`                                                                                                                                 |
-| `concat_member_curation`             | `ConcatMemberCuration`                                                                                                                                                                                    |
+| `concat_member_curation`             | `ConcatMemberCurationV2`                                                                                                                                                                                    |
 | `unit_matching`                      | `MatcherParameters`, `UnitMatchSelection`, `UnitMatch`, `TrackedUnit`                                                                                                                                     |
 | `recompute`                          | `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`              |
 
@@ -194,7 +194,7 @@ Concat path:
     -> ConcatenatedRecordingSelection.MemberSnapshot
     -> ConcatenatedRecording (mask -> concatenate; no motion correction)
     -> SortingSelection (concat source) -> Sorting -> CurationV2
-    -> ConcatMemberCuration (original session timestamps) -> SpikeSortingOutput
+    -> ConcatMemberCurationV2 (original session timestamps) -> SpikeSortingOutput
 
 Optional motion stage (on either path's Recording or ConcatenatedRecording):
   Recording | ConcatenatedRecording [+ ArtifactDetectionOutput, single source only]
@@ -219,7 +219,7 @@ Both curation paths:
     `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
     `unit_matching`, `unit_annotation`, `recompute`, `motion`), so v0/v1 schemas
     are untouched.
-- `CurationV2` and `ConcatMemberCuration` register as parts on the existing
+- `CurationV2` and `ConcatMemberCurationV2` register as parts on the existing
     `SpikeSortingOutput`, so v0, v1, imported, and v2 curations share one merge
     surface. The concat `CurationV2` itself is not registered: its synthetic
     timeline is unsafe for session-scoped consumers.
@@ -377,8 +377,8 @@ their lifecycle and serialization checks when changing supported versions.
     `CurationV2.delete`, which refuses to orphan a descendant. Delete leaf-up,
     or delete the whole `Sorting`. `super_delete`, `delete_quick` and upstream
     cascades bypass the guard; `audit_orphaned_lineage` finds the orphans.
-- `CurationV2` and `ConcatMemberCuration` deletes cascade through
-    `ConcatMemberCuration._delete_and_reclaim` with
+- `CurationV2` and `ConcatMemberCurationV2` deletes cascade through
+    `ConcatMemberCurationV2._delete_and_reclaim` with
     `force_masters=False, force_parts=True`. With `force_masters=True`,
     DataJoint 0.14 can reach `CurationV2` through a nested part first, so the
     outer delete reports zero rows and rolls back. Orphaned `SpikeSortingOutput`
@@ -578,7 +578,7 @@ the ordered member recordings) has the same fail-closed lifecycle as
     sorting to per-member frames. It asserts one strictly increasing boundary
     per member and that every spike lands in exactly one member, else raises
     `ConcatSplitError`.
-- **Member outputs are regenerable.** `ConcatMemberCuration` derives each
+- **Member outputs are regenerable.** `ConcatMemberCurationV2` derives each
     session-aligned Units table from the concat `CurationV2` NWB, the frozen
     boundaries, and member timestamps.
 - No recompute trio exists for concats. On-demand verified rebuild covers
@@ -1109,7 +1109,7 @@ working.
 
 `spikesorting_merge.py`:
 
-- `CurationV2` and `ConcatMemberCuration` are imported in `try`/`except`, so
+- `CurationV2` and `ConcatMemberCurationV2` are imported in `try`/`except`, so
     environments without the v2 dependencies still load the merge table. Their
     part tables are declared only when the import succeeds, because DataJoint
     needs the foreign-key target at declaration time.

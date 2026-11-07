@@ -346,7 +346,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `isi_violation` uses original spike timestamps and excludes artificial
         concatenation joins, preventing acquisition gaps from creating false
         refractory violations #1609
-    - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCuration` parts,
+    - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCurationV2` parts,
         declared when the v2 module imports; if it cannot import, a warning names
         the cause and the parts are omitted. `get_restricted_merge_ids` now
         defaults to every available source, including v2 #1609

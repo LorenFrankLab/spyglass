@@ -315,8 +315,8 @@ class CurationRef:
         -------
         Mapping[int, uuid.UUID]
             Read-only mapping from ``member_index`` to the ``merge_id`` of
-            each ``ConcatMemberCuration`` row of this curation that is
-            registered in ``SpikeSortingOutput.ConcatMemberCuration``. Empty
+            each ``ConcatMemberCurationV2`` row of this curation that is
+            registered in ``SpikeSortingOutput.ConcatMemberCurationV2``. Empty
             for a curation of a single-recording sort, or before the member
             rows are populated and registered.
 
@@ -327,11 +327,11 @@ class CurationRef:
         """
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
         from spyglass.spikesorting.v2.concat_member_curation import (
-            ConcatMemberCuration,
+            ConcatMemberCurationV2,
         )
 
         rows = (
-            ConcatMemberCuration * SpikeSortingOutput.ConcatMemberCuration
+            ConcatMemberCurationV2 * SpikeSortingOutput.ConcatMemberCurationV2
             & self.as_key()
         ).fetch("member_index", "merge_id", as_dict=True)
         return MappingProxyType(

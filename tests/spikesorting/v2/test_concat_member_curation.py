@@ -15,7 +15,7 @@ def concat_member_curation(chronic_2_session_minirec):
     import spikeinterface as si
 
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import (
@@ -117,8 +117,8 @@ def concat_member_curation(chronic_2_session_minirec):
         description="concat member applied-merge test",
         apply_merge=True,
     )
-    ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
-    rows = (ConcatMemberCuration & curation_key).fetch(
+    ConcatMemberCurationV2.populate(curation_key, reserve_jobs=False)
+    rows = (ConcatMemberCurationV2 & curation_key).fetch(
         as_dict=True, order_by="member_index"
     )
     yield {
@@ -156,7 +156,7 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
         validate_sorting_provenance,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
@@ -201,7 +201,7 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
             **curation_key,
             "member_index": int(row["member_index"]),
         }
-        member_sorting = ConcatMemberCuration.get_sorting(member_key)
+        member_sorting = ConcatMemberCurationV2.get_sorting(member_key)
         assert {int(unit_id) for unit_id in member_sorting.unit_ids} == (
             expected_unit_ids
         )
@@ -238,7 +238,9 @@ def test_member_rows_preserve_units_spikes_labels_and_wall_clock(
                 assert float(abs_times[unit_id].min()) >= float(timestamps[0])
                 assert float(abs_times[unit_id].max()) <= float(timestamps[-1])
 
-        units = (ConcatMemberCuration & member_key).fetch_nwb()[0]["object_id"]
+        units = (ConcatMemberCurationV2 & member_key).fetch_nwb()[0][
+            "object_id"
+        ]
         stored_labels = {
             int(unit_id): list(unit_row["curation_label"])
             for unit_id, unit_row in units.iterrows()
@@ -255,15 +257,15 @@ def test_member_rows_register_and_dispatch_through_merge_table(
     """Each member is a normal session-scoped SpikeSortingOutput source."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     ctx = concat_member_curation
     curation_key = ctx["curation_key"]
     assert not (SpikeSortingOutput.CurationV2 & curation_key)
-    merge_rows = (SpikeSortingOutput.ConcatMemberCuration & curation_key).fetch(
-        as_dict=True
-    )
+    merge_rows = (
+        SpikeSortingOutput.ConcatMemberCurationV2 & curation_key
+    ).fetch(as_dict=True)
     assert len(merge_rows) == len(ctx["rows"]) == 2
 
     expected_nwbs = {member["nwb_file_name"] for member in ctx["members"]}
@@ -271,7 +273,7 @@ def test_member_rows_register_and_dispatch_through_merge_table(
     for merge_row in merge_rows:
         merge_key = {"merge_id": merge_row["merge_id"]}
         source_row = (
-            ConcatMemberCuration
+            ConcatMemberCurationV2
             & {
                 "sorting_id": merge_row["sorting_id"],
                 "curation_id": merge_row["curation_id"],
@@ -301,20 +303,20 @@ def test_decoding_duplicate_guard_is_scoped_to_one_member(
     """Different members coexist; two curations of one member do not."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     ctx = concat_member_curation
     root_member_key = {**ctx["root_curation_key"], "member_index": 0}
-    ConcatMemberCuration.populate(root_member_key, reserve_jobs=False)
+    ConcatMemberCurationV2.populate(root_member_key, reserve_jobs=False)
     root_member_id = (
-        SpikeSortingOutput.ConcatMemberCuration & root_member_key
+        SpikeSortingOutput.ConcatMemberCurationV2 & root_member_key
     ).fetch1("merge_id")
 
     child_rows = sorted(ctx["rows"], key=lambda row: int(row["member_index"]))
     child_ids = [
         (
-            SpikeSortingOutput.ConcatMemberCuration
+            SpikeSortingOutput.ConcatMemberCurationV2
             & {
                 "sorting_id": row["sorting_id"],
                 "curation_id": row["curation_id"],
@@ -343,7 +345,7 @@ def test_session_consumers_read_member_row(concat_member_curation):
     from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     ctx = concat_member_curation
@@ -353,10 +355,10 @@ def test_session_consumers_read_member_row(concat_member_curation):
         "curation_id": row["curation_id"],
         "member_index": int(row["member_index"]),
     }
-    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+    merge_id = (SpikeSortingOutput.ConcatMemberCurationV2 & member_key).fetch1(
         "merge_id"
     )
-    direct_units = (ConcatMemberCuration & member_key).fetch_nwb()[0][
+    direct_units = (ConcatMemberCurationV2 & member_key).fetch_nwb()[0][
         "object_id"
     ]
     unit_id = int(direct_units.index[0])
@@ -427,7 +429,7 @@ def test_waveform_features_group_rejects_other_sessions_member(
     ctx = concat_member_curation
     row = ctx["rows"][0]
     merge_id = (
-        SpikeSortingOutput.ConcatMemberCuration
+        SpikeSortingOutput.ConcatMemberCurationV2
         & {
             "sorting_id": row["sorting_id"],
             "curation_id": row["curation_id"],
@@ -470,7 +472,7 @@ def test_waveform_features_use_member_recording(concat_member_curation):
         "curation_id": row["curation_id"],
         "member_index": int(row["member_index"]),
     }
-    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+    merge_id = (SpikeSortingOutput.ConcatMemberCurationV2 & member_key).fetch1(
         "merge_id"
     )
     params_name = "concat_member_amplitude"
@@ -546,7 +548,7 @@ def test_preview_member_output_is_rejected_for_decoding(
     """A member row inherits its parent curation's unapplied-merge guard."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -559,8 +561,8 @@ def test_preview_member_output_is_rejected_for_decoding(
         apply_merge=False,
     )
     member_key = {**preview, "member_index": 0}
-    ConcatMemberCuration.populate(member_key, reserve_jobs=False)
-    merge_id = (SpikeSortingOutput.ConcatMemberCuration & member_key).fetch1(
+    ConcatMemberCurationV2.populate(member_key, reserve_jobs=False)
+    merge_id = (SpikeSortingOutput.ConcatMemberCurationV2 & member_key).fetch1(
         "merge_id"
     )
     with pytest.raises(ValueError, match="NOT applied"):
@@ -574,11 +576,11 @@ def test_member_analysis_files_are_not_orphans(concat_member_curation):
     from spyglass.common import AnalysisNwbfile
 
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     curation_key = concat_member_curation["curation_key"]
-    member_files = (ConcatMemberCuration & curation_key).fetch(
+    member_files = (ConcatMemberCurationV2 & curation_key).fetch(
         "analysis_file_name", as_dict=True
     )
     assert member_files
@@ -596,33 +598,35 @@ def test_direct_member_delete_orphans_file_and_repopulates(
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
 
     curation_key = concat_member_curation["curation_key"]
-    row = (ConcatMemberCuration & curation_key & {"member_index": 0}).fetch1()
-    member_key = {name: row[name] for name in ConcatMemberCuration.primary_key}
+    row = (ConcatMemberCurationV2 & curation_key & {"member_index": 0}).fetch1()
+    member_key = {
+        name: row[name] for name in ConcatMemberCurationV2.primary_key
+    }
     analysis_key = {"analysis_file_name": row["analysis_file_name"]}
     analysis_path = Path(
         AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
     )
     merge_key = {
         "merge_id": (
-            SpikeSortingOutput.ConcatMemberCuration & member_key
+            SpikeSortingOutput.ConcatMemberCurationV2 & member_key
         ).fetch1("merge_id")
     }
 
-    (ConcatMemberCuration & member_key).delete(
+    (ConcatMemberCurationV2 & member_key).delete(
         force_permission=True, safemode=False
     )
-    assert not (ConcatMemberCuration & member_key)
+    assert not (ConcatMemberCurationV2 & member_key)
     assert not (SpikeSortingOutput & merge_key)
     assert analysis_path.exists()
     assert (AnalysisNwbfile & analysis_key).get_orphans()
 
-    ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
-    assert ConcatMemberCuration & member_key
-    assert SpikeSortingOutput.ConcatMemberCuration & member_key
+    ConcatMemberCurationV2.populate(curation_key, reserve_jobs=False)
+    assert ConcatMemberCurationV2 & member_key
+    assert SpikeSortingOutput.ConcatMemberCurationV2 & member_key
 
 
 @pytest.mark.slow
@@ -638,7 +642,7 @@ def test_changed_second_fetch_leaves_no_staged_member_file(
 
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from tests.spikesorting.v2._tripart_helpers import (
         assert_no_staged_analysis_files,
@@ -648,23 +652,23 @@ def test_changed_second_fetch_leaves_no_staged_member_file(
 
     curation_key = concat_member_curation["curation_key"]
     member_key = (
-        ConcatMemberCuration & curation_key & {"member_index": 0}
+        ConcatMemberCurationV2 & curation_key & {"member_index": 0}
     ).fetch1("KEY")
-    (ConcatMemberCuration & member_key).delete(
+    (ConcatMemberCurationV2 & member_key).delete(
         force_permission=True, safemode=False
     )
 
     with monkeypatch.context() as patch:
         created = record_created_analysis_files(patch)
-        change_second_fetch(patch, ConcatMemberCuration)
+        change_second_fetch(patch, ConcatMemberCurationV2)
         with pytest.raises(DataJointError, match="Referential integrity"):
-            ConcatMemberCuration.populate(member_key, reserve_jobs=False)
-        assert not (ConcatMemberCuration & member_key)
-        assert not (SpikeSortingOutput.ConcatMemberCuration & member_key)
+            ConcatMemberCurationV2.populate(member_key, reserve_jobs=False)
+        assert not (ConcatMemberCurationV2 & member_key)
+        assert not (SpikeSortingOutput.ConcatMemberCurationV2 & member_key)
         assert_no_staged_analysis_files(created)
 
-    ConcatMemberCuration.populate(member_key, reserve_jobs=False)
-    assert ConcatMemberCuration & member_key
+    ConcatMemberCurationV2.populate(member_key, reserve_jobs=False)
+    assert ConcatMemberCurationV2 & member_key
 
 
 @pytest.mark.slow
@@ -679,19 +683,19 @@ def test_delete_cascades_member_rows_and_orphans_files(
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
 
     ctx = concat_member_curation
     curation_key = ctx["curation_key"]
-    rows = (ConcatMemberCuration & curation_key).fetch(as_dict=True)
+    rows = (ConcatMemberCurationV2 & curation_key).fetch(as_dict=True)
     analysis_names = [str(row["analysis_file_name"]) for row in rows]
     paths = [
         Path(AnalysisNwbfile.get_abs_path(name)) for name in analysis_names
     ]
     merge_ids = list(
-        (SpikeSortingOutput.ConcatMemberCuration & curation_key).fetch(
+        (SpikeSortingOutput.ConcatMemberCurationV2 & curation_key).fetch(
             "merge_id"
         )
     )
@@ -707,19 +711,19 @@ def test_delete_cascades_member_rows_and_orphans_files(
     preview = "\n".join(seen)
     assert all(name in preview for name in analysis_names)
     assert CurationV2 & curation_key
-    assert ConcatMemberCuration & curation_key
+    assert ConcatMemberCurationV2 & curation_key
 
     monkeypatch.setattr(
         "datajoint.table.user_choice", lambda *args, **kwargs: "no"
     )
     (CurationV2 & curation_key).delete(force_permission=True, safemode=True)
     assert CurationV2 & curation_key
-    assert ConcatMemberCuration & curation_key
+    assert ConcatMemberCurationV2 & curation_key
     assert all(path.exists() for path in paths)
 
     (CurationV2 & curation_key).delete(force_permission=True, safemode=False)
     assert not (CurationV2 & curation_key)
-    assert not (ConcatMemberCuration & curation_key)
+    assert not (ConcatMemberCurationV2 & curation_key)
     assert not (SpikeSortingOutput & [{"merge_id": mid} for mid in merge_ids])
     member_files = AnalysisNwbfile & [
         {"analysis_file_name": name} for name in analysis_names

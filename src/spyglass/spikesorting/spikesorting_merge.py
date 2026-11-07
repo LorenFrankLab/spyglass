@@ -58,12 +58,12 @@ def _probe_v2_concat_member_curation() -> "Union[type, None]":
     """Import the optional per-member concat curation merge target."""
     return _import_v2_part(
         "spyglass.spikesorting.v2.concat_member_curation",
-        "ConcatMemberCuration",
+        "ConcatMemberCurationV2",
         "spikesorting v2 concat-member outputs are unavailable",
     )[0]
 
 
-ConcatMemberCuration = _probe_v2_concat_member_curation()
+ConcatMemberCurationV2 = _probe_v2_concat_member_curation()
 
 
 def _raise_v2_unavailable(caller: str) -> None:
@@ -101,12 +101,12 @@ source_class_dict = {
 }
 if CurationV2 is not None:
     source_class_dict["CurationV2"] = CurationV2
-if ConcatMemberCuration is not None:
-    source_class_dict["ConcatMemberCuration"] = ConcatMemberCuration
+if ConcatMemberCurationV2 is not None:
+    source_class_dict["ConcatMemberCurationV2"] = ConcatMemberCurationV2
 
 # Sources whose curated NWB stores per-unit observed spans. Other sources
 # are reported as unknown coverage.
-OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCuration"})
+OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCurationV2"})
 
 
 @schema
@@ -148,13 +148,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             -> CurationV2
             """
 
-    if ConcatMemberCuration is not None:
+    if ConcatMemberCurationV2 is not None:
 
-        class ConcatMemberCuration(SpyglassMixin, dj.Part):  # noqa: F811
+        class ConcatMemberCurationV2(SpyglassMixin, dj.Part):  # noqa: F811
             definition = """
             -> master
             ---
-            -> ConcatMemberCuration
+            -> ConcatMemberCurationV2
             """
 
     def _get_restricted_merge_ids_v2(
@@ -206,9 +206,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
         joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
         merge_ids = list(joined.fetch("merge_id", as_dict=as_dict))
-        if ConcatMemberCuration is not None:
+        if ConcatMemberCurationV2 is not None:
             member_joined = (
-                SpikeSortingOutput.ConcatMemberCuration * curation_table.proj()
+                SpikeSortingOutput.ConcatMemberCurationV2
+                * curation_table.proj()
             )
             merge_ids.extend(member_joined.fetch("merge_id", as_dict=as_dict))
         return merge_ids
@@ -377,7 +378,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             raise AttributeError(
                 f"SpikeSortingOutput.{accessor}: source table "
                 f"{source_table.__name__} does not define {accessor}; only "
-                "the v2 CurationV2 and ConcatMemberCuration sources do. Use "
+                "the v2 CurationV2 and ConcatMemberCurationV2 sources do. Use "
                 "SpikeSortingOutput.get_recording."
             )
         query = source_table & cls.merge_get_part(key)
@@ -405,12 +406,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 *fields, as_dict=True
             )
         }
-        if ConcatMemberCuration is not None:
+        if ConcatMemberCurationV2 is not None:
             member_rows = (
-                cls.ConcatMemberCuration * merges_applied & restriction
+                cls.ConcatMemberCurationV2 * merges_applied & restriction
             ).fetch(*fields, "member_index", as_dict=True)
             sources.update(
-                (row["merge_id"], ("ConcatMemberCuration", row))
+                (row["merge_id"], ("ConcatMemberCurationV2", row))
                 for row in member_rows
             )
         for mid in merge_ids:
@@ -510,13 +511,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         cannot enforce the session. Other sources lack a uniform session FK
         and are not checked.
         """
-        if ConcatMemberCuration is None:
+        if ConcatMemberCurationV2 is None:
             return
         requested = [{"merge_id": mid} for mid in merge_ids if mid is not None]
         if not requested:
             return
         member_rows = (
-            cls.ConcatMemberCuration * ConcatMemberCuration & requested
+            cls.ConcatMemberCurationV2 * ConcatMemberCurationV2 & requested
         ).fetch("merge_id", "nwb_file_name", as_dict=True)
         mismatched = {
             str(row["merge_id"]): str(row["nwb_file_name"])

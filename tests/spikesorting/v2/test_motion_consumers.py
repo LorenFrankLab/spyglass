@@ -1369,7 +1369,7 @@ def test_corrected_concat_split_into_members_conserves_spikes(
     discontinuous_sources, monkeypatch
 ):
     """A corrected concatenation sort (its gaps capped to zero on the
-    estimation clock) split into member outputs by ``ConcatMemberCuration``
+    estimation clock) split into member outputs by ``ConcatMemberCurationV2``
     keeps every spike: each member holds the sorter's frames that fall in
     it, shifted to member frames, with the member recording's own
     timestamps at those frames."""
@@ -1379,7 +1379,7 @@ def test_corrected_concat_split_into_members_conserves_spikes(
         recording_timestamps,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import Recording
@@ -1420,7 +1420,7 @@ def test_corrected_concat_split_into_members_conserves_spikes(
             plant_sorter(patch, _planted_frames(planted))
             Sorting.populate(sort_key, reserve_jobs=False)
         curation_key = CurationV2.insert_curation(sorting_key=sort_key)
-        ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
+        ConcatMemberCurationV2.populate(curation_key, reserve_jobs=False)
 
         n_member_spikes = 0
         for index in range(len(snapshots)):
@@ -1431,14 +1431,14 @@ def test_corrected_concat_split_into_members_conserves_spikes(
                 ]
                 - offsets[index]
             )
-            member_sorting = ConcatMemberCuration.get_sorting(member_key)
+            member_sorting = ConcatMemberCurationV2.get_sorting(member_key)
             (unit_id,) = member_sorting.unit_ids
             frames = member_sorting.get_unit_spike_train(unit_id=unit_id)
             np.testing.assert_array_equal(frames, expected)
             abs_times, sample_indices, _ = (
                 read_units_abs_times_and_sample_indices(
                     AnalysisNwbfile.get_abs_path(
-                        (ConcatMemberCuration & member_key).fetch1(
+                        (ConcatMemberCurationV2 & member_key).fetch1(
                             "analysis_file_name"
                         )
                     )
@@ -1607,7 +1607,7 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
     accessor."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
-        ConcatMemberCuration,
+        ConcatMemberCurationV2,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
@@ -1682,9 +1682,9 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
             (sort_keys[1], corrected, "corrected concat"),
         ):
             curation = CurationV2.insert_curation(sorting_key=sort_key)
-            ConcatMemberCuration.populate(curation, reserve_jobs=False)
+            ConcatMemberCurationV2.populate(curation, reserve_jobs=False)
             with pytest.raises(
-                ValueError, match="ConcatMemberCuration.get_source_recording"
+                ValueError, match="ConcatMemberCurationV2.get_source_recording"
             ):
                 CurationV2.get_source_recording(curation)
             windows = [(0, int(offsets[-1]))]
@@ -1705,19 +1705,21 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                 member_windows = [(0, lengths[index])]
                 label = f"{what} member {index}"
                 _assert_same_windows(
-                    ConcatMemberCuration.get_source_recording(member_key),
+                    ConcatMemberCurationV2.get_source_recording(member_key),
                     member,
                     member_windows,
                     f"{label} source recording",
                 )
                 _assert_same_windows(
-                    ConcatMemberCuration.get_recording(member_key),
+                    ConcatMemberCurationV2.get_recording(member_key),
                     member,
                     member_windows,
                     f"{label} get_recording (the source recording)",
                 )
-                member_input = ConcatMemberCuration.get_sorting_input_recording(
-                    member_key
+                member_input = (
+                    ConcatMemberCurationV2.get_sorting_input_recording(
+                        member_key
+                    )
                 )
                 assert (
                     member_input.channel_ids.tolist()
@@ -1738,7 +1740,7 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                 )
                 merge_key = {
                     "merge_id": (
-                        SpikeSortingOutput.ConcatMemberCuration & member_key
+                        SpikeSortingOutput.ConcatMemberCurationV2 & member_key
                     ).fetch1("merge_id")
                 }
                 _assert_same_windows(
@@ -1753,7 +1755,7 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                     member_windows,
                     f"{label} merge sorting input",
                 )
-            member_input = ConcatMemberCuration.get_sorting_input_recording(
+            member_input = ConcatMemberCurationV2.get_sorting_input_recording(
                 {**curation, "member_index": 0}
             )
             assert not np.any(_window_traces(member_input, [excluded])[0])

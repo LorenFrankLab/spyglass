@@ -567,20 +567,20 @@ def select_units_for_analysis(
         targets.append((str(nwb_file_name), merge_id, None))
     else:
         from spyglass.spikesorting.v2.concat_member_curation import (
-            ConcatMemberCuration,
+            ConcatMemberCurationV2,
         )
 
         member_merge_ids = ref.member_merge_ids
         if not member_merge_ids:
             raise ValueError(
                 "select_units_for_analysis: this concat curation has no "
-                "per-member SpikeSortingOutput rows (ConcatMemberCuration); "
+                "per-member SpikeSortingOutput rows (ConcatMemberCurationV2); "
                 "populate them before handing it to analysis. Its synthetic "
                 "concat timeline is never used for analysis."
             )
         member_sessions = {
             int(r["member_index"]): str(r["nwb_file_name"])
-            for r in (ConcatMemberCuration & key).fetch(
+            for r in (ConcatMemberCurationV2 & key).fetch(
                 "member_index", "nwb_file_name", as_dict=True
             )
         }
