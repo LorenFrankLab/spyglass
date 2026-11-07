@@ -805,6 +805,15 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     Stores the URI (hosted figure or local bundle) and package versions. A
     zero-unit sort raises ``ZeroUnitAnalyzerError``.
+
+    Steps
+    -----
+    1. Validate the selection and resolve the display analyzer, seed
+       labels and review timeline.
+    2. Load the analyzer under the cache lock.
+    3. Build the curation view.
+    4. Publish it: upload, or stage a local bundle.
+    5. Insert the URI, then move a local bundle into place.
     """
 
     _populate_key_lock = True
@@ -916,9 +925,11 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             review_timeline_from_inputs,
         )
 
-        # The lock prevents reading a concurrent publish mid-move.
+        # 2. Load the analyzer; the lock prevents reading a concurrent
+        # publish mid-move.
         with analyzer_cache_lock(curation_key["sorting_id"]):
             analyzer = load_analyzer_folder(analyzer_folder)
+        # 3. Build the curation view.
         view = build_curation_view(
             analyzer,
             curation_key,
@@ -933,6 +944,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             f"Spyglass curation {curation_key['sorting_id']}"
             f" / {curation_key['curation_id']}"
         )
+        # 4. Publish it: upload, or stage a local bundle.
         uri, staged_bundle = _publish_view(
             view,
             upload=upload,

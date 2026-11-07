@@ -1505,14 +1505,16 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
         )
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
+        # 2. Open the recording. DREDge fancy-indexes lazy h5py timestamps
+        # by peak frame, which h5py refuses for repeats; a span view avoids it.
         recording = read_stored_traces(traces)
-        # DREDge fancy-indexes the lazy h5py timestamps by peak frame, which
-        # h5py refuses for repeated frames; the span view avoids that.
         if recording.has_time_vector():
             recording = AcquisitionSpanRecording(
                 recording, 0, recording.get_num_samples()
             )
+        # 3. Estimate motion.
         motion = sip.compute_motion(recording, preset=preset)
+        # 4. Summarize the largest displacement.
         max_abs_displacement_um = motion_max_abs_displacement_um(motion)
         if not np.isfinite(max_abs_displacement_um):
             # A NaN summary would slip past a `max_abs_displacement_um > x`

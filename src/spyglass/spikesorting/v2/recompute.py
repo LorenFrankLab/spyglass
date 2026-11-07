@@ -414,7 +414,14 @@ class _RecomputeMixin:
 
 @schema
 class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
-    """Dependency + content inventory for a ``Recording`` artifact."""
+    """Dependency + content inventory for a ``Recording`` artifact.
+
+    Steps
+    -----
+    1. Read the artifact's file name and stored ``content_hash``.
+    2. Read the file's embedded pynwb namespace versions.
+    3. Insert the inventory row.
+    """
 
     definition = """
     -> Recording
@@ -611,7 +618,16 @@ class RecordingArtifactRecomputeSelection(
 
 @schema
 class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
-    """Regenerate a recording artifact and compare trace content hashes."""
+    """Regenerate a recording artifact and compare trace content hashes.
+
+    Steps
+    -----
+    1. Unless ``xfail``, resolve the current artifact (rebuilt if
+       missing) and ``Recording.make_fetch``.
+    2. Fingerprint the current file.
+    3. Rebuild the recording to a temp file and fingerprint it.
+    4. Insert the outcome, ``matched`` anchored on ``content_hash``.
+    """
 
     definition = """
     -> RecordingArtifactRecomputeSelection
@@ -884,6 +900,13 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     One row per (sort, analyzer recipe): the sort's display recipe plus any
     whitened metric recipe a ``CurationEvaluationSelection`` references. Each
     recipe has its own folder, ``{sorting_id}__{waveform_params_name}.analyzer``.
+
+    Steps
+    -----
+    1. Read the unit count and resolve the analyzer folder.
+    2. Load the analyzer and hash its extensions; an unavailable
+       folder is inventoried as missing, not rebuilt.
+    3. Insert the inventory row.
     """
 
     definition = """
@@ -1107,7 +1130,15 @@ class SortingAnalyzerRecomputeSelection(
 
 @schema
 class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
-    """Regenerate an analyzer folder and compare extension content hashes."""
+    """Regenerate an analyzer folder and compare extension content hashes.
+
+    Steps
+    -----
+    1. Unless ``xfail``, resolve the stored analyzer and its
+       rebuild inputs.
+    2. Hash the stored analyzer and a fresh temp rebuild.
+    3. Insert the outcome with per-extension differences.
+    """
 
     definition = """
     -> SortingAnalyzerRecomputeSelection

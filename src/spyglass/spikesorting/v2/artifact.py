@@ -733,6 +733,15 @@ class RecordingArtifactDetection(
 
     Writes one ``IntervalList`` row. Always reads the uncorrected
     ``Recording``; motion correction is downstream of the mask.
+
+    Steps
+    -----
+    1. Resolve the parameters and the recording, rebuilding a
+       missing file.
+    2. Open the recording.
+    3. Scan it in chunks for threshold-crossing artifacts.
+    4. Remove the manual exclusions.
+    5. Insert the ``IntervalList``, master, part and merge rows.
     """
 
     _populate_key_lock = True
@@ -816,7 +825,9 @@ class RecordingArtifactDetection(
         """
         from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
 
+        # 2. Open the recording.
         recording = read_stored_traces(traces)
+        # 3-4. Scan for artifacts, then remove the manual exclusions.
         valid_times = self._run_artifact_scan(
             recording,
             validated,
@@ -840,9 +851,15 @@ class SharedGroupArtifactDetection(
 ):
     """Artifact-removed valid times for a ``SharedArtifactGroup``.
 
-    ``make_fetch`` rejects a member set that differs from
-    ``member_set_hash``. ``make_compute`` scans the members' unioned channels
-    once; ``make_insert`` writes the result for every member session.
+    Steps
+    -----
+    1. Resolve the parameters and members, refusing a member set that
+       differs from ``member_set_hash``.
+    2. Open each member's recording and check they can be aggregated.
+    3. Union the members' channels and scan once for artifacts.
+    4. Remove the manual exclusions.
+    5. Insert one ``IntervalList`` row per member session, plus the
+       master, part and merge rows.
     """
 
     _populate_key_lock = True
@@ -983,10 +1000,11 @@ class SharedGroupArtifactDetection(
                 "source has no member_recording_ids; make_fetch contract "
                 "violated."
             )
+        # 2. Open each member and re-check insert_group's invariants, which a
+        # direct insert can bypass.
         per_member_recordings = [
             read_stored_traces(traces) for traces in member_traces
         ]
-        # Re-check insert_group's invariants; a direct insert can bypass it.
         from spyglass.spikesorting.v2._artifacts.shared_group import (
             assert_shared_group_recordings_aggregatable,
         )
@@ -996,6 +1014,7 @@ class SharedGroupArtifactDetection(
             member_recording_ids,
             member_nwb_file_names,
         )
+        # 3-4. Union the channels, scan once, remove the manual exclusions.
         unioned = si.aggregate_channels(per_member_recordings)
         valid_times = self._run_artifact_scan(
             unioned,

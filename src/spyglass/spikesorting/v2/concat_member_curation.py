@@ -116,6 +116,15 @@ class ConcatMemberCurationV2(
     and maps them onto the member ``Recording`` timestamps. Unit ids and
     labels are shared across members; a unit with no spikes in a member has
     an empty train.
+
+    Steps
+    -----
+    1. Resolve the frozen members, boundaries and curation state.
+    2. Read the curated concat units' spike frames.
+    3. Split every unit's frames at the member boundaries.
+    4. Map this member's frames onto its ``Recording`` timestamps.
+    5. Write the member's Units NWB to a staged file.
+    6. Register the file and insert the row and its merge entry.
     """
 
     _populate_key_lock = True
@@ -493,9 +502,9 @@ class ConcatMemberCurationV2(
         The staged file is registered only by :meth:`make_insert` and removed
         here if staging fails.
         """
+        # 2. Read the curated concat units' spike frames.
         sample_indices = read_units_spike_sample_indices(curated_abs_path)
-
-        # Split all members so every concat spike is checked to land in
+        # 3. Split all members so every concat spike is checked to land in
         # exactly one member.
         split_trains = split_unit_spike_trains(
             sample_indices,
@@ -503,7 +512,7 @@ class ConcatMemberCurationV2(
             total_n_samples=n_samples,
         )
         local_frames = split_trains[member_position]
-
+        # 4. Map this member's frames onto its Recording timestamps.
         abs_times_by_uid = member_spike_times(
             local_frames,
             read_series_timestamps(
@@ -526,6 +535,7 @@ class ConcatMemberCurationV2(
             staged_analysis_file,
         )
 
+        # 5. Write the member's Units NWB to a staged file.
         with staged_analysis_file(
             nwb_file_name, context="ConcatMemberCurationV2.make_compute"
         ) as analysis_file_name:
