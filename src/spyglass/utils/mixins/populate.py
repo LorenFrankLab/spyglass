@@ -1,13 +1,120 @@
 """Mixin for tables with custom populate behavior."""
 
+import functools
+import shutil
+from pathlib import Path
+from typing import Any, NamedTuple, Tuple, Union
+
 from spyglass.utils.dj_helper_fn import NonDaemonPool, populate_pass_function
+from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
+
+# Instance attribute: one list of recorded outputs per active ``_populate1``.
+_SCOPES_ATTR = "_staged_output_scopes"
+
+
+class StagedOutputs(NamedTuple):
+    """Outputs a ``make_compute`` wrote for its ``make_insert`` to register.
+
+    Attributes
+    ----------
+    analysis_file_names : tuple of str
+        ``AnalysisNwbfile`` names that have no table row yet.
+    paths : tuple of str or Path
+        Files or folders, unique to this attempt.
+    owners : tuple
+        Objects whose ``close()`` discards their staged output. ``close`` must
+        be safe to call more than once.
+    """
+
+    analysis_file_names: Tuple[str, ...] = ()
+    paths: Tuple[Union[str, Path], ...] = ()
+    owners: Tuple[Any, ...] = ()
+
+
+def unlink_staged_analysis_file(analysis_file_name: str, *, context: str):
+    """Remove an unregistered analysis file; log, never raise, on failure.
+
+    Parameters
+    ----------
+    analysis_file_name : str
+        Name of the ``AnalysisNwbfile`` to remove.
+    context : str
+        Caller name used in the log message.
+    """
+    try:
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+        Path(abs_path).unlink(missing_ok=True)
+    except Exception as exc:  # keep the populate's own error
+        logger.error(
+            f"{context}: failed to remove staged analysis file "
+            f"{analysis_file_name!r}: {exc!r}"
+        )
+
+
+def _remove_staged_path(path: Union[str, Path], *, context: str):
+    """Remove a staged file or folder; log, never raise, on failure."""
+    path = Path(path)
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.error(f"{context}: failed to remove staged {path}: {exc!r}")
+
+
+def _recording_compute(compute):
+    """Wrap ``make_compute`` to record the outputs its result staged."""
+
+    @functools.wraps(compute)
+    def make_compute(self, key, *args, **kwargs):
+        computed = compute(self, key, *args, **kwargs)
+        scopes = self.__dict__.get(_SCOPES_ATTR)
+        if scopes:
+            scopes[-1].append(self._staged_outputs(computed))
+        return computed
+
+    return make_compute
+
+
+def _releasing_insert(insert):
+    """Wrap ``make_insert`` to forget the outputs it registered."""
+
+    @functools.wraps(insert)
+    def make_insert(self, key, *args, **kwargs):
+        insert(self, key, *args, **kwargs)
+        scopes = self.__dict__.get(_SCOPES_ATTR)
+        if scopes:
+            scopes[-1].clear()
+
+    return make_insert
 
 
 class PopulateMixin(BaseMixin):
 
     _parallel_make = False  # Tables that use parallel processing in make
     _use_transaction = True  # Use transaction in populate.
+
+    # Tri-part tables whose make_compute writes files define
+    # _staged_outputs(self, computed) -> StagedOutputs to opt in to cleanup.
+    _staged_outputs = None
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._staged_outputs is None:
+            return
+        for name, wrap in (
+            ("make_compute", _recording_compute),
+            ("make_insert", _releasing_insert),
+        ):
+            method = cls.__dict__.get(name)
+            if method is not None:
+                setattr(cls, name, wrap(method))
 
     # -------------------------------- populate --------------------------------
 
@@ -54,3 +161,50 @@ class PopulateMixin(BaseMixin):
         finally:
             pool.close()
             pool.terminate()
+
+    # ----------------------------- staged outputs -----------------------------
+
+    def _populate1(self, key, jobs, *args, **kwargs):
+        """Run DataJoint's ``_populate1``; remove outputs left unregistered.
+
+        DataJoint runs a tri-part ``make_compute`` outside the transaction, so
+        files it writes outlive a populate that fails before ``make_insert``
+        commits. For tables that define ``_staged_outputs``, the outputs of
+        each ``make_compute`` are recorded, forgotten once ``make_insert``
+        returns, and removed on a raise or a non-``True`` status (``False`` for
+        a skipped key, ``(key, error)`` under ``suppress_errors``). A failed
+        commit after ``make_insert`` or a killed process leaves them on disk.
+        """
+        if self._staged_outputs is None:
+            return super()._populate1(key, jobs, *args, **kwargs)
+
+        scopes = self.__dict__.setdefault(_SCOPES_ATTR, [])
+        pending = []
+        scopes.append(pending)
+        try:
+            status = super()._populate1(key, jobs, *args, **kwargs)
+        except BaseException:
+            self._discard_staged_outputs(pending)
+            raise
+        finally:
+            scopes.pop()
+        if status is not True:
+            self._discard_staged_outputs(pending)
+        return status
+
+    def _discard_staged_outputs(self, pending):
+        """Remove every recorded output; log, never raise, on failure."""
+        context = f"{type(self).__name__}.populate"
+        for outputs in pending:
+            for name in outputs.analysis_file_names:
+                unlink_staged_analysis_file(name, context=context)
+            for owner in outputs.owners:
+                try:
+                    owner.close()
+                except Exception as exc:  # keep the populate's own error
+                    logger.error(
+                        f"{context}: failed to discard staged output "
+                        f"{owner!r}: {exc!r}"
+                    )
+            for path in outputs.paths:
+                _remove_staged_path(path, context=context)
