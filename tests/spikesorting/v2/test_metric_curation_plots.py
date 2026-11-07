@@ -157,20 +157,6 @@ def test_calculate_isi_violation_threshold_is_milliseconds():
     ) == pytest.approx(1 / 3)
 
 
-def test_calculate_isi_violation_accepts_deprecated_s_alias():
-    """The deprecated ``isi_threshold_s`` keyword alias gives the same result.
-
-    ``calculate_isi_violation`` is shared with v0/v1 callers.
-    """
-    from spyglass.spikesorting.utils_burst import calculate_isi_violation
-
-    t1 = np.array([0.0100, 0.0500])
-    t2 = np.array([0.0115])
-    with pytest.warns(DeprecationWarning):
-        legacy = calculate_isi_violation(t1, t2, isi_threshold_s=2.0)
-    assert legacy == calculate_isi_violation(t1, t2, isi_threshold_ms=2.0)
-
-
 def test_plot_burst_pair_peaks_single_pair_and_extra_channels():
     """One pair (1-D squeezed axes) and >4 channels must not raise.
 

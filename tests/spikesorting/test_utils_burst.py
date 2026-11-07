@@ -58,12 +58,31 @@ def test_isi_violation_threshold_is_milliseconds():
     assert calculate_isi_violation(peak1, peak2, isi_threshold_ms=2.5) == 2 / 4
 
 
-def test_isi_violation_deprecated_seconds_name_warns():
+def test_isi_violation_deprecated_seconds_name_logs(monkeypatch):
+    """The old name is logged through ActivityLog and still applies in ms."""
+    import sys
+    import types
+
     from spyglass.spikesorting.utils_burst import calculate_isi_violation
+
+    logged = []
+
+    class _ActivityLog:
+        def deprecate_log(self, name, alt=None):
+            logged.append((name, alt))
+
+    fake = types.ModuleType("spyglass.common.common_usage")
+    fake.ActivityLog = _ActivityLog
+    monkeypatch.setitem(sys.modules, "spyglass.common.common_usage", fake)
 
     peak1 = np.array([0.0, 0.003])
     peak2 = np.array([0.001, 0.013])
+    result = calculate_isi_violation(peak1, peak2, isi_threshold_s=2.5)
 
-    with pytest.warns(DeprecationWarning, match="isi_threshold_ms"):
-        result = calculate_isi_violation(peak1, peak2, isi_threshold_s=2.5)
     assert result == 2 / 4
+    assert logged == [
+        (
+            "calculate_isi_violation(isi_threshold_s=)",
+            "calculate_isi_violation(isi_threshold_ms=)",
+        )
+    ]
