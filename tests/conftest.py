@@ -50,6 +50,11 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from . import _ci_lanes
+from ._ci_lanes import (  # registered as this conftest's hooks
+    pytest_collection_modifyitems,
+    pytest_ignore_collect,
+)
 from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
 from .data_downloader import FILE_PATHS, DataDownloader
@@ -311,13 +316,32 @@ def pytest_addoption(parser):
         'spyglass-pytest-<branch>'). Docker container name.
     --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
+    _ci_lanes.pytest_addoption(parser)
     parser.addoption(
         "--v2-tier",
-        choices=("unit", "db_unit", "stage", "pipeline", "regression_gate"),
+        choices=(
+            "unit",
+            "db_unit",
+            "stage",
+            "pipeline",
+            "regression_gate",
+            "database",
+        ),
         default=None,
         help=(
-            "Run one spikesorting v2 test tier. The unit tier starts no Docker "
-            "server, fetches no datasets and rejects DataJoint connections."
+            "Run one spikesorting v2 test tier, or 'database' for every test "
+            "outside the unit tier. The unit tier starts no Docker server, "
+            "fetches no datasets and rejects DataJoint connections."
+        ),
+    )
+    parser.addoption(
+        "--v2-pr",
+        action="store_true",
+        dest="v2_pr",
+        default=False,
+        help=(
+            "Run only the spikesorting v2 tests CI runs on every push and pull "
+            "request: the unit and db_unit tiers and tests marked smoke."
         ),
     )
     parser.addoption(

@@ -9,8 +9,10 @@ from unittest.mock import patch
 
 
 def main() -> None:
+    import mountainsort4
     import numpy as np
     import spikeinterface as si
+    import spikeinterface.sorters as sis
 
     import spyglass.settings as settings
     from spyglass.spikesorting.v2 import run_v2_pipeline
@@ -23,6 +25,9 @@ def main() -> None:
     from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
     assert callable(run_v2_pipeline)
+    # Both native sorters the spikesorting-v2 extra installs.
+    assert "mountainsort5" in sis.installed_sorters(), sis.installed_sorters()
+    assert callable(mountainsort4.mountainsort4)
     assert "manual_excluded_times" in RunV2PipelineInputs.__optional_keys__
     PreprocessingParamsSchema.model_validate({})
     recording, _ = si.generate_ground_truth_recording(

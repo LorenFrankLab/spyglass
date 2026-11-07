@@ -303,6 +303,7 @@ markers = [
 
 [tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
 source = [ "*/src/spyglass/*" ]
+relative_files = true # lets CI combine data from every job
 omit = [ # which submodules have no tests
   "*/__init__.py",
   "*/_version.py",
@@ -323,3 +324,6 @@ omit = [ # which submodules have no tests
   # "*/utils/*",
   "settings.py",
 ]
+
+[tool.coverage.paths] # site-packages installs map onto src/ when combining
+source = [ "src/spyglass", "*/site-packages/spyglass" ]

@@ -49,10 +49,11 @@ Every collected v2 test has exactly one effective tier:
 | `pipeline` | The complete sorting chain or session orchestration, including fixtures that already built it. |
 | `regression_gate` | Heavy scientific fixtures, memory, lifecycle acceptance and regeneration gates. |
 
-Run another tier with `--v2-tier stage`, for example. These dependency tiers are
-independent of speed markers; database tiers use the normal Docker/database
-setup. The CI workload shard named `unit` includes light database work to
-balance runtime. It is **not** the isolated `unit` tier.
+Run another tier with `--v2-tier stage`, for example, or every tier except
+`unit` with `--v2-tier database`. These dependency tiers are independent of
+speed markers; database tiers use the normal Docker/database setup. The CI
+workload shard named `unit` includes light database work to balance runtime. It
+is **not** the isolated `unit` tier.
 
 On push and pull request, every CI lane (the three workload shards and the
 matching and browser extras) runs only the `unit` and `db_unit` tiers plus the
@@ -62,8 +63,7 @@ default branch, so dispatch one before merging a branch that changes v2. To run
 the pull-request selection locally:
 
 ```bash
-pytest tests/spikesorting/v2 -m "(unit or db_unit or smoke) and not regenerate" \
-  --v2-tier-budgets
+pytest tests/spikesorting/v2 --v2-pr --v2-tier-budgets
 ```
 
 To run the whole v2 suite in parallel locally, use pytest-xdist (the `test`
@@ -342,11 +342,32 @@ ______________________________________________________________________
 The `fast`/`full` selection applies only to `run-tests`. The spike sorting jobs
 select by event instead; see [Spike sorting lanes](#spike-sorting-lanes).
 
+**Lanes:** each job selects its tests with `--lane NAME`, defined in
+`tests/_ci_lanes.py`, instead of listing paths:
+
+| Lane | Job | Tests |
+| --- | --- | --- |
+| `core` | `run-tests` | `tests/` except `spikesorting/v0`, `v1` and `v2` |
+| `legacy` | `pytest-legacy` | `spikesorting/v0`, `v1` and the v2 legacy-guard file |
+| `v2-single-session`, `v2-integration`, `v2-unit` | `pytest-v2` workload shards | Every v2 test file once |
+| `v2-matching`, `v2-curation` | `pytest-v2` extras lanes | Tests that need the matching or curation extras |
+| `v2-supported-python` | `v2-supported-python` | DB-free contract tests, run with `--noconftest -p tests._ci_lanes` |
+
+Run a job's selection locally with, for example,
+`pytest --lane v2-unit --v2-tier unit`. Pass a value-taking option as
+`--opt=value` (such as `--base-dir=/local/disk/tests/_data`) when no test path
+is given; pytest otherwise reads the value as a test path and does not load
+`tests/conftest.py`.
+
 **Optimizations:**
 
 - **Test data caching**: 231 MB cached (saves 1-2 min per run)
 - **Conditional downloads**: Skip if cache hit
-- **CodeCov integration**: Separate flags for fast/full test coverage
+- **CodeCov integration**: one report. Every test job uploads its raw coverage
+    data (`COVERAGE_FILE`) as an artifact; the `coverage` job combines them
+    with `coverage combine` and uploads one XML, flagged `fast-tests` or
+    `full-tests` by the `run-tests` mode. `[paths]` in `tests/.coveragerc` maps
+    the site-packages install of `run-tests` onto `src/`.
 
 **Manual Dispatch:**
 
@@ -362,10 +383,12 @@ durations.
 
 **Workload shards** (`single-session`, `integration`, `unit`)
 
-- Balanced by runtime, not test count. `run_ci_shard.py` routes
-    `single_session/` to `single-session`, `INTEGRATION_MODULES` to
-    `integration`, and every other file to `unit`. Add a new full-sort test file
-    to `INTEGRATION_MODULES`.
+- Balanced by runtime, not test count. The `v2-single-session` lane holds
+    `single_session/`, `v2-integration` holds `INTEGRATION_MODULES` (in
+    `tests/_ci_lanes.py`), and `v2-unit` every other file. Add a new full-sort
+    test file to `INTEGRATION_MODULES`.
+- Each shard runs `--v2-tier unit` on xdist workers, then `--v2-tier database`
+    serially. Push and PR add `--v2-pr`.
 - Env: `environments/environment_spikesorting_v2.yml` (Python 3.11, extras
     `test`, `spikesorting-v2`, `spikesorting-v2-validation`). NEURON and LFPy
     are left out: they only generate fixtures, which CI downloads.
@@ -438,17 +461,21 @@ durations.
 
 **`pytest-legacy`**
 
+- Runs on Sunday's scheduled run, on manual dispatch, and on pull requests
+    whose files match the `legacy-changes` paths filter (the v0/v1, analysis
+    and shared spike sorting modules, the legacy env, `pyproject.toml`, this
+    workflow, the lanes file and the legacy tests).
 - v0/v1 compute paths call `_require_legacy_si_environment`, which raises under
-    SI 0.101 and later, so `run-tests` ignores `tests/spikesorting/v0` and `v1`;
-    this job runs them on SI 0.99.
+    SI 0.101 and later, so the `core` lane leaves out `tests/spikesorting/v0`
+    and `v1`; this job runs them on SI 0.99.
 - A `sed` step relaxes the SI and probeinterface pins in its checkout so the env
     resolves SI 0.99 in one pass. Installing 0.104 and then downgrading leaves
     an incompatible numpy 2 stack.
 - The verify step asserts SI < 0.100 (0.100 breaks `NwbRecordingExtractor`
     timestamps), probeinterface < 0.3 and numpy < 2.
 - Also runs `tests/spikesorting/v2/test_clusterless_waveform_features.py` for
-    its legacy-guard test. Its v2 imports are lazy, and passing it by path keeps
-    other SI 0.104 modules from being collected.
+    its legacy-guard test. Its v2 imports are lazy, and the `legacy` lane
+    collects no other SI 0.104 module.
 
 ______________________________________________________________________
 

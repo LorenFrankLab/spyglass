@@ -1,6 +1,8 @@
 # Copied from tests/.coveragerc to .coveragerc on github actions
 
 [run]
+# Repository-relative paths, so the CI coverage job can combine every job
+relative_files = True
 omit =
     */__init__.py
     */_version.py
@@ -20,6 +22,13 @@ omit =
     # */spikesorting/*
     # */utils/*
     settings.py
+
+[paths]
+# First entry: where the combining job finds the sources. run-tests installs
+# spyglass into site-packages; the other jobs install it editable.
+source =
+    src/spyglass
+    */site-packages/spyglass
 
 [report]
 exclude_lines =

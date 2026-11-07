@@ -7,8 +7,9 @@ on:
     branches:
       - '!test_branch'
       - '!documentation'
-  schedule:  # once a day at midnight UTC
-    - cron: '0 0 * * *'
+  schedule:  # once a day at midnight UTC; Sunday's run adds pytest-legacy
+    - cron: '0 0 * * 1-6'
+    - cron: '0 0 * * 0'
   pull_request: # requires approval for first-time contributors
     types: [synchronize, opened, reopened, labeled, closed]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
@@ -38,9 +39,13 @@ jobs:
     defaults:
      run:
        shell: bash -el {0}
+    outputs:  # the Codecov flag and name for the combined report
+      mode: ${{ steps.test_mode.outputs.mode }}
+      description: ${{ steps.test_mode.outputs.description }}
     env:
       OS: ubuntu-latest
       PYTHON: '3.10'
+      COVERAGE_FILE: coverage-run-tests.data  # combined in the coverage job
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -173,25 +178,20 @@ jobs:
         # --base-dir matches the conftest default (./tests/_data/) and the
         # path covered by the cache-test-data step above. Pinned explicitly
         # so cache hits are stable across any future conftest default change.
-        # Spike sorting suites run in pytest-v2 and pytest-legacy.
-        pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
-          --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
+        # The core lane leaves out the spike sorting suites, which run in
+        # pytest-v2 and pytest-legacy (lanes: tests/_ci_lanes.py).
+        pytest --lane core --no-docker --no-dlc --base-dir ./tests/_data/ \
+          --cov-config=.coveragerc --cov=spyglass-neuro \
           ${{ steps.test_mode.outputs.marker_args }} \
-          --ignore=tests/spikesorting/v0 \
-          --ignore=tests/spikesorting/v1 \
-          --ignore=tests/spikesorting/v2 \
           tests/
-    # Spike sorting jobs upload their own coverage reports below.
-    - name: Upload coverage reports to Codecov
+    - name: Upload raw coverage data
       timeout-minutes: 10
-      if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
-      uses: codecov/codecov-action@v5
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage.xml
-        disable_search: true
-        flags: ${{ steps.test_mode.outputs.mode }}-tests
-        name: ${{ steps.test_mode.outputs.description }}
+        name: coverage-run-tests
+        path: coverage-run-tests.data
+        if-no-files-found: ignore
 
   pytest-v2: # Spikesorting V2
     name: pytest-v2 ${{ matrix.shard.name }} (SpikeInterface 0.104)
@@ -201,10 +201,14 @@ jobs:
       github.event.action != 'closed' ||
       github.event.pull_request.merged == true
     # Shards are balanced by runtime; separate-env lanes run beside them.
-    # New full-sort test file: add it to INTEGRATION_MODULES in run_ci_shard.py.
+    # New full-sort test file: add it to INTEGRATION_MODULES in tests/_ci_lanes.py.
     env:
       # CPU torch wheels; the CUDA ones have filled the runner disk.
       PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+      COVERAGE_FILE: coverage-v2-${{ matrix.shard.name }}.data
+      # Push and PR: unit and db_unit tiers plus smoke tests. Schedule and
+      # dispatch: every tier.
+      V2_SCOPE: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && '--v2-pr' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -249,16 +253,7 @@ jobs:
       # Run a sorter, not just import it.
       run: |
         pip check
-        python - <<'EOF'
-        import spikeinterface as si
-        import spikeinterface.sorters as sis
-        assert "mountainsort5" in sis.installed_sorters(), sis.installed_sorters()
-        import mountainsort4
-        assert callable(mountainsort4.mountainsort4)
-        rec = si.generate_recording(num_channels=4, durations=[2.0], sampling_frequency=30000.0)
-        sorting = sis.run_sorter("mountainsort5", rec, folder="/tmp/ms5_smoke", remove_existing_folder=True, filter=False, whiten=True)
-        print("mountainsort5 runtime ok:", sorting)
-        EOF
+        python tests/spikesorting/v2/scripts/smoke_supported_python.py
     - name: Cache downloaded MEArec fixtures
       # Keyed per event so PR (smoke only) and nightly/manual caches stay apart.
       uses: actions/cache@v4
@@ -332,47 +327,21 @@ jobs:
           REQ="mearec_polymer_smoke"
         fi
         echo "SPYGLASS_V2_REQUIRE_FIXTURES=$REQ" >> "$GITHUB_ENV"
-    - name: Select the v2 test tiers for this run
-      # Push and PR: unit, db_unit and smoke tests. Schedule and dispatch: all.
-      # A later ``-m`` replaces pyproject's, so repeat ``not regenerate``.
-      run: |
-        if [ "${{ github.event_name }}" = "push" ] || \
-           [ "${{ github.event_name }}" = "pull_request" ]; then
-          MARKERS="(unit or db_unit or smoke) and not regenerate"
-        else
-          MARKERS="not regenerate"
-        fi
-        echo "V2_MARKERS=$MARKERS" >> "$GITHUB_ENV"
     - name: Run modern spike-sorting tests
       if: contains(fromJSON('["single-session", "integration", "unit"]'), matrix.shard.name)
-      # Shard contents: tests/spikesorting/v2/scripts/run_ci_shard.py.
       run: |
-        # DB-free unit tier on xdist workers, then DB tiers serially; fail if either
-        # fails. Per-shard XML because later lanes overwrite .coverage.
+        # DB-free unit tier on xdist workers, then DB tiers serially; fail if either fails.
         shard=${{ matrix.shard.name }}
-        common=(--no-docker --no-dlc -q --v2-tier-budgets --durations=25
-                --cov-config=tests/.coveragerc)
+        common=(--lane "v2-$shard" --no-docker --no-dlc -q --v2-tier-budgets
+                --durations=25 --cov-config=tests/.coveragerc --cov-append)
         unit_status=0
         db_status=0
-        python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
-          --v2-tier unit -m "not regenerate" -n auto "${common[@]}" \
-          --junitxml="junit-v2-$shard-unit.xml" --cov-report= \
-          || unit_status=$?
-        python tests/spikesorting/v2/scripts/run_ci_shard.py "$shard" \
-          -m "($V2_MARKERS) and not unit" "${common[@]}" --cov-append \
-          --junitxml="junit-v2-$shard.xml" \
-          --cov-report="xml:coverage-v2-$shard.xml" || db_status=$?
+        pytest --v2-tier unit -n auto "${common[@]}" \
+          --junitxml="junit-v2-$shard-unit.xml" || unit_status=$?
+        pytest --v2-tier database $V2_SCOPE "${common[@]}" \
+          --junitxml="junit-v2-$shard.xml" || db_status=$?
         echo "unit tier exit $unit_status; database tiers exit $db_status"
         [ "$unit_status" -eq 0 ] && [ "$db_status" -eq 0 ]
-    - name: Upload v2 shard coverage to Codecov
-      if: ${{ !cancelled() && contains(fromJSON('["single-session", "integration", "unit"]'), matrix.shard.name) && hashFiles(format('coverage-v2-{0}.xml', matrix.shard.name)) != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-${{ matrix.shard.name }}.xml
-        disable_search: true
-        flags: spikesorting-v2-${{ matrix.shard.name }}
-        name: Spike sorting v2 ${{ matrix.shard.name }}
     # --- Matching extra (own env); asserts the resolver keeps numpy>=2.
     - name: Matching-extra resolver evidence (separate env)
       if: matrix.shard.name == 'matching'
@@ -389,29 +358,9 @@ jobs:
         # No ``|| true``: a missing smoke fixture must fail, not skip the match path.
         conda run -n spyglass_v2_matching python \
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
-        conda run -n spyglass_v2_matching pytest -m "$V2_MARKERS" \
-          --v2-tier-budgets --durations=25 \
-          --junitxml=junit-v2-matching.xml \
-          tests/spikesorting/v2/test_v1_parity.py::test_optional_matching_extra_resolution \
-          tests/spikesorting/v2/test_unitmatch.py \
-          tests/spikesorting/v2/test_unitmatch_concat.py \
-          tests/spikesorting/v2/test_unitmatch_backend.py \
-          tests/spikesorting/v2/test_unitmatch_daily_concat.py \
-          tests/spikesorting/v2/test_direct_curation_unitmatch.py \
-          tests/spikesorting/v2/test_motion_consumers.py::test_unitmatch_bundle_of_a_corrected_sort \
-          tests/spikesorting/v2/test_motion_consumers.py::test_corrected_concat_bundle_keeps_windows_in_spans \
-          tests/spikesorting/v2/test_notebook_execution.py::test_cross_session_notebook_runs \
-          --no-docker --no-dlc -q --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-matching.xml
-    - name: Upload matching coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-v2-matching.xml') != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-matching.xml
-        disable_search: true
-        flags: spikesorting-v2-matching
-        name: Spike sorting v2 matching
+        conda run -n spyglass_v2_matching pytest --lane v2-matching $V2_SCOPE \
+          --v2-tier-budgets --durations=25 --junitxml=junit-v2-matching.xml \
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
     # --- Matcher ground truth: red until the 2sessions_{s1,s2} fixtures are
     # hosted (_fetch.py URLs are None). Do not mask the failure.
     - name: Two-session matcher ground-truth gate (nightly / manual dispatch)
@@ -420,17 +369,7 @@ jobs:
         SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_2sessions_s1 mearec_polymer_128ch_2sessions_s2" \
           conda run -n spyglass_v2_matching pytest \
           tests/spikesorting/v2/test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth \
-          --no-docker --no-dlc -q --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-matching-ground-truth.xml
-    - name: Upload matcher ground-truth coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-v2-matching-ground-truth.xml') != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-matching-ground-truth.xml
-        disable_search: true
-        flags: spikesorting-v2-matching-ground-truth
-        name: Spike sorting v2 matcher ground truth
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
     # --- Motion benchmark: development evidence with no pass/fail limits,
     # ~50 min, so manual dispatch only.
     - name: Motion-correction development benchmark (manual dispatch only)
@@ -440,17 +379,7 @@ jobs:
         SPYGLASS_V2_MOTION_BENCHMARK_OUT="$RUNNER_TEMP/motion-benchmark-development" \
         SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_drift_120s" \
           pytest tests/spikesorting/v2/test_motion_acceptance.py \
-          --no-docker --no-dlc -q --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-motion-benchmark.xml
-    - name: Upload motion benchmark coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-v2-motion-benchmark.xml') != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-motion-benchmark.xml
-        disable_search: true
-        flags: spikesorting-v2-motion-benchmark
-        name: Spike sorting v2 motion benchmark
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
     - name: Upload the motion benchmark evidence (manual dispatch only)
       # always(): publish partial results from failed or timed-out runs.
       if: ${{ always() && matrix.shard.name == 'motion-benchmark' }}
@@ -473,29 +402,9 @@ jobs:
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
         # Missing figpack/playwright/browser fails the browser tests, not skips.
         SPYGLASS_REQUIRE_BROWSER_TESTS=1 conda run -n spyglass_v2_curation pytest \
-          -m "$V2_MARKERS" --v2-tier-budgets --durations=25 \
+          --lane v2-curation $V2_SCOPE --v2-tier-budgets --durations=25 \
           --junitxml=junit-v2-curation.xml \
-          tests/spikesorting/v2/test_figpack_curation_integration.py \
-          tests/spikesorting/v2/test_review_api_integration.py \
-          tests/spikesorting/v2/test_review_delivery.py \
-          tests/spikesorting/v2/test_review_unit_properties.py \
-          tests/spikesorting/v2/test_review_inspection.py \
-          tests/spikesorting/v2/test_review_browser.py \
-          tests/spikesorting/v2/test_review_browser_journey.py \
-          tests/spikesorting/v2/test_user_curation_workflow.py \
-          tests/spikesorting/v2/test_epoch_unitmatch.py \
-          tests/spikesorting/v2/test_notebook_execution.py::test_curation_notebook_runs \
-          --no-docker --no-dlc -q --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-curation.xml
-    - name: Upload curation coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-v2-curation.xml') != '' }}
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-curation.xml
-        disable_search: true
-        flags: spikesorting-v2-curation
-        name: Spike sorting v2 curation
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
     # --- Acceptance probes (nightly/manual, curation env): too slow per push.
     # test_database_and_file_restore skips: no Docker client for its restore.
     - name: End-to-end acceptance probes (nightly / manual dispatch)
@@ -504,17 +413,14 @@ jobs:
         SPYGLASS_V2_REQUIRE_FIXTURES="mearec_tetrode_60s mearec_polymer_smoke" \
           conda run -n spyglass_v2_curation pytest \
           tests/spikesorting/v2/acceptance --run-acceptance --no-docker --no-dlc -q \
-          --cov-config=tests/.coveragerc \
-          --cov-report=xml:coverage-v2-acceptance.xml
-    - name: Upload acceptance coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-v2-acceptance.xml') != '' }}
-      uses: codecov/codecov-action@v5
+          --cov-config=tests/.coveragerc --cov-append
+    - name: Upload raw coverage data
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-v2-acceptance.xml
-        disable_search: true
-        flags: spikesorting-v2-acceptance
-        name: Spike sorting v2 acceptance
+        name: coverage-v2-${{ matrix.shard.name }}
+        path: coverage-v2-${{ matrix.shard.name }}.data
+        if-no-files-found: ignore
     - name: Upload v2 test reports
       # Per-test durations, to track cost across runs; includes failed runs.
       if: ${{ always() && hashFiles('junit-v2-*.xml') != '' }}
@@ -552,26 +458,57 @@ jobs:
         python -m pip check
     - name: Check public and scientific contracts without the DB harness
       run: |
-        python -m pytest --noconftest -o addopts='' -q \
-          tests/spikesorting/v2/test_dependency_contract.py \
-          tests/spikesorting/v2/test_pipeline_facade.py \
-          tests/spikesorting/v2/test_service_import_contracts.py::test_pipeline_type_contracts_are_reexported_from_facade \
-          tests/spikesorting/v2/test_params_validation.py::test_preprocessing_non_default_blob_round_trips \
-          tests/spikesorting/v2/test_preprocessing_order.py \
-          tests/spikesorting/v2/test_signal_math.py \
-          tests/spikesorting/v2/test_mountainsort4_runtime.py
+        python -m pytest --noconftest -p tests._ci_lanes -o addopts='' -q \
+          --lane v2-supported-python
     - name: Exercise the installed v2 sorter runtime
       run: python tests/spikesorting/v2/scripts/smoke_supported_python.py
+
+  legacy-changes:
+    # Did this pull request touch what pytest-legacy exercises?
+    if: |-
+      github.event_name == 'pull_request' && (
+        github.event.action != 'closed' ||
+        github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # paths-filter lists the PR's files through the API
+    outputs:
+      legacy: ${{ steps.filter.outputs.legacy }}
+    steps:
+    - uses: dorny/paths-filter@v4.0.3
+      id: filter
+      with:
+        filters: |
+          legacy:
+            - 'src/spyglass/spikesorting/*.py'
+            - 'src/spyglass/spikesorting/v0/**'
+            - 'src/spyglass/spikesorting/v1/**'
+            - 'src/spyglass/spikesorting/analysis/**'
+            - 'src/spyglass/decoding/v1/waveform_features.py'
+            - 'environments/environment_spikesorting_legacy.yml'
+            - 'pyproject.toml'
+            - '.github/workflows/test-conda.yml'
+            - 'tests/_ci_lanes.py'
+            - 'tests/spikesorting/*.py'
+            - 'tests/spikesorting/v0/**'
+            - 'tests/spikesorting/v1/**'
+            - 'tests/spikesorting/v2/test_clusterless_waveform_features.py'
 
   pytest-legacy:
     # v0/v1 tests need SpikeInterface 0.99 (_require_legacy_si_environment).
     name: pytest-legacy (SpikeInterface 0.99)
-    # Skip if PR is closed but not merged
+    # Weekly (Sunday's schedule), on manual dispatch, and on pull requests that
+    # touch the legacy pipelines.
+    needs: legacy-changes
     if: |-
-      github.event_name != 'pull_request' ||
-      github.event.action != 'closed' ||
-      github.event.pull_request.merged == true
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        github.event.schedule == '0 0 * * 0' ||
+        needs.legacy-changes.outputs.legacy == 'true')
     runs-on: ubuntu-latest
+    env:
+      COVERAGE_FILE: coverage-legacy.data  # combined in the coverage job
     defaults:
       run:
         shell: bash -el {0}
@@ -666,17 +603,51 @@ jobs:
       run: mv tests/.coveragerc .coveragerc
     - name: Run legacy spike-sorting tests
       run: |
-        # This v2 file holds the legacy-environment guard test (its v2 cases skip).
-        pytest tests/spikesorting/v0 tests/spikesorting/v1 \
-          tests/spikesorting/v2/test_clusterless_waveform_features.py \
-          --no-docker --no-dlc --base-dir ./tests/_data/ -q \
-          --cov-config=.coveragerc --cov-report=xml:coverage-legacy.xml
-    - name: Upload legacy coverage to Codecov
-      if: ${{ !cancelled() && hashFiles('coverage-legacy.xml') != '' }}
+        pytest --lane legacy --no-docker --no-dlc --base-dir ./tests/_data/ -q \
+          --cov-config=.coveragerc
+    - name: Upload raw coverage data
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-legacy
+        path: coverage-legacy.data
+        if-no-files-found: ignore
+
+  coverage:
+    # One Codecov report: every test job's raw data, combined.
+    name: Combine coverage
+    needs: [run-tests, pytest-v2, pytest-legacy]
+    if: |-
+      !cancelled() && (
+        github.event_name != 'pull_request' ||
+        github.event.action != 'closed' ||
+        github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout  # the report reads the measured sources
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+    - name: Install coverage
+      run: python -m pip install coverage
+    - name: Download raw coverage data
+      uses: actions/download-artifact@v4
+      with:
+        pattern: coverage-*
+        path: coverage-data
+        merge-multiple: true
+    - name: Combine into one report
+      # [paths] in tests/.coveragerc maps site-packages installs onto src/.
+      run: |
+        coverage combine --rcfile=tests/.coveragerc coverage-data/*.data
+        coverage xml --rcfile=tests/.coveragerc -o coverage.xml
+    - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        files: coverage-legacy.xml
+        files: coverage.xml
         disable_search: true
-        flags: spikesorting-legacy
-        name: Spike sorting legacy
+        flags: ${{ needs.run-tests.outputs.mode || 'full' }}-tests
+        name: ${{ needs.run-tests.outputs.description || 'Full test suite' }}

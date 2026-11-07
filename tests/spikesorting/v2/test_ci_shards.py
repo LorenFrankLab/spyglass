@@ -1,61 +1,38 @@
 """The CI shards partition the suite, including newly added test modules."""
 
-import pytest
+from pathlib import Path, PurePosixPath
 
-from tests.spikesorting.v2.scripts.run_ci_shard import (
+from tests._ci_lanes import (
     INTEGRATION_MODULES,
-    REPO_ROOT,
-    SHARDS,
-    SUITE,
-    shard_args,
+    LANES,
+    V2,
+    collects,
+    missing_paths,
 )
 
-
-def _selected_test_files(args, repo_root):
-    ignored = {
-        repo_root / arg.removeprefix("--ignore=")
-        for arg in args
-        if arg.startswith("--ignore=")
-    }
-    files = set()
-    for arg in args:
-        if arg.startswith("--"):
-            continue
-        path = repo_root / arg
-        candidates = path.rglob("test_*.py") if path.is_dir() else [path]
-        files.update(
-            candidate
-            for candidate in candidates
-            if not any(
-                candidate == skip or skip in candidate.parents
-                for skip in ignored
-            )
-        )
-    return files
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SHARDS = ("v2-single-session", "v2-integration", "v2-unit")
 
 
 def test_ci_shards_cover_every_test_once():
-    shards = [
-        _selected_test_files(shard_args(name), REPO_ROOT) for name in SHARDS
+    files = [
+        PurePosixPath(path.relative_to(REPO_ROOT).as_posix())
+        for path in (REPO_ROOT / V2).rglob("test_*.py")
     ]
-    expected = set((REPO_ROOT / SUITE).rglob("test_*.py"))
-    assert set.union(*shards) == expected
-    assert sum(map(len, shards)) == len(expected)
+    assert files
+    for file in files:
+        owners = [name for name in SHARDS if collects(LANES[name], file)]
+        assert len(owners) == 1, (file, owners)
     assert len(INTEGRATION_MODULES) == len(set(INTEGRATION_MODULES))
 
 
-def test_new_test_defaults_to_unit_shard(tmp_path):
-    suite = tmp_path / SUITE
-    suite.mkdir(parents=True)
-    for name in INTEGRATION_MODULES:
-        (suite / name).touch()
-    added = suite / "test_new_regression.py"
-    added.touch()
-    assert added in _selected_test_files(
-        shard_args("unit", repo_root=tmp_path), tmp_path
-    )
+def test_new_test_defaults_to_unit_shard():
+    added = PurePosixPath(V2) / "test_new_regression.py"
+    owners = [name for name in SHARDS if collects(LANES[name], added)]
+    assert owners == ["v2-unit"]
 
 
 def test_stale_integration_path_fails_instead_of_losing_coverage(tmp_path):
-    with pytest.raises(ValueError, match="Missing v2 integration modules"):
-        shard_args("integration", repo_root=tmp_path)
+    assert all(not missing_paths(lane, REPO_ROOT) for lane in LANES.values())
+    missing = missing_paths(LANES["v2-integration"], tmp_path)
+    assert missing == sorted(f"{V2}/{name}" for name in INTEGRATION_MODULES)

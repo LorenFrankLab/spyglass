@@ -174,11 +174,32 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.timeout(TIER_TIMEOUTS_S[tier]))
 
     requested = config.getoption("v2_tier", default=None)
-    if requested is not None:
+    if requested == "database":
+        # Everything but the unit tier, including untiered items (doctests).
+        unit = {item for item, tier in assignments if tier == "unit"}
+        deselected = [item for item in items if item in unit]
+        items[:] = [item for item in items if item not in unit]
+        config.hook.pytest_deselected(items=deselected)
+    elif requested is not None:
         wanted = {item for item, tier in assignments if tier == requested}
         selected = [item for item in items if item in wanted]
         deselected = [item for item in items if item not in wanted]
         items[:] = selected
+        config.hook.pytest_deselected(items=deselected)
+
+    # The per-PR selection; other suites' tests are left to their own options.
+    if config.getoption("v2_pr", default=False):
+        per_pr = {
+            item for item, tier in assignments if tier in ("unit", "db_unit")
+        }
+        deselected = [
+            item
+            for item in items
+            if item.path.is_relative_to(SUITE_PATH)
+            and item not in per_pr
+            and item.get_closest_marker("smoke") is None
+        ]
+        items[:] = [item for item in items if item not in deselected]
         config.hook.pytest_deselected(items=deselected)
 
 
