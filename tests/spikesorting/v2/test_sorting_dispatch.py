@@ -1132,3 +1132,31 @@ def test_sorting_wrappers_forward_statistics_spans(
         noise_levels,
         cache_span_noise_levels(reference, spans, return_in_uV=True, seed=2),
     )
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_local_mountainsort4_scratch_stays_in_the_sort_temp_dir(monkeypatch):
+    """MS4 writes its whitened copy inside the per-sort scratch folder, not
+    the system ``/tmp``."""
+    import os
+    import uuid
+
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
+
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=30_000.0
+    )
+    captured = {}
+
+    def _capture(*args, **kwargs):
+        captured.update(kwargs)
+        return _tiny_numpy_sorting()
+
+    monkeypatch.setattr(sis, "run_sorter", _capture)
+    run_si_sorter("mountainsort4", {}, rec, uuid.uuid4(), None, None)
+
+    scratch = os.path.dirname(captured["folder"])
+    assert captured["tempdir"] == scratch

@@ -660,7 +660,7 @@ def run_si_sorter(
                     spans=statistics_spans,
                 )
 
-            # Job kwargs go via SI globals (MS4/MS5/KS4 reject them as kwargs).
+            # Job kwargs go through SI's global job settings, not sorter params.
             # A child folder keeps container files out of the shared temp dir.
             output_folder = os.path.join(sorter_temp_dir.name, "sorter_output")
             run_kwargs = dict(
@@ -680,6 +680,12 @@ def run_si_sorter(
                     **run_kwargs, **effective_params
                 )
             else:
+                if "tempdir" in sis.get_default_sorter_params(sorter):
+                    # Otherwise MS4 writes its whitened copy to the system /tmp.
+                    effective_params = {
+                        **effective_params,
+                        "tempdir": sorter_temp_dir.name,
+                    }
                 raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
             # Copy into memory before the finally deletes the temp dir.
             return si.NumpySorting.from_sorting(
