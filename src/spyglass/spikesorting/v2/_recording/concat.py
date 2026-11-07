@@ -662,6 +662,98 @@ def concat_span_arrays(
     return continuity_spans, continuity_start_s, continuity_end_s, statistics
 
 
+def member_kept_intervals(member_plan, recordings) -> list:
+    """Each member's kept intervals on its own timeline, in seconds.
+
+    A member without artifact detection keeps its whole acquisition, split
+    at its internal timestamp gaps.
+
+    Parameters
+    ----------
+    member_plan : list[dict]
+        Resolved per-member plan dicts, in ``member_index`` order.
+    recordings : list[si.BaseRecording]
+        The unmasked member recordings, aligned with ``member_plan``.
+
+    Returns
+    -------
+    list[numpy.ndarray]
+        ``(n_intervals, 2)`` valid times per member.
+    """
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
+
+    return [
+        (
+            plan["valid_times"]
+            if plan["valid_times"] is not None
+            else base_intervals_and_gaps(
+                recording, recording.get_sampling_frequency()
+            ).base_intervals
+        )
+        for plan, recording in zip(member_plan, recordings, strict=True)
+    ]
+
+
+def assert_concat_preserves_samples(
+    concat_n_samples: int, boundaries: list[int]
+) -> None:
+    """Refuse a concatenation whose length differs from its members' total.
+
+    A mismatch would misalign ``split_sorting_by_session``.
+
+    Parameters
+    ----------
+    concat_n_samples : int
+        Frames of the concatenated recording.
+    boundaries : list[int]
+        Cumulative member end samples (:func:`cumulative_member_boundaries`).
+
+    Raises
+    ------
+    RuntimeError
+        If the counts differ.
+    """
+    if boundaries and concat_n_samples != boundaries[-1]:
+        raise RuntimeError(
+            "ConcatenatedRecording.make: the concatenated recording has "
+            f"{concat_n_samples} samples but the cumulative member sample "
+            f"count is {boundaries[-1]}; the concatenation must preserve "
+            "the sample count or the MemberBoundary back-mapping would be "
+            "wrong."
+        )
+
+
+def member_boundary_rows(member_indices, boundaries, member_valid_times):
+    """The ``MemberBoundary`` part rows, without the master key.
+
+    Parameters
+    ----------
+    member_indices : list[int]
+        Each member's ``member_index``.
+    boundaries : list[int]
+        Cumulative member end samples, aligned with ``member_indices``.
+    member_valid_times : list[numpy.ndarray]
+        Each member's kept intervals (:func:`member_kept_intervals`).
+
+    Returns
+    -------
+    list[dict]
+        ``{"member_index", "end_sample", "member_valid_times"}`` per member.
+    """
+    return [
+        {
+            "member_index": member_index,
+            "end_sample": int(end_sample),
+            "member_valid_times": valid_times,
+        }
+        for member_index, end_sample, valid_times in zip(
+            member_indices, boundaries, member_valid_times, strict=True
+        )
+    ]
+
+
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     """Return kept concat intervals in seconds from half-open frame ranges."""
     import numpy as np

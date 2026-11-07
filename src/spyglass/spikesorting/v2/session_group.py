@@ -492,6 +492,16 @@ class ConcatenatedRecording(
     Writes one masked, unwhitened ``ElectricalSeries`` over the ordered
     members (no motion correction), plus cumulative member sample boundaries
     in ``MemberBoundary``.
+
+    Steps
+    -----
+    1. Resolve the frozen members, rebuilding a missing member file.
+    2. Load each member's cached recording.
+    3. Zero each member's artifact intervals.
+    4. Derive the continuity and statistics spans from member timestamps.
+    5. Stitch the members into one segment and check its length.
+    6. Write one ``ElectricalSeries`` with provenance to a staged file.
+    7. Register the file and insert the row and its ``MemberBoundary`` rows.
     """
 
     _populate_key_lock = True
@@ -616,56 +626,39 @@ class ConcatenatedRecording(
             back-mapping).
         """
         from spyglass.spikesorting.v2._recording.concat import (
+            assert_concat_preserves_samples,
             build_concatenated_recording,
             concat_provenance_tables,
             concat_span_arrays,
             cumulative_member_boundaries,
             mask_member_recordings,
+            member_boundary_rows,
+            member_kept_intervals,
             observation_intervals,
         )
         from spyglass.spikesorting.v2._storage.nwb import write_nwb_artifact
-        from spyglass.spikesorting.v2._core.signal_math import (
-            base_intervals_and_gaps,
-        )
 
+        # 2. Load each member's cached recording.
         recordings, member_sample_counts, member_indices = (
             self._load_member_recordings(member_plan, member_traces)
         )
-        member_valid_times = [
-            (
-                plan["valid_times"]
-                if plan["valid_times"] is not None
-                else base_intervals_and_gaps(
-                    recording, recording.get_sampling_frequency()
-                ).base_intervals
-            )
-            for plan, recording in zip(member_plan, recordings, strict=True)
-        ]
+        member_valid_times = member_kept_intervals(member_plan, recordings)
+        # 3. Zero each member's artifact intervals.
         masked_recordings, artifact_ranges = mask_member_recordings(
             recordings, [plan["valid_times"] for plan in member_plan]
         )
-        # Use member timestamps; the concatenation drops their gaps.
+        # 4. Derive the spans from member timestamps; the concat drops gaps.
         continuity_spans, continuity_start_s, continuity_end_s, statistics = (
             concat_span_arrays(
                 recordings, member_sample_counts, artifact_ranges
             )
         )
-        recordings = masked_recordings
-
-        concatenated = build_concatenated_recording(recordings)
-
-        # Compute before staging the NWB so a failure cannot orphan a file.
+        # 5. Stitch the members into one segment and check its length.
+        concatenated = build_concatenated_recording(masked_recordings)
+        # Checked before staging the NWB so a failure cannot orphan a file.
         boundaries = cumulative_member_boundaries(member_sample_counts)
         concat_n_samples = int(concatenated.get_num_samples())
-        # A sample-count mismatch would misalign split_sorting_by_session.
-        if boundaries and concat_n_samples != boundaries[-1]:
-            raise RuntimeError(
-                "ConcatenatedRecording.make: the concatenated recording has "
-                f"{concat_n_samples} samples but the cumulative member sample "
-                f"count is {boundaries[-1]}; the concatenation must preserve "
-                "the sample count or the MemberBoundary back-mapping would be "
-                "wrong."
-            )
+        assert_concat_preserves_samples(concat_n_samples, boundaries)
         sampling_frequency = float(concatenated.get_sampling_frequency())
         obs_intervals = observation_intervals(
             concat_n_samples, sampling_frequency, artifact_ranges
@@ -673,7 +666,7 @@ class ConcatenatedRecording(
         n_channels = int(concatenated.get_num_channels())
         total_duration_s = concat_n_samples / sampling_frequency
 
-        # The analysis NWB's parent is the first member's session.
+        # 6. Write one ElectricalSeries; its parent is the first member's NWB.
         provenance_tables = concat_provenance_tables(
             concat_recording_id=key["concat_recording_id"],
             preprocessing_params_name=preprocessing_params_name,
@@ -688,23 +681,13 @@ class ConcatenatedRecording(
             concatenated,
             anchor_nwb_file_name,
             filtering_description=(
-                f"Concatenated {len(recordings)} member recording(s) "
+                f"Concatenated {len(masked_recordings)} member recording(s) "
                 f"(preprocessing_params={preprocessing_params_name!r}); "
                 "selected member artifact masks applied; no motion "
                 "correction; unwhitened"
             ),
             provenance_tables=provenance_tables,
         )
-        member_boundaries = [
-            {
-                "member_index": member_index,
-                "end_sample": int(end_sample),
-                "member_valid_times": valid_times,
-            }
-            for member_index, end_sample, valid_times in zip(
-                member_indices, boundaries, member_valid_times, strict=True
-            )
-        ]
         return ConcatRecordingComputed(
             analysis_file_name=analysis_file_name,
             object_id=object_id,
@@ -715,7 +698,9 @@ class ConcatenatedRecording(
             n_samples=concat_n_samples,
             content_hash=content_hash,
             anchor_nwb_file_name=anchor_nwb_file_name,
-            member_boundaries=member_boundaries,
+            member_boundaries=member_boundary_rows(
+                member_indices, boundaries, member_valid_times
+            ),
             obs_intervals=obs_intervals,
             statistics_spans=statistics,
             continuity_spans=continuity_spans,
