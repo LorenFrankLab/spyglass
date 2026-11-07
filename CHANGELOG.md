@@ -75,6 +75,24 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
+#### Delete Options Are Keyword-Only (#PRNUM)
+
+`Table().delete(restriction)` read `restriction` as `force_permission`, so it
+skipped the permission check and targeted the whole table. Positional arguments
+to `delete`, `cautious_delete` and `super_delete` are now restrictions, and a
+positional bool raises `TypeError`.
+
+```python
+# OLD: positional flags
+Table().cautious_delete(True)
+Table().super_delete(False, safemode=False)
+
+# NEW: pass flags by keyword; positionals restrict
+Table().cautious_delete(force_permission=True)
+Table().super_delete(warn=False, safemode=False)
+Table().delete({"nwb_file_name": nwb_file_name})
+```
+
 ### Documentation
 
 - Add LFP artifact detection to the LFP notebook #1641
@@ -127,6 +145,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Apply a positional restriction passed to `delete`, `cautious_delete` and
+    `super_delete`, on Spyglass and merge tables, instead of reading it as
+    `force_permission` or `warn` #PRNUM
 
 ### Pipelines
 
