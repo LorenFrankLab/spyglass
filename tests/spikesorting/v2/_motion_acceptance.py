@@ -17,8 +17,9 @@ or above it and must carry gates, so held-out seeds are never run without
 gates fixed in advance. A held-out manifest also pins the harness code it was
 fixed against (:class:`HarnessPin`); its cases refuse to run on other code.
 
-DB-free and light at import (pydantic only), so the gate-check tests run in
-the unit shard.
+DB-FREE and light at import (pydantic only; the v2 parameter schemas are
+imported when a manifest is validated), so the gate-check unit tests run in the
+per-PR unit shard.
 """
 
 from __future__ import annotations
@@ -408,8 +409,8 @@ class HarnessPin(_Model):
     ``files`` records the exact on-disk SHA-256 of each of :data:`HARNESS_FILES`,
     including uncommitted edits (:func:`harness_fingerprint`); it does not claim
     those bytes are committed. A case refuses to run when its harness files
-    differ (:func:`check_harness_pin`). A refreshed pin is not benchmark
-    evidence.
+    differ (:func:`check_harness_pin`). Historical pin refreshes are documented
+    in the adjacent test README; a refreshed pin is not benchmark evidence.
     """
 
     git_commit: str = Field(min_length=7)
