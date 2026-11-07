@@ -193,8 +193,8 @@ See the
 [Spike Sorting v2 notebooks](https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV2/)
 for presets, curation, concatenation, and cross-session unit matching, and the
 [v1→v2 migration guide](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Migration/)
-for porting existing v1 workflows. Existing v0/v1 sorts stay queryable; active
-v0/v1 runtime workflows use the legacy SpikeInterface 0.99 environment.
+for porting existing v1 workflows. Existing v0/v1 sorts stay readable in the
+main environment; new sorts use v2.
 
 ## Tutorials
 

@@ -325,5 +325,5 @@ def test_legacy_spike_sorting_names_the_legacy_environment(
 
     module = importlib.import_module(module_name)
     table = module.SpikeSorting()
-    with pytest.raises(RuntimeError, match="legacy SpikeInterface 0.99"):
+    with pytest.raises(RuntimeError, match="needs SpikeInterface 0.99"):
         table.make_compute(**call)

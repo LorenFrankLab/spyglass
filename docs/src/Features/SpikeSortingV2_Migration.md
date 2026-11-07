@@ -26,10 +26,10 @@ existing v0/v1 behavior are in the [CHANGELOG](../CHANGELOG.md).
     chain with one call (preset → preprocess → artifact → sort → curation →
     merge). v2 also adds same-day concatenation, cross-session unit matching,
     content-addressed identity, and hash-verifiable recompute.
-- **Existing v1 sorts: keep using v1.** They stay queryable through the v1
-    tables.
-- **Producing new v0/v1 output needs the legacy SpikeInterface 0.99
-    environment.** Under SI 0.104 these raise a clear `RuntimeError`:
+- **Existing v0/v1 sorts stay readable.** Query them through the v0/v1 tables
+    and `SpikeSortingOutput` in the main environment.
+- **New v0/v1 output is not supported.** Under SI 0.104 these raise a clear
+    `RuntimeError`; run new sorts through v2 instead:
     - v0 `ArtifactDetection` / `Waveforms` / `QualityMetrics` / `BurstPair`
         populate;
     - v1 `ArtifactDetection` / `MetricCuration` / `BurstPair` populate, and
@@ -68,28 +68,24 @@ python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"
 - Dependency pins and when they can move:
     [Dependency Pins](../ForDevelopers/Dependencies.md).
 
-### Two environments, one database
+### Reading v0/v1 results
 
-|                  | Modern (supported v2 install)                                                                                                                                    | Legacy (v0/v1 runtime)                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Install          | `pip install -e ".[spikesorting-v2]"` (or `environments/environment_spikesorting_v2.yml`); SI 0.104.3, NumPy 2                                                   | `environments/environment_spikesorting_legacy.yml`, SI 0.99, NumPy < 2       |
-| Runs             | v2 sort / review / curation / selection; **reads** v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`)                                                     | v0/v1 populate / `MetricCuration` / `BurstPair` / `Waveforms`; MountainSort4 |
-| Sorters that run | MountainSort4 (hippocampus default; native or container), MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed), SpykingCircus2 / Tridesclous2 | MountainSort4 and the v1 sorter set                                          |
-| Check            | `pip check`; `preflight_v2_pipeline(...)` reports `sorter_installed` / `sorter_runtime_available`                                                                | `pip check`; the v1 tutorials                                                |
-
-- Both environments share the MySQL database and the `SPYGLASS_BASE_DIR`
-    artifacts.
+- The main environment (`environments/environment.yml`; SI 0.104.3, NumPy 2)
+    reads v0/v1 outputs (`SpikeSortingOutput`, `SortedSpikesGroup`) from the
+    same database and `SPYGLASS_BASE_DIR`. Add the `spikesorting-v2` extra
+    (`pip install -e ".[spikesorting-v2]"`) to run v2 sorts.
+- Sorters that run: MountainSort4 (hippocampus default; native or container),
+    MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed),
+    SpykingCircus2 / Tridesclous2. `preflight_v2_pipeline(...)` reports
+    `sorter_installed` / `sorter_runtime_available`.
 - The `spikesorting-v2` extra includes `mountainsort4==1.0.7`. It bundles the
     algorithm and runs natively on NumPy 2; no `ml_ms4alg` install is needed.
     Use the native preset (`franklab_probe_hippocampus_30khz_ms4_2026_06`) or
     the container preset
     (`franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`).
-- The legacy environment is only for producing new v0/v1 output. Users who only
-    *read* v0/v1 results use the modern install.
-- The legacy file relaxes the SI/probeinterface pins in `pyproject.toml` before
-    the build (see the comments at the top of that file). Follow it verbatim and
-    restore `pyproject.toml` afterwards. Installing both stacks from unchanged
-    metadata is not supported.
+- `environments/environment_spikesorting_legacy.yml` (SI 0.99, NumPy < 2) only
+    runs the v0/v1 test suites in CI (the `pytest-legacy` job). It is not a
+    supported install.
 
 ### Scripts and worker processes
 

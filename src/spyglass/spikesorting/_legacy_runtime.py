@@ -16,18 +16,15 @@ _LEGACY_BOUNDARY = Version("0.101")
 def _legacy_runtime_message(component: str) -> str:
     """Compose the error message raised by the legacy-environment guard."""
     return (
-        f"{component} requires the legacy SpikeInterface 0.99 environment. "
+        f"{component} needs SpikeInterface 0.99 and is not supported here. "
         "Existing v0/v1 rows, and their saved recordings, sortings, and "
         "binary-folder waveforms, remain readable under SpikeInterface "
         "0.101 and later; "
         "computing new v0/v1 sortings (other than clusterless_thresholder), "
         "waveforms, quality metrics, artifact detection, burst curation, and "
         "clusterless features is not. "
-        "To continue this workflow: "
-        "either run it in a separate legacy environment built from "
-        "environments/environment_spikesorting_legacy.yml, or switch new "
-        "processing to the modern v2 spike-sorting pipeline (see 'Two "
-        "environments, one database' in the Spike Sorting v2 migration guide)."
+        "Run new processing with the v2 spike-sorting pipeline (see "
+        "'Choosing v1 or v2' in the Spike Sorting v2 migration guide)."
     )
 
 

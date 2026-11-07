@@ -217,7 +217,7 @@ def _assert_legacy_guard(
     second invocation cannot silently pass the component-name assertion.
     """
     with pytest.raises(
-        RuntimeError, match="legacy SpikeInterface 0.99"
+        RuntimeError, match="needs SpikeInterface 0.99"
     ) as exc_info:
         callable_()
     assert component in str(exc_info.value)
