@@ -344,11 +344,11 @@ def _span_whitening_matrix(recording, spans, *, random_seed: int):
     return compute_whitening_from_covariance(cov, eps)
 
 
-def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
-    """SI external float64 whitening with a pinned covariance seed.
+def pinned_whiten(recording, *, random_seed: int = 0, spans=None, dtype=None):
+    """SI external whitening with a pinned covariance seed.
 
-    Shared by the sorter's external-whiten path and the whitened metric
-    analyzer. ``sip.whiten`` defaults to ``seed=None`` (non-deterministic),
+    Shared by the sorter's external-whiten path (float32) and the whitened
+    metric analyzer (float64, which analyzer recompute hashes). ``sip.whiten`` defaults to ``seed=None`` (non-deterministic),
     so the seed is explicit. The covariance uses only samples inside
     ``spans``, since artifact-masked zeros would over-whiten. Without spans,
     or with one covering the recording, this is SI's own whitening.
@@ -362,9 +362,13 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
     spans : list[tuple[int, int]] or None, optional
         Keyword-only. Statistics spans in ``recording``'s frame coordinates.
         Default ``None`` (the whole recording).
+    dtype : numpy dtype or None, optional
+        Keyword-only. Output dtype. Default ``None`` (float64).
     """
     import numpy as np
     import spikeinterface.preprocessing as sip
+
+    dtype = np.float64 if dtype is None else dtype
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         spans_cover_recording,
@@ -373,11 +377,11 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None):
     if spans is None or spans_cover_recording(
         spans, recording.get_num_samples()
     ):
-        return sip.whiten(recording, dtype=np.float64, seed=random_seed)
+        return sip.whiten(recording, dtype=dtype, seed=random_seed)
     whitening = _span_whitening_matrix(
         recording, spans, random_seed=random_seed
     )
-    return sip.whiten(recording, dtype=np.float64, W=whitening, M=None)
+    return sip.whiten(recording, dtype=dtype, W=whitening, M=None)
 
 
 def cache_span_noise_levels(
@@ -666,10 +670,12 @@ def run_si_sorter(
 
         with sorter_runtime_state(sorter, config.job_kwargs):
             if config.external_whiten:
+                # float32 like the stored traces; float64 doubled MS5's cache.
                 recording = pinned_whiten(
                     recording,
                     random_seed=config.random_seed,
                     spans=statistics_spans,
+                    dtype="float32",
                 )
 
             # Job kwargs go through SI's global job settings, not sorter params.
