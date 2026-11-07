@@ -365,7 +365,7 @@ class ConcatenatedRecordingSelection(
             If more than one selection row already matches the identity (a raw
             insert bypassed this helper).
         """
-        identity, set_hash, concat_recording_id, snapshot_rows, artifacts = (
+        identity, set_hash, concat_recording_id, snapshot_rows, _ = (
             _session_group_insert.plan_concat_selection(
                 cls, key, artifact_detection_ids
             )
@@ -380,31 +380,18 @@ class ConcatenatedRecordingSelection(
             {"concat_recording_id": concat_recording_id, **row}
             for row in snapshot_rows
         ]
-        from spyglass.spikesorting.v2.artifact_output import (
-            artifact_lifecycle_locks,
-        )
-
-        detection_ids = [
-            value for value in artifacts.values() if value is not None
-        ]
-        if detection_ids and cls.connection.in_transaction:
-            raise ValueError(
-                "Create an artifact-backed concat selection outside a caller-owned "
-                "transaction so its artifact lifecycle locks cover the commit."
-            )
         try:
             # Validated above; master and snapshot commit together.
-            with artifact_lifecycle_locks(detection_ids):
-                with cls._safe_context():
-                    cls.insert1(
-                        {
-                            **identity,
-                            "member_set_hash": set_hash,
-                            "concat_recording_id": concat_recording_id,
-                        },
-                        allow_direct_insert=True,
-                    )
-                    cls.MemberSnapshot.insert(snapshot_inserts)
+            with cls._safe_context():
+                cls.insert1(
+                    {
+                        **identity,
+                        "member_set_hash": set_hash,
+                        "concat_recording_id": concat_recording_id,
+                    },
+                    allow_direct_insert=True,
+                )
+                cls.MemberSnapshot.insert(snapshot_inserts)
         except dj.errors.DuplicateError:
             existing = cls._find_existing_pk(
                 identity, set_hash, concat_recording_id

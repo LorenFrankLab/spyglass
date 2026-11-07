@@ -1,7 +1,6 @@
 """``SortingSelection`` composition with the ``ArtifactDetectionOutput`` merge.
 
-Covers atomic composition, delete lifecycle, the fail-closed advisory lock,
-and ``get_merge_id`` integrity. No sorter or analyzer runs.
+Covers atomic composition, delete lifecycle and ``get_merge_id`` integrity. No sorter or analyzer runs.
 """
 
 from __future__ import annotations
@@ -292,8 +291,8 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
 def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
     """An artifact-free insert_selection is safe under an ambient transaction.
 
-    It takes no advisory lock and touches no merge, so the master and recording
-    source part land together on commit.
+    It touches no merge, so the master and recording source part land
+    together on commit.
     """
     import datajoint as dj
 
@@ -462,216 +461,6 @@ def test_insert_selection_lazily_registers_unregistered_detection(
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 
-def test_delete_and_insert_lock_the_same_detection_key(
-    ingested_recording, monkeypatch
-):
-    """insert_selection and the detection delete take the advisory lock keyed
-    on the same (ArtifactDetectionOutput, artifact_detection_id)."""
-    import contextlib
-
-    import spyglass.spikesorting.v2._core.db_locking as db_locking
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    recorded: list = []
-    real_lock = db_locking.required_advisory_lock
-
-    @contextlib.contextmanager
-    def spy_lock(table, key, **kwargs):
-        recorded.append((table.full_table_name, dict(key)))
-        with real_lock(table, key, **kwargs):
-            yield
-
-    # Both insert_selection and delete import required_advisory_lock from
-    # _db_locking at call time, so patching it there covers both.
-    monkeypatch.setattr(db_locking, "required_advisory_lock", spy_lock)
-
-    rec_pk = ingested_recording["rec_pk"]
-    art = _second_detection(rec_pk)
-    art_id = art["artifact_detection_id"]
-    merge_tbl = ArtifactDetectionOutput().full_table_name
-    sort_pk = None
-    try:
-        sort_pk = SortingSelection.insert_selection(
-            {
-                "recording_id": rec_pk["recording_id"],
-                "sorter": "clusterless_thresholder",
-                "sorter_params_name": "default",
-                "artifact_detection_id": art_id,
-            }
-        )
-        insert_locks = [
-            (t, k)
-            for t, k in recorded
-            if t == merge_tbl
-            and str(k.get("artifact_detection_id")) == str(art_id)
-        ]
-        assert (
-            insert_locks
-        ), "insert_selection did not lock the artifact detection"
-
-        recorded.clear()
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
-        delete_locks = [
-            (t, k)
-            for t, k in recorded
-            if t == merge_tbl
-            and str(k.get("artifact_detection_id")) == str(art_id)
-        ]
-        assert delete_locks, "delete did not lock the artifact detection"
-    finally:
-        if sort_pk is not None and (SortingSelection & sort_pk):
-            (SortingSelection & sort_pk).super_delete(warn=False)
-        if RecordingArtifactDetection & art:
-            (RecordingArtifactDetection & art).super_delete(
-                warn=False, force_masters=True
-            )
-        (RecordingArtifactSelection & art).super_delete(warn=False)
-
-
-def test_required_lock_failure_aborts_insert_and_delete(
-    ingested_recording, monkeypatch
-):
-    """When the advisory lock raises ``AdvisoryLockError``, neither
-    ``insert_selection`` nor the detection delete mutates the database."""
-    import spyglass.spikesorting.v2._core.db_locking as db_locking
-    from spyglass.spikesorting.v2._core.db_locking import AdvisoryLockError
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    def boom(table, key, **kwargs):
-        raise AdvisoryLockError("simulated acquisition failure")
-
-    rec_pk = ingested_recording["rec_pk"]
-    art = _second_detection(rec_pk)
-    art_id = art["artifact_detection_id"]
-    merge_id = ArtifactDetectionOutput.get_merge_id(
-        {"artifact_detection_id": art_id}
-    )
-    sel = {
-        "recording_id": rec_pk["recording_id"],
-        "sorter": "clusterless_thresholder",
-        "sorter_params_name": "default",
-        "artifact_detection_id": art_id,
-    }
-    n_sel_before = len(SortingSelection())
-    try:
-        monkeypatch.setattr(db_locking, "required_advisory_lock", boom)
-
-        # insert_selection aborts before its transaction and writes nothing.
-        with pytest.raises(AdvisoryLockError):
-            SortingSelection.insert_selection(sel)
-        assert (
-            len(SortingSelection()) == n_sel_before
-        ), "insert_selection created a row despite a failed lock"
-        assert not (
-            SortingSelection.ArtifactDetectionSource
-            & {"artifact_detection_merge_id": merge_id}
-        ), "insert_selection linked a sort despite a failed lock"
-
-        # Delete of the unreferenced detection aborts and removes nothing.
-        with pytest.raises(AdvisoryLockError):
-            (RecordingArtifactDetection & art).delete(safemode=False)
-        assert RecordingArtifactDetection & art
-        assert (
-            ArtifactDetectionOutput.get_merge_id(
-                {"artifact_detection_id": art_id}
-            )
-            == merge_id
-        )
-    finally:
-        monkeypatch.undo()  # restore the real lock before teardown deletes
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
-        (RecordingArtifactSelection & art).super_delete(warn=False)
-
-
-def test_held_lock_blocks_insert_and_delete(ingested_recording, monkeypatch):
-    """A lock held by a separate DB session blocks insert_selection and delete.
-
-    Both raise ``AdvisoryLockError`` while the lock is held. After release,
-    insert_selection commits, an ordinary delete is refused, and
-    ``cascade_delete`` removes the detection with its sort. A second
-    connection is needed because MySQL named locks are reentrant per session.
-    """
-    import datajoint as dj
-
-    import spyglass.spikesorting.v2._core.db_locking as db_locking
-    from spyglass.spikesorting.v2._core.db_locking import (
-        AdvisoryLockError,
-        _lock_name,
-    )
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    # Blocked acquire fails in ~1 s (the timeout is read at call time).
-    monkeypatch.setattr(db_locking, "LIFECYCLE_LOCK_TIMEOUT_S", 1)
-
-    rec_pk = ingested_recording["rec_pk"]
-    art = _second_detection(rec_pk)
-    art_id = art["artifact_detection_id"]
-    lock_name = _lock_name(
-        ArtifactDetectionOutput, {"artifact_detection_id": art_id}
-    )
-    conn_b = dj.Connection(
-        dj.config["database.host"],
-        dj.config["database.user"],
-        dj.config["database.password"],
-        port=dj.config["database.port"],
-    )
-    sel = {
-        "recording_id": rec_pk["recording_id"],
-        "sorter": "clusterless_thresholder",
-        "sorter_params_name": "default",
-        "artifact_detection_id": art_id,
-    }
-    sort_pk = None
-    try:
-        held = conn_b.query(
-            "SELECT GET_LOCK(%s, %s)", args=(lock_name, 10)
-        ).fetchone()
-        assert held and held[0] == 1, "second session could not take the lock"
-
-        # Both lifecycle ops block on the held lock and fail closed.
-        with pytest.raises(AdvisoryLockError):
-            SortingSelection.insert_selection(sel)
-        with pytest.raises(AdvisoryLockError):
-            (RecordingArtifactDetection & art).delete(safemode=False)
-        # The detection survived.
-        assert RecordingArtifactDetection & art
-
-        # After release, insert_selection commits and creates a referrer.
-        conn_b.query("SELECT RELEASE_LOCK(%s)", args=(lock_name,))
-        sort_pk = SortingSelection.insert_selection(sel)
-        assert SortingSelection & sort_pk
-        # Ordinary delete is refused; cascade_delete removes detection and sort.
-        with pytest.raises(
-            ValueError, match="referenced by a SortingSelection"
-        ):
-            (RecordingArtifactDetection & art).delete(safemode=False)
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
-        assert not (RecordingArtifactDetection & art)
-        assert not (SortingSelection & sort_pk)
-    finally:
-        conn_b.close()  # frees the held named lock if an assert left it held
-        if sort_pk is not None and (SortingSelection & sort_pk):
-            (SortingSelection & sort_pk).super_delete(warn=False)
-        if RecordingArtifactDetection & art:
-            (RecordingArtifactDetection & art).cascade_delete(safemode=False)
-        (RecordingArtifactSelection & art).super_delete(warn=False)
-
-
 def test_insert_detection_maps_only_missing_parent_to_key_error(
     dj_conn, monkeypatch
 ):
@@ -823,15 +612,11 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 
 
-def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
+def test_insert_selection_links_artifact_in_ambient_transaction(
     ingested_recording,
 ):
-    """An artifact-bound insert_selection inside a caller-owned transaction is
-    refused and writes nothing.
-
-    The advisory lock would be released before the caller commits, so it could
-    not serialize a concurrent artifact deletion.
-    """
+    """An artifact-bound insert_selection joins a caller-owned transaction and
+    rolls back with it."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2.artifact import (
@@ -853,11 +638,10 @@ def test_insert_selection_rejects_artifact_link_in_ambient_transaction(
     try:
         conn.start_transaction()
         try:
-            with pytest.raises(ValueError, match="caller-owned transaction"):
-                SortingSelection.insert_selection(sel)
+            sort_pk = SortingSelection.insert_selection(sel)
+            assert SortingSelection & sort_pk
         finally:
             conn.cancel_transaction()
-        # Fails before any insert.
         assert len(SortingSelection()) == n_before
     finally:
         (RecordingArtifactDetection & art).cascade_delete(safemode=False)

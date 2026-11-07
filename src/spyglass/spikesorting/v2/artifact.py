@@ -719,61 +719,50 @@ class _ArtifactDetectionMixin:
         delete those first or use :meth:`cascade_delete`. Owned
         ``IntervalList`` rows are removed for detections actually deleted.
         Positional arguments are restrictions, applied before rows are
-        fetched and locks taken.
+        fetched.
 
         Raises
         ------
         ValueError
             If a detection is referenced and ``_cascade_sorts`` is False.
-        AdvisoryLockError
-            If a per-detection lifecycle lock cannot be taken in time.
         """
         if restrictions:
             return self._restrict_delete_args(restrictions).delete(
                 safemode=safemode, _cascade_sorts=_cascade_sorts, **kwargs
             )
 
-        from spyglass.spikesorting.v2.artifact_output import (
-            artifact_lifecycle_locks,
-        )
-
         detection_cls = type(self)
         rows = self.fetch(as_dict=True)
-
-        # Same lock as insert_selection; closes the check-then-cascade race.
-        with artifact_lifecycle_locks(
-            row["artifact_detection_id"] for row in rows
-        ):
-            if not _cascade_sorts:
-                referenced = [
-                    str(row["artifact_detection_id"])
-                    for row in rows
-                    if self._merge_registration(row)[1]
-                ]
-                if referenced:
-                    raise ValueError(
-                        f"{detection_cls.__name__}.delete: refusing to delete "
-                        "artifact detection(s) referenced by a SortingSelection, "
-                        "MotionEstimateSelection or ConcatenatedRecordingSelection:"
-                        f" {referenced}. Delete those selections and outputs first, or call "
-                        "cascade_delete() to remove them too."
-                    )
-
-            delete_targets = [
-                (
-                    {k: row[k] for k in self.primary_key},
-                    collect_artifact_interval_rows_to_remove(
-                        [row], detection_cls=detection_cls
-                    ),
-                )
+        if not _cascade_sorts:
+            referenced = [
+                str(row["artifact_detection_id"])
                 for row in rows
+                if self._merge_registration(row)[1]
             ]
+            if referenced:
+                raise ValueError(
+                    f"{detection_cls.__name__}.delete: refusing to delete "
+                    "artifact detection(s) referenced by a SortingSelection, "
+                    "MotionEstimateSelection or ConcatenatedRecordingSelection:"
+                    f" {referenced}. Delete those selections and outputs first, or call "
+                    "cascade_delete() to remove them too."
+                )
 
-            # force_masters cascade removes the merge registration too.
-            if safemode is None:
-                super().delete(**kwargs)
-            else:
-                super().delete(safemode=safemode, **kwargs)
+        delete_targets = [
+            (
+                {k: row[k] for k in self.primary_key},
+                collect_artifact_interval_rows_to_remove(
+                    [row], detection_cls=detection_cls
+                ),
+            )
+            for row in rows
+        ]
+
+        # force_masters cascade removes the merge registration too.
+        if safemode is None:
+            super().delete(**kwargs)
+        else:
+            super().delete(safemode=safemode, **kwargs)
 
         remove_artifact_interval_rows(
             [

@@ -6,16 +6,14 @@ so a selection carries one foreign key instead of two exclusive part tables.
 Like ``LFPOutput``, it is an input-union merge: each result table registers
 itself here when populated, and the sorting stage reads it back.
 
-- :func:`artifact_lifecycle_locks`: the lock shared by a detection delete and
-  every selection that links a detection.
-- :func:`insert_artifact_bound_selection`: the selection insert that links one.
+- :func:`insert_artifact_bound_selection`: the selection insert that links a
+  detection.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Iterable, Iterator
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable
 
 import datajoint as dj
 
@@ -178,39 +176,6 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         return (part & key).fetch1("artifact_detection_id")
 
 
-@contextmanager
-def artifact_lifecycle_locks(detection_ids: Iterable) -> Iterator[None]:
-    """Hold the lifecycle lock of every artifact detection in ``detection_ids``.
-
-    A detection ``delete`` and every selection insert that links a detection
-    take this lock, so a delete cannot cascade through a link being
-    committed. Locks are taken in ascending id order to avoid deadlock.
-
-    Parameters
-    ----------
-    detection_ids : iterable of uuid.UUID or str
-        The ``artifact_detection_id`` values to lock; repeats are locked once.
-        Empty takes no lock.
-
-    Raises
-    ------
-    AdvisoryLockError
-        If a lock cannot be taken within the lifecycle timeout; locks already
-        taken are released.
-    """
-    from spyglass.spikesorting.v2._core.db_locking import required_advisory_lock
-
-    with ExitStack() as locks:
-        for detection_id in sorted({uuid.UUID(str(i)) for i in detection_ids}):
-            locks.enter_context(
-                required_advisory_lock(
-                    ArtifactDetectionOutput,
-                    {"artifact_detection_id": detection_id},
-                )
-            )
-        yield
-
-
 def insert_artifact_bound_selection(
     table_cls,
     pk: dict,
@@ -226,8 +191,6 @@ def insert_artifact_bound_selection(
 
     Shared by ``SortingSelection`` and ``MotionEstimateSelection``.
 
-    - Owns its transaction: the lock against the detection's delete is
-      released on return, before a caller's transaction would commit.
     - Resolves (and if needed registers) the merge id before the transaction,
       so a duplicate collides on the master insert with nothing to roll back.
     - A duplicate refetches the existing selection.
@@ -260,31 +223,15 @@ def insert_artifact_bound_selection(
 
     Raises
     ------
-    ValueError
-        If ``artifact_detection_id`` is set inside a caller-owned
-        transaction.
     SchemaBypassError
         If the detection is not populated, a duplicate master's parts do not
         match this selection, or an input foreign key is unsatisfied.
-    AdvisoryLockError
-        If the detection's lifecycle lock cannot be taken.
     """
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
     table = table_cls.__name__
     art_merge_id = None
     if artifact_detection_id is not None:
-        if table_cls.connection.in_transaction:
-            raise ValueError(
-                f"{table}.insert_selection: refusing to link an artifact "
-                "detection while a caller-owned transaction is open. The "
-                "delete-vs-select advisory lock is released when this call "
-                "returns -- before your transaction commits -- so it cannot "
-                "serialize a concurrent artifact deletion against the "
-                "uncommitted selection. Call insert_selection OUTSIDE the "
-                "transaction (it manages its own), or link the artifact in a "
-                "separate committed step."
-            )
         art_key = {"artifact_detection_id": artifact_detection_id}
         try:
             art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
@@ -300,30 +247,27 @@ def insert_artifact_bound_selection(
                 ) from key_exc
             art_merge_id = ArtifactDetectionOutput.get_merge_id(art_key)
 
-    with artifact_lifecycle_locks(
-        [] if artifact_detection_id is None else [artifact_detection_id]
-    ):
-        try:
-            with table_cls._safe_context():
-                insert_rows(art_merge_id)
-            return pk
-        except dj.errors.DuplicateError as exc:
-            # A concurrent caller may have inserted the same selection.
-            existing = refetch()
-            if existing is not None:
-                return existing
-            master_id = ", ".join(str(value) for value in pk.values())
-            raise SchemaBypassError(
-                f"{table} master {master_id} exists but its source/artifact "
-                "parts do not match this selection: the master was inserted "
-                "without insert_selection (a raw-insert orphan). Use "
-                "insert_selection(), or drop the orphan master."
-            ) from exc
-        except dj.errors.IntegrityError as exc:
-            raise SchemaBypassError(
-                f"{table}: an input foreign key is unsatisfied for {inputs} "
-                f"-- the referenced {input_tables} row is missing (a raw "
-                "insert bypassing insert_selection, or a concurrent delete "
-                "mid-insert). Populate the input, or retry if a transient "
-                "race."
-            ) from exc
+    try:
+        with table_cls._safe_context():
+            insert_rows(art_merge_id)
+        return pk
+    except dj.errors.DuplicateError as exc:
+        # A concurrent caller may have inserted the same selection.
+        existing = refetch()
+        if existing is not None:
+            return existing
+        master_id = ", ".join(str(value) for value in pk.values())
+        raise SchemaBypassError(
+            f"{table} master {master_id} exists but its source/artifact "
+            "parts do not match this selection: the master was inserted "
+            "without insert_selection (a raw-insert orphan). Use "
+            "insert_selection(), or drop the orphan master."
+        ) from exc
+    except dj.errors.IntegrityError as exc:
+        raise SchemaBypassError(
+            f"{table}: an input foreign key is unsatisfied for {inputs} "
+            f"-- the referenced {input_tables} row is missing (a raw "
+            "insert bypassing insert_selection, or a concurrent delete "
+            "mid-insert). Populate the input, or retry if a transient "
+            "race."
+        ) from exc

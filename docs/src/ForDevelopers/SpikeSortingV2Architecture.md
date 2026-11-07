@@ -605,17 +605,10 @@ the ordered member recordings) has the same fail-closed lifecycle as
     compared by a streamed SHA-256 (`_core.signal_math.timestamp_fingerprint`).
     `SharedGroupArtifactDetection.make_compute` re-checks, because a direct
     selection insert bypasses `insert_group`.
-- `_ArtifactDetectionMixin.delete` and
-    `artifact_output.insert_artifact_bound_selection` take the same
-    per-detection advisory lock. A concurrent selection insert either commits
-    before the delete's referrer check, so the delete is refused, or waits and
-    then fails on the deleted merge FK. It never lands in between, where the
-    `force_masters` cascade would drop its sort.
-- The lock fails closed (`AdvisoryLockError`). Locks are taken in sorted
-    `artifact_detection_id` order, so overlapping bulk deletes cannot deadlock.
-- `insert_selection` refuses to link a detection inside a caller-owned
-    transaction, because the lock is released on return, before that transaction
-    commits.
+- `_ArtifactDetectionMixin.delete` refuses detections a selection references.
+    A selection that links the detection after that check and before the
+    cascade is removed by the `force_masters` cascade, like any DataJoint
+    child.
 - DataJoint does not cascade through `interval_list_name`-keyed dependencies, so
     owned `IntervalList` rows are collected before the cascade and removed only
     for detections it deleted.
