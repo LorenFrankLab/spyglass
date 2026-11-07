@@ -38,9 +38,6 @@ from spyglass.spikesorting.v2._matching import (
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
 )
-from spyglass.spikesorting.v2._matching.compute import (
-    _input_recording_spike_counts,
-)
 from spyglass.spikesorting.v2._matching.inputs import (
     _validate_member_curations,
     normalize_curation_choices,
@@ -639,6 +636,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     input, runs the matcher in ``input_index`` order, and writes the
     canonicalized pairs. The AnalysisNwbfile parent is the first input's
     first recording's NWB.
+
+    Steps
+    -----
+    1. Re-validate the frozen inputs, rebuilding missing trace files.
+    2. Record the backend that runs and its producer provenance.
+    3. Snapshot the matchable units and per-recording spike counts.
+    4. Stage the pairs NWB under the first input's first recording.
+    5. Extract waveform bundles and run the matcher in input order.
+    6. Write the canonicalized pairs with provenance.
+    7. Register the file and insert the pairs and snapshots.
     """
 
     _populate_key_lock = True
@@ -888,66 +895,29 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         backend. Reads only files ``make_fetch`` resolved; the only DB access
         is staging the pairs NWB.
         """
-        import spikeinterface as si
-
-        from spyglass.spikesorting.v2._matching.provenance import (
-            matcher_provenance,
-        )
         from spyglass.spikesorting.v2._storage.matches_nwb import (
             write_pairs_table,
-        )
-        from spyglass.spikesorting.v2.matcher_protocol import (
-            get_input_preparer,
-            get_matcher,
         )
         from spyglass.spikesorting.v2._storage.staged_outputs import (
             staged_analysis_file,
         )
-        from spyglass.spikesorting.v2._storage.units_nwb import (
-            read_stored_units,
-        )
 
-        # Provenance from the registry entry that actually runs.
-        backend = get_matcher(matcher_name)
-        spikeinterface_version = si.__version__
-        matcher_backend = type(backend).__module__
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
+        # 2. Record the backend that runs and its producer provenance.
+        (
+            spikeinterface_version,
+            matcher_backend,
+            matcher_backend_version,
+            producer_provenance,
+        ) = _unit_match_compute.matcher_run_provenance(
+            matcher_name, params, job_kwargs
         )
-
-        producer_provenance = matcher_provenance(
-            backend,
-            get_input_preparer(matcher_name),
-            params,
-            job_kwargs=_resolved_job_kwargs(job_kwargs),
-        )
-        matcher_backend_version = producer_provenance["backend"]["version"]
-
         anchor_nwb_file_name = input_plan[0]["recordings"][0]["nwb_file_name"]
-        # Includes units a bundle leaves out; they become unmatched tracked
-        # units.
-        matchable_units = [
-            {
-                "input_index": int(plan["input_index"]),
-                "sorting_id": plan["sorting_id"],
-                "curation_id": int(plan["curation_id"]),
-                "unit_id": int(unit_id),
-            }
-            for plan in input_plan
-            for unit_id in plan["matchable_unit_ids"]
-        ]
-        # Read once for both spike counts and bundles.
-        sortings = {
-            plan["input_index"]: read_stored_units(plan["units"])
-            for plan in input_plan
-        }
-        recording_spike_counts = [
-            count
-            for plan in input_plan
-            for count in _input_recording_spike_counts(
-                plan, sortings[plan["input_index"]]
-            )
-        ]
+        # 3. Snapshot the matchable units and per-recording spike counts.
+        matchable_units = _unit_match_compute.matchable_unit_rows(input_plan)
+        sortings = _unit_match_compute.read_input_sortings(input_plan)
+        recording_spike_counts = _unit_match_compute.recording_spike_counts(
+            input_plan, sortings
+        )
         provenance_tables = _unit_match_compute.unit_match_provenance_tables(
             key,
             input_plan,
@@ -960,10 +930,12 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             matcher_provenance=producer_provenance,
         )
 
+        # 4. Stage the pairs NWB under the first input's first recording.
         with staged_analysis_file(
             anchor_nwb_file_name, context="UnitMatch.make_compute"
         ) as analysis_file_name:
             abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
+            # 5. Extract bundles and run the matcher in input order.
             if len(input_plan) < 2:
                 logger.warning(
                     "UnitMatch.make: selection "
@@ -982,6 +954,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         sortings=sortings,
                     )
                 )
+            # 6. Write the canonicalized pairs with provenance.
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
             )
@@ -1132,6 +1105,14 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
 
     ``n_sessions_detected`` counts distinct ``nwb_file_name`` values where a
     member unit has spikes. ``n_matching_inputs`` counts distinct inputs.
+
+    Steps
+    -----
+    1. Resolve the tracking threshold and node budget.
+    2. Read the graph: matchable units as nodes, pairs as edges.
+    3. Find each unit's input and the sessions it has spikes in.
+    4. Keep edges above the threshold; cover the units with cliques.
+    5. Insert one row per tracked unit and its members.
     """
 
     _populate_key_lock = True
@@ -1161,8 +1142,34 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         detected sessions from ``UnitMatch.RecordingSpikeCount``. Raises if a
         ``Pair`` endpoint is missing from the universe.
         """
-        master_rows, member_rows = _unit_match_readers.tracked_unit_rows(key)
+        from spyglass.spikesorting.v2._matching.graph import (
+            STRICT_POLICY,
+            derive_tracked_units,
+        )
 
+        # 1. Resolve the tracking threshold and node budget.
+        tracking = _unit_match_readers.tracking_params(key)
+        # 2. Read the graph: matchable units as nodes, pairs as edges.
+        node_universe, matchable_rows = _unit_match_readers.matchable_nodes(key)
+        edges = _unit_match_readers.pair_edges(key)
+        # 3. Find each unit's input and the sessions it has spikes in.
+        input_by_node, detected_sessions_by_node = (
+            _unit_match_readers.node_detections(key, matchable_rows)
+        )
+        # 4. Keep edges above the threshold; cover the units with cliques.
+        tracked = derive_tracked_units(
+            node_universe,
+            edges,
+            threshold=tracking.tracked_unit_threshold,
+            max_strict_nodes=tracking.max_strict_nodes,
+            policy=STRICT_POLICY,
+            input_by_node=input_by_node,
+            detected_sessions_by_node=detected_sessions_by_node,
+        )
+        # 5. Insert one row per tracked unit and its members.
+        master_rows, member_rows = _unit_match_readers.tracked_unit_rows(
+            key, tracked
+        )
         with self._safe_context():
             self.insert(master_rows)
             self.Member.insert(member_rows)

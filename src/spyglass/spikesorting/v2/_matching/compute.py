@@ -223,6 +223,130 @@ def _input_recording_spike_counts(plan: dict, sorting) -> list[dict]:
     ]
 
 
+def matcher_run_provenance(matcher_name: str, params, job_kwargs) -> tuple:
+    """Provenance of the registered matcher that actually runs.
+
+    Parameters
+    ----------
+    matcher_name : str
+        Registered matcher name.
+    params : dict
+        The ``MatcherParameters`` row's ``params``.
+    job_kwargs : dict or None
+        The row's job kwargs blob.
+
+    Returns
+    -------
+    spikeinterface_version : str
+    matcher_backend : str
+        The backend's module path.
+    matcher_backend_version : str or None
+    producer_provenance : dict
+        From ``_matching.provenance.matcher_provenance``.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+    from spyglass.spikesorting.v2._matching.provenance import (
+        matcher_provenance,
+    )
+    from spyglass.spikesorting.v2.matcher_protocol import (
+        get_input_preparer,
+        get_matcher,
+    )
+
+    backend = get_matcher(matcher_name)
+    spikeinterface_version = si.__version__
+    matcher_backend = type(backend).__module__
+    producer_provenance = matcher_provenance(
+        backend,
+        get_input_preparer(matcher_name),
+        params,
+        job_kwargs=_resolved_job_kwargs(job_kwargs),
+    )
+    return (
+        spikeinterface_version,
+        matcher_backend,
+        producer_provenance["backend"]["version"],
+        producer_provenance,
+    )
+
+
+def matchable_unit_rows(input_plan) -> list[dict]:
+    """The ``UnitMatch.MatchableUnit`` rows, without the master key.
+
+    Includes units a bundle leaves out; they become unmatched tracked units.
+
+    Parameters
+    ----------
+    input_plan : list of dict
+        ``UnitMatchFetched.input_plan``.
+
+    Returns
+    -------
+    list of dict
+        ``{"input_index", "sorting_id", "curation_id", "unit_id"}`` per
+        matchable unit, in input order.
+    """
+    return [
+        {
+            "input_index": int(plan["input_index"]),
+            "sorting_id": plan["sorting_id"],
+            "curation_id": int(plan["curation_id"]),
+            "unit_id": int(unit_id),
+        }
+        for plan in input_plan
+        for unit_id in plan["matchable_unit_ids"]
+    ]
+
+
+def read_input_sortings(input_plan) -> dict:
+    """Each input's curated units, keyed by ``input_index``.
+
+    Read once for both the spike counts and the bundles.
+
+    Parameters
+    ----------
+    input_plan : list of dict
+        ``UnitMatchFetched.input_plan``.
+
+    Returns
+    -------
+    dict
+        ``{input_index: si.BaseSorting}``.
+    """
+    from spyglass.spikesorting.v2._storage.units_nwb import read_stored_units
+
+    return {
+        plan["input_index"]: read_stored_units(plan["units"])
+        for plan in input_plan
+    }
+
+
+def recording_spike_counts(input_plan, sortings: dict) -> list[dict]:
+    """The ``UnitMatch.RecordingSpikeCount`` rows, without the master key.
+
+    Parameters
+    ----------
+    input_plan : list of dict
+        ``UnitMatchFetched.input_plan``.
+    sortings : dict
+        :func:`read_input_sortings`.
+
+    Returns
+    -------
+    list of dict
+        One row per (unit, constituent recording), in input order.
+    """
+    return [
+        count
+        for plan in input_plan
+        for count in _input_recording_spike_counts(
+            plan, sortings[plan["input_index"]]
+        )
+    ]
+
+
 def unit_match_provenance_tables(
     key,
     input_plan,

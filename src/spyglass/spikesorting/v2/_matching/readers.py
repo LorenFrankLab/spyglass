@@ -178,11 +178,8 @@ def get_input_provenance(
     )
 
 
-def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
-    """Derive one run's ``TrackedUnit`` master and ``Member`` rows.
-
-    The derivation behind ``TrackedUnit.make`` (see its docstring), which
-    inserts the returned rows in one transaction.
+def tracking_params(key):
+    """The tracked-unit threshold and budget of one ``UnitMatch`` run.
 
     Parameters
     ----------
@@ -191,21 +188,14 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
 
     Returns
     -------
-    master_rows : list of dict
-        One ``TrackedUnit`` row per derived tracked unit.
-    member_rows : list of dict
-        One ``TrackedUnit.Member`` row per (tracked unit, member unit).
+    TrackingParamsSchema
+        From ``_params.tracking.resolve_tracking_params``.
     """
-    from spyglass.spikesorting.v2._matching.graph import (
-        STRICT_POLICY,
-        derive_tracked_units,
-    )
     from spyglass.spikesorting.v2._params.tracking import (
         resolve_tracking_params,
     )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
-        UnitMatch,
         UnitMatchSelection,
     )
 
@@ -213,9 +203,31 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     params = (
         MatcherParameters & {"matcher_params_name": sel["matcher_params_name"]}
     ).fetch1("params")
-    tracking = resolve_tracking_params(params)
+    return resolve_tracking_params(params)
 
-    # Graph node identity: (str sorting_id, int curation_id, int unit_id).
+
+def matchable_nodes(key) -> tuple[list[tuple], list[dict]]:
+    """One run's graph nodes: its frozen matchable units.
+
+    Parameters
+    ----------
+    key : dict
+        Primary key of one ``UnitMatch`` row.
+
+    Returns
+    -------
+    node_universe : list of tuple
+        ``(str sorting_id, int curation_id, int unit_id)`` per unit.
+    matchable_rows : list of dict
+        The run's ``UnitMatch.MatchableUnit`` rows.
+
+    Raises
+    ------
+    ValueError
+        If the run has no ``MatchableUnit`` snapshot (a legacy row).
+    """
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
     matchable_rows = (UnitMatch.MatchableUnit & key).fetch(as_dict=True)
     node_universe = [
         (
@@ -234,8 +246,26 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
             "UnitMatch (delete + populate) "
             "so the matchable set is recorded before deriving tracked units."
         )
+    return node_universe, matchable_rows
 
-    edges = [
+
+def pair_edges(key) -> list[tuple]:
+    """One run's graph edges: its ``UnitMatch.Pair`` rows.
+
+    Parameters
+    ----------
+    key : dict
+        Primary key of one ``UnitMatch`` row.
+
+    Returns
+    -------
+    list of tuple
+        ``(node_a, node_b, match_probability)``, nodes as in
+        :func:`matchable_nodes`.
+    """
+    from spyglass.spikesorting.v2.unit_matching import UnitMatch
+
+    return [
         (
             (
                 str(pair["session_a_sorting_id"]),
@@ -252,19 +282,25 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
         for pair in (UnitMatch.Pair & key).fetch(as_dict=True)
     ]
 
-    input_by_node, detected_sessions_by_node = _node_detections(
-        key, matchable_rows
-    )
-    tracked = derive_tracked_units(
-        node_universe,
-        edges,
-        threshold=tracking.tracked_unit_threshold,
-        max_strict_nodes=tracking.max_strict_nodes,
-        policy=STRICT_POLICY,
-        input_by_node=input_by_node,
-        detected_sessions_by_node=detected_sessions_by_node,
-    )
 
+def tracked_unit_rows(key, tracked) -> tuple[list[dict], list[dict]]:
+    """One run's ``TrackedUnit`` master and ``Member`` rows.
+
+    Parameters
+    ----------
+    key : dict
+        Primary key of one ``UnitMatch`` row.
+    tracked : list of dict
+        ``_matching.graph.derive_tracked_units`` output; the list position
+        is the ``tracked_unit_id``.
+
+    Returns
+    -------
+    master_rows : list of dict
+        One ``TrackedUnit`` row per derived tracked unit.
+    member_rows : list of dict
+        One ``TrackedUnit.Member`` row per (tracked unit, member unit).
+    """
     master_rows = []
     member_rows = []
     for tracked_unit_id, unit in enumerate(tracked):
@@ -292,7 +328,7 @@ def tracked_unit_rows(key) -> tuple[list[dict], list[dict]]:
     return master_rows, member_rows
 
 
-def _node_detections(key, matchable_rows: list[dict]) -> tuple[dict, dict]:
+def node_detections(key, matchable_rows: list[dict]) -> tuple[dict, dict]:
     """Each matchable unit's input and the sessions it was detected in.
 
     Reads one run's frozen ``UnitMatch.RecordingSpikeCount`` and
