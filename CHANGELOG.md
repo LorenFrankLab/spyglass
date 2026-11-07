@@ -169,7 +169,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         #1678
     - Import `kachery_cloud` only inside the v0/v1 FigURL functions that use
         it, so spike sorting, decoding and MUA import without the
-        `kachery-legacy` extra #PRNUM
+        `kachery-legacy` extra #1719
 
 ## [0.6.0] (Sep 1st 2026)
 
