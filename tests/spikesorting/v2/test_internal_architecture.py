@@ -94,7 +94,7 @@ def test_internal_dependencies_use_owners_and_keep_orchestration_outward():
                 elif (
                     path.parent.name != "_orchestration"
                     and module.startswith(f"{PREFIX}._orchestration.")
-                    and module.rsplit(".", 1)[-1] not in {"types", "exports"}
+                    and module.rsplit(".", 1)[-1] != "types"
                 ):
                     reason = "imports orchestration"
                 if reason:

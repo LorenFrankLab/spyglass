@@ -1,7 +1,5 @@
 """Typed public contracts for the v2 pipeline orchestration helpers.
 
-Keep this module DB-free so the shapes can be inspected without a database.
-
 - ``TypedDict`` comes from ``typing_extensions``: Python 3.10's stdlib version
   does not recognize ``NotRequired``.
 - No ``from __future__ import annotations``: stringized annotations hide

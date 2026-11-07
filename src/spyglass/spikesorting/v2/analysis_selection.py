@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 from spyglass.spikesorting.v2._curation.unit_selection import (
     UnitSelectionSnapshot,

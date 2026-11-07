@@ -1,7 +1,7 @@
 """Pure source-routing classifier behind ``CurationV2.resolve_restriction``.
 
-Splits a restriction into per-source dicts without a database; the join
-assembly is :func:`._curation.restriction.resolve_restriction`.
+Splits a restriction into per-source dicts; the join assembly is
+:func:`._curation.restriction.resolve_restriction`.
 """
 
 from __future__ import annotations

@@ -246,9 +246,9 @@ def test_fingerprint_geometry_parity(tmp_path):
     import spikeinterface.extractors as se
 
     from spyglass.spikesorting.v2._recording.fingerprint import (
-        geometry_component_hash,
         recording_content_fingerprint,
     )
+    from spyglass.utils.nwb_hash import electrode_geometry_hash
 
     path, es_path = _baseline(tmp_path / "rec.nwb")
     components = recording_content_fingerprint(
@@ -260,7 +260,7 @@ def test_fingerprint_geometry_parity(tmp_path):
     )
     si_locations = np.asarray(recording.get_channel_locations(), dtype=float)
 
-    assert components["geometry"] == geometry_component_hash(si_locations), (
+    assert components["geometry"] == electrode_geometry_hash(si_locations), (
         "persisted-region geometry must match SpikeInterface's "
         "get_channel_locations for an unperturbed file"
     )
@@ -283,32 +283,28 @@ def test_fingerprint_components_match_canonical_set(tmp_path):
     assert set(components) == set(FINGERPRINT_COMPONENTS)
 
 
-def test_geometry_component_hash_rejects_empty_coords():
+def test_electrode_geometry_hash_rejects_empty_coords():
     """A region with no coordinate columns raises rather than hashing an
     empty array."""
-    from spyglass.spikesorting.v2._recording.fingerprint import (
-        geometry_component_hash,
-    )
+    from spyglass.utils.nwb_hash import electrode_geometry_hash
 
     with pytest.raises(ValueError, match="no probe geometry"):
-        geometry_component_hash(np.zeros((4, 0)))
+        electrode_geometry_hash(np.zeros((4, 0)))
 
 
-def test_geometry_component_hash_distinguishes_rel_z():
+def test_electrode_geometry_hash_distinguishes_rel_z():
     """A 3-D layout does not collide with the 2-D layout of the same
     in-plane coordinates."""
-    from spyglass.spikesorting.v2._recording.fingerprint import (
-        geometry_component_hash,
-    )
+    from spyglass.utils.nwb_hash import electrode_geometry_hash
 
     xy = np.array([[0.0, 0.0], [0.0, 20.0], [0.0, 40.0], [0.0, 60.0]])
     xyz = np.column_stack([xy, np.zeros(4)])
     xyz_deep = np.column_stack([xy, np.full(4, 5.0)])
 
-    assert geometry_component_hash(xy) != geometry_component_hash(
+    assert electrode_geometry_hash(xy) != electrode_geometry_hash(
         xyz
     ), "2-D and 3-D geometry of the same in-plane coords must not collide"
-    assert geometry_component_hash(xyz) != geometry_component_hash(
+    assert electrode_geometry_hash(xyz) != electrode_geometry_hash(
         xyz_deep
     ), "a rel_z (depth) change must change the geometry hash"
 

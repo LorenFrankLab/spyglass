@@ -1,7 +1,7 @@
 """Recording artifact self-heal, verified rebuilding and atomic publication.
 
 Rebuilds call the owning table's fetch/compute methods and publish only
-output whose content hash matches the stored row. DB-free at import.
+output whose content hash matches the stored row.
 """
 
 from __future__ import annotations

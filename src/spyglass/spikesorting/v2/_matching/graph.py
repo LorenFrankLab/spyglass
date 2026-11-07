@@ -1,7 +1,6 @@
-"""DB-free graph logic for cross-session unit tracking.
+"""Graph logic for cross-session unit tracking.
 
-Pure transforms the ``unit_matching`` tables delegate to. No DataJoint or
-SpikeInterface imports.
+Pure transforms the ``unit_matching`` tables delegate to.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
 )

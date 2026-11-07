@@ -14,43 +14,6 @@ from collections.abc import Mapping
 _DEFAULT_SEARCH_THREADS_CAP = 16
 
 
-def _usable_cpus() -> int:
-    """Cores this process may run on (its affinity mask where available)."""
-    import os
-
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:  # not available on macOS / Windows
-        return os.cpu_count() or 1
-
-
-def _repair_openblas_after_fork() -> None:
-    """Rebuild each OpenBLAS thread pool in the parent after a fork.
-
-    SciPy's bundled OpenBLAS 0.3.30 otherwise deadlocks on its next float32 LU
-    (e.g. MountainSort5 PCA). Resetting the thread count rebuilds the pool.
-    """
-    try:
-        from threadpoolctl import ThreadpoolController
-    except ImportError:
-        return
-    for lib in ThreadpoolController().lib_controllers:
-        if lib.internal_api == "openblas":
-            lib.set_num_threads(lib.num_threads)
-
-
-@functools.cache
-def install_openblas_fork_repair() -> None:
-    """Run :func:`_repair_openblas_after_fork` after every fork (once per process).
-
-    Repairs only the parent; forked workers must stay single-threaded
-    (SpikeInterface's default ``max_threads_per_worker=1``).
-    """
-    import os
-
-    os.register_at_fork(after_in_parent=_repair_openblas_after_fork)
-
-
 def _explicit_n_jobs(*row_job_kwargs: dict | None):
     """The ``n_jobs`` a layer set (a later row blob first), or ``None``."""
     import datajoint as dj
@@ -89,7 +52,9 @@ def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
     """
     explicit = _explicit_n_jobs(*row_job_kwargs)
     if explicit is None:
-        return max(1, min(_DEFAULT_SEARCH_THREADS_CAP, _usable_cpus() // 4))
+        from spyglass.utils.parallel import usable_cpus
+
+        return max(1, min(_DEFAULT_SEARCH_THREADS_CAP, usable_cpus() // 4))
     from spikeinterface.core.job_tools import fix_job_kwargs
 
     return fix_job_kwargs({"n_jobs": explicit})["n_jobs"]

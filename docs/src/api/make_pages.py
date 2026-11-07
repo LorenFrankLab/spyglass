@@ -1,7 +1,6 @@
 """Generate the api pages and navigation."""
 
 from pathlib import Path
-import runpy
 
 import mkdocs_gen_files
 from mkdocs.utils import log
@@ -12,11 +11,6 @@ added = 0
 add_limit = None
 
 nav = mkdocs_gen_files.Nav()
-# Read the dependency-free export catalog without importing the runtime tables.
-# Griffe cannot infer pipeline.__all__ from its imported, unpacked tuple.
-pipeline_exports = runpy.run_path(
-    "src/spyglass/spikesorting/v2/_orchestration/exports.py"
-)["PIPELINE_FACADE_EXPORTS"]
 for path in sorted(Path("src/spyglass/").glob("**/*.py")):
     if (
         path.stem in ignored_stems
@@ -36,10 +30,6 @@ for path in sorted(Path("src/spyglass/").glob("**/*.py")):
 
     with mkdocs_gen_files.open(f"api/{rel_path.with_suffix('')}.md", "w") as f:
         print(f"::: {module_path}", file=f)
-        if module_path == "spyglass.spikesorting.v2.pipeline":
-            print("    options:\n      members:", file=f)
-            for name in pipeline_exports:
-                print(f"        - {name}", file=f)
     nav[rel_path.parts] = f"{rel_path.with_suffix('')}.md"
 
     if add_limit is not None:

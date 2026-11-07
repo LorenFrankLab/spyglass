@@ -1,4 +1,4 @@
-"""Lazy frame spans with their original acquisition clocks (DB-free)."""
+"""Lazy frame spans with their original acquisition clocks."""
 
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 

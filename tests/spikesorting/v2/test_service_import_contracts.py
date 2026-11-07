@@ -1,8 +1,9 @@
 """Import-boundary and facade contracts for the DB-free service modules.
 
 Service modules import without ``spyglass.common`` or a v2 schema module,
-so a cold import opens no DB connection. Typed pipeline contracts are
-re-exported beside ``run_v2_pipeline``.
+so a cold import opens no DB connection (see "Dependency direction" in
+``docs/src/ForDevelopers/SpikeSortingV2Architecture.md``). Typed pipeline
+contracts are re-exported beside ``run_v2_pipeline``.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""DB-free metric computation and labeling for ``CurationEvaluation``.
+"""Metric computation and labeling for ``CurationEvaluation``.
 
 - ``compute_metrics``: voltage metrics on the display analyzer, PC/NN
   metrics on the whitened metric analyzer.
@@ -7,9 +7,6 @@
   failed computation.
 - ``evaluate_analyzers``: metrics, labels, and merge groups with namespace
   checks.
-
-SpikeInterface is imported inside functions, so helpers test without a
-database.
 """
 
 from __future__ import annotations
@@ -920,7 +917,7 @@ def evaluate_analyzers(
 
     # SI metric defaults and warning capture are process-wide; the lock also
     # covers auto-merge, which can compute quality_metrics itself.
-    from spyglass.spikesorting.v2._core.progress import report_progress
+    from spyglass.utils.progress import report_progress
 
     report_progress("Computing quality metrics and proposed labels…")
     metric_kwargs = metric_inputs.metric_kwargs

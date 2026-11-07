@@ -1,4 +1,4 @@
-"""DB-free NWB (de)serialization for cross-session match output.
+"""NWB (de)serialization for cross-session match output.
 
 ``unit_match_pairs`` has one row per match pair, with both sides'
 ``(sorting_id, curation_id, unit_id)`` (``session_a_*`` has the lower

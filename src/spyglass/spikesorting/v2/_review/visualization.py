@@ -1,8 +1,7 @@
-"""DB-free registry and extension policy for the v2 visualization facade.
+"""Registry and extension policy for the v2 visualization facade.
 
 The facade (``visualization.py``) resolves keys and guarantees helpers read
 the unwhitened display analyzer, never the whitened metric analyzer.
-matplotlib and SpikeInterface are imported lazily.
 """
 
 from __future__ import annotations

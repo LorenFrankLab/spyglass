@@ -6,7 +6,7 @@ root turns old folders into cache misses.
 
 Folders are SI ``binary_folder`` analyzers, the only SI 0.104.3 format that
 extracts waveforms straight into a memmap; :func:`load_analyzer_folder` maps
-them lazily. DB-free at import.
+them lazily.
 """
 
 from __future__ import annotations

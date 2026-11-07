@@ -1,4 +1,4 @@
-"""DB-free compute steps of ``UnitMatch.make_compute``.
+"""Compute steps of ``UnitMatch.make_compute``.
 
 Reads only the files named in ``UnitMatchFetched.input_plan``; never queries
 the database or stages a file.

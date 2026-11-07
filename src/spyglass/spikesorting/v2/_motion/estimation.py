@@ -23,7 +23,7 @@ from typing import NamedTuple
 import numpy as np
 from spikeinterface.core import BaseRecording, BaseRecordingSegment
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2._core.signal_math import (
     frames_with_window_in_one_span,
 )

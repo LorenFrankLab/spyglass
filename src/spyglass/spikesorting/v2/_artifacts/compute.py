@@ -1,4 +1,4 @@
-"""DB-free worker kernels for the chunked artifact scan.
+"""Worker kernels for the chunked artifact scan.
 
 Spawned ``n_jobs>1`` workers re-import the module defining the worker
 function, and importing a schema module opens a DB connection. Keep this

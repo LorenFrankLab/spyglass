@@ -1,7 +1,6 @@
-"""Artifact-detection ``IntervalList`` naming convention (DB-free).
+"""Artifact-detection ``IntervalList`` naming convention.
 
-Names are ``f"artifact_detection_{artifact_detection_id}"``. No DB import, so
-DB-isolated workers and ``_curation.routing`` can parse names.
+Names are ``f"artifact_detection_{artifact_detection_id}"``.
 """
 
 from __future__ import annotations

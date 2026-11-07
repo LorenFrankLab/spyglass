@@ -1,4 +1,4 @@
-"""DB-free plotting and analyzer-extraction helpers for ``CurationEvaluation``."""
+"""Plotting and analyzer-extraction helpers for ``CurationEvaluation``."""
 
 from __future__ import annotations
 

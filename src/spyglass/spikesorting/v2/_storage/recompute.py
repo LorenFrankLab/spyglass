@@ -1,4 +1,4 @@
-"""DB-free content-hashing helpers for v2 recompute verification.
+"""Content-hashing helpers for v2 recompute verification.
 
 A whole-file ``NwbfileHasher`` digest includes object ids and creation
 timestamps, so it cannot confirm a rebuild. These helpers hash content: rounded

@@ -15,32 +15,6 @@ TIMESTAMP_ROUNDING = 9  # seconds; sub-sample, absorbs float64 ULP noise
 FINGERPRINT_COMPONENTS = ("traces", "timestamps", "geometry", "metadata")
 
 
-def geometry_component_hash(coords) -> str:
-    """Hash a ``(n_channels, n_coords)`` probe-geometry array.
-
-    Prefixed with the shape so a transpose or channel-count change cannot
-    collide.
-    """
-    import hashlib
-
-    import numpy as np
-
-    arr = np.ascontiguousarray(
-        np.asarray(coords, dtype=np.float64).astype("<f8")
-    )
-    if arr.ndim != 2 or arr.shape[1] == 0:
-        raise ValueError(
-            "geometry_component_hash: expected a (n_channels, n_coords>=1) "
-            f"array but got shape {arr.shape} -- the persisted electrodes "
-            "region carries no rel_x/rel_y[/rel_z] coordinates (no probe "
-            "geometry). Refusing to hash an empty geometry component."
-        )
-    digest = hashlib.md5()
-    digest.update(str(arr.shape).encode())
-    digest.update(arr.tobytes())
-    return digest.hexdigest()
-
-
 def recording_content_fingerprint(
     analysis_abs_path,
     *,
@@ -77,6 +51,10 @@ def recording_content_fingerprint(
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
     from spyglass.spikesorting.v2._core.signal_math import (
         _segment_times_slice,
+    )
+    from spyglass.utils.nwb_hash import (
+        electrode_coordinates,
+        electrode_geometry_hash,
     )
 
     analysis_abs_path = str(analysis_abs_path)
@@ -139,24 +117,7 @@ def recording_content_fingerprint(
     ) as io:
         nwbfile = io.read()
         series = nwbfile.acquisition[series_name]
-        region = series.electrodes
-        table = region.table
-        coord_cols = [
-            c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames
-        ]
-        # One read per column, not per h5py element.
-        columns = [
-            np.asarray(table[col].data[:], dtype=np.float64)
-            for col in coord_cols
-        ]
-        coords = np.asarray(
-            [
-                [float(column[int(row)]) for column in columns]
-                for row in region.data[:]
-            ],
-            dtype=np.float64,
-        )
-        geometry_hash = geometry_component_hash(coords)
+        geometry_hash = electrode_geometry_hash(electrode_coordinates(series))
         metadata["conversion"] = repr(float(series.conversion))
         metadata["offset"] = repr(
             float(series.offset) if series.offset is not None else 0.0

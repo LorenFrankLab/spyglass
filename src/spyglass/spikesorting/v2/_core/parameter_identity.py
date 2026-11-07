@@ -3,13 +3,11 @@
 A fingerprint identifies a parameter row by its content, excluding the row
 name, so two names for the same content collide. Selection identity
 (:mod:`_core.selection_identity`) hashes the names instead.
-
-Stdlib-only so a spawned worker that re-imports it opens no DB connection.
 """
 
 from __future__ import annotations
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 
 _SHORT_FINGERPRINT_LENGTH = 12
 

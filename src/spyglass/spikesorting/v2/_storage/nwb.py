@@ -1,10 +1,9 @@
 """NWB trace reading, preprocessing, streaming writes and geometry persistence.
 
-DB-free at import. Writers receive resolved inputs and never import their
-table module. Allocating a file with ``AnalysisNwbfile().create`` reads
-DataJoint metadata, the accepted exception to DB-free ``make_compute``; the
-file is registered only in ``make_insert``. Self-heal and rebuilds live in
-``_storage.rebuilds``.
+Writers receive resolved inputs and never import their table module.
+Allocating a file with ``AnalysisNwbfile().create`` reads DataJoint metadata,
+the accepted exception to DB-free ``make_compute``; the file is registered
+only in ``make_insert``. Self-heal and rebuilds live in ``_storage.rebuilds``.
 """
 
 from __future__ import annotations

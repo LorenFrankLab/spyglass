@@ -2,8 +2,7 @@
 
 Label validation and composition, manual-input normalization, post-merge
 ``CurationV2.Unit`` rows, and ``MergeGroup`` / ``ParentMergeGroup``
-provenance rows. Given pre-fetched ``Unit`` rows, they decide what to insert
-without a database. Imports stay dependency-light: no DB or SpikeInterface.
+provenance rows. Given pre-fetched ``Unit`` rows, they decide what to insert.
 """
 
 from __future__ import annotations

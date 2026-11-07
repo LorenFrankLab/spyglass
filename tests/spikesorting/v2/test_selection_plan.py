@@ -390,15 +390,15 @@ def test_off_and_estimate_preserve_sort_input(source, sorting_id, canonical):
     """Without a corrected recording the payload has no motion term and the
     ids equal the recorded ones; an explicit ``None`` is the same request."""
     from spyglass.spikesorting.v2._core.selection_identity import (
-        canonical_identity,
         sorting_identity_payload,
     )
+    from spyglass.utils.identity import canonical_json
 
     payload = sorting_identity_payload(**_BASE_SORTER, **source)
     assert "motion_corrected_recording_id" not in payload
-    assert canonical_identity(payload) == canonical
+    assert canonical_json(payload) == canonical
     assert (
-        canonical_identity(
+        canonical_json(
             sorting_identity_payload(
                 **_BASE_SORTER, **source, motion_corrected_recording_id=None
             )

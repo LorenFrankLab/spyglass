@@ -19,7 +19,7 @@ Tables:
         with the source's own timestamps.
 
 ``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
-a sort's input. DB-free computation lives in ``_motion``.
+a sort's input. Computation lives in ``_motion``.
 """
 
 from __future__ import annotations

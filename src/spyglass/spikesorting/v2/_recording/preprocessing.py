@@ -7,8 +7,6 @@ The caller applies the stack in this order (no whitening):
 2. ``restrict_recording``.
 3. ``apply_spatial_preprocessing`` (bad-channel interpolation, reference),
    which is per-sample and unaffected by joins.
-
-DB-free at import and at call time.
 """
 
 from __future__ import annotations

@@ -6,13 +6,8 @@
 
 from __future__ import annotations
 
-from spyglass.spikesorting.v2._orchestration.exports import (
-    PACKAGE_ROOT_REEXPORTS,
-    PIPELINE_FACADE_EXPORTS,
-)
-
-# Listed independently of the production manifest, so removing a manifest
-# entry cannot silently shrink the public API.
+# Listed independently of the production ``__all__`` lists, so removing an
+# entry there cannot silently shrink the public API.
 _ROOT_REEXPORTS = frozenset(
     [
         "run_v2_pipeline",
@@ -104,11 +99,9 @@ def test_pipeline_facade_reexports_public_api():
     """Every public name resolves from ``spyglass.spikesorting.v2.pipeline``."""
     import spyglass.spikesorting.v2.pipeline as pl
 
-    assert tuple(pl.__all__) == PIPELINE_FACADE_EXPORTS
+    assert len(pl.__all__) == len(set(pl.__all__))
     assert _FACADE_REEXPORTS <= set(pl.__all__)
-    missing = [
-        name for name in PIPELINE_FACADE_EXPORTS if not hasattr(pl, name)
-    ]
+    missing = [name for name in pl.__all__ if not hasattr(pl, name)]
     assert not missing, f"pipeline facade no longer exports: {missing}"
 
 
@@ -120,8 +113,16 @@ def test_package_root_reexports_primary_entrypoints():
     """
     import importlib
 
+    import spyglass.spikesorting.v2.pipeline as pl
+
     v2 = importlib.import_module("spyglass.spikesorting.v2")
-    assert _ROOT_REEXPORTS <= set(PACKAGE_ROOT_REEXPORTS)
+    assert _ROOT_REEXPORTS <= set(v2.__all__)
+    lazy = set(v2.__all__) - {
+        "initialize_v2_defaults",
+        "verify_v2_default_catalog",
+        "CurationLabel",
+    }
+    assert lazy <= set(pl.__all__)
 
     missing = [name for name in _ROOT_REEXPORTS if not hasattr(v2, name)]
     assert not missing, f"package root no longer re-exports: {missing}"
@@ -152,7 +153,7 @@ def test_pipeline_facade_is_a_thin_reexport():
     """
     import spyglass.spikesorting.v2.pipeline as pl
 
-    for name in PIPELINE_FACADE_EXPORTS:
+    for name in pl.__all__:
         obj = getattr(pl, name)
         module = getattr(obj, "__module__", "")
         assert module != pl.__name__, (

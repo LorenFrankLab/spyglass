@@ -1,7 +1,7 @@
 """``SortingAnalyzer`` cache access/build/rebuild behind ``Sorting``.
 
-DB-free at import. ``build_analyzer`` takes resolved inputs only; the rebuild
-adapters fetch theirs first.
+``build_analyzer`` takes resolved inputs only; the rebuild adapters fetch
+theirs first.
 """
 
 from __future__ import annotations

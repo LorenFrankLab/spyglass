@@ -1009,7 +1009,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         cls.drop_missing_local_bundle(selection)
         reused = bool(cls & selection)
         if not reused:
-            from spyglass.spikesorting.v2._core.progress import (
+            from spyglass.utils.progress import (
                 report_progress,
             )
 

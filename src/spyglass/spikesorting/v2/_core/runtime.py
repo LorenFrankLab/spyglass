@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, distributions, version
 from pathlib import Path
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 
 RUNTIME_SCHEMA_VERSION = 1
 _PACKAGES = (

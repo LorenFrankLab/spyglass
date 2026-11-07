@@ -29,7 +29,7 @@ from spyglass.spikesorting.v2._storage.analyzer_cache import (
     publish_analyzer_atomically,
     waveform_recipe_hash,
 )
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 from spyglass.spikesorting.v2._sorting.analyzer import (
     BASE_ANALYZER_EXTENSIONS,
@@ -537,7 +537,7 @@ def _resolve_published_analyzer(
                 folder,
             )
 
-        from spyglass.spikesorting.v2._core.progress import report_progress
+        from spyglass.utils.progress import report_progress
 
         report_progress(f"Building this curation's {role} analyzer…")
         publish_analyzer_atomically(folder, build_into)

@@ -1,8 +1,7 @@
-"""DB-free helpers for the FigPack curation tables.
+"""Helpers for the FigPack curation tables.
 
 Config hashing, default labels, and translation between FigPack's
-``sorting_curation`` state and v2 ``(labels, merge_groups)``. Never imports
-DataJoint, SpikeInterface, or figpack.
+``sorting_curation`` state and v2 ``(labels, merge_groups)``.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ import json
 
 from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 
 #: Install hint surfaced when the optional FigPack packages are missing.
 FIGPACK_INSTALL_HINT = (

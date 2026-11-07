@@ -168,7 +168,7 @@ def evaluate_temporary_analyzers(
     import tempfile
     from pathlib import Path
 
-    from spyglass.spikesorting.v2._core.progress import report_progress
+    from spyglass.utils.progress import report_progress
     from spyglass.spikesorting.v2._curation.analyzer import (
         publish_resolved_merged_analyzer,
     )

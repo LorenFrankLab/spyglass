@@ -1,7 +1,4 @@
-"""Pure and SpikeInterface helpers behind the concatenated-recording cache.
-
-DB-free at import; SpikeInterface is imported lazily.
-"""
+"""Pure and SpikeInterface helpers behind the concatenated-recording cache."""
 
 from __future__ import annotations
 
@@ -95,15 +92,12 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     str
         A 64-character lowercase hex SHA-256 digest of the ordered member set.
     """
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        canonical_identity,
-        sha256_json,
-    )
+    from spyglass.utils.identity import canonical_json, sha256_json
 
     ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
     return sha256_json(
         [
-            canonical_identity(
+            canonical_json(
                 {field: row[field] for field in MEMBER_SNAPSHOT_LOGICAL_FIELDS}
             )
             for row in ordered

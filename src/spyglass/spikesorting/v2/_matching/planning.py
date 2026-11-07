@@ -1,4 +1,4 @@
-"""DB-free curation-choice planning for cross-session unit matching.
+"""Curation-choice planning for cross-session unit matching.
 
 Turns already-fetched curation lists into one pinned curation per matching
 input via a named curation strategy, returning a reviewable plan:

@@ -19,12 +19,12 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     RECORDING_IDENTITY_FIELDS,
     V2_SELECTION_NAMESPACE,
     assert_supplied_id_matches,
-    canonical_identity,
     deterministic_id,
     existing_selection_pk,
     recording_identity_payload,
     recording_input_hash,
 )
+from spyglass.utils.identity import canonical_json
 
 # --------------------------------------------------------------------------
 # Pure-helper unit tests (no database).
@@ -126,16 +126,16 @@ def test_source_kind_participates_in_identity():
     )
 
 
-def test_canonical_identity_is_sorted_compact_json():
-    out = canonical_identity({"b": 2, "a": 1})
+def test_canonical_json_is_sorted_compact_json():
+    out = canonical_json({"b": 2, "a": 1})
     assert out == '{"a":1,"b":2}'
 
 
-def test_canonical_identity_rejects_unsupported_type():
+def test_canonical_json_rejects_unsupported_type():
     """A float (or any unsupported type) raises rather than silently
     serializing to a repr-dependent string."""
     with pytest.raises(TypeError, match="UUID, str, int, bool, or None"):
-        canonical_identity({"x": 1.5})
+        canonical_json({"x": 1.5})
 
 
 def test_assert_supplied_id_matches_accepts_none_and_exact():
@@ -210,7 +210,6 @@ def test_selection_identity_import_pulls_no_db_layer_modules():
         import sys
         import spyglass.spikesorting.v2._core.selection_identity as s
         assert hasattr(s, "deterministic_id")
-        assert hasattr(s, "canonical_identity")
         leaked = sorted(
             m
             for m in sys.modules

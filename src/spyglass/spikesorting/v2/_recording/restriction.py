@@ -1,8 +1,8 @@
 """Time/channel restriction + truncation-guard arithmetic behind ``Recording``.
 
 ``select_sort_group_channels`` runs before temporal preprocessing and
-``restrict_recording`` after it. DB-free at import; ``restrict_recording``
-opens a DB connection at call time via its lazy ``Interval`` import.
+``restrict_recording`` after it. ``restrict_recording`` opens a DB connection
+at call time via its lazy ``Interval`` import.
 """
 
 from __future__ import annotations

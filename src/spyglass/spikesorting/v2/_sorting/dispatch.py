@@ -1,7 +1,4 @@
-"""Sorter dispatch and post-sort trim behind ``Sorting``.
-
-DB-free at import and at call time.
-"""
+"""Sorter dispatch and post-sort trim behind ``Sorting``."""
 
 from __future__ import annotations
 

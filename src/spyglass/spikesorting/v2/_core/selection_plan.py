@@ -1,4 +1,4 @@
-"""DB-free builders for the v2 selection insert plans.
+"""Builders for the v2 selection insert plans.
 
 The builders validate a request, compute the deterministic primary key, and
 shape the rows to insert. The table's ``insert_selection`` runs the DB half.

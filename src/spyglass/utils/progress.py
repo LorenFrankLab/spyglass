@@ -1,7 +1,8 @@
 """Step reports from long computations to whoever is showing their progress.
 
-A review worker installs a reporter with :func:`progress_reporter`; compute
-code calls :func:`report_progress`, which is a no-op without a reporter.
+A caller that displays progress installs a reporter with
+:func:`progress_reporter`; compute code calls :func:`report_progress`, which
+is a no-op without a reporter.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import contextvars
 from typing import Callable
 
 _REPORTER: contextvars.ContextVar[Callable[[str], None] | None] = (
-    contextvars.ContextVar("v2_progress_reporter", default=None)
+    contextvars.ContextVar("spyglass_progress_reporter", default=None)
 )
 
 

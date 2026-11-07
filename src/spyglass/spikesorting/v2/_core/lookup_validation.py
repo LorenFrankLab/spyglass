@@ -1,7 +1,6 @@
-"""DB-free validation helpers for the v2 parameter Lookup tables.
+"""Validation helpers for the v2 parameter Lookup tables.
 
-Helpers that query receive their table at call time, so the module imports
-without a DB connection.
+Helpers that query receive their table at call time.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""DB-free NWB (de)serialization for analyzer-curation outputs.
+"""NWB (de)serialization for analyzer-curation outputs.
 
 ``CurationEvaluation`` writes three scratch tables into one AnalysisNwbfile:
 

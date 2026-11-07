@@ -74,15 +74,19 @@ def test_v2_extra_installs_native_mountainsort4():
     assert "ml_ms4alg" not in requirements
 
 
-def test_v2_extra_pins_exercised_datajoint_lifecycle():
-    """Every independently installable runtime extra selects the tested release."""
+def test_v2_extras_bound_datajoint_to_tested_populate_lifecycle():
+    """Each runtime extra stays on 0.14 releases with the tested ``_populate1``."""
     for extra in (
         "spikesorting-v2",
         "spikesorting-v2-matching",
         "spikesorting-v2-curation",
     ):
         requirements = _extra_requirements(extra)
-        assert str(requirements["datajoint"].specifier) == "==0.14.9", extra
+        datajoint = requirements["datajoint"].specifier
+        assert datajoint.contains("0.14.7"), extra
+        assert datajoint.contains("0.14.10"), extra
+        assert not datajoint.contains("0.14.6"), extra
+        assert not datajoint.contains("0.15.0"), extra
 
 
 def test_v2_runtime_extras_declare_reentrant_analyzer_locks():

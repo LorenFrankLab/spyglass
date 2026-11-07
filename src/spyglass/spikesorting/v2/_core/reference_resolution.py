@@ -1,4 +1,4 @@
-"""DB-free reference validation and resolution for ``SortGroupV2``."""
+"""Reference validation and resolution for ``SortGroupV2``."""
 
 from __future__ import annotations
 

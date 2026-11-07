@@ -4,21 +4,20 @@ Each selection's primary key is a ``uuid5`` of its canonical logical identity,
 so the primary-key constraint (not a check-then-insert race) deduplicates
 concurrent inserts.
 
-Stdlib-only so a spawned worker that re-imports it opens no DB connection.
-Values are canonicalized so ``uuid.UUID(x)`` and ``str(x)``, or numpy and
-plain ints, give the same identity.
+Values are canonicalized by :mod:`spyglass.utils.identity`.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from collections.abc import Callable, Collection
 
-# uuid5(NAMESPACE_DNS, "spyglass.spikesorting.v2.selection"), frozen as a
-# literal.
-V2_SELECTION_NAMESPACE = uuid.UUID("b44d4765-4714-5c69-96d5-97feb2217e86")
+from spyglass.utils.identity import parse_uuid, sha256_json
+from spyglass.utils.identity import deterministic_id as _deterministic_id
+
+V2_SELECTION_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_DNS, "spyglass.spikesorting.v2.selection"
+)
 
 RECORDING_IDENTITY_FIELDS = (
     "nwb_file_name",
@@ -27,105 +26,6 @@ RECORDING_IDENTITY_FIELDS = (
     "preprocessing_params_name",
     "team_name",
 )
-
-
-def _maybe_uuid(value: str) -> uuid.UUID | None:
-    """Return the ``uuid.UUID`` for a UUID-ish string, else ``None``."""
-    try:
-        return uuid.UUID(value)
-    except (ValueError, AttributeError, TypeError):
-        return None
-
-
-def _canonical_scalar(value):
-    """Normalize one identity value to a single canonical form.
-
-    - ``None`` -> ``None``.
-    - ``uuid.UUID`` or a UUID-ish ``str`` -> canonical lowercase string.
-    - ``bool`` -> ``bool`` (not collapsed to ``1``/``0``).
-    - ``int`` or integer-like (``__index__``, e.g. numpy) -> plain ``int``.
-    - any other ``str`` -> unchanged.
-
-    Raises
-    ------
-    TypeError
-        If ``value`` is not a ``UUID``, ``str``, ``int``, ``bool``,
-        ``None``, or an integer-like object implementing ``__index__``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return int(value)
-    if isinstance(value, str):
-        parsed = _maybe_uuid(value)
-        return str(parsed) if parsed is not None else value
-    # numpy integers, without importing numpy; float has no __index__.
-    if hasattr(value, "__index__"):
-        return int(value)
-    raise TypeError(
-        "selection identity values must be UUID, str, int, bool, or None; "
-        f"got {type(value).__name__!r} ({value!r})"
-    )
-
-
-def canonical_identity(payload: dict) -> str:
-    """Return a byte-stable JSON string for a selection's logical identity.
-
-    Values are normalized via :func:`_canonical_scalar`.
-
-    Parameters
-    ----------
-    payload : dict
-        The selection's logical-identity fields.
-
-    Returns
-    -------
-    str
-        A byte-stable JSON string with sorted keys and fixed separators.
-    """
-    normalized = {str(k): _canonical_scalar(v) for k, v in payload.items()}
-    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
-
-
-def sha256_json(
-    payload, *, separators=(",", ":"), allow_nan: bool = True
-) -> str:
-    """Return the sha256 hex digest of ``payload``'s sorted-key JSON encoding.
-
-    Stored digests depend on the exact bytes, so a caller must keep its
-    ``separators`` and ``allow_nan`` while its digests are stored.
-
-    Parameters
-    ----------
-    payload
-        A JSON-serializable value.
-    separators : tuple of str, optional
-        ``json.dumps`` separators. Default compact ``(",", ":")``;
-        ``(", ", ": ")`` reproduces ``json.dumps``'s default spacing.
-    allow_nan : bool, optional
-        If False, a NaN or infinite float raises ``ValueError`` instead of
-        encoding as ``NaN`` / ``Infinity``. Default True.
-
-    Returns
-    -------
-    str
-        The 64-character lowercase sha256 hex digest.
-
-    Raises
-    ------
-    TypeError
-        If ``payload`` holds a value ``json.dumps`` cannot encode.
-    ValueError
-        If ``allow_nan`` is False and ``payload`` holds a NaN or infinity.
-    """
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=separators, allow_nan=allow_nan
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
@@ -146,9 +46,7 @@ def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     uuid.UUID
         The deterministic ``uuid5`` primary key for the selection.
     """
-    return uuid.uuid5(
-        V2_SELECTION_NAMESPACE, f"{kind}:{canonical_identity(payload)}"
-    )
+    return _deterministic_id(V2_SELECTION_NAMESPACE, kind, payload)
 
 
 def recording_identity_payload(key: dict) -> dict:
@@ -460,7 +358,7 @@ def assert_supplied_id_matches(supplied, deterministic, *, field: str) -> None:
     if isinstance(supplied, uuid.UUID):
         normalized = supplied
     elif isinstance(supplied, str):
-        normalized = _maybe_uuid(supplied)  # None if not a well-formed UUID
+        normalized = parse_uuid(supplied)  # None if not a well-formed UUID
     else:
         normalized = None
     if normalized != deterministic:

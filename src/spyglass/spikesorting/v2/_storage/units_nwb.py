@@ -1,7 +1,7 @@
 """Units-NWB read/write IO for v2 sorts.
 
-Shared by ``Sorting`` and ``CurationV2``. DB-free at import;
-``write_curated_units_nwb`` alone queries the source sort before writing.
+Shared by ``Sorting`` and ``CurationV2``. Only ``write_curated_units_nwb``
+queries the database, for the source sort, before writing.
 """
 
 from __future__ import annotations

@@ -1,7 +1,4 @@
-"""Artifact-mask service behind ``Sorting``.
-
-DB-free at import and at call time.
-"""
+"""Artifact-mask service behind ``Sorting``."""
 
 from __future__ import annotations
 

@@ -252,7 +252,7 @@ def _run_operation(
     *, review_id, bundle, request, operation_id, started_at=None
 ):
     """Worker entry point: all schema imports and DB work stay in this process."""
-    from spyglass.spikesorting.v2._core.progress import progress_reporter
+    from spyglass.utils.progress import progress_reporter
 
     root = Path(bundle)
     state = {

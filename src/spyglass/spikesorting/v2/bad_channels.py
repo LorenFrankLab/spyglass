@@ -6,8 +6,6 @@
 - ``suggest_bad_channels``: detects per shank on a session's band-passed raw
   recording and reports, or with ``persist=True`` writes, the ``dead`` /
   ``noise`` channels to ``Electrode.bad_channel``.
-
-DB-free at import: dependencies are imported inside the functions.
 """
 
 from __future__ import annotations

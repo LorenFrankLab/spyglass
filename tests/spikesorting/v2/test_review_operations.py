@@ -315,7 +315,7 @@ def test_operation_steps_reach_the_journal_with_timing(tmp_path, monkeypatch):
     import time
 
     from spyglass.spikesorting.v2 import review_api
-    from spyglass.spikesorting.v2._core.progress import report_progress
+    from spyglass.utils.progress import report_progress
     from spyglass.spikesorting.v2._review.operations import (
         OPERATION_FILE,
         ReviewOperationService,

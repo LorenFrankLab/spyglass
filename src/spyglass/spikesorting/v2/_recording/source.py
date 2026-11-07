@@ -6,8 +6,6 @@
 - :class:`EffectiveTraces`: the persisted artifact every trace consumer
   reads, either the lineage source or a ``MotionCorrectedRecording``, and
   whether the artifact mask must still be applied.
-
-DB-free; SpikeInterface and the NWB reader are imported lazily.
 """
 
 from __future__ import annotations

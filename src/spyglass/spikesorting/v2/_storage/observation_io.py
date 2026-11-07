@@ -1,4 +1,4 @@
-"""Read exposure from committed outputs, keeping interval math DB-free."""
+"""Read exposure from committed outputs."""
 
 from __future__ import annotations
 

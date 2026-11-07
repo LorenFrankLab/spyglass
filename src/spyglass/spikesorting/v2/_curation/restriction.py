@@ -1,7 +1,6 @@
 """Join assembly behind ``CurationV2.resolve_restriction``.
 
-Key classification lives in the DB-free ``_curation.routing``. DataJoint
-tables are imported inside the function.
+Key classification lives in ``_curation.routing``.
 """
 
 from __future__ import annotations

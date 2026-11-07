@@ -1,6 +1,6 @@
 """Channel-id / probe-geometry services behind ``Recording``.
 
-DB-free at import; only the ``fetch_*`` functions read the database.
+Only the ``fetch_*`` functions read the database.
 """
 
 from __future__ import annotations

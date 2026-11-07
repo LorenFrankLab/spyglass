@@ -1,8 +1,8 @@
-"""DB-free validation for shared (cross-recording) artifact groups.
+"""Validation for shared (cross-recording) artifact groups.
 
 A ``SharedArtifactGroup`` runs one artifact pass over the union of its
 members' channels. ``aggregate_channels`` stacks members by frame index, so
-they must share a time axis. No DB import.
+they must share a time axis.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-"""Database-free artifact detection and interval-row construction.
+"""Artifact detection and interval-row construction.
 
 Builds artifact-removed ``valid_times`` and the ``IntervalList`` / ownership
 rows. Readers live in ``_artifacts.readers``; per-chunk kernels in
-``_artifacts.compute``. Dependencies are imported lazily; no DB access.
+``_artifacts.compute``.
 """
 
 from __future__ import annotations

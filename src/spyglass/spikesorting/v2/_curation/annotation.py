@@ -1,9 +1,8 @@
-"""Dependency-light normalization for typed unit-annotation sets.
+"""Normalization for typed unit-annotation sets.
 
 The DataJoint tables live in :mod:`unit_annotation`; this module owns the
-canonical value/parameter encoding and hashes so content identity can be
-tested without a database connection.  Type tags make ``None``, ``NaN``,
-empty text, booleans, integers, and floating-point values unambiguous.
+canonical value/parameter encoding and hashes. Type tags make ``None``,
+``NaN``, empty text, booleans, integers, and floating-point values unambiguous.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 
 ANNOTATION_VALUE_TYPES = frozenset({"float", "int", "bool", "text"})
 _BIGINT_MIN = -(2**63)

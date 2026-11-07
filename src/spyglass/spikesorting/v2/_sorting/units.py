@@ -1,7 +1,4 @@
-"""``Sorting.Unit`` row construction behind ``Sorting``.
-
-DB-free at import and at call time.
-"""
+"""``Sorting.Unit`` row construction behind ``Sorting``."""
 
 from __future__ import annotations
 

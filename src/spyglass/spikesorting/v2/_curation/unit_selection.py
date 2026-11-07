@@ -17,7 +17,7 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
     lossless_int,
 )
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2._curation.annotation import ANNOTATION_VALUE_TYPES
 
 if TYPE_CHECKING:

@@ -20,11 +20,10 @@ check them are described in `tests/README.md` ("Spike sorting lanes").
 
 ## `spikesorting-v2` extras
 
-- `datajoint==0.14.9` (also in the matching and curation extras, so each
+- `datajoint>=0.14.7,<0.15` (also in the matching and curation extras, so each
     installs alone): v2 staged-output cleanup overrides
-    `AutoPopulate._populate1` (`_storage/staged_outputs.py`,
-    `_storage/analyzer_cache.py`). The pin keeps the populate lifecycle that the
-    transaction and rollback tests exercise; move it only after rerunning them.
+    `AutoPopulate._populate1`, which is unchanged across this range. Widen it
+    after rerunning the staged-output commit and rollback tests.
 - `filelock>=3.15`: cross-process locks for the analyzer cache
     (`analyzer_cache_lock`) and the recording, concat and motion cache rebuilds.
     Declared directly, not left to torch. `analyzer_cache_lock` relies on

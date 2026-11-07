@@ -18,7 +18,7 @@ from spyglass.spikesorting.v2._review.annotations import (
 from spyglass.spikesorting.v2._curation.metrics import (
     si_quality_metric_output_columns,
 )
-from spyglass.spikesorting.v2._core.selection_identity import sha256_json
+from spyglass.utils.identity import sha256_json
 
 _PROFILE_FIELDS = frozenset(
     {

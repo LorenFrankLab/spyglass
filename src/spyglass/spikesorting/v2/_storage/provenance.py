@@ -1,4 +1,4 @@
-"""DB-free NWB provenance scratch (de)serialization for the v2 writers.
+"""NWB provenance scratch (de)serialization for the v2 writers.
 
 Provenance lives in NWB scratch under stable names, read by name so no
 DataJoint column is needed to find it. Every container carries

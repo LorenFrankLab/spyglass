@@ -10,12 +10,7 @@ Pydantic or SpikeInterface. Eager names:
 from importlib import import_module
 
 from spyglass.spikesorting.v2._core.enums import CurationLabel
-from spyglass.spikesorting.v2._core.job_config import (
-    install_openblas_fork_repair,
-)
-from spyglass.spikesorting.v2._orchestration.exports import (
-    PACKAGE_ROOT_REEXPORTS,
-)
+from spyglass.utils.parallel import install_openblas_fork_repair
 
 # SpikeInterface's forked workers otherwise deadlock SciPy's OpenBLAS.
 install_openblas_fork_repair()
@@ -86,15 +81,58 @@ def initialize_v2_defaults() -> None:
         )
 
 
-# Entrypoints re-exported lazily from ``.pipeline``, resolved on first access.
-_PIPELINE_REEXPORTS = PACKAGE_ROOT_REEXPORTS
-
-
+# Names after the first three resolve lazily from ``.pipeline``.
 __all__ = [
     "initialize_v2_defaults",
     "verify_v2_default_catalog",
     "CurationLabel",
-    *_PIPELINE_REEXPORTS,
+    "run_v2_pipeline",
+    "run_v2_concat_pipeline",
+    "run_v2_pipeline_session",
+    "estimate_motion",
+    "estimate_concat_motion",
+    "run_v2_unit_match",
+    "plan_v2_unit_match",
+    "plan_v2_unit_match_from_sorts",
+    "plan_v2_unit_match_from_curations",
+    "preflight_v2_unit_match",
+    "preflight_v2_pipeline",
+    "preflight_v2_pipeline_session",
+    "describe_run",
+    "describe_units",
+    "describe_parameter_rows",
+    "describe_sort_groups",
+    "describe_epochs",
+    "describe_pipeline_presets",
+    "describe_pipeline_preset",
+    "describe_recommendation_status",
+    "list_pipeline_presets",
+    "register_pipeline_preset",
+    "clone_pipeline_preset",
+    "describe_unit_match_choices",
+    "plot_sort_group_geometry",
+    "RunResult",
+    "CurationRef",
+    "EvaluationSpec",
+    "EvaluationResult",
+    "MergedCuration",
+    "MergeEvaluateReceipt",
+    "ReviewProfileRef",
+    "FigPackReview",
+    "CurationChangeSet",
+    "MergeLabelConflict",
+    "ReviewImportReceipt",
+    "ReviewStageStatus",
+    "AnnotationDefinitionRef",
+    "AnnotationSetRef",
+    "read_unit_properties",
+    "open_curation_analyzer",
+    "select_units_for_analysis",
+    "resolve_unit_selection",
+    "UnitSelectionSnapshot",
+    "UnitSelectionReceipt",
+    "SelectedGroup",
+    "V2_UNIT_SELECTION_POLICIES",
 ]
 
 
@@ -111,7 +149,7 @@ def __getattr__(name):
 
         globals()[name] = verify_v2_default_catalog
         return verify_v2_default_catalog
-    if name in _PIPELINE_REEXPORTS:
+    if name in __all__:
         pipeline = import_module(f"{__name__}.pipeline")
         value = getattr(pipeline, name)
         globals()[name] = value
