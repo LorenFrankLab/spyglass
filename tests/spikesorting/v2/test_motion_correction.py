@@ -383,7 +383,7 @@ def test_estimate_round_trip(drift_recording):
 
 def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
     """An artifact-backed selection is a distinct estimate whose statistics
-    spans exclude the masked period, and it protects its detection.
+    spans exclude the masked period, and deleting the detection removes it.
 
     The mask starts 5 frames after the deepest trough in [10.0, 10.1) s: that
     spike stays unmasked and is detected, but its localization window (3
@@ -444,9 +444,10 @@ def test_masked_estimate_uses_the_pinned_artifact_mask(drift_recording):
         MotionEstimate().get_motion(unmasked_key).displacement[0],
     )
 
-    with pytest.raises(ValueError, match="MotionEstimateSelection"):
-        (RecordingArtifactDetection & artifact_key).delete(safemode=False)
-    assert RecordingArtifactDetection & artifact_key
+    (RecordingArtifactDetection & artifact_key).delete(safemode=False)
+    assert not (RecordingArtifactDetection & artifact_key)
+    assert not (MotionEstimateSelection & key)
+    assert not (MotionEstimate & key)
 
 
 def test_unfiltered_sources_are_refused_for_motion_estimation(
