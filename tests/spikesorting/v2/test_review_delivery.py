@@ -156,6 +156,32 @@ def test_connected_actions_require_matching_origin_and_review(bundle):
         assert status == expected
 
 
+def test_bundle_path_does_not_reveal_its_review_url(bundle):
+    """Another local user who knows the bundle directory cannot reach it."""
+    import hashlib
+
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    class Operations:
+        review_id = "pinned-review"
+
+        def start(self, request):
+            return {"status": "running"}
+
+        def close(self):
+            pass
+
+    url = serve_review_bundle(bundle, operation_factory=Operations)
+    port = urllib.parse.urlsplit(url).port
+    guessed = hashlib.sha256(str(bundle.resolve()).encode()).hexdigest()
+    for path in ("", "api/capabilities"):
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(
+                f"http://localhost:{port}/bundles/{guessed}/{path}", timeout=5
+            )
+        assert exc.value.code == 404
+
+
 @pytest.mark.parametrize("action", ["inspect", "commit", "parent"])
 def test_operation_destinations_share_port_and_isolate_bundles(bundle, action):
     """The one forwarded origin serves child assets, drafts, and operations."""

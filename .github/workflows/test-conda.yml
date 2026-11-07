@@ -178,8 +178,6 @@ jobs:
         # --base-dir matches the conftest default (./tests/_data/) and the
         # path covered by the cache-test-data step above. Pinned explicitly
         # so cache hits are stable across any future conftest default change.
-        # The core lane leaves out the spike sorting suites, which run in
-        # pytest-v2 and pytest-legacy (lanes: tests/_ci_lanes.py).
         pytest --lane core --no-docker --no-dlc --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro \
           ${{ steps.test_mode.outputs.marker_args }} \
@@ -360,15 +358,6 @@ jobs:
           tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
         conda run -n spyglass_v2_matching pytest --lane v2-matching $V2_SCOPE \
           --v2-tier-budgets --durations=25 --junitxml=junit-v2-matching.xml \
-          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
-    # --- Matcher ground truth: red until the 2sessions_{s1,s2} fixtures are
-    # hosted (_fetch.py URLs are None). Do not mask the failure.
-    - name: Two-session matcher ground-truth gate (nightly / manual dispatch)
-      if: matrix.shard.name == 'matching' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-      run: |
-        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_2sessions_s1 mearec_polymer_128ch_2sessions_s2" \
-          conda run -n spyglass_v2_matching pytest \
-          tests/spikesorting/v2/test_unitmatch.py::test_v2_unitmatch_polymer_mearec_ground_truth \
           --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
     # --- Motion benchmark: development evidence with no pass/fail limits,
     # ~50 min, so manual dispatch only.

@@ -5,7 +5,7 @@ persisted bundle is served over loopback; **Save draft** writes the
 ``annotations.json`` that :meth:`FigPackReview.preview_import` reads.
 
 - One daemon server per process, reused across bundles; the port is never
-  persisted.
+  persisted. Each bundle's URL id is random, so only its holder can reach it.
 - Only ``annotations.json`` accepts ``PUT``, with the last-read revision.
 - An optional operation adapter accepts same-origin, review-scoped POSTs.
 """
@@ -13,7 +13,7 @@ persisted bundle is served over loopback; **Save draft** writes the
 from __future__ import annotations
 
 import atexit
-import hashlib
+import secrets
 import threading
 from dataclasses import dataclass
 from functools import partial
@@ -103,7 +103,6 @@ def serve_review_bundle(
             "again from its curation (start_review(...) recreates the bundle "
             "-- edits saved into the missing bundle are gone)."
         )
-    bundle_id = hashlib.sha256(str(root).encode()).hexdigest()
     with _LOCK:
         if _SERVER is None:
             handler = partial(_handler_class(), enable_file_upload=True)
@@ -119,6 +118,9 @@ def serve_review_bundle(
             thread.start()
             _SERVER = server, thread
         server, _ = _SERVER
+        # A random id keeps other local users who know the path out.
+        ids = {served.root: key for key, served in server.bundles.items()}
+        bundle_id = ids.get(root) or secrets.token_urlsafe(32)
         served = server.bundles.setdefault(bundle_id, _Bundle(root))
         if served.operations is None and operation_factory is not None:
             served.operations = operation_factory()

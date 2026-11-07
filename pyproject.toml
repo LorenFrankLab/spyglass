@@ -50,10 +50,7 @@ dependencies = [
   "ipympl",
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
-  # ndx-ophys-devices 0.4.0 is a breaking spec change: ViralVectorInjection
-  # coordinates moved into a StereotacticPosition child, FiberInsertion was
-  # dropped, and OpticalLens* was renamed ObjectiveLens*. Our ingestion in
-  # common_optogenetics reads the 0.3.x layout.
+  # 0.4.0 changed the spec; common_optogenetics reads the 0.3.x layout
   "ndx-ophys-devices>=0.3.1,<0.4",
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
@@ -119,7 +116,6 @@ optional-dependencies.moseq-gpu = [
 optional-dependencies.spikesorting = [
   "numba",                  # clusterless peaks, burst correlograms
   "probeinterface>=0.3.2",  # required by spikeinterface 0.104
-  "pubnub<6.4",             # TODO: remove this when sortingview is updated
   "pydantic>=2",            # spikesorting v2 parameter models
   "sortingview>=0.11",
   "spikeinterface==0.104.3", # a bump shifts untyped sorter defaults;
@@ -127,8 +123,6 @@ optional-dependencies.spikesorting = [
 ]
 optional-dependencies.spikesorting-v2 = [
   "spyglass-neuro[spikesorting]",
-  # v2 staged cleanup overrides AutoPopulate._populate1
-  "datajoint>=0.14.7,<0.15",
   # analyzer/cache locks; >=3.15 makes is_singleton locks reentrant
   "filelock>=3.15",
   "threadpoolctl>=3", # structured native-thread runtime receipts
@@ -139,8 +133,6 @@ optional-dependencies.spikesorting-v2 = [
 ]
 optional-dependencies.spikesorting-v2-matching = [
   "spyglass-neuro[spikesorting]",
-  # installable alone; same staged populate lifecycle as spikesorting-v2
-  "datajoint>=0.14.7,<0.15",
   "filelock>=3.15", # existing-sort analyzer reads use the shared cache lock
   "threadpoolctl>=3", # structured native-thread runtime receipts
   # <3.2.8: later releases pin numpy<2. 3.2.7 still needs the numpy-2 shim in
@@ -151,7 +143,6 @@ optional-dependencies.spikesorting-v2-matching = [
 ]
 optional-dependencies.spikesorting-v2-curation = [
   "spyglass-neuro[spikesorting]",
-  "datajoint>=0.14.7,<0.15", # existing v2 sorts use the staged populate lifecycle
   "filelock>=3.15", # shared analyzer locks and atomic draft revision checks
   "threadpoolctl>=3", # structured native-thread runtime receipts
   # review extension uses these FigPack APIs; re-test browser review to bump

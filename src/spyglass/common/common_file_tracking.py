@@ -92,9 +92,7 @@ class AnalysisFileIssues(dj.Manual):
                         "analysis_file_name"
                     )
                 )
-            except ImportError:
-                logger.debug(f"{module} unavailable; skipping.")
-            except Exception as e:  # Keep the scan running
+            except Exception as e:  # e.g., spike sorting extra not installed
                 logger.warning(f"Could not fetch {table} deleted files: {e}")
         return deleted
 

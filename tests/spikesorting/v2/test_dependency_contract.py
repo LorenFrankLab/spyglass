@@ -5,7 +5,7 @@ job declare consistent dependency pins (no DB, no SpikeInterface import).
   spec matches the pyproject pin.
 - The legacy lane sed-rewrites the committed SI/probeinterface strings, so
   the sed patterns must match them.
-- Every conda env declares SciPy >=1.13 or documents the legacy recipe.
+- Every conda env declares SciPy >=1.13, except the test-only legacy env.
 """
 
 import re
@@ -72,21 +72,6 @@ def test_v2_extra_installs_native_mountainsort4():
     assert str(requirements["mountainsort4"].specifier) == "==1.0.7"
     assert "ml-ms4alg" not in requirements
     assert "ml_ms4alg" not in requirements
-
-
-def test_v2_extras_bound_datajoint_to_tested_populate_lifecycle():
-    """Each runtime extra stays on 0.14 releases with the tested ``_populate1``."""
-    for extra in (
-        "spikesorting-v2",
-        "spikesorting-v2-matching",
-        "spikesorting-v2-curation",
-    ):
-        requirements = _extra_requirements(extra)
-        datajoint = requirements["datajoint"].specifier
-        assert datajoint.contains("0.14.7"), extra
-        assert datajoint.contains("0.14.10"), extra
-        assert not datajoint.contains("0.14.6"), extra
-        assert not datajoint.contains("0.15.0"), extra
 
 
 def test_v2_runtime_extras_declare_reentrant_analyzer_locks():
@@ -190,11 +175,11 @@ def test_spikeinterface_hard_pin_matches_v2_env():
 
 
 def test_legacy_sed_targets_present():
-    """The legacy recipes rewrite exactly the SpikeInterface and
+    """The legacy CI recipe rewrites exactly the SpikeInterface and
     probeinterface strings pyproject commits, and nothing about numpy (the
     legacy env file pins numpy<2 itself)."""
     pyproject = PYPROJECT.read_text()
-    recipes = {path: path.read_text() for path in (CONDA_CI, LEGACY_ENV)}
+    recipes = {CONDA_CI: CONDA_CI.read_text()}
 
     for source, legacy in LEGACY_SED_REWRITES:
         assert source in pyproject, (
@@ -217,30 +202,24 @@ def test_legacy_sed_targets_present():
 def test_all_conda_envs_are_modern_scipy_or_document_legacy_install():
     """Every environment makes its SciPy/runtime generation explicit.
 
-    Modern envs need SciPy >=1.13. The SI-0.99 legacy env must carry the
-    pre-install pin-relaxation recipe and pin ``numpy<2`` in a dependency list.
+    Modern envs need SciPy >=1.13. Only the test-only SI-0.99 legacy env may
+    skip it, and it must pin ``numpy<2`` in a dependency list.
     """
     modern_scipy = re.compile(
         r'^\s*-\s*["\']?scipy>=1\.13(?:["\']|\s|$)', re.MULTILINE
     )
     # A real conda or pip dependency list item, not prose that names the pin.
     legacy_numpy_pin = re.compile(r'^\s*-\s*["\']?numpy<2', re.MULTILINE)
-    legacy_markers = (
-        "sed -i",
-        "spikeinterface>=0.99.1,<0.100",
-    )
 
     for path in sorted(ENVIRONMENTS.glob("*.yml")):
         contents = path.read_text()
         is_modern = bool(modern_scipy.search(contents))
-        documents_legacy_install = all(
-            marker in contents for marker in legacy_markers
+        is_legacy = path == LEGACY_ENV and bool(
+            legacy_numpy_pin.search(contents)
         )
-        pins_legacy_numpy = bool(legacy_numpy_pin.search(contents))
-        assert is_modern or (documents_legacy_install and pins_legacy_numpy), (
-            f"{path} must pin scipy>=1.13, or both document the complete "
-            "legacy SI-0.99 pre-install sed recipe and carry a real "
-            "`- numpy<2` dependency entry (a header mention does not count)"
+        assert is_modern or is_legacy, (
+            f"{path} must pin scipy>=1.13; only {LEGACY_ENV.name} may skip it "
+            "and it must carry a real `- numpy<2` dependency entry"
         )
 
 

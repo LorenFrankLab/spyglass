@@ -25,15 +25,9 @@ non-sorting pipelines import without it.
     (`test_si_default_snapshots.py`) fail on a bump: move the pin and audit the
     snapshot diff together. `environment_spikesorting_v2.yml` must carry the
     same pin (`test_spikeinterface_hard_pin_matches_v2_env`).
-- `pubnub<6.4`: kept from the old sortingview pin. sortingview 0.14 does not
-    depend on pubnub; the deprecated `kachery-cloud` pins `pubnub==6.3.*`.
 
 ## `spikesorting-v2` extras
 
-- `datajoint>=0.14.7,<0.15` (also in the matching and curation extras, so each
-    installs alone): v2 staged-output cleanup overrides
-    `AutoPopulate._populate1`, which is unchanged across this range. Widen it
-    after rerunning the staged-output commit and rollback tests.
 - `filelock>=3.15`: cross-process locks for the analyzer cache
     (`analyzer_cache_lock`) and the recording, concat and motion cache rebuilds.
     Declared directly, not left to torch. `analyzer_cache_lock` relies on

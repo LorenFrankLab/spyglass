@@ -1,9 +1,4 @@
-# Test-only env for the v0/v1 spike sorting suites (SpikeInterface 0.99).
-# Relax pyproject's SI pins first, as the pytest-legacy CI job does:
-#   sed -i \
-#     -e 's/"spikeinterface==0.104.3"/"spikeinterface>=0.99.1,<0.100"/' \
-#     -e 's/"probeinterface>=0.3.2"/"probeinterface>=0.2.19,<0.3"/' \
-#     pyproject.toml
+# Test-only (v0/v1 suites, SI 0.99); pytest-legacy relaxes pyproject's SI pins
 name: spyglass_spikesorting_legacy
 channels:
   - conda-forge

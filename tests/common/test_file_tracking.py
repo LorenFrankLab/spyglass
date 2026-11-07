@@ -498,6 +498,19 @@ def test_get_recompute_deleted_returns_set(file_tracking_module):
     assert isinstance(result, set)
 
 
+def test_get_recompute_deleted_warns_when_a_table_is_unavailable(
+    file_tracking_module,
+):
+    """An unimportable recompute table is named, since its files then look missing."""
+    with (
+        patch.dict("sys.modules", {"spyglass.spikesorting.v1.recompute": None}),
+        patch("spyglass.common.common_file_tracking.logger") as log,
+    ):
+        file_tracking_module._get_recompute_deleted()
+    warned = " ".join(str(call) for call in log.warning.call_args_list)
+    assert "RecordingRecompute" in warned
+
+
 # ======================= resolve_table_refs ==========================
 
 

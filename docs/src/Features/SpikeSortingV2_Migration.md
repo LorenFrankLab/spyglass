@@ -937,9 +937,10 @@ through it. Reference details:
     at most 32 characters). Labels already on the parent are kept on import.
 
 - **Local serving.** `review.open()` starts or reuses one loopback server per
-    Python process and serves `http://localhost:<port>/bundles/<id>/`. A browser
-    save writes the bundle's `annotations.json`, the file the importer reads;
-    nothing else is writable.
+    Python process and serves `http://localhost:<port>/bundles/<id>/`. The
+    `<id>` is random, so only someone given the URL can read or edit the review.
+    A browser save writes the bundle's `annotations.json`, the file the importer
+    reads; nothing else is writable.
 
     - The port is process state. After a kernel restart,
         `FigPackReview.resume(review_id).open()` serves the same files with every

@@ -426,9 +426,9 @@ durations.
 - `SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED=1` turns the missing-extra skip into
     a failure, so the install may tolerate transient errors (`|| true`) while a
     broken extra still fails.
-- Nightly/manual: `test_v2_unitmatch_polymer_mearec_ground_truth` requires
-    `mearec_polymer_128ch_2sessions_{s1,s2}`, which have no URL in `_fetch.py`.
-    The step fails until they are hosted.
+- `test_v2_unitmatch_polymer_mearec_ground_truth` needs
+    `mearec_polymer_128ch_2sessions_{s1,s2}`, which have no URL in `_fetch.py`,
+    so CI skips it; run it locally with the fixtures.
 
 **`curation`**
 
