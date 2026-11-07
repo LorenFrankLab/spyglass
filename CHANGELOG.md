@@ -75,7 +75,7 @@ info = (
 rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 ```
 
-#### Delete Options Are Keyword-Only (#PRNUM)
+#### Delete Options Are Keyword-Only (#1718)
 
 `Table().delete(restriction)` read `restriction` as `force_permission`, so it
 skipped the permission check and targeted the whole table. Positional arguments
@@ -147,7 +147,7 @@ Table().delete({"nwb_file_name": nwb_file_name})
     #1686
 - Apply a positional restriction passed to `delete`, `cautious_delete` and
     `super_delete`, on Spyglass and merge tables, instead of reading it as
-    `force_permission` or `warn` #PRNUM
+    `force_permission` or `warn` #1718
 
 ### Pipelines
 
