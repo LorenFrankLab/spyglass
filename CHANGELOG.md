@@ -175,7 +175,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         four channels #1711
     - Rename `calculate_isi_violation`'s `isi_threshold_s` to
         `isi_threshold_ms`, since the value is in milliseconds. The old name
-        warns and is removed in a future release #1711
+        is logged in `ActivityLog` and scheduled for removal in 0.7.0 #1711
 
 ## [0.6.0] (Sep 1st 2026)
 

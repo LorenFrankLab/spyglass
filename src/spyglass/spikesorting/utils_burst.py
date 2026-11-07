@@ -1,4 +1,3 @@
-import warnings
 from typing import Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -306,11 +305,11 @@ def calculate_isi_violation(
         ``violations / total_spikes``.
     """
     if isi_threshold_s is not None:
-        warnings.warn(
-            "calculate_isi_violation(isi_threshold_s=...) is deprecated; the "
-            "value was always applied in milliseconds. Use isi_threshold_ms.",
-            DeprecationWarning,
-            stacklevel=2,
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            "calculate_isi_violation(isi_threshold_s=)",
+            alt="calculate_isi_violation(isi_threshold_ms=)",
         )
         isi_threshold_ms = isi_threshold_s
     spike_train = np.sort(np.concatenate((peak1, peak2)))
