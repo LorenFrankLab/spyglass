@@ -568,10 +568,29 @@ def test_preview_member_output_is_rejected_for_decoding(
 
 
 @pytest.mark.slow
-def test_direct_member_delete_reclaims_file_and_repopulates(
+def test_member_analysis_files_are_not_orphans(concat_member_curation):
+    """Despite sharing the secondary ``nwb_file_name`` with ``AnalysisNwbfile``,
+    the orphan query behind ``cleanup()`` runs and keeps member files."""
+    from spyglass.common import AnalysisNwbfile
+
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
+    )
+
+    curation_key = concat_member_curation["curation_key"]
+    member_files = (ConcatMemberCuration & curation_key).fetch(
+        "analysis_file_name", as_dict=True
+    )
+    assert member_files
+    assert not (AnalysisNwbfile().get_orphans() & member_files)
+
+
+@pytest.mark.slow
+def test_direct_member_delete_orphans_file_and_repopulates(
     concat_member_curation,
 ):
-    """A member row owns a reclaimable file and remains regenerable."""
+    """A deleted member's file is left for AnalysisNwbfile cleanup, and the
+    member remains regenerable."""
     from pathlib import Path
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -598,8 +617,8 @@ def test_direct_member_delete_reclaims_file_and_repopulates(
     )
     assert not (ConcatMemberCuration & member_key)
     assert not (SpikeSortingOutput & merge_key)
-    assert not (AnalysisNwbfile & analysis_key)
-    assert not analysis_path.exists()
+    assert analysis_path.exists()
+    assert (AnalysisNwbfile & analysis_key).get_orphans()
 
     ConcatMemberCuration.populate(curation_key, reserve_jobs=False)
     assert ConcatMemberCuration & member_key
@@ -649,10 +668,11 @@ def test_changed_second_fetch_leaves_no_staged_member_file(
 
 
 @pytest.mark.slow
-def test_delete_cascades_member_rows_and_reclaims_files(
+def test_delete_cascades_member_rows_and_orphans_files(
     concat_member_curation, monkeypatch
 ):
-    """Deleting a concat curation removes member outputs and owned files."""
+    """Deleting a concat curation removes member outputs and leaves their
+    files to AnalysisNwbfile cleanup."""
     from pathlib import Path
 
     import spyglass.spikesorting.v2.concat_member_curation as member_mod
@@ -701,22 +721,7 @@ def test_delete_cascades_member_rows_and_reclaims_files(
     assert not (CurationV2 & curation_key)
     assert not (ConcatMemberCuration & curation_key)
     assert not (SpikeSortingOutput & [{"merge_id": mid} for mid in merge_ids])
-    assert not (
-        AnalysisNwbfile
-        & [{"analysis_file_name": name} for name in analysis_names]
-    )
-    assert not any(path.exists() for path in paths)
-
-
-@pytest.mark.slow
-def test_member_analysis_files_are_not_orphans(concat_member_curation):
-    """Despite sharing the secondary ``nwb_file_name`` with ``AnalysisNwbfile``,
-    the orphan query behind ``cleanup()`` runs and keeps member files."""
-    from spyglass.common import AnalysisNwbfile
-
-    member_files = [
-        {"analysis_file_name": row["analysis_file_name"]}
-        for row in concat_member_curation["rows"]
+    member_files = AnalysisNwbfile & [
+        {"analysis_file_name": name} for name in analysis_names
     ]
-    assert member_files
-    assert not (AnalysisNwbfile().get_orphans() & member_files)
+    assert len(member_files.get_orphans()) == len(analysis_names)

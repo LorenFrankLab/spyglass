@@ -276,7 +276,7 @@ def test_artifact_detection_populates_and_writes_interval_list(
         (
             RecordingArtifactDetection
             & {"artifact_detection_id": row["artifact_detection_id"]}
-        ).cascade_delete()
+        ).delete()
         (
             RecordingArtifactSelection
             & {"artifact_detection_id": row["artifact_detection_id"]}
@@ -346,7 +346,7 @@ def test_artifact_detection_delete_removes_interval_list_row(
         (
             RecordingArtifactDetection
             & {"artifact_detection_id": row["artifact_detection_id"]}
-        ).cascade_delete()
+        ).delete()
         (
             RecordingArtifactSelection
             & {"artifact_detection_id": row["artifact_detection_id"]}
@@ -870,7 +870,7 @@ def test_artifact_detection_delete_uses_interval_ownership_part_rows(
     )
     # Start from a detection no sort references (a prior test's
     # populated_sorting may; that fixture rebuilds its chain on demand).
-    (RecordingArtifactDetection & art_pk).cascade_delete(safemode=False)
+    (RecordingArtifactDetection & art_pk).delete(safemode=False)
     RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True
@@ -909,7 +909,7 @@ def test_artifact_detection_delete_requires_interval_ownership_part_rows(
     )
     # Start from a detection no sort references (a prior test's
     # populated_sorting may; that fixture rebuilds its chain on demand).
-    (RecordingArtifactDetection & art_pk).cascade_delete(safemode=False)
+    (RecordingArtifactDetection & art_pk).delete(safemode=False)
     RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
     part_rows = (RecordingArtifactDetection.RemovedInterval & art_pk).fetch(
         "nwb_file_name", "interval_list_name", as_dict=True

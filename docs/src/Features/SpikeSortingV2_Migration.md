@@ -1163,10 +1163,9 @@ Sorting.find_orphaned_analyzer_folders(dry_run=False)
 - Active builds are skipped; ownership is checked by lock, not by PID or age.
     Run reclamation when sorting and rebuild jobs are idle.
 - `CurationV2.delete()` and `ConcatMemberCuration.delete()` list member rows,
-    merge ids, and analysis files in a dry run, then remove them and reclaim
-    only true `AnalysisNwbfile` orphans. After `super_delete`, raw SQL, or an
-    upstream cascade, review `AnalysisNwbfile().cleanup(dry_run=True)` before
-    cleaning up.
+    merge ids, and analysis files in a dry run, then remove the rows. Their
+    analysis files are left for `AnalysisNwbfile().cleanup()`, like any other
+    pipeline's.
 
 ### Same-day concatenation
 
@@ -1275,8 +1274,8 @@ member_merge_ids = {
 - **Observation intervals survive.** The concat NWB stores kept intervals in
     synthetic seconds; each member export stores them in original session time.
     `describe_run` reports member detection ids, status, and masked durations.
-- Deleting a detection that a concat selection references is refused, unless
-    cascade deleting (`cascade_delete()`).
+- Deleting a detection also deletes the concat selections that use it; the
+    confirmation prompt lists them.
 - **Brain regions anchor to the first member.** `get_unit_brain_regions` on a
     concat sort raises `ConcatBrainRegionAmbiguousError` unless
     `allow_anchor_member=True` (labeled `region_resolution="anchor_member"`).

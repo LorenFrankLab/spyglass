@@ -266,8 +266,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         cls = type(self)
         pk = self.primary_key
         rows = self.fetch("KEY")
-        # Snapshot concat members: the cascade cannot remove their upstream
-        # AnalysisNwbfile, so orphans are reclaimed after the delete.
+        # Snapshot concat members for the dry-run inventory and merge cleanup.
         from spyglass.spikesorting.v2.concat_member_curation import (
             ConcatMemberCuration,
         )

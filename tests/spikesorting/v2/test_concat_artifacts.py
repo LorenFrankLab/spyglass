@@ -349,12 +349,6 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             request,
             artifact_detection_ids={0: detection_ids[1], 1: detection_ids[0]},
         )
-    with pytest.raises(ValueError, match="referenced"):
-        (
-            RecordingArtifactDetection
-            & {"artifact_detection_id": detection_ids[0]}
-        ).delete(safemode=False)
-
     ConcatenatedRecording.populate(key, reserve_jobs=False)
     row = (ConcatenatedRecording & key).fetch1()
     combined = ConcatenatedRecording().get_recording(key)
@@ -593,7 +587,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     member_keys = (ConcatMemberCuration & merged).fetch("KEY")
     (
         RecordingArtifactDetection & {"artifact_detection_id": detection_ids[0]}
-    ).cascade_delete(safemode=False)
+    ).delete(safemode=False)
     assert not (ConcatenatedRecordingSelection & key)
     assert not (ConcatenatedRecordingSelection & different)
     assert not (Sorting & sorting_key)

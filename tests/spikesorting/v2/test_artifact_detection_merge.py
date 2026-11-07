@@ -319,38 +319,6 @@ def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
             (SortingSelection & sort_pk).super_delete(warn=False)
 
 
-def test_delete_detection_refused_when_referenced(ingested_recording):
-    """Deleting an artifact result a sorting references is refused, leaving
-    the detection and sort intact."""
-    from spyglass.spikesorting.v2.artifact import (
-        RecordingArtifactDetection,
-        RecordingArtifactSelection,
-    )
-    from spyglass.spikesorting.v2.sorting import SortingSelection
-
-    rec_pk = ingested_recording["rec_pk"]
-    art = _second_detection(rec_pk)
-    sort_pk = SortingSelection.insert_selection(
-        {
-            "recording_id": rec_pk["recording_id"],
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-            "artifact_detection_id": art["artifact_detection_id"],
-        }
-    )
-    try:
-        with pytest.raises(
-            ValueError, match="referenced by a SortingSelection"
-        ):
-            (RecordingArtifactDetection & art).delete(safemode=False)
-        assert RecordingArtifactDetection & art
-        assert SortingSelection & sort_pk
-    finally:
-        (SortingSelection & sort_pk).super_delete(warn=False)
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
-        (RecordingArtifactSelection & art).super_delete(warn=False)
-
-
 def test_delete_detection_unreferenced_unregisters_and_removes(
     ingested_recording,
 ):
@@ -379,9 +347,9 @@ def test_delete_detection_unreferenced_unregisters_and_removes(
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 
-def test_cascade_delete_removes_referencing_sorts(ingested_recording):
-    """cascade_delete removes the artifact result, its registration, and every
-    sorting that referenced it."""
+def test_delete_removes_referencing_sorts(ingested_recording):
+    """Deleting an artifact result removes its registration and every sorting
+    that referenced it."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -403,7 +371,7 @@ def test_cascade_delete_removes_referencing_sorts(ingested_recording):
         }
     )
     try:
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
+        (RecordingArtifactDetection & art).delete(safemode=False)
         assert not (RecordingArtifactDetection & art)
         assert not (ArtifactDetectionOutput & {"merge_id": merge_id})
         assert not (SortingSelection & sort_pk)
@@ -644,7 +612,7 @@ def test_insert_selection_links_artifact_in_ambient_transaction(
             conn.cancel_transaction()
         assert len(SortingSelection()) == n_before
     finally:
-        (RecordingArtifactDetection & art).cascade_delete(safemode=False)
+        (RecordingArtifactDetection & art).delete(safemode=False)
         (RecordingArtifactSelection & art).super_delete(warn=False)
 
 

@@ -164,9 +164,8 @@ planned with `attempt_all`. Parameter tables provide `insert_default()`.
 - `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
     two artifact-detection tables. `SortingSelection.ArtifactDetectionSource`
     holds one optional foreign key to it; user code does not import it. Deleting
-    a result is refused while a sort or frozen concat member references it
-    (`cascade_delete` removes the dependents too). Concat members reference
-    `RecordingArtifactDetection` directly.
+    a result also deletes the sorts and concat members that reference it.
+    Concat members reference `RecordingArtifactDetection` directly.
 - Parameter tables are Pydantic-validated Lookups; user params validate the
     `params` blob on insert.
 - `CurationReviewProfile` binds one immutable name to the metric and rule
@@ -566,9 +565,8 @@ the ordered member recordings) has the same fail-closed lifecycle as
     existing concat; the next `insert_selection` mints a new id. A member
     `Recording` that is gone or drifted raises `MissingRecordingForConcatError`
     / `ConcatMemberDriftError`.
-- **Artifact dependencies.** Member detections are foreign keys. Ordinary
-    deletion refuses referenced detections; `cascade_delete()` removes the
-    dependent concat and sorts. Masks apply before concatenation and masked
+- **Artifact dependencies.** Member detections are foreign keys, so deleting a
+    detection cascades to the dependent concat and sorts. Masks apply before concatenation and masked
     samples stay masked. `obs_intervals` stores valid time on the concat
     timeline; `MemberBoundary.member_valid_times` stores it in original session
     timestamps for member exports.
@@ -605,10 +603,8 @@ the ordered member recordings) has the same fail-closed lifecycle as
     compared by a streamed SHA-256 (`_core.signal_math.timestamp_fingerprint`).
     `SharedGroupArtifactDetection.make_compute` re-checks, because a direct
     selection insert bypasses `insert_group`.
-- `_ArtifactDetectionMixin.delete` refuses detections a selection references.
-    A selection that links the detection after that check and before the
-    cascade is removed by the `force_masters` cascade, like any DataJoint
-    child.
+- `_ArtifactDetectionMixin.delete` cascades to the selections that use a
+    detection; the prompt lists them.
 - DataJoint does not cascade through `interval_list_name`-keyed dependencies, so
     owned `IntervalList` rows are collected before the cascade and removed only
     for detections it deleted.

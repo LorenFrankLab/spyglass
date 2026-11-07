@@ -235,83 +235,8 @@ class ConcatMemberCuration(
                 force_parts=True,
             )
 
-    @classmethod
-    def _cleanup_deleted_analysis_rows(cls, rows: list[dict]) -> list[str]:
-        """Delete orphaned member AnalysisNwbfile rows and external files.
-
-        ``AnalysisNwbfile`` is upstream, so the cascade cannot remove it.
-        Only files of member rows that are actually gone and that nothing
-        else references are removed.
-        """
-        pk = cls.primary_key
-        remaining = {
-            tuple(key[name] for name in pk)
-            for key in (
-                cls & [{name: row[name] for name in pk} for row in rows]
-            ).fetch("KEY")
-        }
-        deleted_names = {
-            str(row["analysis_file_name"])
-            for row in rows
-            if tuple(row[name] for name in pk) not in remaining
-        }
-        if not deleted_names:
-            return []
-        # Deleting files before an outer transaction commits would break
-        # rollback; leave them to the global cleanup pass.
-        if cls.connection.in_transaction:
-            logger.warning(
-                "Concat-member rows were deleted inside an outer transaction; "
-                "deferring their AnalysisNwbfile/file reclamation. Run "
-                "AnalysisNwbfile().cleanup(dry_run=True) after commit."
-            )
-            return []
-        candidates = [
-            {"analysis_file_name": name} for name in sorted(deleted_names)
-        ]
-        orphan_names = sorted(
-            str(name)
-            for name in (AnalysisNwbfile & candidates)
-            .get_orphans()
-            .fetch("analysis_file_name")
-        )
-        if orphan_names:
-            orphan_paths = {
-                Path(AnalysisNwbfile.get_abs_path(name)).resolve()
-                for name in orphan_names
-            }
-            # Proven orphans: super_delete avoids a second force-masters
-            # cascade. Reclaim only the external entries captured above.
-            orphan_candidates = [
-                {"analysis_file_name": name} for name in orphan_names
-            ]
-            (AnalysisNwbfile & orphan_candidates).super_delete(
-                warn=False, safemode=False, force_masters=False
-            )
-            external = AnalysisNwbfile()._ext_tbl
-            external_hashes = [
-                file_hash
-                for file_hash, file_path in external.unused().fetch_external_paths()
-                if Path(file_path).resolve() in orphan_paths
-            ]
-            if external_hashes:
-                errors = (
-                    external
-                    & [{"hash": file_hash} for file_hash in external_hashes]
-                ).delete(
-                    delete_external_files=True,
-                    display_progress=False,
-                    errors_as_string=True,
-                )
-                if errors:
-                    raise RuntimeError(
-                        "Failed to reclaim concat-member analysis file(s): "
-                        f"{errors}"
-                    )
-        return orphan_names
-
     def delete(self, *restrictions, **kwargs):
-        """Delete member rows and reclaim their orphaned analysis files."""
+        """Delete member rows and their orphaned merge entries."""
         if restrictions:
             return self._restrict_delete_args(restrictions).delete(**kwargs)
 
@@ -338,7 +263,8 @@ class ConcatMemberCuration(
 
         Shared by :meth:`delete` and ``CurationV2.delete``. A dry run only
         logs the member inventory. Otherwise the cascade is followed by
-        removing orphaned merge masters and member ``AnalysisNwbfile`` rows.
+        removing orphaned merge masters. Member ``AnalysisNwbfile`` rows are
+        left to ``AnalysisNwbfile().cleanup()``.
 
         Parameters
         ----------
@@ -388,7 +314,6 @@ class ConcatMemberCuration(
         )
         if not dry_run:
             cls._cleanup_orphaned_merge_masters(merge_ids)
-            cls._cleanup_deleted_analysis_rows(member_rows)
         return result
 
     @staticmethod

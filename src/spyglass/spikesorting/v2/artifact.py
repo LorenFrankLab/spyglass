@@ -681,73 +681,24 @@ class _ArtifactDetectionMixin:
                 return next(iter(result.values()))
         return result
 
-    def _merge_registration(self, row):
-        """Return merge registration and count of its selection dependencies.
+    def delete(self, *restrictions, safemode=None, **kwargs):
+        """Delete detections, their dependents, and owned intervals.
 
-        Counts sorting, motion-estimate and concat selections. Concat member
-        FKs can reference a detection directly even if its merge registration
-        is absent.
-        """
-        from spyglass.spikesorting.v2.artifact_output import (
-            ArtifactDetectionOutput,
-        )
-        from spyglass.spikesorting.v2.motion import MotionEstimateSelection
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecordingSelection,
-        )
-        from spyglass.spikesorting.v2.sorting import SortingSelection
-
-        det_key = {"artifact_detection_id": row["artifact_detection_id"]}
-        n_concat = len(ConcatenatedRecordingSelection.MemberSnapshot & det_key)
-        try:
-            merge_id = ArtifactDetectionOutput.get_merge_id(det_key)
-        except KeyError:
-            return None, n_concat
-        merge_key = {"artifact_detection_merge_id": merge_id}
-        n = len(SortingSelection.ArtifactDetectionSource & merge_key) + len(
-            MotionEstimateSelection.ArtifactDetectionSource & merge_key
-        )
-        return merge_id, n + n_concat
-
-    def delete(
-        self, *restrictions, safemode=None, _cascade_sorts=False, **kwargs
-    ):
-        """Delete detections, their merge registration and owned intervals.
-
-        Refused when a ``SortingSelection``, ``MotionEstimateSelection`` or
-        ``ConcatenatedRecordingSelection`` member references a detection;
-        delete those first or use :meth:`cascade_delete`. Owned
-        ``IntervalList`` rows are removed for detections actually deleted.
+        The cascade removes the merge registration and any sorting,
+        motion-estimate or concat selection that uses a detection; the
+        confirmation prompt lists them. Owned ``IntervalList`` rows are
+        removed for detections actually deleted, since only this table's
+        ``RemovedInterval`` parts record which intervals it owns.
         Positional arguments are restrictions, applied before rows are
         fetched.
-
-        Raises
-        ------
-        ValueError
-            If a detection is referenced and ``_cascade_sorts`` is False.
         """
         if restrictions:
             return self._restrict_delete_args(restrictions).delete(
-                safemode=safemode, _cascade_sorts=_cascade_sorts, **kwargs
+                safemode=safemode, **kwargs
             )
 
         detection_cls = type(self)
         rows = self.fetch(as_dict=True)
-        if not _cascade_sorts:
-            referenced = [
-                str(row["artifact_detection_id"])
-                for row in rows
-                if self._merge_registration(row)[1]
-            ]
-            if referenced:
-                raise ValueError(
-                    f"{detection_cls.__name__}.delete: refusing to delete "
-                    "artifact detection(s) referenced by a SortingSelection, "
-                    "MotionEstimateSelection or ConcatenatedRecordingSelection:"
-                    f" {referenced}. Delete those selections and outputs first, or call "
-                    "cascade_delete() to remove them too."
-                )
-
         delete_targets = [
             (
                 {k: row[k] for k in self.primary_key},
@@ -771,17 +722,6 @@ class _ArtifactDetectionMixin:
                 if not (detection_cls & master_key)
                 for restriction in interval_rows_to_remove
             ]
-        )
-
-    def cascade_delete(self, *args, safemode=None, **kwargs):
-        """Delete these detections and their dependent sorts and concats.
-
-        Removes dependent ``ConcatenatedRecordingSelection``,
-        ``SortingSelection`` and ``MotionEstimateSelection`` rows, their
-        downstream outputs, and the merge registration.
-        """
-        return self.delete(
-            *args, safemode=safemode, _cascade_sorts=True, **kwargs
         )
 
 
