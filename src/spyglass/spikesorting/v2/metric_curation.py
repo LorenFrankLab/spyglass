@@ -674,6 +674,17 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     - Root or label-only curation: reuses the sort's cached analyzers.
     - Applied-merge curation: uses the curation's merged display-analyzer
       cache and temporary metric analyzers.
+
+    Steps
+    -----
+    1. Resolve the curation, traces, analyzers and metric recipe.
+    2. Stage the output file.
+    3. Record what is scored, from which traces, with which recipes.
+    4. For a zero-unit curation, write empty tables.
+    5. Open the scored traces with the artifact mask applied.
+    6. Measure each unit's observed time from the curated units.
+    7. Compute metrics, merge suggestions and labels.
+    8. Write the three tables with provenance, then register the file.
     """
 
     _populate_key_lock = True
@@ -716,88 +727,31 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         import spikeinterface as si
 
-        from spyglass.spikesorting.v2._storage.provenance import (
-            CURATION_EVALUATION_PROVENANCE,
-            build_provenance_table,
-        )
         from spyglass.spikesorting.v2._recording.source import (
             read_effective_recording,
         )
+        from spyglass.spikesorting.v2._storage.observation_io import (
+            observation_metrics_from_nwb,
+        )
 
         spikeinterface_version = si.__version__
+        # 2. Stage the output file; make_insert registers it.
         with staged_analysis_file(
             recording_inputs.nwb_file_name,
             context="CurationEvaluation.make_compute",
         ) as analysis_file_name:
             abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
-            wants_pc = (not metric_inputs.skip_pc_metrics) and bool(
-                _requested_pc_metrics(metric_inputs.metric_names)
+            # 3. Record what is scored, from which traces, with which recipes.
+            base_provenance = self._base_provenance(
+                recording_inputs,
+                sorting_inputs,
+                analyzer_inputs,
+                metric_inputs,
+                spikeinterface_version,
             )
 
-            # recording_content_hash is of the traces actually scored (the
-            # corrected recording's, when motion-corrected).
-            corrected_id = recording_inputs.traces.key.get(
-                "motion_corrected_recording_id"
-            )
-
-            # Shared by the populated and zero-unit paths.
-            base_provenance = {
-                "sorting_id": str(sorting_inputs.sorting_id),
-                "curation_id": int(sorting_inputs.curation_id),
-                "metric_params_name": metric_inputs.metric_params_name,
-                "auto_curation_rules_name": metric_inputs.auto_curation_rules_name,
-                "display_waveform_params_name": analyzer_inputs.display_waveform_params_name,
-                "metric_waveform_params_name": analyzer_inputs.metric_waveform_params_name,
-                "metric_names": list(metric_inputs.metric_names),
-                "metric_kwargs": metric_inputs.metric_kwargs,
-                "auto_merge_preset": metric_inputs.auto_merge_preset,
-                "auto_merge_kwargs": metric_inputs.auto_merge_kwargs,
-                "auto_curation_rules": metric_inputs.rule_rows,
-                "source_kind": recording_inputs.source_kind,
-                "recording_id": recording_inputs.recording_id,
-                "concat_recording_id": recording_inputs.concat_recording_id,
-                "recording_content_hash": recording_inputs.traces.row[
-                    "content_hash"
-                ],
-                "spikeinterface_version": spikeinterface_version,
-            }
-            if corrected_id is not None:
-                base_provenance["motion_corrected_recording_id"] = str(
-                    corrected_id
-                )
-
-            from spyglass.spikesorting.v2._core.observed_time import (
-                OBSERVATION_VERSION,
-            )
-
-            base_provenance["observation_version"] = OBSERVATION_VERSION
-            base_provenance["observed_presence_bin_duration_s"] = (
-                metric_inputs.observed_presence_bin_duration_s
-            )
-
-            def _provenance_tables(source_analyzer_hashes):
-                from spyglass.spikesorting.v2._core.runtime import (
-                    runtime_environment_provenance,
-                )
-
-                return [
-                    build_provenance_table(
-                        CURATION_EVALUATION_PROVENANCE,
-                        {
-                            **base_provenance,
-                            "source_analyzer_hashes": source_analyzer_hashes,
-                            **runtime_environment_provenance(
-                                job_kwargs=metric_inputs.metric_job_kwargs,
-                                execution_params={
-                                    "stage": "curation_evaluation",
-                                    "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
-                                },
-                            ),
-                        },
-                    )
-                ]
-
-            # SI cannot build an analyzer over zero units; write empty tables.
+            # 4. SI cannot build an analyzer over zero units; write empty
+            # tables.
             if not sorting_inputs.expected_unit_ids:
                 logger.warning(
                     "CurationEvaluation: curation "
@@ -805,7 +759,10 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "zero units; writing empty metric/merge/label tables."
                 )
                 object_ids = self._write_empty(
-                    abs_path, provenance_tables=_provenance_tables(None)
+                    abs_path,
+                    provenance_tables=self._provenance_tables(
+                        base_provenance, None, analyzer_inputs, metric_inputs
+                    ),
                 )
                 return CurationEvaluationComputed(
                     analysis_file_name,
@@ -815,6 +772,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     None,
                 )
 
+            # 5. Open the scored traces with the artifact mask applied.
             recording = read_effective_recording(
                 recording_inputs.traces_abs_path,
                 recording_inputs.traces,
@@ -822,50 +780,37 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 artifact_detection_id=recording_inputs.artifact_detection_id,
                 recording_id=recording_inputs.recording_id,
             )
-            statistics_spans = list(recording_inputs.statistics_spans)
-
-            from spyglass.spikesorting.v2._storage.observation_io import (
-                observation_metrics_from_nwb,
-            )
-
+            # 6. Measure each unit's observed time from the curated units.
             observation_metrics, interval_hash = observation_metrics_from_nwb(
                 sorting_inputs.curated_units.abs_path,
                 recording,
                 bin_duration_s=metric_inputs.observed_presence_bin_duration_s,
             )
             base_provenance["observation_intervals_hash"] = interval_hash
-
-            evaluate = (
-                _evaluation_analyzers.evaluate_cached_analyzers
-                if sorting_inputs.use_fast_path
-                else _evaluation_analyzers.evaluate_temporary_analyzers
-            )
+            # 7. Compute metrics, merge suggestions and labels.
             metrics_df, labels_by_unit, merge_groups, source_analyzer_hashes = (
-                evaluate(
+                self._evaluate_analyzers(
                     recording,
+                    recording_inputs=recording_inputs,
                     sorting_inputs=sorting_inputs,
                     analyzer_inputs=analyzer_inputs,
                     metric_inputs=metric_inputs,
-                    wants_pc=wants_pc,
                     observation_metrics=observation_metrics,
-                    statistics_spans=statistics_spans,
-                    # Concat traces use a synthetic clock; the spans keep
-                    # the member/acquisition joins timestamps cannot recover.
-                    continuity_spans=(
-                        recording_inputs.traces.row["continuity_spans"]
-                        if recording_inputs.source_kind
-                        == "concatenated_recording"
-                        else None
-                    ),
                 )
             )
+            # 8. Write the three tables with provenance.
             object_ids = write_analyzer_curation_tables(
                 abs_path,
                 metrics_df=metrics_df,
                 merge_groups=merge_groups,
                 labels_by_unit=labels_by_unit,
                 unit_ids=[int(u) for u in metrics_df.index],
-                provenance_tables=_provenance_tables(source_analyzer_hashes),
+                provenance_tables=self._provenance_tables(
+                    base_provenance,
+                    source_analyzer_hashes,
+                    analyzer_inputs,
+                    metric_inputs,
+                ),
             )
             return CurationEvaluationComputed(
                 analysis_file_name,
@@ -1198,6 +1143,169 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     # ---- compute helpers (DB-light; SI work) -----------------------------
+
+    @staticmethod
+    def _base_provenance(
+        recording_inputs: EvaluationRecordingInputs,
+        sorting_inputs: EvaluationSortingInputs,
+        analyzer_inputs: EvaluationAnalyzerInputs,
+        metric_inputs: EvaluationMetricInputs,
+        spikeinterface_version: str,
+    ) -> dict:
+        """The evaluation provenance shared by the populated and zero-unit paths.
+
+        ``recording_content_hash`` is of the traces actually scored (the
+        corrected recording's, when motion-corrected).
+
+        Parameters
+        ----------
+        recording_inputs, sorting_inputs, analyzer_inputs, metric_inputs
+            The :meth:`make_fetch` carriers.
+        spikeinterface_version : str
+            ``spikeinterface.__version__`` at evaluation time.
+
+        Returns
+        -------
+        dict
+            The provenance header without the observation interval hash,
+            analyzer hashes or runtime receipt.
+        """
+        from spyglass.spikesorting.v2._core.observed_time import (
+            OBSERVATION_VERSION,
+        )
+
+        corrected_id = recording_inputs.traces.key.get(
+            "motion_corrected_recording_id"
+        )
+        base_provenance = {
+            "sorting_id": str(sorting_inputs.sorting_id),
+            "curation_id": int(sorting_inputs.curation_id),
+            "metric_params_name": metric_inputs.metric_params_name,
+            "auto_curation_rules_name": metric_inputs.auto_curation_rules_name,
+            "display_waveform_params_name": analyzer_inputs.display_waveform_params_name,
+            "metric_waveform_params_name": analyzer_inputs.metric_waveform_params_name,
+            "metric_names": list(metric_inputs.metric_names),
+            "metric_kwargs": metric_inputs.metric_kwargs,
+            "auto_merge_preset": metric_inputs.auto_merge_preset,
+            "auto_merge_kwargs": metric_inputs.auto_merge_kwargs,
+            "auto_curation_rules": metric_inputs.rule_rows,
+            "source_kind": recording_inputs.source_kind,
+            "recording_id": recording_inputs.recording_id,
+            "concat_recording_id": recording_inputs.concat_recording_id,
+            "recording_content_hash": recording_inputs.traces.row[
+                "content_hash"
+            ],
+            "spikeinterface_version": spikeinterface_version,
+        }
+        if corrected_id is not None:
+            base_provenance["motion_corrected_recording_id"] = str(corrected_id)
+        base_provenance["observation_version"] = OBSERVATION_VERSION
+        base_provenance["observed_presence_bin_duration_s"] = (
+            metric_inputs.observed_presence_bin_duration_s
+        )
+        return base_provenance
+
+    @staticmethod
+    def _provenance_tables(
+        base_provenance: dict,
+        source_analyzer_hashes,
+        analyzer_inputs: EvaluationAnalyzerInputs,
+        metric_inputs: EvaluationMetricInputs,
+    ) -> list:
+        """The evaluation NWB's provenance table, with a runtime receipt.
+
+        Parameters
+        ----------
+        base_provenance : dict
+            :meth:`_base_provenance`, plus the observation interval hash on
+            the populated path.
+        source_analyzer_hashes : dict or None
+            Role to content hash of each canonical analyzer consumed.
+        analyzer_inputs, metric_inputs
+            The :meth:`make_fetch` carriers.
+
+        Returns
+        -------
+        list
+            One ``DynamicTable`` for ``provenance_tables``.
+        """
+        from spyglass.spikesorting.v2._core.runtime import (
+            runtime_environment_provenance,
+        )
+        from spyglass.spikesorting.v2._storage.provenance import (
+            CURATION_EVALUATION_PROVENANCE,
+            build_provenance_table,
+        )
+
+        return [
+            build_provenance_table(
+                CURATION_EVALUATION_PROVENANCE,
+                {
+                    **base_provenance,
+                    "source_analyzer_hashes": source_analyzer_hashes,
+                    **runtime_environment_provenance(
+                        job_kwargs=metric_inputs.metric_job_kwargs,
+                        execution_params={
+                            "stage": "curation_evaluation",
+                            "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
+                        },
+                    ),
+                },
+            )
+        ]
+
+    @staticmethod
+    def _evaluate_analyzers(
+        recording,
+        *,
+        recording_inputs: EvaluationRecordingInputs,
+        sorting_inputs: EvaluationSortingInputs,
+        analyzer_inputs: EvaluationAnalyzerInputs,
+        metric_inputs: EvaluationMetricInputs,
+        observation_metrics,
+    ) -> tuple:
+        """Score the curation on the sort's cached or temporary analyzers.
+
+        A curation with the raw sort's unit set reuses the cached analyzers;
+        an applied-merge curation builds temporary ones.
+
+        Parameters
+        ----------
+        recording : si.BaseRecording
+            The scored traces, artifact-masked.
+        recording_inputs, sorting_inputs, analyzer_inputs, metric_inputs
+            The :meth:`make_fetch` carriers.
+        observation_metrics : object
+            From ``observation_metrics_from_nwb``.
+
+        Returns
+        -------
+        tuple
+            ``(metrics_df, labels_by_unit, merge_groups,
+            source_analyzer_hashes)``.
+        """
+        evaluate = (
+            _evaluation_analyzers.evaluate_cached_analyzers
+            if sorting_inputs.use_fast_path
+            else _evaluation_analyzers.evaluate_temporary_analyzers
+        )
+        return evaluate(
+            recording,
+            sorting_inputs=sorting_inputs,
+            analyzer_inputs=analyzer_inputs,
+            metric_inputs=metric_inputs,
+            wants_pc=(not metric_inputs.skip_pc_metrics)
+            and bool(_requested_pc_metrics(metric_inputs.metric_names)),
+            observation_metrics=observation_metrics,
+            statistics_spans=list(recording_inputs.statistics_spans),
+            # Concat traces use a synthetic clock; the spans keep the
+            # member/acquisition joins timestamps cannot recover.
+            continuity_spans=(
+                recording_inputs.traces.row["continuity_spans"]
+                if recording_inputs.source_kind == "concatenated_recording"
+                else None
+            ),
+        )
 
     @staticmethod
     def _write_empty(abs_path, *, provenance_tables=None):
