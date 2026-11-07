@@ -529,7 +529,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         if mismatched:
             raise ValueError(
                 "Concat-member SpikeSortingOutput row(s) belong to a "
-                f"different session than SortedSpikesGroup {nwb_file_name!r}: "
+                f"different session than the decoding group's {nwb_file_name!r}: "
                 f"{mismatched}. Use that member's own merge_id."
             )
 

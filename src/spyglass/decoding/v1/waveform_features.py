@@ -1,5 +1,4 @@
-# Lazy annotations: some SI versions lack hint-only names (WaveformExtractor)
-from __future__ import annotations
+from __future__ import annotations  # handles SI version issues
 
 import os
 from itertools import chain

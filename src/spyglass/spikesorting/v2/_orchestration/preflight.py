@@ -1,7 +1,19 @@
 """Read-only configuration checks run before any pipeline populate.
 
-Re-exports the public names of the ``preflight_*`` siblings. Patch a private
-name in the module that looks it up. Table modules are imported lazily.
+Holds ``preflight_v2_pipeline`` / ``preflight_v2_pipeline_session`` and
+re-exports its siblings:
+
+- ``preflight_checks``: per-stage checks and ``assert_preset_compute_rows``
+- ``preflight_concat``: ``assert_concat_preflight``, run by a concat run
+- ``preflight_runtime``: installed sorters and container runtimes
+- ``preflight_motion``: motion request, recipe and supplied-estimate checks
+- ``preflight_geometry``: missing or coincident sort-group contacts
+- ``preflight_plan``: the ids a run would compute or reuse
+- ``preflight_scientific_setup``: ``describe_scientific_setup``
+- ``preflight_report``: the ``Preflight*`` report types
+
+Patch a private name in the module that looks it up. Table modules are
+imported lazily.
 """
 
 from __future__ import annotations

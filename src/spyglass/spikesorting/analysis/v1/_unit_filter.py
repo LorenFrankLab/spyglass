@@ -70,12 +70,8 @@ UNIT_CRITERIA_OPERATORS = {
     "isin": lambda vals, target: _isin(vals, target),
     "notin": lambda vals, target: ~_isin(vals, target),
 }
-# Only "isin" and "notin" are list-aware, via _isin. The rest compare a
-# unit's value as a whole, so on a column holding a list per unit (e.g. the
-# curation labels) numpy compares the list object itself to the target: a
-# list never equals a string, making "==" all-False and "!=" all-True
-# regardless of the labels. filter_units_by_criteria raises rather than
-# return such a mask
+# Only "isin" and "notin" handle list-valued columns (e.g. curation labels);
+# the rest would compare the list itself, so filter_units_by_criteria raises
 SCALAR_ONLY_OPERATORS = frozenset(UNIT_CRITERIA_OPERATORS) - {"isin", "notin"}
 # Operators taking a [low, high] pair rather than one value
 RANGE_OPERATORS = ("between", "outside")

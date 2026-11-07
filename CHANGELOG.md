@@ -222,8 +222,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12`; native MountainSort4 1.0.7 is installed through the v2 extra
     and runs on NumPy 2 with the v2 compatibility path. The DLC and MoSeq
-    environments stay on NumPy < 2 and drop their conda `pytorch` and `jax` pins
-    #1609
+    environments stay on NumPy < 2 #1609
 - Add `environments/environment_spikesorting_v2.yml` and the test-only
     `environments/environment_spikesorting_legacy.yml` #1609
 - Add optional extras `spikesorting-v2` (MountainSort4, MountainSort5, torch),

@@ -1139,8 +1139,9 @@ working.
 - Decoding-group creation raises (`assert_decoding_merge_ids_ok`), so a
     dangerous set never reaches a decoder. It raises on a `CurationV2` made with
     `apply_merge=False` whose proposed merges are unapplied (concat members
-    inherit their parent curation's state), and on two merge ids for the same
-    sorting or the same concat member. v0/v1 sources are skipped.
+    inherit their parent curation's state), on two merge ids for the same
+    sorting or the same concat member, and, given the group's `nwb_file_name`,
+    on a concat member from another session. v0/v1 sources are skipped.
 - `get_spike_times_by_unit` is the common sink for `get_firing_rate`,
     `get_spike_indicator` and `get_spike_times`, so it warns once. It warns on
     the merge ids that `fetch_nwb(return_merge_ids=True)` resolved, so the
