@@ -39,10 +39,8 @@ def _sorter_takes_seed(sorter: str) -> bool:
     """Whether SpikeInterface's wrapper for ``sorter`` has a ``seed`` param."""
     import spikeinterface.sorters as sis
 
-    try:
-        return "seed" in sis.get_default_sorter_params(sorter)
-    except KeyError:  # unknown sorter: run_sorter reports it
-        return False
+    sorter_class = sis.sorter_dict.get(sorter.lower())
+    return "seed" in (getattr(sorter_class, "_default_params", None) or {})
 
 
 class EffectiveSortConfig(NamedTuple):
