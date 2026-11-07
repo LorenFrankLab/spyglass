@@ -10,6 +10,11 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     reject_duplicate_parameter_content,
     validate_lookup_rows,
 )
+from spyglass.spikesorting.v2.exceptions import (
+    ImmutableRowError,
+    SchemaBypassError,
+    UnsupportedDirectInsertError,
+)
 
 
 def single_source_part(table, key: dict) -> tuple[str, dict]:
@@ -38,8 +43,6 @@ def single_source_part(table, key: dict) -> tuple[str, dict]:
     SchemaBypassError
         If zero or more than one source part row exists for ``key``.
     """
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
     master_key = {k: v for k, v in key.items() if k in table.primary_key}
     recording_ids = (table.RecordingSource & master_key).fetch("recording_id")
     concat_ids = (table.ConcatenatedRecordingSource & master_key).fetch(
@@ -77,8 +80,6 @@ def optional_part_value(table, key: dict, part, column: str):
     SchemaBypassError
         If more than one ``part`` row exists for ``key``.
     """
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
     master_key = {k: v for k, v in key.items() if k in table.primary_key}
     rows = (part & master_key).fetch(column)
     if len(rows) > 1:
@@ -141,10 +142,6 @@ class _IdentityMasterGuard:
             directing the caller to the create path instead.
         """
         if not allow_direct_insert:
-            from spyglass.spikesorting.v2.exceptions import (
-                UnsupportedDirectInsertError,
-            )
-
             raise UnsupportedDirectInsertError(
                 f"Direct insert into {type(self).__name__} is not supported: "
                 f"{self._direct_insert_reason()} Pass allow_direct_insert=True "
@@ -177,8 +174,6 @@ class _IdentityMasterGuard:
             If ``allow_master_mutation`` is ``False`` (the default).
         """
         if not allow_master_mutation:
-            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
-
             raise ImmutableRowError(
                 f"In-place update1 of {type(self).__name__} is not supported: "
                 "its identity-bearing columns feed the deterministic ids (or "
@@ -264,8 +259,6 @@ class ImmutableParamsLookup:
             directing the caller to insert a new named row instead.
         """
         if not allow_param_mutation:
-            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
-
             raise ImmutableRowError(
                 f"In-place update1 of {self.__class__.__name__} is not "
                 "supported: this row's content is folded into the deterministic "
@@ -300,8 +293,6 @@ class ImmutableParamsLookup:
             If ``replace=True``.
         """
         if replace:
-            from spyglass.spikesorting.v2.exceptions import ImmutableRowError
-
             raise ImmutableRowError(
                 f"insert(replace=True) on {self.__class__.__name__} is not "
                 "supported: this row's content is folded into the "

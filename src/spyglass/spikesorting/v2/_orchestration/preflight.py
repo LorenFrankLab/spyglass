@@ -75,6 +75,11 @@ from spyglass.spikesorting.v2._orchestration.presets import (
 from spyglass.spikesorting.v2._orchestration.types import (
     MotionMode,
 )
+from spyglass.spikesorting.v2._artifacts.manual import (
+    artifact_recipe_with_manual_exclusions,
+    resolve_manual_exclusions,
+)
+from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
 
 def preflight_v2_pipeline(
@@ -149,10 +154,6 @@ def preflight_v2_pipeline(
     ):
         return _blocked_preflight_report(pipeline_preset, checks, warnings)
     bundle = _PIPELINE_PRESETS[pipeline_preset]
-    from spyglass.spikesorting.v2._artifacts.manual import (
-        artifact_recipe_with_manual_exclusions,
-        resolve_manual_exclusions,
-    )
 
     manual_excluded_times = resolve_manual_exclusions(manual_excluded_times)
     bundle = artifact_recipe_with_manual_exclusions(
@@ -300,8 +301,6 @@ def _resolve_session_sort_group_ids(
         ``SortGroupV2`` rows, or a requested ``sort_group_ids`` entry is
         absent.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     if pipeline_preset is None:
         raise PipelineInputError(
             f"{caller}: pipeline_preset is required -- a whole-session run does "

@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import NamedTuple
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+import pynwb
 
 from spyglass.spikesorting._numerical import (
     finite_intervals,
@@ -15,6 +20,20 @@ from spyglass.spikesorting._numerical import (
     finite_vector,
     integer_scalar,
     integer_vector,
+)
+from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._core.signal_math import (
+    _MERGE_DEDUP_DELTA_MS,
+    _segment_times_at,
+    base_intervals_and_gaps,
+    intersect_interval_sets,
+)
+from spyglass.spikesorting.v2._storage.provenance import (
+    validate_curation_header,
+    validate_sorting_provenance,
+)
+from spyglass.spikesorting.v2._storage.staged_outputs import (
+    staged_analysis_file,
 )
 
 SPIKE_SAMPLE_INDEX_COLUMN = "spike_sample_index"
@@ -46,9 +65,6 @@ def read_units_columns(abs_path, columns, *, unit_ids=None) -> tuple:
         v2 table must contain spike times, sample frames, and observation
         intervals; missing columns raise ``ValueError``.
     """
-    import numpy as np
-    import pynwb
-
     wanted = (
         None
         if unit_ids is None
@@ -273,8 +289,6 @@ def build_lazy_merged_sorting_from_samples(
 
 def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
     """Return deduplicated ``(times, frames)`` with both arrays aligned."""
-    import numpy as np
-
     times_list, frames_list = list(times_list), list(frames_list)
     if len(times_list) != len(frames_list):
         raise ValueError(
@@ -331,8 +345,6 @@ def abs_spike_times_dataframe(abs_times):
         A single ``spike_times`` column of per-unit arrays, indexed by
         ``unit_id``.
     """
-    import pandas as pd
-
     abs_times = _integer_keyed_mapping(abs_times, name="spike_times")
     unit_ids = list(abs_times)
     return pd.DataFrame(
@@ -355,8 +367,6 @@ def empty_spike_times_dataframe():
         An empty ``spike_times`` column, with an integer ``unit_id``
         index.
     """
-    import pandas as pd
-
     return pd.DataFrame(
         {"spike_times": []},
         index=pd.Index([], name="unit_id", dtype=int),
@@ -365,8 +375,6 @@ def empty_spike_times_dataframe():
 
 def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
     """Map stored sample frames to absolute times without full-vector allocation."""
-    import numpy as np
-
     sample_indices_by_unit = _integer_keyed_mapping(
         sample_indices_by_unit, name="spike_sample_index"
     )
@@ -402,8 +410,6 @@ def _sample_indices_to_times_by_unit(recording, sample_indices_by_unit):
             uid: read_times(frames)
             for uid, frames in sample_indices_by_unit.items()
         }
-
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 
     return {
         int(uid): finite_vector(
@@ -454,9 +460,6 @@ def read_series_timestamps(abs_path, electrical_series_path):
     np.ndarray, shape (n_samples,)
         The series' wall-clock timestamps, in seconds (float64).
     """
-    import numpy as np
-    import pynwb
-
     series_name = electrical_series_path.rsplit("/", 1)[-1]
     with pynwb.NWBHDF5IO(path=abs_path, mode="r", load_namespaces=True) as io:
         nwbf = io.read()
@@ -530,8 +533,6 @@ def _add_sample_frame_column(nwbf, frame_trains):
     Added after the unit rows; otherwise HDMF turns appended empty trains into
     a 2D array.
     """
-    import numpy as np
-
     frame_trains = [
         integer_vector(frames, name="spike_sample_index", nonnegative=True)
         for frames in frame_trains
@@ -567,14 +568,7 @@ def write_sorting_units_nwb(
     timestamps. Every row carries ``obs_intervals`` (default: the recording's
     contiguous spans) and ``curation_label="uncurated"``.
     """
-    from spyglass.spikesorting.v2._storage.provenance import (
-        validate_sorting_provenance,
-    )
-
     validate_sorting_provenance(source_provenance)
-    from spyglass.spikesorting.v2._storage.staged_outputs import (
-        staged_analysis_file,
-    )
 
     # The caller's staging cleanup does not know this file's name.
     with staged_analysis_file(
@@ -605,12 +599,7 @@ def _write_sorting_units_nwb_body(
     (``{unit_id: {peak_amplitude_uv, peak_electrode_id, n_spikes,
     brain_region}}``) adds the ``Sorting.Unit`` values as columns.
     """
-    import pynwb
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._core.signal_math import (
-        base_intervals_and_gaps,
-    )
     from spyglass.spikesorting.v2._storage.provenance import (
         SORTING_PROVENANCE,
         build_provenance_table,
@@ -739,10 +728,6 @@ def write_curated_units_nwb(
     come first in source order. With ``apply_merge=False`` (preview) every
     source unit is written unchanged.
     """
-    from spyglass.spikesorting.v2._storage.provenance import (
-        validate_curation_header,
-    )
-
     validate_curation_header(curation_header)
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -765,10 +750,6 @@ def write_curated_units_nwb(
                 kept_unit_to_contributors, apply_merge
             ),
         )
-    )
-
-    from spyglass.spikesorting.v2._storage.staged_outputs import (
-        staged_analysis_file,
     )
 
     # Curation stages outside its transaction, so its cleanup misses this file.
@@ -797,10 +778,6 @@ def _curated_obs_intervals(
     A merged unit gets the intersection of its contributors' windows; other
     units keep their own.
     """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        intersect_interval_sets,
-    )
-
     if apply_merge and len(contribs) > 1:
         return intersect_interval_sets(
             [obs_intervals_by_uid[int(u)] for u in contribs]
@@ -827,13 +804,6 @@ def _write_curated_units_nwb_body(
     n_spikes_by_uid)``. ``obs_intervals_by_uid`` is
     ``{unit_id: (n, 2) array}``; SI quality metrics do not use it.
     """
-    import numpy as np
-    import pynwb
-
-    from spyglass.spikesorting.v2._storage.provenance import (
-        validate_curation_header,
-    )
-
     validate_curation_header(curation_header)
     if sample_indices_by_uid is None or obs_intervals_by_uid is None:
         raise ValueError(
@@ -860,8 +830,6 @@ def _write_curated_units_nwb_body(
         for uid, contributors in kept_unit_to_contributors.items()
     }
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._core.enums import CurationLabel
-    from spyglass.spikesorting.v2._core.signal_math import _MERGE_DEDUP_DELTA_MS
 
     analysis_abs_path = AnalysisNwbfile.get_abs_path(analysis_file_name)
 
@@ -946,8 +914,6 @@ def _write_curated_units_nwb_body(
         units_object_id = nwbf.units.object_id
         # Lineage mirrors CurationV2.MergeGroup (raw contributors), real merges
         # only.
-        from collections import defaultdict
-
         from spyglass.spikesorting.v2._storage.provenance import (
             CURATION_MERGE_LINEAGE,
             CURATION_PROVENANCE,

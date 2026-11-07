@@ -5,6 +5,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, TYPE_CHECKING
+import importlib
+
+from spyglass.spikesorting.v2._sorting.dispatch import (
+    MATLAB_SORTERS,
+    matlab_container_required_message,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -149,8 +155,6 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
     # Installed packages can still fail to import a compiled dependency.
     backend_modules = _SORTER_RUNTIME_BACKENDS.get(bundle.sorter, ())
     if sorter_installed_ok and backend_modules:
-        import importlib
-
         broken_backends = []
         for mod in backend_modules:
             try:
@@ -197,10 +201,6 @@ def _check_sorter_execution(
     else:
         from spyglass.spikesorting.v2._params.sorter import (
             validate_execution_params,
-        )
-        from spyglass.spikesorting.v2._sorting.dispatch import (
-            MATLAB_SORTERS,
-            matlab_container_required_message,
         )
 
         execution_params = validate_execution_params(

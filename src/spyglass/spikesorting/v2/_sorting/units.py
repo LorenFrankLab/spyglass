@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+
 
 def _to_int_unit_id(unit_id):
     """Coerce a sorter unit id to int, or raise the typed NonIntegerUnitIDError.
 
     ``Sorting.Unit`` stores int unit ids.
     """
-    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
-
     try:
         return int(unit_id)
     except (TypeError, ValueError) as exc:
@@ -125,7 +126,6 @@ def build_unit_rows_from_analyzer(
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         load_analyzer_folder,
     )
-    from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 
     analyzer = load_analyzer_folder(analyzer_folder)
     peak_sign = resolve_peak_sign(sorter_row["params"])

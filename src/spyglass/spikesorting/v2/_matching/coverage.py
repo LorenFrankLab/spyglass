@@ -8,6 +8,9 @@ The timestamp-only scan uses bounded buffers and does not read signal traces.
 
 from __future__ import annotations
 
+import copy
+from pathlib import Path
+
 import numpy as np
 
 from spyglass.spikesorting.v2._core.signal_math import (
@@ -16,6 +19,8 @@ from spyglass.spikesorting.v2._core.signal_math import (
     frames_for_times,
 )
 from spyglass.spikesorting._numerical import integer_vector
+from spyglass.spikesorting.v2._storage.spikeinterface import close_nwb_recording
+from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
 _AMBIGUOUS_CLOCK_ERROR = (
     "Duplicate acquisition timestamps do not uniquely identify raw samples. "
@@ -169,8 +174,6 @@ def validate_source_coverage(coverage):
 
 def stored_analysis_path(analysis_file_name):
     """Read an exact registered analysis path without directory/file fallbacks."""
-    from pathlib import Path
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     table = AnalysisNwbfile()
@@ -195,8 +198,6 @@ def stored_analysis_path(analysis_file_name):
 
 def _base_artifact(recording_row, *, allow_rebuild):
     """Resolve a pinned artifact without reconstructing it in read-only plans."""
-    from pathlib import Path
-
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
 
     key = {"recording_id": recording_row["recording_id"]}
@@ -238,8 +239,6 @@ def resolve_recording_source_coverage(recording_row, *, allow_rebuild=False):
     ``recording_row`` contains ``recording_id``, ``nwb_file_name`` and
     ``recording_content_hash``. Only execution may opt into reconstruction.
     """
-    from pathlib import Path
-
     from spyglass.common.common_ephys import Raw
     from spyglass.common.common_nwbfile import Nwbfile
     from spyglass.spikesorting.v2._storage.provenance import (
@@ -285,8 +284,6 @@ def _memoized_coverage(memo_key, *, in_transaction: bool, scan) -> dict:
     recording and raw files (``memo_key[0]`` / ``memo_key[2]``) keep their
     inode, size and modification time; anything else scans again.
     """
-    import copy
-
     from spyglass.spikesorting.v2._storage.rebuilds import _file_identity
 
     identity = (_file_identity(memo_key[0]), _file_identity(memo_key[2]))
@@ -304,10 +301,6 @@ def _scan_source_coverage(
 ) -> dict:
     """Open the persisted and raw recordings and map their timestamps."""
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        close_nwb_recording,
-    )
-    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
     series_path, explicit = raw_eseries_path_and_timestamp_mode(
         raw_path, object_id=source_object_id

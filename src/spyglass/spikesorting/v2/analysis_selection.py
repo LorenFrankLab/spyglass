@@ -36,12 +36,23 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+import pandas as pd
+
 from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
 from spyglass.spikesorting.v2._curation.unit_selection import (
     UnitSelectionSnapshot,
     unit_selection_hash,
 )
+from spyglass.spikesorting._observed_time import (
+    normalize_observation_provenance,
+)
+from spyglass.spikesorting.analysis.v1._unit_filter import (
+    filter_units_by_criteria,
+    filter_units_by_labels,
+)
+from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
 
 #: Read-only ``include_labels`` / ``exclude_labels`` tuples behind a mapping
 #: proxy.
@@ -229,8 +240,6 @@ class UnitSelectionReceipt:
 
     def describe(self):
         """One row per unit: verdict, labels, reason."""
-        import pandas as pd
-
         labels = (
             self.selection_snapshot.labels_by_unit
             if self.selection_snapshot is not None
@@ -311,10 +320,6 @@ def apply_unit_selection_policy(
     ``SortedSpikesGroup.fetch_spike_data`` applies, so the receipt matches
     what analysis reads. No database access.
     """
-    from spyglass.spikesorting.analysis.v1._unit_filter import (
-        filter_units_by_labels,
-    )
-
     unit_ids = [int(u) for u in unit_ids]
     labels = [list(labels_by_unit.get(u, [])) for u in unit_ids]
     include = list(policy["include_labels"])
@@ -356,11 +361,6 @@ def resolve_unit_selection(
     reasons enter the snapshot hash. Does not require a registered output, so
     it also resolves a concat parent curation for matching.
     """
-    import pandas as pd
-
-    from spyglass.spikesorting.analysis.v1._unit_filter import (
-        filter_units_by_criteria,
-    )
     from spyglass.spikesorting.v2.curation import CurationV2
 
     ref = CurationRef.from_key(curation)
@@ -372,7 +372,6 @@ def resolve_unit_selection(
         merges_applied=row["merges_applied"],
     )
     resolved_policy, stored_criteria = _resolve_policy(policy)
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     criteria = json.loads(
         json.dumps(
@@ -420,9 +419,6 @@ def resolve_unit_selection(
                     else f"criterion failed: {column} {criterion} (value={value})"
                 )
     included = tuple(u for u in included if u not in excluded)
-    from spyglass.spikesorting.v2._core.observed_time import (
-        OBSERVATION_VERSION,
-    )
 
     provenance = {
         "observation_version": OBSERVATION_VERSION,
@@ -536,9 +532,6 @@ def select_units_for_analysis(
     annotations = selection.annotation_sets
     from spyglass.spikesorting.v2._storage.observation_io import (
         selection_observations,
-    )
-    from spyglass.spikesorting._observed_time import (
-        normalize_observation_provenance,
     )
 
     # Group names hash provenance only, not the full snapshot hash.

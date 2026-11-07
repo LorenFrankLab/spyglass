@@ -11,6 +11,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
+import pickle
+import platform
+
+from packaging.version import Version
+
+from spyglass.utils import logger
 
 RUNTIME_ANNOTATION = "spyglass_sort_runtime"
 _VERSION_MARKER = "SPYGLASS_SI_VERSION="
@@ -38,7 +45,6 @@ def _installed_si_version(client):
 def _prepare_runtime(client, installation_mode, requested_version):
     """Install when necessary and fail closed if the resulting pin differs."""
     import spikeinterface as si
-    from packaging.version import Version
     from spikeinterface.sorters.container_tools import (
         install_package_in_container,
     )
@@ -100,10 +106,6 @@ def run_sorter_container(
     after sorting and saving succeed; a failed pip command cannot silently run
     the wrong runtime. The pin is checked again after extra requirements.
     """
-    import os
-    import pickle
-    import platform
-
     import spikeinterface as si
     from spikeinterface.core.core_tools import check_json
     from spikeinterface.sorters.container_tools import (
@@ -115,8 +117,6 @@ def run_sorter_container(
     )
     from spikeinterface.sorters.sorterlist import sorter_dict
     from spikeinterface.sorters.utils import has_nvidia
-
-    from spyglass.utils import logger
 
     folder = Path(folder).resolve()
     scratch = folder.parent

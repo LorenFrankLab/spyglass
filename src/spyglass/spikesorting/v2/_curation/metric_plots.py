@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 import math
+from itertools import permutations
 
 import numpy as np
 import pandas as pd
+
+from spyglass.spikesorting.v2._core.signal_math import (
+    _MERGE_DEDUP_DELTA_MS,
+    _segment_times_at,
+)
+from spyglass.spikesorting.v2._curation.metrics import (
+    count_short_isis,
+    isi_continuity_boundaries,
+    isi_violation_fraction,
+)
+from spyglass.spikesorting.v2._storage.units_nwb import (
+    _dedup_merged_spike_times_and_frames,
+)
 
 # Metrics shown by default in the QC histograms, in display order; only those
 # present in the metrics table are used.
@@ -364,21 +378,7 @@ def burst_pair_metrics_from_analyzer(
     Pass the unwhitened display analyzer; whitening distorts similarity and
     locations.
     """
-    from itertools import permutations
-
     from spyglass.spikesorting.utils_burst import calculate_ca
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _MERGE_DEDUP_DELTA_MS,
-        _segment_times_at,
-    )
-    from spyglass.spikesorting.v2._curation.metrics import (
-        count_short_isis,
-        isi_continuity_boundaries,
-        isi_violation_fraction,
-    )
-    from spyglass.spikesorting.v2._storage.units_nwb import (
-        _dedup_merged_spike_times_and_frames,
-    )
 
     for name in ("templates", "template_similarity", "unit_locations"):
         if not analyzer.has_extension(name):
@@ -468,8 +468,6 @@ def burst_pair_metrics_frame(analyzer, pairs=None, **kwargs):
         ``wf_similarity``, ``isi_violation``, ``xcorrel_asymm``,
         ``unit_distance``.
     """
-    import pandas as pd
-
     rows = burst_pair_metrics_from_analyzer(analyzer, pairs=pairs, **kwargs)
     frame = pd.DataFrame(
         rows, columns=("unit1", "unit2", *BURST_PAIR_METRIC_COLUMNS)

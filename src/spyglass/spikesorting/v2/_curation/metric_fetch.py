@@ -18,6 +18,19 @@ from spyglass.spikesorting.v2._core.job_config import (
     resolve_search_threads,
 )
 from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
+from spyglass.spikesorting.v2._curation.analyzer import (
+    merged_analyzer_cache_inputs,
+)
+from spyglass.spikesorting.v2._storage.recompute import analyzer_hash_for_role
+from spyglass.spikesorting.v2.exceptions import (
+    AnalyzerFolderInvalidError,
+    AnalyzerFolderMissingError,
+    ZeroUnitAnalyzerError,
+)
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.metric_curation import (
@@ -40,10 +53,6 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
         ``make_compute``.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
-    from spyglass.spikesorting.v2._artifacts.readers import (
-        read_recording_artifact_valid_times,
-    )
-    from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
     from spyglass.spikesorting.v2._sorting.analyzer import (
         fetch_waveform_params,
         resolve_display_waveform_params_name,
@@ -166,10 +175,6 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
 
     merged_display_cache = None
     if not use_fast_path and expected_unit_ids:
-        from spyglass.spikesorting.v2._curation.analyzer import (
-            merged_analyzer_cache_inputs,
-        )
-
         merged_display_cache = merged_analyzer_cache_inputs(
             curation_key, display_waveform_params_name, "display"
         )
@@ -248,14 +253,6 @@ def detect_stale_source(table_cls, key) -> dict:
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._storage.recompute import (
-        analyzer_hash_for_role,
-    )
-    from spyglass.spikesorting.v2.exceptions import (
-        AnalyzerFolderInvalidError,
-        AnalyzerFolderMissingError,
-        ZeroUnitAnalyzerError,
-    )
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluationSelection,
     )

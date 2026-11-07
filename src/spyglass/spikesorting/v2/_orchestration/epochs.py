@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 
 _EPOCH_COLUMNS = (
@@ -28,8 +33,6 @@ _EPOCH_COLUMNS = (
 
 def _interval_bounds(interval):
     """Preserve disjoint acquisition bounds; report malformed lists explicitly."""
-    import numpy as np
-
     if interval is None:
         return (), None, None, None, "missing", "IntervalList row is missing."
     try:
@@ -65,8 +68,6 @@ def _interval_bounds(interval):
 
 def epoch_rows_to_dataframe(nwb_file_name, tasks, intervals, recordings):
     """Pure chooser from fetched rows; preserve labels, keys, bounds, and gaps."""
-    import pandas as pd
-
     by_name = {row["interval_list_name"]: row for row in intervals}
     tasks_by_interval = {}
     for task in tasks:
@@ -157,8 +158,6 @@ def epoch_rows_to_dataframe(nwb_file_name, tasks, intervals, recordings):
 
 def _recording_candidates(selection_rows):
     """Read computed rows and registered paths, never reconstructing a cache."""
-    from pathlib import Path
-
     from spyglass.spikesorting.v2._matching.coverage import stored_analysis_path
     from spyglass.spikesorting.v2.recording import Recording
 

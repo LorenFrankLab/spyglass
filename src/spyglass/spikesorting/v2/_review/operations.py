@@ -16,8 +16,16 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import fcntl
+
+import datajoint as dj
 
 from spyglass.spikesorting.v2._core.json_io import read_json, write_json
+from spyglass.spikesorting.v2._review.annotations import (
+    annotations_payload_hash,
+)
+from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.utils.progress import progress_reporter
 
 OPERATION_FILE = "spyglass_review_operation.json"
 RESULT_FILE = "spyglass_review_result.json"
@@ -53,8 +61,6 @@ def _acquire_operation_lock(bundle):
     The worker inherits the descriptor (Linux/macOS), so closing the notebook
     or server cannot release ownership mid-operation.
     """
-    import fcntl
-
     lock = (Path(bundle) / LOCK_FILE).open("a+")
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -76,8 +82,6 @@ class ReviewOperationService:
 
     @classmethod
     def for_review(cls, review):
-        import datajoint as dj
-
         return cls(review.review_id, review.uri, dict(dj.config))
 
     def start(self, request):
@@ -252,8 +256,6 @@ def _run_operation(
     *, review_id, bundle, request, operation_id, started_at=None
 ):
     """Worker entry point: all schema imports and DB work stay in this process."""
-    from spyglass.utils.progress import progress_reporter
-
     root = Path(bundle)
     state = {
         "status": "running",
@@ -448,10 +450,6 @@ def committed_review_result(review):
 
     Refuses a review whose saved draft changed after its last commit.
     """
-    from spyglass.spikesorting.v2._review.annotations import (
-        annotations_payload_hash,
-    )
-    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.review_api import FigPackReview
 
     visited = set()

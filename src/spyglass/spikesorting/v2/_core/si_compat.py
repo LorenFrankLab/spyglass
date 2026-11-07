@@ -12,6 +12,10 @@ import os
 import threading
 from contextlib import contextmanager
 
+import numpy as np
+
+from spyglass.utils import logger
+
 _SORTER_RUNTIME_LOCK = threading.RLock()
 
 
@@ -42,10 +46,7 @@ def sorter_runtime_state(sorter: str, job_kwargs: dict):
     lock is reentrant for nested calls and is reset in forked workers. Direct
     third-party SI/NumPy mutations do not participate in this protocol.
     """
-    import numpy as np
     import spikeinterface as si
-
-    from spyglass.utils import logger
 
     with _SORTER_RUNTIME_LOCK:
         previous_global = dict(si.get_global_job_kwargs())

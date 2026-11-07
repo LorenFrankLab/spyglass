@@ -6,6 +6,8 @@ from spyglass.spikesorting.v2._orchestration.types import MotionMode
 from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     MotionRecipe,
 )
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
 
 #: No recipe has passed probe-specific validation.
 MOTION_RECIPE_STATUS = (
@@ -149,9 +151,7 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
     Runs the dispatcher's ``resolve_sort_config`` so preflight, the run
     receipt and execution agree. Returns ``EffectiveSortConfig.as_dict()``.
     """
-    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
     from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
 
     rows = (
         SorterParameters

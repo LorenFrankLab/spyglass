@@ -5,7 +5,23 @@ from __future__ import annotations
 import uuid
 from typing import NamedTuple, get_args
 
+import numpy as np
+
 from spyglass.spikesorting.v2._orchestration.types import MotionMode
+from spyglass.spikesorting.v2._core.selection_identity import (
+    artifact_detection_identity_payload,
+    deterministic_id,
+)
+from spyglass.spikesorting.v2._core.selection_plan import (
+    build_recording_selection_plan,
+)
+from spyglass.spikesorting.v2._recording.geometry import (
+    maybe_apply_tetrode_geometry,
+    sort_group_planar_positions,
+)
+from spyglass.spikesorting.v2._recording.source import (
+    correction_lineage_mismatch,
+)
 
 
 def motion_request_problem(
@@ -271,13 +287,6 @@ def expected_source_ids(
     artifact_detection_id : uuid.UUID or None
         ``None`` when the preset runs no artifact detection.
     """
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        artifact_detection_identity_payload,
-        deterministic_id,
-    )
-    from spyglass.spikesorting.v2._core.selection_plan import (
-        build_recording_selection_plan,
-    )
     from spyglass.spikesorting.v2.recording import resolve_recording_input_hash
 
     recording_id = build_recording_selection_plan(
@@ -341,9 +350,6 @@ def supplied_motion_estimate_problem(
         Every mismatch, each naming the estimate's value and the run's, or
         ``None`` when the estimate can be applied.
     """
-    from spyglass.spikesorting.v2._recording.source import (
-        correction_lineage_mismatch,
-    )
     from spyglass.spikesorting.v2.motion import (
         _SOURCE_TABLES,
         MotionEstimate,
@@ -451,15 +457,10 @@ def motion_geometry_problem_from_contacts(
     str or None
         The estimator's refusal, or ``None`` when the geometry is eligible.
     """
-    import numpy as np
     from spikeinterface.core import NumpyRecording
 
     from spyglass.spikesorting.v2._motion.estimation import (
         check_estimation_eligibility,
-    )
-    from spyglass.spikesorting.v2._recording.geometry import (
-        maybe_apply_tetrode_geometry,
-        sort_group_planar_positions,
     )
 
     channel_ids = [int(c) for c in channel_ids]

@@ -12,6 +12,15 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
     waveform_params_for_preprocessing,
 )
 from spyglass.spikesorting.v2._sorting.analyzer import fetch_waveform_params
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._params.sorter import validate_execution_params
+from spyglass.spikesorting.v2._recording.unit_metadata import (
+    sort_group_electrode_regions,
+)
+from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._recording.source import SourceResolution
@@ -24,7 +33,6 @@ def fetch_sorter_analyzer_inputs(key) -> tuple[dict, dict]:
     Shared by populate, rebuild and recompute, so the computation never
     reads tables or ambient configuration.
     """
-    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
         SortingSelection,
@@ -79,8 +87,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         and sel_row.get("artifact_detection_id") is not None
     ):
         # Only a direct insert can reach this; concat members carry their masks.
-        from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
         raise SchemaBypassError(
             "Sorting.make_fetch: concat source for sorting_id="
             f"{key.get('sorting_id')!r} carries artifact_detection_id="
@@ -101,10 +107,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         # Firing rates need the artifact-removed observation intervals.
         # Without a detection, make_compute derives them from the recording.
         if sel_row.get("artifact_detection_id") is not None:
-            from spyglass.spikesorting.v2._artifacts.readers import (
-                read_recording_artifact_valid_times,
-            )
-
             obs_intervals = read_recording_artifact_valid_times(
                 sel_row["artifact_detection_id"],
                 nwb_file_name,
@@ -129,10 +131,6 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     )
     display_waveform_params = fetch_waveform_params(
         display_waveform_params_name
-    )
-
-    from spyglass.spikesorting.v2._params.sorter import (
-        validate_execution_params,
     )
 
     execution_params = validate_execution_params(
@@ -240,9 +238,6 @@ def fetch_unit_electrode_metadata(sort_group_id, nwb_file_name):
     ``electrode_by_id`` comes from the unjoined ``SortGroupElectrode`` so it
     is complete; ``region_by_electrode`` omits electrodes without a region.
     """
-    from spyglass.spikesorting.v2._recording.unit_metadata import (
-        sort_group_electrode_regions,
-    )
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     sort_group_id = int(sort_group_id)
@@ -301,7 +296,6 @@ def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
     SchemaBypassError
         If a concat selection has no ``MemberSnapshot`` rows.
     """
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,

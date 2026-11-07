@@ -7,8 +7,23 @@ the database or stages a file.
 from __future__ import annotations
 
 import time
+import json
+import tempfile
+from pathlib import Path
 
 from spyglass.spikesorting.v2._matching.inputs import _input_label
+from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._matching.graph import (
+    canonicalize_match_pairs,
+    count_recording_spikes,
+)
+from spyglass.spikesorting.v2._matching.provenance import (
+    matcher_provenance,
+    validate_matcher_provenance,
+)
+from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+from spyglass.utils import logger
 
 
 def extract_and_match(
@@ -33,14 +48,7 @@ def extract_and_match(
         Every matchable unit of an input was left out of its bundle; the
         message names the input.
     """
-    import tempfile
-    from pathlib import Path
-
     from spyglass.settings import temp_dir as spyglass_temp_dir
-    from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
-    from spyglass.spikesorting.v2._matching.graph import (
-        canonicalize_match_pairs,
-    )
     from spyglass.spikesorting.v2._sorting.analyzer import (
         read_canonical_recording,
     )
@@ -55,8 +63,6 @@ def extract_and_match(
         get_input_preparer,
         get_matcher,
     )
-    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
-    from spyglass.utils import logger
 
     def _input_description(plan):
         nwb_file_names = sorted(
@@ -188,9 +194,6 @@ def _input_recording_spike_counts(plan: dict, sorting) -> list[dict]:
         A spike of a matchable unit lies outside every frozen span of its
         input's recordings.
     """
-    from spyglass.spikesorting.v2._matching.graph import count_recording_spikes
-    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
-
     trains = {
         int(unit_id): sorting.get_unit_spike_train(unit_id=unit_id)
         for unit_id in plan["matchable_unit_ids"]
@@ -246,10 +249,6 @@ def matcher_run_provenance(matcher_name: str, params, job_kwargs) -> tuple:
     """
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._core.job_config import _resolved_job_kwargs
-    from spyglass.spikesorting.v2._matching.provenance import (
-        matcher_provenance,
-    )
     from spyglass.spikesorting.v2.matcher_protocol import (
         get_input_preparer,
         get_matcher,
@@ -384,8 +383,6 @@ def unit_match_provenance_tables(
     list of hdmf.common.DynamicTable
         For ``_storage.matches_nwb.write_pairs_table(provenance_tables=...)``.
     """
-    import json
-
     from spyglass.spikesorting.v2._storage.provenance import (
         UNITMATCH_INPUT_COLUMNS,
         UNITMATCH_INPUT_RECORDING_COLUMNS,
@@ -394,10 +391,6 @@ def unit_match_provenance_tables(
         UNITMATCH_PROVENANCE,
         build_long_provenance_table,
         build_provenance_table,
-    )
-
-    from spyglass.spikesorting.v2._matching.provenance import (
-        validate_matcher_provenance,
     )
 
     validate_matcher_provenance(matcher_provenance)

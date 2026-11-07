@@ -7,6 +7,8 @@ functions.
 
 from __future__ import annotations
 
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+
 
 def evaluated_curation_key(key) -> dict:
     """Resolve a CurationEvaluation key to its evaluated curation key.
@@ -55,10 +57,6 @@ def resolve_accepted_merges(
             if len(group) >= 2
         ]
     if merge_groups is not None:
-        from spyglass.spikesorting.v2._core.lookup_validation import (
-            lossless_int,
-        )
-
         return [
             [lossless_int(u, "merge group unit_id") for u in group]
             for group in merge_groups

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import numpy as np
+
+from spyglass.spikesorting.v2._recording.geometry import _POSITION_DECIMALS
+
 # Cap terminal output; a 128-channel group would otherwise print 128 triples.
 _MAX_REPORTED_CONTACTS = 4
 
@@ -32,8 +36,6 @@ def _missing_coordinate_report(channel_ids, positions) -> str:
         ``"electrode 12 (rel_z); electrode 15 (rel_y, rel_z)"``, capped by
         ``_MAX_REPORTED_CONTACTS``.
     """
-    import numpy as np
-
     columns = ("rel_x", "rel_y", "rel_z")
     finite = np.isfinite(np.asarray(positions, dtype=float))
     described = []
@@ -68,11 +70,7 @@ def _coincident_contact_report(channel_ids, positions) -> str:
         ``"electrodes [1, 2] at (0.0, 0.0); ..."``, capped by
         ``_MAX_REPORTED_CONTACTS`` groups.
     """
-    import numpy as np
-
     # Same rounding as the verdict, so the message names the same set.
-    from spyglass.spikesorting.v2._recording.geometry import _POSITION_DECIMALS
-
     xy = np.round(np.asarray(positions, dtype=float)[:, :2], _POSITION_DECIMALS)
     groups: dict = {}
     for electrode_id, position in zip(channel_ids, xy):

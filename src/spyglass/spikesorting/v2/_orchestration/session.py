@@ -20,6 +20,13 @@ from spyglass.spikesorting.v2._orchestration.types import (
 )
 from spyglass.spikesorting.v2._orchestration.run import run_v2_pipeline
 from spyglass.spikesorting.v2.curation_api import RunResult
+from spyglass.spikesorting.v2.exceptions import (
+    PipelineInputError,
+    PipelineStageError,
+    PreflightError,
+    ZeroUnitSortError,
+)
+from spyglass.utils import logger
 
 
 def run_v2_pipeline_session(
@@ -92,8 +99,6 @@ def run_v2_pipeline_session(
         Propagated from a per-group :func:`run_v2_pipeline` when
         ``continue_on_error=False``.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     motion_problem = motion_request_problem(
         motion_mode, motion_correction_params_name
     )
@@ -196,9 +201,6 @@ def _run_session_preflight(
     PreflightError
         If a group fails preflight and ``continue_on_error`` is False.
     """
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.utils import logger
-
     session_report = preflight_v2_pipeline_session(
         nwb_file_name=nwb_file_name,
         interval_list_name=interval_list_name,
@@ -271,13 +273,6 @@ def _run_session_group(
         From the group's run when ``continue_on_error`` is False; with it
         True they become an ``outcome="failed"`` entry.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        PipelineStageError,
-        PreflightError,
-        ZeroUnitSortError,
-    )
-    from spyglass.utils import logger
-
     try:
         summary = run_v2_pipeline(
             nwb_file_name=nwb_file_name,
@@ -342,8 +337,6 @@ def _log_session_receipt(results: list) -> None:
 
     Includes zero-unit and warned groups, which are easy to miss.
     """
-    from spyglass.utils import logger
-
     n_ok, n_failed, n_zero, n_warn = _session_outcome_counts(results)
     failed_details = [
         f"sort_group_id={entry['sort_group_id']}: "

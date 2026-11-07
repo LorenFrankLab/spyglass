@@ -6,7 +6,13 @@ the unwhitened display analyzer, never the whitened metric analyzer.
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
+
+from spyglass.spikesorting.v2._curation.metric_plots import (
+    draw_metric_histogram,
+)
 
 # Extensions each widget reads beyond the base set (SI 0.104.3). Never
 # ``principal_components``, which belongs to the whitened metric analyzer.
@@ -248,13 +254,7 @@ def plot_metrics_figure(metrics_df: pd.DataFrame, *, columns=None):
     ValueError
         If ``columns`` names a column the table does not have.
     """
-    import math
-
     import matplotlib.pyplot as plt
-
-    from spyglass.spikesorting.v2._curation.metric_plots import (
-        draw_metric_histogram,
-    )
 
     numeric = (
         metrics_df.apply(pd.to_numeric, errors="coerce")

@@ -19,6 +19,18 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _populate_once,
     _run_stage,
 )
+from spyglass.spikesorting.v2._artifacts.manual import (
+    artifact_recipe_with_manual_exclusions,
+    resolve_manual_exclusions,
+)
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    artifact_frame_ranges,
+)
+from spyglass.spikesorting.v2.exceptions import (
+    PipelineInputError,
+    PreflightError,
+)
+from spyglass.utils import logger
 
 
 def _validate_run_request(
@@ -82,8 +94,6 @@ def _validate_run_request(
         On a missing source input, an unknown preset, or a contradictory
         motion request.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     single_named = {
         "nwb_file_name": nwb_file_name,
         "sort_group_id": sort_group_id,
@@ -122,10 +132,6 @@ def _validate_run_request(
     )
     if motion_problem is not None:
         raise PipelineInputError(f"{caller}: {motion_problem}")
-    from spyglass.spikesorting.v2._artifacts.manual import (
-        artifact_recipe_with_manual_exclusions,
-        resolve_manual_exclusions,
-    )
 
     manual_excluded_times = resolve_manual_exclusions(
         manual_excluded_times, concat=is_concat
@@ -184,9 +190,6 @@ def _run_preflight(
     PreflightError
         If a prerequisite is missing.
     """
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-    from spyglass.utils import logger
-
     if not is_concat:
         report = preflight_v2_pipeline(
             **source_inputs,
@@ -379,8 +382,6 @@ def _build_concat_source(
 
     Parameters, return and errors as in :func:`_build_run_source`.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     run_summary["source_mode"] = "concat"
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -566,10 +567,6 @@ def _build_member_artifacts(
         ]
 
         def _populate_member_artifacts():
-            from spyglass.spikesorting.v2._sorting.artifact_mask import (
-                artifact_frame_ranges,
-            )
-
             for member, artifact_key, recording_key in zip(
                 members, artifact_keys, member_recording_keys, strict=True
             ):

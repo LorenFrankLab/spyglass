@@ -24,6 +24,8 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _populate_once,
     _run_stage,
 )
+from spyglass.spikesorting.v2._recording.source import SourceLineage
+from spyglass.utils import logger
 
 
 def _run_motion_estimate(
@@ -69,7 +71,6 @@ def _run_motion_estimate(
         MotionEstimate,
         MotionEstimateSelection,
     )
-    from spyglass.utils import logger
 
     def _preset() -> str:
         return (MotionEstimate & estimate_key).fetch1("resolved_params")[
@@ -77,8 +78,6 @@ def _run_motion_estimate(
         ]
 
     if motion_estimate_id is not None:
-        from spyglass.spikesorting.v2._recording.source import SourceLineage
-
         estimate_key = {
             "motion_estimate_id": uuid.UUID(str(motion_estimate_id))
         }

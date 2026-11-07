@@ -21,6 +21,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_motion import (
 from spyglass.spikesorting.v2._orchestration.preflight_runtime import (
     _check_sorter_execution,
 )
+from spyglass.spikesorting.v2.exceptions import PreflightError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -61,7 +62,6 @@ def _raising_check(
     Lets the concat preflight reuse the ``_check_*`` helpers. The message is
     the failing check's fix, prefixed with ``"{caller}: "`` when given.
     """
-    from spyglass.spikesorting.v2.exceptions import PreflightError
 
     def _check(name: str, ok, fix: str) -> bool:
         if not bool(ok):

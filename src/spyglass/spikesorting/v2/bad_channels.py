@@ -12,6 +12,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from spyglass.spikesorting.v2._core.signal_math import (
+    assert_freq_max_below_nyquist,
+)
+from spyglass.spikesorting.v2._recording.geometry import (
+    spikeinterface_channel_ids,
+)
+from spyglass.utils import logger
+from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
+
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._core.enums import BadChannelLabel
 
@@ -191,8 +200,6 @@ def suggest_bad_channels(
         If no electrodes are found for the session / requested groups, or if
         ``reviewed_report`` is given without ``persist=True``.
     """
-    from spyglass.utils import logger
-
     # Apply mode: persist the reviewed report without re-detecting.
     if reviewed_report is not None:
         if not persist:
@@ -215,11 +222,7 @@ def suggest_bad_channels(
 
     from spyglass.common.common_ephys import Electrode, Raw
     from spyglass.common.common_nwbfile import Nwbfile
-    from spyglass.spikesorting.v2._recording.geometry import (
-        spikeinterface_channel_ids,
-    )
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
-    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
 
     # Read probe_shank the same way set_group_by_shank does.
     query = Electrode() & {"nwb_file_name": nwb_file_name}
@@ -257,10 +260,6 @@ def suggest_bad_channels(
         load_time_vector=False,
     )
     # scipy's filter design fails opaquely at or above Nyquist.
-    from spyglass.spikesorting.v2._core.signal_math import (
-        assert_freq_max_below_nyquist,
-    )
-
     assert_freq_max_below_nyquist(
         bandpass[1],
         rec.get_sampling_frequency(),

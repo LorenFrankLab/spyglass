@@ -7,6 +7,11 @@ they must share a time axis.
 
 from __future__ import annotations
 
+import numpy as np
+
+from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
+from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
 
 def validate_shared_artifact_group_members(member_meta) -> str:
     """Validate session + sampling-frequency consistency; return the nwb_file_name.
@@ -76,11 +81,6 @@ def assert_shared_group_recordings_aggregatable(
         If the members do not share a session, sampling frequency, sample
         count, dtype, or exact timestamp vector.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
     sessions = set(nwb_file_names)
     if len(sessions) > 1:
         raise SchemaBypassError(

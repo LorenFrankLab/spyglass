@@ -5,6 +5,13 @@ Only the ``fetch_*`` functions read the database.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import numpy as np
+import pynwb
+
+from spyglass.utils import logger
+
 
 def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
     """Map Spyglass electrode_ids onto SpikeInterface channel ids.
@@ -34,10 +41,6 @@ def spikeinterface_channel_ids(nwb_file_abs_path: str, spyglass_ids):
         If any requested electrode id is not in the electrodes table, or maps
         to more than one row (ambiguous id).
     """
-    from pathlib import Path
-
-    import pynwb
-
     from spyglass.utils.nwb_helper_fn import (
         get_electrode_indices,
         invalid_electrode_index,
@@ -137,8 +140,6 @@ def fetch_sort_group_contact_positions(nwb_file_name: str, channel_ids):
         :func:`fetch_sort_group_probe_info` is. ``NaN`` where the electrode
         has no probe link or a NULL coordinate.
     """
-    import numpy as np
-
     from spyglass.common.common_device import Probe as _Probe
     from spyglass.common.common_ephys import Electrode as _Electrode
 
@@ -257,8 +258,6 @@ def maybe_apply_tetrode_geometry(
         The recording with tetrode geometry attached when every gate
         passes, otherwise the input recording unchanged.
     """
-    from spyglass.utils import logger
-
     reason = _tetrode_repair_skip_reason(
         probe_types, electrode_group_names, len(sort_group_channel_ids)
     )
@@ -266,7 +265,6 @@ def maybe_apply_tetrode_geometry(
         logger.info("maybe_apply_tetrode_geometry skipped: %s", reason)
         return recording
 
-    import numpy as np
     import probeinterface as pi
 
     tetrode = pi.Probe(ndim=2)
@@ -308,8 +306,6 @@ def sort_group_planar_positions(positions, probe_types, electrode_group_names):
     planar : numpy.ndarray or None
         ``(n_contacts, 2)`` positions, or ``None`` with ``source``.
     """
-    import numpy as np
-
     if tetrode_repair_applies(
         tuple(probe_types), tuple(electrode_group_names), len(positions)
     ):
@@ -356,8 +352,6 @@ def classify_missing_geometry(locations) -> str:
     ValueError
         If ``locations`` holds no contacts.
     """
-    import numpy as np
-
     positions = np.asarray(locations, dtype=float)
     if positions.size == 0:
         raise ValueError(
@@ -375,8 +369,6 @@ def classify_missing_geometry(locations) -> str:
 
 def _all_rows_distinct(positions) -> bool:
     """True when no two rows of ``positions`` coincide (to 6 decimals)."""
-    import numpy as np
-
     rounded = np.round(np.asarray(positions, dtype=float), _POSITION_DECIMALS)
     return len(np.unique(rounded, axis=0)) == len(rounded)
 
@@ -397,8 +389,6 @@ def assert_finite_contact_positions(locations) -> None:
     ValueError
         If any coordinate is non-finite, naming the offending rows.
     """
-    import numpy as np
-
     loc = np.asarray(locations, dtype=float)
     if np.isfinite(loc).all():
         return
@@ -435,7 +425,6 @@ def select_distinct_plane(locations):
         If ``locations`` is not ``(n_contacts, 3)``, or any coordinate is
         non-finite.
     """
-    import numpy as np
     from probeinterface import select_axes
 
     loc = np.asarray(locations, dtype=float)
@@ -476,8 +465,6 @@ def effective_contact_plane(locations) -> tuple:
     planar : numpy.ndarray or None
         ``(n_contacts, 2)`` positions in the chosen plane for ``"plane"``.
     """
-    import numpy as np
-
     positions = np.asarray(locations, dtype=float)
     missing = classify_missing_geometry(positions)
     if missing == "partial":
@@ -565,10 +552,7 @@ def normalize_channel_locations(recording, *, channel_ids=None):
         names a channel the recording does not carry, or if some but not all
         3D contact positions on any sliced channel are non-finite.
     """
-    import numpy as np
     from probeinterface import select_axes
-
-    from spyglass.utils import logger
 
     if recording.get_property("contact_vector") is not None:
         raise ValueError(
@@ -635,8 +619,6 @@ def assert_unique_contact_positions(
         If the recording carries no geometry at all, if ``require_2d`` and its
         locations are still 3D, or if two or more contacts share a 2D position.
     """
-    import numpy as np
-
     # get_channel_locations would raise a bare Exception here.
     if (
         recording.get_property("contact_vector") is None
@@ -688,8 +670,6 @@ def flatten_planar_geometry(recording) -> None:
         If the third coordinate is not constant across contacts: the geometry
         was never reduced to a plane, so dropping z would move contacts.
     """
-    import numpy as np
-
     locations = recording.get_property("location")
     if locations is None or np.asarray(locations).shape[1] != 3:
         return
@@ -717,8 +697,6 @@ def _shank_pitch(shank_xyz):
     shank, good and bad. Returns ``None`` for fewer than 2 electrodes, any
     non-finite coordinate, or a non-positive spacing.
     """
-    import numpy as np
-
     xyz = np.asarray(shank_xyz, dtype=float)
     if xyz.shape[0] < 2 or not np.isfinite(xyz).all():
         return None
@@ -739,8 +717,6 @@ def _interior_bad_channel_ids(good_xyz, candidate_xyz, pitch):
     pitch``. Non-finite input yields ``[]`` or skips the candidate. Returns
     a sorted list.
     """
-    import numpy as np
-
     good = np.asarray(good_xyz, dtype=float)
     if (
         good.shape[0] < 2
@@ -792,8 +768,6 @@ def fetch_interior_bad_channel_ids(
         re-include and fill on the ``interpolate`` path; empty when
         the group has no interior bad channels.
     """
-    import numpy as np
-
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
 

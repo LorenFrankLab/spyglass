@@ -4,19 +4,30 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import numpy as np
+
+from spyglass.spikesorting._intervals import (
+    intersect_intervals,
+    merge_sorted_intervals,
+)
+from spyglass.spikesorting.v2._core.signal_math import (
+    _segment_times_at,
+    assert_artifact_frame_fraction,
+    assert_positive_sampling_frequency,
+    base_intervals_and_gaps,
+    frames_for_times,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import (
+    use_pickle_recording_serialization,
+)
+from spyglass.spikesorting.v2.exceptions import EmptyArtifactValidTimesError
+from spyglass.utils import logger
+
 
 def _validate_artifact_intervals(
     recording, valid_times, artifact_detection_id, recording_id
 ):
     """Validate the interval contract and bounded recording envelope."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_at,
-        assert_positive_sampling_frequency,
-    )
-    from spyglass.spikesorting.v2.exceptions import EmptyArtifactValidTimesError
-
     n_segments = recording.get_num_segments()
     if n_segments != 1:
         raise ValueError(
@@ -141,15 +152,6 @@ def artifact_frame_ranges(
         interval with ``end < start``, or is not sorted-by-start and
         non-overlapping; the walker never sorts or merges.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_at,
-        assert_artifact_frame_fraction,
-        assert_positive_sampling_frequency,
-        frames_for_times,
-    )
-
     valid_times, n_samples, t_first, t_last = _validate_artifact_intervals(
         recording, valid_times, artifact_detection_id, recording_id
     )
@@ -243,8 +245,6 @@ def has_nonzero_offset(recording) -> bool:
     -------
     bool
     """
-    import numpy as np
-
     offsets = recording.get_channel_offsets()
     return offsets is not None and bool(np.any(offsets != 0))
 
@@ -306,10 +306,6 @@ def silence_frame_ranges(recording, frame_ranges):
     )
 
     # SilencedPeriodsRecording claims JSON support but cannot reload from it.
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        use_pickle_recording_serialization,
-    )
-
     use_pickle_recording_serialization(masked)
     return masked
 
@@ -337,8 +333,6 @@ def complement_frame_ranges(
         Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
         when ``excluded_ranges`` is empty.
     """
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
-
     n_samples = int(n_samples)
     merged = merge_sorted_intervals(
         sorted((int(a), int(b)) for a, b in excluded_ranges)
@@ -380,10 +374,6 @@ def boundary_spans_from_timestamps(recording) -> list[tuple[int, int]]:
         If ``recording`` has more than one segment; the v2 sort/statistics
         pipeline is single-segment only.
     """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        base_intervals_and_gaps,
-    )
-
     n_segments = recording.get_num_segments()
     if n_segments != 1:
         raise ValueError(
@@ -472,9 +462,6 @@ def statistics_spans(
     ValueError
         If no artifact-free frame lies inside any boundary span.
     """
-    from spyglass.spikesorting._intervals import intersect_intervals
-    from spyglass.utils import logger
-
     n_samples = int(n_samples)
     valid = complement_frame_ranges(excluded_ranges, n_samples)
     valid_samples = sum(b - a for a, b in valid)
@@ -628,8 +615,6 @@ def sample_span_data(
     numpy.ndarray
         ``(min(target_samples, total_valid), n_channels)`` traces.
     """
-    import numpy as np
-
     rng = np.random.default_rng(seed)
     lengths = np.array([b - a for a, b in spans], dtype=np.int64)
     total_valid = int(lengths.sum())
@@ -708,8 +693,6 @@ def sample_span_snippet_starts(
     ValueError
         If no span admits a snippet of length ``nsamples``.
     """
-    import numpy as np
-
     nsamples = int(nsamples)
     counts = np.array(
         [max(0, (b - a) - nsamples + 1) for a, b in spans], dtype=np.int64

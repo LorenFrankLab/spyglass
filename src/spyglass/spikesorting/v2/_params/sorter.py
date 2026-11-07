@@ -14,6 +14,7 @@ Concurrency settings live in each row's ``job_kwargs`` blob.
 from __future__ import annotations
 
 from typing import Literal
+import difflib
 
 from pydantic import (
     BaseModel,
@@ -542,8 +543,6 @@ def validate_sorter_params_against_wrapper(sorter: str, params) -> None:
     ValueError
         If any key is outside the wrapper's accepted parameter names.
     """
-    import difflib
-
     vocabulary = sorter_wrapper_vocabulary(sorter)
     if vocabulary is None:
         return

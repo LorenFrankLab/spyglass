@@ -8,17 +8,25 @@ Holds the preset registry, its ``list_*`` / ``describe_*`` views, and
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+import pandas as pd
 
 from spyglass.spikesorting.v2._core.recipe_catalog import (
     pipeline_preset_specs,
     waveform_params_for_preprocessing,
 )
-
-if TYPE_CHECKING:
-    import pandas as pd
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _jsonable_blob,
+    parameter_row_fingerprint,
+)
+from spyglass.spikesorting.v2._params.artifact_detection import (
+    ArtifactDetectionParamsSchema,
+)
+from spyglass.spikesorting.v2._params.preprocessing import (
+    PreprocessingParamsSchema,
+)
+from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
 
 
 class _PipelinePreset(BaseModel):
@@ -146,8 +154,6 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     >>> "recommendation_status" in describe_pipeline_presets().columns
     True
     """
-    import pandas as pd
-
     columns = [
         "pipeline_preset",
         "recommendation_status",
@@ -194,8 +200,6 @@ def describe_recommendation_status() -> "pd.DataFrame":
     ... }
     True
     """
-    import pandas as pd
-
     return pd.DataFrame(
         [
             {"recommendation_status": status, "meaning": meaning}
@@ -238,8 +242,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         is a ``rule.<index>`` entry. ``"sorter_execution"`` rows leave
         ``params_schema_version`` blank; their ``schema_version`` is a key.
     """
-    import pandas as pd
-
     # Before table imports, which connect to the database.
     if name not in _PIPELINE_PRESETS:
         raise ValueError(_unknown_pipeline_preset_message(name))
@@ -252,7 +254,6 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     )
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     def _flatten(prefix, value):
         if isinstance(value, dict):
@@ -728,23 +729,12 @@ def clone_pipeline_preset(
         )
     base = _PIPELINE_PRESETS[base_name]
 
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        parameter_row_fingerprint,
-    )
-    from spyglass.spikesorting.v2._params.artifact_detection import (
-        ArtifactDetectionParamsSchema,
-    )
-    from spyglass.spikesorting.v2._params.preprocessing import (
-        PreprocessingParamsSchema,
-    )
-    from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import (
         PreprocessingWaveformParameters,
         SorterParameters,
     )
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     # ``sorter`` is None for the single-key tables.
     stages = {

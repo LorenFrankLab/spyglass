@@ -16,6 +16,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+import pandas as pd
+
 from spyglass.spikesorting.v2._curation.transforms import (
     allocate_merged_unit_ids,
     validate_merge_groups,
@@ -38,10 +40,20 @@ from spyglass.spikesorting.v2.exceptions import (
     ReviewChangedSincePreviewError,
     UnresolvedMergeLabelConflictError,
 )
+from spyglass.spikesorting.v2._review.delivery import with_focus_units
+from spyglass.spikesorting.v2._review.inspection import (
+    add_trace_inspection,
+    inspection_view,
+)
+from spyglass.spikesorting.v2._review.operations import (
+    ReviewOperationService,
+    committed_review_result,
+)
+from spyglass.spikesorting.v2._review.unit_properties import (
+    review_unit_properties,
+)
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from spyglass.spikesorting.v2._review.notebook import ReviewCommitPanel
 
 ReviewStageState = Literal["computed", "reused", "complete"]
@@ -278,9 +290,6 @@ class FigPackReview:
             from spyglass.spikesorting.v2._review.delivery import (
                 serve_review_bundle,
             )
-            from spyglass.spikesorting.v2._review.operations import (
-                ReviewOperationService,
-            )
 
             url = serve_review_bundle(
                 self.uri,
@@ -289,7 +298,6 @@ class FigPackReview:
                     self
                 ),
             )
-        from spyglass.spikesorting.v2._review.delivery import with_focus_units
 
         url = with_focus_units(url, focus_unit_ids)
         if open_browser:
@@ -298,10 +306,6 @@ class FigPackReview:
 
     def result(self) -> CurationRef:
         """Read the completed browser review's final, explicitly verified curation."""
-        from spyglass.spikesorting.v2._review.operations import (
-            committed_review_result,
-        )
-
         if self.is_hosted:
             raise ValueError(
                 "Hosted drafts use the notebook commit receipt; browser results require a connected local review."
@@ -322,10 +326,6 @@ class FigPackReview:
         from spyglass.spikesorting.v2._storage.observation_io import (
             cached_review_timeline,
             review_timeline,
-        )
-        from spyglass.spikesorting.v2._review.inspection import inspection_view
-        from spyglass.spikesorting.v2._review.unit_properties import (
-            review_unit_properties,
         )
         from spyglass.spikesorting.v2._review.view import coerce_units_table_ids
         from spyglass.spikesorting.v2.figpack_curation import (
@@ -368,10 +368,6 @@ class FigPackReview:
                 ),
             )
             if include_traces:
-                from spyglass.spikesorting.v2._review.inspection import (
-                    add_trace_inspection,
-                )
-
                 add_trace_inspection(
                     analyzer, view, ids, time_range, timeline=timeline
                 )
@@ -588,8 +584,6 @@ class CurationChangeSet:
         proposed group the unit joins, or ``""``). Empty when nothing
         changed. Derived from the preview's fields; no database access.
         """
-        import pandas as pd
-
         group_of = {
             unit_id: ",".join(map(str, group))
             for group in self.merge_groups

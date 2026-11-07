@@ -35,6 +35,8 @@ imported lazily so importing this module needs no DB connection.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
+from pathlib import Path
 
 from spyglass.spikesorting.v2._review import visualization as _viz
 from spyglass.spikesorting.v2._review.visualization import (
@@ -42,6 +44,7 @@ from spyglass.spikesorting.v2._review.visualization import (
     plot_metrics_figure,
 )
 from spyglass.spikesorting.v2.exceptions import MissingDisplayExtensionError
+from spyglass.spikesorting.v2._curation.analyzer import display_analyzer_request
 
 __all__ = [
     "available_visualizations",
@@ -72,9 +75,6 @@ def _curation_request(curation, *, caller: str) -> dict:
     A bare sorting key is rejected; the raw sort's units are addressed through
     its root curation.
     """
-    from spyglass.spikesorting.v2._curation.analyzer import (
-        display_analyzer_request,
-    )
     from spyglass.spikesorting.v2.curation_api import CurationRef
 
     if not isinstance(curation, CurationRef):
@@ -138,9 +138,6 @@ def _request_analyzer_for_plot(
 
 def _write_export_provenance(output_folder, curation_ref, analyzer, recipe):
     """Write the export's source curation and unit ids to a JSON file."""
-    import json
-    from pathlib import Path
-
     import spikeinterface as si
 
     payload = {

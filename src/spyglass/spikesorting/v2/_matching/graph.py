@@ -17,6 +17,11 @@ from spyglass.spikesorting.v2.exceptions import (
     TrackedUnitBudgetExceededError,
 )
 from spyglass.spikesorting.v2._matching.coverage import validate_source_coverage
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._recording.concat import (
+    split_spike_frames_by_spans,
+)
+from spyglass.spikesorting.v2.exceptions import OverlappingMatchInputError
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.matcher_protocol import MatchPair
@@ -294,10 +299,6 @@ def count_recording_spikes(unit_spike_trains: dict, spans: list) -> dict:
         If the spans are not contiguous from frame 0 or a spike falls
         outside them.
     """
-    from spyglass.spikesorting.v2._recording.concat import (
-        split_spike_frames_by_spans,
-    )
-
     per_recording = split_spike_frames_by_spans(unit_spike_trains, spans)
     return {
         int(unit_id): [len(frames[unit_id]) for frames in per_recording]
@@ -346,8 +347,6 @@ def canonicalize_match_pairs(
         On invalid identifiers, an ineligible unit, an unpinned curation, a
         same-input pair, or a reversed duplicate.
     """
-    from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
-
     oriented: dict[tuple, dict] = {}
     for pair in pairs:
         side_a = (
@@ -429,8 +428,6 @@ def assert_disjoint_source_coverage(inputs) -> None:
     are ignored. Members of one concatenation are checked against each other
     too.
     """
-    from spyglass.spikesorting.v2.exceptions import OverlappingMatchInputError
-
     by_source = {}
     for input_index, item in enumerate(inputs):
         label = (

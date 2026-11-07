@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+import importlib
 
 from spyglass.spikesorting.v2._orchestration.preflight import (
     resolve_motion_recipe,
@@ -30,6 +31,9 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _run_sorting_stage,
 )
 from spyglass.spikesorting.v2.curation_api import RunResult
+from spyglass.spikesorting.v2._orchestration.preflight import (
+    describe_scientific_setup,
+)
 
 
 def run_v2_pipeline(
@@ -321,8 +325,6 @@ def _run_pipeline(
     )
 
     # A schema that cannot activate should fail before any compute.
-    import importlib
-
     for schema_module in (
         "spyglass.spikesorting.spikesorting_merge",
         "spyglass.spikesorting.v2.sorting",
@@ -369,10 +371,6 @@ def _run_pipeline(
     # Shared up front so a failure's shallow-copied partial summary has timings.
     run_summary["stage_seconds"] = stage_seconds
     warnings_list: list[str] = list(preflight_warnings)
-
-    from spyglass.spikesorting.v2._orchestration.preflight import (
-        describe_scientific_setup,
-    )
 
     run_summary["scientific_config"] = describe_scientific_setup(
         bundle,

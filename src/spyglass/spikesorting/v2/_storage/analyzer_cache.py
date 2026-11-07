@@ -12,6 +12,15 @@ them lazily.
 from __future__ import annotations
 
 from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
+from spyglass.spikesorting.v2._core.parameter_identity import (
+    parameter_fingerprint,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import (
+    attach_memmapped_waveforms,
+    saved_extension_data_file,
+    saved_extension_metadata,
+    use_pickle_recording_serialization,
+)
 
 import hashlib
 import json
@@ -23,6 +32,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
+import errno
+
+import datajoint as dj
+import numpy as np
 
 #: Not ``.zarr``: SI would load it as zarr.
 ANALYZER_FOLDER_SUFFIX = ".analyzer"
@@ -188,8 +201,6 @@ def v2_storage_root(custom_key: str, name: str) -> Path:
     ``Path(base_dir) / "spikesorting_v2" / name``. Not under ``temp_dir``,
     whose week-old files the lab cleanup script deletes.
     """
-    import datajoint as dj
-
     from spyglass.settings import base_dir
 
     configured = (dj.config.get("custom") or {}).get(custom_key)
@@ -267,11 +278,6 @@ def load_analyzer_folder(folder, *, recording=None):
             f"Analyzer recording could not be loaded: {folder}"
         )
     # SI does not persist this flag on load.
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        attach_memmapped_waveforms,
-        use_pickle_recording_serialization,
-    )
-
     use_pickle_recording_serialization(analyzer.recording)
     attach_memmapped_waveforms(analyzer)
     return analyzer
@@ -329,12 +335,6 @@ def analyzer_extension_array(analyzer, extension_name, data_name):
     Read-only. Kept out of SI's extension state so SI's save cannot overwrite
     the mapped source.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        saved_extension_data_file,
-    )
-
     if (
         analyzer.format != "binary_folder"
         or extension_name in analyzer.extensions
@@ -348,10 +348,6 @@ def analyzer_extension_array(analyzer, extension_name, data_name):
 
 def analyzer_extension_params(analyzer, name):
     """Read extension parameters without loading a disk-backed payload."""
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        saved_extension_metadata,
-    )
-
     if analyzer.format != "binary_folder" or name in analyzer.extensions:
         return analyzer.get_extension(name).params or {}
     extension, completed = saved_extension_metadata(analyzer, name)
@@ -363,9 +359,6 @@ def analyzer_extension_params(analyzer, name):
 def waveform_recipe_hash(recipe_row) -> str:
     """Return the content fingerprint of one analyzer-waveform recipe row."""
     from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-    from spyglass.spikesorting.v2._core.parameter_identity import (
-        parameter_fingerprint,
-    )
 
     return parameter_fingerprint(
         "AnalyzerWaveformParameters",
@@ -525,8 +518,6 @@ def analyzer_publication_transaction(table, sorting_id):
     if table.connection.in_transaction and not analyzer_population_active(
         sorting_id
     ):
-        import datajoint as dj
-
         raise dj.errors.DataJointError(
             "Sorting.make_insert cannot publish inside a caller-owned "
             "database transaction. Use populate(), or call make_insert "
@@ -750,8 +741,6 @@ def _remove_unless_in_use(folder: Path) -> bool:
     On NFS a still-mapped file leaves a ``.nfs`` placeholder (``EBUSY`` /
     ``ENOTEMPTY``); that folder is left for later. Other errors raise.
     """
-    import errno
-
     from spyglass.utils import logger
 
     try:
@@ -1054,8 +1043,6 @@ def find_orphaned_analyzer_folders(
     The body of ``Sorting.find_orphaned_analyzer_folders``. ``table_cls`` is
     the ``Sorting`` class.
     """
-    import datajoint as dj
-
     from spyglass.utils import logger
 
     if not dry_run and table_cls.connection.in_transaction:

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+import numpy as np
+
+from spyglass.spikesorting._intervals import merge_sorted_intervals
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+
 
 def resolve_manual_exclusions(value, *, concat=False):
     """Normalize runner input: intervals, or a concat member-index mapping."""
-    from collections.abc import Mapping
-
     if not concat:
         if isinstance(value, Mapping):
             raise TypeError(
@@ -21,7 +27,6 @@ def resolve_manual_exclusions(value, *, concat=False):
         raise TypeError(
             "Concat manual_excluded_times must map member_index to intervals."
         )
-    from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 
     result = {}
     for index, times in value.items():
@@ -42,10 +47,6 @@ def artifact_recipe_with_manual_exclusions(bundle, exclusions):
 
 def normalize_manual_exclusions(intervals):
     """Sorted union of finite [start, stop) intervals in session seconds."""
-    import numpy as np
-
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
-
     if intervals is None:
         return []
     values = np.asarray(intervals, dtype=float)
@@ -72,10 +73,6 @@ def apply_manual_exclusions(valid_times, excluded_times, min_length_s):
     already-valid interval so no output spans a recording gap or restores a
     detected artifact.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
-
     exclusions = normalize_manual_exclusions(excluded_times)
     if not exclusions or len(valid_times) == 0:
         return valid_times

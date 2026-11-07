@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+import math
 
 from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._review.annotations import (
@@ -255,7 +256,6 @@ class ReviewDisplayOptions:
                 "min_similarity_for_correlograms must be within [0, 1]; got "
                 f"{self.min_similarity_for_correlograms!r}."
             )
-        import math
 
         for value in (
             self.raster_max_firing_rate,
@@ -294,8 +294,6 @@ class ReviewDisplayOptions:
 
     def point_limit(self, kind, duration_s):
         """Resolve the duration-scaled point budget and an optional cap."""
-        import math
-
         rate, cap = (
             (self.raster_max_firing_rate, self.max_raster_spikes_per_unit)
             if kind == "raster"

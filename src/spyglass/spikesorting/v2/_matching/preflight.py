@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+import pandas as pd
+
 from spyglass.spikesorting.v2._matching.planning import (
     UnitMatchInputPlan,
     UnitMatchPlan,
@@ -17,6 +19,11 @@ from spyglass.spikesorting.v2._matching.planning import (
     unit_match_plan_structure_errors,
 )
 from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+from spyglass.spikesorting.v2._matching.inputs import (
+    _validate_member_curations,
+    assert_matching_policy_excludes_mua,
+    normalize_curation_choices,
+)
 
 
 @dataclass(frozen=True)
@@ -57,8 +64,6 @@ class UnitMatchPreflightReport:
 
     def as_dataframe(self):
         """One row per check, including prerequisites that could not run."""
-        import pandas as pd
-
         return pd.DataFrame(
             [
                 {
@@ -126,10 +131,6 @@ def _not_run_checks() -> list[UnitMatchPreflightCheck]:
 
 
 def _validate_group_plan(plan: UnitMatchPlan) -> None:
-    from spyglass.spikesorting.v2._matching.inputs import (
-        _validate_member_curations,
-        normalize_curation_choices,
-    )
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     group = {
@@ -185,9 +186,6 @@ def preflight_v2_unit_match(
             + tuple(_not_run_checks()),
         )
 
-    from spyglass.spikesorting.v2._matching.inputs import (
-        assert_matching_policy_excludes_mua,
-    )
     from spyglass.spikesorting.v2.analysis_selection import (
         UnitSelectionSnapshot,
         resolve_unit_selection,

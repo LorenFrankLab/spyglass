@@ -28,6 +28,15 @@ from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     get_spike_sorting_v2_merge_ids as get_spike_sorting_v2_merge_ids,
 )
+from spyglass.spikesorting.v2 import visualization
+from spyglass.spikesorting.v2._curation.analyzer import (
+    display_analyzer_request,
+    open_curation_analyzer,
+)
+from spyglass.spikesorting.v2._review.unit_properties import (
+    missing_rule_metrics,
+)
+from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
 
 # Whether this call materialized a row ("computed") or found it ("reused").
 MaterializationStatus = Literal["computed", "reused"]
@@ -200,7 +209,6 @@ class CurationRef:
                 f"missing {sorted(missing)}."
             )
         from spyglass.spikesorting.v2.curation import CurationV2
-        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
 
         dj_key = {
             "sorting_id": key["sorting_id"],
@@ -242,7 +250,6 @@ class CurationRef:
     def _current_row(self) -> dict[str, Any]:
         """Fetch this exact generation or raise the typed stale-ref error."""
         from spyglass.spikesorting.v2.curation import CurationV2
-        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
 
         rows = (CurationV2 & self._unchecked_key()).fetch(as_dict=True)
         current_uuid = (
@@ -642,11 +649,6 @@ class CurationRef:
         are computed into the published cache first, so repeated calls reuse
         them.
         """
-        from spyglass.spikesorting.v2._curation.analyzer import (
-            display_analyzer_request,
-            open_curation_analyzer,
-        )
-
         return open_curation_analyzer(
             **display_analyzer_request(self), extra_extensions=extra_extensions
         )
@@ -906,8 +908,6 @@ class CurationPlots:
         self._curation = curation
 
     def _call(self, function: str, *args, **kwargs):
-        from spyglass.spikesorting.v2 import visualization
-
         return getattr(visualization, function)(self._curation, *args, **kwargs)
 
     def sorting_summary(self, **kwargs):
@@ -1052,9 +1052,6 @@ class EvaluationResult:
             row is gone, or its selection no longer names the evaluated
             curation.
         """
-        from spyglass.spikesorting.v2._review.unit_properties import (
-            missing_rule_metrics,
-        )
         from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
         self._current_evaluation_key()

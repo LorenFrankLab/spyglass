@@ -14,6 +14,10 @@ from collections.abc import Callable, Collection
 
 from spyglass.utils.identity import parse_uuid, sha256_json
 from spyglass.utils.identity import deterministic_id as _deterministic_id
+from spyglass.spikesorting.v2._artifacts.manual import (
+    normalize_manual_exclusions,
+)
+from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
 
 V2_SELECTION_NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_DNS, "spyglass.spikesorting.v2.selection"
@@ -134,9 +138,6 @@ def artifact_detection_identity_payload(
             "artifact_detection_identity_payload requires exactly one source: "
             "recording_id xor shared_artifact_group_name."
         )
-    from spyglass.spikesorting.v2._artifacts.manual import (
-        normalize_manual_exclusions,
-    )
 
     exclusions = normalize_manual_exclusions(manual_excluded_times)
     manual = (
@@ -409,7 +410,5 @@ def existing_selection_pk(
         master_id for master_id in master_ids if master_id != canonical_id
     ]
     if bypassed:
-        from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError
-
         raise DuplicateSelectionError(bypass_message(bypassed))
     return {pk_field: canonical_id} if len(master_ids) else None

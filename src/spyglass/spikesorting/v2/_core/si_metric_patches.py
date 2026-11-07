@@ -26,8 +26,17 @@ import threading
 import spikeinterface as si
 import spikeinterface.metrics.quality.misc_metrics as _mm
 import spikeinterface.metrics.quality.pca_metrics as _pm
+import numpy as np
+from spikeinterface.metrics.quality import ComputeQualityMetrics
 
 from spyglass.utils import logger
+from spyglass.spikesorting.v2._core.signal_math import (
+    frames_with_window_in_one_span,
+)
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    sample_span_snippet_starts,
+    spans_cover_recording,
+)
 
 #: SI versions these patches are validated against.
 _VALIDATED_SI_PREFIXES = ("0.104",)
@@ -112,7 +121,6 @@ def _si_metric_param_copies():
 
     Unlocked; the caller must hold :data:`SI_METRIC_STATE_LOCK`.
     """
-    from spikeinterface.metrics.quality import ComputeQualityMetrics
     from spikeinterface.metrics.template import ComputeTemplateMetrics
 
     metric_classes = {
@@ -238,11 +246,6 @@ def _draw_noise_cluster_uncached(
     numpy.ndarray
         ``(n_snippets, nsamples, n_channels)`` snippets in start order.
     """
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        sample_span_snippet_starts,
-        spans_cover_recording,
-    )
-
     np = _pm.np
     spans = _NOISE_CLUSTER_SPANS.get()
     if spans_cover_recording(spans, recording.get_num_samples()):
@@ -498,7 +501,6 @@ def _compute_isolation_kdtree(
         If ``n_neighbors`` equals ``n_spikes``, as scikit-learn raises in SI;
         SI's callers turn it into a NaN metric.
     """
-    import numpy as np
     from scipy.spatial import cKDTree
 
     n_spikes_target = pcs_target_unit.shape[0]
@@ -639,10 +641,6 @@ def _template_corrected_sd_ratio(
 
 def _span_spike_counts(sorting, spans):
     """``{unit_id: int}`` spikes whose frame lies inside a half-open span."""
-    from spyglass.spikesorting.v2._core.signal_math import (
-        frames_with_window_in_one_span,
-    )
-
     np = _mm.np
     spike_vector = sorting.to_spike_vector()
     # A one-sample window [frame, frame + 1) lies in a span iff the frame does.
@@ -674,10 +672,6 @@ def _sd_ratio_statistics_spans(
     noise std comes from span samples, so ``p`` counts the unit's spikes whose
     frame lies in a span over the total span samples.
     """
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        spans_cover_recording,
-    )
-
     sd_ratio_kwargs = dict(
         unit_ids=unit_ids,
         periods=periods,

@@ -11,19 +11,23 @@ The caller applies the stack in this order (no whitening):
 
 from __future__ import annotations
 
+from itertools import pairwise
+
+import numpy as np
+
+from spyglass.spikesorting.v2._core.signal_math import (
+    assert_freq_max_below_nyquist,
+    base_intervals_and_gaps,
+)
+from spyglass.utils import logger
+
 
 def _split_acquisition_spans(recording):
     """Isolate real timestamp gaps before operations with temporal support."""
-    from itertools import pairwise
-
-    import numpy as np
     from spikeinterface import append_recordings
 
     from spyglass.spikesorting.v2._recording.acquisition_spans import (
         AcquisitionSpanRecording,
-    )
-    from spyglass.spikesorting.v2._core.signal_math import (
-        base_intervals_and_gaps,
     )
 
     spans = []
@@ -71,10 +75,7 @@ def apply_temporal_preprocessing(recording, validated):
     tuple
         ``(recording, applied_steps)``.
     """
-    import numpy as np
     import spikeinterface.preprocessing as sip
-
-    from spyglass.utils import logger
 
     applied_steps: dict = {}
 
@@ -101,10 +102,6 @@ def apply_temporal_preprocessing(recording, validated):
 
     if validated.bandpass_filter is not None:
         # The schema cannot know fs; scipy fails opaquely at/above Nyquist.
-        from spyglass.spikesorting.v2._core.signal_math import (
-            assert_freq_max_below_nyquist,
-        )
-
         assert_freq_max_below_nyquist(
             validated.bandpass_filter.freq_max,
             recording.get_sampling_frequency(),
@@ -165,7 +162,6 @@ def apply_spatial_preprocessing(
         gains/offsets, or non-positive gains. SI references raw counts, so
         every contributing channel must share its calibration.
     """
-    import numpy as np
     import spikeinterface.preprocessing as sip
 
     applied_steps: dict = {}

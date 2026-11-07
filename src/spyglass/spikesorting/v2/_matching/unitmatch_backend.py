@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 from types import SimpleNamespace
+import importlib.metadata
 
 import numpy as np
 
@@ -27,6 +28,10 @@ from spyglass.spikesorting.v2.matcher_protocol import (
     SessionMatcherInput,
     is_registered,
     register_matcher,
+)
+from spyglass.spikesorting.v2.matcher_protocol import (
+    WAVEFORM_BUNDLE_LAYOUT,
+    WAVEFORM_BUNDLE_VERSION,
 )
 
 _INSTALL_HINT = (
@@ -171,11 +176,6 @@ class UnitMatchBackend:
 
     @staticmethod
     def _validate_bundle_layouts(session_inputs) -> None:
-        from spyglass.spikesorting.v2.matcher_protocol import (
-            WAVEFORM_BUNDLE_LAYOUT,
-            WAVEFORM_BUNDLE_VERSION,
-        )
-
         for bundle in session_inputs:
             if (bundle.layout, bundle.layout_version) != (
                 WAVEFORM_BUNDLE_LAYOUT,
@@ -202,8 +202,6 @@ class UnitMatchBackend:
 
         Recorded as ``UnitMatch`` provenance.
         """
-        import importlib.metadata
-
         try:
             return importlib.metadata.version("unitmatchpy")
         except importlib.metadata.PackageNotFoundError:

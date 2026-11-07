@@ -8,6 +8,22 @@ equal. Design notes are in the developer docs. Imports are lazy, so
 
 from __future__ import annotations
 
+import hashlib
+
+import numpy as np
+import pynwb
+
+from spyglass.spikesorting.v2._core.signal_math import _segment_times_slice
+from spyglass.spikesorting.v2._storage.analyzer_cache import artifact_slot_lock
+from spyglass.spikesorting.v2._storage.recompute import (
+    combined_hash,
+    hash_recording_traces,
+)
+from spyglass.utils.nwb_hash import (
+    electrode_coordinates,
+    electrode_geometry_hash,
+)
+
 TRACE_ROUNDING = 4  # µV; well below the ephys noise floor
 TIMESTAMP_ROUNDING = 9  # seconds; sub-sample, absorbs float64 ULP noise
 
@@ -39,23 +55,7 @@ def recording_content_fingerprint(
     dict[str, str]
         ``{"traces", "timestamps", "geometry", "metadata"}`` component hashes.
     """
-    import hashlib
-
-    import numpy as np
-    import pynwb
-
-    from spyglass.spikesorting.v2._storage.recompute import (
-        combined_hash,
-        hash_recording_traces,
-    )
     from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_slice,
-    )
-    from spyglass.utils.nwb_hash import (
-        electrode_coordinates,
-        electrode_geometry_hash,
-    )
 
     analysis_abs_path = str(analysis_abs_path)
     series_name = electrical_series_path.rsplit("/", 1)[-1]
@@ -152,8 +152,4 @@ def recording_artifact_lock(recording_id):
     filelock.FileLock
         An unacquired lock.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        artifact_slot_lock,
-    )
-
     return artifact_slot_lock("recording", recording_id)

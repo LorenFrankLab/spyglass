@@ -7,6 +7,25 @@ rows. Readers live in ``_artifacts.readers``; per-chunk kernels in
 
 from __future__ import annotations
 
+import numpy as np
+
+from spyglass.spikesorting.v2._artifacts.compute import (
+    _compute_artifact_chunk,
+    _init_artifact_worker,
+)
+from spyglass.spikesorting.v2._artifacts.naming import (
+    artifact_detection_interval_list_name,
+)
+from spyglass.spikesorting.v2._core.signal_math import (
+    _segment_times_at,
+    assert_artifact_frame_fraction,
+    assert_positive_sampling_frequency,
+    base_intervals_and_gaps,
+    subtract_intervals,
+)
+from spyglass.spikesorting.v2.exceptions import InsufficientZScoreChannelsError
+from spyglass.utils import logger
+
 
 def scan_artifact_frames(recording, validated, job_kwargs=None):
     """Flag contiguous artifact-frame RUNS via a chunked ``ChunkRecordingExecutor``.
@@ -40,19 +59,10 @@ def scan_artifact_frames(recording, validated, job_kwargs=None):
         If the total flagged sample count exceeds the
         ``_MAX_ARTIFACT_FRAME_FRACTION`` guard (a misconfigured detector).
     """
-    import numpy as np
     from spikeinterface.core.job_tools import (
         ChunkRecordingExecutor,
         ensure_n_jobs,
         job_keys,
-    )
-
-    from spyglass.spikesorting.v2._artifacts.compute import (
-        _compute_artifact_chunk,
-        _init_artifact_worker,
-    )
-    from spyglass.spikesorting.v2._core.signal_math import (
-        assert_artifact_frame_fraction,
     )
 
     resolved = dict(job_kwargs or {})
@@ -115,8 +125,6 @@ def _split_runs_at_gaps(runs, gap_after):
     np.ndarray
         The runs with any gap-spanning run split, shape ``(n_runs', 2)``.
     """
-    import numpy as np
-
     if gap_after.size == 0:
         return runs
     out = []
@@ -160,16 +168,6 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         Artifact-removed valid times in seconds, shape
         ``(n_intervals, 2)``.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _segment_times_at,
-        assert_positive_sampling_frequency,
-        base_intervals_and_gaps,
-        subtract_intervals,
-    )
-    from spyglass.utils import logger
-
     fs = assert_positive_sampling_frequency(
         recording.get_sampling_frequency(), context="detect_artifacts: "
     )
@@ -197,10 +195,6 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     n_channels = recording.get_num_channels()
     if validated.zscore_threshold is not None and n_channels < 3:
         if validated.amplitude_threshold_uv is None:
-            from spyglass.spikesorting.v2.exceptions import (
-                InsufficientZScoreChannelsError,
-            )
-
             raise InsufficientZScoreChannelsError(
                 "Artifact detection: zscore_threshold is the only detector on a "
                 f"{n_channels}-channel recording{context}, but the cross-channel "
@@ -347,10 +341,6 @@ def build_artifact_interval_rows(
     list[dict]
         One ``IntervalList`` row dict per target ``nwb_file_name``.
     """
-    from spyglass.spikesorting.v2._artifacts.naming import (
-        artifact_detection_interval_list_name,
-    )
-
     interval_list_name = artifact_detection_interval_list_name(
         key["artifact_detection_id"]
     )

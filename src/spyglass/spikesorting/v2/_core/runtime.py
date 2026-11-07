@@ -19,6 +19,8 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, distributions, version
 from pathlib import Path
 
+import numpy as np
+
 from spyglass.utils.identity import sha256_json
 
 RUNTIME_SCHEMA_VERSION = 1
@@ -71,8 +73,6 @@ _POOL_FIELDS = (
 
 
 def _json_value(value):
-    import numpy as np
-
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, Path):

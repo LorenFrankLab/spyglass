@@ -17,6 +17,13 @@ from spyglass.spikesorting.v2._storage.provenance import (
     concrete_vectordata,
     read_table_frames,
 )
+from spyglass.spikesorting.v2._storage.provenance import (
+    UNITMATCH_INPUTS,
+    UNITMATCH_INPUT_COLUMNS,
+    UNITMATCH_INPUT_RECORDINGS,
+    UNITMATCH_INPUT_RECORDING_COLUMNS,
+    long_provenance_from_frame,
+)
 
 UNIT_MATCH_PAIRS_TABLE = "unit_match_pairs"
 
@@ -141,14 +148,6 @@ def read_input_provenance(abs_path: str) -> tuple[list[dict], list[dict]]:
         by ``(input_index, recording_index)``, without the
         ``provenance_schema_version`` column.
     """
-    from spyglass.spikesorting.v2._storage.provenance import (
-        UNITMATCH_INPUT_COLUMNS,
-        UNITMATCH_INPUT_RECORDING_COLUMNS,
-        UNITMATCH_INPUT_RECORDINGS,
-        UNITMATCH_INPUTS,
-        long_provenance_from_frame,
-    )
-
     input_frame, recording_frame = read_table_frames(
         abs_path,
         scratch_names=(UNITMATCH_INPUTS, UNITMATCH_INPUT_RECORDINGS),

@@ -10,12 +10,20 @@ from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
 
 import gc
 from pathlib import Path
+import tempfile
 
 import numpy as np
 
 from spyglass.spikesorting.v2._params.matcher import WaveformBundleParamsSchema
 from spyglass.spikesorting.v2._core.signal_math import (
     frames_with_window_in_one_span,
+)
+from spyglass.spikesorting.v2._matching.provenance import spyglass_version
+from spyglass.spikesorting.v2.matcher_protocol import (
+    PreparedMatcherInput,
+    SessionMatcherInput,
+    WAVEFORM_BUNDLE_LAYOUT,
+    WAVEFORM_BUNDLE_VERSION,
 )
 
 
@@ -33,20 +41,9 @@ class WaveformInputPreparer:
     @staticmethod
     def preparer_version() -> str | None:
         """The Spyglass distribution implements this bundle extraction."""
-        from spyglass.spikesorting.v2._matching.provenance import (
-            spyglass_version,
-        )
-
         return spyglass_version()
 
     def prepare(self, source, directory, params, job_kwargs):
-        from spyglass.spikesorting.v2.matcher_protocol import (
-            WAVEFORM_BUNDLE_LAYOUT,
-            WAVEFORM_BUNDLE_VERSION,
-            PreparedMatcherInput,
-            SessionMatcherInput,
-        )
-
         excluded = self.extract(
             directory,
             source.recording,
@@ -254,8 +251,6 @@ def extract_waveform_bundle(
         )
     # SI's memory and zarr formats allocate the full unit x spike x sample x
     # channel volume, so write to disk.
-    import tempfile
-
     from spyglass.settings import temp_dir as spyglass_temp_dir
 
     with tempfile.TemporaryDirectory(

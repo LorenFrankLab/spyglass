@@ -6,6 +6,13 @@ output whose content hash matches the stored row.
 
 from __future__ import annotations
 
+import os
+import time
+from pathlib import Path
+
+import h5py
+import numpy as np
+
 from spyglass.spikesorting.v2._storage.nwb import (
     StoredTraces,
     recording_provenance_table,
@@ -13,6 +20,14 @@ from spyglass.spikesorting.v2._storage.nwb import (
 from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
+from spyglass.spikesorting.v2._recording.concat import (
+    concat_recording_artifact_lock,
+)
+from spyglass.spikesorting.v2._recording.fingerprint import (
+    recording_artifact_lock,
+)
+from spyglass.spikesorting.v2.exceptions import RecordingContentDriftError
+from spyglass.utils import logger
 
 #: ``{analysis_file_name: (abs_path, file_identity)}`` for files checksummed
 #: outside a transaction. See :func:`ensure_artifact_file`.
@@ -25,8 +40,6 @@ def _restore_object_id(path: str, rebuilt_id: str, stored_id: str) -> None:
     Spyglass ``fetch_nwb`` finds each ``*object_id`` column's object by that
     id.
     """
-    import h5py
-
     if rebuilt_id == stored_id:
         return
     with h5py.File(path, "r+") as file:
@@ -60,9 +73,6 @@ def install_rebuilt_recording(
     The caller holds the artifact lock and has verified the content hash. On
     failure the temp or installed file is removed so the next read retries.
     """
-    import os
-    from pathlib import Path
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     try:
@@ -103,10 +113,6 @@ def _reject_irreproducible_rebuild(
         If ``computed.content_hash`` differs from ``row["content_hash"]``. The
         staged file is removed first; the canonical slot is never touched.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        RecordingContentDriftError,
-    )
-
     if computed.content_hash == row["content_hash"]:
         return
     _unlink_staged_analysis_file(computed.analysis_file_name, context=context)
@@ -119,8 +125,6 @@ def _reject_irreproducible_rebuild(
 
 def _file_identity(abs_path: str) -> tuple[int, int, int] | None:
     """``(inode, size, mtime_ns)`` of a file, or ``None`` if it is absent."""
-    import os
-
     try:
         stat = os.stat(abs_path)
     except FileNotFoundError:
@@ -152,8 +156,6 @@ def ensure_artifact_file(table, key: dict, analysis_file_name: str) -> str:
     str
         Absolute path of the (present) artifact file.
     """
-    from pathlib import Path
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     in_transaction = AnalysisNwbfile().connection.in_transaction
@@ -216,14 +218,7 @@ def rebuild_nwb_artifact(table, key) -> None:
     RecordingContentDriftError
         If the rebuild does not reproduce the stored ``content_hash``.
     """
-    import time
-    from pathlib import Path
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording.fingerprint import (
-        recording_artifact_lock,
-    )
-    from spyglass.utils import logger
 
     row = (table & key).fetch1()
     recording_id = row["recording_id"]
@@ -310,8 +305,6 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
         If the selection is stale or the rebuild does not reproduce the
         stored ``content_hash``.
     """
-    from pathlib import Path
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2._motion.estimation import (
         motion_corrected_recording_artifact_lock,
@@ -320,10 +313,6 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
     from spyglass.spikesorting.v2._motion.compute import (
         stale_corrected_selection_fields,
     )
-    from spyglass.spikesorting.v2.exceptions import (
-        RecordingContentDriftError,
-    )
-    from spyglass.utils import logger
 
     row = (table & key).fetch1()
     analysis_file_name = row["analysis_file_name"]
@@ -393,8 +382,6 @@ def clear_recompute_deleted_flag(recording_id) -> None:
     ``deleted=1`` means "removed and still absent". A failed clear is logged;
     file tracking is presence-aware, so it cannot hide the rebuilt file.
     """
-    from spyglass.utils import logger
-
     try:
         from spyglass.spikesorting.v2.recompute import (
             RecordingArtifactRecompute,
@@ -432,18 +419,7 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
     RecordingContentDriftError
         If the rebuilt content hash or spans differ from the stored row.
     """
-    from pathlib import Path
-
-    import numpy as np
-
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._recording.concat import (
-        concat_recording_artifact_lock,
-    )
-    from spyglass.spikesorting.v2.exceptions import (
-        RecordingContentDriftError,
-    )
-    from spyglass.utils import logger
 
     row = (table & key).fetch1()
     concat_recording_id = row["concat_recording_id"]

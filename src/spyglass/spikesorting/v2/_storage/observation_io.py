@@ -7,11 +7,20 @@ import json
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
+import pandas as pd
+from pynwb import NWBHDF5IO
 
 from spyglass.spikesorting._observed_time import (
     compact_observation_intervals,
 )
 from spyglass.spikesorting.v2._core.observed_time import observed_intervals
+from spyglass.spikesorting.v2._core.json_io import read_json, write_json
+from spyglass.spikesorting.v2._core.observed_time import observed_metrics
+from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    artifact_frame_ranges,
+    boundary_spans_from_timestamps,
+)
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2._recording.source import EffectiveTraces
@@ -46,12 +55,6 @@ def observation_fingerprint(observation):
 
 def observation_metrics_from_nwb(path, recording, *, bin_duration_s):
     """Read one unit's spikes at a time; retain only metrics and small spans."""
-    import pandas as pd
-    from pynwb import NWBHDF5IO
-
-    from spyglass.spikesorting.v2._core.observed_time import observed_metrics
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-
     origin = float(_segment_times_at(recording, np.array([0]))[0])
     with NWBHDF5IO(path, "r", load_namespaces=True) as io:
         units = io.read().units
@@ -79,8 +82,6 @@ def observation_metrics_from_nwb(path, recording, *, bin_duration_s):
 
 def selection_observations(merge_id, unit_ids):
     """Freeze v2 output availability without reading the NWB spike trains."""
-    from pynwb import NWBHDF5IO
-
     from spyglass.common import AnalysisNwbfile
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
@@ -107,8 +108,6 @@ def cached_review_timeline(curation_key, *, cache_path, curation_uuid):
     File replacement is atomic so notebook inspection and HTTP workers can
     share it. A new curation generation cannot reuse an earlier one's mask.
     """
-    from spyglass.spikesorting.v2._core.json_io import read_json, write_json
-
     cached = read_json(cache_path)
     identity = str(curation_uuid)
     if cached.get("curation_uuid") == identity:
@@ -226,14 +225,7 @@ def review_timeline(curation_key):
 
 def review_timeline_from_inputs(inputs: ReviewTimelineInputs):
     """Build :func:`review_timeline` from resolved inputs; no DB access."""
-    from pynwb import NWBHDF5IO
-
     from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        artifact_frame_ranges,
-        boundary_spans_from_timestamps,
-    )
     from spyglass.spikesorting.v2._recording.source import read_persisted_traces
 
     recording = read_persisted_traces(inputs.traces_path, inputs.traces)

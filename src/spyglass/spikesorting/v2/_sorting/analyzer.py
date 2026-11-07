@@ -7,9 +7,37 @@ theirs first.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
+import inspect
+import shutil
+
+import numpy as np
 
 from spyglass.spikesorting.v2._storage.recompute import (
     BASE_ANALYZER_EXTENSIONS,
+)
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+from spyglass.spikesorting.v2._recording.geometry import (
+    assert_unique_contact_positions,
+)
+from spyglass.spikesorting.v2._sorting.dispatch import (
+    cache_span_noise_levels,
+    pinned_whiten,
+)
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    analyzer_extension_array,
+    analyzer_extension_params,
+    assert_analyzer_sparsity_polarity,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import (
+    saved_extension_metadata,
+)
+from spyglass.spikesorting.v2.exceptions import (
+    AnalyzerFolderInvalidError,
+    AnalyzerFolderMissingError,
+    ZeroUnitAnalyzerError,
 )
 
 if TYPE_CHECKING:
@@ -48,8 +76,6 @@ def ensure_review_template_percentiles(analyzer) -> None:
     cache on first plot, invalidating it. The recompute hash covers only the
     average templates.
     """
-    import inspect
-
     import spikeinterface.widgets as sw
 
     shading = (
@@ -125,8 +151,6 @@ def _zero_unit_error(caller: str, sorting_id, *, hint: str = ""):
 
     ``hint`` is appended verbatim after the shared message.
     """
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
-
     return ZeroUnitAnalyzerError(
         f"{caller}: sorting_id={sorting_id!r} has zero units; no "
         "SortingAnalyzer exists (SI cannot build one over zero units)."
@@ -188,17 +212,11 @@ def _load_analyzer_folder_or_rebuild(
     - ``restore_recording``: optional zero-arg callable restoring the trace
       file; a folder missing only its recording is retried once after it.
     """
-    import shutil
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         AnalyzerRecordingUnavailableError,
         analyzer_cache_lock,
         load_analyzer_extensions,
         load_analyzer_folder,
-    )
-    from spyglass.spikesorting.v2.exceptions import (
-        AnalyzerFolderInvalidError,
-        AnalyzerFolderMissingError,
     )
 
     def load(restore=restore_recording):
@@ -280,10 +298,6 @@ def assert_analyzer_matches_recipe(analyzer, waveform_params) -> None:
         If the cached window, ``max_spikes_per_unit`` or whitening differs
         from ``waveform_params``.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_extension_params,
-    )
-
     expected = {
         ("waveforms", "ms_before"): float(waveform_params["ms_before"]),
         ("waveforms", "ms_after"): float(waveform_params["ms_after"]),
@@ -340,15 +354,8 @@ def analyzer_sparsity_validator(sorter_params_fn):
                     "Could not resolve sorter parameters for analyzer sparsity "
                     "validation; the existing cache has not been invalidated."
                 ) from exc
-            from spyglass.spikesorting.v2._core.signal_math import (
-                resolve_peak_sign,
-            )
 
             peak_sign = resolve_peak_sign(sorter_params)
-        from spyglass.spikesorting.v2._storage.analyzer_cache import (
-            analyzer_extension_params,
-            assert_analyzer_sparsity_polarity,
-        )
 
         assert_analyzer_sparsity_polarity(
             analyzer, expected_peak_sign=peak_sign
@@ -371,13 +378,6 @@ def _assert_complete_base_extensions(analyzer) -> None:
     SI lists an extension as saved once ``params.json`` exists, before it
     finishes. Checks run status and array headers without reading payloads.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_extension_array,
-    )
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        saved_extension_metadata,
-    )
-
     missing = set(BASE_ANALYZER_EXTENSIONS) - set(
         analyzer.get_saved_extension_names()
     )
@@ -672,10 +672,6 @@ def resolve_canonical_recording(key) -> CanonicalRecording:
     valid_times = None
     if traces.apply_artifact_mask:
         # Same helper as Sorting.make_fetch, so rebuilds match the sort.
-        from spyglass.spikesorting.v2._artifacts.readers import (
-            read_recording_artifact_valid_times,
-        )
-
         valid_times = read_recording_artifact_valid_times(
             lineage.artifact_detection_id,
             (RecordingSelection & lineage.key).fetch1("nwb_file_name"),
@@ -874,8 +870,6 @@ def build_analyzer(
         )
     seed = job_kwargs.get("random_seed", 0)
 
-    import shutil
-
     import spikeinterface as si
 
     from spyglass.utils import logger
@@ -909,8 +903,6 @@ def build_analyzer(
         waveform_params["sparsity"]
     ).si_create_kwargs()
     if sparsity_kwargs["sparse"]:
-        from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
-
         sparsity_kwargs["peak_sign"] = resolve_peak_sign(
             sorter_row.get("params")
         )
@@ -928,10 +920,6 @@ def build_analyzer(
     folder.parent.mkdir(parents=True, exist_ok=True)
 
     # Before get_probe(), whose error names neither the sort nor the fix.
-    from spyglass.spikesorting.v2._recording.geometry import (
-        assert_unique_contact_positions,
-    )
-
     try:
         assert_unique_contact_positions(recording, require_2d=False)
     except ValueError as exc:
@@ -947,8 +935,6 @@ def build_analyzer(
     # unit_locations and the GUI probe view fail on a 3D probe.
     probe = recording.get_probe()
     if probe.ndim == 3:
-        import numpy as np
-
         z = np.asarray(probe.contact_positions)[:, 2]
         if z.size and not np.allclose(z, z[0]):
             logger.warning(
@@ -961,8 +947,6 @@ def build_analyzer(
         recording = recording.set_probe(probe.to_2d())
 
     if whiten:
-        from spyglass.spikesorting.v2._sorting.dispatch import pinned_whiten
-
         recording = pinned_whiten(
             recording,
             random_seed=seed,
@@ -970,10 +954,6 @@ def build_analyzer(
         )
 
     # On the final object: preprocessors drop the cached property.
-    from spyglass.spikesorting.v2._sorting.dispatch import (
-        cache_span_noise_levels,
-    )
-
     cache_span_noise_levels(
         recording,
         statistics_spans,

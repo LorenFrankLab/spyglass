@@ -5,15 +5,31 @@ Reporting does not import the runners.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import numpy as np
+import pandas as pd
 
 from spyglass.spikesorting.v2._orchestration.presets import (
     _PIPELINE_PRESETS,
 )
-
-if TYPE_CHECKING:
-    import pandas as pd
-
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    _jsonable_blob,
+    parameter_row_fingerprint,
+)
+from spyglass.spikesorting.v2._core.observed_time import observed_intervals
+from spyglass.spikesorting.v2._core.parameter_identity import (
+    parameter_fingerprint,
+    short_fingerprint,
+)
+from spyglass.spikesorting.v2._params.metric_curation import (
+    prepare_auto_curation_rules,
+    prepare_quality_metric_row,
+)
+from spyglass.spikesorting.v2.exceptions import DuplicateParameterContentError
 
 _PARAMETER_ROW_COLUMNS = [
     "table",
@@ -52,8 +68,6 @@ def describe_parameter_rows() -> "pd.DataFrame":
         names), ``duplicate_of``, ``name_warnings``, and ``summary``; sorted by
         ``(table, sorter, parameter_name)``.
     """
-    import pandas as pd
-
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
@@ -207,11 +221,6 @@ def _preset_parameter_records(
     folds the sorter and ``execution_params`` into the fingerprint, as the
     duplicate-content guard does.
     """
-    from spyglass.spikesorting.v2._core.lookup_validation import (
-        _jsonable_blob,
-        parameter_row_fingerprint,
-    )
-
     table_name = table.__name__
     if sorter_keyed:
         shipped = {(r[0], r[1]) for r in table._DEFAULT_CONTENTS}
@@ -267,7 +276,6 @@ def _downstream_parameter_records() -> list[dict]:
     )
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     records: list[dict] = []
     records += _simple_parameter_records(
@@ -337,11 +345,6 @@ def _simple_parameter_records(
     rows into the fingerprint so masters differing only in parts are not
     duplicates.
     """
-    from spyglass.spikesorting.v2._core.parameter_identity import (
-        parameter_fingerprint,
-    )
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     table_name = table.__name__
     records: list[dict] = []
     for simple_row in table.fetch(as_dict=True):
@@ -382,7 +385,6 @@ def _simple_parameter_records(
 def _autocuration_rule_content(rules_row) -> list[dict]:
     """The ruleset's ``AutoCurationRules.Rule`` rows, for its fingerprint."""
     from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
 
     # Drop the name FK so identical rule sets under different names match.
     return [
@@ -404,8 +406,6 @@ def _autocuration_rule_content(rules_row) -> list[dict]:
 
 def _motion_estimation_summary(row) -> str:
     """One-line summary of a ``MotionEstimationParameters`` row."""
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     params = _jsonable_blob(row["params"])
     return (
         f"preset {params.get('preset')!r}, max_gap_s "
@@ -415,8 +415,6 @@ def _motion_estimation_summary(row) -> str:
 
 def _motion_interpolation_summary(row) -> str:
     """One-line summary of a ``MotionInterpolationParameters`` row."""
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     params = _jsonable_blob(row["params"])
     return (
         f"{params.get('spatial_interpolation_method')}, border_mode "
@@ -430,10 +428,6 @@ def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
     Rows sharing a fingerprint within the same ``(table, sorter)`` scope are
     content duplicates under different names.
     """
-    from spyglass.spikesorting.v2._core.parameter_identity import (
-        short_fingerprint,
-    )
-
     names_by_fp: dict[tuple[str, str, str], list[str]] = {}
     for rec in records:
         names_by_fp.setdefault(
@@ -481,10 +475,6 @@ def _canonical_quality_metric_rows(table) -> list[dict]:
     ``_default_rows`` is insert input; prepare it as the insert does so every
     stored column is compared.
     """
-    from spyglass.spikesorting.v2._params.metric_curation import (
-        prepare_quality_metric_row,
-    )
-
     return [prepare_quality_metric_row(row) for row in table._default_rows()]
 
 
@@ -494,10 +484,6 @@ def _canonical_autocuration_master_rows(table) -> list[dict]:
     Prepared as ``insert_rules`` does so defaulted columns are compared.
     ``Rule`` parts are compared separately.
     """
-    from spyglass.spikesorting.v2._params.metric_curation import (
-        prepare_auto_curation_rules,
-    )
-
     return [
         prepare_auto_curation_rules(master, rule_rows)[0]
         for master, rule_rows in table._default_payloads()
@@ -509,8 +495,6 @@ def _shipped_default_rows(table) -> list[dict]:
 
     Returns ``[]`` when a table has no static default source.
     """
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     contents = getattr(table, "_DEFAULT_CONTENTS", None)
     if contents:
         names = list(table().heading.names)
@@ -571,8 +555,6 @@ def _diverged_autocuration_rules(table) -> list[dict]:
     A different rule count, a missing ``rule_index``, or a diverged field is
     stale.
     """
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     stale: list[dict] = []
     for master, shipped_rules in table._default_payloads():
         name = master["auto_curation_rules_name"]
@@ -645,11 +627,6 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
         ``fields`` are the diverged content columns. Empty when the catalog is
         clean.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        DuplicateParameterContentError,
-    )
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     stale: list[dict] = []
     for table, name_attr in _v2_default_catalog_tables():
         pk_fields = list(table.primary_key)
@@ -711,12 +688,6 @@ def _observed_duration_s(sorting_id) -> float:
     Mirrors ``Sorting.make_fetch``: the artifact-retained duration if masked,
     else sample count / sampling frequency.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._artifacts.readers import (
-        read_recording_artifact_valid_times,
-    )
-    from spyglass.spikesorting.v2._core.observed_time import observed_intervals
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -771,8 +742,6 @@ def describe_units(sorting_id) -> "pd.DataFrame":
         ``peak_electrode_id`` (the unit's peak-amplitude ``electrode_id``), and
         ``brain_region``.
     """
-    import pandas as pd
-
     from spyglass.common.common_ephys import Electrode
     from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -1100,8 +1069,6 @@ def describe_run(result) -> "pd.DataFrame":
         - ``input`` rows (``run_v2_unit_match``): one per matching input, in
           ``input_index`` order.
     """
-    import pandas as pd
-
     if isinstance(result, dict):
         return pd.DataFrame(
             _describe_run_single_rows(result), columns=_RUN_COLUMNS

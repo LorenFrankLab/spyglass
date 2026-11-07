@@ -10,6 +10,10 @@ from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     expected_source_ids,
     supplied_motion_estimate_problem,
 )
+from spyglass.spikesorting.v2._core.selection_plan import (
+    build_sorting_selection_plan,
+)
+from spyglass.spikesorting.v2._recording.source import SourceLineage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,9 +43,6 @@ def _preflight_expected_ids(
     dict
         The :attr:`PreflightReport.expected_ids` mapping.
     """
-    from spyglass.spikesorting.v2._core.selection_plan import (
-        build_sorting_selection_plan,
-    )
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -61,8 +62,6 @@ def _preflight_expected_ids(
         manual_excluded_times=manual_excluded_times,
     )
     if motion_estimate_id is not None and motion_recipe is not None:
-        from spyglass.spikesorting.v2._recording.source import SourceLineage
-
         supplied = supplied_motion_estimate_problem(
             motion_estimate_id,
             motion_recipe,

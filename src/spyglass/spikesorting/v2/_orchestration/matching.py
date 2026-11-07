@@ -20,14 +20,24 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _populate_once,
     _run_stage,
 )
+from spyglass.spikesorting.v2._matching.planning import (
+    build_unit_match_input_plan,
+    build_unit_match_plan,
+    member_choices_to_dataframe,
+)
+from spyglass.spikesorting.v2._matching.preflight import (
+    preflight_v2_unit_match,
+    unlabeled_units_warning,
+)
+from spyglass.spikesorting.v2.analysis_selection import UnitSelectionSnapshot
+from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.spikesorting.v2.exceptions import (
+    PipelineInputError,
+    PreflightError,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
-
-    from spyglass.spikesorting.v2.curation_api import CurationRef
-    from spyglass.spikesorting.v2.analysis_selection import (
-        UnitSelectionSnapshot,
-    )
 
 
 def run_v2_unit_match(
@@ -108,8 +118,6 @@ def run_v2_unit_match(
         If ``UnitMatch`` / ``TrackedUnit`` populate fails (names the stage,
         carries the partial summary).
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
-
     input_curations = None
     input_unit_selections = None
     expected_input_set_hash = None
@@ -191,11 +199,6 @@ def run_v2_unit_match(
         )
 
     if plan is not None:
-        from spyglass.spikesorting.v2._matching.preflight import (
-            preflight_v2_unit_match,
-        )
-        from spyglass.spikesorting.v2.exceptions import PreflightError
-
         report = preflight_v2_unit_match(plan)
         if not report.ok:
             raise PreflightError(report.summary())
@@ -203,9 +206,6 @@ def run_v2_unit_match(
         expected_input_set_hash = report.input_set_hash
         preflight_warnings = list(report.warnings)
     else:
-        from spyglass.spikesorting.v2._matching.preflight import (
-            unlabeled_units_warning,
-        )
         from spyglass.spikesorting.v2.analysis_selection import (
             resolve_unit_selection,
         )
@@ -391,10 +391,6 @@ def plan_v2_unit_match(
         ``as_dataframe()``. ``plan.ok`` is ``False`` if any member is
         unresolved; ``run_v2_unit_match(plan)`` then raises with the errors.
     """
-    from spyglass.spikesorting.v2._matching.planning import (
-        build_unit_match_plan,
-    )
-
     members = _unit_match_member_choices(
         session_group_owner, session_group_name
     )
@@ -465,10 +461,6 @@ def plan_v2_unit_match_from_sorts(
         From the planner on no sorts, a sort named twice, or an invalid
         strategy / manual pin.
     """
-    from spyglass.spikesorting.v2._matching.planning import (
-        build_unit_match_input_plan,
-    )
-
     plan = build_unit_match_input_plan(
         matcher_params_name=matcher_params_name,
         curation_strategy=curation_strategy,
@@ -499,11 +491,6 @@ def plan_v2_unit_match_from_curations(
     The preflight is read-only; ``run_v2_unit_match(plan)`` revalidates before
     any write.
     """
-    from spyglass.spikesorting.v2.curation_api import CurationRef
-    from spyglass.spikesorting.v2.analysis_selection import (
-        UnitSelectionSnapshot,
-    )
-
     refs = list(curations)
     if not refs:
         raise ValueError(
@@ -567,10 +554,6 @@ def plan_v2_unit_match_from_curations(
 
 def _preflight_match_plan(plan, *, unit_policy: str):
     """Freeze eligibility and attach the canonical read-only prerequisites."""
-    from spyglass.spikesorting.v2._matching.preflight import (
-        preflight_v2_unit_match,
-    )
-
     plan.unit_policy = unit_policy
     if not plan.ok:
         return plan
@@ -667,7 +650,6 @@ def _unit_match_sort_choices(sorting_ids) -> list[dict]:
         If a ``sorting_id`` is not a UUID or names no ``SortingSelection``.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecordingSelection,
@@ -760,7 +742,6 @@ def _unit_match_member_choices(
         If the ``SessionGroup`` has no members.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.exceptions import PipelineInputError
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.session_group import SessionGroup
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -827,10 +808,6 @@ def describe_unit_match_choices(
     PipelineInputError
         If the ``SessionGroup`` has no members.
     """
-    from spyglass.spikesorting.v2._matching.planning import (
-        member_choices_to_dataframe,
-    )
-
     return member_choices_to_dataframe(
         _unit_match_member_choices(session_group_owner, session_group_name)
     )

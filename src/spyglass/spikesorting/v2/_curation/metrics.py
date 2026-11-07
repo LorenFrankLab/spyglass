@@ -31,6 +31,13 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
 )
 from spyglass.utils import logger
+from spyglass.spikesorting.v2._core.job_config import resolve_search_threads
+from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
+from spyglass.spikesorting.v2._sorting.dispatch import (
+    cache_span_noise_levels,
+    without_random_seed,
+)
+from spyglass.utils.progress import report_progress
 
 # Mirrors ``AutoCurationRules.Rule.operator`` and ``RuleOperator``. Non-finite
 # values are filtered before dispatch, so NaN never matches (even ``!=``).
@@ -364,8 +371,6 @@ def count_short_isis(times, frames, threshold_s, boundaries) -> int:
 
 def _source_clock_isi_counts(analyzer, unit_ids, threshold_s, continuity_spans):
     """Count short ISIs from spike timestamps without loading the full clock."""
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-
     sorting, recording = analyzer.sorting, analyzer.recording
     boundaries = isi_continuity_boundaries(analyzer, continuity_spans)
     counts = np.zeros(len(unit_ids), dtype=float)
@@ -831,8 +836,6 @@ def _pca_params_match(existing: dict) -> bool:
 
     Compares only the pinned keys; ``dtype`` is normalized via ``np.dtype``.
     """
-    import numpy as np
-
     for key, pinned in _PCA_EXTENSION_PARAMS.items():
         value = existing.get(key)
         if key == "dtype":
@@ -917,8 +920,6 @@ def evaluate_analyzers(
 
     # SI metric defaults and warning capture are process-wide; the lock also
     # covers auto-merge, which can compute quality_metrics itself.
-    from spyglass.utils.progress import report_progress
-
     report_progress("Computing quality metrics and proposed labels…")
     metric_kwargs = metric_inputs.metric_kwargs
     metric_job_kwargs = metric_inputs.metric_job_kwargs
@@ -1100,8 +1101,6 @@ def compute_metrics(
       ``sd_ratio``'s span noise; ``search_threads`` (``None``:
       ``resolve_search_threads()``) sets nn neighbor-search threads.
     """
-    import numpy as np
-    import pandas as pd
     from spikeinterface.metrics.quality import (
         compute_quality_metrics,
         get_default_quality_metrics_params,
@@ -1149,10 +1148,6 @@ def compute_metrics(
         if "sd_ratio" in voltage_names:
             # Cache span-only noise std (masked zeros would bias it low); the
             # patch below gives sd_ratio's template correction the same spans.
-            from spyglass.spikesorting.v2._sorting.dispatch import (
-                cache_span_noise_levels,
-            )
-
             cache_span_noise_levels(
                 display_analyzer.recording,
                 statistics_spans,
@@ -1207,9 +1202,6 @@ def compute_metrics(
             )
         # nn_noise_overlap needs a 'median' template, and SI 0.104.3 breaks
         # on sparse analyzers; the compute below applies the fix and k-d tree.
-        from spyglass.spikesorting.v2._core.job_config import (
-            resolve_search_threads,
-        )
         from spyglass.spikesorting.v2._core.si_metric_patches import (
             isolation_workers,
             patch_isolation_kdtree,
@@ -1401,7 +1393,6 @@ def compute_merge_groups(
     from spikeinterface.curation import compute_merge_unit_groups
 
     from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
-    from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
 
     extensions = list(_CURATION_EXTENSIONS)
     extensions.extend(_AUTO_MERGE_EXTRA_EXTENSIONS.get(auto_merge_preset, ()))

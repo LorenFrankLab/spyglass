@@ -14,8 +14,16 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
+import numpy as np
+
+from spyglass.spikesorting.v2._core.selection_identity import (
+    deterministic_id,
+    sorting_identity_payload,
+)
+from spyglass.spikesorting.v2._recording.geometry import _all_rows_distinct
+from spyglass.spikesorting.v2._sorting.artifact_mask import apply_artifact_mask
+
 if TYPE_CHECKING:
-    import numpy as np
     import spikeinterface as si
 
 BaseTraceKind = Literal["recording", "concatenated_recording"]
@@ -225,11 +233,6 @@ def sorting_parts_mismatch(
     str or None
         ``None`` when the parts give ``sorting_id``; otherwise a description.
     """
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        deterministic_id,
-        sorting_identity_payload,
-    )
-
     if lineage.kind == "concatenated_recording":
         if lineage.artifact_detection_id is not None:
             return (
@@ -283,10 +286,6 @@ def check_corrected_channel_map(
         the loaded contact positions are not finite, not distinct, or differ
         from the row's.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._recording.geometry import _all_rows_distinct
-
     row = traces.row
     loaded_ids = [str(c) for c in recording.channel_ids]
     stored_ids = [str(c) for c in np.asarray(row["channel_ids"]).tolist()]
@@ -383,10 +382,6 @@ def read_effective_recording(
     if traces.kind == "motion_corrected_recording":
         check_corrected_channel_map(recording, traces)
     if traces.apply_artifact_mask:
-        from spyglass.spikesorting.v2._sorting.artifact_mask import (
-            apply_artifact_mask,
-        )
-
         recording = apply_artifact_mask(
             recording,
             artifact_valid_times,

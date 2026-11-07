@@ -10,10 +10,21 @@ from __future__ import annotations
 
 from typing import Callable, NamedTuple
 
+import h5py
+import numpy as np
+import pynwb
+
 from spyglass.spikesorting.v2._recording.types import RecordingArtifactResult
 from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
+from spyglass.spikesorting.v2._core.signal_math import (
+    assert_positive_sampling_frequency,
+)
+from spyglass.spikesorting.v2._storage.recompute import combined_hash
+from spyglass.spikesorting.v2._storage.spikeinterface import retain_pynwb_reader
+from spyglass.utils.h5py_helper_fn import convert_dataset_type
+from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 
 _ELECTRICAL_SERIES_NAME = "ProcessedElectricalSeries"
 _ELECTRICAL_SERIES_PATH = f"acquisition/{_ELECTRICAL_SERIES_NAME}"
@@ -26,8 +37,6 @@ def _stored_trace_dtype(dtype):
     (~3e-7 uV rms) is far below the 1 uV raw step. Integer traces keep their
     dtype.
     """
-    import numpy as np
-
     dtype = np.dtype(dtype)
     return np.dtype(np.float32) if dtype == np.float64 else dtype
 
@@ -70,9 +79,6 @@ def read_recording_nwb(
         electrical_series_path=electrical_series_path,
         load_time_vector=load_time_vector,
         use_pynwb=True,
-    )
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        retain_pynwb_reader,
     )
 
     retain_pynwb_reader(recording)
@@ -165,11 +171,8 @@ def _widen_position_column_to_float64(group, column) -> None:
         Name of the ``rel_*`` dataset to widen. A no-op when it is already
         float64.
     """
-    import numpy as np
-
     if group[column].dtype == np.float64:
         return
-    from spyglass.utils.h5py_helper_fn import convert_dataset_type
 
     convert_dataset_type(group, column, "float64")
 
@@ -203,9 +206,6 @@ def _persist_channel_geometry(
     RuntimeError
         If the persisted coordinates do not read back as written.
     """
-    import h5py
-    import numpy as np
-
     positions = np.asarray(locations, dtype=float)
     rows = np.asarray(row_indices, dtype=int)
     if positions.ndim != 2 or positions.shape[1] != 2:
@@ -293,14 +293,9 @@ def write_nwb_artifact(
         describes a pre-motion preprocessed recording of ``nwb_file_name``.
         Not part of ``content_hash``.
     """
-    import pynwb
-
     from spyglass.spikesorting.v2._storage.iterators import (
         SpikeInterfaceRecordingDataChunkIterator,
         TimestampsDataChunkIterator,
-    )
-    from spyglass.spikesorting.v2._core.signal_math import (
-        assert_positive_sampling_frequency,
     )
     from spyglass.spikesorting.v2._core.signal_math import (
         _get_recording_timestamps,
@@ -312,7 +307,6 @@ def write_nwb_artifact(
     )
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2._recording.fingerprint import (
         recording_content_fingerprint,
     )
@@ -482,8 +476,6 @@ def read_raw_recording(raw_path: str, raw_object_id: str):
     -------
     si.BaseRecording
     """
-    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
-
     raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
         raw_path, object_id=raw_object_id
     )

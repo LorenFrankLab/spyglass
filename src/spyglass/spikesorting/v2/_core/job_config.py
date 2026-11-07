@@ -10,16 +10,18 @@ import functools
 import numbers
 from collections.abc import Mapping
 
+import datajoint as dj
+
+from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
+from spyglass.utils import logger
+from spyglass.utils.parallel import usable_cpus
+
 #: Default thread cap for the nn-metric neighbor search.
 _DEFAULT_SEARCH_THREADS_CAP = 16
 
 
 def _explicit_n_jobs(*row_job_kwargs: dict | None):
     """The ``n_jobs`` a layer set (a later row blob first), or ``None``."""
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
-
     for blob in reversed(row_job_kwargs):
         if blob and "n_jobs" in blob:
             return blob["n_jobs"]
@@ -52,8 +54,6 @@ def resolve_search_threads(*row_job_kwargs: dict | None) -> int:
     """
     explicit = _explicit_n_jobs(*row_job_kwargs)
     if explicit is None:
-        from spyglass.utils.parallel import usable_cpus
-
         return max(1, min(_DEFAULT_SEARCH_THREADS_CAP, usable_cpus() // 4))
     from spikeinterface.core.job_tools import fix_job_kwargs
 
@@ -65,10 +65,6 @@ def _ambient_job_kwargs() -> dict:
 
     Shared by :func:`_resolved_job_kwargs` and :func:`resolve_effective_seed`.
     """
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
-
     merged = get_global_job_kwargs()
     custom = dj.config.get("custom", {}) or {}
     merged.update(custom.get("spikesorting_v2_job_kwargs", {}) or {})
@@ -104,8 +100,6 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
 @functools.lru_cache(maxsize=None)
 def _warn_ambient_seed_once(seed: int) -> None:
     """Emit the ambient-seed warning at most once per distinct seed value."""
-    from spyglass.utils import logger
-
     logger.warning(
         "spikesorting v2: random_seed=%s is supplied via the ambient "
         "SI-global / dj.config['custom']['spikesorting_v2_job_kwargs'] layer, "

@@ -6,16 +6,24 @@
   analyzers over the merged sorting.
 
 Kept out of the pure :mod:`._curation.metrics` because they touch disk.
-Dependencies are imported inside functions so module patches take effect.
+Patched dependencies are imported inside functions so module patches take
+effect.
 """
 
 from __future__ import annotations
 
 import gc
 from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 from spyglass.spikesorting.v2._curation import metrics as _metric_curation
 from spyglass.spikesorting.v2._storage.units_nwb import read_stored_units
+from spyglass.spikesorting.v2._curation.analyzer import (
+    publish_resolved_merged_analyzer,
+)
+from spyglass.spikesorting.v2._storage.recompute import analyzer_role_hashes
+from spyglass.utils.progress import report_progress
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -68,12 +76,9 @@ def evaluate_cached_analyzers(
     source_analyzer_hashes : dict
         ``{role: content_hash}`` of every canonical analyzer evaluated.
     """
-    from pathlib import Path
-
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_cache_lock,
     )
-    from spyglass.spikesorting.v2._storage.recompute import analyzer_role_hashes
     from spyglass.spikesorting.v2._sorting.analyzer import (
         load_or_rebuild_analyzer_from_resolved,
     )
@@ -165,13 +170,6 @@ def evaluate_temporary_analyzers(
     source_analyzer_hashes : None
         No snapshot: the curation and recipe pin these analyzers.
     """
-    import tempfile
-    from pathlib import Path
-
-    from spyglass.utils.progress import report_progress
-    from spyglass.spikesorting.v2._curation.analyzer import (
-        publish_resolved_merged_analyzer,
-    )
     from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
 
     curated_sorting = read_stored_units(sorting_inputs.curated_units)

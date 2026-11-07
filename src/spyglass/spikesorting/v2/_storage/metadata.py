@@ -5,6 +5,8 @@ Heavy dependencies are imported inside the functions.
 
 from __future__ import annotations
 
+import numpy as np
+
 
 def resolve_conversion_and_offset(recording) -> tuple[float, float]:
     """Resolve the ElectricalSeries ``(conversion, offset)`` for a recording.
@@ -24,8 +26,6 @@ def resolve_conversion_and_offset(recording) -> tuple[float, float]:
         If the recording has heterogeneous channel gains, a non-positive
         channel gain, or heterogeneous channel offsets.
     """
-    import numpy as np
-
     gains = np.unique(recording.get_channel_gains())
     if len(gains) != 1:
         raise ValueError(

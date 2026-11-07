@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+import numpy as np
+
+from spyglass.spikesorting.v2._core.signal_math import (
+    _segment_times_at,
+    base_intervals_and_gaps,
+)
+from spyglass.spikesorting.v2._recording.geometry import flatten_planar_geometry
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    Continuity,
+    artifact_frame_ranges,
+    complement_frame_ranges,
+    continuity_from_timestamps,
+    has_nonzero_offset,
+    silence_frame_ranges,
+    statistics_spans,
+)
+from spyglass.spikesorting.v2._storage.analyzer_cache import artifact_slot_lock
+from spyglass.spikesorting.v2.exceptions import ConcatSplitError
+from spyglass.utils.identity import canonical_json, sha256_json
+
 
 def member_recording_selection_key(
     member: dict, preprocessing_params_name: str
@@ -92,8 +112,6 @@ def member_set_hash(snapshot_rows: list[dict]) -> str:
     str
         A 64-character lowercase hex SHA-256 digest of the ordered member set.
     """
-    from spyglass.utils.identity import canonical_json, sha256_json
-
     ordered = sorted(snapshot_rows, key=lambda row: int(row["member_index"]))
     return sha256_json(
         [
@@ -120,10 +138,6 @@ def concat_recording_artifact_lock(concat_recording_id):
     filelock.FileLock
         An unacquired lock.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        artifact_slot_lock,
-    )
-
     return artifact_slot_lock("concat_recording", concat_recording_id)
 
 
@@ -145,8 +159,6 @@ def cumulative_member_boundaries(
     list[int]
         Cumulative end-sample boundaries, same length as the input.
     """
-    import numpy as np
-
     counts = [int(n) for n in num_samples_per_member]
     return np.cumsum(counts, dtype=np.int64).tolist()
 
@@ -187,10 +199,6 @@ def split_unit_spike_trains(
         ``total_n_samples``, or any input spike frame falls outside
         ``[0, boundaries[-1])``.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
-
     if not boundaries:
         raise ConcatSplitError(
             "split_unit_spike_trains: no member boundaries; a concatenated "
@@ -274,8 +282,6 @@ def split_spike_frames_by_spans(
         If the spans are empty or not contiguous from frame 0, or a spike
         falls outside them (see :func:`split_unit_spike_trains`).
     """
-    from spyglass.spikesorting.v2.exceptions import ConcatSplitError
-
     if not spans:
         raise ConcatSplitError(
             "split_spike_frames_by_spans: no recording spans to split by."
@@ -322,8 +328,6 @@ def member_spike_times(
     ValueError
         If a local frame falls outside ``[0, len(timestamps))``.
     """
-    import numpy as np
-
     bounds = {
         int(unit_id): (int(np.min(frames)), int(np.max(frames)))
         for unit_id, frames in local_frames_by_unit.items()
@@ -385,10 +389,6 @@ def _sampling_frequency_tolerance(reference, recording) -> float:
     which can shift by one ULP of the clock's absolute offset. Capped at one
     frame of drift over either recording.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-
     uncertainty = 0.0
     drift_limits = []
     for candidate in (reference, recording):
@@ -429,8 +429,6 @@ def assert_concat_compatible(recordings: list) -> None:
         frequency, sample dtype, channel gains/offsets, or channel geometry
         differs from the first member's.
     """
-    import numpy as np
-
     if not recordings:
         raise ValueError(
             "build_concatenated_recording: no member recordings to "
@@ -545,12 +543,6 @@ def mask_member_recordings(recordings, member_valid_times):
     """
     import spikeinterface.preprocessing as sip
 
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        artifact_frame_ranges,
-        has_nonzero_offset,
-        silence_frame_ranges,
-    )
-
     assert_concat_compatible(recordings)
     if any(has_nonzero_offset(r) for r in recordings):
         recordings = [sip.scale_to_uV(r) for r in recordings]
@@ -593,11 +585,6 @@ def concat_continuity(member_recordings, member_sample_counts):
         Concat-frame spans with each span's first and last timestamp on its
         member's clock.
     """
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        Continuity,
-        continuity_from_timestamps,
-    )
-
     ends = cumulative_member_boundaries(member_sample_counts)
     spans: list[tuple[int, int]] = []
     start_s: list[float] = []
@@ -643,10 +630,6 @@ def concat_span_arrays(
         ``(m, 2)`` int64 half-open concat frame ranges that are artifact-free
         and lie inside a single continuity span.
     """
-    import numpy as np
-
-    from spyglass.spikesorting.v2._sorting.artifact_mask import statistics_spans
-
     continuity = concat_continuity(member_recordings, member_sample_counts)
     continuity_spans = np.asarray(continuity.spans, dtype=np.int64).reshape(
         -1, 2
@@ -680,10 +663,6 @@ def member_kept_intervals(member_plan, recordings) -> list:
     list[numpy.ndarray]
         ``(n_intervals, 2)`` valid times per member.
     """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        base_intervals_and_gaps,
-    )
-
     return [
         (
             plan["valid_times"]
@@ -756,12 +735,6 @@ def member_boundary_rows(member_indices, boundaries, member_valid_times):
 
 def observation_intervals(n_samples, sampling_frequency, artifact_ranges):
     """Return kept concat intervals in seconds from half-open frame ranges."""
-    import numpy as np
-
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        complement_frame_ranges,
-    )
-
     intervals = complement_frame_ranges(artifact_ranges, n_samples)
     return (
         np.asarray(intervals, dtype=float).reshape(-1, 2) / sampling_frequency
@@ -877,10 +850,6 @@ def build_concatenated_recording(recordings: list):
     from spikeinterface.core import concatenate_recordings
 
     assert_concat_compatible(recordings)
-
-    from spyglass.spikesorting.v2._recording.geometry import (
-        flatten_planar_geometry,
-    )
 
     # Permit exactly the rate roundoff the compatibility check accepted.
     reference_fs = recordings[0].get_sampling_frequency()

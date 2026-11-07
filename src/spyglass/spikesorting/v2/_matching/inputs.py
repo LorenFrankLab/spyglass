@@ -9,7 +9,44 @@ from __future__ import annotations
 import functools
 import uuid
 
+import datajoint as dj
+import numpy as np
+
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    deterministic_id,
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._core.signal_math import base_intervals_and_gaps
+from spyglass.spikesorting.v2._curation.unit_selection import (
+    validate_unit_selection_snapshot,
+)
+from spyglass.spikesorting.v2._matching.assets import (
+    validate_match_backend_availability,
+    validate_match_input_assets,
+)
+from spyglass.spikesorting.v2._matching.coverage import (
+    enrich_recording_source_coverage,
+    validate_source_coverage,
+)
+from spyglass.spikesorting.v2._matching.graph import (
+    assert_disjoint_source_coverage,
+    chronological_input_order,
+    frozen_order_errors,
+    input_part_structure_errors,
+    input_set_hash,
+    utc_datetime,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import close_nwb_recording
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatMemberDriftError,
+    MissingRecordingForConcatError,
+    SchemaBypassError,
+)
+from spyglass.utils import logger
 
 
 @functools.lru_cache(maxsize=None)
@@ -19,8 +56,6 @@ def _warn_clusterless_match_once(sorting_id: str) -> None:
     Its units are threshold-crossing events, not sorted neurons.
     ``cache_clear()`` resets the per-``sorting_id`` dedupe.
     """
-    from spyglass.utils import logger
-
     logger.warning(
         "UnitMatchSelection: sort %s was produced by the clusterless "
         "thresholder -- its units are threshold-crossing events, NOT sorted "
@@ -49,8 +84,6 @@ def insert_inputs(
     Duplicate-key recovery has no savepoint, so the master insert must stay
     the transaction's first statement.
     """
-    import datajoint as dj
-
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.session_group import SessionGroup
     from spyglass.spikesorting.v2.unit_matching import MatcherParameters
@@ -147,16 +180,6 @@ def prepare_match_inputs(
 
     Planning disables reconstruction; execution can rebuild missing artifacts.
     """
-    from spyglass.spikesorting.v2._matching.graph import (
-        chronological_input_order,
-        input_set_hash,
-    )
-    from spyglass.spikesorting.v2._matching.coverage import (
-        enrich_recording_source_coverage,
-    )
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        deterministic_id,
-    )
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
         UnitMatchSelection,
@@ -230,10 +253,6 @@ def prepare_match_inputs(
     unitmatch_id = deterministic_id("unitmatch", identity)
 
     if validate_backend:
-        from spyglass.spikesorting.v2._matching.assets import (
-            validate_match_backend_availability,
-            validate_match_input_assets,
-        )
         from spyglass.spikesorting.v2.matcher_protocol import get_matcher
 
         validate_match_input_assets(ordered)
@@ -289,9 +308,6 @@ def _resolve_unit_selections(inputs, supplied, unit_policy) -> dict:
     """
     from spyglass.spikesorting.v2.analysis_selection import (
         resolve_unit_selection,
-    )
-    from spyglass.spikesorting.v2._curation.unit_selection import (
-        validate_unit_selection_snapshot,
     )
 
     if supplied is None:
@@ -382,16 +398,6 @@ def find_existing_pk(
     ``unitmatch_id``, or for a deterministic master whose parts are
     malformed or do not realize its ``input_set_hash``.
     """
-    from spyglass.spikesorting.v2._matching.graph import (
-        frozen_order_errors,
-        input_part_structure_errors,
-        input_set_hash,
-    )
-    from spyglass.spikesorting.v2._core.selection_identity import (
-        existing_selection_pk,
-    )
-    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
-
     master_ids = {
         row["unitmatch_id"]
         for row in (table_cls & identity).fetch("KEY", as_dict=True)
@@ -440,10 +446,6 @@ def find_existing_pk(
 
 def _validate_frozen_unit_selections(rows, exc_class=ValueError):
     """Validate population hashes and generation pins without reading live labels."""
-    from spyglass.spikesorting.v2._curation.unit_selection import (
-        validate_unit_selection_snapshot,
-    )
-
     for row in rows:
         try:
             data = validate_unit_selection_snapshot(row["selection_snapshot"])
@@ -462,10 +464,6 @@ def _validate_frozen_unit_selections(rows, exc_class=ValueError):
 
 def _validate_frozen_source_coverage(rows, exc_class=ValueError):
     """Reject missing or malformed acquisition coverage at a stored boundary."""
-    from spyglass.spikesorting.v2._matching.coverage import (
-        validate_source_coverage,
-    )
-
     for row in rows:
         try:
             validate_source_coverage(row["source_coverage"])
@@ -601,8 +599,6 @@ def _resolve_match_input(
         and, for a concatenation member, ``start_sample``, ``end_sample`` and
         ``valid_times``.
     """
-    import numpy as np
-
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -610,10 +606,6 @@ def _resolve_match_input(
     )
     from spyglass.spikesorting.v2._recording.concat_fetch import (
         resolve_snapshot_recordings,
-    )
-    from spyglass.spikesorting.v2.exceptions import (
-        ConcatMemberDriftError,
-        MissingRecordingForConcatError,
     )
     from spyglass.spikesorting.v2.session_group import (
         ConcatenatedRecording,
@@ -745,8 +737,6 @@ def _session_start_mismatches(recording_rows, live_start_times) -> list[str]:
         One message per differing or missing session; empty when every
         frozen time equals the live one.
     """
-    from spyglass.spikesorting.v2._matching.graph import utc_datetime
-
     mismatches = []
     for row in recording_rows:
         name = row["nwb_file_name"]
@@ -782,9 +772,6 @@ def _add_single_recording_frames(item, *, allow_rebuild=True) -> None:
     from spyglass.spikesorting.v2._matching.coverage import (
         open_base_recording,
     )
-    from spyglass.spikesorting.v2._storage.spikeinterface import (
-        close_nwb_recording,
-    )
 
     recording = item["recordings"][0]
     recording["start_sample"] = 0
@@ -816,23 +803,13 @@ def _recording_valid_times(traces, nwb_file_name, artifact_detection_id):
     -------
     numpy.ndarray, shape (n_intervals, 2)
     """
-    import numpy as np
-
     if artifact_detection_id is not None:
-        from spyglass.spikesorting.v2._artifacts.readers import (
-            read_recording_artifact_valid_times,
-        )
-
         valid_times = read_recording_artifact_valid_times(
             artifact_detection_id,
             nwb_file_name,
             caller="UnitMatchSelection.insert_inputs",
         )
     else:
-        from spyglass.spikesorting.v2._core.signal_math import (
-            base_intervals_and_gaps,
-        )
-
         valid_times = base_intervals_and_gaps(
             traces, traces.get_sampling_frequency()
         ).base_intervals
@@ -852,9 +829,6 @@ def _check_input_sessions(inputs, exc_class) -> None:
         Exception raised for a multi-day concatenation input. Repeated
         samples raise ``OverlappingMatchInputError``.
     """
-    from spyglass.spikesorting.v2._matching.graph import (
-        assert_disjoint_source_coverage,
-    )
     from spyglass.spikesorting.v2.session_group import (
         distinct_recording_dates,
     )
@@ -948,7 +922,6 @@ def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
     list of str
         One message per differing field; empty when the live state matches.
     """
-    import numpy as np
 
     def _text(value):
         return None if value is None else str(value)

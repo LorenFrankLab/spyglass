@@ -11,6 +11,9 @@ import hashlib
 import json
 
 import numpy as np
+import pynwb
+
+from spyglass.utils.nwb_hash import get_file_namespaces, get_namespace_versions
 
 # Each digest carries the format version it was computed under.
 ANALYZER_CONTENT_HASH_VERSION = 2
@@ -234,8 +237,6 @@ def compare_hash_dicts(
 
 def current_nwb_namespaces(abs_path: str) -> dict:
     """Return the pynwb namespace versions embedded in an NWB file."""
-    from spyglass.utils.nwb_hash import get_file_namespaces
-
     deps = dict(get_file_namespaces(abs_path))
     deps.pop("version", None)
     return deps
@@ -247,10 +248,6 @@ def current_env_namespaces() -> dict:
     Includes extensions loaded so far this session. Compare with
     :func:`current_nwb_namespaces` via :func:`env_matches`.
     """
-    import pynwb
-
-    from spyglass.utils.nwb_hash import get_namespace_versions
-
     deps = get_namespace_versions(pynwb.get_manager().type_map)
     deps.pop("version", None)
     return deps

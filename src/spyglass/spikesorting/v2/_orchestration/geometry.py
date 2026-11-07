@@ -6,15 +6,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
+import warnings
+from collections import Counter
+
+import numpy as np
+import pandas as pd
 
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     sort_group_electrode_regions,
 )
-
-if TYPE_CHECKING:
-    import pandas as pd
-
 
 # Auto-label electrode ids only for groups this sparse (tetrodes, stereotrodes).
 _AUTO_LABEL_MAX_PER_COLUMN = 8
@@ -36,8 +37,6 @@ _SORT_GROUP_COLUMNS = [
 
 def _missing(value) -> bool:
     """Return True when ``value`` is ``None`` or a pandas/NumPy NA/NaN."""
-    import pandas as pd
-
     return value is None or bool(pd.isna(value))
 
 
@@ -91,8 +90,6 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
         ``brain_regions``, ``bad_channel_count``, ``reference_mode``, and
         ``reference_electrode_id``.
     """
-    import pandas as pd
-
     from spyglass.spikesorting.v2.recording import SortGroupV2
 
     def _sorted_nullable_ints(values):
@@ -167,8 +164,6 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
 
 def _registered_position(probe_geometry, electrode):
     """``(rel_x, rel_y, rel_z)`` of an electrode's probe contact, NaN if none."""
-    import numpy as np
-
     geometry = probe_geometry.get(_probe_key(electrode))
     if not geometry:
         return np.full(3, np.nan)
@@ -194,7 +189,6 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     contact (see ``sort_group_planar_positions``), read from the registered
     ``Probe.Electrode`` geometry as preflight does.
     """
-    import numpy as np
     from probeinterface import select_axes
 
     from spyglass.common.common_device import Probe
@@ -397,8 +391,6 @@ def _layout_probe_contacts(plottable):
     multi_probe = len(probe_ids) > 1
     gap = None
     if multi_probe:
-        import warnings
-
         # Scale by overall extent so single-column probes still get a gap.
         all_x = [row["plot_x"] for row in plottable]
         all_y = [row["plot_y"] for row in plottable]
@@ -587,8 +579,6 @@ def plot_sort_group_geometry(
     multi_probe = len(probe_ids) > 1
 
     # Shrink markers for dense groups so stacked contacts stay separable.
-    from collections import Counter
-
     contacts_per_column = Counter(row["sort_group_id"] for row in plottable)
     max_per_column = max(contacts_per_column.values())
     marker_s = max(8.0, min(50.0, 500.0 / max_per_column))

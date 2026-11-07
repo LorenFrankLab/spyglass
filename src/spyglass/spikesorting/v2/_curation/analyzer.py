@@ -18,6 +18,10 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import shutil
+import tempfile
+
+import numpy as np
 
 from spyglass.spikesorting.v2._storage.analyzer_cache import (
     analyzer_cache_lock,
@@ -41,6 +45,14 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
     resolve_display_waveform_params_name,
 )
 from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
+from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    ANALYZER_FOLDER_SUFFIX,
+    analyzer_extension_params,
+)
+from spyglass.utils import logger
+from spyglass.utils.progress import report_progress
 
 CURATION_ANALYZER_MANIFEST = "spyglass_curation_analyzer_manifest.json"
 MERGE_POLICY_VERSION = "absolute_time_cross_unit_dedup_0_4ms_v1"
@@ -74,8 +86,6 @@ class CurationAnalyzerManifest:
 
 def _content_hash(value) -> str:
     """Hash a JSON-like value deterministically, including numpy blobs."""
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     return sha256_json(_jsonable_blob(value), allow_nan=False)
 
 
@@ -213,8 +223,6 @@ def _raw_contributor_map(key) -> dict[str, list[int]]:
 
 def hash_sorting_spike_content(sorting) -> str:
     """Hash exact unit ids and spike-sample frames for every segment."""
-    import numpy as np
-
     digest = hashlib.sha256()
     # Omit sampling frequency: SI may swap in the recording's nearly-equal
     # float (100.0 vs 99.99999999999999), breaking reuse after a round-trip.
@@ -301,8 +309,6 @@ def merged_analyzer_cache_inputs(curation_key, waveform_recipe, role):
 
 def normalize_extension_request(extra_extensions) -> dict[str, dict]:
     """Return ``{name: params}`` with JSON-native params, sorted by name."""
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     request = {}
     for name in sorted(extra_extensions or {}):
         request[str(name)] = _jsonable_blob(dict(extra_extensions[name] or {}))
@@ -343,10 +349,6 @@ def _extension_inventory(
     extensions plus ``extra``, since a derivative copies whatever its source
     carries.
     """
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_extension_params,
-    )
-
     saved = set(analyzer.get_saved_extension_names())
     if exact:
         expected = _expected_extensions(role, extra)
@@ -376,15 +378,10 @@ def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
     Keys absent from ``requested`` are unconstrained. Values compare
     JSON-natively (``1 == 1.0``).
     """
-    from spyglass.spikesorting.v2._core.lookup_validation import _jsonable_blob
-
     if not analyzer.has_extension(name):
         return False
     if not requested:
         return True
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_extension_params,
-    )
 
     stored = _jsonable_blob(dict(analyzer_extension_params(analyzer, name)))
     wanted = _jsonable_blob(dict(requested))
@@ -439,8 +436,6 @@ def _load_valid_cached_analyzer(
     folder: Path, expected_prefix: dict, role: str, *, validate_analyzer=None
 ):
     """Return a validated cached analyzer, or ``None`` on any corruption."""
-    from spyglass.utils import logger
-
     extra = tuple(expected_prefix.get("extension_request", {}))
     is_derivative = bool(expected_prefix.get("extension_request"))
     try:
@@ -519,8 +514,6 @@ def _resolve_published_analyzer(
     validate_analyzer=None,
 ):
     """Build or reuse one validated cache slot under the per-sort lock."""
-    from spyglass.utils import logger
-
     with analyzer_cache_lock(sorting_id):
         if folder.exists():
             analyzer = _load_valid_cached_analyzer(
@@ -536,8 +529,6 @@ def _resolve_published_analyzer(
                 "rebuilding it from the committed curation.",
                 folder,
             )
-
-        from spyglass.utils.progress import report_progress
 
         report_progress(f"Building this curation's {role} analyzer…")
         publish_analyzer_atomically(folder, build_into)
@@ -881,7 +872,6 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     from spyglass.spikesorting.v2._core.si_metric_patches import (
         isolated_si_metric_defaults,
     )
-    from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
 
     required = set(BASE_ANALYZER_EXTENSIONS) | set(request)
     plan = {name: dict(params) for name, params in needs_compute.items()}
@@ -946,13 +936,7 @@ def analyzer_working_copy(published):
     The copy step of :func:`open_curation_analyzer`, for callers that resolved
     (and validated) the published analyzer themselves.
     """
-    import shutil
-    import tempfile
-
     from spyglass.settings import temp_dir as spyglass_temp_dir
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        ANALYZER_FOLDER_SUFFIX,
-    )
 
     tmp = tempfile.mkdtemp(
         prefix="v2_curation_analyzer_", dir=spyglass_temp_dir

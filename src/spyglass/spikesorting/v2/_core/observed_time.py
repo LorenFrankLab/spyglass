@@ -17,20 +17,19 @@ from spyglass.spikesorting._numerical import (
     finite_vector,
 )
 from spyglass.spikesorting._observed_time import contains_times
+from spyglass.spikesorting._intervals import intersect_intervals
+from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
+from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    artifact_frame_ranges,
+    boundary_spans_from_timestamps,
+    complement_frame_ranges,
+)
 
 OBSERVATION_VERSION = 2
 
 
 def observed_intervals(recording, valid_times):
     """Convert stored valid times into half-open, gap-preserving exposure."""
-    from spyglass.spikesorting._intervals import intersect_intervals
-    from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        artifact_frame_ranges,
-        boundary_spans_from_timestamps,
-        complement_frame_ranges,
-    )
-
     valid_times = finite_intervals(
         valid_times, name="observed_intervals valid_times"
     )

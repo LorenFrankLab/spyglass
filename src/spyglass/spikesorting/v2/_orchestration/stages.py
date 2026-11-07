@@ -6,7 +6,14 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import datajoint as dj
+
 from spyglass.spikesorting.v2._orchestration.types import StageStatus
+from spyglass.spikesorting.v2.exceptions import (
+    PipelineStageError,
+    ZeroUnitSortError,
+)
+from spyglass.utils import logger
 
 
 def _run_stage(
@@ -24,8 +31,6 @@ def _run_stage(
     Returns ``(work_result, status, seconds)``; ``seconds`` is wall-clock
     time in ``work`` this call.
     """
-    from spyglass.spikesorting.v2.exceptions import PipelineStageError
-
     status: StageStatus = "reused" if exists else "computed"
     start = time.perf_counter()
     try:
@@ -52,8 +57,6 @@ def _populate_once(table, key) -> None:
     ``key`` must be a full single-row primary key, or the recovery check
     could swallow a genuine duplicate.
     """
-    import datajoint as dj
-
     try:
         table.populate(key, reserve_jobs=False)
     except dj.errors.DuplicateError:
@@ -181,12 +184,10 @@ def _run_sorting_stage(
     ZeroUnitSortError
         If the sort finds zero units and ``require_units`` is True.
     """
-    from spyglass.spikesorting.v2.exceptions import ZeroUnitSortError
     from spyglass.spikesorting.v2.sorting import (
         Sorting,
         SortingSelection,
     )
-    from spyglass.utils import logger
 
     sorting_key = SortingSelection.insert_selection(
         {
@@ -252,7 +253,6 @@ def _run_root_curation_stage(
         If the curation insert or its merge registration fails.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.utils import logger
 
     # ``curation_id`` is not content-addressed, so "reused" means a root exists.
     curation_exists = bool(

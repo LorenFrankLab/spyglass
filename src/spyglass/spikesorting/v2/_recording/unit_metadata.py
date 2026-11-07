@@ -6,6 +6,8 @@ and presentation modules consume these adapters instead of each other.
 
 from __future__ import annotations
 
+import pandas as pd
+
 
 def unit_brain_region_df(unit_relation, resolution: str):
     """Join a Unit-part relation against Electrode * BrainRegion.
@@ -28,8 +30,6 @@ def unit_brain_region_df(unit_relation, resolution: str):
         ``region_resolution`` literal label. Carries the full schema
         even when empty.
     """
-    import pandas as pd
-
     from spyglass.common.common_ephys import Electrode as _Electrode
     from spyglass.common.common_region import BrainRegion
 

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 @dataclass
@@ -58,7 +59,6 @@ def with_focus_units(url: str, unit_ids) -> str:
     """Return ``url`` with ``spyglass_units`` set to ``unit_ids`` (if any)."""
     if not len(unit_ids):
         return url
-    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
     parts = urlsplit(url)
     query = dict(parse_qsl(parts.query))

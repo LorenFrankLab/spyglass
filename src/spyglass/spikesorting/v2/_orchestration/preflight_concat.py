@@ -19,6 +19,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     expected_source_ids,
     supplied_motion_estimate_problem,
 )
+from spyglass.spikesorting.v2.exceptions import PreflightError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -93,7 +94,6 @@ def _assert_session_group_members(group_key: dict, caller: str) -> list[dict]:
         ``nwb_file_name``, ``sort_group_id``, ``interval_list_name`` and
         ``team_name``.
     """
-    from spyglass.spikesorting.v2.exceptions import PreflightError
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     if not (SessionGroup & group_key):
@@ -217,8 +217,6 @@ def _assert_supplied_concat_estimate(
     Its frozen members must be the recordings and artifact detections this
     run would select.
     """
-    from spyglass.spikesorting.v2.exceptions import PreflightError
-
     concat_members = []
     for member in members:
         recording_id, artifact_detection_id = expected_source_ids(

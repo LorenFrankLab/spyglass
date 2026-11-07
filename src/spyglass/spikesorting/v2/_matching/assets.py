@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import h5py
+
 from spyglass.spikesorting.v2._matching.coverage import stored_analysis_path
+from spyglass.spikesorting._numerical import integer_vector
+from spyglass.spikesorting.v2._storage.units_nwb import (
+    SPIKE_SAMPLE_INDEX_COLUMN,
+)
 
 
 def validate_match_backend_availability(name, *, needs_pair_inference):
@@ -31,13 +37,6 @@ def _required_path(name, *, label, recovery):
 
 def _validate_units_layout(path, expected_units, *, label):
     """Check the namespace and required columns without reading spike trains."""
-    import h5py
-
-    from spyglass.spikesorting._numerical import integer_vector
-    from spyglass.spikesorting.v2._storage.units_nwb import (
-        SPIKE_SAMPLE_INDEX_COLUMN,
-    )
-
     with h5py.File(path, "r") as handle:
         if handle.attrs.get("neurodata_type") != "NWBFile":
             raise ValueError(f"{label} artifact is not an NWBFile.")
@@ -94,8 +93,6 @@ def _validate_units_layout(path, expected_units, *, label):
 
 def _validate_trace_layout(path, series_path, expected_frames, *, label):
     """Read dataset shape metadata, without reading signal or timestamp arrays."""
-    import h5py
-
     with h5py.File(path, "r") as handle:
         series = handle.get(series_path)
         if not isinstance(series, h5py.Group) or "data" not in series:

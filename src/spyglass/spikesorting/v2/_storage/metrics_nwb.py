@@ -23,6 +23,7 @@ from spyglass.spikesorting.v2._storage.provenance import (
     concrete_vectordata,
     read_table_frames,
 )
+from spyglass.spikesorting.v2.exceptions import UnsupportedMetricValueError
 
 QUALITY_METRICS_TABLE = "quality_metrics"
 MERGE_SUGGESTIONS_TABLE = "merge_suggestions"
@@ -35,10 +36,6 @@ def _scalar_or_nan(value, *, context: str = "") -> float:
     Scalar NaN is valid (a metric not computable for a low-spike unit). Array
     or object cells raise rather than silently becoming NaN.
     """
-    from spyglass.spikesorting.v2.exceptions import (
-        UnsupportedMetricValueError,
-    )
-
     array = np.asarray(value)
     if (
         array.ndim == 0

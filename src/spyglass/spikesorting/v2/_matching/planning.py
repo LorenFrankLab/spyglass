@@ -14,11 +14,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import pandas as pd
+
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from spyglass.spikesorting.v2._matching.preflight import (
         UnitMatchPreflightReport,
     )
@@ -122,8 +122,6 @@ def member_choices_to_dataframe(members: list[dict]) -> "pd.DataFrame":
     The view behind ``describe_unit_match_choices``. A member with no sort
     yet appears as one row with null curation columns.
     """
-    import pandas as pd
-
     rows: list[dict] = []
     for member in members:
         member_id = {col: member[col] for col in _MEMBER_COLUMNS}
@@ -189,8 +187,6 @@ class UnitMatchPlan:
 
     def as_dataframe(self):
         """One row per member (``member_index`` order) for notebook review."""
-        import pandas as pd
-
         columns = [
             "member_index",
             "nwb_file_name",
@@ -253,8 +249,6 @@ class UnitMatchInputPlan:
 
     def as_dataframe(self):
         """Review inputs and defensive coverage copies in planned input order."""
-        import pandas as pd
-
         columns = list(_INPUT_PLAN_COLUMNS)
         if self.preflight is not None:
             columns.extend(_ELIGIBILITY_PLAN_COLUMNS)

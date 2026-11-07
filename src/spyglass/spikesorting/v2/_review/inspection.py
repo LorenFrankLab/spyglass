@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import io
+
 import numpy as np
+
+from spyglass.spikesorting.v2._storage.analyzer_cache import (
+    analyzer_extension_array,
+)
 
 
 def defer_time_views(analyzer, display):
@@ -148,10 +154,6 @@ def raster_view(
 def amplitude_view(analyzer, display, unit_ids):
     """Read only sampled amplitudes and use the same relative clock as raster."""
     from figpack_spike_sorting.views import SpikeAmplitudes, SpikeAmplitudesItem
-
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        analyzer_extension_array,
-    )
 
     amplitudes = analyzer_extension_array(
         analyzer, "spike_amplitudes", "amplitudes"
@@ -330,8 +332,6 @@ def add_trace_inspection(
     analyzer, summary, unit_ids, time_range, *, timeline=None
 ):
     """Add a bounded spike-on-trace figure to a focused inspection bundle."""
-    import io
-
     import figpack.views as fv
     import matplotlib.pyplot as plt
     import spikeinterface.widgets as sw
