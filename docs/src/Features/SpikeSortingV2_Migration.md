@@ -78,8 +78,11 @@ python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"
     (`pip install -e ".[spikesorting-v2]"`) to run v2 sorts.
 - Sorters that run: MountainSort4 (hippocampus default; native or container),
     MountainSort5 (alternative), Kilosort4 (with its GPU runtime installed),
-    SpykingCircus2 / Tridesclous2. `preflight_v2_pipeline(...)` reports
-    `sorter_installed` / `sorter_runtime_available`.
+    SpykingCircus2 / Tridesclous2. Their `v2_preprocessed` rows skip the
+    sorter's own filtering and referencing, which v2 has already done;
+    `default` keeps SpikeInterface's. Each gets the run's seed.
+    `preflight_v2_pipeline(...)` reports `sorter_installed` /
+    `sorter_runtime_available`.
 - The `spikesorting-v2` extra includes `mountainsort4==1.0.7`. It bundles the
     algorithm and runs natively on NumPy 2; no `ml_ms4alg` install is needed.
     Use the native preset (`franklab_probe_hippocampus_30khz_ms4_2026_06`) or

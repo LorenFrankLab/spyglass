@@ -35,6 +35,16 @@ MATLAB_SORTER_STRIP_KWARGS = (
 )
 
 
+def _sorter_takes_seed(sorter: str) -> bool:
+    """Whether SpikeInterface's wrapper for ``sorter`` has a ``seed`` param."""
+    import spikeinterface.sorters as sis
+
+    try:
+        return "seed" in sis.get_default_sorter_params(sorter)
+    except KeyError:  # unknown sorter: run_sorter reports it
+        return False
+
+
 class EffectiveSortConfig(NamedTuple):
     """What one sort actually executes, resolved once from its parameter row.
 
@@ -130,6 +140,8 @@ def resolve_sort_config(
     si_params = dict(scientific)
     if external_whiten:
         si_params["whiten"] = False
+    if "seed" not in si_params and _sorter_takes_seed(sorter):
+        si_params["seed"] = random_seed
     if sorter.lower() in MATLAB_SORTERS and is_container_backend(execution):
         si_params = {
             k: v

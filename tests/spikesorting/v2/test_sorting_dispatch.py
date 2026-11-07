@@ -1160,3 +1160,21 @@ def test_local_mountainsort4_scratch_stays_in_the_sort_temp_dir(monkeypatch):
 
     scratch = os.path.dirname(captured["folder"])
     assert captured["tempdir"] == scratch
+
+
+@pytest.mark.parametrize(
+    "sorter, params, expected",
+    [
+        ("tridesclous2", {}, 7),
+        ("spykingcircus2", {}, 7),
+        ("tridesclous2", {"seed": 3}, 3),
+        ("mountainsort5", {}, None),
+    ],
+)
+def test_sorters_that_take_a_seed_get_the_run_seed(sorter, params, expected):
+    """A sorter's own ``seed`` follows the run's ``random_seed`` unless the
+    row sets it, so a recorded seed is the one the sorter used."""
+    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
+
+    config = resolve_sort_config(sorter, params, job_kwargs={"random_seed": 7})
+    assert config.si_sorter_params.get("seed") == expected

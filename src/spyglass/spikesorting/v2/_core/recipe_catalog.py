@@ -377,6 +377,14 @@ def sorter_default_contents() -> tuple:
         ),
         _sorter_row("spykingcircus2", "default", {}),
         _sorter_row("tridesclous2", "default", {}),
+        # v2 has already filtered and referenced; keep each sorter's own
+        # whitening. ``default`` keeps SpikeInterface's full preprocessing.
+        _sorter_row(
+            "spykingcircus2", "v2_preprocessed", {"apply_preprocessing": False}
+        ),
+        _sorter_row(
+            "tridesclous2", "v2_preprocessed", {"apply_preprocessing": False}
+        ),
         _sorter_row(
             "clusterless_thresholder",
             "default",
