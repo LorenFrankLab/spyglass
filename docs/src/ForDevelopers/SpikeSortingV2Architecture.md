@@ -287,6 +287,11 @@ database transaction. Insert registers results atomically after DataJoint
 verifies the input snapshot. Carriers between these phases must retain stable
 DataJoint hashing and serialization behavior.
 
+Each computed table's `make_compute` reads as its recipe: numbered comments
+mark an ordered sequence of named step calls, and the class docstring's `Steps`
+section lists the same steps. The steps are implemented in the owning private
+module or as private methods of the table; `make_compute` only orders them.
+
 Output staging uses the shared `AnalysisNwbfile` allocation adapter, which reads
 parent file metadata at call time. This exception is documented in the NWB
 storage service. Do not allocate random output files in `make_fetch`: DataJoint
@@ -405,7 +410,7 @@ their lifecycle and serialization checks when changing supported versions.
 
 ### Preprocessing order
 
-`_storage.nwb.compute_recording_artifact` prepares a recording in this order:
+`Recording._compute_recording_artifact` prepares a recording in this order:
 
 1. Read and select the sort group's channels.
 2. Reduce 3D contact positions to a distinct plane

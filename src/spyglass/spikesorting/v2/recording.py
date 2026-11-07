@@ -880,11 +880,20 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
 class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Preprocessed recording materialized NWB-resident in AnalysisNwbfile.
 
-    ``make`` selects the sort group's channels, filters the continuous
-    source, restricts to the interval, then interpolates or removes bad
-    channels and references. It writes one ``ElectricalSeries`` and records
-    a ``content_hash`` fingerprint so a rebuild can be verified.
-    ``get_recording`` rebuilds a missing file without deleting the row.
+    Writes one ``ElectricalSeries`` and records a ``content_hash``
+    fingerprint so a rebuild can be verified. ``get_recording`` rebuilds a
+    missing file without deleting the row.
+
+    Steps
+    -----
+    1. Read the raw series and keep the sort group's channels.
+    2. Reduce contact positions to a distinct plane.
+    3. Phase shift and bandpass the continuous recording.
+    4. Restrict to the sort interval.
+    5. Interpolate or remove bad channels, then reference.
+    6. Fix tetrode geometry and check contact positions are distinct.
+    7. Stream to a staged AnalysisNwbfile and fingerprint its content.
+    8. Check the saved duration for truncation, then register the file.
     """
 
     _populate_key_lock = True
@@ -995,6 +1004,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             raw_object_id=raw_object_id,
             raw_path=raw_path,
         )
+        # Steps 1-7, shared with rebuilds and recompute.
         artifact = self._compute_recording_artifact(
             fetched,
             provenance_tables=_recording_nwb.recording_provenance_table(
@@ -1006,32 +1016,10 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 bad_channel_handling=preprocessing_params.bad_channel_handling,
             ),
         )
-
-        # Same filtering as restrict_recording, so dropped slivers are not
-        # flagged as truncation.
-        intended_intervals = intended_save_intervals(
-            sort_valid_times,
-            raw_valid_times,
-            preprocessing_params.min_segment_length,
+        # Step 8: the duration make_insert checks for truncation.
+        expectation = self._save_expectation(
+            fetched, artifact.sampling_frequency
         )
-        expectation = compute_recording_save_expectation(
-            intended_intervals,
-            sort_valid_times,
-            preprocessing_params.min_segment_length,
-        )
-
-        # Request past raw coverage is clipped with a warning; true truncation
-        # still raises in make_insert.
-        if expectation.over_request > 1.5 / artifact.sampling_frequency:
-            logger.warning(
-                f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
-                f"{sel['nwb_file_name']!r} requests "
-                f"{expectation.requested_saved_total:.6f}s but the raw recording "
-                f"covers only {expectation.expected_saved_total:.6f}s after "
-                f"min_segment_length filtering; clipping to raw coverage "
-                f"({expectation.over_request:.6f}s past the recording dropped)."
-            )
-
         return RecordingComputed(
             analysis_file_name=artifact.analysis_file_name,
             object_id=artifact.object_id,
@@ -1046,6 +1034,165 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             expected_saved_total=expectation.expected_saved_total,
             n_intended_intervals=expectation.n_intended_intervals,
         )
+
+    @classmethod
+    def _compute_recording_artifact(
+        cls,
+        fetched: RecordingFetched,
+        *,
+        provenance_tables=None,
+    ) -> RecordingArtifactResult:
+        """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
+
+        Steps 1-7 of :class:`Recording`. Filtering before the time
+        restriction keeps join transients out of selected intervals. A
+        classmethod so ``RecordingArtifactRecompute.make_compute`` can run it
+        without a table instance (constructing one queries the DB).
+
+        Parameters
+        ----------
+        fetched : RecordingFetched
+            The inputs :meth:`make_fetch` resolved.
+        provenance_tables : optional
+            Source-lineage scratch table(s) to embed in the file (see
+            :func:`._storage.nwb.recording_provenance_table`).
+
+        Returns
+        -------
+        RecordingArtifactResult
+        """
+        from spyglass.spikesorting.v2._recording.geometry import (
+            assert_unique_contact_positions,
+            maybe_apply_tetrode_geometry,
+            normalize_channel_locations,
+            retained_channel_ids,
+        )
+        from spyglass.spikesorting.v2._recording.preprocessing import (
+            apply_spatial_preprocessing,
+            apply_temporal_preprocessing,
+            filtering_description,
+        )
+        from spyglass.spikesorting.v2._recording.restriction import (
+            restrict_recording,
+            select_sort_group_channels,
+        )
+
+        params = fetched.preprocessing_params
+        # 1. Read the raw series and keep the sort group's channels.
+        recording = _recording_nwb.read_raw_recording(
+            fetched.raw_path, fetched.raw_object_id
+        )
+        sampling_frequency = float(recording.get_sampling_frequency())
+        recording = select_sort_group_channels(
+            recording,
+            nwb_file_abs_path=fetched.raw_path,
+            sort_group_channel_ids=fetched.channel_ids,
+            reference_mode=fetched.reference_mode,
+            reference_electrode_id=fetched.reference_electrode_id,
+            bad_channel_handling=params.bad_channel_handling,
+            bad_channel_ids=fetched.bad_channel_ids,
+        )
+        # 2. Reduce contact positions to a distinct plane.
+        recording = normalize_channel_locations(
+            recording,
+            channel_ids=retained_channel_ids(
+                fetched.channel_ids,
+                reference_mode=fetched.reference_mode,
+                reference_electrode_id=fetched.reference_electrode_id,
+                bad_channel_handling=params.bad_channel_handling,
+                bad_channel_ids=fetched.bad_channel_ids,
+            ),
+        )
+        # 3. Phase shift and bandpass on the continuous recording.
+        recording, temporal_steps = apply_temporal_preprocessing(
+            recording, params
+        )
+        # 4. Restrict to the sort interval.
+        recording, timestamps_override, n_selected_intervals = (
+            restrict_recording(
+                recording=recording,
+                nwb_file_name=fetched.sel["nwb_file_name"],
+                interval_list_name=fetched.sel["interval_list_name"],
+                sort_valid_times=fetched.sort_valid_times,
+                raw_valid_times=fetched.raw_valid_times,
+                min_segment_length=params.min_segment_length,
+            )
+        )
+        # 5. Interpolate or remove bad channels, then reference.
+        recording, spatial_steps = apply_spatial_preprocessing(
+            recording,
+            reference_mode=fetched.reference_mode,
+            reference_electrode_id=fetched.reference_electrode_id,
+            validated=params,
+            bad_channel_handling=params.bad_channel_handling,
+            bad_channel_ids=fetched.bad_channel_ids,
+        )
+        # 6. Fix tetrode geometry and check positions are distinct.
+        recording = maybe_apply_tetrode_geometry(
+            recording=recording,
+            probe_types=fetched.probe_types,
+            electrode_group_names=fetched.electrode_group_names,
+            sort_group_channel_ids=fetched.channel_ids,
+        )
+        assert_unique_contact_positions(recording)
+        # 7. Stream to a staged AnalysisNwbfile, describing only steps run.
+        return _recording_nwb.write_recording_artifact(
+            recording,
+            nwb_file_name=fetched.sel["nwb_file_name"],
+            timestamps_override=timestamps_override,
+            n_selected_intervals=n_selected_intervals,
+            sampling_frequency=sampling_frequency,
+            filtering_description=filtering_description(
+                params.bandpass_filter,
+                fetched.reference_mode,
+                {**temporal_steps, **spatial_steps},
+            ),
+            provenance_tables=provenance_tables,
+            writer=cls._write_nwb_artifact,
+        )
+
+    @staticmethod
+    def _save_expectation(fetched: RecordingFetched, sampling_frequency):
+        """Intended saved duration; warns when the request passes raw coverage.
+
+        Filters as ``restrict_recording`` does, so dropped slivers are not
+        flagged as truncation. A request past raw coverage is clipped with a
+        warning; true truncation still raises in ``make_insert``.
+
+        Parameters
+        ----------
+        fetched : RecordingFetched
+            The inputs :meth:`make_fetch` resolved.
+        sampling_frequency : float
+            Sampling rate of the written recording, in Hz.
+
+        Returns
+        -------
+        RecordingSaveExpectation
+            From :func:`._recording.restriction.compute_recording_save_expectation`.
+        """
+        sel = fetched.sel
+        min_segment_length = fetched.preprocessing_params.min_segment_length
+        intended_intervals = intended_save_intervals(
+            fetched.sort_valid_times,
+            fetched.raw_valid_times,
+            min_segment_length,
+        )
+        expectation = compute_recording_save_expectation(
+            intended_intervals,
+            fetched.sort_valid_times,
+            min_segment_length,
+        )
+        if expectation.over_request > 1.5 / sampling_frequency:
+            logger.warning(
+                f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
+                f"{sel['nwb_file_name']!r} requests "
+                f"{expectation.requested_saved_total:.6f}s but the raw recording "
+                f"covers only {expectation.expected_saved_total:.6f}s after "
+                f"min_segment_length filtering; clipping to raw coverage "
+                f"({expectation.over_request:.6f}s past the recording dropped)."
+            )
+        return expectation
 
     def make_insert(
         self,
@@ -1227,48 +1374,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     # ---- Implementation helpers -----------------------------------------
 
-    @classmethod
-    def _compute_recording_artifact(
-        cls,
-        fetched: RecordingFetched,
-        *,
-        provenance_tables=None,
-    ) -> RecordingArtifactResult:
-        """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
-
-        A classmethod so ``RecordingArtifactRecompute.make_compute`` can run
-        it without a table instance (constructing one queries the DB).
-
-        Parameters
-        ----------
-        fetched : RecordingFetched
-            The inputs :meth:`make_fetch` resolved.
-        provenance_tables : optional
-            Source-lineage scratch table(s) to embed in the file (see
-            :func:`._storage.nwb.recording_provenance_table`).
-
-        Returns
-        -------
-        RecordingArtifactResult
-        """
-        return _recording_nwb.compute_recording_artifact(
-            writer=cls._write_nwb_artifact,
-            raw_path=fetched.raw_path,
-            raw_object_id=fetched.raw_object_id,
-            nwb_file_name=fetched.sel["nwb_file_name"],
-            interval_list_name=fetched.sel["interval_list_name"],
-            channel_ids=fetched.channel_ids,
-            reference_mode=fetched.reference_mode,
-            reference_electrode_id=fetched.reference_electrode_id,
-            sort_valid_times=fetched.sort_valid_times,
-            raw_valid_times=fetched.raw_valid_times,
-            preprocessing_params=fetched.preprocessing_params,
-            probe_types=fetched.probe_types,
-            electrode_group_names=fetched.electrode_group_names,
-            bad_channel_ids=fetched.bad_channel_ids,
-            provenance_tables=provenance_tables,
-        )
-
     @staticmethod
     def _write_nwb_artifact(
         recording,
@@ -1334,6 +1439,14 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     recording so high-drift sessions can be queried by
     ``max_abs_displacement_um``. To correct motion, use ``motion_mode`` on
     ``run_v2_pipeline`` (:mod:`.motion`). Populated on demand only.
+
+    Steps
+    -----
+    1. Resolve the cached recording, rebuilding a missing file.
+    2. Open it, as a span view when it has explicit timestamps.
+    3. Run ``compute_motion`` with the preset.
+    4. Summarize the largest displacement, refusing a non-finite one.
+    5. Insert the serialized motion.
 
     Columns
     -------

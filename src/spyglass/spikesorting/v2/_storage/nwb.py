@@ -8,12 +8,7 @@ only in ``make_insert``. Self-heal and rebuilds live in ``_storage.rebuilds``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, NamedTuple
-
-if TYPE_CHECKING:
-    from spyglass.spikesorting.v2._params.preprocessing import (
-        PreprocessingParamsSchema,
-    )
+from typing import Callable, NamedTuple
 
 from spyglass.spikesorting.v2._recording.types import RecordingArtifactResult
 from spyglass.utils.mixins.populate import (
@@ -469,69 +464,71 @@ def recording_provenance_table(
     ]
 
 
-def compute_recording_artifact(
-    *,
-    raw_path: str,
-    raw_object_id: str,
-    nwb_file_name: str,
-    interval_list_name: str,
-    channel_ids: list,
-    reference_mode: str,
-    reference_electrode_id: int | None,
-    sort_valid_times,
-    raw_valid_times,
-    preprocessing_params: PreprocessingParamsSchema,
-    probe_types: tuple,
-    electrode_group_names: tuple,
-    bad_channel_ids: tuple = (),
-    provenance_tables=None,
-    writer: Callable | None = None,
-) -> RecordingArtifactResult:
-    """Open raw NWB, run preprocessing, stream to AnalysisNwbfile.
+def read_raw_recording(raw_path: str, raw_object_id: str):
+    """Open the session's raw acquisition ``ElectricalSeries``.
 
-    Order: read, channel-select, normalize geometry, temporal preprocessing
-    on the continuous recording, time restriction, spatial preprocessing,
-    tetrode geometry repair, distinct-position check. Filtering before the
-    restriction keeps join transients out of selected intervals.
+    The series is named explicitly because the file may also hold LFP.
+    Explicit timestamps may be irregular, so they are kept.
 
     Parameters
     ----------
-    writer : callable, optional
-        Artifact writer with the ``write_nwb_artifact`` signature. Defaults
-        to that service; the table can supply its configured writer.
     raw_path : str
         Absolute path to the raw NWB file to read.
     raw_object_id : str
         NWB object id of the raw acquisition ElectricalSeries
-        (``Raw.raw_object_id``); selects the source series to read.
+        (``Raw.raw_object_id``).
+
+    Returns
+    -------
+    si.BaseRecording
+    """
+    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
+
+    raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
+        raw_path, object_id=raw_object_id
+    )
+    return read_recording_nwb(
+        raw_path,
+        load_time_vector=load_time_vector,
+        electrical_series_path=raw_series_path,
+    )
+
+
+def write_recording_artifact(
+    recording,
+    *,
+    nwb_file_name: str,
+    timestamps_override,
+    n_selected_intervals: int,
+    sampling_frequency: float,
+    filtering_description: str,
+    provenance_tables=None,
+    writer: Callable | None = None,
+) -> RecordingArtifactResult:
+    """Stream a preprocessed recording to a staged file and measure it.
+
+    Removes the staged file if measuring the saved span fails.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The fully preprocessed recording.
     nwb_file_name : str
-        Name of the session's raw NWB file.
-    interval_list_name : str
-        ``IntervalList`` name selecting the sort interval.
-    channel_ids : list
-        Sorted electrode ids for the sort group.
-    reference_mode : str
-        Referencing mode (e.g. ``'none'``, ``'specific'``).
-    reference_electrode_id : int or None
-        Reference electrode id; non-``None`` only for ``'specific'``.
-    sort_valid_times : numpy.ndarray
-        Requested sort interval ``valid_times``, shape
-        ``(n_intervals, 2)`` in seconds.
-    raw_valid_times : numpy.ndarray
-        Raw data ``valid_times``, shape ``(n_intervals, 2)`` in
-        seconds.
-    preprocessing_params : PreprocessingParamsSchema
-        Validated preprocessing parameters.
-    probe_types : tuple
-        Per-channel ``probe_type`` for the sort group.
-    electrode_group_names : tuple
-        Per-channel ``electrode_group_name`` for the sort group.
-    bad_channel_ids : tuple, optional
-        Interior bad channels to re-include on the ``interpolate``
-        path; defaults to ``()`` (empty, the ``remove`` path).
+        Name of the session's raw NWB file (the analysis file's parent).
+    timestamps_override : array-like or None
+        Timestamps to write in place of the recording's own.
+    n_selected_intervals : int
+        Number of intervals the time restriction kept.
+    sampling_frequency : float
+        Sampling rate of the raw recording, in Hz.
+    filtering_description : str
+        Description of the preprocessing steps that ran.
     provenance_tables : optional
         Source-lineage scratch table(s) to embed in the file (see
         :func:`recording_provenance_table`), passed to the writer.
+    writer : callable, optional
+        Artifact writer with the ``write_nwb_artifact`` signature. Defaults
+        to that service; the table can supply its configured writer.
 
     Returns
     -------
@@ -540,94 +537,8 @@ def compute_recording_artifact(
         saved_end, sampling_frequency, n_channels, duration_s)``. The saved
         times describe the persisted timestamps.
     """
-    from spyglass.spikesorting.v2._recording.geometry import (
-        assert_unique_contact_positions,
-        maybe_apply_tetrode_geometry,
-        normalize_channel_locations,
-    )
-    from spyglass.spikesorting.v2._recording.preprocessing import (
-        apply_spatial_preprocessing,
-        apply_temporal_preprocessing,
-    )
-
-    # Aliased: the bare name is the local ``filtering_description`` below.
-    from spyglass.spikesorting.v2._recording.preprocessing import (
-        filtering_description as _filtering_description_svc,
-    )
-    from spyglass.spikesorting.v2._recording.restriction import (
-        restrict_recording,
-        select_sort_group_channels,
-    )
     from spyglass.spikesorting.v2._core.signal_math import (
         _get_recording_timestamps,
-    )
-    from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
-
-    # Name the raw series explicitly (the file may also hold LFP). Explicit
-    # timestamps may be irregular, so they are kept.
-    raw_series_path, load_time_vector = raw_eseries_path_and_timestamp_mode(
-        raw_path, object_id=raw_object_id
-    )
-    recording = read_recording_nwb(
-        raw_path,
-        load_time_vector=load_time_vector,
-        electrical_series_path=raw_series_path,
-    )
-    sampling_frequency = float(recording.get_sampling_frequency())
-
-    # Filter before restricting in time: a filter over joined intervals reads
-    # its margin across the joins, turning interval edges into transients.
-    recording = select_sort_group_channels(
-        recording,
-        nwb_file_abs_path=raw_path,
-        sort_group_channel_ids=channel_ids,
-        reference_mode=reference_mode,
-        reference_electrode_id=reference_electrode_id,
-        bad_channel_handling=preprocessing_params.bad_channel_handling,
-        bad_channel_ids=bad_channel_ids,
-    )
-    # Choose the plane from retained contacts only. A ``specific`` reference
-    # on another probe of the same type duplicates a member's position.
-    retained = {int(c) for c in channel_ids}
-    if preprocessing_params.bad_channel_handling == "interpolate":
-        retained |= {int(c) for c in bad_channel_ids}
-    if reference_mode == "specific":
-        retained -= {int(reference_electrode_id)}
-    retained_channel_ids = sorted(retained)
-    recording = normalize_channel_locations(
-        recording, channel_ids=retained_channel_ids
-    )
-    recording, temporal_steps = apply_temporal_preprocessing(
-        recording, preprocessing_params
-    )
-    recording, timestamps_override, n_selected_intervals = restrict_recording(
-        recording=recording,
-        nwb_file_name=nwb_file_name,
-        interval_list_name=interval_list_name,
-        sort_valid_times=sort_valid_times,
-        raw_valid_times=raw_valid_times,
-        min_segment_length=preprocessing_params.min_segment_length,
-    )
-    recording, spatial_steps = apply_spatial_preprocessing(
-        recording,
-        reference_mode=reference_mode,
-        reference_electrode_id=reference_electrode_id,
-        validated=preprocessing_params,
-        bad_channel_handling=preprocessing_params.bad_channel_handling,
-        bad_channel_ids=bad_channel_ids,
-    )
-    applied_steps = {**temporal_steps, **spatial_steps}
-    recording = maybe_apply_tetrode_geometry(
-        recording=recording,
-        probe_types=probe_types,
-        electrode_group_names=electrode_group_names,
-        sort_group_channel_ids=channel_ids,
-    )
-    assert_unique_contact_positions(recording)
-
-    # Describe only the steps that actually ran.
-    filtering_description = _filtering_description_svc(
-        preprocessing_params.bandpass_filter, reference_mode, applied_steps
     )
 
     analysis_file_name = None

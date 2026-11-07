@@ -490,6 +490,46 @@ def effective_contact_plane(locations) -> tuple:
     return "plane", positions, chosen[1]
 
 
+def retained_channel_ids(
+    channel_ids,
+    *,
+    reference_mode: str,
+    reference_electrode_id,
+    bad_channel_handling: str,
+    bad_channel_ids=(),
+) -> list[int]:
+    """The contacts the preprocessed recording keeps, for choosing its plane.
+
+    Interpolated bad channels stay; a ``specific`` reference is dropped,
+    since it may sit on another probe of the same type and duplicate a
+    member's position.
+
+    Parameters
+    ----------
+    channel_ids : sequence of int
+        Sorted electrode ids for the sort group.
+    reference_mode : str
+        Referencing mode (e.g. ``'none'``, ``'specific'``).
+    reference_electrode_id : int or None
+        Reference electrode id; non-``None`` only for ``'specific'``.
+    bad_channel_handling : str
+        ``'interpolate'`` or ``'remove'``.
+    bad_channel_ids : sequence of int, optional
+        Interior bad channels re-included on the ``interpolate`` path.
+
+    Returns
+    -------
+    list[int]
+        Sorted retained electrode ids.
+    """
+    retained = {int(c) for c in channel_ids}
+    if bad_channel_handling == "interpolate":
+        retained |= {int(c) for c in bad_channel_ids}
+    if reference_mode == "specific":
+        retained -= {int(reference_electrode_id)}
+    return sorted(retained)
+
+
 def normalize_channel_locations(recording, *, channel_ids=None):
     """Reduce 3D channel locations to the distinct 2D plane, in place.
 
