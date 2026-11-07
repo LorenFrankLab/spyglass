@@ -1,13 +1,15 @@
-"""Import-boundary and facade contracts for the DB-free service modules.
+"""Import-boundary and facade contracts for the DB-free modules.
 
-Service modules import without ``spyglass.common`` or a v2 schema module,
-so a cold import opens no DB connection (see "Dependency direction" in
+SpikeInterface workers re-import the modules that define recording
+subclasses and chunk-executor kernels, and importing a schema module there
+would open a DB connection (see "Dependency direction" in
 ``docs/src/ForDevelopers/SpikeSortingV2Architecture.md``). Typed pipeline
 contracts are re-exported beside ``run_v2_pipeline``.
 """
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 import textwrap
@@ -15,69 +17,58 @@ from pathlib import Path
 
 import pytest
 
-# Service modules that MUST be importable without the DataJoint DB layer.
-_SERVICE_ROOT = (
-    Path(__file__).resolve().parents[3] / "src/spyglass/spikesorting/v2"
-)
-_DB_FREE_SERVICE_MODULES = [
-    "bad_channels",
-    *sorted(
-        ".".join(
-            (
-                path.parent
-                if path.name == "__init__.py"
-                else path.with_suffix("")
-            )
-            .relative_to(_SERVICE_ROOT)
-            .parts
-        )
-        for path in _SERVICE_ROOT.rglob("*.py")
-        if path != _SERVICE_ROOT / "__init__.py"
-        and path.relative_to(_SERVICE_ROOT).parts[0].startswith("_")
-    ),
+_V2_ROOT = Path(__file__).resolve().parents[3] / "src/spyglass/spikesorting/v2"
+# Modules SpikeInterface workers re-import, and what those import there.
+_WORKER_MODULES = [
+    "_artifacts.compute",
+    "_core.enums",
+    "_core.signal_math",
+    "_motion.estimation",
+    "_recording.acquisition_spans",
+    "_recording.restriction",
+    "_sorting.dispatch",
+    "_storage.iterators",
+    "_storage.spikeinterface",
 ]
+# Unit-tier tests and the package root's lazy names import the facade with
+# database access blocked.
+_DB_FREE_MODULES = [*_WORKER_MODULES, "pipeline"]
+_WORKER_BASES = {
+    "BaseRecording",
+    "BaseRecordingSegment",
+    "BaseSorting",
+    "BaseSortingSegment",
+    "BasePreprocessor",
+    "BasePreprocessorSegment",
+    "GenericDataChunkIterator",
+}
 
 
-def test_cold_import_probes_cover_all_private_services():
-    """New service modules must retain the worker-import contract."""
-    service_dir = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "spyglass"
-        / "spikesorting"
-        / "v2"
-    )
-    assert service_dir.is_dir()
-    assert (service_dir / "_orchestration").is_dir()
-    assert not (service_dir / "_internal").exists()
-    services = {
-        ".".join(
-            (
-                path.parent
-                if path.name == "__init__.py"
-                else path.with_suffix("")
-            )
-            .relative_to(service_dir)
-            .parts
-        )
-        for path in service_dir.rglob("*.py")
-        if path != service_dir / "__init__.py"
-        and path.relative_to(service_dir).parts[0].startswith("_")
-    }
-    missing = services - set(_DB_FREE_SERVICE_MODULES)
-    assert not missing, f"Missing cold-import probes: {sorted(missing)!r}"
-    assert len(_DB_FREE_SERVICE_MODULES) == len(set(_DB_FREE_SERVICE_MODULES))
-    assert "_motion" in _DB_FREE_SERVICE_MODULES
-    assert "_recording" in _DB_FREE_SERVICE_MODULES
-    assert "_params" in _DB_FREE_SERVICE_MODULES
+def test_worker_classes_live_in_db_free_modules():
+    """A new SpikeInterface or chunk-iterator subclass joins the probe list."""
+    owners = set()
+    for path in _V2_ROOT.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = {
+                getattr(base, "id", getattr(base, "attr", None))
+                for base in node.bases
+            }
+            if bases & _WORKER_BASES:
+                owners.add(
+                    ".".join(path.relative_to(_V2_ROOT).with_suffix("").parts)
+                )
+    assert owners
+    assert owners <= set(_WORKER_MODULES), sorted(owners - set(_WORKER_MODULES))
 
 
-@pytest.mark.parametrize("modname", _DB_FREE_SERVICE_MODULES)
+@pytest.mark.parametrize("modname", _DB_FREE_MODULES)
 def test_service_module_imports_without_db_layer(modname):
-    """Each private service and package imports with no DB-layer dependency.
+    """Each listed module imports with no DB-layer dependency.
 
-    Schema modules connect at import; spawned workers and DB-isolated nodes
-    must be able to import services. Checked by cold import in a subprocess.
+    Schema modules connect at import, so a worker that imported one would
+    open its own connection. Checked by cold import in a subprocess.
     """
     probe = textwrap.dedent(f"""
         import importlib.abc

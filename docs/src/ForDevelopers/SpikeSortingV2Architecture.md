@@ -262,10 +262,13 @@ Presentation consumes resolved analyzers and tables of unit properties.
 - Import helpers from their canonical owning module.
 - Domain implementations do not depend on orchestration. The data-only pipeline
     contracts in `_orchestration.types` may be shared with other domains.
-- Every internal module must import without activating a schema or importing
-    `spyglass.common`. Import database table classes inside the adapter function
-    that needs them. This allows spawned workers to import computation code
-    without connecting to a database.
+- Modules that SpikeInterface workers re-import must import without
+    activating a schema or importing `spyglass.common`: the recording
+    subclasses, chunk-executor kernels, and the helpers they call. A worker
+    that imported a schema module would open its own database connection.
+- Other modules may import tables at module level. A table import stays
+    inside a function to break an import cycle, or because `pipeline.py` or a
+    unit-tier test (which blocks database access) imports the module.
 - A database-free import does not make every function in a module pure. Name and
     document database adapters, and pass already resolved inputs into
     computation. For example, analyzer rebuilding resolves its sorter row and
@@ -276,8 +279,9 @@ Presentation consumes resolved analyzers and tables of unit properties.
 
 `test_internal_architecture.py` guards direct domain ownership, shallow paths,
 filenames, lightweight initializers, owner imports, and the outward
-orchestration dependency. `test_service_import_contracts.py` discovers private
-modules and package initializers and checks cold imports in fresh interpreters.
+orchestration dependency. `test_service_import_contracts.py` cold-imports the
+worker modules and `pipeline` in fresh interpreters and checks that every
+SpikeInterface subclass lives in a worker module.
 
 ## Computation and file lifecycle
 
