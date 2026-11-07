@@ -128,7 +128,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
 - Add opt-in `PopulateMixin` cleanup of files a tri-part `make_compute` wrote
-    when the populate fails before `make_insert` commits #PRNUM
+    when the populate fails before `make_insert` commits #1717
 
 ### Pipelines
 
@@ -140,7 +140,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
     - Pair waveform-feature units with spike times by label, not position #1678
     - Remove `ClusterlessDecodingV1` result files when its populate fails after
-        `make_compute` #PRNUM
+        `make_compute` #1717
 
 - Position
 
