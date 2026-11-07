@@ -735,6 +735,8 @@ class RecordingArtifactDetection(
     ``Recording``; motion correction is downstream of the mask.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> RecordingArtifactSelection
     """
@@ -842,6 +844,8 @@ class SharedGroupArtifactDetection(
     ``member_set_hash``. ``make_compute`` scans the members' unioned channels
     once; ``make_insert`` writes the result for every member session.
     """
+
+    _populate_key_lock = True
 
     definition = """
     -> SharedGroupArtifactSelection

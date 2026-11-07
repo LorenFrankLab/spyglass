@@ -248,7 +248,7 @@ def test_populate_recovery_classifies_translated_errors(
     from datajoint.connection import translate_query_error
 
     from spyglass.spikesorting.v2._orchestration.stages import (
-        _populate_tolerating_concurrent_duplicate,
+        _populate_once,
     )
 
     error = translate_query_error(
@@ -263,10 +263,10 @@ def test_populate_recovery_classifies_translated_errors(
             return True
 
     if recoverable:
-        _populate_tolerating_concurrent_duplicate(Table(), {"id": 1})
+        _populate_once(Table(), {"id": 1})
     else:
         with pytest.raises(type(error)) as raised:
-            _populate_tolerating_concurrent_duplicate(Table(), {"id": 1})
+            _populate_once(Table(), {"id": 1})
         assert raised.value is error
 
 

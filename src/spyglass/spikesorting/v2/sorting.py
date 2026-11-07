@@ -831,6 +831,8 @@ class Sorting(
     this sort's units, and populates ``Sorting.Unit``.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> SortingSelection
     ---

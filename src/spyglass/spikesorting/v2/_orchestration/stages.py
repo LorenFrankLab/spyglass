@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
 from spyglass.spikesorting.v2._orchestration.types import StageStatus
 
 
@@ -42,12 +41,13 @@ def _run_stage(
     return result, status, time.perf_counter() - start
 
 
-def _populate_tolerating_concurrent_duplicate(table, key) -> None:
+def _populate_once(table, key) -> None:
     """Populate ``key``, tolerating a benign concurrent duplicate.
 
-    With ``reserve_jobs=False`` an overlapping populate can commit the row
-    first; adopt that winner. A duplicate error with the row still absent is
-    re-raised.
+    The v2 tables opt in to ``PopulateMixin``'s per-key lock, so an
+    overlapping run waits and then skips the key. Without the lock, an
+    overlapping populate can commit the row first; adopt that winner. A
+    duplicate error with the row still absent is re-raised.
 
     ``key`` must be a full single-row primary key, or the recovery check
     could swallow a genuine duplicate.
@@ -59,17 +59,6 @@ def _populate_tolerating_concurrent_duplicate(table, key) -> None:
     except dj.errors.DuplicateError:
         if not (table & key):
             raise
-
-
-def _populate_once(table, key) -> None:
-    """Populate ``key`` exactly once, even under concurrent/overlapping runs.
-
-    A MySQL advisory lock serializes same-key populates, so a racing run
-    blocks and then no-ops. Best effort: a dropped session releases the lock,
-    and the worst case is duplicated compute.
-    """
-    with advisory_key_lock(table, key):
-        _populate_tolerating_concurrent_duplicate(table, key)
 
 
 def _run_sort_group_keys(

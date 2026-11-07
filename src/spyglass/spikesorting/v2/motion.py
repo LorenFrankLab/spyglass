@@ -583,6 +583,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     the selection.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> MotionEstimateSelection
     ---
@@ -1184,6 +1186,8 @@ class MotionCorrectedRecording(
     motion (never re-estimating) and installs it only if its content hash
     matches.
     """
+
+    _populate_key_lock = True
 
     definition = """
     -> MotionCorrectedRecordingSelection

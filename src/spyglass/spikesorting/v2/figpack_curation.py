@@ -809,6 +809,8 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     zero-unit sort raises ``ZeroUnitAnalyzerError``.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> FigPackCurationSelection
     ---
@@ -1047,13 +1049,13 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             When dropping the row and the user is not on a lab team with the
             session's experimenter (the usual Spyglass delete permission).
         """
-        from spyglass.spikesorting.v2._core.db_locking import advisory_key_lock
         from spyglass.utils import logger
+        from spyglass.utils.mixins.populate import populate_key_lock
 
         if (FigPackCurationSelection & selection).fetch1("upload"):
             return None
         # Populate's lock, so a concurrent rebuild cannot race the delete.
-        with advisory_key_lock(cls, selection):
+        with populate_key_lock(cls, selection):
             built = cls & selection
             if not built:
                 return None

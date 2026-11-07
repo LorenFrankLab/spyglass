@@ -2,6 +2,7 @@
 
 import functools
 import shutil
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, NamedTuple, Tuple, Union
 
@@ -11,6 +12,9 @@ from spyglass.utils.mixins.base import BaseMixin
 
 # Instance attribute: one list of recorded outputs per active ``_populate1``.
 _SCOPES_ATTR = "_staged_output_scopes"
+
+# Longer than any single populate; finite so a stuck holder cannot wedge others.
+POPULATE_LOCK_TIMEOUT_S = 8 * 3600
 
 
 class StagedOutputs(NamedTuple):
@@ -95,6 +99,57 @@ def _releasing_insert(insert):
     return make_insert
 
 
+def _get_lock(connection, name: str, timeout_s: int) -> bool:
+    """Return whether ``GET_LOCK`` took ``name`` within ``timeout_s``."""
+    result = connection.query(
+        "SELECT GET_LOCK(%s, %s)", args=(name, int(timeout_s))
+    ).fetchone()
+    return bool(result and result[0] == 1)
+
+
+@contextmanager
+def populate_key_lock(table, key: dict):
+    """Serialize populates of one ``(table, key)`` with a MySQL named lock.
+
+    Best effort: yields whether the lock was taken, and the caller proceeds
+    either way, so the worst case is a repeated compute. The lock lives on the
+    database server, so it coordinates jobs on different hosts, and a dropped
+    session releases it.
+
+    Parameters
+    ----------
+    table : dj.Table
+        The table being populated.
+    key : dict
+        The primary key being populated.
+    """
+    from datajoint.hash import key_hash
+
+    # MySQL caps lock names at 64 characters.
+    name = "sgpop:" + key_hash({"__table__": table.full_table_name, **key})
+    connection = table.connection
+    acquired = False
+    try:
+        try:
+            acquired = _get_lock(connection, name, 0)
+            if not acquired:
+                logger.info(
+                    f"{type(table).__name__}: waiting for another job "
+                    f"populating {key}"
+                )
+                acquired = _get_lock(connection, name, POPULATE_LOCK_TIMEOUT_S)
+        except Exception as exc:  # a real DB error resurfaces in populate
+            logger.warning(f"Populate lock for {key} unavailable: {exc!r}")
+            acquired = False
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                connection.query("SELECT RELEASE_LOCK(%s)", args=(name,))
+            except Exception:  # closing the session releases it anyway
+                pass
+
+
 class PopulateMixin(BaseMixin):
 
     _parallel_make = False  # Tables that use parallel processing in make
@@ -103,6 +158,9 @@ class PopulateMixin(BaseMixin):
     # Tri-part tables whose make_compute writes files define
     # _staged_outputs(self, computed) -> StagedOutputs to opt in to cleanup.
     _staged_outputs = None
+    # True makes a job wait for another job's populate of the same key, then
+    # skip it, instead of computing it twice.
+    _populate_key_lock = False
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -165,6 +223,20 @@ class PopulateMixin(BaseMixin):
     # ----------------------------- staged outputs -----------------------------
 
     def _populate1(self, key, jobs, *args, **kwargs):
+        """Run DataJoint's ``_populate1``, under a per-key lock if opted in.
+
+        DataJoint skips a key that is already populated before computing it,
+        so a job that waited on the lock skips the key another job finished.
+        """
+        lock = (
+            populate_key_lock(self, key)
+            if self._populate_key_lock
+            else nullcontext()
+        )
+        with lock:
+            return self._populate1_with_cleanup(key, jobs, *args, **kwargs)
+
+    def _populate1_with_cleanup(self, key, jobs, *args, **kwargs):
         """Run DataJoint's ``_populate1``; remove outputs left unregistered.
 
         DataJoint runs a tri-part ``make_compute`` outside the transaction, so

@@ -676,6 +676,8 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
       cache and temporary metric analyzers.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> CurationEvaluationSelection
     ---

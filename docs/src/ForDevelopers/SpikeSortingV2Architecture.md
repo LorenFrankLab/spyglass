@@ -356,13 +356,13 @@ their lifecycle and serialization checks when changing supported versions.
 ### Concurrent populate
 
 - The pipeline populates with `reserve_jobs=False`, avoiding stale `~jobs` rows.
-- `_orchestration.stages._populate_once` serializes same-key populates with a
-    MySQL advisory lock (`_core.db_locking.advisory_key_lock`), so a long sort
-    runs once when runs overlap. The second run blocks, then its `populate` is a
-    no-op.
+- Every v2 stage table sets `_populate_key_lock = True`, so `PopulateMixin`
+    serializes same-key populates with a MySQL named lock, from the conductor
+    or a direct `populate`. A long sort runs once when runs overlap: the second
+    job waits, then skips the key.
 - The lock is best effort. It is bound to the DB session, and a timeout or error
     proceeds unlocked. Correctness relies on each stage's insert contract.
-- `_populate_tolerating_concurrent_duplicate` adopts a row that another run
+- `_orchestration.stages._populate_once` adopts a row that another run
     committed first. A `DuplicateError` with the row still absent is re-raised.
     `key` must be a full primary key, or the check could hide a real duplicate.
 - `Sorting` keeps each attempt's analyzer private until its insert wins, so a

@@ -118,6 +118,8 @@ class ConcatMemberCuration(
     an empty train.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> CurationV2
     member_index: int

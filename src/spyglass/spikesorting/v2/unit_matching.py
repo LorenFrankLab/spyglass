@@ -641,6 +641,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     first recording's NWB.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> UnitMatchSelection
     ---
@@ -1131,6 +1133,8 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ``n_sessions_detected`` counts distinct ``nwb_file_name`` values where a
     member unit has spikes. ``n_matching_inputs`` counts distinct inputs.
     """
+
+    _populate_key_lock = True
 
     definition = """
     -> UnitMatch

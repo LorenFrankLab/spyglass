@@ -887,6 +887,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ``get_recording`` rebuilds a missing file without deleting the row.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> RecordingSelection
     ---

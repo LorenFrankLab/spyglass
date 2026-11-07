@@ -326,7 +326,7 @@ def test_curation_stage_wraps_missing_merge_registration(first_run):
 
 
 @pytest.mark.unit
-def test_populate_tolerating_concurrent_duplicate():
+def test_populate_once():
     """A benign concurrent duplicate (row committed by an overlapping run) is
     reused, not raised; a real duplicate/other error still propagates.
 
@@ -336,7 +336,7 @@ def test_populate_tolerating_concurrent_duplicate():
     import datajoint as dj
 
     from spyglass.spikesorting.v2._orchestration.stages import (
-        _populate_tolerating_concurrent_duplicate,
+        _populate_once,
     )
 
     class _FakeTable:
@@ -360,157 +360,54 @@ def test_populate_tolerating_concurrent_duplicate():
 
     # Benign race: DuplicateError, but the row exists afterward -> swallowed.
     tolerated = _FakeTable(error=duplicate, exists=True)
-    _populate_tolerating_concurrent_duplicate(tolerated, key)
+    _populate_once(tolerated, key)
     assert tolerated.populated_with == key
 
     # DuplicateError but the row is STILL absent -> genuine failure, re-raised.
     with pytest.raises(dj.errors.DuplicateError):
-        _populate_tolerating_concurrent_duplicate(
-            _FakeTable(error=duplicate, exists=False), key
-        )
+        _populate_once(_FakeTable(error=duplicate, exists=False), key)
 
     # A non-duplicate error always propagates, even if the row happens to exist.
     with pytest.raises(ValueError):
-        _populate_tolerating_concurrent_duplicate(
-            _FakeTable(error=ValueError("boom"), exists=True), key
-        )
+        _populate_once(_FakeTable(error=ValueError("boom"), exists=True), key)
 
     # No error -> normal populate, no raise.
-    _populate_tolerating_concurrent_duplicate(
-        _FakeTable(error=None, exists=False), key
-    )
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("lock_acquired", [True, False])
-def test_populate_once_populates_within_lock(monkeypatch, lock_acquired):
-    """``_populate_once`` invokes populate while holding the key's advisory lock.
-
-    Populate always runs, even on a lock timeout; a waiter finds the row done
-    through DataJoint's own no-op.
-    """
-    import contextlib
-
-    from spyglass.spikesorting.v2._orchestration import (
-        stages as _pipeline_stages,
-    )
-
-    events = []
-
-    @contextlib.contextmanager
-    def _fake_lock(table, key, **kwargs):
-        events.append("lock-enter")
-        try:
-            yield lock_acquired
-        finally:
-            events.append("lock-exit")
-
-    class _FakeTable:
-        def populate(self, key, reserve_jobs=False):
-            events.append("populate")
-
-        def __and__(self, key):
-            return []  # row absent -> tolerant helper won't swallow anything
-
-    monkeypatch.setattr(_pipeline_stages, "advisory_key_lock", _fake_lock)
-    _pipeline_stages._populate_once(_FakeTable(), {"sorting_id": "x"})
-    assert events == ["lock-enter", "populate", "lock-exit"]
+    _populate_once(_FakeTable(error=None, exists=False), key)
 
 
 @pytest.mark.database
-def test_advisory_key_lock_acquires_and_releases(dj_conn):
-    """The MySQL advisory lock is held while inside the context, freed after."""
-    import datajoint as dj
-    from datajoint.hash import key_hash
-
-    from spyglass.spikesorting.v2._core.db_locking import (
-        advisory_key_lock as _advisory_key_lock,
+def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
+    """Each v2 stage table waits on a concurrent same-key populate."""
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        SharedGroupArtifactDetection,
     )
-
-    connection = dj.conn()
-
-    class _FakeTable:
-        pass
-
-    table = _FakeTable()
-    table.connection = connection
-    table.full_table_name = "`sgv2test`.`lock_roundtrip`"
-
-    key = {"id": "abc123"}
-    lock_name = "sgv2pop:" + key_hash(
-        {"__table__": table.full_table_name, **key}
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCuration,
     )
-
-    def _is_free():
-        return connection.query(
-            "SELECT IS_FREE_LOCK(%s)", args=(lock_name,)
-        ).fetchone()[0]
-
-    assert _is_free() == 1
-    with _advisory_key_lock(table, key) as acquired:
-        assert acquired is True
-        assert _is_free() == 0  # held on this session
-    assert _is_free() == 1  # released on context exit
-
-
-@pytest.mark.unit
-def test_advisory_key_lock_acquire_error_is_non_fatal():
-    """A GET_LOCK failure yields False and never raises (lock is best-effort)."""
-    from spyglass.spikesorting.v2._core.db_locking import (
-        advisory_key_lock as _advisory_key_lock,
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecording,
+        MotionEstimate,
     )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit, UnitMatch
 
-    class _BadConnection:
-        def query(self, *args, **kwargs):
-            raise RuntimeError("simulated GET_LOCK failure")
-
-    class _FakeTable:
-        connection = _BadConnection()
-        full_table_name = "`sgv2test`.`bad`"
-
-    with _advisory_key_lock(_FakeTable(), {"id": "z"}) as acquired:
-        assert acquired is False
-
-
-@pytest.mark.database
-def test_advisory_key_lock_excludes_other_session(dj_conn, monkeypatch):
-    """A second DB session cannot take the lock while the first holds it.
-
-    Needs a second connection: MySQL named locks are reentrant within a
-    session.
-    """
-    import datajoint as dj
-
-    from spyglass.spikesorting.v2._core import db_locking
-    from spyglass.spikesorting.v2._core.db_locking import (
-        advisory_key_lock as _advisory_key_lock,
-    )
-
-    conn_b = dj.Connection(
-        dj.config["database.host"],
-        dj.config["database.user"],
-        dj.config["database.password"],
-        port=dj.config["database.port"],
-    )
-
-    class _FakeTable:
-        full_table_name = "`sgv2test`.`exclusion`"
-
-    holder = _FakeTable()
-    holder.connection = dj.conn()
-    waiter = _FakeTable()
-    waiter.connection = conn_b
-    key = {"id": "excl"}
-
-    try:
-        with _advisory_key_lock(holder, key) as held:
-            assert held is True
-            # The other session times out.
-            monkeypatch.setattr(db_locking, "POPULATE_LOCK_TIMEOUT_S", 1)
-            with _advisory_key_lock(waiter, key) as while_held:
-                assert while_held is False
-        # Once the holder releases, the other session acquires it.
-        with _advisory_key_lock(waiter, key) as after_release:
-            assert after_release is True
-    finally:
-        conn_b.close()
+    for table in (
+        Recording,
+        RecordingArtifactDetection,
+        SharedGroupArtifactDetection,
+        MotionEstimate,
+        MotionCorrectedRecording,
+        ConcatenatedRecording,
+        Sorting,
+        CurationEvaluation,
+        ConcatMemberCuration,
+        FigPackCuration,
+        UnitMatch,
+        TrackedUnit,
+    ):
+        assert table._populate_key_lock is True, table.__name__

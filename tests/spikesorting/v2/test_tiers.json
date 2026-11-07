@@ -685,11 +685,8 @@
     "test_pipeline_observability.py": {
       "tier": "pipeline",
       "overrides": {
-        "test_advisory_key_lock_acquire_error_is_non_fatal": "unit",
-        "test_advisory_key_lock_acquires_and_releases": "db_unit",
-        "test_advisory_key_lock_excludes_other_session": "db_unit",
-        "test_populate_once_populates_within_lock": "unit",
-        "test_populate_tolerating_concurrent_duplicate": "unit"
+        "test_populate_once": "unit",
+        "test_v2_stage_tables_take_the_populate_key_lock": "db_unit"
       }
     },
     "test_pipeline_presets.py": {

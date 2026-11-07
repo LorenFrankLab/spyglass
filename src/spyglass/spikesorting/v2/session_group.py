@@ -494,6 +494,8 @@ class ConcatenatedRecording(
     in ``MemberBoundary``.
     """
 
+    _populate_key_lock = True
+
     definition = """
     -> ConcatenatedRecordingSelection
     ---
