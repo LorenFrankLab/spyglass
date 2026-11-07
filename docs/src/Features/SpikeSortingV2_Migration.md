@@ -55,6 +55,8 @@ pip install "spyglass-neuro[spikesorting-v2]"
 python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"
 ```
 
+- `spikesorting`: SpikeInterface and the packages that spike sorting, MUA and
+    decoding import. Every `spikesorting-v2` runtime extra includes it.
 - `spikesorting-v2`: the sorting runtime. SpikeInterface is pinned to
     **0.104.3** in `pyproject.toml`; the compatibility adapters and analyzer
     serialization are validated against that version.

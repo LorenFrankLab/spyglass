@@ -39,4 +39,4 @@ dependencies:
   - track_linearization>=2.3
   - pip:
       - mountainsort4
-      - ..[dlc]
+      - ..[dlc,spikesorting]

@@ -104,6 +104,19 @@ For v0/v1 users:
         v1) for v0/v1 sorts
     - loading a Zarr-format waveform folder
 
+#### Spike Sorting Dependencies Are an Extra (#1609)
+
+`pip install spyglass-neuro` no longer installs SpikeInterface, probeinterface,
+numba, pydantic or sortingview. Session ingestion, LFP, position, linearization
+and ripple detection work without them. Spike sorting, MUA, decoding and
+`RippleTimesV1.create_figurl` need the `spikesorting` extra:
+
+```bash
+pip install "spyglass-neuro[spikesorting]"
+```
+
+`environments/environment.yml` and the `spikesorting-v2` extras include it.
+
 #### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
 
 v0, v1 and v2 recordings now open the raw acquisition `ElectricalSeries` by name
@@ -206,9 +219,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Update dependency pins: `numpy>=1.26,<3`, `scipy>=1.13`,
     `spikeinterface==0.104.3`, `probeinterface>=0.3.2`, `jax<0.10`,
     `non-local-detector==0.6.9`, `ripple-detection>=1.7`, `keypoint-moseq>=0.6`;
-    declare `networkx`, `numba` and `pydantic>=2`; drop the `panel>=1.4` pin,
-    which Spyglass does not import and which blocked `keypoint-moseq` 0.6 (it
-    pins `panel==0.14.4`) #1609
+    declare `networkx`, and `numba` and `pydantic>=2` in the new `spikesorting`
+    extra; drop the `panel>=1.4` pin, which Spyglass does not import and which
+    blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`) #1609
 - `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
     `environment.yml` installs `torch>=2` from pip instead of conda
     `pytorch<1.12`; native MountainSort4 1.0.7 is installed through the v2 extra
@@ -221,6 +234,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
     (FigPack browser review, ipywidgets), and the test-only
     `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
+- Add the `spikesorting` extra (SpikeInterface, probeinterface, numba, pydantic,
+    sortingview), which the `spikesorting-v2` extras include. v0/v1 FigURL
+    curation imports `kachery_cloud` only when it runs, and `insert_sessions`
+    skips the spike sorting and decoding merge tables without the extra #1609
 - The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
     a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
     deadlocks #1609

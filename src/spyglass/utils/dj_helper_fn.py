@@ -17,6 +17,11 @@ from datajoint.user_tables import TableMeta, UserTable
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
+# Top-level modules spyglass imports from the ``spikesorting`` extra.
+SPIKESORTING_EXTRA_MODULES = frozenset(
+    {"numba", "probeinterface", "pydantic", "sortingview", "spikeinterface"}
+)
+
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.
 PERIPHERAL_TABLES = [
@@ -100,13 +105,22 @@ def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     - Prevents circular imports
     - Prevents errors from table declaration within a transaction
     - Run during nwb insertion
+    - Skips DecodingOutput and SpikeSortingOutput without the
+      ``spikesorting`` extra: nothing in that install can declare them later
     """
-    from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (
-        SpikeSortingOutput,
-    )  # noqa: F401
+
+    try:
+        from spyglass.decoding.decoding_merge import DecodingOutput
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+    except ModuleNotFoundError as err:
+        if (err.name or "").split(".")[0] not in SPIKESORTING_EXTRA_MODULES:
+            raise
+        logger.debug(f"Spike sorting merge tables unavailable: {err}")
+        return LFPOutput, PositionOutput
 
     return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 

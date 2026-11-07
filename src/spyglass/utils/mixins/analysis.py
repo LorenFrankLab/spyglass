@@ -6,7 +6,7 @@ import string
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -14,7 +14,6 @@ import h5py
 import numpy as np
 import pandas as pd
 import pynwb
-import spikeinterface as si
 from datajoint.table import Table
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
@@ -26,6 +25,9 @@ from spyglass.utils.nwb_helper_fn import (
     get_electrode_indices,
     get_nwb_file,
 )
+
+if TYPE_CHECKING:  # annotation only; SpikeInterface is the spikesorting extra
+    import spikeinterface as si
 
 # Only differs from the common AnalysisNwbfile in adding 'Custom' to heading
 ENFORCED_DEFINITION = """

@@ -90,7 +90,7 @@ jobs:
     - name: Run pip install for test deps
       timeout-minutes: 15
       run: |
-        pip install --quiet .[test]
+        pip install --quiet .[test,spikesorting]
     - name: Cache test data
       timeout-minutes: 10
       id: cache-test-data

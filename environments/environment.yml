@@ -39,4 +39,4 @@ dependencies:
   - track_linearization>=2.3
   - pip:
       - torch>=2  # pip, not conda: conda pytorch>=2 forces numpy<2
-      - ..  # ..[spikesorting-v2] adds MountainSort4/5
+      - ..[spikesorting]  # ..[spikesorting-v2] adds MountainSort4/5

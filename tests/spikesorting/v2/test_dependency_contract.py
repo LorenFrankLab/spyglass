@@ -146,12 +146,29 @@ def test_scipy_declared_in_base():
     )
 
 
+def test_spikesorting_extra_owns_sorting_dependencies():
+    """The SpikeInterface stack lives in the ``spikesorting`` extra, not the
+    base install, and every v2 runtime extra pulls that extra in."""
+    sorting = _extra_requirements("spikesorting")
+    assert not set(sorting) & set(_base_requirements()), (
+        "base dependencies repeat spikesorting-extra packages: "
+        f"{sorted(set(sorting) & set(_base_requirements()))}"
+    )
+    for extra in (
+        "spikesorting-v2",
+        "spikesorting-v2-matching",
+        "spikesorting-v2-curation",
+    ):
+        requirements = _extra_requirements(extra)
+        assert "spikesorting" in requirements["spyglass-neuro"].extras, extra
+
+
 def test_spikeinterface_hard_pin_matches_v2_env():
     """SpikeInterface is hard-pinned in pyproject and the v2 conda env spec
     matches that pin (not a looser range that could drift)."""
-    reqs = _base_requirements()
+    reqs = _extra_requirements("spikesorting")
 
-    assert "spikeinterface" in reqs, "spikeinterface missing from base deps"
+    assert "spikeinterface" in reqs, "spikeinterface missing from the extra"
     si_specifiers = list(reqs["spikeinterface"].specifier)
     assert len(si_specifiers) == 1 and si_specifiers[0].operator == "==", (
         f"spikeinterface must be hard-pinned (==X.Y.Z); found "

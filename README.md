@@ -122,6 +122,14 @@ python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 
 ### Manual Installation
 
+`pip install spyglass-neuro` covers session ingestion, LFP, position,
+linearization and ripple detection. Spike sorting, MUA and decoding need the
+`spikesorting` extra, which `environments/environment.yml` installs:
+
+```bash
+pip install "spyglass-neuro[spikesorting]"
+```
+
 For manual installation and advanced configuration:
 
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)

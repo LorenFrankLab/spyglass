@@ -94,9 +94,24 @@ jobs:
       - name: Install archive # requires tag
         if: matrix.package == 'archive' && startsWith(github.ref, 'refs/tags/')
         run: pip install archive/archive.tgz
+      # The base install leaves out the spikesorting extra. Schema modules are
+      # checked from source: importing them needs a DB.
+      - name: Smoke test without the spikesorting extra
+        if: matrix.package != 'archive' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          python tests/decoding/scripts/smoke_installed_stack.py \
+            --without-spikesorting
+      - name: Install the spikesorting extra
+        if: matrix.package != 'archive' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          case "${{ matrix.package }}" in
+            wheel) package=$(ls dist/*.whl) ;;
+            sdist) package=$(ls dist/*.tar.gz) ;;
+            archive) package=archive/archive.tgz ;;
+          esac
+          pip install "${package}[spikesorting]"
       # The resolver can install a jax/numpy/spikeinterface combination that
-      # imports individually but not together. Not a cold `import
-      # spyglass.decoding`: that activates DataJoint schemas and needs a DB.
+      # imports individually but not together.
       # TODO(#1609): revisit with the SpikeInterface bump.
       - name: Smoke test installed dependency stack
         if: matrix.package != 'archive' || startsWith(github.ref, 'refs/tags/')

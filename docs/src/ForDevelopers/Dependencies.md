@@ -10,6 +10,14 @@ check them are described in `tests/README.md` ("Spike sorting lanes").
     SpikeInterface stack; only the `pytest-legacy` pin rewrite and
     `environment_spikesorting_legacy.yml` do. Raise the floor once those
     packages support numpy 2.
+
+## `spikesorting` extra
+
+Spike sorting, MUA and decoding import these, so the base install leaves them
+out. The `spikesorting-v2` runtime extras include it as
+`spyglass-neuro[spikesorting]`. `test_spikesorting_optional.py` checks that the
+non-sorting pipelines import without it.
+
 - `spikeinterface==0.104.3`: sorter parameters a row leaves unset take SI's
     defaults, and the Kilosort4, SpykingCircus2, Tridesclous2 and generic
     schemas pass extra keys through (`extra="allow"`), so a bump can silently
@@ -17,6 +25,8 @@ check them are described in `tests/README.md` ("Spike sorting lanes").
     (`test_si_default_snapshots.py`) fail on a bump: move the pin and audit the
     snapshot diff together. `environment_spikesorting_v2.yml` must carry the
     same pin (`test_spikeinterface_hard_pin_matches_v2_env`).
+- `pubnub<6.4`: kept from the old sortingview pin. sortingview 0.14 does not
+    depend on pubnub; the deprecated `kachery-cloud` pins `pubnub==6.3.*`.
 
 ## `spikesorting-v2` extras
 

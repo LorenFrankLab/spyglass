@@ -8,7 +8,6 @@ import h5py
 import numpy as np
 import pandas as pd
 import pynwb
-import spikeinterface as si
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 

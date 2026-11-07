@@ -18,4 +18,4 @@ dependencies:
   - pip:
       - "numpy<2"  # also on the pip layer, so pip cannot upgrade past it
       - mountainsort4
-      - --editable "..[test]"
+      - --editable "..[test,spikesorting]"
