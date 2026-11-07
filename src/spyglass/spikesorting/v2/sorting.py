@@ -1571,7 +1571,8 @@ class Sorting(
     def root_curation(self, key):
         """Return the generation-pinned ``CurationRef`` of this sort's root.
 
-        The plot and export delegates below pass it to ``v2.visualization``.
+        The export delegates below pass it to ``v2.visualization``; plot
+        through its ``plots`` attribute.
 
         Raises
         ------
@@ -1590,82 +1591,6 @@ class Sorting(
                 "does this) before plotting or exporting its units."
             )
         return CurationRef.from_key(root.fetch1("KEY"))
-
-    def plot_summary(
-        self, key, *, compute_missing=False, backend=None, **kwargs
-    ):
-        """Delegate to ``visualization.plot_sorting_summary`` (root curation).
-
-        ``backend`` is required: SI's ``SortingSummaryWidget`` has no
-        matplotlib backend.
-        """
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_sorting_summary(
-            self.root_curation(key),
-            compute_missing=compute_missing,
-            backend=backend,
-            **kwargs,
-        )
-
-    def plot_unit_summary(
-        self,
-        key,
-        unit_id,
-        *,
-        compute_missing=False,
-        backend="matplotlib",
-        **kwargs,
-    ):
-        """Delegate to ``visualization.plot_unit_summary`` (root curation)."""
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_unit_summary(
-            self.root_curation(key),
-            unit_id,
-            compute_missing=compute_missing,
-            backend=backend,
-            **kwargs,
-        )
-
-    def plot_waveforms(
-        self, key, unit_ids=None, *, backend="matplotlib", **kwargs
-    ):
-        """Delegate to ``visualization.plot_waveforms`` (root curation)."""
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_waveforms(
-            self.root_curation(key),
-            unit_ids=unit_ids,
-            backend=backend,
-            **kwargs,
-        )
-
-    def plot_spikes_on_traces(
-        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
-    ):
-        """Delegate to ``visualization.plot_spikes_on_traces`` (root curation)."""
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_spikes_on_traces(
-            self.root_curation(key),
-            compute_missing=compute_missing,
-            backend=backend,
-            **kwargs,
-        )
-
-    def plot_unit_locations(
-        self, key, *, compute_missing=False, backend="matplotlib", **kwargs
-    ):
-        """Delegate to ``visualization.plot_unit_locations`` (root curation)."""
-        from spyglass.spikesorting.v2 import visualization
-
-        return visualization.plot_unit_locations(
-            self.root_curation(key),
-            compute_missing=compute_missing,
-            backend=backend,
-            **kwargs,
-        )
 
     def export_si_report(
         self, key, output_folder, *, compute_missing=False, **kwargs

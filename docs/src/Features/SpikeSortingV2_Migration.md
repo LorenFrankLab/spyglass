@@ -571,6 +571,8 @@ through `get_recording`.
 | v2 merge ids for a restriction                  | `get_spike_sorting_v2_merge_ids(restriction)` (`spyglass.spikesorting.v2.curation_api`)                     |
 
 `ssviz.export_to_phy` writes `spyglass_provenance.json` beside the export.
+Plots always name the curation they show: from a `Sorting` key, the raw
+(uncurated) units are `Sorting().root_curation(key).plots.unit_summary(3)`.
 
 ### Selecting units for analysis
 

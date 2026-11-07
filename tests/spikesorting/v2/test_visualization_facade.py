@@ -118,36 +118,6 @@ def test_table_delegates_call_facade_if_present(dj_conn, monkeypatch):
             {"backend": "matplotlib"},
         ),
         (
-            Sorting.plot_summary,
-            "plot_sorting_summary",
-            (),
-            {"compute_missing": False, "backend": None},
-        ),
-        (
-            Sorting.plot_unit_summary,
-            "plot_unit_summary",
-            (17,),
-            {"compute_missing": False, "backend": "matplotlib"},
-        ),
-        (
-            Sorting.plot_waveforms,
-            "plot_waveforms",
-            (),
-            {"unit_ids": None, "backend": "matplotlib"},
-        ),
-        (
-            Sorting.plot_spikes_on_traces,
-            "plot_spikes_on_traces",
-            (),
-            {"compute_missing": False, "backend": "matplotlib"},
-        ),
-        (
-            Sorting.plot_unit_locations,
-            "plot_unit_locations",
-            (),
-            {"compute_missing": False, "backend": "matplotlib"},
-        ),
-        (
             Sorting.export_si_report,
             "export_si_report",
             ("report",),
