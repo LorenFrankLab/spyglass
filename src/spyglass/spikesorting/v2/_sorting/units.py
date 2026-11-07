@@ -146,3 +146,31 @@ def build_unit_rows_from_analyzer(
         sort_group_id=sort_group_id,
         nwb_file_name=nwb_file_name,
     )
+
+
+def unit_metadata_by_id(unit_rows, region_by_electrode) -> dict:
+    """Per-unit columns of the units NWB, keyed by unit id.
+
+    Parameters
+    ----------
+    unit_rows : list of dict
+        ``Sorting.Unit`` rows (:func:`build_unit_rows_from_analyzer`).
+    region_by_electrode : dict
+        ``{electrode_id: region_name}``; an electrode without a region has
+        no entry.
+
+    Returns
+    -------
+    dict
+        ``{unit_id: {"peak_amplitude_uv", "peak_electrode_id", "n_spikes",
+        "brain_region"}}``.
+    """
+    return {
+        int(row["unit_id"]): {
+            "peak_amplitude_uv": row["peak_amplitude_uv"],
+            "peak_electrode_id": int(row["electrode_id"]),
+            "n_spikes": int(row["n_spikes"]),
+            "brain_region": region_by_electrode.get(int(row["electrode_id"])),
+        }
+        for row in unit_rows
+    }

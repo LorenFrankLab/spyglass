@@ -825,10 +825,21 @@ class Sorting(
 ):
     """Sorted units NWB + SortingAnalyzer folder.
 
-    ``make()`` runs the sorter (with sorter-owned whitening when requested),
-    removes excess spikes, builds a ``binary_folder`` ``SortingAnalyzer``
-    with the base extensions, writes an ``AnalysisNwbfile`` holding only
-    this sort's units, and populates ``Sorting.Unit``.
+    Whitening, when requested, is the sorter's own. The analyzer is a
+    ``binary_folder`` ``SortingAnalyzer`` with the base extensions; the
+    ``AnalysisNwbfile`` holds only this sort's units.
+
+    Steps
+    -----
+    1. Resolve the source, sorter recipe and traces, rebuilding a missing
+       trace file.
+    2. Open the sorter input traces.
+    3. Silence artifacts and find the artifact-free statistics spans.
+    4. Resolve the sorter params, job kwargs and seed.
+    5. Run the sorter, then drop spikes past the recording's end.
+    6. Build the display analyzer in a private staged folder.
+    7. Build the per-unit rows (peak amplitude, electrode, region).
+    8. Write the units NWB, then insert the rows and publish the analyzer.
     """
 
     _populate_key_lock = True
@@ -989,16 +1000,19 @@ class Sorting(
             Carrier of the computed sorting, staged units NWB, analyzer
             folder, and lookups threaded into ``make_insert``.
         """
-        # Concat and motion-corrected traces are stored masked; a single
-        # recording is masked by sorting_statistics_spans below.
         from spyglass.spikesorting.v2._recording.source import (
             read_persisted_traces,
         )
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
+            StagedAnalyzer,
+            analyzer_path,
+        )
 
+        # 2. Open the sorter input. Concat and motion-corrected traces are
+        # stored masked; a single recording is masked in step 3.
         recording = read_persisted_traces(traces_abs_path, traces)
-
-        # Artifact-free frame ranges for noise and whitening estimates,
-        # stored so analyzer rebuilds reuse them.
+        # 3. Silence artifacts and find the artifact-free frame ranges for
+        # noise and whitening estimates, stored so rebuilds reuse them.
         recording, statistics_spans = sorting_statistics_spans(
             recording,
             traces,
@@ -1009,28 +1023,11 @@ class Sorting(
             concat_statistics_spans=concat_statistics_spans,
             source_n_samples=source_n_samples,
         )
-
-        sorter = sorter_row["sorter"]
-        sorter_params = dict(sorter_row["params"])
-        # ``schema_version`` is Pydantic bookkeeping; the SI sorter
-        # wrapper does not accept it.
-        sorter_params.pop("schema_version", None)
-
-        # Shared by the sorter and the analyzer build.
-        from spyglass.spikesorting.v2._core.job_config import (
-            _resolved_job_kwargs,
+        # 4. Resolve the sorter params, job kwargs and seed.
+        sorter, sorter_params, job_kwargs, effective_random_seed = (
+            self._sorter_run_config(sorter_row)
         )
-
-        job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
-        import spikeinterface as si
-
-        # A seed outside the row is not part of sorting_id, so reject it.
-        effective_random_seed = resolve_effective_seed(
-            sorter_row["job_kwargs"],
-            reject_ambient_seed=SorterParameters._is_seed_dependent_sort(
-                sorter, sorter_params
-            ),
-        )
+        # 5. Run the sorter, then drop spikes past the recording's end.
         sorting_obj = self._run_sorter(
             sorter=sorter,
             sorter_params=sorter_params,
@@ -1045,16 +1042,12 @@ class Sorting(
         )
         sorting_obj = remove_excess_spikes(sorting_obj, recording)
 
-        from spyglass.spikesorting.v2._storage.analyzer_cache import (
-            StagedAnalyzer,
-            analyzer_path,
-        )
-
         # Owned by this attempt until insert, not a concurrent publication.
         staged_analyzer = StagedAnalyzer(
             analyzer_path(key["sorting_id"], display_waveform_params_name)
         )
         try:
+            # 6. Build the display analyzer in the staged folder.
             _sorting_analyzer.build_analyzer(
                 sorting=sorting_obj,
                 recording=recording,
@@ -1065,7 +1058,7 @@ class Sorting(
                 waveform_params=display_waveform_params,
                 statistics_spans=statistics_spans,
             )
-            # Shared by the NWB columns and the Sorting.Unit insert.
+            # 7. Build the unit rows, shared by the NWB and Sorting.Unit.
             unit_rows = _sorting_units.build_unit_rows_from_analyzer(
                 sorting=sorting_obj,
                 analyzer_folder=staged_analyzer.folder,
@@ -1075,65 +1068,30 @@ class Sorting(
                 nwb_file_name=nwb_file_name,
                 key=key,
             )
-            unit_metadata = {
-                int(row["unit_id"]): {
-                    "peak_amplitude_uv": row["peak_amplitude_uv"],
-                    "peak_electrode_id": int(row["electrode_id"]),
-                    "n_spikes": int(row["n_spikes"]),
-                    "brain_region": region_by_electrode.get(
-                        int(row["electrode_id"])
-                    ),
-                }
-                for row in unit_rows
-            }
-            concat_recording_id = (
-                source.key["concat_recording_id"]
-                if source.kind == "concatenated_recording"
-                else None
-            )
-            source_provenance = {
-                "sorting_id": str(key["sorting_id"]),
-                "recording_id": (
-                    source.key["recording_id"]
-                    if source.kind == "recording"
-                    else None
-                ),
-                "concat_recording_id": concat_recording_id,
-                "sorter": sorter_row["sorter"],
-                "sorter_params_name": sorter_row["sorter_params_name"],
-                "sorter_params": sorter_row["params"],
-                # The backend can change the output.
-                "execution_params": execution_params,
-                "artifact_detection_id": sel_row.get("artifact_detection_id"),
-                "display_waveform_params_name": display_waveform_params_name,
-                "effective_random_seed": effective_random_seed,
-                "spikeinterface_version": spikeinterface_version,
-                "sorter_version": sorter_version,
-                "analyzer_spikeinterface_version": si.__version__,
-                STATISTICS_SPANS_FIELD: [
-                    [int(a), int(b)] for a, b in statistics_spans
-                ],
-            }
-            if motion_correction_provenance is not None:
-                source_provenance.update(motion_correction_provenance)
-            from spyglass.spikesorting.v2._core.runtime import (
-                runtime_environment_provenance,
-            )
-
-            source_provenance.update(
-                runtime_environment_provenance(
-                    job_kwargs=job_kwargs, execution_params=execution_params
-                )
-            )
-            # A failed write removes its own file.
+            # 8. Write the units NWB; a failed write removes its own file.
             analysis_file_name, units_object_id = (
                 _units_nwb.write_sorting_units_nwb(
                     sorting=sorting_obj,
                     recording=recording,
                     nwb_file_name=nwb_file_name,
                     obs_intervals=obs_intervals,
-                    unit_metadata=unit_metadata,
-                    source_provenance=source_provenance,
+                    unit_metadata=_sorting_units.unit_metadata_by_id(
+                        unit_rows, region_by_electrode
+                    ),
+                    source_provenance=self._units_source_provenance(
+                        key=key,
+                        source=source,
+                        sel_row=sel_row,
+                        sorter_row=sorter_row,
+                        execution_params=execution_params,
+                        display_waveform_params_name=display_waveform_params_name,
+                        effective_random_seed=effective_random_seed,
+                        spikeinterface_version=spikeinterface_version,
+                        sorter_version=sorter_version,
+                        statistics_spans=statistics_spans,
+                        motion_correction_provenance=motion_correction_provenance,
+                        job_kwargs=job_kwargs,
+                    ),
                 )
             )
 
@@ -1152,6 +1110,134 @@ class Sorting(
         except BaseException:
             staged_analyzer.close()
             raise
+
+    @staticmethod
+    def _sorter_run_config(sorter_row: dict) -> tuple:
+        """Resolve the sorter, its params, job kwargs and effective seed.
+
+        A seed outside the row is not part of ``sorting_id``, so a
+        seed-dependent sort rejects it.
+
+        Parameters
+        ----------
+        sorter_row : dict
+            The ``SorterParameters`` row (``sorter``, ``params``,
+            ``job_kwargs``).
+
+        Returns
+        -------
+        sorter : str
+        sorter_params : dict
+            ``params`` without Pydantic's ``schema_version``, which the SI
+            sorter wrapper does not accept.
+        job_kwargs : dict
+            Resolved job kwargs, shared by the sorter and the analyzer build.
+        effective_random_seed : int or None
+        """
+        from spyglass.spikesorting.v2._core.job_config import (
+            _resolved_job_kwargs,
+        )
+
+        sorter = sorter_row["sorter"]
+        sorter_params = dict(sorter_row["params"])
+        sorter_params.pop("schema_version", None)
+        job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+        effective_random_seed = resolve_effective_seed(
+            sorter_row["job_kwargs"],
+            reject_ambient_seed=SorterParameters._is_seed_dependent_sort(
+                sorter, sorter_params
+            ),
+        )
+        return sorter, sorter_params, job_kwargs, effective_random_seed
+
+    @staticmethod
+    def _units_source_provenance(
+        *,
+        key,
+        source,
+        sel_row: dict,
+        sorter_row: dict,
+        execution_params: dict,
+        display_waveform_params_name: str,
+        effective_random_seed,
+        spikeinterface_version: str,
+        sorter_version,
+        statistics_spans,
+        motion_correction_provenance,
+        job_kwargs: dict,
+    ) -> dict:
+        """The units NWB's sorting provenance header.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key of the sorting being populated.
+        source : SourceResolution
+            Resolved sort input source.
+        sel_row : dict
+            The ``SortingSelection`` row.
+        sorter_row : dict
+            The ``SorterParameters`` row.
+        execution_params : dict
+            The sorter execution backend; it can change the output.
+        display_waveform_params_name : str
+            The display recipe.
+        effective_random_seed : int or None
+            Seed the sort used.
+        spikeinterface_version, sorter_version : str or None
+            Producing versions from ``sort_runtime_versions``.
+        statistics_spans : sequence of (int, int)
+            Artifact-free frame ranges.
+        motion_correction_provenance : dict or None
+            Motion correction ids and recipe names, for a corrected sort.
+        job_kwargs : dict
+            Resolved job kwargs, for the runtime receipt.
+
+        Returns
+        -------
+        dict
+        """
+        import spikeinterface as si
+
+        from spyglass.spikesorting.v2._core.runtime import (
+            runtime_environment_provenance,
+        )
+
+        concat_recording_id = (
+            source.key["concat_recording_id"]
+            if source.kind == "concatenated_recording"
+            else None
+        )
+        source_provenance = {
+            "sorting_id": str(key["sorting_id"]),
+            "recording_id": (
+                source.key["recording_id"]
+                if source.kind == "recording"
+                else None
+            ),
+            "concat_recording_id": concat_recording_id,
+            "sorter": sorter_row["sorter"],
+            "sorter_params_name": sorter_row["sorter_params_name"],
+            "sorter_params": sorter_row["params"],
+            "execution_params": execution_params,
+            "artifact_detection_id": sel_row.get("artifact_detection_id"),
+            "display_waveform_params_name": display_waveform_params_name,
+            "effective_random_seed": effective_random_seed,
+            "spikeinterface_version": spikeinterface_version,
+            "sorter_version": sorter_version,
+            "analyzer_spikeinterface_version": si.__version__,
+            STATISTICS_SPANS_FIELD: [
+                [int(a), int(b)] for a, b in statistics_spans
+            ],
+        }
+        if motion_correction_provenance is not None:
+            source_provenance.update(motion_correction_provenance)
+        source_provenance.update(
+            runtime_environment_provenance(
+                job_kwargs=job_kwargs, execution_params=execution_params
+            )
+        )
+        return source_provenance
 
     def make_insert(
         self,
