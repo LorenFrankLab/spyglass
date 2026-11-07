@@ -109,7 +109,6 @@ def plot_burst_pair_peaks(
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        # Plot at most n_cols channels.
         for i in range(min(peak1.shape[1], peak2.shape[1], n_cols)):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
