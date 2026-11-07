@@ -57,7 +57,10 @@ repos:
     rev: v0.14.13
     hooks:
       - id: ruff
-        args: [--force-exclude]
+        args: [
+          "--exclude", "./notebooks/py_scripts/",
+          "--ignore", "F401,E402,E501"
+        ]
         # F401: Unused import - May flag tables in DataJoint foreign keys
         # E402: Module level import not at top of file - May want lazyloading
         # E501: Line too long - Allow longer lines in table definitions
