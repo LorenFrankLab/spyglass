@@ -591,4 +591,4 @@ if run_epoch_match:
 # - For the matcher's parameters, internals, overlap restrictions, and the
 #   synthetic matching-recovery benchmark (including the per-day
 #   motion-correction alignment limitation), see
-#   `docs/src/Features/SpikeSortingV2.md`.
+#   `docs/src/Features/SpikeSortingV2_Migration.md`.

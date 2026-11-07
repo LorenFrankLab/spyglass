@@ -1,7 +1,7 @@
 """Execute the published recovery steps with database/browser stand-ins.
 
 The browser journey exercises real edits and commits. These tests exercise
-the notebook/reference control flow that chooses which branch is handed to
+the notebook control flow that chooses which branch is handed to
 verification and analysis, including keeping a valid merge during recovery.
 """
 
@@ -18,24 +18,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[3]
 
 
-def _workflow(source):
-    if source == "reference":
-        text = (_ROOT / "docs/src/Features/SpikeSortingV2.md").read_text()
-        section = text.split("**A committed merge that was wrong**", 1)[1]
-        recovery = re.findall(r"```python\n(.*?)```", section, re.S)[:3]
-        verification = next(
-            block
-            for block in re.findall(r"```python\n(.*?)```", text, re.S)
-            if "if pending_verification is not None:" in block
-        )
-        # Supply the same API stand-in as the notebook instead of importing
-        # the database-backed facade in this control-flow test.
-        verification = verification.replace(
-            "from spyglass.spikesorting.v2.pipeline import FigPackReview\n",
-            "",
-        )
-        return recovery, verification
-
+def _workflow():
     notebook = json.loads(
         (_ROOT / "notebooks/10_Spike_SortingV2_Curation.ipynb").read_text()
     )
@@ -63,7 +46,6 @@ def _workflow(source):
     return recovery, verification
 
 
-@pytest.mark.parametrize("source", ["notebook", "reference"])
 @pytest.mark.parametrize(
     "remaining_groups,has_changes",
     [
@@ -73,10 +55,8 @@ def _workflow(source):
     ],
     ids=["complete-undo", "keep-label-edits", "keep-valid-merge"],
 )
-def test_recovery_hands_off_the_replacement(
-    source, remaining_groups, has_changes
-):
-    recovery, verification = _workflow(source)
+def test_recovery_hands_off_the_replacement(remaining_groups, has_changes):
+    recovery, verification = _workflow()
     open_cell, preview_cell, commit_cell = recovery
     parent = SimpleNamespace(curation_id=1)
     abandoned = SimpleNamespace(curation_id=2, parent=parent)
@@ -118,11 +98,10 @@ def test_recovery_hands_off_the_replacement(
     exec(preview_cell, namespace)
     review.preview_import.assert_called_once()
     changes.commit.assert_not_called()
-    if source == "notebook":
-        exec(commit_cell, namespace)
-        changes.commit.assert_not_called()
-        assert namespace["pending_verification"] is old_pending
-        namespace["commit_recovery"] = True
+    exec(commit_cell, namespace)
+    changes.commit.assert_not_called()
+    assert namespace["pending_verification"] is old_pending
+    namespace["commit_recovery"] = True
     exec(commit_cell, namespace)
     changes.commit.assert_called_once_with(
         conflict_resolutions={}, confirm_no_changes=not has_changes

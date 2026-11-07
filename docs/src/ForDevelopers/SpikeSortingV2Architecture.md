@@ -1,13 +1,237 @@
-# Spike sorting v2 architecture
+# Spike sorting v2 developer guide
 
-The supported imports are listed in the
-[v2 API map](../Features/SpikeSortingV2_API.md). Public modules own notebook
-entrypoints, handles, and DataJoint table declarations. Private implementation
-modules live in private domain packages directly under
-`spyglass.spikesorting.v2`, such as `_recording` and `_review`. Parameter models
-remain in the existing `_params` package. Put implementation code in its domain
-and use short filenames within that domain: `_recording/restriction.py`,
-`_sorting/analyzer.py`, and `_review/inspection.py`.
+How `spyglass.spikesorting.v2` is organized, and why.
+
+- Users: the v2 notebooks are the how-to, starting with the
+    [first sort](../notebooks/10_Spike_SortingV2.ipynb). v1 users read the
+    [migration guide](../Features/SpikeSortingV2_Migration.md).
+- Signatures and parameters: the generated
+    [API reference](../api/spikesorting/v2/pipeline.md).
+- v2 keeps Spyglass's DataJoint contracts: Selection / make / merge dispatch,
+    cascade-safe cautious deletes, and the analysis-NWB lifecycle.
+
+## Public API
+
+- **Supported:** the names below, imported from the paths shown, and the public
+    (no leading underscore) methods of the listed tables.
+- **Internal:** underscore packages (`spyglass.spikesorting.v2._*`) and their
+    submodules. No stability guarantee. `docs/src/api/make_pages.py` leaves them
+    out of the API reference.
+- A helper a public module imports for its own use is not API unless listed
+    here. Neither are the `*Fetched` / `*Computed` classes, which carry data
+    between a table's `make_fetch`, `make_compute`, and `make_insert`.
+- `pipeline` declares a literal `__all__`, which the API reference renders. The
+    package root's literal `__all__` is the subset it re-exports. Root names
+    after the first three load lazily from `pipeline`, so
+    `import spyglass.spikesorting.v2` stays light.
+- Most work needs only the package root, `pipeline`, and the curation and review
+    handles. Use the tables to query results or compose a stage by hand.
+
+### Entry points
+
+Package root, `spyglass.spikesorting.v2`:
+
+- `initialize_v2_defaults`: install every default parameter row, idempotently.
+    Run it first.
+- `verify_v2_default_catalog`: report stored default rows whose content differs
+    from the shipped content.
+- `CurationLabel`: the canonical labels (`accept`, `mua`, `noise`, ...).
+
+`spyglass.spikesorting.v2.pipeline`:
+
+- `run_v2_pipeline`: sort one sort group end to end (recording, artifacts, sort,
+    curation, optional auto-curation). Returns a `RunResult`.
+- `run_v2_concat_pipeline`: the same for a same-day `SessionGroup`
+    concatenation.
+- `run_v2_pipeline_session`: every (or selected) sort group of a session.
+- `preflight_v2_pipeline` / `preflight_v2_pipeline_session`: read-only check of
+    a planned run before any compute. Return `PreflightReport` /
+    `PreflightSessionReport`.
+- `estimate_motion` / `estimate_concat_motion`: save a motion estimate without
+    sorting, for inspection before applying it.
+- `describe_sort_groups` / `plot_sort_group_geometry`: inspect sort groups and
+    their geometry before choosing one.
+- `list_pipeline_presets` / `describe_pipeline_presets`: list the presets / show
+    them as a table. `describe_pipeline_preset`: one preset's validated values.
+    `describe_recommendation_status`: the `recommendation_status` legend.
+- `register_pipeline_preset` / `clone_pipeline_preset`: add a preset, or copy
+    one with some values changed.
+- `describe_parameter_rows`: catalog the parameter rows in the database.
+- `describe_run`: a run summary as a receipt (stages, warnings, effective sorter
+    configuration, merge ids). `describe_units`: per-unit sort-time snapshot.
+- `describe_epochs`: task epochs and interval lists on the acquisition clock,
+    with candidate recording keys and cache readiness.
+- `describe_unit_match_choices`: the curations pinnable per group member.
+- `plan_v2_unit_match` / `plan_v2_unit_match_from_sorts` /
+    `plan_v2_unit_match_from_curations`: a reviewable matching plan from a
+    group, named sorts, or exact `CurationRef`s. `preflight_v2_unit_match`:
+    recheck a plan without writing. `run_v2_unit_match`: match and derive
+    tracked units.
+- `select_units_for_analysis`: apply a label policy to a curation and build the
+    `SortedSpikesGroup` downstream analyses read. Returns a
+    `UnitSelectionReceipt` (`describe`, `fetch_spike_data`, `group_key`).
+    `resolve_unit_selection` / `UnitSelectionSnapshot`: a read-only population
+    snapshot for a matching plan. `SelectedGroup`, `V2_UNIT_SELECTION_POLICIES`:
+    one created group, the shipped policies.
+- `open_curation_analyzer`: a disk-backed working copy of a curation's analyzer.
+- Typed results for hints and `isinstance`: `RunResult`, `PreflightReport`,
+    `PreflightSessionReport`, `UnitMatchPlan`, `UnitMatchInputPlan`,
+    `UnitMatchPreflightReport`, `EstimateMotionReceipt`, and the `RunV2*`
+    summaries.
+
+`spyglass.spikesorting.v2.curation_api` (common names also in `pipeline`):
+
+- `RunResult`: a mapping with `root_curation`, `auto_labeled_curation`, and
+    `start_review(...)`.
+- `CurationRef`: a curation pinned to one generation. Lineage, `evaluate`,
+    `start_review`, `preview_merges`, `commit_merges`, `open_analyzer`, subtree
+    deletion.
+- `save_manual_curation`: a manual child (labels and/or merges).
+- `preview_merges` / `commit_merges` / `merge_and_evaluate`: function forms of
+    the merge operations. `create_initial_curation`: the root curation.
+- `EvaluationSpec`, `EvaluationResult`, `EvaluationPlots`: an evaluation's
+    recipe, result snapshot, and plots.
+- `MergedCuration`, `MergeEvaluateReceipt`: merge results.
+    `CurationDeletePreview`, `CurationDeleteReceipt`, `CurationOperation`:
+    subtree deletion and operation provenance.
+- `get_spike_sorting_v2_merge_ids`: merge ids of v2 curations matching a
+    restriction.
+
+`spyglass.spikesorting.v2.review_api` (`FigPackReview` also in `pipeline`; needs
+the `spikesorting-v2-curation` extra):
+
+- `start_review`: evaluate a pinned curation with a profile and build its view.
+    Usually `run.start_review(...)` or `curation.start_review(...)`.
+- `FigPackReview`: resumable review handle (`summary`, `open`, `preview_import`,
+    `commit_panel`, `result`, `find`, `resume`).
+- `CurationChangeSet`, `ReviewImportReceipt`, `MergeLabelConflict`: pending
+    edits, import result, a merge label conflict.
+- `ReviewProfileRef`, `ReviewStageStatus`: a resolved profile, a review's
+    status.
+
+`spyglass.spikesorting.v2.unit_annotation`:
+
+- `UnitAnnotationDefinition`: versioned custom unit-property definitions.
+    `CurationUnitAnnotationSet`: immutable sets over one curation's units.
+- `from_dataframe` / `to_dataframe`, `read_unit_properties`,
+    `AnnotationDefinitionRef`, `AnnotationSetRef`.
+- `annotation_api` exposes `read_unit_properties` and the two references without
+    importing the tables.
+
+`spyglass.spikesorting.v2.visualization` (`ssviz`):
+
+- `available_visualizations`: catalog of the helpers and the key each takes.
+- `recording_key_for_sorting`: a sorting key's `Recording` key.
+- `plot_recording_traces`, `plot_recording_probe_map`: a saved recording.
+- `plot_sorting_summary`, `plot_unit_summary`, `plot_waveforms`,
+    `plot_spikes_on_traces`, `plot_unit_locations`: unit plots of a curation.
+- `plot_metrics`, `plot_si_quality_metrics`, `plot_si_template_metrics`,
+    `plot_suggested_merges`: metric and merge-suggestion plots.
+- `export_si_report`, `export_to_phy`: a SpikeInterface report or Phy folder.
+
+Other modules:
+
+- `bad_channels`: `suggest_bad_channels` (suggest and optionally persist);
+    `detect_bad_channels` (lower-level, on a filtered SI recording).
+- `exceptions`: catchable v2 errors (e.g. `PipelineStageError`,
+    `PreflightError`).
+- `matcher_protocol`: custom matcher registration (see
+    [Custom unit matchers](#custom-unit-matchers)).
+- `spyglass.spikesorting.spikesorting_merge.SpikeSortingOutput`: the merge table
+    v2 curations register on.
+
+### Tables by module
+
+Fill a `*Selection` table with `insert_selection`, then `populate()` the
+computed table; `run_v2_pipeline` does this. The recompute selections are
+planned with `attempt_all`. Parameter tables provide `insert_default()`.
+
+| Module (`spyglass.spikesorting.v2.`) | Tables                                                                                                                                                                                                    |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`, `DriftEstimate` (QC only)                                                                                                    |
+| `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedGroupArtifactSelection`, `SharedGroupArtifactDetection`                          |
+| `sorting`                            | `SorterParameters`, `AnalyzerWaveformParameters`, `PreprocessingWaveformParameters`, `SortingSelection`, `Sorting`                                                                                        |
+| `curation`                           | `CurationV2`                                                                                                                                                                                              |
+| `metric_curation`                    | `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`, `CurationEvaluation`                                                                                                       |
+| `review_profile`                     | `CurationReviewProfile`                                                                                                                                                                                   |
+| `figpack_curation`                   | `FigPackCurationSelection`, `FigPackCuration` (the layer under `FigPackReview`)                                                                                                                           |
+| `motion`                             | `MotionEstimationParameters`, `MotionInterpolationParameters`, `MotionCorrectionParameters`, `MotionEstimateSelection`, `MotionEstimate`, `MotionCorrectedRecordingSelection`, `MotionCorrectedRecording` |
+| `session_group`                      | `SessionGroup`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`                                                                                                                                 |
+| `concat_member_curation`             | `ConcatMemberCuration`                                                                                                                                                                                    |
+| `unit_matching`                      | `MatcherParameters`, `UnitMatchSelection`, `UnitMatch`, `TrackedUnit`                                                                                                                                     |
+| `recompute`                          | `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`              |
+
+- `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
+    two artifact-detection tables. `SortingSelection.ArtifactDetectionSource`
+    holds one optional foreign key to it; user code does not import it. Deleting
+    a result is refused while a sort or frozen concat member references it
+    (`cascade_delete` removes the dependents too). Concat members reference
+    `RecordingArtifactDetection` directly.
+- Parameter tables are Pydantic-validated Lookups; user params validate the
+    `params` blob on insert.
+- `CurationReviewProfile` binds one immutable name to the metric and rule
+    recipes, ordered display columns, label palette, and import mode.
+- The remaining public names in the table modules (insert guards, integrity
+    audits, compute helpers) support the tables and are not entry points.
+
+## Pipeline structure
+
+```
+Recording preparation:
+  SortGroupV2 -> RecordingSelection -> Recording (bandpass + reference)
+
+Artifact choices for single-recording sorting:
+  Recording -> RecordingArtifactSelection -> RecordingArtifactDetection
+  SharedArtifactGroup -> SharedGroupArtifactSelection -> SharedGroupArtifactDetection
+  Both detection types register in ArtifactDetectionOutput.
+
+Single-recording path:
+  Recording + optional ArtifactDetectionOutput
+    -> SortingSelection -> Sorting -> CurationV2
+    -> SpikeSortingOutput.CurationV2
+
+Concat path:
+  Member Recordings + explicit per-member RecordingArtifactDetection choices
+    -> ConcatenatedRecordingSelection.MemberSnapshot
+    -> ConcatenatedRecording (mask -> concatenate; no motion correction)
+    -> SortingSelection (concat source) -> Sorting -> CurationV2
+    -> ConcatMemberCuration (original session timestamps) -> SpikeSortingOutput
+
+Optional motion stage (on either path's Recording or ConcatenatedRecording):
+  Recording | ConcatenatedRecording [+ ArtifactDetectionOutput, single source only]
+    -> MotionEstimateSelection -> MotionEstimate
+    -> MotionCorrectedRecordingSelection -> MotionCorrectedRecording
+    -> SortingSelection.MotionCorrectionSource
+
+Both curation paths:
+  CurationV2 -> CurationEvaluationSelection -> CurationEvaluation
+```
+
+- `SortingSelection` takes its source through one of two exclusive parts:
+    `RecordingSource` (a `Recording`) or `ConcatenatedRecordingSource` (a
+    `ConcatenatedRecording`).
+- Single-recording sorts can add an artifact detection through
+    `ArtifactDetectionOutput`. Concat sources already hold their frozen member
+    masks and accept no sort-stage artifact input.
+- An optional third part, `MotionCorrectionSource`, points at a
+    `MotionCorrectedRecording` computed from the same source and mask.
+- All tables live in `spikesorting_v2_*` schemas (`recording`, `artifact`,
+    `artifact_output`, `sorting`, `curation`, `metric_curation`,
+    `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
+    `unit_matching`, `unit_annotation`, `recompute`, `motion`), so v0/v1 schemas
+    are untouched.
+- `CurationV2` and `ConcatMemberCuration` register as parts on the existing
+    `SpikeSortingOutput`, so v0, v1, imported, and v2 curations share one merge
+    surface. The concat `CurationV2` itself is not registered: its synthetic
+    timeline is unsafe for session-scoped consumers.
+
+## Internal domains
+
+Public modules own notebook entry points, handles, and DataJoint table
+declarations. Implementation lives in private domain packages directly under
+`spyglass.spikesorting.v2`. Parameter models live in `_params`. Put
+implementation code in its domain, with short filenames:
+`_recording/restriction.py`, `_sorting/analyzer.py`, `_review/inspection.py`.
 
 | Internal domain  | Responsibilities                                                                                                 |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -33,8 +257,7 @@ Presentation consumes resolved analyzers and tables of unit properties.
 
 - Import helpers from their canonical owning module.
 - Domain implementations do not depend on orchestration. The data-only pipeline
-    contracts in `_orchestration.types` and the export catalog in
-    `_orchestration.exports` may be shared with other domains.
+    contracts in `_orchestration.types` may be shared with other domains.
 - Every internal module must import without activating a schema or importing
     `spyglass.common`. Import database table classes inside the adapter function
     that needs them. This allows spawned workers to import computation code
@@ -60,8 +283,8 @@ database transaction. Insert registers results atomically after DataJoint
 verifies the input snapshot. Carriers between these phases must retain stable
 DataJoint hashing and serialization behavior.
 
-Output staging uses the shared `AnalysisNwbfile` allocation adapter, which
-reads parent file metadata at call time. This exception is documented in the NWB
+Output staging uses the shared `AnalysisNwbfile` allocation adapter, which reads
+parent file metadata at call time. This exception is documented in the NWB
 storage service. Do not allocate random output files in `make_fetch`: DataJoint
 calls fetch again to verify its deterministic snapshot. Registration belongs in
 `make_insert`, and failed attempts must remove only their own staged outputs.
@@ -124,8 +347,9 @@ their lifecycle and serialization checks when changing supported versions.
 - Outputs are forgotten before COMMIT so a failure after a successful commit
     cannot remove a committed row's files. A failed COMMIT, or a process killed
     between compute and insert, leaves staging on disk until swept.
-- The mixin relies on `AutoPopulate._populate1` internals, so `_core.dj_compat`
-    pins the DataJoint version.
+- The mixin relies on `AutoPopulate._populate1` internals, so the v2 extras
+    bound the DataJoint version (`pyproject.toml`;
+    [Dependency Pins](./Dependencies.md)).
 
 ### Concurrent populate
 
@@ -157,6 +381,13 @@ their lifecycle and serialization checks when changing supported versions.
     DataJoint 0.14 can reach `CurationV2` through a nested part first, so the
     outer delete reports zero rows and rolls back. Orphaned `SpikeSortingOutput`
     masters are removed afterwards.
+- An upstream delete (`Recording`, `RecordingSelection`, `SortGroupV2`) cascades
+    to `Sorting` through DataJoint `FreeTable` objects, which skip the
+    `Sorting.delete()` override, so the analyzer folder stays.
+    `Sorting.find_orphaned_analyzer_folders` reports disk-side orphans, staging
+    leftovers, DB rows with missing folders, and recompute-reclaimed folders.
+    Build ownership is checked by lock; killed processes release theirs. It
+    never deletes a database row.
 - Before that cascade, the delete refuses if any table outside the merge
     references those merge ids. The masters are removed after the confirmation
     prompt, so their dependents would otherwise be deleted unseen. Referencing
@@ -301,6 +532,11 @@ their lifecycle and serialization checks when changing supported versions.
     match, because the content hash omits them and noise and motion estimation
     read them. Motion-corrected rebuilds refuse a stale selection before
     computing.
+- Drift causes include a SpikeInterface or BLAS upgrade, an edited raw NWB, or
+    changed upstream inputs. The error names the file and the recovery options.
+    There is no hash-mutating `repair()`.
+- Rebuild, read repair, and recompute deletion are serialized per artifact
+    (`artifact_slot_lock`), so reclamation never races a rebuild.
 - A rebuild clears stale `RecordingArtifactRecompute.deleted` flags, best
     effort.
 - `get_abs_path` checksums the whole file (~1.3 s/GiB), and DataJoint runs
@@ -308,6 +544,44 @@ their lifecycle and serialization checks when changing supported versions.
     checked with unchanged inode, size and mtime is not checksummed again.
     `_matching.coverage._SCANNED_COVERAGE` reuses the coverage scan (19 s for a
     20 min epoch) the same way; its small entries are never evicted.
+
+### Concatenated recordings
+
+`ConcatenatedRecording` (a masked, unwhitened `ElectricalSeries` stitched from
+the ordered member recordings) has the same fail-closed lifecycle as
+`Recording`, plus a frozen member set.
+
+- **Identity is the ordered member set.** `concat_recording_id` hashes the group
+    and parameter names and a SHA-256 of the ordered logical members
+    (`member_set_hash`). `ConcatenatedRecordingSelection.insert_selection`
+    freezes each member's identity, resolved `Recording` (`recording_id` and
+    `content_hash`), and exact `artifact_detection_id` (or `None`) in the
+    `MemberSnapshot` part. Mask choices are in `member_set_hash`, so a changed
+    mask is a different concat and sort.
+- **Reads use the snapshot.** Materialization and split read `MemberSnapshot`,
+    never the live group. Editing `SessionGroup.Member` does not change an
+    existing concat; the next `insert_selection` mints a new id. A member
+    `Recording` that is gone or drifted raises `MissingRecordingForConcatError`
+    / `ConcatMemberDriftError`.
+- **Artifact dependencies.** Member detections are foreign keys. Ordinary
+    deletion refuses referenced detections; `cascade_delete()` removes the
+    dependent concat and sorts. Masks apply before concatenation and masked
+    samples stay masked. `obs_intervals` stores valid time on the concat
+    timeline; `MemberBoundary.member_valid_times` stores it in original session
+    timestamps for member exports.
+- **Reads and rebuilds mirror `Recording`.** A present file is read through the
+    `~external` checksum. A missing file is rebuilt under
+    `concat_recording_artifact_lock`, verified against `content_hash`, and
+    installed with `os.replace`.
+- **Split-back conserves spikes.** `split_sorting_by_session()` maps a concat
+    sorting to per-member frames. It asserts one strictly increasing boundary
+    per member and that every spike lands in exactly one member, else raises
+    `ConcatSplitError`.
+- **Member outputs are regenerable.** `ConcatMemberCuration` derives each
+    session-aligned Units table from the concat `CurationV2` NWB, the frozen
+    boundaries, and member timestamps.
+- No recompute trio exists for concats. On-demand verified rebuild covers
+    correctness; there is no reclamation surface.
 
 ## Artifact detection and masking
 
@@ -415,6 +689,34 @@ their lifecycle and serialization checks when changing supported versions.
     `kilosort` installed, so a key missing from both params and defaults counts
     as on.
 
+### Motion artifacts
+
+Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
+
+- `MotionEstimate` is a relational row: the SI `Motion` blob, resolved
+    configuration, spans, and peak-count diagnostics. It has no
+    `AnalysisNwbfile` lifecycle.
+- `MotionCorrectedRecording` is a full NWB `ElectricalSeries` with the source's
+    sample count and rate, so about the source's disk size. A single-session
+    `"apply"` sort keeps both on disk, because other consumers read the
+    original.
+- Applying motion is lazy but holds about two float32 copies of each write
+    buffer (parent read plus interpolation output): 2 x n_channels x 4
+    bytes/frame for ~4 s at 128 channels and ~2.4 s at 384, so ~120 MB and ~220
+    MB, plus a smaller per-frame cost for chunk times and bin indices.
+- **A rebuild reapplies the saved motion, never re-estimates.** It uses the
+    shared locked, verified rebuild. A rebuild under another SpikeInterface
+    version is installed when it reproduces the stored hash; a new compute still
+    refuses an SI version change.
+- **Deletion protection.** `SortingSelection.MotionCorrectionSource` is a
+    foreign key onto `MotionCorrectedRecording`. `delete_quick` on a referenced
+    row fails on the constraint, and a plain DataJoint delete without
+    `force_masters` is refused ("Attempt to delete part table ... before
+    deleting from its master"). `cautious_delete` sets `force_masters=True`, so
+    the delete cascades through the sorts that read it. The same covers a
+    `MotionEstimate` referenced by a `MotionCorrectedRecordingSelection`.
+- No recompute trio exists, as for concats.
+
 ## Analyzer caches
 
 - A `SortingAnalyzer` folder (5-50 GB) is rebuildable scratch. A valid `Sorting`
@@ -433,8 +735,30 @@ their lifecycle and serialization checks when changing supported versions.
 - A sort has a display (unwhitened) and a metric (whitened) recipe, so the
     folder name carries `waveform_params_name`. It must match `^[A-Za-z0-9_]+$`,
     checked at insert and at load.
-- Sparse builds write a sparsity receipt with the polarity that chose the
-    channels. A sparse folder without a readable receipt is invalid.
+- A committed merged curation's per-generation cache is named
+    `{sorting_id}__curation_{uuid}_{role}_{recipe_hash}_si_{si_hash}.analyzer`.
+    A derivative with extra extensions appends `_ext_{request_hash}` and is
+    reused by every later request with the same parameters.
+- Memory, on a 415 MB waveform volume (`test_analyzer_memory.py`): extraction
+    peaks at ~1.5x the volume (file-backed dirty pages included), ~2.3x for
+    `zarr`. A lazy load plus one unit's read costs ~0.17x, against >= 1x eager.
+    The waveform sample (`max_spikes_per_unit`, window, sparsity) is never
+    reduced to meet a memory target.
+- The analyzer's recording reference is saved as `recording.pickle`, with
+    artifact exclusions and recipe preprocessing. SI 0.104.3's JSON loses
+    structured artifact intervals, including after probe projection. The pickle
+    stores extractor parameters and source paths, not traces. A cache whose
+    recording cannot reload is invalid and rebuilt.
+- Sparse builds pick channels with the sorter's detection polarity (`peak_sign`
+    or `detect_sign`), so positive and bidirectional detections keep their peak
+    channels. This covers initial builds, cache rebuilds, and curated analyzers.
+    Waveform recipes have no `sparsity.peak_sign`. Each sparse build writes a
+    receipt of that polarity. A sparse folder without a
+    readable receipt, or whose polarity conflicts with its sorter, is invalid
+    and rebuilt. Dense analyzers need no receipt.
+- `Sorting` builds in a private directory and derives unit metadata from that
+    build. Only the winning insert installs it. Extraction runs outside the
+    database transaction; publication uses directory renames.
 
 ### Locks
 
@@ -513,6 +837,17 @@ their lifecycle and serialization checks when changing supported versions.
 - `delete_files` removes the whole folder, including extensions the audit does
     not hash (amplitudes, correlograms, `principal_components`,
     `quality_metrics`). `get_analyzer` rebuilds all of it on the next read.
+- The analyzer comparison hashes deterministic extension data, including the
+    seed-pinned `noise_levels`. Neither family uses a whole-file digest, which
+    folds in volatile NWB metadata. `rounding` applies only to the analyzer
+    comparison; recording precision is fixed by the fingerprint constants.
+- Extension hashes use the version-tagged `array-v2` format: shapes, dtypes, and
+    boundaries are hashed with canonical little-endian values. Hashing streams
+    bounded buffers, memmapped waveforms included.
+- A rebuild retires the prior `SortingAnalyzerVersions` generation and its
+    verdicts, then inventories the published folder again. `attempt_all()`
+    refreshes inventories of folders rebuilt by DB-free workers from a
+    path/size/mtime fingerprint, without reading waveforms.
 
 ## SpikeInterface metric patches
 
@@ -643,6 +978,61 @@ each patch once a fixed SpikeInterface is adopted.
     already have rebuilt an earlier one. A single input writes no pairs and
     reads only its curated units file.
 
+### Custom unit matchers
+
+`from spyglass.spikesorting.v2.matcher_protocol import ...`:
+
+- `register_matcher`, `get_matcher`, `get_input_preparer`: register a backend
+    and parameter schema with an optional preparer; inspect producers.
+- `MatcherProtocol`, `MatchPair`, `SessionMatcherInput`: the backend contract,
+    returned pairs, prepared input bundles.
+- `MatcherInputPreparer`, `MatcherInputSource`, `PreparedMatcherInput`: prepare
+    a backend's bundle from resolved recordings and curated units.
+- `MatcherGeometryValidator`, `MatcherProvenanceProvider`: optional geometry
+    requirements and model or feature fingerprints.
+
+Contracts:
+
+- Register with `register_matcher(backend, schema, input_preparer=preparer)` in
+    each worker process before inserting its parameters or populating its runs.
+- `MatcherInputPreparer.prepare(source, directory, params, job_kwargs)` gets a
+    `MatcherInputSource`: the masked recording, curated sorting, frozen
+    statistics spans, curation identity, and date. It returns a
+    `PreparedMatcherInput` with the backend's `SessionMatcherInput` and any
+    excluded unit ids. It must keep the frozen identity and date. Excluded units
+    stay in the matchable universe, unmatched.
+- Returned pairs use integer curation and unit ids and may reference only units
+    the preparer kept. Invalid pairs fail before the pairs table is written.
+- Prepared files live through inference and are then removed, also on failure.
+- `SessionMatcherInput` names a `bundle_dir`, a `layout` with a positive
+    `layout_version`, and an optional `geometry_path`. The backend owns its
+    formats and validates the layout it consumes.
+- The shared preparer declares `split_half_waveforms` version 1 (dense
+    split-half waveforms), which UnitMatch requires with geometry. It needs
+    SpikeInterface and NumPy, not UnitMatchPy. Omitting `input_preparer` uses
+    it. Other preparers can declare feature or spike-train layouts without
+    geometry.
+- Register a new matcher name when the preparation or inference contract changes
+    for persisted parameters.
+- `UnitMatch.matcher_provenance` and the pairs NWB header record each producer's
+    qualified class name and version, plus the Spyglass version. Backends may
+    supply `backend_version()`, preparers `preparer_version()`; unknown versions
+    are `None`. `provenance_fingerprints(params)` may return named model or
+    feature fingerprints. These are observational: put any result-determining
+    asset fingerprint in the immutable params schema too, and verify the loaded
+    asset against it. The hooks also run for single-input selections, which skip
+    preparation and inference.
+- Geometry belongs to the backend. `validate_geometry(named_positions, params)`
+    checks the effective positions (labeled, chronological) before a new
+    multi-input selection is inserted; raise `ValueError` for unsupported
+    geometry. UnitMatch uses it to require identical geometry and checks again
+    during inference. A backend without the hook triggers no geometry reads.
+- Frozen-input identity, source-overlap checks, and pair validation apply to
+    every backend.
+- Custom parameter schemas may define `tracked_unit_threshold` and
+    `max_strict_nodes`; others use the defaults. Grouping always uses the
+    `strict` policy, whatever the backend.
+
 ## Browser review delivery
 
 - A FigPack bundle opened as a `file://` URL shows a directory listing or an
@@ -664,12 +1054,43 @@ each patch once a fixed SpikeInterface is adopted.
 - A draft save must carry the revision from the last read. `_review.drafts`
     serializes the check and atomic replace with a file lock.
 
+## Provenance in each v2 NWB
+
+Every v2 analysis NWB carries the lineage needed to read it without the
+database. `nwbfile.get_scratch(name)` returns a DataFrame: a scalar header is a
+`key` / `value_json` table, a relational table has one row per member, unit, or
+pair. Large arrays (fingerprints, displacement, templates) are not duplicated;
+only the producing params are written.
+
+| Artifact                    | Container(s)                                                                                                                            | Carries                                                                                                                                                                                                                                                                                                                          |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recording                   | `spyglass_v2_recording_provenance`                                                                                                      | raw source `object_id`, `recording_id`, preprocessing recipe, sort group, resolved reference mode, bad-channel handling, SI version                                                                                                                                                                                              |
+| Sorting                     | `spyglass_v2_sorting_provenance` + per-unit Units columns                                                                               | `peak_amplitude_uv` / `peak_electrode_id` / `n_spikes` / `brain_region` columns (as `Sorting.Unit`); header with recording or concat id, sorter and params, `artifact_detection_id`, display recipe, effective seed, SI and sorter versions                                                                                      |
+| Curated units               | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage`                                                                | curation header (sorting/curation id, `curation_uuid`, parent, source, `merges_applied`, description) and the kept→contributor lineage mirroring `CurationV2.MergeGroup` (raw contributors)                                                                                                                                      |
+| Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage`                                                                | the concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, unit ids preserved across members                                                                                                                                                                         |
+| UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_inputs` + `spyglass_v2_unitmatch_input_recordings`                          | run and matcher header (backend, versions); per input `(sorting_id, curation_id, curation_uuid, source_kind, source_id, input_start_time, waveform_traces, motion_corrected_recording_id)`; per recording `(nwb_file_name, interval_list_name, recording_id, session_start_time, start_sample, end_sample)`                      |
+| CurationEvaluation          | `spyglass_v2_curation_evaluation_provenance`                                                                                            | metric set and recipe names, auto-merge preset and rules, evaluated curation, `source_analyzer_hashes`, SI version, upstream recording or concat `content_hash`                                                                                                                                                                  |
+| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`                                                                          | member artifact detection ids, excluded frame ranges, valid observation intervals, ordered member frame boundaries                                                                                                                                                                                                               |
+| MotionCorrectedRecording    | `spyglass_v2_motion_correction_provenance` + `spyglass_v2_motion_continuity_spans` (+ `spyglass_v2_concat_members` for a concat source) | estimation and interpolation recipes, resolved interpolation config, SI version, estimate and corrected-recording ids, algorithm version, source (kind, key, `content_hash`), removed channels, statistics spans, each continuity span's frames, first/last timestamp and estimation-clock start, and a concat's member back-map |
+
+```python
+import pynwb
+from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.v2.sorting import Sorting
+
+abs_path = AnalysisNwbfile.get_abs_path(
+    (Sorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
+)
+with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
+    prov = io.read().get_scratch("spyglass_v2_sorting_provenance")
+```
+
 ## Process and threading
 
 - SciPy's bundled OpenBLAS 0.3.30 shuts its thread pool down in its fork
     handler, and its next parallel float32 LU then deadlocks rebuilding it. This
     hung MountainSort5's PCA after SpikeInterface's forked workers.
-- `_core.job_config.install_openblas_fork_repair` registers
+- `spyglass.utils.parallel.install_openblas_fork_repair` registers
     `os.register_at_fork(after_in_parent=...)` to reset each OpenBLAS pool's
     thread count, which rebuilds the pool (~2 ms). The hook covers `os.fork` and
     multiprocessing's fork start method. `subprocess` bypasses the fork handlers
@@ -684,6 +1105,130 @@ each patch once a fixed SpikeInterface is adopted.
 - `n_jobs` stays at SpikeInterface's single worker unless a layer sets it. On a
     real 20 min epoch, four worker processes saved ~6 s.
 
+## Shared code outside v2
+
+How code outside `spyglass.spikesorting.v2` supports v2 sources while v0/v1 keep
+working.
+
+### Optional v2 layer in `SpikeSortingOutput`
+
+`spikesorting_merge.py`:
+
+- `CurationV2` and `ConcatMemberCuration` are imported in `try`/`except`, so
+    environments without the v2 dependencies still load the merge table. Their
+    part tables are declared only when the import succeeds, because DataJoint
+    needs the foreign-key target at declaration time.
+- The probe catches `Exception`, not only `ImportError`, because v2 can also
+    fail on a dependency version skew. The error is logged and kept in
+    `_v2_import_error`; `_raise_v2_unavailable` re-raises it when a v2-only
+    helper is called, so users see the real cause.
+- `_available_merge_sources()` lists `"v2"` only when it imported, so
+    `get_restricted_merge_ids()` with default sources works without v2. With
+    default sources the v2 resolver ignores keys meant for v0/v1; an explicit
+    `sources` list keeps it strict so typos raise.
+
+### Warn or raise at the consumer boundary
+
+- Query helpers warn: `get_restricted_merge_ids` on several curations of one
+    sorting, `CurationV2.get_sorting` and the spike accessors on preview
+    curations, and the spike accessors on merges that span pipeline sources.
+    They stay usable for inspection.
+- Decoding-group creation raises (`assert_decoding_merge_ids_ok`), so a
+    dangerous set never reaches a decoder. It raises on a `CurationV2` made with
+    `apply_merge=False` whose proposed merges are unapplied (concat members
+    inherit their parent curation's state), and on two merge ids for the same
+    sorting or the same concat member. v0/v1 sources are skipped.
+- `get_spike_times_by_unit` is the common sink for `get_firing_rate`,
+    `get_spike_indicator` and `get_spike_times`, so it warns once. It warns on
+    the merge ids that `fetch_nwb(return_merge_ids=True)` resolved, so the
+    warnings match what was read. It passes `multi_source=True`, so
+    `_warn_multi_source_merge_ids` replaces `fetch_nwb`'s multi-source error
+    with a warning.
+
+### Legacy SpikeInterface guard
+
+`spikesorting/_legacy_runtime.py`:
+
+- v0/v1 compute paths that call SI APIs removed or renamed in 0.101 (sorting,
+    waveforms, quality metrics, artifact detection, burst curation, clusterless
+    features) call `_require_legacy_si_environment()` first. It raises a clear
+    error instead of an opaque failure inside SI, and does nothing before SI
+    0.101.
+- Read paths are not guarded. Renamed loading and `NumpySorting` APIs go through
+    `_si_compat`; saved binary waveform folders load as a
+    `MockWaveformExtractor` under SI 0.101+ (`_si_compat.load_waveforms`).
+- `clusterless_thresholder` sorting is exempt: it uses `detect_peaks`, not
+    `run_sorter`, whose `output_folder` argument SI 0.101+ rejects.
+
+### MUA detection over observed time
+
+`mua/v1/_detection.py`:
+
+- A group whose units were not observed for the whole time axis carries NaN in
+    those bins. Passed straight to `ripple_detection.multiunit_HSE_detector`,
+    `gaussian_smooth` (`truncate=8`) spreads each NaN bin across the smoothed
+    rate, and the z-score's `nan_policy="omit"` then renormalizes over what
+    survives, which can erase real events and invent others.
+- `detect_multiunit_events_in_observed_runs` runs the detector's steps on each
+    contiguous observed run with one normalization shared across all observed
+    samples, including runs too short to hold an event. A timestamp jump over
+    1.5 sample periods also ends a run; `close_event_threshold` merges only
+    within a run.
+- The module holds no DataJoint tables, so it is unit testable without a
+    database.
+- `firing_rate_over_observed_runs` and the MUA FigURL split runs the same way.
+    Unobserved bins are NaN (missing evidence), not zero (silence).
+
+### Clusterless waveform features from v2 sources
+
+`decoding/v1/waveform_features.py`:
+
+- v2 marks come from a fresh `SortingAnalyzer` over the merge source's recording
+    and sorting (`random_spikes` with `method="all"`, then `waveforms`), wrapped
+    in `_AnalyzerWaveformAccessor` so the shared feature helpers and the NWB
+    writer serve both v0/v1 `WaveformExtractor`s and v2.
+- The persisted v2 analyzer is not reused: it subsamples spikes
+    (`max_spikes_per_unit`, 20000 in the shipped recipes), while clusterless
+    decoding needs every spike's amplitude aligned 1:1 with `spike_times`.
+    `sparse=False` keeps every channel.
+- A finite `max_spikes_per_unit` is rejected before the analyzer build.
+    `_write_waveform_features_to_nwb` rechecks 1:1 alignment for v2 because
+    features and `spike_times` are separate reads.
+- Amplitudes are in microvolts (`return_in_uV=True`); v0/v1 marks are raw ADC
+    counts. A model trained on v1 marks cannot be applied to v2 marks without
+    rescaling.
+- `format="binary_folder"` memmaps the waveforms, so memory stays bounded for
+    millions of spikes.
+- The accessor holds strong references to the analyzer (SI extensions only
+    weakref it) and the `TemporaryDirectory`. `__del__` drops the memmap first
+    because NFS blocks removing a still-mapped file.
+- A zero-unit sort gets an accessor with `analyzer=None`.
+- `spike_location` features need a v2 source; v0/v1 sources raise
+    `NotImplementedError`.
+
+### `UnitAnnotation` unit ids
+
+`spikesorting/analysis/v1/unit_annotation.py`:
+
+- `UnitAnnotation.unit_id` is the NWB units-table id, not a position in the
+    spike-times list. They differ for sparse id sets: v2 merges, and v1 merges,
+    which assign `max(ids) + 1` and drop the constituents.
+- Rows written with positional ids are found by `audit_positional_unit_ids`
+    (merges whose NWB ids are not `0..n-1`) and remapped by
+    `migrate_positional_unit_ids`. The migration validates the full plan first,
+    then inserts a per-merge marker (`UnitAnnotationPositionalIdMigration`) in
+    the same transaction as the rewrite. The marker goes first so a concurrent
+    migration collides before rows are rewritten.
+- `add_annotation` refuses merges with unmigrated rows. Any write it makes marks
+    the merge in the same transaction, so later writes skip the audit's NWB
+    read. It checks the unrestricted table, since a restricted `self` could hide
+    rows and mark an unmigrated merge. Inside a caller's transaction it joins
+    that transaction; the caller must roll back on failure or the merge stays
+    marked without rows.
+- `fetch_unit_spikes` reads markers before rows: a marker guarantees NWB ids,
+    and a missing marker refuses a sparse read even if a migration commits
+    between the two queries.
+
 ## Validation
 
 Recording wrappers serialize their current class paths, such as
@@ -695,12 +1240,32 @@ Scientific benchmark manifests pin the harness files and record execution
 provenance. The test guide explains how source hashes, checkout commits and
 historical acceptance evidence relate to the current harness.
 
-The unpinned motion benchmark wrapper also stamps runtime receipts.
-Reuse requires matching validated runtime, source and harness fingerprints. A
-failed run cannot restamp an old cached result, and a source or runtime change
-during execution leaves the new evidence unstamped. Lazy optional native
-libraries are recorded as observations; NumPy/SciPy BLAS settings, package
-versions and explicit thread configuration enter runtime identity.
+The unpinned motion benchmark wrapper also stamps runtime receipts. Reuse
+requires matching validated runtime, source and harness fingerprints. A failed
+run cannot restamp an old cached result, and a source or runtime change during
+execution leaves the new evidence unstamped. Lazy optional native libraries are
+recorded as observations; NumPy/SciPy BLAS settings, package versions and
+explicit thread configuration enter runtime identity.
+
+### Release workload measurement
+
+`tests/spikesorting/v2/scripts/measure_release_workflow.py` is the repeatable
+release run. On one NWB file, against a private MySQL container and base dir, it
+runs prepare → sort → auto-label → review bundle and reopen → merge →
+re-evaluate → waveform inspection → Phy export → unit selection → warm rerun. It
+samples the whole process tree's RSS (workers included) and the scratch-disk
+footprint, and writes a JSON receipt with stage timings, peak memory, peak
+scratch, bundle bytes, and the effective configuration.
+
+- Run it on a lab Linux machine with one representative 1-3 h tetrode recording
+    and one >= 1 h probe recording to set machine budgets.
+- Short synthetic fixtures are not evidence of long-recording capacity.
+
+### Test safety
+
+- Destructive recompute paths run under a temporary `SPYGLASS_BASE_DIR`, never
+    shared lab storage.
+- Tests prefer `dry_run=True` unless deletion is the behavior under test.
 
 For local test tiers and commands, see the
 [test guide](https://github.com/LorenFrankLab/spyglass/blob/master/tests/README.md).

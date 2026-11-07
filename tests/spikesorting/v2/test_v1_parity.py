@@ -321,18 +321,12 @@ def test_no_phase_label_leakage_in_runtime_code():
     repo_root = Path(__file__).resolve().parents[3]
     v2_src = repo_root / "src" / "spyglass" / "spikesorting" / "v2"
     user_docs = (
-        repo_root / "docs" / "src" / "Features" / "SpikeSortingV2.md",
         repo_root / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md",
         repo_root
         / "docs"
         / "src"
-        / "Features"
-        / "SpikeSortingV2_Quickstart.md",
-        repo_root
-        / "docs"
-        / "src"
-        / "Features"
-        / "SpikeSortingV2StorageManagement.md",
+        / "ForDevelopers"
+        / "SpikeSortingV2Architecture.md",
     )
     notebook_scripts = tuple(
         sorted(

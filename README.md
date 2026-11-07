@@ -139,7 +139,7 @@ Install the `spikesorting-v2` extra
 native MountainSort4 sorter and the MountainSort5 alternative. Configure the
 database connection and ingest your session first. Review bad channels and
 reference metadata before grouping, as shown in the
-[v2 quickstart](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Quickstart/).
+[v2 first-sort notebook](https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV2/).
 
 ```python
 from spyglass.common.common_lab import LabTeam
@@ -177,7 +177,7 @@ analysis_summary = run_v2_pipeline(
     auto_curate=True,
 )
 # Selects unreviewed units that pass the auto-curation rules. For human
-# review, follow the quickstart and select review.result() instead.
+# review, follow the curation notebook and select review.result() instead.
 receipt = select_units_for_analysis(
     analysis_summary.auto_labeled_curation, policy="v2_unflagged_units"
 )
@@ -189,8 +189,8 @@ Without `auto_curate=True`, a run stops at the uncurated root and
 `auto_labeled_merge_id` is `None`. A `root_merge_id` identifies every root unit;
 choose a curated generation and an explicit selection policy before decoding.
 
-See
-[Spike Sorting v2](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2/)
+See the
+[Spike Sorting v2 notebooks](https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV2/)
 for presets, curation, concatenation, and cross-session unit matching, and the
 [v1→v2 migration guide](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Migration/)
 for porting existing v1 workflows. Existing v0/v1 sorts stay queryable; active

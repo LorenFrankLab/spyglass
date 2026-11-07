@@ -22,7 +22,9 @@ from spyglass.spikesorting.v2.pipeline import (
 
 # tests/spikesorting/v2/ -> repo root is parents[3].
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_FEATURE_DOC = _REPO_ROOT / "docs" / "src" / "Features" / "SpikeSortingV2.md"
+_FEATURE_DOC = (
+    _REPO_ROOT / "docs" / "src" / "Features" / "SpikeSortingV2_Migration.md"
+)
 _NOTEBOOK_PY = _REPO_ROOT / "notebooks" / "py_scripts" / "10_Spike_SortingV2.py"
 # The Neuropixels/Kilosort4 preset in the catalog.
 _CANONICAL_NPX_PRESET = "franklab_neuropixels_ks4_2026_06"
