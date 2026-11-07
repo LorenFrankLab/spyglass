@@ -63,7 +63,7 @@ def receipt(monkeypatch):
     monkeypatch.setattr(
         runtime,
         "_source_identity",
-        lambda: {"git_commit": "a" * 40},
+        lambda: {"git_commit": "a" * 40, "git_dirty": False},
     )
     monkeypatch.setattr(
         runtime,
@@ -172,6 +172,7 @@ def test_real_capture_is_stable_without_optional_import_warming():
         (("job_kwargs", "n_jobs"), 4),
         (("execution_params", "docker_image"), "ghcr.io/example/sorter:2.0"),
         (("source", "git_commit"), "d" * 40),
+        (("source", "git_dirty"), True),
     ],
 )
 def test_reproducibility_inputs_change_identity(receipt, path, replacement):
@@ -215,7 +216,9 @@ def test_unknown_optional_package_versions_and_unavailable_hardware_are_explicit
     assert len(runtime.runtime_environment_fingerprint(changed)) == 64
 
 
-def test_source_identity_records_the_checkout_commit(tmp_path, monkeypatch):
+def test_source_identity_records_the_checkout_commit_and_edits(
+    tmp_path, monkeypatch
+):
     import subprocess
 
     checkout = tmp_path / "checkout"
@@ -225,7 +228,7 @@ def test_source_identity_records_the_checkout_commit(tmp_path, monkeypatch):
     module.parent.mkdir(parents=True)
     module.write_text("# runtime\n")
     monkeypatch.setattr(runtime, "__file__", str(module))
-    assert runtime._source_identity() == {"git_commit": None}
+    assert runtime._source_identity() == {"git_commit": None, "git_dirty": None}
 
     def git(*args):
         return subprocess.run(
@@ -248,9 +251,35 @@ def test_source_identity_records_the_checkout_commit(tmp_path, monkeypatch):
         "-m",
         "init",
     )
+    git("add", "src")
+    git(
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "add runtime",
+    )
+    commit = git("rev-parse", "HEAD")
     assert runtime._source_identity() == {
-        "git_commit": git("rev-parse", "HEAD")
+        "git_commit": commit,
+        "git_dirty": False,
     }
+
+    module.write_text("# runtime, edited\n")
+    assert runtime._source_identity() == {
+        "git_commit": commit,
+        "git_dirty": True,
+    }
+
+
+def test_receipt_without_dirty_flag_still_validates(receipt):
+    """Receipts written before ``git_dirty`` existed stay readable."""
+    legacy = copy.deepcopy(receipt)
+    del legacy["source"]["git_dirty"]
+    assert len(runtime.runtime_environment_fingerprint(legacy)) == 64
 
 
 def test_receipt_with_legacy_source_hash_still_validates(receipt):

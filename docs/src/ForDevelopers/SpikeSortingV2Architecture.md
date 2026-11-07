@@ -317,8 +317,9 @@ metric values may still be NaN. Observation windows reject reversed endpoints
 while metrics continue merging overlaps and ignoring zero-length exposure.
 
 Sorting, curation, member exports, evaluation and matching provenance carry
-structured runtime receipts from `_core.runtime`: code bytes and checkout
-identity, Python and dependency versions, platform and accelerator metadata,
+structured runtime receipts from `_core.runtime`: the checkout's git commit and
+whether its tracked source had uncommitted edits (`git_dirty`), Python and
+dependency versions, platform and accelerator metadata,
 thread configuration, native BLAS settings and resolved execution settings.
 Receipts describe the host orchestrator. Requested container settings and the
 sorter adapter's observed producer versions remain distinct metadata; the host

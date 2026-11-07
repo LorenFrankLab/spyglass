@@ -120,7 +120,7 @@ def _source_identity():
     # A non-clone install has no commit here; its packages["spyglass-neuro"]
     # version carries the build's +g<hash>.
     root = Path(__file__).resolve().parents[5]
-    commit = None
+    commit = dirty = None
     if (root / ".git").exists():
         try:
             commit = subprocess.run(
@@ -131,9 +131,19 @@ def _source_identity():
                 text=True,
                 timeout=5,
             ).stdout.strip()
+            # Uncommitted edits to tracked source make the commit inexact.
+            dirty = (
+                subprocess.run(
+                    ["git", "diff", "--quiet", "HEAD", "--", "src"],
+                    cwd=root,
+                    capture_output=True,
+                    timeout=5,
+                ).returncode
+                != 0
+            )
         except (OSError, subprocess.SubprocessError):
             pass
-    return {"git_commit": commit}
+    return {"git_commit": commit, "git_dirty": dirty}
 
 
 def _cpu_model():
@@ -344,6 +354,9 @@ def _validate_runtime_values(snapshot):
     _require_string(
         snapshot["source"]["git_commit"], "source.git_commit", optional=True
     )
+    dirty = snapshot["source"].get("git_dirty")
+    if dirty is not None and type(dirty) is not bool:
+        raise ValueError("runtime environment.source.git_dirty is invalid.")
     for group, keys in (
         ("threading", _THREAD_ENV),
         ("accelerators", _DEVICE_ENV),
