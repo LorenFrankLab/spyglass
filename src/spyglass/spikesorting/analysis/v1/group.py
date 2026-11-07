@@ -132,9 +132,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         merge_ids = [
             k.get("merge_id", k.get("spikesorting_merge_id")) for k in keys
         ]
-        SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
-        SpikeSortingOutput.assert_merge_ids_match_session(
-            merge_ids, nwb_file_name
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            merge_ids, nwb_file_name=nwb_file_name
         )
 
         selections = {

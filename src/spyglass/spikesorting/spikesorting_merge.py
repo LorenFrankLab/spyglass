@@ -441,11 +441,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
     @classmethod
-    def assert_decoding_merge_ids_ok(cls, merge_ids) -> None:
+    def assert_decoding_merge_ids_ok(
+        cls, merge_ids, nwb_file_name=None
+    ) -> None:
         """Validate merge_ids destined for a decoding group.
 
         Raises where query helpers only warn. v0/v1 sources are skipped.
 
+        - A concat-member output from a session other than
+          ``nwb_file_name`` (checked only when it is given).
         - A v2 preview curation (``apply_merge=False``, merges unapplied)
           would decode oversplit units. Concat members inherit their parent
           curation's state.
@@ -456,7 +460,12 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         ----------
         merge_ids : iterable
             ``merge_id`` values (or anything ``& {"merge_id": ...}`` accepts).
+        nwb_file_name : str, optional
+            Session of the group the merge_ids will join.
         """
+        merge_ids = list(merge_ids)
+        if nwb_file_name is not None:
+            cls._assert_merge_ids_match_session(merge_ids, nwb_file_name)
         if CurationV2 is None:
             return
         source_to_merges: dict = {}
@@ -497,7 +506,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
     @classmethod
-    def assert_merge_ids_match_session(cls, merge_ids, nwb_file_name) -> None:
+    def _assert_merge_ids_match_session(cls, merge_ids, nwb_file_name) -> None:
         """Reject concat-member outputs owned by a different session.
 
         A decoding group's units part only foreign-keys a merge id, so it

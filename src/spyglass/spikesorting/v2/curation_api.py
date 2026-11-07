@@ -265,6 +265,19 @@ class CurationRef:
         return self._unchecked_key()
 
     @property
+    def plots(self) -> CurationPlots:
+        """Return the plotting facade for this curation.
+
+        Returns
+        -------
+        CurationPlots
+            Each method calls the matching
+            ``spyglass.spikesorting.v2.visualization.plot_*`` function with
+            this ref, which re-verifies its generation.
+        """
+        return CurationPlots(self)
+
+    @property
     def merge_id(self) -> uuid.UUID | None:
         """Return this exact curation's downstream merge id, if registered.
 
@@ -751,6 +764,33 @@ class EvaluationSpec:
 
     metric_params_name: str
     auto_curation_rules_name: str
+
+
+class CurationPlots:
+    """Plotting facade for one exact curation's display analyzer."""
+
+    def __init__(self, curation: "CurationRef"):
+        self._curation = curation
+
+    def _call(self, function: str, *args, **kwargs):
+        from spyglass.spikesorting.v2 import visualization
+
+        return getattr(visualization, function)(self._curation, *args, **kwargs)
+
+    def sorting_summary(self, **kwargs):
+        return self._call("plot_sorting_summary", **kwargs)
+
+    def unit_summary(self, unit_id, **kwargs):
+        return self._call("plot_unit_summary", unit_id, **kwargs)
+
+    def waveforms(self, unit_ids=None, **kwargs):
+        return self._call("plot_waveforms", unit_ids, **kwargs)
+
+    def spikes_on_traces(self, **kwargs):
+        return self._call("plot_spikes_on_traces", **kwargs)
+
+    def unit_locations(self, **kwargs):
+        return self._call("plot_unit_locations", **kwargs)
 
 
 class EvaluationPlots:
@@ -1766,6 +1806,7 @@ __all__ = [
     "CurationDeletePreview",
     "CurationDeleteReceipt",
     "CurationOperation",
+    "CurationPlots",
     "CurationRef",
     "EvaluationPlots",
     "EvaluationResult",

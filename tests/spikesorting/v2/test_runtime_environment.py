@@ -63,10 +63,7 @@ def receipt(monkeypatch):
     monkeypatch.setattr(
         runtime,
         "_source_identity",
-        lambda: {
-            "git_commit": "a" * 40,
-            "source_sha256": "b" * 64,
-        },
+        lambda: {"git_commit": "a" * 40},
     )
     monkeypatch.setattr(
         runtime,
@@ -174,7 +171,6 @@ def test_real_capture_is_stable_without_optional_import_warming():
         ),
         (("job_kwargs", "n_jobs"), 4),
         (("execution_params", "docker_image"), "ghcr.io/example/sorter:2.0"),
-        (("source", "source_sha256"), "c" * 64),
         (("source", "git_commit"), "d" * 40),
     ],
 )
@@ -219,29 +215,49 @@ def test_unknown_optional_package_versions_and_unavailable_hardware_are_explicit
     assert len(runtime.runtime_environment_fingerprint(changed)) == 64
 
 
-def test_source_identity_changes_when_package_code_changes(
-    tmp_path, monkeypatch
-):
-    package = tmp_path / "checkout" / "src" / "spyglass"
-    module = package / "spikesorting" / "v2" / "_core" / "runtime.py"
+def test_source_identity_records_the_checkout_commit(tmp_path, monkeypatch):
+    import subprocess
+
+    checkout = tmp_path / "checkout"
+    module = (
+        checkout / "src" / "spyglass" / "spikesorting" / "v2" / "_core"
+    ) / "runtime.py"
     module.parent.mkdir(parents=True)
     module.write_text("# runtime\n")
-    scientific = package / "scientific.py"
-    scientific.write_text("threshold = 5\n")
     monkeypatch.setattr(runtime, "__file__", str(module))
-    first = runtime._source_identity()
-    scientific.write_text("threshold = 6\n")
-    second = runtime._source_identity()
-    assert first["git_commit"] is None
-    assert second["git_commit"] is None
-    assert first["source_sha256"] != second["source_sha256"]
-    scientific.with_suffix(".md").write_text("non-source documentation\n")
-    assert runtime._source_identity() == second
-    moved = scientific.with_name("renamed.py")
-    scientific.rename(moved)
-    assert (
-        runtime._source_identity()["source_sha256"] != second["source_sha256"]
+    assert runtime._source_identity() == {"git_commit": None}
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "-q")
+    git(
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
     )
+    assert runtime._source_identity() == {
+        "git_commit": git("rev-parse", "HEAD")
+    }
+
+
+def test_receipt_with_legacy_source_hash_still_validates(receipt):
+    """Receipts written before the source hash was dropped stay readable."""
+    legacy = copy.deepcopy(receipt)
+    legacy["source"]["source_sha256"] = "b" * 64
+    assert len(runtime.runtime_environment_fingerprint(legacy)) == 64
 
 
 def test_requested_container_is_configuration_not_producer_environment(receipt):
@@ -269,7 +285,6 @@ def test_requested_container_is_configuration_not_producer_environment(receipt):
         ("platform", "cpu_affinity"),
         ("packages", "numpy"),
         ("source", "git_commit"),
-        ("source", "source_sha256"),
         ("threading", "environment", "OMP_NUM_THREADS"),
         ("threading", "blas_pools"),
         ("threading", "blas_pools", 0, "num_threads"),
@@ -300,7 +315,6 @@ def test_fingerprint_rejects_missing_nested_receipt_fields(receipt, path):
         (("platform", "cpu_count"), True),
         (("platform", "cpu_affinity"), "all"),
         (("packages", "numpy"), 123),
-        (("source", "source_sha256"), "not-a-digest"),
         (("source", "git_commit"), 123),
         (("threading", "environment", "OMP_NUM_THREADS"), 2),
         (("threading", "blas_pools"), [{}]),

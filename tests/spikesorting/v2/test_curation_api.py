@@ -181,6 +181,48 @@ def test_evaluation_facade_refuses_changed_or_missing_recipes(
         result.plots.metrics()
 
 
+def test_curation_plots_delegate_to_visualization(monkeypatch):
+    """``ref.plots`` passes the ref and arguments to each module function."""
+    from spyglass.spikesorting.v2 import visualization
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    calls = []
+
+    def recorder(name):
+        def record(*args, **kwargs):
+            calls.append((name, args, kwargs))
+            return name
+
+        return record
+
+    for function in (
+        "plot_sorting_summary",
+        "plot_unit_summary",
+        "plot_waveforms",
+        "plot_spikes_on_traces",
+        "plot_unit_locations",
+    ):
+        monkeypatch.setattr(visualization, function, recorder(function))
+    ref = CurationRef(uuid.uuid4(), 1, uuid.uuid4())
+
+    assert ref.plots.sorting_summary(backend="figpack") == (
+        "plot_sorting_summary"
+    )
+    ref.plots.unit_summary(3, compute_missing=True)
+    ref.plots.waveforms([3, 4], backend="ipywidgets")
+    ref.plots.waveforms()
+    ref.plots.spikes_on_traces()
+    ref.plots.unit_locations(compute_missing=True)
+    assert calls == [
+        ("plot_sorting_summary", (ref,), {"backend": "figpack"}),
+        ("plot_unit_summary", (ref, 3), {"compute_missing": True}),
+        ("plot_waveforms", (ref, [3, 4]), {"backend": "ipywidgets"}),
+        ("plot_waveforms", (ref, None), {}),
+        ("plot_spikes_on_traces", (ref,), {}),
+        ("plot_unit_locations", (ref,), {"compute_missing": True}),
+    ]
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_curation_ref_state_operation_lineage_and_merge_id(

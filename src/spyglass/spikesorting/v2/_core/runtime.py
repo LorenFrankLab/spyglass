@@ -9,7 +9,6 @@ describe libraries loaded at capture time and do not change environment identity
 from __future__ import annotations
 
 import functools
-import hashlib
 import json
 import os
 import platform
@@ -118,17 +117,9 @@ def _installed_distributions():
 
 
 def _source_identity():
-    package = Path(__file__).resolve().parents[3]
-    files = {
-        path.relative_to(package)
-        .as_posix(): hashlib.sha256(path.read_bytes())
-        .hexdigest()
-        for path in sorted(package.rglob("*.py"))
-    }
-    if not files:
-        raise ValueError("Cannot fingerprint Spyglass source: no Python files.")
-    source_sha = sha256_json(files)
-    root = package.parent.parent
+    # A non-clone install has no commit here; its packages["spyglass-neuro"]
+    # version carries the build's +g<hash>.
+    root = Path(__file__).resolve().parents[5]
     commit = None
     if (root / ".git").exists():
         try:
@@ -142,7 +133,7 @@ def _source_identity():
             ).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             pass
-    return {"git_commit": commit, "source_sha256": source_sha}
+    return {"git_commit": commit}
 
 
 def _cpu_model():
@@ -444,7 +435,7 @@ def runtime_environment_fingerprint(snapshot):
         },
         "packages": set(_PACKAGES),
         "installed_distributions": set(),
-        "source": {"git_commit", "source_sha256"},
+        "source": {"git_commit"},
         "threading": {"environment", "blas_pools"},
         "accelerators": {"environment", "nvidia"},
         "job_kwargs": set(),
@@ -472,15 +463,6 @@ def runtime_environment_fingerprint(snapshot):
             raise ValueError(
                 f"runtime environment package {name!r} has an invalid version."
             )
-    source_sha = snapshot["source"]["source_sha256"]
-    if (
-        not isinstance(source_sha, str)
-        or len(source_sha) != 64
-        or any(char not in "0123456789abcdef" for char in source_sha)
-    ):
-        raise ValueError(
-            "runtime environment.source.source_sha256 must be SHA-256."
-        )
     identity = {
         key: value
         for key, value in snapshot.items()

@@ -80,9 +80,8 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
             return
         # After the duplicate return: keys for an existing group are unused
         merge_ids = [k.get("spikesorting_merge_id") for k in keys]
-        SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
-        SpikeSortingOutput.assert_merge_ids_match_session(
-            merge_ids, nwb_file_name
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            merge_ids, nwb_file_name=nwb_file_name
         )
         self.insert1(
             group_key,
