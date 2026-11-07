@@ -130,7 +130,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - `convert_dataset_type` keeps a chunked dataset's `maxshape` and leaves the
     original dataset in place when the dtype conversion fails #1711
 - `_get_peak_amplitude` reads amplitudes at the waveform extractor's
-    `nbefore`, not the window midpoint, for asymmetric windows #1711
+    `nbefore`, not the window midpoint. Clusterless amplitude marks (v0
+    `UnitMarks`, v1 `UnitWaveformFeatures`) and v0/v1 `BurstPair` peak
+    amplitudes change for waveform parameters whose `ms_before` and `ms_after`
+    differ #1711
 
 ### Pipelines
 
