@@ -89,11 +89,13 @@ def test_create_initial_curation_equiv(populated_sorting):
 def test_preview_merges_records_not_applies(polymer_60s_sort):
     """``preview_merges`` records merges without applying them."""
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import create_initial_curation
+    from spyglass.spikesorting.v2.curation_api import CurationRef
 
     a, b = _two_unit_ids(polymer_60s_sort)
     clear_curations_for(polymer_60s_sort)
-    root = create_initial_curation(polymer_60s_sort)
+    root = CurationRef.from_key(
+        CurationV2.create_initial_curation(polymer_60s_sort)
+    )
     key = root.preview_merges([[a, b]]).as_key()
     assert key["curation_id"] != root.curation_id
     assert (
@@ -112,12 +114,14 @@ def test_preview_merges_records_not_applies(polymer_60s_sort):
 def test_commit_merges_commits(polymer_60s_sort):
     """``commit_merges`` commits the merged unit set."""
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import create_initial_curation
+    from spyglass.spikesorting.v2.curation_api import CurationRef
 
     a, b = _two_unit_ids(polymer_60s_sort)
     n_sort_units = len(_unit_ids(polymer_60s_sort))
     clear_curations_for(polymer_60s_sort)
-    root = create_initial_curation(polymer_60s_sort)
+    root = CurationRef.from_key(
+        CurationV2.create_initial_curation(polymer_60s_sort)
+    )
     key = root.commit_merges([[a, b]]).as_key()
     assert (
         int((CurationV2 & key).fetch1("parent_curation_id")) == root.curation_id
@@ -133,13 +137,15 @@ def test_commit_merges_reuses_matching_child(polymer_60s_sort):
     """Reuse by default makes a manual-merge notebook cell rerunnable."""
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2._core.enums import CurationLabel
-    from spyglass.spikesorting.v2.curation_api import create_initial_curation
+    from spyglass.spikesorting.v2.curation_api import CurationRef
 
     a, b = _two_unit_ids(polymer_60s_sort)
     all_unit_ids = _unit_ids(polymer_60s_sort)
     merged_unit_id = max(all_unit_ids) + 1
     clear_curations_for(polymer_60s_sort)
-    root = create_initial_curation(polymer_60s_sort)
+    root = CurationRef.from_key(
+        CurationV2.create_initial_curation(polymer_60s_sort)
+    )
 
     first = root.commit_merges(
         [[a, b]],
@@ -172,28 +178,27 @@ def test_merge_facade_forwards_to_insert_curation(planted_two_unit_sort):
     Runs on the planted two-unit sort, so it needs no 60s fixture.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import (
-        commit_merges,
-        create_initial_curation,
-        preview_merges,
-    )
+    from spyglass.spikesorting.v2.curation_api import CurationRef
 
     sorting_key = dict(planted_two_unit_sort)
     a, b = _two_unit_ids(sorting_key)
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(sorting_key)
-        for merge, applied in ((preview_merges, False), (commit_merges, True)):
-            child = merge(
-                parent_curation=root,
-                groups=[[a, b]],
-                description=f"{merge.__name__} child",
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        for name, applied in (
+            ("preview_merges", False),
+            ("commit_merges", True),
+        ):
+            child = getattr(root, name)(
+                [[a, b]], description=f"{name} child"
             ).as_key()
             row = (CurationV2 & child).fetch1()
             assert row["sorting_id"] == root.sorting_id
             assert int(row["parent_curation_id"]) == root.curation_id
             assert bool(row["merges_applied"]) is applied
-            assert row["description"] == f"{merge.__name__} child"
+            assert row["description"] == f"{name} child"
     finally:
         clear_curations_for(sorting_key)
 
@@ -503,7 +508,7 @@ def test_commit_merges_forwards_allow_custom_labels(planted_two_unit_sort):
     custom (non-canonical) parent label does not fail the child insert.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import create_initial_curation
+    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting_key = dict(planted_two_unit_sort)
@@ -513,10 +518,12 @@ def test_commit_merges_forwards_allow_custom_labels(planted_two_unit_sort):
     clear_curations_for(planted_two_unit_sort)
     try:
         # A root carrying a CUSTOM label on unit 0 (needs the flag here too).
-        root = create_initial_curation(
-            sorting_key,
-            labels={unit_ids[0]: ["my_custom"]},
-            allow_custom_labels=True,
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(
+                sorting_key,
+                labels={unit_ids[0]: ["my_custom"]},
+                allow_custom_labels=True,
+            )
         )
         # The merged unit inherits unit 0's custom label.
         with pytest.raises(ValueError, match="not in CurationLabel"):

@@ -226,9 +226,12 @@ class AnnotationSetRef:
         }
 
     def to_dataframe(self) -> pd.DataFrame:
-        from spyglass.spikesorting.v2.unit_annotation import to_dataframe
+        """Return this set's values indexed by curated ``unit_id``."""
+        from spyglass.spikesorting.v2.unit_annotation import (
+            CurationUnitAnnotationSet,
+        )
 
-        return to_dataframe(self)
+        return CurationUnitAnnotationSet.to_dataframe(self)
 
 
 def read_unit_properties(

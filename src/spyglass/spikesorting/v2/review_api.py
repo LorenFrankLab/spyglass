@@ -739,16 +739,6 @@ class ReviewImportReceipt:
     stages: tuple[ReviewStageStatus, ...]
     needs_merge_verification: bool
 
-    @property
-    def created_at(self):
-        """Creation timestamp of the committed/reused child."""
-        return self.curation.created_at
-
-    @property
-    def created_by(self) -> str:
-        """Database user recorded for the committed/reused child."""
-        return self.curation.created_by
-
     def next_step(self) -> str:
         """One line saying whether the committed result is usable yet."""
         child = self.curation.curation_id
@@ -769,7 +759,7 @@ class ReviewImportReceipt:
         Parent annotation sets are not carried to the child; select
         child-scoped sets explicitly.
         """
-        return start_review(
+        return _start_review(
             self.curation,
             self.changes.review.profile,
             upload=self.changes.review.upload,
@@ -838,7 +828,7 @@ def _resolve_annotation_sets(
     return resolved
 
 
-def start_review(
+def _start_review(
     parent: CurationRef,
     profile: str | ReviewProfileRef,
     *,
@@ -851,78 +841,10 @@ def start_review(
 ) -> FigPackReview:
     """Evaluate one pinned curation and build/reuse its seeded review view.
 
-    Evaluates ``parent`` with the profile's recipe (or checks the supplied
-    ``evaluation``), then builds or reuses the FigPack review view. Once the
-    parent gains a child, the same call starts a new review; use
-    :meth:`FigPackReview.find` to resume an earlier one.
-
-    Parameters
-    ----------
-    parent : CurationRef
-        The curation generation to review. Its identity is re-verified
-        before use.
-    profile : str or ReviewProfileRef
-        A ``CurationReviewProfile`` name or a resolved profile reference. It
-        supplies the evaluation recipe, label options, and displayed unit
-        properties. A ``ReviewProfileRef`` must still match its persisted
-        row.
-    upload : bool, optional
-        Publish a hosted figpack.org figure (requires a FigPack API key
-        unless ``ephemeral``). Default ``False`` saves a local bundle.
-    ephemeral : bool, optional
-        For ``upload=True``, publish a temporary figure that needs no API
-        key. Ignored when ``upload=False``. Default ``False``.
-    evaluation : EvaluationResult, optional
-        An existing evaluation to display. It must cover ``parent`` with the
-        profile's exact recipe names. Default ``None`` creates or reuses the
-        profile's evaluation of ``parent`` and populates it.
-    metric_waveform_params_name : str, optional
-        Metric waveform recipe for the evaluation. Default ``None`` uses the
-        supplied ``evaluation``'s recipe, or ``parent``'s default recipe when
-        none is supplied.
-    annotation_sets : sequence, optional
-        Annotation-set references (anything ``AnnotationSetRef.from_key``
-        accepts) to include in the review. Each must belong to ``parent``
-        and none may repeat. Default ``()`` includes none.
-    display_options : ReviewDisplayOptions or mapping, optional
-        Browser payload bounds (raster/amplitude samples, point budget,
-        correlogram pair filter). Persisted with the review; does not affect
-        the evaluation. A mapping may only use ``ReviewDisplayOptions`` field
-        names. Default ``None`` uses the defaults.
-
-    Returns
-    -------
-    FigPackReview
-        Handle for the review. ``uri`` locates the built view, and
-        ``stages`` reports whether this call computed or reused the
-        evaluation and the view.
-
-    Raises
-    ------
-    ImportError
-        If the optional ``figpack`` or ``figpack-spike-sorting`` package is
-        not installed.
-    TypeError
-        If ``parent`` is not a ``CurationRef``, or ``display_options`` is not
-        a ``ReviewDisplayOptions``, a mapping, or ``None``.
-    ValueError
-        If ``display_options`` has unknown or invalid fields; an annotation
-        set belongs to a different curation or is listed twice; ``profile``
-        does not resolve to exactly one ``CurationReviewProfile`` row or no
-        longer matches its pinned hash; ``evaluation`` is not over
-        ``parent`` with the profile's recipe names or with
-        ``metric_waveform_params_name``; or ``parent`` is an
-        uncommitted merge preview.
-    CurationNotFoundError
-        If ``parent`` no longer identifies its curation generation (the row
-        was deleted or its numeric id reused).
-    LookupError
-        If the ``CurationEvaluation`` row for ``evaluation`` is not
-        populated.
-    FigPackUploadError
-        If the view must be built with ``upload=True`` and
-        ``ephemeral=False`` while no FigPack API key is configured (an existing
-        hosted view is reused without uploading).
+    The shared body of the ``start_review`` methods; see
+    :meth:`CurationRef.start_review` for the parameters. ``evaluation``, when
+    given, must cover ``parent`` with the profile's exact recipe names (and
+    ``metric_waveform_params_name``, if given) and be populated.
     """
     resolved_display = ReviewDisplayOptions.from_mapping(display_options)
     from spyglass.spikesorting.v2._review.view import require_figpack
@@ -1412,5 +1334,4 @@ __all__ = [
     "ReviewImportReceipt",
     "ReviewProfileRef",
     "ReviewStageStatus",
-    "start_review",
 ]

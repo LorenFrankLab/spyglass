@@ -38,34 +38,30 @@ def test_public_curation_api_is_reexported():
 
 def test_non_root_facade_requires_typed_parent():
     """Child facade operations expose no numeric root-sentinel escape hatch."""
-    from spyglass.spikesorting.v2.curation_api import (
-        commit_merges,
-        merge_and_evaluate,
-        preview_merges,
-        save_manual_curation,
-    )
+    from spyglass.spikesorting.v2.curation_api import save_manual_curation
 
-    for function in (
-        commit_merges,
-        merge_and_evaluate,
-        preview_merges,
-        save_manual_curation,
+    parameter = inspect.signature(save_manual_curation).parameters[
+        "parent_curation"
+    ]
+    assert parameter.default is inspect.Parameter.empty
+    with pytest.raises(TypeError, match="requires parent_curation=CurationRef"):
+        save_manual_curation(parent_curation={"curation_id": -1})
+
+
+def test_merge_operations_have_one_public_form():
+    """Merges and reviews start from the facade objects, not module functions."""
+    from spyglass.spikesorting.v2 import curation_api, review_api
+
+    for name in (
+        "commit_merges",
+        "create_initial_curation",
+        "merge_and_evaluate",
+        "preview_merges",
     ):
-        parameter = inspect.signature(function).parameters["parent_curation"]
-        assert parameter.default is inspect.Parameter.empty
-        with pytest.raises(
-            TypeError, match="requires parent_curation=CurationRef"
-        ):
-            if function is save_manual_curation:
-                function(parent_curation={"curation_id": -1})
-            elif function is merge_and_evaluate:
-                function(
-                    parent_curation={"curation_id": -1},
-                    spec=None,
-                    groups=[[0, 1]],
-                )
-            else:
-                function(parent_curation={"curation_id": -1}, groups=[[0, 1]])
+        assert not hasattr(curation_api, name)
+    assert not hasattr(review_api, "start_review")
+    for method in ("preview_merges", "commit_merges", "start_review"):
+        assert callable(getattr(curation_api.CurationRef, method))
 
 
 def test_merge_group_normalization_is_lossless():
@@ -287,7 +283,6 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
     from spyglass.spikesorting.v2.curation_api import (
         CurationRef,
         RunResult,
-        create_initial_curation,
         save_manual_curation,
     )
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -296,7 +291,9 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
     unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(sorting_key)
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
         labeled = save_manual_curation(
             parent_curation=root,
             labels={unit_ids[0]: ["mua"]},
@@ -404,7 +401,7 @@ def test_subtree_delete_is_leaf_up(planted_three_unit_sort):
 
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import (
-        create_initial_curation,
+        CurationRef,
         save_manual_curation,
     )
     from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
@@ -414,7 +411,9 @@ def test_subtree_delete_is_leaf_up(planted_three_unit_sort):
     unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(sorting_key)
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
         child = save_manual_curation(
             parent_curation=root, labels={unit_ids[0]: ["mua"]}
         )
@@ -449,11 +448,7 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.curation_api import (
-        EvaluationSpec,
-        create_initial_curation,
-        merge_and_evaluate,
-    )
+    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
@@ -464,8 +459,10 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
     unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(
-            sorting_key, labels={unit_ids[0]: ["mua"]}
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(
+                sorting_key, labels={unit_ids[0]: ["mua"]}
+            )
         )
         evaluation = root.evaluate(
             metric_params_name="minimal",
@@ -508,12 +505,6 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
         with CurationV2.connection.transaction:
             with pytest.raises(RuntimeError, match="outside.*transaction"):
                 evaluation.merge_and_evaluate([[unit_ids[0], unit_ids[1]]])
-            with pytest.raises(RuntimeError, match="outside.*transaction"):
-                merge_and_evaluate(
-                    parent_curation=root,
-                    spec=EvaluationSpec("minimal", "none"),
-                    groups=[[unit_ids[0], unit_ids[1]]],
-                )
 
         # The expert commit does not evaluate; merge_and_evaluate resumes.
         committed = evaluation.commit_merges([[unit_ids[0], unit_ids[1]]])
@@ -532,7 +523,11 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
 
         second = evaluation.merge_and_evaluate([[unit_ids[0], unit_ids[1]]])
         assert second.child == first.child
-        assert set(second.stage_statuses.values()) == {"reused"}
+        assert {
+            second.curation_status,
+            second.evaluation_selection_status,
+            second.evaluation_status,
+        } == {"reused"}
         assert second.evaluation.evaluation_id == first.evaluation.evaluation_id
 
         replaced = evaluation.accept_labels(mode="replace")
@@ -557,9 +552,10 @@ def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
     recipe, not the default."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
+    from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
         EvaluationResult,
-        create_initial_curation,
     )
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
@@ -571,7 +567,9 @@ def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
     unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(sorting_key)
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
         default_key = CurationEvaluationSelection.insert_by_curation_id(
             root.sorting_id, root.curation_id, "minimal", "none"
         )
@@ -612,17 +610,14 @@ def test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe(
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_merge_and_evaluate_function_uses_a_requested_recipe(
+def test_evaluate_then_merge_and_evaluate_uses_a_requested_recipe(
     planted_two_unit_sort, curation_evaluation_defaults
 ):
-    """The function form evaluates parent and child with a named recipe."""
+    """``evaluate(...).merge_and_evaluate`` keeps a named recipe throughout."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2.curation_api import (
-        EvaluationSpec,
-        create_initial_curation,
-        merge_and_evaluate,
-    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.metric_curation import (
         CurationEvaluation,
         CurationEvaluationSelection,
@@ -633,7 +628,9 @@ def test_merge_and_evaluate_function_uses_a_requested_recipe(
     unit_ids = sorted(map(int, (Sorting.Unit & sorting_key).fetch("unit_id")))
     clear_curations_for(sorting_key)
     try:
-        root = create_initial_curation(sorting_key)
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
         default_key = CurationEvaluationSelection.insert_by_curation_id(
             root.sorting_id, root.curation_id, "minimal", "none"
         )
@@ -649,12 +646,11 @@ def test_merge_and_evaluate_function_uses_a_requested_recipe(
             if name != default_recipe
         )
 
-        receipt = merge_and_evaluate(
-            parent_curation=root,
-            spec=EvaluationSpec("minimal", "none"),
-            groups=[[unit_ids[0], unit_ids[1]]],
+        receipt = root.evaluate(
+            metric_params_name="minimal",
+            auto_curation_rules_name="none",
             metric_waveform_params_name=recipe,
-        )
+        ).merge_and_evaluate([[unit_ids[0], unit_ids[1]]])
 
         parent_recipes = set(
             (

@@ -29,6 +29,11 @@ How `spyglass.spikesorting.v2` is organized, and why.
 
 ### Entry points
 
+Each operation has one public form: a `pipeline` function or a method on a
+facade object (`RunResult`, `CurationRef`, `EvaluationResult`, `FigPackReview`,
+...). The table classes are the expert layer those methods call; v2 adds no
+module-level function that repeats an object method.
+
 Package root, `spyglass.spikesorting.v2`:
 
 - `initialize_v2_defaults`: install every default parameter row, idempotently.
@@ -87,21 +92,20 @@ Package root, `spyglass.spikesorting.v2`:
     `start_review`, `preview_merges`, `commit_merges`, `open_analyzer`, subtree
     deletion.
 - `save_manual_curation`: a manual child (labels and/or merges).
-- `preview_merges` / `commit_merges` / `merge_and_evaluate`: function forms of
-    the merge operations. `create_initial_curation`: the root curation.
 - `EvaluationSpec`, `EvaluationResult`, `EvaluationPlots`: an evaluation's
-    recipe, result snapshot, and plots.
-- `MergedCuration`, `MergeEvaluateReceipt`: merge results.
-    `CurationDeletePreview`, `CurationDeleteReceipt`, `CurationOperation`:
-    subtree deletion and operation provenance.
+    recipe, result snapshot (`merge_and_evaluate`, `commit_merges`,
+    `accept_labels`, `start_review`), and plots.
+- `MergeEvaluateReceipt`: merge-and-evaluate result. `CurationDeletePreview`,
+    `CurationDeleteReceipt`, `CurationOperation`: subtree deletion and operation
+    provenance.
 - `get_spike_sorting_v2_merge_ids`: merge ids of v2 curations matching a
     restriction.
 
 `spyglass.spikesorting.v2.review_api` (`FigPackReview` also in `pipeline`; needs
 the `spikesorting-v2-curation` extra):
 
-- `start_review`: evaluate a pinned curation with a profile and build its view.
-    Usually `run.start_review(...)` or `curation.start_review(...)`.
+- Reviews start from `run.start_review(...)`, `curation.start_review(...)`, or
+    `evaluation.start_review(...)`.
 - `FigPackReview`: resumable review handle (`summary`, `open`, `preview_import`,
     `commit_panel`, `result`, `find`, `resume`).
 - `CurationChangeSet`, `ReviewImportReceipt`, `MergeLabelConflict`: pending
@@ -113,7 +117,8 @@ the `spikesorting-v2-curation` extra):
 
 - `UnitAnnotationDefinition`: versioned custom unit-property definitions.
     `CurationUnitAnnotationSet`: immutable sets over one curation's units.
-- `from_dataframe` / `to_dataframe`, `read_unit_properties`,
+- `CurationUnitAnnotationSet.from_dataframe` writes a set;
+    `AnnotationSetRef.to_dataframe` reads one. `read_unit_properties`,
     `AnnotationDefinitionRef`, `AnnotationSetRef`.
 - `annotation_api` exposes `read_unit_properties` and the two references without
     importing the tables.

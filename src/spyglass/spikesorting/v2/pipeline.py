@@ -94,7 +94,6 @@ from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,
     EvaluationSpec,
-    MergedCuration,
     MergeEvaluateReceipt,
     RunResult,
 )
@@ -163,7 +162,6 @@ __all__ = [
     "CurationRef",
     "EvaluationSpec",
     "EvaluationResult",
-    "MergedCuration",
     "MergeEvaluateReceipt",
     "ReviewProfileRef",
     "FigPackReview",

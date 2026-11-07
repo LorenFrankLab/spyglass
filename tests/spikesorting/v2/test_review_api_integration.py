@@ -232,14 +232,6 @@ def test_browser_review_preview_commit_resume_and_continue(
         }
         assert no_change_receipt.curation.parent == review.parent
         assert not no_change_receipt.needs_merge_verification
-        assert (
-            no_change_receipt.created_at
-            == no_change_receipt.curation.created_at
-        )
-        assert (
-            no_change_receipt.created_by
-            == no_change_receipt.curation.created_by
-        )
 
         first_edits = {
             unit_ids[0]: [inherited_label],

@@ -310,8 +310,8 @@
       "tier": "unit",
       "overrides": {
         "test_curation_ref_state_operation_lineage_and_merge_id": "stage",
+        "test_evaluate_then_merge_and_evaluate_uses_a_requested_recipe": "stage",
         "test_evaluation_facade_snapshot_labels_and_merge_receipt": "stage",
-        "test_merge_and_evaluate_function_uses_a_requested_recipe": "stage",
         "test_merge_and_evaluate_keeps_the_parent_metric_waveform_recipe": "stage",
         "test_subtree_delete_is_leaf_up": "stage"
       }

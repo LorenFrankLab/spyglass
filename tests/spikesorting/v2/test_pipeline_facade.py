@@ -39,7 +39,6 @@ _ROOT_REEXPORTS = frozenset(
         "CurationRef",
         "EvaluationSpec",
         "EvaluationResult",
-        "MergedCuration",
         "MergeEvaluateReceipt",
         "ReviewProfileRef",
         "FigPackReview",

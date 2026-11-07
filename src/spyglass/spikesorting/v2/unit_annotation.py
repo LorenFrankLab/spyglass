@@ -542,29 +542,10 @@ def _values_from_dataframe(
     return sorted(values)
 
 
-def from_dataframe(
-    curation: CurationRef,
-    definition: AnnotationDefinitionRef | Mapping[str, Any],
-    df: pd.DataFrame,
-    **kwargs,
-) -> AnnotationSetRef:
-    """Public function form of ``CurationUnitAnnotationSet.from_dataframe``."""
-    return CurationUnitAnnotationSet.from_dataframe(
-        curation, definition, df, **kwargs
-    )
-
-
-def to_dataframe(set_key: AnnotationSetRef | Mapping[str, Any]) -> pd.DataFrame:
-    """Public function form of ``CurationUnitAnnotationSet.to_dataframe``."""
-    return CurationUnitAnnotationSet.to_dataframe(set_key)
-
-
 __all__ = [
     "AnnotationDefinitionRef",
     "AnnotationSetRef",
     "CurationUnitAnnotationSet",
     "UnitAnnotationDefinition",
-    "from_dataframe",
     "read_unit_properties",
-    "to_dataframe",
 ]

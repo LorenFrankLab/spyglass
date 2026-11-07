@@ -168,7 +168,6 @@ __all__ = [
     "CurationRef",
     "EvaluationSpec",
     "EvaluationResult",
-    "MergedCuration",
     "MergeEvaluateReceipt",
     "ReviewProfileRef",
     "FigPackReview",

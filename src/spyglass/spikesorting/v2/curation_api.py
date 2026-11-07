@@ -557,16 +557,73 @@ class CurationRef:
         annotation_sets=(),
         display_options=None,
     ):
-        """Start/reuse a seeded browser review over this exact generation.
+        """Evaluate this curation and build/reuse its seeded review view.
 
-        ``metric_waveform_params_name`` picks the evaluation's metric
-        waveform recipe (``None`` uses this curation's default).
-        ``display_options`` (``ReviewDisplayOptions`` / mapping / ``None``)
-        bounds the browser payload and is persisted with the review.
+        Evaluates this curation with the profile's recipe, then builds or
+        reuses the FigPack review view. Once this curation gains a child, the
+        same call starts a new review; use :meth:`FigPackReview.find` to
+        resume an earlier one. :meth:`EvaluationResult.start_review` reviews
+        an existing evaluation instead.
+
+        Parameters
+        ----------
+        profile : str or ReviewProfileRef
+            A ``CurationReviewProfile`` name or a resolved profile reference.
+            It supplies the evaluation recipe, label options, and displayed
+            unit properties. A ``ReviewProfileRef`` must still match its
+            persisted row.
+        upload : bool, optional
+            Publish a hosted figpack.org figure (requires a FigPack API key
+            unless ``ephemeral``). Default ``False`` saves a local bundle.
+        ephemeral : bool, optional
+            For ``upload=True``, publish a temporary figure that needs no API
+            key. Ignored when ``upload=False``. Default ``False``.
+        metric_waveform_params_name : str, optional
+            Metric waveform recipe for the evaluation. Default ``None`` uses
+            this curation's default recipe.
+        annotation_sets : sequence, optional
+            Annotation-set references (anything ``AnnotationSetRef.from_key``
+            accepts) to include in the review. Each must belong to this
+            curation and none may repeat. Default ``()`` includes none.
+        display_options : ReviewDisplayOptions or mapping, optional
+            Browser payload bounds (raster/amplitude samples, point budget,
+            correlogram pair filter). Persisted with the review; does not
+            affect the evaluation. A mapping may only use
+            ``ReviewDisplayOptions`` field names. Default ``None`` uses the
+            defaults.
+
+        Returns
+        -------
+        FigPackReview
+            Handle for the review. ``uri`` locates the built view, and
+            ``stages`` reports whether this call computed or reused the
+            evaluation and the view.
+
+        Raises
+        ------
+        ImportError
+            If the optional ``figpack`` or ``figpack-spike-sorting`` package
+            is not installed.
+        TypeError
+            If ``display_options`` is not a ``ReviewDisplayOptions``, a
+            mapping, or ``None``.
+        ValueError
+            If ``display_options`` has unknown or invalid fields; an
+            annotation set belongs to a different curation or is listed
+            twice; ``profile`` does not resolve to exactly one
+            ``CurationReviewProfile`` row or no longer matches its pinned
+            hash; or this curation is an uncommitted merge preview.
+        CurationNotFoundError
+            If this ref no longer identifies its curation generation (the row
+            was deleted or its numeric id reused).
+        FigPackUploadError
+            If the view must be built with ``upload=True`` and
+            ``ephemeral=False`` while no FigPack API key is configured (an
+            existing hosted view is reused without uploading).
         """
-        from spyglass.spikesorting.v2.review_api import start_review
+        from spyglass.spikesorting.v2.review_api import _start_review
 
-        return start_review(
+        return _start_review(
             self,
             profile,
             upload=upload,
@@ -597,14 +654,90 @@ class CurationRef:
     def preview_merges(
         self, groups: Sequence[Sequence[int]], **kwargs
     ) -> "CurationRef":
-        """Create/reuse a manual preview child from this typed parent."""
-        return preview_merges(parent_curation=self, groups=groups, **kwargs)
+        """Create/reuse a manual preview child of this curation.
+
+        Records ``groups`` as proposed merges without applying them: every
+        unit keeps its id in the child, and the proposals are stored in
+        ``CurationV2.MergeGroup`` for review. ``groups`` are checked against
+        this curation's units before any write. Inserts through
+        ``CurationV2.insert_curation`` with ``apply_merge=False`` and
+        ``reuse_existing`` defaulting to ``True``, so repeating the call
+        returns the matching existing child.
+
+        Parameters
+        ----------
+        groups : sequence of sequence of int
+            Disjoint merge groups of this curation's unit ids, each with at
+            least two distinct ids.
+        **kwargs
+            Forwarded to ``CurationV2.insert_curation``: ``labels``,
+            ``description``, ``reuse_existing`` (default ``True`` here),
+            ``label_policy`` (``"inherit"`` or ``"replace"``), and
+            ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+            ``parent_curation_id`` are set from this curation and ``groups``.
+
+        Returns
+        -------
+        CurationRef
+            Reference pinned to the preview child's current generation.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref no longer identifies its curation generation (the row
+            was deleted or its numeric id reused).
+        ValueError
+            If ``groups`` is empty or malformed (a group with fewer than two
+            ids, a repeated id, overlapping groups, or a non-integer id) or
+            references unit ids absent from this curation, or if this
+            curation is itself an uncommitted preview.
+        """
+        return _insert_merge_child(self, groups, apply_merge=False, **kwargs)
 
     def commit_merges(
         self, groups: Sequence[Sequence[int]], **kwargs
     ) -> "CurationRef":
-        """Create/reuse a committed manual merge child without evaluation."""
-        return commit_merges(parent_curation=self, groups=groups, **kwargs)
+        """Create/reuse a committed merge child without evaluation.
+
+        Applies ``groups`` in a new child curation: each merged unit's spike
+        train is the union of its contributors, and the contributors are
+        absorbed, so the child has fewer units than this curation. The child
+        is not evaluated; use :meth:`EvaluationResult.merge_and_evaluate` to
+        commit and evaluate in one call. ``groups`` are checked against this
+        curation's units before any write. Inserts through
+        ``CurationV2.insert_curation`` with ``apply_merge=True`` and
+        ``reuse_existing`` defaulting to ``True``, so repeating the call
+        returns the matching existing child.
+
+        Parameters
+        ----------
+        groups : sequence of sequence of int
+            Disjoint merge groups of this curation's unit ids, each with at
+            least two distinct ids.
+        **kwargs
+            Forwarded to ``CurationV2.insert_curation``: ``labels``,
+            ``description``, ``reuse_existing`` (default ``True`` here),
+            ``label_policy`` (``"inherit"`` or ``"replace"``), and
+            ``allow_custom_labels``. The sorting key, ``merge_groups``, and
+            ``parent_curation_id`` are set from this curation and ``groups``.
+
+        Returns
+        -------
+        CurationRef
+            Reference pinned to the merged child's current generation.
+
+        Raises
+        ------
+        CurationNotFoundError
+            If this ref no longer identifies its curation generation (the row
+            was deleted or its numeric id reused).
+        ValueError
+            If ``groups`` is empty or malformed (a group with fewer than two
+            ids, a repeated id, overlapping groups, or a non-integer id) or
+            references unit ids absent from this curation, or if this
+            curation is itself an uncommitted preview.
+        """
+        return _insert_merge_child(self, groups, apply_merge=True, **kwargs)
 
     def lineage(self) -> tuple["CurationRef", ...]:
         """Return ancestors from root through this curation."""
@@ -1293,10 +1426,15 @@ class EvaluationResult:
         annotation_sets=(),
         display_options=None,
     ):
-        """Start a review after verifying this evaluation matches its profile."""
-        from spyglass.spikesorting.v2.review_api import start_review
+        """Start a review after verifying this evaluation matches its profile.
 
-        return start_review(
+        As :meth:`CurationRef.start_review`, but displays this evaluation,
+        which must cover its curation with the profile's exact recipe names
+        and be populated (``ValueError`` / ``LookupError`` otherwise).
+        """
+        from spyglass.spikesorting.v2.review_api import _start_review
+
+        return _start_review(
             self.curation,
             profile,
             upload=upload,
@@ -1305,15 +1443,6 @@ class EvaluationResult:
             annotation_sets=annotation_sets,
             display_options=display_options,
         )
-
-
-@dataclass(frozen=True)
-class MergedCuration:
-    """A merge child plus the canonical groups and create/reuse status."""
-
-    curation: CurationRef
-    merge_groups: tuple[tuple[int, ...], ...]
-    status: MaterializationStatus
 
 
 @dataclass(frozen=True)
@@ -1327,24 +1456,6 @@ class MergeEvaluateReceipt:
     curation_status: MaterializationStatus
     evaluation_selection_status: MaterializationStatus
     evaluation_status: MaterializationStatus
-
-    @property
-    def merged(self) -> MergedCuration:
-        return MergedCuration(
-            curation=self.child,
-            merge_groups=self.merge_groups,
-            status=self.curation_status,
-        )
-
-    @property
-    def stage_statuses(self) -> Mapping[str, MaterializationStatus]:
-        return MappingProxyType(
-            {
-                "curation": self.curation_status,
-                "evaluation_selection": self.evaluation_selection_status,
-                "evaluation": self.evaluation_status,
-            }
-        )
 
 
 class RunResult(dict):
@@ -1445,10 +1556,9 @@ def _validate_merge_groups(
 
 
 def _insert_merge_child(
-    parent_curation: CurationRef,
+    parent: CurationRef,
     groups: Sequence[Sequence[int]],
     *,
-    caller: str,
     apply_merge: bool,
     labels: dict[int, list[str]] | None = None,
     description: str = "",
@@ -1458,12 +1568,12 @@ def _insert_merge_child(
 ) -> CurationRef:
     """Insert a preview or committed merge child of a typed parent.
 
-    The shared body of :func:`preview_merges` (``apply_merge=False``) and
-    :func:`commit_merges` (``apply_merge=True``). The parent always supplies
+    The shared body of :meth:`CurationRef.preview_merges`
+    (``apply_merge=False``) and :meth:`CurationRef.commit_merges`
+    (``apply_merge=True``). The parent always supplies
     ``parent_curation_id``, so ``reuse_existing`` can only match a child of
     that parent, never an unrelated root curation.
     """
-    parent = _require_parent_ref(parent_curation, caller=caller)
     from spyglass.spikesorting.v2.curation import CurationV2
 
     child = CurationV2.insert_curation(
@@ -1503,234 +1613,6 @@ def _evaluate_curation(
     return EvaluationResult.from_key(selection)
 
 
-def merge_and_evaluate(
-    *,
-    parent_curation: CurationRef,
-    spec: EvaluationSpec,
-    groups: Sequence[Sequence[int]],
-    metric_waveform_params_name: str | None = None,
-) -> MergeEvaluateReceipt:
-    """Commit merges and evaluate the child, with an explicit parent and spec.
-
-    Lower-level orchestration form of
-    :meth:`EvaluationResult.merge_and_evaluate`. It evaluates
-    ``parent_curation`` with ``spec`` (creating and populating the
-    evaluation, or reusing an existing one), commits ``groups`` into a
-    merged child curation, and evaluates that child with the same ``spec``.
-    Each stage reuses rows that already exist, so repeating the call after
-    an interruption resumes rather than duplicating work. Call it outside
-    any open DataJoint transaction; ``populate`` manages its own.
-
-    Parameters
-    ----------
-    parent_curation : CurationRef
-        The curation whose units are merged. Its identity is re-verified
-        before use.
-    spec : EvaluationSpec
-        Metric-parameter and auto-curation-rule names used for both the
-        parent and the child evaluation.
-    groups : sequence of sequence of int
-        Disjoint merge groups of ``parent_curation`` unit ids, each with at
-        least two distinct ids.
-    metric_waveform_params_name : str, optional
-        Metric waveform recipe for both evaluations. Default ``None`` uses
-        ``parent_curation``'s default recipe.
-
-    Returns
-    -------
-    MergeEvaluateReceipt
-        The child curation, its evaluation, the normalized merge groups, and
-        whether this call computed or reused the child curation, its
-        evaluation selection, and its evaluation.
-
-    Raises
-    ------
-    TypeError
-        If ``parent_curation`` is not a ``CurationRef`` or ``spec`` is not
-        an ``EvaluationSpec``.
-    CurationNotFoundError
-        If ``parent_curation`` no longer identifies its curation generation
-        (the row was deleted or its numeric id reused).
-    RuntimeError
-        If called inside an open DataJoint transaction.
-    ValueError
-        If ``groups`` is empty or malformed (a group with fewer than two
-        ids, a repeated id, overlapping groups, or a non-integer id), or
-        references unit ids absent from ``parent_curation``, or if
-        ``parent_curation`` is an uncommitted merge preview. Groups are
-        checked after the parent evaluation is populated.
-    """
-    parent = _require_parent_ref(parent_curation, caller="merge_and_evaluate")
-    if not isinstance(spec, EvaluationSpec):
-        raise TypeError(
-            "merge_and_evaluate requires spec=EvaluationSpec; pass the exact "
-            "metric and auto-curation rule recipe names."
-        )
-    _require_outside_merge_evaluation_transaction()
-    return _evaluate_curation(
-        parent, spec, metric_waveform_params_name=metric_waveform_params_name
-    ).merge_and_evaluate(groups)
-
-
-def create_initial_curation(
-    sorting_key: Mapping[str, Any], **kwargs
-) -> CurationRef:
-    """Create the root curation of a sorting; no typed parent is required.
-
-    This is the only facade operation that does not take a ``CurationRef``
-    parent. It forwards to ``CurationV2.create_initial_curation``, which
-    inserts a root curation with no merges. If a root already exists for
-    the sorting, it is returned when no labels or description are passed;
-    otherwise a ``ValueError`` is raised rather than ignoring them.
-
-    Parameters
-    ----------
-    sorting_key : mapping
-        Mapping with the ``sorting_id`` of the upstream ``Sorting`` row.
-    **kwargs
-        Forwarded to ``CurationV2.create_initial_curation``, which accepts
-        ``labels`` (``{unit_id: [label, ...]}``, default ``None``),
-        ``description`` (str, default ``""``), and ``allow_custom_labels``
-        (bool, default ``False``; accept labels outside the canonical
-        ``CurationLabel`` set).
-
-    Returns
-    -------
-    CurationRef
-        Reference pinned to the root curation's current generation.
-
-    Raises
-    ------
-    ValueError
-        If ``sorting_id`` is not in ``Sorting``; a root curation already
-        exists and ``labels`` or ``description`` were passed; or ``labels``
-        are invalid (not a list per unit, a label outside ``CurationLabel``
-        without ``allow_custom_labels=True``, or an unknown unit id).
-    """
-    from spyglass.spikesorting.v2.curation import CurationV2
-
-    return CurationRef.from_key(
-        CurationV2.create_initial_curation(dict(sorting_key), **kwargs)
-    )
-
-
-def preview_merges(
-    *,
-    parent_curation: CurationRef,
-    groups: Sequence[Sequence[int]],
-    **kwargs,
-) -> CurationRef:
-    """Create a preview child; a typed, current parent is mandatory.
-
-    Records ``groups`` as proposed merges without applying them: every
-    parent unit keeps its id in the child, and the proposals are stored in
-    ``CurationV2.MergeGroup`` for review. ``groups`` are checked against the
-    parent's units before any write. Inserts through
-    ``CurationV2.insert_curation`` with ``apply_merge=False`` and
-    ``reuse_existing`` defaulting to ``True``, so repeating the call returns
-    the matching existing child.
-
-    Parameters
-    ----------
-    parent_curation : CurationRef
-        The curation to branch from. Its identity is re-verified before use.
-    groups : sequence of sequence of int
-        Disjoint merge groups of ``parent_curation`` unit ids, each with at
-        least two distinct ids.
-    **kwargs
-        Forwarded to ``CurationV2.insert_curation``: ``labels``,
-        ``description``, ``reuse_existing`` (default ``True`` here),
-        ``label_policy`` (``"inherit"`` or ``"replace"``), and
-        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
-        ``parent_curation_id`` are set from ``parent_curation`` and
-        ``groups``.
-
-    Returns
-    -------
-    CurationRef
-        Reference pinned to the preview child's current generation.
-
-    Raises
-    ------
-    TypeError
-        If ``parent_curation`` is not a ``CurationRef``.
-    CurationNotFoundError
-        If ``parent_curation`` no longer identifies its curation generation
-        (the row was deleted or its numeric id reused).
-    ValueError
-        If ``groups`` is empty or malformed (a group with fewer than two
-        ids, a repeated id, overlapping groups, or a non-integer id) or
-        references unit ids absent from ``parent_curation``, or if
-        ``parent_curation`` is itself an uncommitted preview.
-    """
-    return _insert_merge_child(
-        parent_curation,
-        groups,
-        caller="preview_merges",
-        apply_merge=False,
-        **kwargs,
-    )
-
-
-def commit_merges(
-    *,
-    parent_curation: CurationRef,
-    groups: Sequence[Sequence[int]],
-    **kwargs,
-) -> CurationRef:
-    """Commit a merge child without evaluation; a typed parent is mandatory.
-
-    Applies ``groups`` in a new child curation: each merged unit's spike
-    train is the union of its contributors, and the contributors are
-    absorbed, so the child has fewer units than the parent. The child is
-    not evaluated; use :func:`merge_and_evaluate` to commit and evaluate in
-    one call. ``groups`` are checked against the parent's units before any
-    write. Inserts through ``CurationV2.insert_curation`` with
-    ``apply_merge=True`` and ``reuse_existing`` defaulting to ``True``, so
-    repeating the call returns the matching existing child.
-
-    Parameters
-    ----------
-    parent_curation : CurationRef
-        The curation to branch from. Its identity is re-verified before use.
-    groups : sequence of sequence of int
-        Disjoint merge groups of ``parent_curation`` unit ids, each with at
-        least two distinct ids.
-    **kwargs
-        Forwarded to ``CurationV2.insert_curation``: ``labels``,
-        ``description``, ``reuse_existing`` (default ``True`` here),
-        ``label_policy`` (``"inherit"`` or ``"replace"``), and
-        ``allow_custom_labels``. The sorting key, ``merge_groups``, and
-        ``parent_curation_id`` are set from ``parent_curation`` and
-        ``groups``.
-
-    Returns
-    -------
-    CurationRef
-        Reference pinned to the merged child's current generation.
-
-    Raises
-    ------
-    TypeError
-        If ``parent_curation`` is not a ``CurationRef``.
-    CurationNotFoundError
-        If ``parent_curation`` no longer identifies its curation generation
-        (the row was deleted or its numeric id reused).
-    ValueError
-        If ``groups`` is empty or malformed (a group with fewer than two
-        ids, a repeated id, overlapping groups, or a non-integer id) or
-        references unit ids absent from ``parent_curation``, or if
-        ``parent_curation`` is itself an uncommitted preview.
-    """
-    return _insert_merge_child(
-        parent_curation,
-        groups,
-        caller="commit_merges",
-        apply_merge=True,
-        **kwargs,
-    )
-
-
 def save_manual_curation(
     *,
     parent_curation: CurationRef,
@@ -1744,8 +1626,9 @@ def save_manual_curation(
     Forwards to ``CurationV2.save_manual_curation`` with the parent's
     ``sorting_id`` and ``curation_id``. Supply edits with integer unit IDs
     through ``labels=`` and ``merge_groups=``.
-    Unlike :func:`preview_merges` and :func:`commit_merges`, this facade
-    does not pre-check merge groups and does not default ``reuse_existing``
+    Unlike :meth:`CurationRef.preview_merges` and
+    :meth:`CurationRef.commit_merges`, this facade does not pre-check merge
+    groups and does not default ``reuse_existing``
     to ``True``; ``CurationV2`` validates the merge groups.
 
     Parameters
@@ -1817,12 +1700,7 @@ __all__ = [
     "EvaluationPlots",
     "EvaluationResult",
     "EvaluationSpec",
-    "MergedCuration",
     "MergeEvaluateReceipt",
     "RunResult",
-    "commit_merges",
-    "create_initial_curation",
-    "merge_and_evaluate",
-    "preview_merges",
     "save_manual_curation",
 ]

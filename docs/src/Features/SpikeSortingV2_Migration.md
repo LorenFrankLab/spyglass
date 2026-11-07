@@ -577,8 +577,8 @@ through `get_recording`.
 **A merge id is a registered output, not a filtered population.** The supported
 handoff is `select_units_for_analysis(curation, policy=...)` on the curation you
 reviewed (`run.auto_labeled_curation`, `review.result()`, or a
-`save_manual_curation` / `commit_merges` child). Name it deliberately; never
-infer it from the latest child.
+`save_manual_curation` / `curation.commit_merges` child). Name it deliberately;
+never infer it from the latest child.
 
 | Policy                               | Include                                            | Deny                                 |
 | ------------------------------------ | -------------------------------------------------- | ------------------------------------ |
@@ -779,7 +779,7 @@ valid `template_metric_columns` values.
 - It scores a **committed** `CurationV2` generation in that curation's own unit
     namespace. A merged unit's metrics come from its merged template, never a
     contributor. Preview curations (`apply_merge=False` with an unapplied merge)
-    are rejected; commit the merge first (`commit_merges` /
+    are rejected; commit the merge first (`curation.commit_merges(groups)` /
     `insert_curation(..., apply_merge=True)`).
 - It records the exact recipe pair it used. Its proposals become a committed
     child; the scored row is never changed.
@@ -792,8 +792,8 @@ valid `template_metric_columns` values.
     is `CurationEvaluationSelection.metric_waveform_params_name`.
 - Results are written to NWB and returned as an `EvaluationResult` snapshot.
     `metrics`, `suggested_merges`, and `proposed_labels` are copies.
-- `merge_and_evaluate(groups)` is idempotent and resumable. Run it outside a
-    caller-owned transaction: `populate` manages its own.
+- `evaluation.merge_and_evaluate(groups)` is idempotent and resumable. Run it
+    outside a caller-owned transaction: `populate` manages its own.
     `evaluation.commit_merges(groups)` commits without re-evaluation.
 - `accept_labels(mode="replace")` makes the evaluation the complete verdict;
     `mode="overlay"` keeps current labels and adds.
@@ -1067,8 +1067,8 @@ annotation sets (`UnitAnnotationDefinition`,
 
 - A set belongs to one exact curation and is selected explicitly
     (`read_unit_properties(curation, evaluation=None, annotation_sets=[...])`,
-    `start_review(..., annotation_sets=[...])`). Spyglass never picks a "latest"
-    set.
+    `curation.start_review(..., annotation_sets=[...])`). Spyglass never picks a
+    "latest" set.
 - Columns are namespaced by definition version and full `set_hash`, so sets and
     built-in metrics cannot overwrite each other. A set's `set_hash` joins the
     review figure's identity.
