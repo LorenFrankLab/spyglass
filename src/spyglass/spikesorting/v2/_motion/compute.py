@@ -126,6 +126,93 @@ def stale_estimate_selection_fields(
     )
 
 
+def resolve_estimation_recipe(
+    key, selection: dict, params: dict
+) -> tuple[dict, str]:
+    """Resolve an estimate's recipe, refusing a stale selection.
+
+    Parameters
+    ----------
+    key : dict
+        The ``MotionEstimate`` key, for the message.
+    selection : dict
+        The ``MotionEstimateSelection`` row.
+    params : dict
+        Its ``MotionEstimationParameters`` row's ``params`` blob.
+
+    Returns
+    -------
+    resolved : dict
+        The resolved estimation configuration.
+    resolved_hash : str
+        ``_motion.resolved_params_hash`` of ``resolved``.
+
+    Raises
+    ------
+    ValueError
+        If the selection is stale (:func:`stale_estimate_selection_fields`).
+    """
+    from spyglass.spikesorting.v2._motion import estimation as _motion
+
+    resolved = _motion.resolve_estimation_params(params)
+    resolved_hash = _motion.resolved_params_hash(resolved)
+    stale = stale_estimate_selection_fields(selection, resolved_hash)
+    if stale:
+        raise ValueError(
+            f"MotionEstimate {key}: the selection is stale ({'; '.join(stale)}). "
+            "Recreate it with MotionEstimateSelection.insert_selection, "
+            "which derives a new motion_estimate_id."
+        )
+    return resolved, resolved_hash
+
+
+def resolve_interpolation_recipe(
+    key,
+    selection: dict,
+    interpolation_params: dict,
+    *,
+    check_spikeinterface_version: bool,
+) -> dict:
+    """Resolve a corrected recording's recipe, refusing a stale selection.
+
+    Parameters
+    ----------
+    key : dict
+        The ``MotionCorrectedRecording`` key, for the message.
+    selection : dict
+        The ``MotionCorrectedRecordingSelection`` row.
+    interpolation_params : dict
+        Its ``MotionInterpolationParameters`` row's ``params`` blob.
+    check_spikeinterface_version : bool
+        Also compare the installed SpikeInterface version.
+
+    Returns
+    -------
+    dict
+        The resolved interpolation configuration.
+
+    Raises
+    ------
+    ValueError
+        If the selection is stale (:func:`stale_corrected_selection_fields`).
+    """
+    from spyglass.spikesorting.v2._motion import estimation as _motion
+
+    resolved = _motion.resolve_interpolation_params(interpolation_params)
+    stale = stale_corrected_selection_fields(
+        selection,
+        resolved,
+        check_spikeinterface_version=check_spikeinterface_version,
+    )
+    if stale:
+        raise ValueError(
+            f"MotionCorrectedRecording {key}: the selection is stale "
+            f"({'; '.join(stale)}). Recreate it with "
+            "MotionCorrectedRecordingSelection.insert_selection."
+        )
+    return resolved
+
+
 def estimation_spans(
     recording, lineage, source_row: dict, artifact_valid_times, n_samples: int
 ) -> tuple:
@@ -262,6 +349,87 @@ def assert_geometry_matches_estimate(key, source, estimate: dict) -> None:
             f"estimate's {estimate_locations.tolist()}; the estimate does "
             "not describe this geometry."
         )
+
+
+def apply_saved_motion(
+    key, source, estimate: dict, clock, resolved: dict, n_samples: int
+) -> tuple:
+    """Apply a saved estimate to its source on the estimation clock.
+
+    Parameters
+    ----------
+    key : dict
+        The ``MotionCorrectedRecording`` key, for the message.
+    source : si.BaseRecording
+        The source traces, with the flattened geometry the estimate used.
+    estimate : dict
+        The saved estimate's application fields.
+    clock : _motion.EstimationClock
+        The estimate's estimation clock.
+    resolved : dict
+        The resolved interpolation configuration.
+    n_samples : int
+        Frames of ``source``.
+
+    Returns
+    -------
+    applied : _motion.AppliedMotion
+        The applied correction.
+    statistics : numpy.ndarray
+        ``(n, 2)`` int64 statistics spans the correction silenced outside.
+
+    Raises
+    ------
+    ValueError
+        If the interpolation changed the sample count.
+    """
+    from spyglass.spikesorting.v2._motion import estimation as _motion
+
+    statistics = np.asarray(
+        estimate["statistics_spans"], dtype=np.int64
+    ).reshape(-1, 2)
+    applied = _motion.apply_motion_on_estimation_clock(
+        source,
+        _motion.motion_from_storage_dict(estimate["motion"]),
+        clock=clock,
+        statistics_spans=statistics,
+        resolved_interpolation=resolved,
+    )
+    corrected = applied.recording
+    if int(corrected.get_num_samples()) != n_samples:
+        raise ValueError(
+            f"MotionCorrectedRecording {key}: interpolation changed the "
+            f"sample count ({corrected.get_num_samples()} != {n_samples})."
+        )
+    return applied, statistics
+
+
+def corrected_filtering_description(
+    source_filtering: str, motion_estimate_id, resolved: dict
+) -> str:
+    """The ``filtering`` text of a corrected recording's series.
+
+    Parameters
+    ----------
+    source_filtering : str
+        The source series' ``filtering`` attribute.
+    motion_estimate_id : uuid.UUID or str
+        The applied estimate.
+    resolved : dict
+        The resolved interpolation configuration.
+
+    Returns
+    -------
+    str
+    """
+    interpolation_text = ", ".join(
+        f"{name}={resolved[name]}" for name in sorted(resolved)
+    )
+    return (
+        f"{source_filtering}; motion corrected with saved estimate "
+        f"{motion_estimate_id} ({interpolation_text}); "
+        "frames outside the statistics spans silenced; unwhitened"
+    )
 
 
 def motion_correction_provenance_tables(

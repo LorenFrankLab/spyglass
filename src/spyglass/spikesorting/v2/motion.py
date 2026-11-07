@@ -581,6 +581,17 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     Populated explicitly. If the recipe's resolution, SpikeInterface version
     or algorithm version changed since selection, populate raises; recreate
     the selection.
+
+    Steps
+    -----
+    1. Resolve the source, recipe and artifact mask, rebuilding a missing
+       source file.
+    2. Resolve the recipe and refuse a stale selection.
+    3. Open the source traces.
+    4. Find the continuity spans and the artifact-free statistics spans.
+    5. Lay the continuity spans on the estimation clock.
+    6. Silence frames outside the statistics spans and estimate motion.
+    7. Summarize the estimate, fingerprint its inputs and insert the row.
     """
 
     _populate_key_lock = True
@@ -700,30 +711,24 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
         from spyglass.spikesorting.v2._motion import estimation as _motion
         from spyglass.spikesorting.v2._storage.nwb import read_recording_nwb
 
-        resolved = _motion.resolve_estimation_params(params)
-        resolved_hash = _motion.resolved_params_hash(resolved)
-        stale = _motion_compute.stale_estimate_selection_fields(
-            selection, resolved_hash
+        # 2. Resolve the recipe and refuse a stale selection.
+        resolved, resolved_hash = _motion_compute.resolve_estimation_recipe(
+            key, selection, params
         )
-        if stale:
-            raise ValueError(
-                f"MotionEstimate {key}: the selection is stale ({'; '.join(stale)}). "
-                "Recreate it with MotionEstimateSelection.insert_selection, "
-                "which derives a new motion_estimate_id."
-            )
-
+        # 3. Open the source traces.
         recording = read_recording_nwb(
             source_path,
             electrical_series_path=source_row["electrical_series_path"],
         )
         recording.annotate(is_filtered=True)
         n_samples = int(recording.get_num_samples())
+        # 4. Find the continuity spans and the artifact-free statistics spans.
         continuity, continuity_start_s, continuity_end_s, statistics = (
             _motion_compute.estimation_spans(
                 recording, lineage, source_row, artifact_valid_times, n_samples
             )
         )
-
+        # 5. Lay the continuity spans on the estimation clock.
         sampling_frequency = float(recording.get_sampling_frequency())
         clock = _motion.build_estimation_clock(
             continuity,
@@ -732,6 +737,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             sampling_frequency,
             resolved["max_gap_s"],
         )
+        # 6. Silence frames outside the statistics spans and estimate motion.
         motion, diagnostics = _motion.estimate_motion_in_spans(
             recording,
             statistics_spans=statistics,
@@ -739,6 +745,69 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             resolved_params=resolved,
             job_kwargs=job_kwargs,
         )
+        # 7. Summarize the estimate and fingerprint its inputs.
+        return self._estimate_computed(
+            motion,
+            diagnostics,
+            recording=recording,
+            clock=clock,
+            statistics=statistics,
+            resolved=resolved,
+            resolved_hash=resolved_hash,
+            n_samples=n_samples,
+            sampling_frequency=sampling_frequency,
+            source_content_hash=selection["source_content_hash"],
+            artifact_detection_id=lineage.artifact_detection_id,
+        )
+
+    @staticmethod
+    def _estimate_computed(
+        motion,
+        diagnostics,
+        *,
+        recording,
+        clock,
+        statistics,
+        resolved: dict,
+        resolved_hash: str,
+        n_samples: int,
+        sampling_frequency: float,
+        source_content_hash: str,
+        artifact_detection_id,
+    ) -> MotionEstimateComputed:
+        """Assemble an estimate's row: motion, clock, evidence, fingerprint.
+
+        Parameters
+        ----------
+        motion : spikeinterface.core.motion.Motion
+            The estimate.
+        diagnostics : _motion.MotionDiagnostics
+            Peak counts and noise levels from ``estimate_motion_in_spans``.
+        recording : si.BaseRecording
+            The estimated source traces.
+        clock : _motion.EstimationClock
+            The estimation clock the motion bins are on.
+        statistics : list of tuple of int
+            Half-open frame ranges of the valid samples used.
+        resolved : dict
+            The resolved estimation configuration.
+        resolved_hash : str
+            ``_motion.resolved_params_hash`` of ``resolved``.
+        n_samples : int
+            Frames of ``recording``.
+        sampling_frequency : float
+            Sampling frequency of ``recording`` in Hz.
+        source_content_hash : str
+            The selection's ``source_content_hash``.
+        artifact_detection_id : uuid.UUID or None
+            The pinned artifact detection, if any.
+
+        Returns
+        -------
+        MotionEstimateComputed
+        """
+        from spyglass.spikesorting.v2._motion import estimation as _motion
+
         channel_ids = recording.channel_ids.tolist()
         channel_locations = np.asarray(
             recording.get_channel_locations(), dtype=np.float64
@@ -766,8 +835,8 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             peaks_per_continuity_span=diagnostics.peaks_per_continuity_span,
             noise_levels=diagnostics.noise_levels,
             input_fingerprint=_motion.motion_input_fingerprint(
-                source_content_hash=selection["source_content_hash"],
-                artifact_detection_id=lineage.artifact_detection_id,
+                source_content_hash=source_content_hash,
+                artifact_detection_id=artifact_detection_id,
                 n_samples=n_samples,
                 sampling_frequency=sampling_frequency,
                 continuity_spans=clock.spans,
@@ -1185,6 +1254,17 @@ class MotionCorrectedRecording(
     channels. :meth:`get_recording` rebuilds a missing file from the saved
     motion (never re-estimating) and installs it only if its content hash
     matches.
+
+    Steps
+    -----
+    1. Resolve the saved estimate and its source file, rebuilding a missing
+       source file.
+    2. Resolve the interpolation recipe and refuse a stale selection.
+    3. Open the source and check its frames, rate and channels.
+    4. Flatten the geometry, as the estimate stored it, and check it.
+    5. Silence, interpolate on the estimation clock, silence again.
+    6. Write the corrected traces to a staged file with provenance.
+    7. Register the file and insert the row.
     """
 
     _populate_key_lock = True
@@ -1297,7 +1377,6 @@ class MotionCorrectedRecording(
             or an application failure (see
             ``_motion.apply_motion_on_estimation_clock``).
         """
-        from spyglass.spikesorting.v2._motion import estimation as _motion
         from spyglass.spikesorting.v2._recording.geometry import (
             flatten_planar_geometry,
         )
@@ -1309,21 +1388,16 @@ class MotionCorrectedRecording(
             _LazyRecordingTimestamps,
         )
 
-        resolved = _motion.resolve_interpolation_params(interpolation_params)
-        stale = _motion_compute.stale_corrected_selection_fields(
+        # 2. Resolve the interpolation recipe and refuse a stale selection.
+        resolved = _motion_compute.resolve_interpolation_recipe(
+            key,
             selection,
-            resolved,
+            interpolation_params,
             check_spikeinterface_version=(
                 not allow_spikeinterface_version_change
             ),
         )
-        if stale:
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: the selection is stale "
-                f"({'; '.join(stale)}). Recreate it with "
-                "MotionCorrectedRecordingSelection.insert_selection."
-            )
-
+        # 3. Open the source and check its frames, rate and channels.
         source = read_recording_nwb(
             source_path, electrical_series_path=source_electrical_series_path
         )
@@ -1337,32 +1411,17 @@ class MotionCorrectedRecording(
         source_filtering = _series_filtering(
             source_path, source_electrical_series_path
         )
-
-        # The estimate stored the flattened positions it was computed on.
+        # 4. Flatten the geometry, as the estimate stored it, and check it.
         flatten_planar_geometry(source)
         _motion_compute.assert_geometry_matches_estimate(key, source, estimate)
-
+        # 5. Silence, interpolate on the estimation clock, silence again.
         clock = _estimation_clock_of(estimate)
-        statistics = np.asarray(
-            estimate["statistics_spans"], dtype=np.int64
-        ).reshape(-1, 2)
-        applied = _motion.apply_motion_on_estimation_clock(
-            source,
-            _motion.motion_from_storage_dict(estimate["motion"]),
-            clock=clock,
-            statistics_spans=statistics,
-            resolved_interpolation=resolved,
+        applied, statistics = _motion_compute.apply_saved_motion(
+            key, source, estimate, clock, resolved, n_samples
         )
         corrected = applied.recording
-        if int(corrected.get_num_samples()) != n_samples:
-            raise ValueError(
-                f"MotionCorrectedRecording {key}: interpolation changed the "
-                f"sample count ({corrected.get_num_samples()} != {n_samples})."
-            )
         channel_ids = corrected.channel_ids.tolist()
-        interpolation_text = ", ".join(
-            f"{name}={resolved[name]}" for name in sorted(resolved)
-        )
+        # 6. Write the corrected traces to a staged file with provenance.
         provenance_tables = _motion_compute.motion_correction_provenance_tables(
             key,
             selection,
@@ -1379,10 +1438,8 @@ class MotionCorrectedRecording(
             corrected,
             nwb_file_name,
             timestamps_override=timestamps,
-            filtering_description=(
-                f"{source_filtering}; motion corrected with saved estimate "
-                f"{selection['motion_estimate_id']} ({interpolation_text}); "
-                "frames outside the statistics spans silenced; unwhitened"
+            filtering_description=_motion_compute.corrected_filtering_description(
+                source_filtering, selection["motion_estimate_id"], resolved
             ),
             description=(
                 "Motion-corrected preprocessed recording from "
