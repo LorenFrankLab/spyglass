@@ -1,7 +1,6 @@
 from typing import List, Union
 
 import datajoint as dj
-import kachery_cloud as kcl
 import numpy as np
 import spikeinterface as si
 from sortingview.SpikeSortingView import create_raw_traces_plot
@@ -110,6 +109,8 @@ def create_mountain_layout(
 
 
 def _upload_data_and_return_sha1(data):
+    import kachery_cloud as kcl  # kachery-legacy extra
+
     data_uri = kcl.store_json(data)
     data_hash = data_uri.split("/")[2]
     return data_hash

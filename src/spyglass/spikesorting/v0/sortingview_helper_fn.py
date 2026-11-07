@@ -2,7 +2,6 @@
 
 from typing import Any, List, Tuple, Union
 
-import kachery_cloud as kcl
 import sortingview as sv
 import sortingview.views as vv
 import spikeinterface as si
@@ -138,6 +137,8 @@ def _generate_url(
 
     if initial_curation is not None:
         logger.warning("found initial curation")
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         sorting_curation_uri = kcl.store_json(initial_curation)
     else:
         sorting_curation_uri = None
