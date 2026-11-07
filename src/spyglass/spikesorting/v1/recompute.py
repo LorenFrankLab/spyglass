@@ -952,11 +952,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
 
-    def delete(self, *args, safemode=None, **kwargs) -> None:
+    def delete(self, *restrictions, safemode=None, **kwargs) -> None:
         """Delete recompute attempts when deleting rows.
 
         Parameters
         ----------
+        *restrictions : Any
+            Restrictions applied before collecting attempt files.
         safemode : bool, optional
             Whether to prompt before deleting, per the datajoint API. When
             None, defaults to dj.config["safemode"]. Passing False deletes
@@ -964,6 +966,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             callers (tests, scripts, cron) are not left with an EOFError or
             a silent no-op.
         """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
+
         attempt_paths = []
         for key in self:
             _, new = self._get_paths(key)
@@ -981,7 +988,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         for path in attempt_paths:
             path.unlink(missing_ok=True)
-        super().delete(*args, safemode=False, **kwargs)
+        super().delete(safemode=False, **kwargs)
 
     def update_secondary(self, restriction=True) -> None:
         """Update secondary attrs for existing entries.
