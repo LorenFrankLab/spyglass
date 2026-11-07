@@ -167,6 +167,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - Import `kachery_cloud` only inside the v0/v1 FigURL functions that use
+        it, so spike sorting, decoding and MUA import without the
+        `kachery-legacy` extra #PRNUM
 
 ## [0.6.0] (Sep 1st 2026)
 

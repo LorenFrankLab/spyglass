@@ -2,7 +2,6 @@ import uuid
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
-import kachery_cloud as kcl
 import pynwb
 import sortingview.views as vv
 import spikeinterface as si
@@ -111,6 +110,8 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
             else []
         )
 
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         return kcl.store_json(
             {
                 "labelsByUnit": labels_dict,
@@ -215,6 +216,8 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     def get_labels(cls, curation_json) -> Dict[int, List[str]]:
         """Uses kachery cloud to load curation json. Returns labelsByUnit."""
 
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         labels_by_unit = kcl.load_json(curation_json).get("labelsByUnit")
         return (
             {
@@ -228,6 +231,8 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     @classmethod
     def get_merge_groups(cls, curation_json) -> Dict:
         """Uses kachery cloud to load curation json. Returns mergeGroups."""
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         return kcl.load_json(curation_json).get("mergeGroups", {})
 
 
