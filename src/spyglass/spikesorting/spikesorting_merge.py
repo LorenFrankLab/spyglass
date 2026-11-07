@@ -1,4 +1,5 @@
 import uuid
+from importlib import import_module
 from typing import Union
 
 import datajoint as dj
@@ -26,24 +27,28 @@ from spyglass.utils.spikesorting import (
 
 
 # v2 is optional: its parts are declared only if v2 imports, since DataJoint
-# needs the FK target. The import error is kept for _raise_v2_unavailable.
-def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
-    """Import the v2 ``CurationV2`` part-table target for this merge table.
-
-    Returns ``(CurationV2_or_None, import_error_or_None)``. Catches any
-    exception, not only ``ImportError``, since v2 can also fail on version
-    skew and v0/v1-only environments must still load this table.
-    """
+# needs the FK target. Only an ImportError (missing or incompatible package)
+# is tolerated; anything else is a v2 bug and raises.
+def _import_v2_part(module: str, name: str, unavailable: str):
+    """Return ``(class_or_None, import_error_or_None)`` for a v2 part target."""
     try:
-        from spyglass.spikesorting.v2.curation import CurationV2
-    except Exception as err:  # noqa: BLE001 -- see docstring
+        return getattr(import_module(module), name), None
+    except ImportError as err:
         logger.warning(
-            "spikesorting v2 is unavailable; SpikeSortingOutput will be "
-            "declared without its CurationV2 part in this process. "
-            f"Captured cause: {type(err).__name__}: {err}"
+            f"{unavailable}; SpikeSortingOutput will be declared without its "
+            f"{name} part in this process. Captured cause: "
+            f"{type(err).__name__}: {err}"
         )
         return None, err
-    return CurationV2, None
+
+
+def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
+    """Import the v2 ``CurationV2`` part-table target for this merge table."""
+    return _import_v2_part(
+        "spyglass.spikesorting.v2.curation",
+        "CurationV2",
+        "spikesorting v2 is unavailable",
+    )
 
 
 CurationV2, _v2_import_error = _probe_v2_curation()
@@ -51,19 +56,11 @@ CurationV2, _v2_import_error = _probe_v2_curation()
 
 def _probe_v2_concat_member_curation() -> "Union[type, None]":
     """Import the optional per-member concat curation merge target."""
-    try:
-        from spyglass.spikesorting.v2.concat_member_curation import (
-            ConcatMemberCuration,
-        )
-    except Exception as err:  # noqa: BLE001 -- optional v2 boundary
-        logger.warning(
-            "spikesorting v2 concat-member outputs are unavailable; "
-            "SpikeSortingOutput will be declared without its "
-            "ConcatMemberCuration part in this process. Captured cause: "
-            f"{type(err).__name__}: {err}"
-        )
-        return None
-    return ConcatMemberCuration
+    return _import_v2_part(
+        "spyglass.spikesorting.v2.concat_member_curation",
+        "ConcatMemberCuration",
+        "spikesorting v2 concat-member outputs are unavailable",
+    )[0]
 
 
 ConcatMemberCuration = _probe_v2_concat_member_curation()

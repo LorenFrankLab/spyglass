@@ -1,7 +1,8 @@
 """The v2 part-table import probe in ``spikesorting_merge``.
 
-Any import failure is tolerated, so v0/v1-only environments still load the
-merge table, and logged with ``logger.warning``.
+An ``ImportError`` (a missing or incompatible package) is tolerated, so an
+environment without v2 still loads the merge table, and logged with
+``logger.warning``. Any other error is a v2 bug and raises.
 """
 
 import sys
@@ -33,28 +34,18 @@ def _force_v2_concat_member_error(monkeypatch, exc):
     monkeypatch.setitem(sys.modules, name, _Boom(name))
 
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        ImportError("v2 module missing"),
-        RuntimeError("v2 module raised at import (e.g. a version skew)"),
-    ],
-    ids=["import_error", "non_import_error"],
-)
-def test_unexpected_v2_import_error_is_logged(
-    dj_conn, monkeypatch, caplog, exc
-):
+def test_v2_import_error_is_tolerated_and_logged(dj_conn, monkeypatch, caplog):
     # Import the probe (declaring spikesorting_merge's schema against the live
     # ``dj_conn`` DB) BEFORE patching, so the patch affects only our direct
     # ``_probe_v2_curation()`` call rather than the module's own load-time one.
     from spyglass.spikesorting.spikesorting_merge import _probe_v2_curation
 
+    exc = ImportError("v2 module missing")
     _force_v2_curation_error(monkeypatch, exc)
 
     with caplog.at_level("WARNING"):
         curation, captured = _probe_v2_curation()
 
-    # Tolerated, including a non-ImportError.
     assert curation is None
     assert captured is exc
 
@@ -69,22 +60,15 @@ def test_unexpected_v2_import_error_is_logged(
     )
 
 
-@pytest.mark.parametrize(
-    "exc",
-    [
-        ImportError("concat member module missing"),
-        RuntimeError("concat member module raised at import"),
-    ],
-    ids=["import_error", "non_import_error"],
-)
-def test_unexpected_concat_member_import_error_is_logged(
-    dj_conn, monkeypatch, caplog, exc
+def test_concat_member_import_error_is_tolerated_and_logged(
+    dj_conn, monkeypatch, caplog
 ):
-    """The optional member-output probe tolerates and surfaces any failure."""
+    """The member-output probe tolerates and surfaces an ImportError."""
     from spyglass.spikesorting.spikesorting_merge import (
         _probe_v2_concat_member_curation,
     )
 
+    exc = ImportError("concat member module missing")
     _force_v2_concat_member_error(monkeypatch, exc)
     with caplog.at_level("WARNING"):
         member_table = _probe_v2_concat_member_curation()
@@ -95,3 +79,18 @@ def test_unexpected_concat_member_import_error_is_logged(
         and type(exc).__name__ in record.message
         for record in caplog.records
     )
+
+
+def test_other_v2_import_errors_raise(dj_conn, monkeypatch):
+    """A non-ImportError while importing v2 is a bug, not a missing extra."""
+    from spyglass.spikesorting.spikesorting_merge import (
+        _probe_v2_concat_member_curation,
+        _probe_v2_curation,
+    )
+
+    _force_v2_curation_error(monkeypatch, RuntimeError("v2 bug at import"))
+    with pytest.raises(RuntimeError, match="v2 bug at import"):
+        _probe_v2_curation()
+    _force_v2_concat_member_error(monkeypatch, RuntimeError("member bug"))
+    with pytest.raises(RuntimeError, match="member bug"):
+        _probe_v2_concat_member_curation()
