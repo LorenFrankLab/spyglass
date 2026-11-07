@@ -1,7 +1,7 @@
 """Analyzer-cache path policy.
 
 The folder location depends only on ``sorting_id`` and one configured root
-(``spikesorting_v2_analyzer_dir``, else ``temp_dir``). DB-free.
+(``spikesorting_v2_analyzer_dir``, else under ``base_dir``). DB-free.
 """
 
 from __future__ import annotations
@@ -41,13 +41,13 @@ def test_analyzer_cache_root_honors_config(restore_custom_config):
     )
 
 
-def test_analyzer_cache_root_falls_back_to_temp_dir(restore_custom_config):
+def test_analyzer_cache_root_falls_back_to_base_dir(restore_custom_config):
     import datajoint as dj
 
-    from spyglass.settings import temp_dir
+    from spyglass.settings import base_dir
 
     dj.config["custom"].pop("spikesorting_v2_analyzer_dir", None)
-    expected = Path(temp_dir) / "spikesorting_v2" / "analyzers"
+    expected = Path(base_dir) / "spikesorting_v2" / "analyzers"
     assert analyzer_cache_root() == expected
     assert analyzer_path("s1", "rec") == expected / "s1__rec.analyzer"
 
@@ -71,15 +71,15 @@ def test_analyzer_path_includes_params_name(restore_custom_config):
 
 
 def test_empty_config_value_falls_back(restore_custom_config):
-    """An empty-string override is falsy -> fall back to temp_dir."""
+    """An empty-string override is falsy -> fall back to base_dir."""
     import datajoint as dj
 
-    from spyglass.settings import temp_dir
+    from spyglass.settings import base_dir
 
     dj.config["custom"]["spikesorting_v2_analyzer_dir"] = ""
     assert (
         analyzer_cache_root()
-        == Path(temp_dir) / "spikesorting_v2" / "analyzers"
+        == Path(base_dir) / "spikesorting_v2" / "analyzers"
     )
 
 
@@ -704,3 +704,30 @@ class TestBuildAnalyzerWaveformParams:
         noise = analyzer.get_extension("noise_levels").get_data()
         assert np.allclose(noise, 1.0, atol=0.5), noise
         assert noise.max() < 2.0 and noise.min() > 0.4, noise
+
+
+def test_default_storage_roots_are_outside_temp_dir(tmp_path, monkeypatch):
+    """Durable v2 folders default under ``base_dir``: lab cleanup deletes
+    week-old files in ``temp_dir``."""
+    import datajoint as dj
+
+    import spyglass.settings as settings
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        v2_storage_root,
+    )
+
+    monkeypatch.setattr(settings, "base_dir", str(tmp_path / "base"))
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path / "base" / "tmp"))
+    monkeypatch.setitem(dj.config, "custom", {})
+
+    root = analyzer_cache_root()
+    assert root == tmp_path / "base" / "spikesorting_v2" / "analyzers"
+    assert not root.is_relative_to(tmp_path / "base" / "tmp")
+    assert v2_storage_root("unused_key", "figpack") == (
+        tmp_path / "base" / "spikesorting_v2" / "figpack"
+    )
+
+    monkeypatch.setitem(
+        dj.config, "custom", {"spikesorting_v2_analyzer_dir": str(tmp_path)}
+    )
+    assert analyzer_cache_root() == tmp_path

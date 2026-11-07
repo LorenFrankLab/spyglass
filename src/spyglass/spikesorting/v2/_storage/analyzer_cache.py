@@ -179,26 +179,30 @@ def analyzer_cache_folder_identity(
     )
 
 
-def analyzer_cache_root() -> Path:
-    """Return the configured root directory for SortingAnalyzer caches.
+def v2_storage_root(custom_key: str, name: str) -> Path:
+    """Return a durable v2 storage folder.
 
-    ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` when truthy,
-    else ``Path(temp_dir) / "spikesorting_v2" / "analyzers"``.
-
-    Returns
-    -------
-    pathlib.Path
-        The root directory under which analyzer caches are stored.
+    ``dj.config["custom"][custom_key]`` when set, else
+    ``Path(base_dir) / "spikesorting_v2" / name``. Not under ``temp_dir``,
+    whose week-old files the lab cleanup script deletes.
     """
     import datajoint as dj
 
-    from spyglass.settings import temp_dir
+    from spyglass.settings import base_dir
 
-    custom = dj.config.get("custom") or {}
-    configured = custom.get("spikesorting_v2_analyzer_dir")
+    configured = (dj.config.get("custom") or {}).get(custom_key)
     if configured:
         return Path(configured)
-    return Path(temp_dir) / "spikesorting_v2" / "analyzers"
+    return Path(base_dir) / "spikesorting_v2" / name
+
+
+def analyzer_cache_root() -> Path:
+    """Return the root directory for SortingAnalyzer caches.
+
+    ``dj.config["custom"]["spikesorting_v2_analyzer_dir"]`` when set, else
+    ``Path(base_dir) / "spikesorting_v2" / "analyzers"``.
+    """
+    return v2_storage_root("spikesorting_v2_analyzer_dir", "analyzers")
 
 
 def analyzer_path(sorting_id, waveform_params_name: str) -> Path:

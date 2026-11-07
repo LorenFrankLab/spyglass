@@ -90,18 +90,16 @@ class FigPackBuildResult:
 
 
 def figpack_cache_root() -> Path:
-    """Return the configured root directory for saved FigPack bundles.
+    """Return the root directory for saved FigPack bundles.
 
     ``dj.config["custom"]["spikesorting_v2_figpack_dir"]`` when set, else
-    ``Path(temp_dir) / "spikesorting_v2" / "figpack"``.
+    ``Path(base_dir) / "spikesorting_v2" / "figpack"``.
     """
-    from spyglass.settings import temp_dir
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        v2_storage_root,
+    )
 
-    custom = dj.config.get("custom") or {}
-    configured = custom.get("spikesorting_v2_figpack_dir")
-    if configured:
-        return Path(configured)
-    return Path(temp_dir) / "spikesorting_v2" / "figpack"
+    return v2_storage_root("spikesorting_v2_figpack_dir", "figpack")
 
 
 def figpack_bundle_path(figpack_curation_id) -> Path:
