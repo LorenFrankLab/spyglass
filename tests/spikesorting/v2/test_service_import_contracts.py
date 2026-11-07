@@ -341,3 +341,31 @@ def test_package_root_imports_without_optional_extra_modules():
         "curation/matching extras\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
+
+
+@pytest.mark.database
+def test_root_exports_every_v2_table(dj_conn):
+    """``from spyglass.spikesorting.v2 import <Table>`` works for every
+    ``@schema`` table in the public modules."""
+    import ast
+    from importlib import import_module
+    from pathlib import Path
+
+    import spyglass.spikesorting.v2 as v2
+
+    root = Path(v2.__file__).parent
+    declared = {}
+    for path in root.glob("*.py"):
+        if path.name.startswith("_"):
+            continue
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.ClassDef) and any(
+                getattr(d, "id", None) == "schema" for d in node.decorator_list
+            ):
+                declared[node.name] = path.stem
+    assert v2._TABLE_MODULES == declared
+    for name, module in declared.items():
+        table = getattr(
+            import_module(f"spyglass.spikesorting.v2.{module}"), name
+        )
+        assert getattr(v2, name) is table

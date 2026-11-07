@@ -1,7 +1,8 @@
 """SpikeInterface ``SortingAnalyzer``-based spike sorting pipeline for Spyglass.
 
 Submodules load lazily, so ``import spyglass.spikesorting.v2`` does not import
-Pydantic or SpikeInterface. Eager names:
+Pydantic or SpikeInterface. Tables (``from spyglass.spikesorting.v2 import
+Recording``) and the pipeline functions load on first use. Eager names:
 
 - ``initialize_v2_defaults``: installs every default Lookup row in one call.
 - ``CurationLabel``: the canonical curation label set.
@@ -81,6 +82,58 @@ def initialize_v2_defaults() -> None:
         )
 
 
+#: Tables, imported from their module on first access.
+_TABLE_MODULES = {
+    "ArtifactDetectionParameters": "artifact",
+    "SharedArtifactGroup": "artifact",
+    "RecordingArtifactSelection": "artifact",
+    "SharedGroupArtifactSelection": "artifact",
+    "RecordingArtifactDetection": "artifact",
+    "SharedGroupArtifactDetection": "artifact",
+    "ArtifactDetectionOutput": "artifact_output",
+    "ConcatMemberCurationV2": "concat_member_curation",
+    "CurationV2": "curation",
+    "FigPackCurationSelection": "figpack_curation",
+    "FigPackCuration": "figpack_curation",
+    "QualityMetricParameters": "metric_curation",
+    "AutoCurationRules": "metric_curation",
+    "CurationEvaluationSelection": "metric_curation",
+    "CurationEvaluation": "metric_curation",
+    "MotionEstimationParameters": "motion",
+    "MotionInterpolationParameters": "motion",
+    "MotionCorrectionParameters": "motion",
+    "MotionEstimateSelection": "motion",
+    "MotionEstimate": "motion",
+    "MotionCorrectedRecordingSelection": "motion",
+    "MotionCorrectedRecording": "motion",
+    "RecordingArtifactVersions": "recompute",
+    "RecordingArtifactRecomputeSelection": "recompute",
+    "RecordingArtifactRecompute": "recompute",
+    "SortingAnalyzerVersions": "recompute",
+    "SortingAnalyzerRecomputeSelection": "recompute",
+    "SortingAnalyzerRecompute": "recompute",
+    "SortGroupV2": "recording",
+    "PreprocessingParameters": "recording",
+    "RecordingSelection": "recording",
+    "Recording": "recording",
+    "DriftEstimate": "recording",
+    "CurationReviewProfile": "review_profile",
+    "SessionGroup": "session_group",
+    "ConcatenatedRecordingSelection": "session_group",
+    "ConcatenatedRecording": "session_group",
+    "SorterParameters": "sorting",
+    "AnalyzerWaveformParameters": "sorting",
+    "PreprocessingWaveformParameters": "sorting",
+    "SortingSelection": "sorting",
+    "Sorting": "sorting",
+    "UnitAnnotationDefinition": "unit_annotation",
+    "CurationUnitAnnotationSet": "unit_annotation",
+    "MatcherParameters": "unit_matching",
+    "UnitMatchSelection": "unit_matching",
+    "UnitMatch": "unit_matching",
+    "TrackedUnit": "unit_matching",
+}
+
 # Names after the first three resolve lazily from ``.pipeline``.
 __all__ = [
     "initialize_v2_defaults",
@@ -138,7 +191,7 @@ __all__ = [
 
 def __dir__():
     # Expose lazy re-exports to tab-completion.
-    return sorted({*globals(), *__all__})
+    return sorted({*globals(), *__all__, *_TABLE_MODULES})
 
 
 def __getattr__(name):
@@ -149,6 +202,11 @@ def __getattr__(name):
 
         globals()[name] = verify_v2_default_catalog
         return verify_v2_default_catalog
+    if name in _TABLE_MODULES:
+        module = import_module(f"{__name__}.{_TABLE_MODULES[name]}")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name in __all__:
         pipeline = import_module(f"{__name__}.pipeline")
         value = getattr(pipeline, name)

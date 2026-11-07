@@ -911,7 +911,10 @@
       "tier": "unit"
     },
     "test_service_import_contracts.py": {
-      "tier": "unit"
+      "tier": "unit",
+      "overrides": {
+        "test_root_exports_every_v2_table": "db_unit"
+      }
     },
     "test_session_concat_schema.py": {
       "tier": "db_unit"
