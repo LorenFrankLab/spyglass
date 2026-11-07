@@ -143,10 +143,6 @@ series, or more than one, raises `ValueError`.
     `ValueError`. Results record the intervals used in
     `spyglass_observation_intervals`, `spyglass_encoding_intervals` and
     `spyglass_decoding_intervals` attributes.
-- Clusterless amplitude marks (v0 `UnitMarks`, v1 `UnitWaveformFeatures`) and
-    v0/v1 `BurstPair` peak amplitudes are read at the spike-aligned sample
-    rather than the waveform midpoint. Values change for waveform parameters
-    whose `ms_before` and `ms_after` differ.
 - `MuaEventsV1` smooths, normalizes and detects events within each contiguous
     observed run, and numbers events uniquely in time order. Results change for
     intervals with more than one valid-time segment.
@@ -202,10 +198,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 ### Documentation
 
-- Add Spike Sorting v2 documentation: a quickstart, a user guide, a v1 to v2
-    migration guide, a storage-management page, and the tutorial notebooks
-    `10_Spike_SortingV2`, `10_Spike_SortingV2_Curation`,
-    `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
+- Add Spike Sorting v2 documentation: a v1 to v2 migration guide, a developer
+    guide, and the tutorial notebooks `10_Spike_SortingV2`,
+    `10_Spike_SortingV2_Curation`, `10_Spike_SortingV2_Presets` and
+    `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
 - Repair stale notebook cross-links and guard them with a test #1678
@@ -235,8 +231,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     (FigPack browser review, ipywidgets), and the test-only
     `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
 - Add the `spikesorting` extra (SpikeInterface, probeinterface, numba, pydantic,
-    sortingview), which the `spikesorting-v2` extras include. v0/v1 FigURL
-    curation imports `kachery_cloud` only when it runs, and `insert_sessions`
+    sortingview), which the `spikesorting-v2` extras include. `insert_sessions`
     skips the spike sorting and decoding merge tables without the extra #1609
 - The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
     a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
