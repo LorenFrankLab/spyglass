@@ -127,6 +127,13 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- `convert_dataset_type` keeps a chunked dataset's `maxshape` and leaves the
+    original dataset in place when the dtype conversion fails #1711
+- `_get_peak_amplitude` reads amplitudes at the waveform extractor's
+    `nbefore`, not the window midpoint. Clusterless amplitude marks (v0
+    `UnitMarks`, v1 `UnitWaveformFeatures`) and v0/v1 `BurstPair` peak
+    amplitudes change for waveform parameters whose `ms_before` and `ms_after`
+    differ #1711
 
 ### Pipelines
 
@@ -167,6 +174,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - `plot_burst_pair_peaks` handles a single pair and units with more than
+        four channels #1711
+    - Rename `calculate_isi_violation`'s `isi_threshold_s` to
+        `isi_threshold_ms`, since the value is in milliseconds. The old name
+        is logged in `ActivityLog` and scheduled for removal in 0.7.0 #1711
 
 ## [0.6.0] (Sep 1st 2026)
 
