@@ -225,14 +225,13 @@ onto them, so v1 strings do not resolve.
 - `PreprocessingParameters`: v1's `default` → `default`. The production region
     recipes are `franklab_hippocampus_2026_06` (600 Hz high-pass) and
     `franklab_cortex_2026_06` (300 Hz).
-- `SorterParameters` (MountainSort4): `franklab_tetrode_hippocampus_30kHz_ms4` /
-    `franklab_probe_ctx_30kHz_ms4` (and v1's
-    `franklab_tetrode_hippocampus_30KHz` / `franklab_probe_ctx_30KHz`) →
-    `franklab_30khz_ms4_2026_06` / `franklab_20khz_ms4_2026_06`. MS4 runs with
-    `filter=False`, so the row is region-agnostic; the high-pass band lives on
-    the preprocessing row.
-- `SorterParameters` (other): `franklab_tetrode_hippocampus_30kHz_ms5` →
-    `franklab_30khz_ms5_2026_06`; `clusterless_thresholder`
+- `SorterParameters` (MountainSort4): v1's
+    `franklab_tetrode_hippocampus_30KHz` / `franklab_probe_ctx_30KHz` →
+    `franklab_30khz_ms4_2026_06` (or `franklab_20khz_ms4_2026_06` at 20 kHz).
+    MS4 runs with `filter=False`, so the row is region-agnostic; the high-pass
+    band lives on the preprocessing row.
+- `SorterParameters` (other): v1's `mountainsort5` `default` (SpikeInterface's
+    defaults) → `franklab_30khz_ms5_2026_06`; `clusterless_thresholder`
     `default_clusterless` → `default`; `kilosort4` `default` →
     `franklab_neuropixels_default`.
 - `ArtifactDetectionParameters`: production rows are
@@ -256,9 +255,10 @@ Name and content rules:
     row then shows `duplicate_of`.
 - **v1 sorter names are opt-in.**
     `SorterParameters.insert_default_legacy_si_sorters()` inserts
-    `('<sorter>', 'default')` rows for installed SI sorters outside v2's set
-    (e.g. `kilosort2_5`), like v1's auto-insert. `initialize_v2_defaults()` does
-    not call it.
+    `('<sorter>', 'default')` rows for installed, non-MATLAB SI sorters outside
+    v2's set (e.g. `herdingspikes`), like v1's auto-insert. MATLAB sorters such
+    as `kilosort2_5` need a container row. `initialize_v2_defaults()` does not
+    call it.
 
 Shipped presets (`describe_pipeline_presets()` shows them as a table; filter it,
 e.g. `presets[presets["sorter_family"] == "kilosort4"]`, rather than hardcoding
@@ -785,7 +785,8 @@ valid `template_metric_columns` values.
     child; the scored row is never changed.
 - PC and cluster-separation metrics (`nn_advanced`, `d_prime`,
     `nearest_neighbor`, `mahalanobis`, `silhouette`) use a **whitened** metric
-    analyzer, like v1's whitened `WaveformParameters`. Amplitudes and
+    analyzer (v0's metrics used a whitened extractor; the v1 notebook used
+    `default_not_whitened`). Amplitudes and
     voltage/spike-train metrics (`snr`, `amplitude_cutoff`, `firing_rate`,
     `isi_violation`, ...) use the unwhitened display analyzer. The metric recipe
     is `CurationEvaluationSelection.metric_waveform_params_name`.
@@ -1712,8 +1713,11 @@ differences:
 - **Small spike-count deltas near mask edges.** v2 fixes v1's off-by-one
     interval consolidation. A few spikes per disjoint boundary differ; v2 is
     correct.
-- **Multi-channel clusterless sorts differ.** v1's `noise_levels=[1.0]` misread
-    channels; v2 broadcasts to `n_channels`.
+- **Clusterless sorts find more peaks.** On multi-channel groups,
+    SpikeInterface 0.104's `locally_exclusive` detector finds about 25-30%
+    more near-threshold peaks than v1's SpikeInterface 0.99 did, at the same
+    µV threshold. v2 passes `noise_levels` per channel; v1's one-element value
+    was broadcast the same way, so the threshold itself is unchanged.
 - **Merged units may have fewer spikes.** Merging removes cross-unit double
     detections within 0.4 ms (a neuron cannot fire twice that fast). v2 does
     this for stored (`apply_merge=True`) and previewed (`get_merged_sorting`)
@@ -1723,6 +1727,22 @@ differences:
     firing-rate windows exclude the wall-clock gaps.
 - **KS4 may differ after an SI version bump.** The pinned snapshot test catches
     it.
+
+The production recipes also change these defaults from v1's shipped rows:
+
+| Setting | v1 | v2 production |
+| --- | --- | --- |
+| Hippocampus high-pass | 300 Hz (v1's 600 Hz sat on an MS4 row with `filter=False`) | 600 Hz (`franklab_hippocampus_2026_06`) |
+| Minimum segment length | 1 s | 1.5 ms |
+| Artifact detection | 3000 µV, all channels | 100 µV on 70% of channels (`franklab_100uv_p07_2026_06`) |
+| Artifact intervals | pieces under 1 s dropped | 1 ms join window; untouched chunks kept; no interval spans a gap |
+| Whitening | unseeded; covariance includes masked zeros | seeded; covariance from unmasked spans only |
+| Empty units after trimming | kept | dropped |
+| ISI refractory window | 1.5 ms | 2.0 ms |
+| Auto-curation rules | `nn_noise_overlap > 0.1` → `noise`, `reject` | `nn_noise_overlap > 0.1` → `noise`; `isi_violation > 0.02` → `reject` |
+| nn metrics space | v1 notebook: unwhitened | whitened metric analyzer |
+| nn `max_spikes` | 1000 | 20000 |
+| Burst `wf_similarity` | Pearson r of dense mean waveforms | SpikeInterface cosine template similarity (sparse); v1 thresholds do not transfer |
 - **Sorters are not exact oracles.** v2 pins SI's whitening and noise-level
     seeds. MS4's `isosplit`, MS5, and KS4 stay non-deterministic, so compare
     qualitatively (unit-count order, firing-rate distribution), not spike by

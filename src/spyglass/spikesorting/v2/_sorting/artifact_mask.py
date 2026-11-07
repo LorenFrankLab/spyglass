@@ -297,7 +297,8 @@ def silence_frame_ranges(recording, frame_ranges):
         return recording
     recording = recording_with_zero_offset(recording)
 
-    # Not remove_artifacts: SI 0.104 leaves the first frame of a run unmasked.
+    # Lazy and O(n_ranges) memory; remove_artifacts also mis-masks a boundary
+    # frame of a padded window in SI 0.104.
     masked = sip.silence_periods(
         recording,
         list_periods=[frame_ranges],

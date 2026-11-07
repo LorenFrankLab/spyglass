@@ -350,9 +350,9 @@ their lifecycle and serialization checks when changing supported versions.
 - Outputs are forgotten before COMMIT so a failure after a successful commit
     cannot remove a committed row's files. A failed COMMIT, or a process killed
     between compute and insert, leaves staging on disk until swept.
-- The cleanup relies on `AutoPopulate._populate1` internals, so the v2 extras
-    bound the DataJoint version (`pyproject.toml`;
-    [Dependency Pins](./Dependencies.md)).
+- The cleanup relies on `AutoPopulate._populate1` internals. Core's
+    `datajoint>=0.14.5,<2.0` range covers them: `_populate1` is unchanged
+    across 0.14.x apart from `make_kwargs`, which v2 does not use.
 
 ### Concurrent populate
 
@@ -615,8 +615,10 @@ the ordered member recordings) has the same fail-closed lifecycle as
 - Statistics spans are artifact-free frame ranges that never cross a selection
     join, a concatenation member join or an acquisition gap.
 - `_sorting.artifact_mask.silence_frame_ranges` zeroes lazily with
-    `spikeinterface.preprocessing.silence_periods`. SpikeInterface 0.104's
-    `remove_artifacts` leaves the first frame of a contiguous run unmasked.
+    `spikeinterface.preprocessing.silence_periods`, in O(n_ranges) memory; a
+    per-frame trigger list cost hundreds of MB on long recordings.
+    SpikeInterface 0.104's `remove_artifacts` also loses the last frame of a
+    padded window at a chunk start.
 - `SilencedPeriodsRecording` reports JSON support, but its periods are a
     structured array that cannot reload from JSON. `run_sorter` would fail on
     reload whenever artifacts were flagged.
