@@ -181,6 +181,56 @@ def test_evaluation_facade_refuses_changed_or_missing_recipes(
         result.plots.metrics()
 
 
+def test_evaluation_plots_delegate_to_curation_evaluation(monkeypatch):
+    """``result.plots`` calls the matching ``CurationEvaluation`` method."""
+    import sys
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+        EvaluationSpec,
+    )
+
+    calls = []
+
+    class FakeEvaluation:
+        def __getattr__(self, method):
+            def record(key, *args, **kwargs):
+                calls.append((method, key, args, kwargs))
+
+            return record
+
+    result = EvaluationResult(
+        curation=CurationRef(uuid.uuid4(), 1, uuid.uuid4()),
+        spec=EvaluationSpec("minimal", "none"),
+        evaluation_id=uuid.uuid4(),
+        metrics=pd.DataFrame({"snr": [7.0]}, index=[0]),
+        suggested_merges=[],
+        proposed_labels={},
+    )
+    key = {"curation_evaluation_id": result.evaluation_id}
+    monkeypatch.setattr(
+        EvaluationResult, "_current_evaluation_key", lambda self: key
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.v2.metric_curation",
+        SimpleNamespace(CurationEvaluation=FakeEvaluation),
+    )
+
+    result.plots.si_quality_metrics(compute_missing=True)
+    result.plots.si_template_metrics(backend="ipywidgets")
+    result.plots.pair_peaks([(0, 1)])
+    assert calls == [
+        ("plot_si_quality_metrics", key, (), {"compute_missing": True}),
+        ("plot_si_template_metrics", key, (), {"backend": "ipywidgets"}),
+        ("investigate_pair_peaks", key, ([(0, 1)],), {}),
+    ]
+
+
 def test_curation_plots_delegate_to_visualization(monkeypatch):
     """``ref.plots`` passes the ref and arguments to each module function."""
     from spyglass.spikesorting.v2 import visualization

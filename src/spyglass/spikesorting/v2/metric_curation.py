@@ -283,6 +283,39 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
             allow_duplicate_params=True,
         )
 
+    @classmethod
+    def available_quality_metrics(cls) -> list[str]:
+        """Return the metric names the installed SpikeInterface exposes."""
+        from spyglass.spikesorting.v2._params.metric_curation import (
+            _available_quality_metric_names,
+        )
+
+        return sorted(_available_quality_metric_names())
+
+    @classmethod
+    def show_available_metrics(cls) -> list[str]:
+        """Log and return the available SpikeInterface quality-metric names.
+
+        Returns the list so it shows in Jupyter whatever the logging setup.
+        """
+        names = cls.available_quality_metrics()
+        for name in names:
+            logger.info(name)
+        return names
+
+    @classmethod
+    def available_template_metric_columns(cls) -> list[str]:
+        """Return the valid ``template_metric_columns`` values.
+
+        These are output column names, not metric names: SI's ``half_width``
+        metric gives the ``trough_half_width`` and ``peak_half_width`` columns.
+        """
+        from spyglass.spikesorting.v2._params.metric_curation import (
+            _available_template_metric_columns,
+        )
+
+        return sorted(_available_template_metric_columns())
+
 
 @schema
 class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
@@ -1343,6 +1376,20 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         return plot_burst_peak_over_time(
             peak_amps, peak_times, used, overlap=overlap
         )
+
+    def get_peak_amps(self, key):
+        """Return ``(peak_amps, peak_times)`` per unit (v1 BurstPair analog).
+
+        ``peak_amps[unit_id]`` is ``(n_spikes, n_channels)`` at the waveform
+        peak, and ``peak_times[unit_id]`` holds the times in seconds of the
+        same spikes: the ``waveforms`` extension's random subset, not the full
+        train.
+        """
+        from spyglass.spikesorting.v2._curation.metric_plots import (
+            peak_amplitudes_from_analyzer,
+        )
+
+        return peak_amplitudes_from_analyzer(self._analyzer_for(key))
 
     def get_burst_pair_metrics(
         self,

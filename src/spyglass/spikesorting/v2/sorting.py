@@ -1503,6 +1503,23 @@ class Sorting(
             )
         return CurationRef.from_key(root.fetch1("KEY"))
 
+    def plot_summary(
+        self, key, *, compute_missing=False, backend=None, **kwargs
+    ):
+        """Delegate to ``visualization.plot_sorting_summary`` (root curation).
+
+        ``backend`` is required: SI's ``SortingSummaryWidget`` has no
+        matplotlib backend.
+        """
+        from spyglass.spikesorting.v2 import visualization
+
+        return visualization.plot_sorting_summary(
+            self.root_curation(key),
+            compute_missing=compute_missing,
+            backend=backend,
+            **kwargs,
+        )
+
     def plot_unit_summary(
         self,
         key,

@@ -769,6 +769,9 @@ Only stored per-pair burst metrics (`BurstPairUnit`) have no v2 table.
 `metric_curation` provides `QualityMetricParameters`, `AutoCurationRules`,
 `CurationEvaluationSelection`, and `CurationEvaluation`. It replaces v1
 `MetricCuration` for SI quality metrics, auto-labels, and merge suggestions.
+`QualityMetricParameters.show_available_metrics()` lists the metric names the
+installed SpikeInterface offers, and `available_template_metric_columns()` the
+valid `template_metric_columns` values.
 
 - It scores a **committed** `CurationV2` generation in that curation's own unit
     namespace. A merged unit's metrics come from its merged template, never a
@@ -894,6 +897,8 @@ v2 has no `BurstPair` table. The v1 plotting helpers live on
 
 - Pair views: `plot_correlograms`, `investigate_pair_xcorrel`,
     `investigate_pair_peaks`, `plot_peak_over_time`.
+- `CurationEvaluation().get_peak_amps(key)` returns `(peak_amps, peak_times)`
+    per unit, as v1 `BurstPair.get_peak_amps` does.
 - `evaluation.burst_pair_metrics(pairs=[...])` (table form
     `CurationEvaluation().get_burst_pair_metrics(key)`) returns a DataFrame
     indexed by `(unit1, unit2)` with `wf_similarity`, `isi_violation`,

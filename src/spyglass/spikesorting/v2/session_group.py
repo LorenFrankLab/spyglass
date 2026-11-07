@@ -245,6 +245,27 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 f"(create the sort groups / team first). ({exc})"
             ) from exc
 
+    @classmethod
+    def is_multi_day(cls, key: dict) -> bool:
+        """Report whether the group's members span two or more dates.
+
+        Dates come from each member's ``Session.session_start_time``, as in
+        ``create_group``.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``SessionGroup``.
+
+        Returns
+        -------
+        bool
+        """
+        start_times = (
+            Session & (cls.Member & key).proj("nwb_file_name")
+        ).fetch("session_start_time")
+        return len(distinct_recording_dates(start_times)) > 1
+
 
 @schema
 class ConcatenatedRecordingSelection(

@@ -474,6 +474,53 @@ def _patch_evaluation_display_analyzer(monkeypatch, analyzer):
 
 
 @pytest.mark.database
+def test_curation_evaluation_get_peak_amps(
+    dj_conn, monkeypatch, synthetic_analyzer
+):
+    """``get_peak_amps`` returns the display analyzer's peak amplitudes."""
+    from spyglass.spikesorting.v2._curation.metric_plots import (
+        peak_amplitudes_from_analyzer,
+    )
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    monkeypatch.setattr(
+        CurationEvaluation,
+        "_analyzer_for",
+        lambda self, key: synthetic_analyzer,
+    )
+    peak_amps, peak_times = CurationEvaluation().get_peak_amps(
+        {"curation_evaluation_id": "unused"}
+    )
+    expected_amps, expected_times = peak_amplitudes_from_analyzer(
+        synthetic_analyzer
+    )
+    assert set(peak_amps) == set(synthetic_analyzer.unit_ids)
+    for unit_id in synthetic_analyzer.unit_ids:
+        np.testing.assert_array_equal(
+            peak_amps[unit_id], expected_amps[unit_id]
+        )
+        np.testing.assert_array_equal(
+            peak_times[unit_id], expected_times[unit_id]
+        )
+
+
+@pytest.mark.database
+def test_quality_metric_parameters_list_available_names(dj_conn):
+    """The discovery helpers list SI metric names and template columns."""
+    from spyglass.spikesorting.v2.metric_curation import (
+        QualityMetricParameters,
+    )
+
+    names = QualityMetricParameters.available_quality_metrics()
+    assert names == sorted(names) and "snr" in names
+    assert QualityMetricParameters.show_available_metrics() == names
+
+    columns = QualityMetricParameters.available_template_metric_columns()
+    assert columns == sorted(columns)
+    assert "trough_half_width" in columns and "half_width" not in columns
+
+
+@pytest.mark.database
 def test_curation_evaluation_get_burst_pair_metrics(
     dj_conn, monkeypatch, synthetic_analyzer
 ):

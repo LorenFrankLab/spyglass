@@ -118,6 +118,12 @@ def test_table_delegates_call_facade_if_present(dj_conn, monkeypatch):
             {"backend": "matplotlib"},
         ),
         (
+            Sorting.plot_summary,
+            "plot_sorting_summary",
+            (),
+            {"compute_missing": False, "backend": None},
+        ),
+        (
             Sorting.plot_unit_summary,
             "plot_unit_summary",
             (17,),

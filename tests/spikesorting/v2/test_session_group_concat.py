@@ -108,7 +108,7 @@ def test_chronic_fixture_provides_two_same_day_and_one_next_day(
     assert (rec0.get_channel_locations() == rec1.get_channel_locations()).all()
 
 
-# ---------- SessionGroup.create_group ----------------------------------------
+# ---------- SessionGroup.create_group / is_multi_day ----------------------
 
 
 @pytest.fixture
@@ -292,8 +292,11 @@ def test_create_group_rejects_missing_foreign_key(chronic_2_session_minirec):
 
 
 @pytest.mark.slow
-def test_create_group_same_day_inserts(chronic_2_session_minirec):
-    """Same-day members insert cleanly under the default ``allow_multi_day``."""
+def test_create_group_same_day_inserts_and_is_not_multi_day(
+    chronic_2_session_minirec,
+):
+    """Same-day members insert cleanly under the default ``allow_multi_day``
+    and ``is_multi_day`` reports ``False``."""
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     sub = chronic_2_session_minirec
@@ -303,6 +306,7 @@ def test_create_group_same_day_inserts(chronic_2_session_minirec):
         SessionGroup.create_group(owner, name, sub["same_day_members"])
         assert SessionGroup & key
         assert len(SessionGroup.Member & key) == 2
+        assert SessionGroup.is_multi_day(key) is False
     finally:
         (SessionGroup & key).super_delete(warn=False)
 
@@ -324,7 +328,8 @@ def test_session_group_create_multi_day_rejected_by_default(
 
 @pytest.mark.slow
 def test_create_group_multi_day_allowed_with_flag(chronic_2_session_minirec):
-    """``allow_multi_day=True`` accepts multi-date members."""
+    """``allow_multi_day=True`` accepts multi-date members and
+    ``is_multi_day`` agrees."""
     from spyglass.spikesorting.v2.session_group import SessionGroup
 
     sub = chronic_2_session_minirec
@@ -334,6 +339,7 @@ def test_create_group_multi_day_allowed_with_flag(chronic_2_session_minirec):
     try:
         SessionGroup.create_group(owner, name, members, allow_multi_day=True)
         assert len(SessionGroup.Member & key) == 2
+        assert SessionGroup.is_multi_day(key) is True
     finally:
         (SessionGroup & key).super_delete(warn=False)
 

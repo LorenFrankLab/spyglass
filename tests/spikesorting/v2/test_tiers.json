@@ -525,8 +525,10 @@
       "overrides": {
         "test_burst_pair_isi_uses_evaluation_recipe": "stage",
         "test_curation_evaluation_get_burst_pair_metrics": "db_unit",
+        "test_curation_evaluation_get_peak_amps": "db_unit",
         "test_evaluation_result_burst_pair_metrics_returns_frame": "db_unit",
-        "test_plot_burst_pair_metrics_renders_from_the_data_path": "db_unit"
+        "test_plot_burst_pair_metrics_renders_from_the_data_path": "db_unit",
+        "test_quality_metric_parameters_list_available_names": "db_unit"
       }
     },
     "test_metric_curation_transforms.py": {
