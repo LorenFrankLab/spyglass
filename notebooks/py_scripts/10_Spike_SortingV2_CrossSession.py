@@ -716,7 +716,9 @@ if run_epoch_match:
 #   all of them. Each evaluation must belong to its curation.
 # - `final_curated` (group and named-sort planners) means a unique committed
 #   non-root leaf. An auto-labeled child can satisfy it, so it is not proof of
-#   review. `manual` takes `manual_curation_choices={sorting_id: curation_id}`.
+#   review. `manual` takes `manual_curation_choices`: `{member_index:
+#   {"sorting_id", "curation_id"}}` for group plans, `{sorting_id: curation_id}`
+#   for named sorts.
 #   A plan that cannot pin exactly one curation has `plan.ok is False`, and
 #   `run_v2_unit_match` raises listing `plan.errors`.
 # - Group-based discovery searches each member's standalone sorts. Use named sorts
