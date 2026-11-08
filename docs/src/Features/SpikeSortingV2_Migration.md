@@ -403,9 +403,10 @@ pipeline call with the same inputs reuses these rows. The
 ### Whole-session runs
 
 `run_v2_pipeline_session` sorts every (or selected) sort group of a session,
-sequentially, and needs an explicit `pipeline_preset`. Section 3 of the
-[Presets notebook](../notebooks/10_Spike_SortingV2_Presets.ipynb) runs it and
-its preflight, freezes the checked groups as `sort_group_ids=`, and describes
+sequentially. It and its preflight both need an explicit `pipeline_preset`.
+Section 3 of the
+[Presets notebook](../notebooks/10_Spike_SortingV2_Presets.ipynb) runs them,
+freezes the checked groups as `sort_group_ids=`, and describes
 `continue_on_error`.
 
 ## What you query differently
