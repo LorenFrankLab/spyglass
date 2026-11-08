@@ -136,7 +136,9 @@ sorting_key = SortingSelection.insert_selection(
         "recording_id": recording_key["recording_id"],
         "sorter": sorter,
         "sorter_params_name": sorter_params_name,
-        "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
+        "artifact_detection_id": artifact_detection_key[
+            "artifact_detection_id"
+        ],
     }
 )
 Sorting.populate(sorting_key)
