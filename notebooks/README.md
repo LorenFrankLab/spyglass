@@ -32,6 +32,8 @@ For v2, choose a notebook for the task you want to complete:
 - [First single-session sort](./10_Spike_SortingV2.ipynb): inspect channels and
     references, choose a preset, run preflight, sort, and select a population
     for analysis.
+- [Stage tables](./10_Spike_SortingV2_Tables.ipynb): the same stages run one
+    table at a time, from selection insert to populate and fetch.
 - [Curation and browser review](./10_Spike_SortingV2_Curation.ipynb): review
     units, save drafts, commit changes, and verify merged units.
 - [Presets and whole-session sorting](./10_Spike_SortingV2_Presets.ipynb):

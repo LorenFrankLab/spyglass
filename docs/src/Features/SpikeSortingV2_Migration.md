@@ -407,71 +407,12 @@ channels:
 ### Running stages by hand
 
 v1 users drove each table. v2 tables work the same way, for when no preset fits
-or to inspect preprocessing and artifacts before sorting. Use row names from
-`describe_pipeline_presets()`. A later pipeline call with the same inputs reuses
-these rows.
-
-```python
-from spyglass.spikesorting.v2.artifact import (
-    RecordingArtifactDetection,
-    RecordingArtifactSelection,
-)
-from spyglass.spikesorting.v2.curation import CurationV2
-from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
-from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-recording_key = RecordingSelection.insert_selection(
-    {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": sort_group_id,
-        "interval_list_name": "raw data valid times",
-        "preprocessing_params_name": "franklab_hippocampus_2026_06",
-        "team_name": "my_team",
-    }
-)
-Recording.populate(recording_key)
-
-# Cross-recording detection uses SharedArtifactGroup +
-# SharedGroupArtifactSelection / SharedGroupArtifactDetection instead.
-artifact_detection_key = RecordingArtifactSelection.insert_selection(
-    {
-        "recording_id": recording_key["recording_id"],
-        "artifact_detection_params_name": "default",
-    }
-)
-RecordingArtifactDetection.populate(artifact_detection_key)
-
-# Preprocessed traces before masking: the first second by default, or pass
-# time_range=(start, stop) in recording seconds. Then the retained intervals.
-Recording().plot_traces(recording_key)
-RecordingArtifactDetection().get_artifact_removed_intervals(artifact_detection_key)
-
-sorting_key = SortingSelection.insert_selection(
-    {
-        "recording_id": recording_key["recording_id"],
-        "sorter": "mountainsort5",
-        "sorter_params_name": "franklab_30khz_ms5_2026_06",
-        "artifact_detection_id": artifact_detection_key["artifact_detection_id"],
-    }
-)
-Sorting.populate(sorting_key)
-
-curation_key = CurationV2.insert_curation(
-    sorting_key=sorting_key,
-    labels={},
-    parent_curation_id=-1,
-    description="first pass",
-)
-```
-
-- Fill a `*Selection` table with `insert_selection`, then `populate()` its
-    computed table. Parameter tables provide `insert_default()`.
-- `SharedArtifactGroup` lets several recordings of one session share one
-    artifact result (e.g. chewing artifacts on every probe).
-- Masked samples read 0 µV. If a masked source has a nonzero channel offset
-    (only with the `no_filter` recipe and `reference_mode="none"`), it is first
-    converted to float32 µV.
-- `Sorting.Unit` stores per-unit summaries (`n_spikes`, `peak_amplitude_uv`).
+or to inspect preprocessing and artifacts before sorting: fill a `*Selection`
+table with `insert_selection`, then `populate()` its computed table. A later
+pipeline call with the same inputs reuses these rows. The
+[Tables notebook](../notebooks/10_Spike_SortingV2_Tables.ipynb) runs
+`Recording`, artifact detection, `Sorting`, `CurationV2`, and
+`CurationEvaluation` this way and reads the merge entry.
 
 ### Whole-session runs
 
