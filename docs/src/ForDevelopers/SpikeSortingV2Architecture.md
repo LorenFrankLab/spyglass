@@ -392,8 +392,8 @@ their lifecycle and serialization checks when changing supported versions.
     `Sorting.delete()` override, so the analyzer folder stays.
     `Sorting.find_orphaned_analyzer_folders` reports disk-side orphans, staging
     leftovers, DB rows with missing folders, and recompute-reclaimed folders.
-    Active builds are skipped; ownership is checked by lock, not by PID or
-    age, and killed processes release theirs. It never deletes a database row.
+    Active builds are skipped; ownership is checked by lock, not by PID or age,
+    and killed processes release theirs. It never deletes a database row.
 - Before that cascade, the delete refuses if any table outside the merge
     references those merge ids. The masters are removed after the confirmation
     prompt, so their dependents would otherwise be deleted unseen. Referencing

@@ -16,8 +16,8 @@ The how-to lives in the notebooks:
 - [Cross-session](../notebooks/10_Spike_SortingV2_CrossSession.ipynb): same-day
     concatenation and unit matching.
 
-This page covers what changes from v1, how to move, and the setup to read
-before running v2. How the code is organized, and why, is in the
+This page covers what changes from v1, how to move, and the setup to read before
+running v2. How the code is organized, and why, is in the
 [developer guide](../ForDevelopers/SpikeSortingV2Architecture.md). Changes to
 existing v0/v1 behavior are in the [CHANGELOG](../CHANGELOG.md).
 
@@ -161,8 +161,8 @@ permissions and path handling are in the
     can cascade-delete another team's rows.
     `SortGroupV2.preview_existing_entries` lists that blast radius; it does not
     block.
-- Users need insert/create privileges on the `spikesorting_v2_motion` schema,
-    as on every other `spikesorting_v2_*` schema.
+- Users need insert/create privileges on the `spikesorting_v2_motion` schema, as
+    on every other `spikesorting_v2_*` schema.
 
 ## Porting a v1 sort to v2
 
@@ -325,8 +325,9 @@ table):
     raises with the same preview. To add groups next to existing ones, pass
     non-overlapping `sort_group_ids=`.
 - **Choose the group deliberately** with `describe_sort_groups` and
-    `plot_sort_group_geometry` (step 2 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)). Do
-    not assume `0` is the right shank.
+    `plot_sort_group_geometry` (step 2 of the
+    [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)). Do not assume
+    `0` is the right shank.
 - **Calibration must match for referencing.** Specific and global-median
     referencing need uniform finite offsets and uniform finite positive gains
     across the contributing channels, including the reference. Otherwise
@@ -338,8 +339,8 @@ table):
 `suggest_bad_channels` proposes `Electrode.bad_channel` flags. It bandpass
 filters the raw recording and runs SpikeInterface's `detect_bad_channels`
 (`coherence+psd`) per full shank. Step 2 of the
-[first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) shows the review-then-persist calls, the seed and
-label rules, and how to recalibrate.
+[first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) shows the
+review-then-persist calls, the seed and label rules, and how to recalibrate.
 
 - **Finalize flags before creating sort groups.** Grouping excludes flagged
     channels. A later flag does not change an existing group; recreate it.
@@ -521,8 +522,8 @@ never infer it from the latest child.
     each on that member's timeline, with the same unit decisions.
 - Across groups, identify units by `(spikesorting_merge_id, unit_id)`.
 
-Add analysis-specific metric criteria (`evaluation=`, `unit_criteria=`) from
-one explicit evaluation of the same curation. The
+Add analysis-specific metric criteria (`evaluation=`, `unit_criteria=`) from one
+explicit evaluation of the same curation. The
 [Curation notebook](../notebooks/10_Spike_SortingV2_Curation.ipynb) ("Additional
 SNR selection for this analysis only") shows the call.
 
@@ -583,10 +584,11 @@ its observed intervals.
 - A v2 `merge_id` exports like a v1 one: fetch it with
     `SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})` between
     `start_export` and `stop_export`, as in the
-    [Export notebook](../notebooks/05_Export.ipynb). `Export.File` gets the curated units NWB, the sort NWB, and the
-    preprocessed-recording cache through the foreign-key cascade. Calling
-    `get_recording` / `get_sorting` during the export is not needed (they log no
-    export events). Zero-unit curations export the same way.
+    [Export notebook](../notebooks/05_Export.ipynb). `Export.File` gets the
+    curated units NWB, the sort NWB, and the preprocessed-recording cache
+    through the foreign-key cascade. Calling `get_recording` / `get_sorting`
+    during the export is not needed (they log no export events). Zero-unit
+    curations export the same way.
 
 - Every v2 analysis NWB carries its own provenance; see
     [Provenance in each v2 NWB](../ForDevelopers/SpikeSortingV2Architecture.md#provenance-in-each-v2-nwb).
@@ -721,8 +723,8 @@ and custom-rule details.
     `CurationRef`s. `auto_labeled_curation` is `None` until an analysis curation
     exists; it never falls back to the root. Section 3 of the Curation notebook
     lists a handle's lineage properties.
-- **Manual edits** use `save_manual_curation`, with labels and merges by
-    integer unit id; the Curation notebook (3-hand-label) shows the call.
+- **Manual edits** use `save_manual_curation`, with labels and merges by integer
+    unit id; the Curation notebook (3-hand-label) shows the call.
 
 ### Burst pairs
 
@@ -742,9 +744,9 @@ v2 has no `BurstPair` table. The v1 plotting helpers live on
     evaluation's refractory window (override with `isi_threshold_ms=`). The v1
     burst utility divides by spike count. Pairs with fewer than two spikes are
     NaN.
-- The plots use a merged curation's own namespace and never fall back to the
-    raw analyzer. The Curation notebook ("Should this pair merge?") runs the
-    pair views.
+- The plots use a merged curation's own namespace and never fall back to the raw
+    analyzer. The Curation notebook ("Should this pair merge?") runs the pair
+    views.
 
 ### Browser review: FigPack replaces FigURL
 
@@ -758,8 +760,8 @@ through it in section 3-browser, with the review details in Appendix C.
     in the Python process. `upload=True` publishes the identical seeded bundle
     to figpack.org (a persistent hosted review needs a FigPack API key).
 - Edits are imported as a new `CurationV2` child pinned to the parent's
-    `curation_uuid`; a committed merge opens a verification review of the
-    merged child.
+    `curation_uuid`; a committed merge opens a verification review of the merged
+    child.
 - The table-level `FigPackCurationSelection` / `FigPackCuration` layer remains
     for expert composition.
 - Native splitting, per-spike deletion, unit-specific valid-time edits,
@@ -869,8 +871,8 @@ v1 has no equivalent. `run_v2_concat_pipeline` sorts same-day recordings in
 separate NWB files as one, so a unit keeps one identity across them. Several
 epochs in one NWB file need no concatenation: sort one `IntervalList` covering
 them with `run_v2_pipeline`. Part A of the
-[Cross-session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb) runs it, chooses between these paths, and shows
-the table-level steps.
+[Cross-session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb)
+runs it, chooses between these paths, and shows the table-level steps.
 
 - Concatenation is the default chronic path for one day's files. For sessions
     days apart, sort each and match units. Multi-day concatenation is
@@ -884,8 +886,9 @@ the table-level steps.
 
 v1 has no equivalent. For sessions days or weeks apart, sort and curate each
 independently, then match. Parts B-D of the
-[Cross-session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb) run it, and its "Matching reference" section
-lists the input rules, restrictions, identity, results, and evidence.
+[Cross-session notebook](../notebooks/10_Spike_SortingV2_CrossSession.ipynb) run
+it, and its "Matching reference" section lists the input rules, restrictions,
+identity, results, and evidence.
 
 - **Inputs must be v2.** Re-sort and curate a v1 or imported sort in v2 first.
 - **Policies must deny `mua`.** Without supplied snapshots the planners default
@@ -899,15 +902,16 @@ lists the input rules, restrictions, identity, results, and evidence.
 
 ### Drift QC
 
-v1 has no equivalent. `DriftEstimate` estimates probe motion on a `Recording`
-to **flag** high-drift sessions. Nothing applies it: the `Recording` is
-unchanged. Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) runs it.
+v1 has no equivalent. `DriftEstimate` estimates probe motion on a `Recording` to
+**flag** high-drift sessions. Nothing applies it: the `Recording` is unchanged.
+Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)
+runs it.
 
 ### Motion correction (experimental)
 
-v1 has no equivalent. **No motion recipe is validated for a probe.** Inspect
-the saved estimate rather than trusting a sort's improvement. No real lab
-recording with drift has been tested.
+v1 has no equivalent. **No motion recipe is validated for a probe.** Inspect the
+saved estimate rather than trusting a sort's improvement. No real lab recording
+with drift has been tested.
 
 `motion_mode` on `run_v2_pipeline`, `run_v2_pipeline_session`,
 `run_v2_concat_pipeline`, and their preflights:
@@ -918,10 +922,10 @@ recording with drift has been tested.
 - `"apply"`: also saves a `MotionCorrectedRecording` and sorts it (a new
     `sorting_id`).
 
-Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) is an optional, off-by-default
-example: estimate, inspect, then apply that exact estimate, with the rules,
-table-level calls, recipes, and storage notes. How motion estimation works is
-in the
+Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)
+is an optional, off-by-default example: estimate, inspect, then apply that exact
+estimate, with the rules, table-level calls, recipes, and storage notes. How
+motion estimation works is in the
 [developer guide](../ForDevelopers/SpikeSortingV2Architecture.md#motion-estimation).
 
 ## What v1 and v2 comparisons show
