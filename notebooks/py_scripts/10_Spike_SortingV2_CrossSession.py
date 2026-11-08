@@ -30,6 +30,16 @@
 #    same-day recordings (multi-day concatenation is supported but experimental,
 #    via `allow_multi_day`) and never corrects motion; to follow units across
 #    days, sort each day independently and match them with UnitMatch (Parts B/C).
+#
+#    | Your data | Path |
+#    | --- | --- |
+#    | Several epochs (e.g. runs and sleeps) in **one** NWB file | One `IntervalList` covering the epochs, then `run_v2_pipeline`. One sort, one `merge_id`; restrict to an epoch's interval at analysis time. |
+#    | Same-day recordings in **separate** NWB files | `run_v2_concat_pipeline`. One sort, one `member_merge_ids` entry per member on that member's own clock. |
+#    | Epochs you want sorted and curated **independently** | Sort each epoch's interval, then match them (Part D). |
+#
+#    The first two sort the epochs as one recording, so a unit keeps one
+#    identity. The single-session path never sorts the gaps between disjoint
+#    intervals. Concatenation is the default chronic path for one day's files.
 # 2. **Match units across sessions via a `SessionGroup`** (Part B). Sort each
 #    session independently, then link the same biological unit across
 #    sessions (typically **across days**) into a *tracked unit*, the basis
@@ -49,8 +59,8 @@
 #    artifact masks cannot make overlapping epochs independent.
 #
 # Every matching input must be a v2 curation. A sort made and curated in v1
-# cannot be matched directly; re-sort and curate it in v2 first (see
-# `docs/src/Features/SpikeSortingV2_Migration.md`).
+# cannot be matched directly; re-sort and curate it in v2 first (see the
+# [migration guide](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Migration/)).
 #
 # Parts A and B start from a `SessionGroup`: a named bundle of *members*, where
 # each member is a `(session, sort group, interval)` tuple. Part C names sorts
@@ -231,6 +241,107 @@ if run_concat:
         )
     member_spikes = concat_selection.groups[0].fetch_spike_data()
     print(f"member 0: {len(member_spikes)} selected unit(s)")
+
+# ### Part A details
+#
+# - **Artifacts are masked per member before concatenation.** Each detection is
+#   frozen in the concat's identity, so a changed mask is a new concat and sort.
+#   No mask is inherited from an earlier standalone sort.
+# - `CurationRef.member_merge_ids` gives a concat-backed curation's member merge
+#   ids.
+# - If any member keeps a nonzero channel offset (only with `no_filter` and
+#   `reference_mode="none"`), every member is converted to float32 µV before
+#   masking. Sample counts and boundaries never change.
+# - **Observation intervals survive.** The concat NWB stores kept intervals in
+#   synthetic seconds; each member export stores them in original session time.
+#   `describe_run` reports member detection ids, status, and masked durations.
+# - Deleting a detection also deletes the concat selections that use it; the
+#   confirmation prompt lists them.
+# - **Brain regions anchor to the first member.** `get_unit_brain_regions` on a
+#   concat sort raises `ConcatBrainRegionAmbiguousError` unless
+#   `allow_anchor_member=True` (labeled `region_resolution="anchor_member"`).
+#   For per-session regions, match the sessions and use
+#   `TrackedUnit.get_unit_brain_regions`. `get_sort_group_info` and
+#   `CurationV2.get_sort_metadata` resolve through the anchor member.
+# - Concatenation never corrects motion. Apply the motion stage to the
+#   `ConcatenatedRecording` for a corrected sort.
+#
+# The same steps table by table. Direct callers supply every member index in
+# `artifact_detection_ids` (`None` means no mask); the standard runner
+# resolves these from the preset.
+#
+# ```python
+# from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+# from spyglass.spikesorting.v2.artifact import (
+#     RecordingArtifactDetection,
+#     RecordingArtifactSelection,
+# )
+# from spyglass.spikesorting.v2.concat_member_curation import ConcatMemberCurationV2
+# from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+# from spyglass.spikesorting.v2.session_group import (
+#     ConcatenatedRecording,
+#     ConcatenatedRecordingSelection,
+#     SessionGroup,
+# )
+# from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+#
+# # 1. Each member's Recording (one shared recipe) and artifact detection. A
+# #    member is (nwb_file_name, sort_group_id, interval_list_name, team_name).
+# members = [
+#     {
+#         "nwb_file_name": f,
+#         "sort_group_id": 0,
+#         "interval_list_name": "raw data valid times",
+#     }
+#     for f in (nwb_a, nwb_b)
+# ]
+# artifact_ids = {}
+# for member_index, m in enumerate(members):
+#     rec_key = RecordingSelection.insert_selection(
+#         {**m, "preprocessing_params_name": "default", "team_name": "my_team"}
+#     )
+#     Recording.populate(rec_key)
+#     detection = RecordingArtifactSelection.insert_selection(
+#         {**rec_key, "artifact_detection_params_name": "default"}
+#     )
+#     RecordingArtifactDetection.populate(detection)
+#     artifact_ids[member_index] = detection["artifact_detection_id"]
+#
+# # 2. Name the group (namespaced by owner).
+# SessionGroup.create_group("my_team", "day1", members)
+#
+# # 3. The masked, unwhitened concat cache.
+# concat_key = ConcatenatedRecordingSelection.insert_selection(
+#     {
+#         "session_group_owner": "my_team",
+#         "session_group_name": "day1",
+#         "preprocessing_params_name": "default",
+#     },
+#     artifact_detection_ids=artifact_ids,
+# )
+# ConcatenatedRecording.populate(concat_key)
+#
+# # 4. Sort it.
+# sort_key = SortingSelection.insert_selection(
+#     {
+#         "concat_recording_id": concat_key["concat_recording_id"],
+#         "sorter": "mountainsort5",
+#         "sorter_params_name": "franklab_30khz_ms5_2026_06",
+#     }
+# )
+# Sorting.populate(sort_key)
+#
+# # 5. After curating, one session-aligned output per member. Every member
+# #    carries the same unit ids, with empty trains where a unit did not fire.
+# curation_key = {"sorting_id": sort_key["sorting_id"], "curation_id": ...}
+# ConcatMemberCurationV2.populate(curation_key)
+# member_merge_ids = {
+#     row["member_index"]: row["merge_id"]
+#     for row in (
+#         SpikeSortingOutput.ConcatMemberCurationV2 * ConcatMemberCurationV2 & curation_key
+#     ).fetch(as_dict=True)
+# }
+# ```
 
 # ## Part B: Match units across sessions
 #
@@ -582,13 +693,167 @@ if run_epoch_match:
 # Matching is a computational plan and result readback. There is no
 # browser interface for editing match pairs or approving tracked identities.
 
+# ## Matching reference
+#
+# The recommended path is Part D's **exact curation → plan → preflight →
+# run**. The details below apply to every planner.
+#
+# Inputs:
+#
+# - A **matching input** is one curated v2 sort: a single-recording `CurationV2`
+#   or a same-day concatenation's parent curation. A two-block daily
+#   concatenation is one input.
+# - **Policies must deny `mua`.** Without supplied snapshots the planners default
+#   to `v2_accepted_single_units`, which normally selects nothing after
+#   automatic labeling alone. Name `v2_unflagged_single_units` for
+#   automatic-only output. `v2_accepted_neural_units`, `v2_unflagged_units`, and
+#   `all_units` are refused.
+# - To carry an analysis population, pass one `resolve_unit_selection(...)`
+#   snapshot per curation as `unit_selections=`, in order. With snapshots, an
+#   unset `unit_policy` keeps each snapshot's policy; an explicit one must match
+#   all of them. Each evaluation must belong to its curation.
+# - `final_curated` (group and named-sort planners) means a unique committed
+#   non-root leaf. An auto-labeled child can satisfy it, so it is not proof of
+#   review. `manual` takes `manual_curation_choices={sorting_id: curation_id}`.
+#   A plan that cannot pin exactly one curation has `plan.ok is False`, and
+#   `run_v2_unit_match` raises listing `plan.errors`.
+# - Group-based discovery searches each member's standalone sorts. Use named sorts
+#   or curation handles for daily concatenation parents.
+# - Planning and preflight need local raw NWBs, source recordings, and curated
+#   Units files. Multi-input runs also need waveform traces and statistics
+#   spans. Neither rebuilds nor downloads anything. Fix blocking findings and
+#   rebuild the plan. Execution rechecks the pins, eligibility, and source hash
+#   before inserting a selection.
+#
+# Restrictions (checked by `UnitMatchSelection.insert_inputs` and again in
+# `UnitMatch.make`):
+#
+# - **No source sample may be reused.** Epochs of one NWB are allowed when their
+#   raw samples are disjoint. `OverlappingMatchInputError` names the inputs,
+#   intervals, and conflicting raw-frame range. Different recipes, interval
+#   names, or masks do not make shared samples independent. A concatenation is
+#   also checked against inputs holding one of its member epochs.
+# - **Selected timestamps must identify raw samples uniquely.** Duplicate
+#   timestamps inside the selection or at its boundaries block matching. Repair
+#   the acquisition clock and recreate its recordings, or choose unambiguous
+#   epochs. Duplicates elsewhere in the acquisition do not block.
+# - **A concatenation input lies within one day.**
+# - **Electrode space.** The UnitMatch backend rejects a geometry mismatch. The
+#   pipeline warns when `(electrode_group_name, electrode_id, brain_region)`
+#   differs, since ingestion naming is not stable across labs. Keep
+#   electrode-group names stable across an implant's sessions. A real probe
+#   mix-up also shows as poor matcher AUC or few pairs. (Concatenation rejects
+#   mismatched electrode spaces outright.)
+# - **Pins are rechecked.** `insert_selection` checks that each pinned curation
+#   belongs to its member. `UnitMatch.make()` rechecks every input's provenance
+#   (`UnitMatchSelectionIntegrityError`), so a direct insert, a recreated
+#   curation, or changed source content cannot match the wrong units. A concat
+#   input whose member `Recording` changed or is gone is refused.
+#
+# Identity:
+#
+# - Inputs are numbered by earliest `session_start_time`, same-session epochs by
+#   selected source time, so naming order does not matter. Epochs are not sorted
+#   by name.
+# - Each input pins `(sorting_id, curation_id, curation_uuid)`, its recordings'
+#   identity, content hash, session start, frame span, kept intervals, selected
+#   unit ids, label policy, verdicts, and source coverage. A later label edit or
+#   changed source needs a new plan.
+# - Source coverage comes from the unmasked persisted recording's timestamps, not
+#   from artifact-free observation intervals.
+# - `UnitMatch.make` refuses a run whose frozen `nwb_file_name` or
+#   `session_start_time` differs from the live rows. After a
+#   `Session.session_start_time` correction, select again.
+# - A `SessionGroup` on a selection is provenance only, not a foreign key.
+# - A single-input run writes its matchable units and an empty `Pair` table
+#   without calling the matcher.
+#
+# Results:
+#
+# - **Waveforms come from the traces the sorter read** (masked, corrected when
+#   selected). Each unit's sampled spikes (where the full window lies in one
+#   statistics span) split in temporal order into two halves. Unlike upstream
+#   UnitMatchPy, Spyglass draws a random sample, averages with the mean, and
+#   does not smooth. A unit with fewer than two such spikes stays unmatched.
+# - **Tracked units are a strict partition.** `TrackedUnit` groups units that
+#   match *every* other input in the group (greedy maximal cliques, largest
+#   first, ties by median edge probability). If A↔B and B↔C match but A↔C does
+#   not, A and C land in different tracked units. An unmatched unit is a
+#   singleton (`n_matching_inputs == 1`, NULL `median_match_probability`). More
+#   than `max_strict_nodes` (default 2000) units raise
+#   `TrackedUnitBudgetExceededError`.
+# - `n_matching_inputs` counts inputs. `n_sessions_detected` counts sessions
+#   (`nwb_file_name`) where the unit has spikes; two intervals of one session
+#   count once.
+# - `TrackedUnit.get_unit_brain_regions` resolves regions per constituent
+#   recording, read live. `TrackedUnit.get_member_spike_times` returns spikes on
+#   each original recording's clock, with interval name and input index. Both
+#   first check the inputs against their frozen rows.
+# - `summary["inputs"]` holds one `UnitMatchInputSummary` per input with
+#   `source_kind` / `source_id`, `nwb_file_names` / `interval_list_names`, and
+#   whether its traces were corrected. `describe_run(summary)` renders them;
+#   `UnitMatch.get_input_provenance(key, from_nwb=False)` returns them as
+#   DataFrames.
+# - Matching yields a pair graph and tracked-unit mapping. It does not build an
+#   analysis population.
+#
+# Table-level calls (`initialize_v2_defaults()` installs `unitmatch_default`; a
+# days-apart `SessionGroup` needs `allow_multi_day=True`;
+# `UnitMatchSelection.insert_inputs(curations, matcher_params_name)` is the
+# group-less form):
+#
+# ```python
+# from spyglass.spikesorting.v2.unit_matching import (
+#     TrackedUnit,
+#     UnitMatch,
+#     UnitMatchSelection,
+# )
+#
+# selection_key = UnitMatchSelection.insert_selection(
+#     "my_team",
+#     "implant_week1",
+#     "unitmatch_default",
+#     {0: curation_day1, 1: curation_day2},  # exact curation per member_index
+# )
+# UnitMatch.populate(selection_key)
+# pairs = UnitMatch().get_pairs(selection_key)  # UnitMatch.Pair as a DataFrame
+# TrackedUnit.populate(selection_key)
+# regions = TrackedUnit().get_unit_brain_regions({**selection_key, "tracked_unit_id": 0})
+# ```
+#
+# Limits and evidence:
+#
+# - **Small unit counts destabilize calibration.** UnitMatch fits its threshold,
+#   prior, and score distributions from each run's units. With about 20 or fewer
+#   units per session, results vary run to run and can include bursts of false
+#   matches. UnitMatchPy 3.2.7 raised an `IndexError` (`get_threshold`) at about
+#   12 units in one session in synthetic trials. Match only well-isolated units
+#   (UnitMatch issues
+#   [#87](https://github.com/EnnyvanBeest/UnitMatch/issues/87),
+#   [#146](https://github.com/EnnyvanBeest/UnitMatch/issues/146),
+#   [#170](https://github.com/EnnyvanBeest/UnitMatch/issues/170)).
+# - **Corrected days must already line up.** Motion correction registers each day
+#   to its own mean position; there is no cross-day registration. On a simulated
+#   32-contact single-column polymer layout (26 µm pitch), a rigid offset of 3 /
+#   6 / 12 µm between corrected days recovered 22 / 12 / 1 of 24 planted
+#   neurons. Confirm the days agree within a few micrometers first (e.g. compare
+#   their displacement estimates).
+# - **Evidence is synthetic only.** No real multi-day lab recording has been
+#   evaluated. A ground-truth benchmark
+#   (`tests/spikesorting/v2/scripts/unitmatch_daily_concat_benchmark.py`) runs
+#   the matching code over simulated two- and three-day concatenations on a
+#   16-channel, 2-column probe; thresholds were set on development seeds and met
+#   on held-out seeds. Recall for gradually drifting and deliberately
+#   conflicting neurons stays low. An end-to-end test with per-day correction on
+#   aligned days recovered 19 of 22 cross-day neurons (13 of 22 without
+#   correction).
+# - UnitMatch's reference probe is the 128-channel LLNL polymer. Custom matchers
+#   are described in the
+#   [developer guide](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/SpikeSortingV2Architecture/#custom-unit-matchers).
+
 # ## Next steps
 #
 # - Curate the concatenated sort (Part A) or any member/named sort (Parts B/C)
 #   with [Curation](./10_Spike_SortingV2_Curation.ipynb).
 # - Organize sorts and filter units with
 #   [Spike Sorting Analysis](./11_Spike_Sorting_Analysis.ipynb).
-# - For the matcher's parameters, internals, overlap restrictions, and the
-#   synthetic matching-recovery benchmark (including the per-day
-#   motion-correction alignment limitation), see
-#   `docs/src/Features/SpikeSortingV2_Migration.md`.
