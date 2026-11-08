@@ -1178,3 +1178,58 @@ def test_sorters_that_take_a_seed_get_the_run_seed(sorter, params, expected):
 
     config = resolve_sort_config(sorter, params, job_kwargs={"random_seed": 7})
     assert config.si_sorter_params.get("seed") == expected
+
+
+class _StopAfterWhiten(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    "sorter, module",
+    [("tridesclous2", "tridesclous2"), ("spykingcircus2", "spyking_circus2")],
+)
+def test_v2_preprocessed_rows_skip_filtering_but_keep_whitening(
+    sorter, module, monkeypatch, tmp_path
+):
+    """v2 already filtered and referenced; the sorter must still whiten."""
+    import importlib
+
+    import spikeinterface.core as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        sorter_default_contents,
+    )
+    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
+
+    (params,) = [
+        row[2]
+        for row in sorter_default_contents()
+        if row[:2] == (sorter, "v2_preprocessed")
+    ]
+    internal = importlib.import_module(
+        f"spikeinterface.sorters.internal.{module}"
+    )
+    calls = []
+
+    def bandpass_filter(recording, *args, **kwargs):
+        calls.append("bandpass_filter")
+        return recording
+
+    def whiten(recording, *args, **kwargs):
+        calls.append("whiten")
+        raise _StopAfterWhiten
+
+    monkeypatch.setattr(internal, "bandpass_filter", bandpass_filter)
+    monkeypatch.setattr(internal, "whiten", whiten)
+    recording = si.generate_recording(num_channels=4, durations=[1.0], seed=0)
+    config = resolve_sort_config(sorter, params)
+    with pytest.raises(Exception):
+        sis.run_sorter(
+            sorter,
+            recording,
+            folder=tmp_path / sorter,
+            verbose=False,
+            **config.si_sorter_params,
+        )
+    assert calls == ["whiten"]
