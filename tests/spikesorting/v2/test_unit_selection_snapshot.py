@@ -18,6 +18,7 @@ from spyglass.spikesorting.v2.curation_api import (
     EvaluationSpec,
 )
 from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+from spyglass.utils.identity import sha256_json
 
 pytestmark = pytest.mark.unit
 
@@ -58,7 +59,8 @@ class ReadOnlyRows:
 
 @pytest.fixture
 def population(monkeypatch):
-    ref = CurationRef(uuid.uuid4(), 2, uuid.uuid4())
+    # Fixed identities keep the pinned selection hashes reproducible.
+    ref = CurationRef(uuid.UUID(int=1), 2, uuid.UUID(int=2))
     key = {"sorting_id": ref.sorting_id, "curation_id": ref.curation_id}
     row = {**key, "curation_uuid": ref.curation_uuid, "merges_applied": True}
     labels = {1: ["accept"], 2: ["accept"], 3: ["noise"], 4: ["mua"], 5: []}
@@ -117,7 +119,7 @@ def population(monkeypatch):
     evaluation = EvaluationResult(
         curation=ref,
         spec=EvaluationSpec("metrics", "rules"),
-        evaluation_id=uuid.uuid4(),
+        evaluation_id=uuid.UUID(int=3),
         metrics=pd.DataFrame({"snr": [7.0, None, 9.0, 6.0, 8.0]}, index=labels),
         suggested_merges=(),
         proposed_labels={},
@@ -151,6 +153,41 @@ def test_resolver_freezes_exact_population_without_group_or_cache_work(
         population.evaluation.evaluation_id
     )
     assert validate_unit_selection_snapshot(payload) == payload
+
+
+@pytest.mark.parametrize(
+    "with_evaluation, selection_hash, provenance_hash",
+    [
+        (
+            False,
+            "064d1f16fa0de553fd7834c5685d0f9ffb7d348d7da654f7b1f2f84b78f33b1c",
+            "7269ee2f355e3624247e3ec8dcfae4c26c8a3d2bc6967b019841cde1c550de18",
+        ),
+        (
+            True,
+            "f5a536ca068df7603d1f92d4cfca33c399bd928983e6759219a9f9a0a7956766",
+            "db522fb5827ecb29ad306c92b61531e70ff598496948e8d610984e9a230b85e9",
+        ),
+    ],
+)
+def test_selection_hashes_are_pinned(
+    population, with_evaluation, selection_hash, provenance_hash
+):
+    """Stored snapshots and group names keep their persisted hashes."""
+    kwargs = (
+        {
+            "evaluation": population.evaluation,
+            "unit_criteria": {"snr": {">": 5}},
+        }
+        if with_evaluation
+        else {}
+    )
+    snapshot = selection.resolve_unit_selection(population.ref, **kwargs)
+    provenance = snapshot.selection_provenance
+    assert provenance["annotation_sets"] == []
+    assert snapshot.selection_hash == selection_hash
+    assert unit_selection_hash(snapshot.snapshot()) == selection_hash
+    assert sha256_json(provenance, separators=(", ", ": ")) == provenance_hash
 
 
 def test_label_only_resolution_does_not_read_unit_properties(
