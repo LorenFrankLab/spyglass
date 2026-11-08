@@ -143,12 +143,32 @@ electrode_config
 # )
 # ```
 #
+# - Detection samples random chunks (`seed=None`). Persist with
+#   `reviewed_report=`, or pass `detection_params={"seed": ...}` to both calls,
+#   when the reviewed and persisted sets must match.
+# - Labels are `dead`, `noise`, or `out`. `persist=True` sets `bad_channel='True'`
+#   for `dead` / `noise` only and never clears a flag.
+# - `out` (outside brain) is report-only, because `bad_channel='True'` means safe
+#   to interpolate or remove. Keep an `out` channel out of a sort by omitting it
+#   from the group, e.g.
+#   `SortGroupV2.set_group_by_electrode_table_column(nwb_file_name, electrode_column="electrode_id", value_groups=[[...]])`.
+# - Thresholds are SpikeInterface's Neuropixels defaults. Recalibrate with
+#   `detection_params=` (e.g. `{"dead_channel_threshold": -0.4}`), scope with
+#   `electrode_group_names=`, change the band with `bandpass=`. Treat "no bad
+#   channels" on a tetrode with skepticism.
+#
 # Choose the sorting reference before grouping. `references=None` inherits
 # each group's stored reference (`-1`/None: none, `-2`: global median,
 # nonnegative: that electrode). To override it, set `references` to a mapping
 # from every included `electrode_group_name` to its reference electrode ID
 # or sentinel. The acquisition reference is not automatically a suitable
 # sorting reference; inspect the resulting group table and geometry below.
+#
+# `describe_sort_groups` shows `n_electrodes`, `electrode_ids`,
+# `electrode_group_names`, `probe_shanks`, `brain_regions`,
+# `bad_channel_count`, and the reference fields. `plot_sort_group_geometry`
+# colors contacts by group, marks bad channels with a red `x` and specific
+# references with a star, and puts each probe in its own column.
 
 if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
     SortGroupV2.set_group_by_shank(

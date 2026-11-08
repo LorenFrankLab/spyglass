@@ -159,6 +159,16 @@ run_summary = run_v2_pipeline(
 # canonical set `CurationV2.label_options()`; custom labels need
 # `allow_custom_labels=True`.
 #
+# A `CurationRef` handle also describes its place in the lineage:
+#
+# - `commit_status` is `"preview"` or `"committed"`. `is_root`, `is_leaf`, and
+#   `has_committed_children` are independent. `operation_type` reports the
+#   producer and change kind. There is no inferred "superseded" state.
+# - `created_at` / `created_by` give creation metadata. `visualize_lineage()`
+#   draws the tree.
+# - Use `preview_curation_delete()` before `delete_subtree()`. `health_report()`
+#   audits lineage and analyzer-cache orphans.
+#
 # The main path is the browser review (3-browser): one review profile fixes the
 # evaluation recipes, the metric columns shown, the label palette and the
 # import mode; you label and merge in FigPack, save, then preview and commit in
@@ -644,6 +654,8 @@ if inspection_pair:
 # `isi_violations_ratio` and is not a contamination estimate. `unavailable_qc`
 # names missing inputs needed by the enabled rules. With missing-policy pass,
 # a blank metric can leave a unit unflagged; it does not establish quality.
+
+# ### Observed time in metrics and analysis
 #
 # Artifact intervals are stored in NWB `obs_intervals`. The standard review
 # displays `observed_firing_rate_hz`, `observed_presence_ratio`, and
@@ -651,6 +663,26 @@ if inspection_pair:
 # definitions. `selection.observation` exposes the frozen population's usable
 # time. Sorted-spikes decoding intersects encoding/decoding intervals with that
 # time; binned counts distinguish excluded bins (NaN) from observed silence.
+#
+# - Observation intervals are normalized through sample boundaries, so the last
+#   sample contributes its full duration. Time is never compressed across
+#   exclusions or gaps.
+# - Observed firing rate: spikes in usable spans over their total duration.
+# - Observed presence: observed duration of occupied bins over total observed
+#   duration. Bins are fixed on the original timeline from the first timestamp.
+#   One observed spike occupies a bin. Partial bins count only their usable
+#   duration. `QualityMetricParameters.observed_presence_bin_duration_s`
+#   defaults to 60 s. This is not SI's presence definition.
+# - Zero exposure gives unavailable rate and presence. Observed silence gives
+#   zero.
+# - Evaluations record the observation-definition version, an interval
+#   fingerprint, and the presence-bin width.
+# - `select_units_for_analysis` freezes each included unit's observed intervals
+#   with the membership. `selection.observation` (one session) or
+#   `selection.groups[i].observation` exposes `intervals`, `duration_s`, and
+#   `unknown_sources`. The common intervals are the **intersection** of the
+#   selected units' availability. Empty or unselected groups impose nothing.
+#   Concat members are mapped to original session seconds.
 
 # ### Additional SNR selection for this analysis only
 #

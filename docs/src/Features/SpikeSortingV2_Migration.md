@@ -324,12 +324,9 @@ table):
     `SortGroupV2.preview_existing_entries(nwb_file_name)` first; `confirm=False`
     raises with the same preview. To add groups next to existing ones, pass
     non-overlapping `sort_group_ids=`.
-- **Choose the group deliberately.** `describe_sort_groups` shows
-    `n_electrodes`, `electrode_ids`, `electrode_group_names`, `probe_shanks`,
-    `brain_regions`, `bad_channel_count`, and the reference fields.
-    `plot_sort_group_geometry` colors contacts by group, marks bad channels with
-    a red `x` and specific references with a star, and puts each probe in its
-    own column. Do not assume `0` is the right shank.
+- **Choose the group deliberately** with `describe_sort_groups` and
+    `plot_sort_group_geometry` (step 2 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)). Do
+    not assume `0` is the right shank.
 - **Calibration must match for referencing.** Specific and global-median
     referencing need uniform finite offsets and uniform finite positive gains
     across the contributing channels, including the reference. Otherwise
@@ -340,22 +337,10 @@ table):
 
 `suggest_bad_channels` proposes `Electrode.bad_channel` flags. It bandpass
 filters the raw recording and runs SpikeInterface's `detect_bad_channels`
-(`coherence+psd`) per full shank. The notebooks show the review-then-persist
-calls.
+(`coherence+psd`) per full shank. Step 2 of the
+[first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) shows the review-then-persist calls, the seed and
+label rules, and how to recalibrate.
 
-- Detection samples random chunks (`seed=None`). Persist with
-    `reviewed_report=`, or pass `detection_params={"seed": ...}` to both calls,
-    when the reviewed and persisted sets must match.
-- Labels are `dead`, `noise`, or `out`. `persist=True` sets `bad_channel='True'`
-    for `dead` / `noise` only and never clears a flag.
-- `out` (outside brain) is report-only, because `bad_channel='True'` means safe
-    to interpolate or remove. Keep an `out` channel out of a sort by omitting it
-    from the group, e.g.
-    `SortGroupV2.set_group_by_electrode_table_column(nwb_file_name, electrode_column="electrode_id", value_groups=[[...]])`.
-- Thresholds are SpikeInterface's Neuropixels defaults. Recalibrate with
-    `detection_params=` (e.g. `{"dead_channel_threshold": -0.4}`), scope with
-    `electrode_group_names=`, change the band with `bandpass=`. Treat "no bad
-    channels" on a tetrode with skepticism.
 - **Finalize flags before creating sort groups.** Grouping excludes flagged
     channels. A later flag does not change an existing group; recreate it.
 
@@ -416,19 +401,11 @@ pipeline call with the same inputs reuses these rows. The
 
 ### Whole-session runs
 
-The Presets notebook shows `run_v2_pipeline_session` and its preflight.
-
-- Both need an explicit `pipeline_preset`.
-- Freeze the preflight's resolved groups
-    (`[row["sort_group_id"] for row in report.group_reports]`) and pass them as
-    `sort_group_ids=`, so the checked and executed groups match.
-- Groups run sequentially.
-- With `preflight=True` (default) the session preflight runs once up front. With
-    `continue_on_error=False` a failing group raises `PreflightError` before any
-    compute. With `True` it is recorded and the passing groups run.
-- `continue_on_error` covers per-group preflight and sort failures only. An
-    unexpected error (a missing Lookup row, a DB-state change) still stops the
-    run.
+`run_v2_pipeline_session` sorts every (or selected) sort group of a session,
+sequentially, and needs an explicit `pipeline_preset`. Section 3 of the
+[Presets notebook](../notebooks/10_Spike_SortingV2_Presets.ipynb) runs it and
+its preflight, freezes the checked groups as `sort_group_ids=`, and describes
+`continue_on_error`.
 
 ## What you query differently
 
@@ -544,20 +521,10 @@ never infer it from the latest child.
     each on that member's timeline, with the same unit decisions.
 - Across groups, identify units by `(spikesorting_merge_id, unit_id)`.
 
-Add analysis-specific metric criteria from one explicit evaluation of the same
-curation:
-
-```python
-evaluation = final_curation.evaluate(
-    metric_params_name="minimal", auto_curation_rules_name="none"
-)
-selection = select_units_for_analysis(
-    final_curation,
-    policy="v2_accepted_single_units",
-    evaluation=evaluation,
-    unit_criteria={"snr": {">=": 5}},
-)
-```
+Add analysis-specific metric criteria (`evaluation=`, `unit_criteria=`) from
+one explicit evaluation of the same curation. The
+[Curation notebook](../notebooks/10_Spike_SortingV2_Curation.ipynb) ("Additional
+SNR selection for this analysis only") shows the call.
 
 - Criteria use the `UnitSelectionParams` operators. A missing value fails the
     predicate. A missing column, or an evaluation of another curation, is an
@@ -573,19 +540,10 @@ selection = select_units_for_analysis(
 
 v2 tracks the usable (unmasked) time of each unit. The
 `franklab_hippocampus_2026_09_17` review profile shows `observed_duration_s`,
-`observed_firing_rate_hz`, and `observed_presence_ratio`.
-
-- Observation intervals are normalized through sample boundaries, so the last
-    sample contributes its full duration. Time is never compressed across
-    exclusions or gaps.
-- Observed firing rate: spikes in usable spans over their total duration.
-- Observed presence: observed duration of occupied bins over total observed
-    duration. Bins are fixed on the original timeline from the first timestamp.
-    One observed spike occupies a bin. Partial bins count only their usable
-    duration. `QualityMetricParameters.observed_presence_bin_duration_s`
-    defaults to 60 s. This is not SI's presence definition.
-- Zero exposure gives unavailable rate and presence. Observed silence gives
-    zero.
+`observed_firing_rate_hz`, and `observed_presence_ratio`. The
+[Curation notebook](../notebooks/10_Spike_SortingV2_Curation.ipynb) ("Observed
+time in metrics and analysis") defines them and shows where a selection exposes
+its observed intervals.
 
 | Metric family                                                      | Time and exclusion semantics                                                                                                                                                                                                                                       |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -595,14 +553,8 @@ v2 tracks the usable (unmasked) time of each unit. The
 | SI `isi_violations_ratio`, refractory-period contamination metrics | Duration-dependent SI estimates; optional expert diagnostics.                                                                                                                                                                                                      |
 | SNR, amplitude/noise overlap, waveform/template metrics            | SI's definitions. The noise estimate behind SNR, `sd_ratio`'s noise std, and `nn_noise_overlap`'s noise cluster sample only the artifact-free statistics spans. Template and waveform amplitudes are unchanged. Sparse or insufficient evidence stays unavailable. |
 
-- Evaluations record the observation-definition version, an interval
-    fingerprint, and the presence-bin width.
 - `select_units_for_analysis` freezes each included unit's observed intervals
-    with the membership. `selection.observation` (one session) or
-    `selection.groups[i].observation` exposes `intervals`, `duration_s`, and
-    `unknown_sources`. The common intervals are the **intersection** of the
-    selected units' availability. Empty or unselected groups impose nothing.
-    Concat members are mapped to original session seconds.
+    with the membership.
 - `SortedSpikesGroup.get_spike_indicator(key, time, return_validity=True)`
     returns counts and a validity mask. Bins crossing exclusions are NaN; valid
     bins without spikes are zero. Firing-rate smoothing runs within observed
@@ -628,20 +580,10 @@ v2 tracks the usable (unmasked) time of each unit. The
 - **v2 amplitudes are in µV; v0/v1 used raw counts.** Retrain decoders per
     pipeline version.
 
-- A v2 `merge_id` exports like a v1 one:
-
-    ```python
-    from spyglass.common.common_usage import Export, ExportSelection
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-
-    ExportSelection().start_export(paper_id="my_paper", analysis_id=1)
-    SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})
-    ExportSelection().stop_export()
-
-    Export().populate_paper(paper_id="my_paper")
-    ```
-
-    `Export.File` gets the curated units NWB, the sort NWB, and the
+- A v2 `merge_id` exports like a v1 one: fetch it with
+    `SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})` between
+    `start_export` and `stop_export`, as in the
+    [Export notebook](../notebooks/05_Export.ipynb). `Export.File` gets the curated units NWB, the sort NWB, and the
     preprocessed-recording cache through the foreign-key cascade. Calling
     `get_recording` / `get_sorting` during the export is not needed (they log no
     export events). Zero-unit curations export the same way.
@@ -777,14 +719,8 @@ and custom-rule details.
 - **Handles.** `run_v2_pipeline` returns a mapping-compatible `RunResult`. Its
     `root_curation` and `auto_labeled_curation` are generation-pinned
     `CurationRef`s. `auto_labeled_curation` is `None` until an analysis curation
-    exists; it never falls back to the root.
-    - `commit_status` is `"preview"` or `"committed"`. `is_root`, `is_leaf`, and
-        `has_committed_children` are independent. `operation_type` reports the
-        producer and change kind. There is no inferred "superseded" state.
-    - `created_at` / `created_by` give creation metadata. `visualize_lineage()`
-        draws the tree.
-    - Use `preview_curation_delete()` before `delete_subtree()`. `health_report()`
-        audits lineage and analyzer-cache orphans.
+    exists; it never falls back to the root. Section 3 of the Curation notebook
+    lists a handle's lineage properties.
 - **Manual edits** use `save_manual_curation`, with labels and merges by
     integer unit id; the Curation notebook (3-hand-label) shows the call.
 

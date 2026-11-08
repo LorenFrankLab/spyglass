@@ -221,6 +221,13 @@ if "my_lab_custom" not in list_pipeline_presets():
 # summary row with the ok / failed / zero-unit / with-warnings counts, then a
 # row per group (and per warning), so failed and zero-unit groups don't hide in
 # a long list.
+#
+# With `preflight=True` (default) the session preflight runs once up front.
+# With `continue_on_error=False` a failing group raises `PreflightError` before
+# any compute. With `True` it is recorded and the passing groups run.
+# `continue_on_error` covers per-group preflight and sort failures only. An
+# unexpected error (a missing Lookup row, a DB-state change) still stops the
+# run.
 
 # Read-only whole-session check first (run_v2_pipeline_session also preflights
 # internally); inspect report.ok / report.errors before committing compute.
