@@ -28,13 +28,9 @@ from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     get_spike_sorting_v2_merge_ids as get_spike_sorting_v2_merge_ids,
 )
-from spyglass.spikesorting.v2 import visualization
 from spyglass.spikesorting.v2._curation.analyzer import (
     display_analyzer_request,
     open_curation_analyzer,
-)
-from spyglass.spikesorting.v2._review.unit_properties import (
-    missing_rule_metrics,
 )
 from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
 
@@ -898,6 +894,8 @@ class CurationPlots:
         self._curation = curation
 
     def _call(self, function: str, *args, **kwargs):
+        from spyglass.spikesorting.v2 import visualization
+
         return getattr(visualization, function)(self._curation, *args, **kwargs)
 
     def sorting_summary(self, **kwargs):
@@ -1042,6 +1040,9 @@ class EvaluationResult:
             row is gone, or its selection no longer names the evaluated
             curation.
         """
+        from spyglass.spikesorting.v2._review.unit_properties import (
+            missing_rule_metrics,
+        )
         from spyglass.spikesorting.v2.metric_curation import AutoCurationRules
 
         self._current_evaluation_key()
