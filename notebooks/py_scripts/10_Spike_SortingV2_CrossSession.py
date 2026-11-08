@@ -30,16 +30,6 @@
 #    same-day recordings (multi-day concatenation is supported but experimental,
 #    via `allow_multi_day`) and never corrects motion; to follow units across
 #    days, sort each day independently and match them with UnitMatch (Parts B/C).
-#
-#    | Your data | Path |
-#    | --- | --- |
-#    | Several epochs (e.g. runs and sleeps) in **one** NWB file | One `IntervalList` covering the epochs, then `run_v2_pipeline`. One sort, one `merge_id`; restrict to an epoch's interval at analysis time. |
-#    | Same-day recordings in **separate** NWB files | `run_v2_concat_pipeline`. One sort, one `member_merge_ids` entry per member on that member's own clock. |
-#    | Epochs you want sorted and curated **independently** | Sort each epoch's interval, then match them (Part D). |
-#
-#    The first two sort the epochs as one recording, so a unit keeps one
-#    identity. The single-session path never sorts the gaps between disjoint
-#    intervals. Concatenation is the default chronic path for one day's files.
 # 2. **Match units across sessions via a `SessionGroup`** (Part B). Sort each
 #    session independently, then link the same biological unit across
 #    sessions (typically **across days**) into a *tracked unit*, the basis
@@ -57,6 +47,18 @@
 #    existing intervals, sort and review each independently, then match the
 #    exact reviewed curations. Disjoint original raw samples are required;
 #    artifact masks cannot make overlapping epochs independent.
+#
+# Pick the path by where the day's data lives:
+#
+# | Your data | Path |
+# | --- | --- |
+# | Several epochs (e.g. runs and sleeps) in **one** NWB file | One `IntervalList` covering the epochs, then `run_v2_pipeline`. One sort, one `merge_id`; restrict to an epoch's interval at analysis time. |
+# | Same-day recordings in **separate** NWB files | `run_v2_concat_pipeline`. One sort, one `member_merge_ids` entry per member on that member's own clock. |
+# | Epochs you want sorted and curated **independently** | Sort each epoch's interval, then match them (Part D). |
+#
+# The first two sort the epochs as one recording, so a unit keeps one
+# identity. The single-session path never sorts the gaps between disjoint
+# intervals. Concatenation is the default chronic path for one day's files.
 #
 # Every matching input must be a v2 curation. A sort made and curated in v1
 # cannot be matched directly; re-sort and curate it in v2 first (see the
