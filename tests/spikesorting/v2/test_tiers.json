@@ -115,7 +115,6 @@
       "tier": "unit",
       "overrides": {
         "test_curation_delete_refuses_while_an_analysis_group_uses_it": "stage",
-        "test_nullable_annotation_criteria_freeze_the_selected_population": "stage",
         "test_select_units_for_analysis_round_trip": "stage"
       }
     },
@@ -1052,12 +1051,6 @@
     "test_tracking_params.py": {
       "tier": "unit"
     },
-    "test_unit_annotation.py": {
-      "tier": "unit"
-    },
-    "test_unit_annotation_integration.py": {
-      "tier": "stage"
-    },
     "test_unit_conventions.py": {
       "tier": "db_unit",
       "overrides": {
@@ -1254,7 +1247,6 @@
     "tests/spikesorting/v2/test_sorting_analyzer.py:clean_ground_truth": "stage",
     "tests/spikesorting/v2/test_sorting_dispatch.py:clean_ground_truth": "stage",
     "tests/spikesorting/v2/test_statistics_spans_rebuilds.py:masked_planted_sort": "stage",
-    "tests/spikesorting/v2/test_unit_annotation_integration.py:versioned_annotation_sets": "db_unit",
     "tests/spikesorting/v2/test_unit_match_generation.py:reviewed_curation": "db_unit",
     "tests/spikesorting/v2/test_unitmatch.py:two_session_curated_group": "pipeline",
     "tests/spikesorting/v2/test_unitmatch_backend.py:two_session_inputs": "stage",

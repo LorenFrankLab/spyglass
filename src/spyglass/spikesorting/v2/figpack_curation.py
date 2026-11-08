@@ -81,12 +81,12 @@ from spyglass.spikesorting.v2._storage.observation_io import (
     resolve_review_timeline_inputs,
     review_timeline_from_inputs,
 )
-from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
-from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
-from spyglass.spikesorting.v2.unit_annotation import (
-    AnnotationSetRef,
-    read_unit_properties,
+from spyglass.spikesorting.v2.curation_api import (
+    CurationRef,
+    EvaluationResult,
+    _read_unit_properties,
 )
+from spyglass.spikesorting.v2.metric_curation import QualityMetricParameters
 from spyglass.utils import logger
 from spyglass.utils.mixins.populate import populate_key_lock
 from spyglass.utils.progress import report_progress
@@ -423,24 +423,20 @@ def _review_context_table(curation_key: dict, review_config: dict | None):
             "unit_id", order_by="unit_id"
         )
     ]
-    annotation_sets = tuple(
-        AnnotationSetRef.from_snapshot(snapshot)
-        for snapshot in review_config.get("annotation_sets", [])
+    if review_config.get("annotation_sets"):
+        raise SchemaBypassError(
+            "FigPack review configuration selects custom unit-annotation "
+            "sets, which v2 does not support; start a new review."
+        )
+    properties = _read_unit_properties(
+        CurationRef.from_key(curation_key), evaluation=evaluation
     )
-    properties = read_unit_properties(
-        CurationRef.from_key(curation_key),
-        evaluation=evaluation,
-        annotation_sets=annotation_sets,
-    )
-    requested = [
-        *review_config["displayed_unit_properties"],
-        *(ref.column_name for ref in annotation_sets),
-    ]
+    requested = list(review_config["displayed_unit_properties"])
     missing = [name for name in requested if name not in properties.columns]
     if missing:
         raise FigPackDisplayedUnitPropertyError(
-            "Review requests properties absent from its selected evaluation "
-            f"and annotation sets: {missing}. Available properties: "
+            "Review requests properties absent from its selected evaluation: "
+            f"{missing}. Available properties: "
             f"{list(map(str, properties.columns))}."
         )
     metrics = properties.reindex(unit_ids)[requested]

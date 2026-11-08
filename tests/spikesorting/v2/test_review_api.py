@@ -261,3 +261,50 @@ def test_configured_lab_label_can_be_added_during_review():
     )
     assert labels[1] == ("lab_cell",)
     assert conflicts == ()
+
+
+def test_review_config_hash_is_pinned():
+    """Persisted review identities keep their ``figpack_config_hash``."""
+    import uuid
+
+    from spyglass.spikesorting.v2._review.annotations import (
+        figpack_config_hash,
+    )
+    from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
+    from spyglass.spikesorting.v2.curation_api import EvaluationSpec
+    from spyglass.spikesorting.v2.review_api import (
+        ReviewProfileRef,
+        _review_config,
+    )
+
+    profile = ReviewProfileRef(
+        review_profile_name="pinned_profile",
+        profile_hash="a" * 64,
+        evaluation_spec=EvaluationSpec("metrics", "rules"),
+        displayed_unit_properties=("snr", "isi_violation"),
+        label_options=("accept", "mua", "noise"),
+        label_import_mode="replace",
+    )
+    config = _review_config(
+        SimpleNamespace(
+            children=(SimpleNamespace(curation_uuid=uuid.UUID(int=5)),)
+        ),
+        profile,
+        SimpleNamespace(evaluation_id=uuid.UUID(int=4)),
+        upload=False,
+        ephemeral=False,
+        display_options=ReviewDisplayOptions(),
+    )
+    config_hash = figpack_config_hash(
+        sorting_id=uuid.UUID(int=1),
+        curation_id=2,
+        curation_uuid=uuid.UUID(int=2),
+        label_options=list(profile.label_options),
+        displayed_unit_properties=list(profile.displayed_unit_properties),
+        upload=False,
+        ephemeral=False,
+        review_config=config,
+    )
+    assert config_hash == (
+        "ee3e17e7a86f20590bf44ddb5a46ee6c882a1f962c8d23ca974d02f261b37d1b"
+    )

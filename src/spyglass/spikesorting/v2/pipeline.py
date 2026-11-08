@@ -85,11 +85,6 @@ from spyglass.spikesorting.v2.analysis_selection import (
     resolve_unit_selection,
     select_units_for_analysis,
 )
-from spyglass.spikesorting.v2.annotation_api import (
-    AnnotationDefinitionRef,
-    AnnotationSetRef,
-    read_unit_properties,
-)
 from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     EvaluationResult,
@@ -169,9 +164,6 @@ __all__ = [
     "MergeLabelConflict",
     "ReviewImportReceipt",
     "ReviewStageStatus",
-    "AnnotationDefinitionRef",
-    "AnnotationSetRef",
-    "read_unit_properties",
     "open_curation_analyzer",
     "select_units_for_analysis",
     "resolve_unit_selection",

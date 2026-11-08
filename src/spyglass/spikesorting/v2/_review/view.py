@@ -197,8 +197,8 @@ def build_curation_view(
     ``review_timeline``; ``display_options`` (:class:`ReviewDisplayOptions`)
     bounds the payload.
 
-    ``review_table`` (profile-backed reviews: evaluation metrics, annotation
-    columns and proposals, indexed by unit id) replaces SI's default unit
+    ``review_table`` (profile-backed reviews: evaluation metrics and
+    proposals, indexed by unit id) replaces SI's default unit
     table columns, so the evaluation wins over same-named analyzer
     properties.
     """

@@ -211,7 +211,6 @@ class FigPackReview:
     uri: str
     upload: bool
     ephemeral: bool
-    annotation_sets: tuple[Any, ...] = field(default_factory=tuple)
     stages: tuple[ReviewStageStatus, ...] = field(default_factory=tuple)
     display_options: ReviewDisplayOptions = field(
         default_factory=ReviewDisplayOptions
@@ -510,12 +509,6 @@ class FigPackReview:
                 "and profile recipe."
             )
         delivery = config["delivery"]
-        from spyglass.spikesorting.v2.unit_annotation import AnnotationSetRef
-
-        annotation_sets = tuple(
-            AnnotationSetRef.from_snapshot(snapshot)
-            for snapshot in config.get("annotation_sets", [])
-        )
         return cls(
             review_id=_uuid(review_id),
             parent=parent,
@@ -524,7 +517,6 @@ class FigPackReview:
             uri=uri,
             upload=bool(delivery["upload"]),
             ephemeral=bool(delivery["ephemeral"]),
-            annotation_sets=annotation_sets,
             stages=(
                 ReviewStageStatus("identity_verified", "complete"),
                 ReviewStageStatus("evaluation_populated", "reused"),
@@ -748,11 +740,7 @@ class ReviewImportReceipt:
         )
 
     def continue_review(self) -> FigPackReview:
-        """Open/reuse a verification review over the actual child.
-
-        Parent annotation sets are not carried to the child; select
-        child-scoped sets explicitly.
-        """
+        """Open/reuse a verification review over the actual child."""
         return _start_review(
             self.curation,
             self.changes.review.profile,
@@ -776,7 +764,6 @@ def _review_config(
     *,
     upload: bool,
     ephemeral: bool,
-    annotation_sets: Sequence[Any],
     display_options: ReviewDisplayOptions,
 ) -> dict:
     config = _profile_snapshot(profile)
@@ -796,30 +783,7 @@ def _review_config(
             ],
         }
     )
-    # Keep the configuration byte-identical when no custom set is selected.
-    if annotation_sets:
-        config["annotation_sets"] = [ref.snapshot() for ref in annotation_sets]
     return config
-
-
-def _resolve_annotation_sets(
-    parent: CurationRef, annotation_sets: Sequence[Any]
-) -> tuple[Any, ...]:
-    """Resolve exact set refs and reject cross-curation selections."""
-    from spyglass.spikesorting.v2.unit_annotation import AnnotationSetRef
-
-    resolved = tuple(
-        AnnotationSetRef.from_key(value) for value in annotation_sets
-    )
-    for ref in resolved:
-        if ref.curation != parent:
-            raise ValueError(
-                f"Annotation set {ref.set_hash} belongs to a different "
-                "curation than the review parent."
-            )
-    if len({ref.as_key()["set_hash"] for ref in resolved}) != len(resolved):
-        raise ValueError("annotation_sets contains a duplicate set reference.")
-    return resolved
 
 
 def _start_review(
@@ -830,7 +794,6 @@ def _start_review(
     ephemeral: bool = False,
     evaluation: EvaluationResult | None = None,
     metric_waveform_params_name: str | None = None,
-    annotation_sets: Sequence[Any] = (),
     display_options: ReviewDisplayOptions | Mapping | None = None,
 ) -> FigPackReview:
     """Evaluate one pinned curation and build/reuse its seeded review view.
@@ -855,7 +818,6 @@ def _start_review(
             "CurationRef.from_key first."
         )
     parent.as_key()
-    resolved_annotation_sets = _resolve_annotation_sets(parent, annotation_sets)
     resolved_profile = ReviewProfileRef.resolve(profile)
     spec = resolved_profile.evaluation_spec
     # A supplied evaluation must already be populated (checked below).
@@ -905,7 +867,6 @@ def _start_review(
         evaluation,
         upload=upload,
         ephemeral=ephemeral,
-        annotation_sets=resolved_annotation_sets,
         display_options=resolved_display,
     )
     view_result = FigPackCuration.build_curation_view_result(

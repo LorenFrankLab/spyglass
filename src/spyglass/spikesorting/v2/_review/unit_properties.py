@@ -55,7 +55,7 @@ def display_column_array(values: pd.Series) -> np.ndarray:
     -------
     numpy.ndarray
         ``float64`` for numeric columns (missing -> NaN, so ``int`` and
-        ``float`` annotations keep their values and a gap stays empty),
+        ``float`` columns keep their values and a gap stays empty),
         ``bool`` for a complete boolean column, and a unicode string array
         otherwise (missing -> ``""``; an incomplete boolean column becomes
         ``"True"`` / ``"False"`` / ``""``).

@@ -18,7 +18,6 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     lossless_int,
 )
 from spyglass.utils.identity import sha256_json
-from spyglass.spikesorting.v2._curation.annotation import ANNOTATION_VALUE_TYPES
 
 if TYPE_CHECKING:
     from spyglass.spikesorting.v2.curation_api import CurationRef
@@ -36,18 +35,6 @@ _SNAPSHOT_FIELDS = frozenset(
         "labels_by_unit",
         "selection_provenance",
         "selection_hash",
-    }
-)
-_ANNOTATION_FIELDS = frozenset(
-    {
-        "sorting_id",
-        "curation_id",
-        "curation_uuid",
-        "annotation_name",
-        "annotation_version",
-        "value_type",
-        "set_hash",
-        "column_name",
     }
 )
 _EVALUATION_RECIPE_FIELDS = frozenset(
@@ -200,59 +187,12 @@ def validate_unit_selection_snapshot(data: Mapping[str, Any]) -> dict:
             raise ValueError("Unit selection has invalid evaluation recipes.")
     elif recipes is not None:
         raise ValueError("Evaluation recipes require an evaluation_id.")
-    annotations = provenance["annotation_sets"]
-    if not isinstance(annotations, list):
-        raise ValueError("Unit selection annotation_sets must be a list.")
-    seen_annotations = set()
-    for annotation in annotations:
-        if (
-            not isinstance(annotation, dict)
-            or set(annotation) != _ANNOTATION_FIELDS
-        ):
-            raise ValueError("Unit selection has an incomplete annotation pin.")
-        lossless_int(annotation["curation_id"], "annotation curation_id")
-        if any(
-            annotation.get(key) != payload[key]
-            for key in ("sorting_id", "curation_id", "curation_uuid")
-        ):
-            raise ValueError(
-                "Annotation selection belongs to another curation."
-            )
-        name = annotation["annotation_name"]
-        if not isinstance(name, str) or not name or len(name) > 64:
-            raise ValueError("Unit selection has an invalid annotation_name.")
-        version = lossless_int(
-            annotation["annotation_version"], "annotation_version"
+    # Hashed provenance keeps an always-empty list for stored identities.
+    if provenance["annotation_sets"] != []:
+        raise ValueError(
+            "Unit selection provenance annotation_sets must be an empty list; "
+            "v2 has no custom unit-annotation sets."
         )
-        if version < 1:
-            raise ValueError("annotation_version must be at least 1.")
-        if (
-            not isinstance(annotation["value_type"], str)
-            or annotation["value_type"] not in ANNOTATION_VALUE_TYPES
-        ):
-            raise ValueError(
-                "Unit selection has an invalid annotation value_type."
-            )
-        set_hash = annotation["set_hash"]
-        if (
-            not isinstance(set_hash, str)
-            or len(set_hash) != 64
-            or any(char not in "0123456789abcdef" for char in set_hash)
-        ):
-            raise ValueError(
-                "Unit selection has an invalid annotation set_hash."
-            )
-        if (
-            annotation["column_name"]
-            != f"annotation:{name}:v{version}:{set_hash}"
-        ):
-            raise ValueError(
-                "Annotation column_name disagrees with its pinned identity."
-            )
-        identity = (name, version, set_hash)
-        if identity in seen_annotations:
-            raise ValueError("Unit selection repeats an annotation pin.")
-        seen_annotations.add(identity)
     if payload["selection_hash"] != unit_selection_hash(payload):
         raise ValueError(
             "Unit selection snapshot selection_hash does not match."
@@ -267,14 +207,13 @@ class UnitSelectionSnapshot:
     Obtain this handle from ``resolve_unit_selection``.
     Mapping-valued properties return immutable mappings or defensive copies.
     ``snapshot()`` returns a fresh primitive dictionary suitable for storage.
-    Evaluation and annotation handles retain the original resolver arguments
-    for read-only drift checking immediately before a planned match runs.
+    The evaluation handle retains the original resolver argument for
+    read-only drift checking immediately before a planned match runs.
     """
 
     curation: CurationRef
     _payload_json: str = field(repr=False)
     evaluation: Any = field(default=None, repr=False, compare=False)
-    annotation_sets: tuple = field(default=(), repr=False, compare=False)
     _criteria_from_policy: bool = field(
         default=False, repr=False, compare=False
     )
@@ -291,7 +230,6 @@ class UnitSelectionSnapshot:
             raise ValueError(
                 "Unit selection snapshot belongs to another curation."
             )
-        object.__setattr__(self, "annotation_sets", tuple(self.annotation_sets))
 
     def snapshot(self) -> dict:
         """Return the pinned population and hash as a defensive primitive copy."""
@@ -367,7 +305,6 @@ class UnitSelectionSnapshot:
             unit_criteria=(
                 None if self._criteria_from_policy else self.unit_criteria
             ),
-            annotation_sets=self.annotation_sets,
         )
         if current.selection_hash != self.selection_hash:
             raise ValueError(

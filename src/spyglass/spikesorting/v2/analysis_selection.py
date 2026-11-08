@@ -39,7 +39,11 @@ from typing import Any
 import pandas as pd
 
 from spyglass.utils.identity import sha256_json
-from spyglass.spikesorting.v2.curation_api import CurationRef, EvaluationResult
+from spyglass.spikesorting.v2.curation_api import (
+    CurationRef,
+    EvaluationResult,
+    _read_unit_properties,
+)
 from spyglass.spikesorting.v2._curation.unit_selection import (
     UnitSelectionSnapshot,
     unit_selection_hash,
@@ -351,14 +355,13 @@ def resolve_unit_selection(
     policy: str = DEFAULT_UNIT_SELECTION_POLICY,
     evaluation: EvaluationResult | None = None,
     unit_criteria: Mapping | None = None,
-    annotation_sets: Sequence = (),
 ) -> UnitSelectionSnapshot:
     """Read and freeze a label/metric population without writing anything.
 
     Takes the same selection arguments as ``select_units_for_analysis``;
     defaults must already be initialized. The curation generation, policy,
-    criteria, evaluation and annotation pins, labels, unit ids and exclusion
-    reasons enter the snapshot hash. Does not require a registered output, so
+    criteria, evaluation pin, labels, unit ids and exclusion reasons enter the
+    snapshot hash. Does not require a registered output, so
     it also resolves a concat parent curation for matching.
     """
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -390,22 +393,14 @@ def resolve_unit_selection(
     included, excluded = apply_unit_selection_policy(
         labels_by_unit, unit_ids, resolved_policy
     )
-    from spyglass.spikesorting.v2.annotation_api import (
-        AnnotationSetRef,
-        read_unit_properties,
-    )
-
-    annotations = tuple(AnnotationSetRef.from_key(v) for v in annotation_sets)
     if evaluation is not None:
         if not isinstance(evaluation, EvaluationResult):
             raise TypeError(
                 "evaluation must be an EvaluationResult or explicit None."
             )
         evaluation._current_evaluation_key()
-    if criteria or evaluation is not None or annotations:
-        properties = read_unit_properties(
-            ref, evaluation=evaluation, annotation_sets=annotations
-        )
+    if criteria or evaluation is not None:
+        properties = _read_unit_properties(ref, evaluation=evaluation)
     # Same operators as v1 analysis groups; columns come from the evaluation.
     for column, criterion in criteria.items():
         mask = filter_units_by_criteria(properties, {column: criterion})
@@ -434,7 +429,8 @@ def resolve_unit_selection(
             if evaluation
             else None
         ),
-        "annotation_sets": [a.snapshot() for a in annotations],
+        # Always empty; kept so stored selection hashes stay valid.
+        "annotation_sets": [],
     }
     # Canonical JSON makes non-serializable criteria fail before writes.
     provenance = _jsonable_blob(provenance)
@@ -459,7 +455,6 @@ def resolve_unit_selection(
         curation=ref,
         _payload_json=json.dumps(payload, sort_keys=True),
         evaluation=evaluation,
-        annotation_sets=annotations,
         _criteria_from_policy=unit_criteria is None,
     )
 
@@ -471,7 +466,6 @@ def select_units_for_analysis(
     group_name: str | None = None,
     evaluation: EvaluationResult | None = None,
     unit_criteria: Mapping | None = None,
-    annotation_sets: Sequence = (),
 ) -> UnitSelectionReceipt:
     """Freeze a label/metric-selected population for downstream analysis.
 
@@ -499,8 +493,6 @@ def select_units_for_analysis(
         stored criteria; an explicit mapping overrides them. Missing values
         fail a predicate. Selected membership is persisted, including empty
         selections, so every downstream consumer uses the same population.
-    annotation_sets : sequence, optional
-        Exact custom property sets available to the criteria.
 
     Returns
     -------
@@ -519,7 +511,6 @@ def select_units_for_analysis(
         policy=policy,
         evaluation=evaluation,
         unit_criteria=unit_criteria,
-        annotation_sets=annotation_sets,
     )
     ref = selection.curation
     key = ref.as_key()
@@ -529,7 +520,6 @@ def select_units_for_analysis(
     excluded = selection.excluded_units
     unlabeled = selection.unlabeled_unit_ids
     provenance = selection.selection_provenance
-    annotations = selection.annotation_sets
     from spyglass.spikesorting.v2._storage.observation_io import (
         selection_observations,
     )
@@ -539,7 +529,7 @@ def select_units_for_analysis(
 
     if group_name is None:
         group_name = f"v2_{policy}_{ref.curation_uuid.hex[:12]}"
-        if criteria or evaluation is not None or annotations:
+        if criteria or evaluation is not None:
             group_name += f"_{selection_hash}"
     if len(group_name) > 80:
         raise ValueError("group_name must be at most 80 characters.")

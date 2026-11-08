@@ -59,7 +59,10 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
 )
 from spyglass.spikesorting.v2._sorting import fetch as _sorting_fetch
 from spyglass.spikesorting.v2._sorting.dispatch import unit_semantics_for_sorter
-from spyglass.spikesorting.v2.curation_api import CurationRef
+from spyglass.spikesorting.v2.curation_api import (
+    CurationRef,
+    _read_unit_properties,
+)
 from spyglass.spikesorting.v2.exceptions import ConcatBrainRegionAmbiguousError
 from spyglass.spikesorting.v2.recording import Recording
 
@@ -978,7 +981,6 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         curation_key: dict,
         *,
         evaluation=None,
-        annotation_sets=None,
     ) -> dict:
         """Return a notebook-printable summary of one curation.
 
@@ -991,10 +993,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             "curation_id": s["root_curation_id"]}`` (or
             ``auto_labeled_curation_id``).
         evaluation : EvaluationResult, optional
-            Evaluation whose metrics fill ``unit_properties``. Requires
-            ``annotation_sets``.
-        annotation_sets : sequence, optional
-            Annotation sets to add to ``unit_properties``; ``[]`` for none.
+            Evaluation of this curation whose metrics fill
+            ``unit_properties``.
 
         Returns
         -------
@@ -1007,7 +1007,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             - ``is_merge_preview``: not applied and has a real merge group
             - ``merge_id``: ``None`` if not in ``SpikeSortingOutput``
             - ``description``, ``created_at``, ``created_by``
-            - ``unit_properties``: only when ``annotation_sets`` is passed
+            - ``unit_properties``: only when ``evaluation`` is passed
 
         See Also
         --------
@@ -1055,21 +1055,9 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         )
         summary["created_at"] = created_at
         summary["created_by"] = str(created_by)
-        if annotation_sets is not None:
-            from spyglass.spikesorting.v2.unit_annotation import (
-                read_unit_properties,
-            )
-
-            summary["unit_properties"] = read_unit_properties(
-                CurationRef.from_key(pk),
-                evaluation=evaluation,
-                annotation_sets=annotation_sets,
-            )
-        elif evaluation is not None:
-            raise ValueError(
-                "summarize_curation requires annotation_sets to be supplied "
-                "explicitly whenever evaluation is selected; pass [] for no "
-                "custom annotation sets."
+        if evaluation is not None:
+            summary["unit_properties"] = _read_unit_properties(
+                CurationRef.from_key(pk), evaluation=evaluation
             )
         return summary
 

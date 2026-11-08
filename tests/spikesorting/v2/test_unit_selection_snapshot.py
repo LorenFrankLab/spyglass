@@ -100,11 +100,6 @@ def population(monkeypatch):
         "spyglass.spikesorting.analysis.v1.group",
         SimpleNamespace(UnitSelectionParams=ReadOnlyRows(policies)),
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "spyglass.spikesorting.v2.unit_annotation",
-        SimpleNamespace(CurationUnitAnnotationSet=object),
-    )
     monkeypatch.setattr(
         selection,
         "ensure_v2_unit_selection_policies",
@@ -193,11 +188,9 @@ def test_selection_hashes_are_pinned(
 def test_label_only_resolution_does_not_read_unit_properties(
     population, monkeypatch
 ):
-    from spyglass.spikesorting.v2 import annotation_api
-
     monkeypatch.setattr(
-        annotation_api,
-        "read_unit_properties",
+        selection,
+        "_read_unit_properties",
         lambda *args, **kwargs: pytest.fail(
             "Label selection needs only metadata."
         ),
@@ -205,52 +198,6 @@ def test_label_only_resolution_does_not_read_unit_properties(
     assert selection.resolve_unit_selection(
         population.ref
     ).included_unit_ids == (1, 2)
-
-
-def test_explicit_annotation_pins_and_nullable_values(population, monkeypatch):
-    from spyglass.spikesorting.v2.annotation_api import AnnotationSetRef
-
-    annotation = AnnotationSetRef(population.ref, "good", 1, "bool", "a" * 64)
-    monkeypatch.setattr(AnnotationSetRef, "_current_row", lambda self: {})
-    table = SimpleNamespace(
-        _dataframe_from_ref=lambda ref: pd.DataFrame(
-            {
-                "good": pd.array(
-                    [True, None, False, False, False], dtype="boolean"
-                )
-            },
-            index=population.labels,
-        )
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "spyglass.spikesorting.v2.unit_annotation",
-        SimpleNamespace(
-            CurationUnitAnnotationSet=table, UnitAnnotationDefinition=object
-        ),
-    )
-    snapshot = selection.resolve_unit_selection(
-        population.ref,
-        policy="all_units",
-        annotation_sets=[annotation],
-        unit_criteria={annotation.column_name: {"!=": False}},
-    )
-    assert snapshot.included_unit_ids == (1,)
-    assert snapshot.excluded_units[2].startswith("unavailable metric:")
-    assert snapshot.selection_provenance["annotation_sets"] == [
-        annotation.snapshot()
-    ]
-    assert (
-        validate_unit_selection_snapshot(snapshot.snapshot())
-        == snapshot.snapshot()
-    )
-    wrong = AnnotationSetRef(
-        CurationRef(uuid.uuid4(), 1, uuid.uuid4()), "good", 1, "bool", "b" * 64
-    )
-    with pytest.raises(ValueError, match="different curation"):
-        selection.resolve_unit_selection(
-            population.ref, annotation_sets=[wrong]
-        )
 
 
 def test_snapshot_is_defensive_and_detects_policy_and_label_drift(population):
@@ -467,49 +414,34 @@ def test_malformed_evaluation_pins_fail_even_with_recomputed_hash(
 
 
 @pytest.mark.parametrize(
-    "edit",
+    "annotations",
     [
-        lambda a: a.pop("annotation_name"),
-        lambda a: a.update(annotation_name=""),
-        lambda a: a.update(annotation_version=True),
-        lambda a: a.update(annotation_version=1.0),
-        lambda a: a.update(annotation_version=0),
-        lambda a: a.update(curation_id=True),
-        lambda a: a.update(value_type="unknown"),
-        lambda a: a.update(value_type=[]),
-        lambda a: a.update(set_hash="a" * 63),
-        lambda a: a.update(set_hash="A" * 64),
-        lambda a: a.update(column_name="annotation:good:v1:wrong_hash"),
+        None,
+        {},
+        "annotation",
+        [{}],
+        [
+            {
+                "annotation_name": "good",
+                "annotation_version": 1,
+                "value_type": "bool",
+                "set_hash": "a" * 64,
+                "column_name": f"annotation:good:v1:{'a' * 64}",
+            }
+        ],
     ],
 )
-def test_malformed_annotation_pins_fail_even_with_recomputed_hash(
-    population, edit
-):
-    data = selection.resolve_unit_selection(population.ref).snapshot()
-    annotation = {
-        **{
-            key: data[key]
-            for key in ("sorting_id", "curation_id", "curation_uuid")
-        },
-        "annotation_name": "good",
-        "annotation_version": 1,
-        "value_type": "bool",
-        "set_hash": "a" * 64,
-        "column_name": f"annotation:good:v1:{'a' * 64}",
-    }
-    data["selection_provenance"]["annotation_sets"] = [annotation]
-    data["selection_hash"] = unit_selection_hash(data)
-    assert validate_unit_selection_snapshot(data) == data
-    edit(annotation)
-    data["selection_hash"] = unit_selection_hash(data)
-    with pytest.raises(ValueError):
-        validate_unit_selection_snapshot(data)
-
-
-@pytest.mark.parametrize("annotations", [None, {}, "annotation", [{}]])
-def test_annotation_collection_requires_complete_pins(population, annotations):
+def test_annotation_sets_must_be_empty_list(population, annotations):
     data = selection.resolve_unit_selection(population.ref).snapshot()
     data["selection_provenance"]["annotation_sets"] = annotations
     data["selection_hash"] = unit_selection_hash(data)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="annotation_sets must be an empty"):
+        validate_unit_selection_snapshot(data)
+
+
+def test_missing_annotation_sets_pin_fails(population):
+    data = selection.resolve_unit_selection(population.ref).snapshot()
+    data["selection_provenance"].pop("annotation_sets")
+    data["selection_hash"] = unit_selection_hash(data)
+    with pytest.raises(ValueError, match="missing evidence pins"):
         validate_unit_selection_snapshot(data)

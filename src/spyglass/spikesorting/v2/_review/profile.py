@@ -103,9 +103,8 @@ def normalize_review_profile(
     if unknown:
         raise ValueError(
             "CurationReviewProfile does not accept runtime/review fields "
-            f"{unknown}. Publishing location, upload/ephemeral mode, "
-            "credentials, and annotation-set selections belong to each "
-            "review invocation."
+            f"{unknown}. Publishing location, upload/ephemeral mode, and "
+            "credentials belong to each review invocation."
         )
     required = (
         "review_profile_name",

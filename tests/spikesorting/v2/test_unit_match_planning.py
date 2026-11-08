@@ -793,7 +793,6 @@ def explicit_matching_plan(monkeypatch):
             ref,
             json.dumps(data),
             evaluation=kwargs.get("evaluation"),
-            annotation_sets=tuple(kwargs.get("annotation_sets", ())),
         )
 
     def prepare(curations, matcher_params_name, **kwargs):
@@ -1022,7 +1021,6 @@ def test_explicit_plan_retains_typed_evidence_populations(
 
     state = explicit_matching_plan
     evaluation = object()
-    annotations = (object(),)
     criteria = {"observed_firing_rate_hz": {"ge": 0}}
     populations = [
         resolve_unit_selection(
@@ -1030,7 +1028,6 @@ def test_explicit_plan_retains_typed_evidence_populations(
             policy="v2_accepted_single_units",
             evaluation=evaluation,
             unit_criteria=criteria,
-            annotation_sets=annotations,
         )
         for ref in state.refs
     ]
@@ -1047,7 +1044,6 @@ def test_explicit_plan_retains_typed_evidence_populations(
     assert preflight_v2_unit_match(plan).ok
     for forwarded in state.resolver_kwargs[-2:]:
         assert forwarded["evaluation"] is evaluation
-        assert forwarded["annotation_sets"] == annotations
         assert forwarded["unit_criteria"] == criteria
     with pytest.raises(ValueError, match="exactly one unit selection"):
         plan_v2_unit_match_from_curations(

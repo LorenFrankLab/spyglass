@@ -87,7 +87,6 @@ def test_service_module_imports_without_db_layer(modname):
             "spyglass.spikesorting.v2.sorting",
             "spyglass.spikesorting.v2.recording",
             "spyglass.spikesorting.v2.curation",
-            "spyglass.spikesorting.v2.unit_annotation",
             "spyglass.spikesorting.v2.unit_matching",
         }}
         attempted = []

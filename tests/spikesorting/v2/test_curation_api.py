@@ -470,6 +470,10 @@ def test_evaluation_facade_snapshot_labels_and_merge_receipt(
         )
         assert evaluation.spec.metric_params_name == "minimal"
         assert evaluation.spec.auto_curation_rules_name == "none"
+        assert "unit_properties" not in root.summarize()
+        properties = root.summarize(evaluation=evaluation)["unit_properties"]
+        assert properties.index.tolist() == unit_ids
+        assert "snr" in properties.columns
 
         metrics = evaluation.metrics
         original_columns = list(metrics.columns)

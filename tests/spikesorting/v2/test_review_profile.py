@@ -48,11 +48,10 @@ def test_review_profile_hash_covers_semantics():
         "ephemeral",
         "credentials",
         "local_destination",
-        "annotation_sets",
     ],
 )
 def test_review_profile_separates_delivery_options(runtime_field):
-    """Per-review delivery/annotation choices cannot enter profile identity."""
+    """Per-review delivery choices cannot enter profile identity."""
     with pytest.raises(ValueError, match="runtime/review fields"):
         _normalized(**{runtime_field: True})
 

@@ -561,7 +561,6 @@ class CurationRef:
         upload: bool = False,
         ephemeral: bool = False,
         metric_waveform_params_name: str | None = None,
-        annotation_sets=(),
         display_options=None,
     ):
         """Evaluate this curation and build/reuse its seeded review view.
@@ -588,10 +587,6 @@ class CurationRef:
         metric_waveform_params_name : str, optional
             Metric waveform recipe for the evaluation. Default ``None`` uses
             this curation's default recipe.
-        annotation_sets : sequence, optional
-            Annotation-set references (anything ``AnnotationSetRef.from_key``
-            accepts) to include in the review. Each must belong to this
-            curation and none may repeat. Default ``()`` includes none.
         display_options : ReviewDisplayOptions or mapping, optional
             Browser payload bounds (raster/amplitude samples, point budget,
             correlogram pair filter). Persisted with the review; does not
@@ -615,9 +610,8 @@ class CurationRef:
             If ``display_options`` is not a ``ReviewDisplayOptions``, a
             mapping, or ``None``.
         ValueError
-            If ``display_options`` has unknown or invalid fields; an
-            annotation set belongs to a different curation or is listed
-            twice; ``profile`` does not resolve to exactly one
+            If ``display_options`` has unknown or invalid fields;
+            ``profile`` does not resolve to exactly one
             ``CurationReviewProfile`` row or no longer matches its pinned
             hash; or this curation is an uncommitted merge preview.
         CurationNotFoundError
@@ -636,7 +630,6 @@ class CurationRef:
             upload=upload,
             ephemeral=ephemeral,
             metric_waveform_params_name=metric_waveform_params_name,
-            annotation_sets=annotation_sets,
             display_options=display_options,
         )
 
@@ -864,15 +857,12 @@ class CurationRef:
         self,
         *,
         evaluation: "EvaluationResult | None" = None,
-        annotation_sets=None,
     ) -> dict:
-        """Summarize this curation and explicitly selected unit properties."""
+        """Summarize this curation and, if given, its evaluation's metrics."""
         from spyglass.spikesorting.v2.curation import CurationV2
 
         return CurationV2.summarize_curation(
-            self.as_key(),
-            evaluation=evaluation,
-            annotation_sets=annotation_sets,
+            self.as_key(), evaluation=evaluation
         )
 
 
@@ -1420,7 +1410,6 @@ class EvaluationResult:
         *,
         upload: bool = False,
         ephemeral: bool = False,
-        annotation_sets=(),
         display_options=None,
     ):
         """Start a review after verifying this evaluation matches its profile.
@@ -1437,7 +1426,6 @@ class EvaluationResult:
             upload=upload,
             ephemeral=ephemeral,
             evaluation=self,
-            annotation_sets=annotation_sets,
             display_options=display_options,
         )
 
@@ -1501,7 +1489,6 @@ class RunResult(dict):
         source: Literal["auto_labeled", "root"] = "auto_labeled",
         upload: bool = False,
         ephemeral: bool = False,
-        annotation_sets=(),
         display_options=None,
     ):
         """Start the canonical review without silently changing its source."""
@@ -1524,7 +1511,6 @@ class RunResult(dict):
             profile,
             upload=upload,
             ephemeral=ephemeral,
-            annotation_sets=annotation_sets,
             display_options=display_options,
         )
 
@@ -1675,6 +1661,56 @@ def save_manual_curation(
         **kwargs,
     )
     return CurationRef.from_key(child)
+
+
+def _read_unit_properties(
+    curation: CurationRef, *, evaluation: EvaluationResult | None
+) -> pd.DataFrame:
+    """Return the evaluation's metrics indexed by the curation's unit ids.
+
+    Without an evaluation, the frame has the unit-id index and no columns.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    if not isinstance(curation, CurationRef):
+        raise TypeError("_read_unit_properties requires curation=CurationRef.")
+    curation_key = curation.as_key()
+    unit_ids = [
+        int(value)
+        for value in (CurationV2.Unit & curation_key).fetch(
+            "unit_id", order_by="unit_id"
+        )
+    ]
+    if evaluation is None:
+        return pd.DataFrame(index=pd.Index(unit_ids, name="unit_id"))
+    if not isinstance(evaluation, EvaluationResult):
+        raise TypeError(
+            "evaluation must be an EvaluationResult or explicit None."
+        )
+    if evaluation.curation != curation:
+        raise ValueError("Selected evaluation belongs to a different curation.")
+    metrics = evaluation.metrics
+    try:
+        metrics.index = [int(value) for value in metrics.index]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Selected evaluation metrics do not use integer unit ids."
+        ) from exc
+    if metrics.columns.duplicated().any():
+        duplicates = list(metrics.columns[metrics.columns.duplicated()])
+        raise ValueError(
+            f"Selected evaluation has duplicate metric columns {duplicates}."
+        )
+    metric_units = set(metrics.index)
+    if metric_units != set(unit_ids):
+        raise ValueError(
+            "Selected evaluation metrics do not match the exact curation "
+            f"unit namespace: metrics={sorted(metric_units)}, "
+            f"curation={unit_ids}."
+        )
+    result = metrics.reindex(unit_ids).copy(deep=True)
+    result.index.name = "unit_id"
+    return result
 
 
 def _require_parent_ref(parent_curation, *, caller: str) -> CurationRef:
