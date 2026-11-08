@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from collections import defaultdict
 
 import datajoint as dj
+from datajoint.utils import get_master
 
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
@@ -38,7 +39,10 @@ from spyglass.spikesorting.v2._curation.transforms import (
 from spyglass.spikesorting.v2._storage.units_nwb import write_curated_units_nwb
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2._core.enums import CurationLabel, CurationSource
-from spyglass.spikesorting.v2._core.table_integrity import FactoryOnlyMaster
+from spyglass.spikesorting.v2._core.table_integrity import (
+    FactoryOnlyMaster,
+    foreign_key_referrers,
+)
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
@@ -271,6 +275,8 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
           ``curation_id``) is not also being deleted. Delete leaf-up.
         - another table uses the curation's ``SpikeSortingOutput`` entry
           (``SortedSpikesGroup``, a unit annotation, waveform features).
+        - a part of another table uses the curation (``UnitMatchSelection``);
+          the cascade would delete the part row but keep its master.
 
         ``super_delete``, ``delete_quick``, and upstream cascades skip this
         guard; :meth:`audit_orphaned_lineage` finds the orphans they leave.
@@ -328,6 +334,24 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 "orphan the child's parent_curation_id lineage. Offending "
                 f"(parent_curation_id, child_curation_id) pairs: {orphaned}. "
                 "Delete the descendant curations first (leaf-up)."
+            )
+        external_parts = {
+            name: n_rows
+            for name, n_rows in foreign_key_referrers(self, list(rows)).items()
+            if get_master(name)
+            not in (
+                "",
+                self.full_table_name,
+                SpikeSortingOutput.full_table_name,
+            )
+        }
+        if external_parts:
+            raise ValueError(
+                f"{cls.__name__}.delete: refusing to delete. Part tables of "
+                f"other tables still use these curations: {external_parts} "
+                "(rows per table). Delete their masters first (for example "
+                "the UnitMatchSelection that matches the curation), then "
+                "delete the curation."
             )
         if safemode is not None:
             kwargs["safemode"] = safemode

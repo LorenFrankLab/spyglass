@@ -1,10 +1,12 @@
 """Insert guards and integrity adapters for v2 DataJoint tables.
 
-Imports no schemas. DataJoint itself is loaded only for guard exceptions;
-parameter validation and integrity queries run at the explicit table boundary.
+Imports no schemas. Parameter validation and integrity queries run at the
+explicit table boundary.
 """
 
 from __future__ import annotations
+
+import datajoint as dj
 
 from spyglass.spikesorting.v2._core.lookup_validation import (
     reject_duplicate_parameter_content,
@@ -88,6 +90,56 @@ def optional_part_value(table, key: dict, part, column: str):
             f"{part.__name__} rows; expected zero or one."
         )
     return rows[0] if len(rows) else None
+
+
+def foreign_key_referrers(
+    parent, rows: list[dict], *, skip=frozenset()
+) -> dict[str, int]:
+    """Count rows in other tables whose foreign keys onto ``parent`` match ``rows``.
+
+    The foreign keys come from ``information_schema``, so a referencing
+    table counts even when its module is not imported in this process.
+
+    Parameters
+    ----------
+    parent : dj.Table
+        The referenced table.
+    rows : list[dict]
+        ``parent`` primary keys to look up.
+    skip : Collection[str]
+        Full names of referencing tables to leave out.
+
+    Returns
+    -------
+    dict[str, int]
+        Matching row count per referencing table, for tables with any.
+    """
+    if not rows:
+        return {}
+    schema, table = parent.full_table_name.replace("`", "").split(".")
+    columns = parent.connection.query(
+        "SELECT table_schema, table_name, constraint_name, column_name, "
+        "referenced_column_name FROM information_schema.key_column_usage "
+        "WHERE referenced_table_schema = %s AND referenced_table_name = %s",
+        args=(schema, table),
+    ).fetchall()
+    foreign_keys: dict[tuple[str, str], dict[str, str]] = {}
+    for child_schema, child_table, constraint, column, referenced in columns:
+        name = f"`{child_schema}`.`{child_table}`"
+        foreign_keys.setdefault((name, constraint), {})[column] = referenced
+    counts: dict[str, int] = {}
+    for (name, _), attr_map in foreign_keys.items():
+        if name in skip:
+            continue
+        child = dj.FreeTable(parent.connection, name)
+        restriction = [
+            {column: row[referenced] for column, referenced in attr_map.items()}
+            for row in rows
+        ]
+        n_rows = len(child & restriction)
+        if n_rows:
+            counts[name] = counts.get(name, 0) + n_rows
+    return counts
 
 
 class _IdentityMasterGuard:

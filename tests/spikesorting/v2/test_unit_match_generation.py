@@ -189,3 +189,28 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
     finally:
         if group_key is not None:
             (SessionGroup & group_key).super_delete(warn=False, safemode=False)
+
+
+@pytest.mark.database
+@pytest.mark.integration
+@pytest.mark.stage
+def test_curation_delete_refuses_while_a_unit_match_uses_it(
+    reviewed_curation,
+):
+    """The cascade would drop the selection's input row but keep the selection."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    _, child = reviewed_curation
+    pk = UnitMatchSelection.insert_inputs(
+        [child],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
+    )
+    try:
+        with pytest.raises(ValueError, match="unit_match_selection__input"):
+            (CurationV2 & child).delete(safemode=False)
+        assert CurationV2 & child
+        assert UnitMatchSelection.Input & pk
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False, safemode=False)

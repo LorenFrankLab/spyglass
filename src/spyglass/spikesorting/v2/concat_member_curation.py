@@ -5,6 +5,9 @@ from __future__ import annotations
 from spyglass.spikesorting.v2._core.runtime import (
     runtime_environment_provenance,
 )
+from spyglass.spikesorting.v2._core.table_integrity import (
+    foreign_key_referrers,
+)
 
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -196,13 +199,7 @@ class ConcatMemberCurationV2(
 
     @staticmethod
     def _merge_referrers(merge_ids) -> dict[str, int]:
-        """Count rows outside the merge table that use these merge entries.
-
-        The foreign keys come from ``information_schema``, so a referencing
-        table counts even when its module is not imported in this process.
-        """
-        if not merge_ids:
-            return {}
+        """Count rows outside the merge table that use these merge entries."""
         from spyglass.spikesorting.analysis.v1.unit_annotation import (
             UnitAnnotationPositionalIdMigration,
         )
@@ -210,27 +207,13 @@ class ConcatMemberCurationV2(
 
         master = SpikeSortingOutput()
         # The migration marker cascades with the entry instead of blocking.
-        cascaded = {UnitAnnotationPositionalIdMigration.full_table_name}
-        schema, table = master.full_table_name.replace("`", "").split(".")
-        foreign_keys = master.connection.query(
-            "SELECT table_schema, table_name, column_name "
-            "FROM information_schema.key_column_usage "
-            "WHERE referenced_table_schema = %s "
-            "AND referenced_table_name = %s "
-            "AND referenced_column_name = 'merge_id'",
-            args=(schema, table),
-        ).fetchall()
-        own_parts = set(master.parts())
-        counts = {}
-        for child_schema, child_table, column in foreign_keys:
-            name = f"`{child_schema}`.`{child_table}`"
-            if name in own_parts or name in cascaded:
-                continue
-            child = dj.FreeTable(master.connection, name)
-            n_rows = len(child & [{column: m} for m in merge_ids])
-            if n_rows:
-                counts[name] = n_rows
-        return counts
+        skip = {
+            *master.parts(),
+            UnitAnnotationPositionalIdMigration.full_table_name,
+        }
+        return foreign_key_referrers(
+            master, [{"merge_id": m} for m in merge_ids], skip=skip
+        )
 
     @staticmethod
     def _cleanup_orphaned_merge_masters(merge_ids) -> None:
