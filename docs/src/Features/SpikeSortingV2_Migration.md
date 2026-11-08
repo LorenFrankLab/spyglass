@@ -47,7 +47,9 @@ existing v0/v1 behavior are in the [CHANGELOG](../CHANGELOG.md).
 - **One merge table.** Both pipelines register on `SpikeSortingOutput`, so
     downstream code keys off `merge_id` whichever pipeline produced the sort.
 
-## Environment setup
+## Setup
+
+Read this before running v2.
 
 ### Install
 
@@ -145,7 +147,9 @@ nodes. A local-filesystem test does not establish shared-mount behavior.
 
 ### Trust model
 
-v2 assumes a **trusted compute operator**, like the rest of Spyglass.
+v2 assumes a **trusted compute operator**, like the rest of Spyglass. File
+permissions and path handling are in the
+[developer guide](../ForDevelopers/SpikeSortingV2Architecture.md#trust-model).
 
 - **Writing `SorterParameters` (or ingesting sessions) is trusted.** A row's
     `execution_params` can pull and run a Docker or Singularity image, so
@@ -157,12 +161,8 @@ v2 assumes a **trusted compute operator**, like the rest of Spyglass.
     can cascade-delete another team's rows.
     `SortGroupV2.preview_existing_entries` lists that blast radius; it does not
     block.
-- Analysis artifacts are written `0o644`. Sorter scratch is world-writable only
-    for a container backend. Caller-supplied NWB file names are reduced to a
-    bare basename before any directory join.
-- Importing `spyglass.spikesorting.v2.sorting` also declares the
-    `spikesorting_v2_motion` schema, so users need insert/create privileges on
-    it, as on every other `spikesorting_v2_*` schema.
+- Users need insert/create privileges on the `spikesorting_v2_motion` schema,
+    as on every other `spikesorting_v2_*` schema.
 
 ## Porting a v1 sort to v2
 
@@ -808,6 +808,8 @@ RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)
 
 - `Recording.get_recording()` and `Sorting.get_analyzer()` rebuild a missing
     file or folder from the stored lineage.
+- How a comparison is recorded is in the
+    [developer guide](../ForDevelopers/SpikeSortingV2Architecture.md#recompute).
 - `get_disk_space()` counts matched, undeleted files across environments, with
     no environment or age check. `delete_files(..., dry_run=True)` previews what
     those checks allow.
@@ -823,17 +825,12 @@ RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)
         file's modification time; for analyzers, the recompute's populate time, so
         a newly verified analyzer waits seven days. Unknown timestamps are
         skipped.
-- A completed `matched=0` comparison lists differing objects in the `Name`
-    (missing from old/new) and `Hash` (differing) parts. Skipped or failed
-    attempts put the reason in `err_msg`.
 - `attempt_all`, `remove_matched` (on `*RecomputeSelection`) and `with_names`,
     `get_parent_key`, `recheck`, `get_disk_space`, `update_secondary` (on
     `*Recompute`) are the v1 `RecordingRecompute` operations.
 - Concatenated and motion-corrected recordings have no recompute trio. A missing
     file is rebuilt and verified on demand by `get_recording()`. There is no
     reclamation surface for them.
-- Run destructive recompute paths under a temporary `SPYGLASS_BASE_DIR` when
-    testing, never on shared lab storage.
 
 **Scratch disk.** Budget for the preprocessed `Recording`, the sorter's scratch
 under `temp_dir` while it runs, the display and (for PC metrics) metric
@@ -860,8 +857,7 @@ Sorting.find_orphaned_analyzer_folders(dry_run=False)
 
 - The report also lists DB rows whose folder is absent and folders reclaimed
     through `SortingAnalyzerRecompute`.
-- Active builds are skipped; ownership is checked by lock, not by PID or age.
-    Run reclamation when sorting and rebuild jobs are idle.
+- Run reclamation when sorting and rebuild jobs are idle.
 - `CurationV2.delete()` and `ConcatMemberCurationV2.delete()` list member rows,
     merge ids, and analysis files in a dry run, then remove the rows. Their
     analysis files are left for `AnalysisNwbfile().cleanup()`, like any other

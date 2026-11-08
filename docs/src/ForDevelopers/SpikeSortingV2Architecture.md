@@ -392,8 +392,8 @@ their lifecycle and serialization checks when changing supported versions.
     `Sorting.delete()` override, so the analyzer folder stays.
     `Sorting.find_orphaned_analyzer_folders` reports disk-side orphans, staging
     leftovers, DB rows with missing folders, and recompute-reclaimed folders.
-    Build ownership is checked by lock; killed processes release theirs. It
-    never deletes a database row.
+    Active builds are skipped; ownership is checked by lock, not by PID or
+    age, and killed processes release theirs. It never deletes a database row.
 - Before that cascade, the delete refuses if any table outside the merge
     references those merge ids. The masters are removed after the confirmation
     prompt, so their dependents would otherwise be deleted unseen. Referencing
@@ -845,6 +845,9 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
 - Extension hashes use the version-tagged `array-v2` format: shapes, dtypes, and
     boundaries are hashed with canonical little-endian values. Hashing streams
     bounded buffers, memmapped waveforms included.
+- A completed `matched=0` comparison lists differing objects in the `Name`
+    (missing from old/new) and `Hash` (differing) parts. Skipped or failed
+    attempts put the reason in `err_msg`.
 - A rebuild retires the prior `SortingAnalyzerVersions` generation and its
     verdicts, then inventories the published folder again. `attempt_all()`
     refreshes inventories of folders rebuilt by DB-free workers from a
@@ -1085,6 +1088,18 @@ abs_path = AnalysisNwbfile.get_abs_path(
 with pynwb.NWBHDF5IO(abs_path, "r", load_namespaces=True) as io:
     prov = io.read().get_scratch("spyglass_v2_sorting_provenance")
 ```
+
+## Trust model
+
+v2 assumes a trusted compute operator; the user-facing rules are in the
+[migration guide](../Features/SpikeSortingV2_Migration.md#trust-model).
+
+- Analysis artifacts are written `0o644`. Sorter scratch is world-writable only
+    for a container backend. Caller-supplied NWB file names are reduced to a
+    bare basename before any directory join.
+- Importing `spyglass.spikesorting.v2.sorting` also declares the
+    `spikesorting_v2_motion` schema, so users need insert/create privileges on
+    it, as on every other `spikesorting_v2_*` schema.
 
 ## Process and threading
 
