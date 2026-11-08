@@ -214,6 +214,7 @@ CurationV2.summarize_curation(root_curation.as_key())
 # equivalent. `upload=True` publishes the identical seeded bundle to
 # figpack.org instead (needs a FigPack API key unless `ephemeral=True`). The
 # optional `spikesorting-v2-curation` extra is required for this path.
+# Appendix C lists the remaining review details.
 
 import importlib.util
 
@@ -435,6 +436,15 @@ if recovery_review is not None:
 # The abandoned branch stays as history (`newer_sibling_curations`); remove
 # it later with `bad_merge.delete_subtree()` once nothing downstream refers
 # to it.
+#
+# - The replacement sibling comes from that merge's parent, not necessarily
+#   the root; the review it came from is `receipt.changes.review`.
+# - Edits made in the merged child's own verification review live on the
+#   abandoned branch; redo them on the replacement.
+# - Once nothing refers to the abandoned branch,
+#   `bad_merge.preview_curation_delete()` lists it leaf-first and
+#   `bad_merge.delete_subtree()` removes it. Delete a `SortedSpikesGroup`
+#   built from it first.
 
 recovery_conflict_resolutions = {}  # use the IDs from recovery_changes
 if recovery_changes is not None and commit_recovery:
@@ -467,6 +477,11 @@ if recovery_changes is not None and commit_recovery:
 # unit ids of `final_curation`; values are labels from
 # `CurationV2.label_options()` (pass `allow_custom_labels=True` for one outside
 # that set). `manual_labels` starts EMPTY so a run-all is a no-op.
+#
+# The full form is
+# `save_manual_curation(parent_curation=..., labels={unit_id: [label, ...]}, merge_groups=[[unit_id, ...], ...], merge_action=...)`.
+# It takes integer unit ids. `merge_action="preview"` stores unapplied
+# proposals; `"commit"` applies them.
 
 manual_labels = {}  # e.g. {5: ["noise"], 12: ["mua"]} after inspecting
 
@@ -687,6 +702,61 @@ analysis_provenance
 # 4. **Merge and re-evaluate**: `merge_and_evaluate(groups)` commits the merge
 #    child and evaluates its actual merged templates; `accept_labels` commits
 #    the rule verdict.
+#
+# Evaluation details:
+#
+# - Preview curations (`apply_merge=False` with an unapplied merge) are
+#   rejected; commit the merge first (`curation.commit_merges(groups)` /
+#   `insert_curation(..., apply_merge=True)`).
+# - It records the exact recipe pair it used. Its proposals become a committed
+#   child; the scored row is never changed.
+# - Results are written to NWB and returned as an `EvaluationResult` snapshot.
+#   `metrics`, `suggested_merges`, and `proposed_labels` are copies.
+# - `evaluation.merge_and_evaluate(groups)` is idempotent and resumable. Run it
+#   outside a caller-owned transaction: `populate` manages its own.
+#   `evaluation.commit_merges(groups)` commits without re-evaluation.
+# - `accept_labels(mode="replace")` makes the evaluation the complete verdict;
+#   `mode="overlay"` keeps current labels and adds.
+# - `evaluation.plots.units_qc()` (table form `CurationEvaluation.plot_units_qc`)
+#   draws a histogram per metric plus a unit-depth scatter; pass `axes=` to
+#   embed it.
+#
+# Table methods (the facade calls these):
+#
+# - `CurationEvaluation.accept_merges` / `accept_all_suggested_merges` commit the
+#   merged unit set and **inherit** the curation's labels. They do not apply
+#   pre-merge evaluation labels, which cannot attach to a merged unit.
+# - Recommended: accept the merge, re-evaluate the merged child, then label with
+#   `use_evaluation_labels` (complete verdict: clears labels the evaluation no
+#   longer proposes) or `overlay_evaluation_labels` (adds).
+# - `accept_evaluation_outputs` applies merges and labels in one call. Its
+#   `labels=None` default applies the pre-merge labels; prefer the action
+#   methods unless that is intended.
+# - `preview_merges` drafts an unapplied merge. Downstream consumers reject that
+#   row until it is committed. Every merge needs a group of two or more units.
+#
+# Custom rule sets:
+#
+# - Insert `AutoCurationRules` with `insert_rules(master, rule_rows)`, so the
+#   master and its ordered rules validate together. Direct `insert1` is blocked.
+# - Expected NaN cases (`expected_missing_units`): `nn_isolation` /
+#   `nn_noise_overlap` below `nn_advanced`'s `min_spikes` or `min_fr`;
+#   `presence_ratio` for a recording shorter than one bin or a unit with no
+#   spikes; `amplitude_cutoff` below
+#   `num_histogram_bins * amplitudes_bins_min_ratio` spikes (500 by default);
+#   `isi_violation` at one spike or fewer; `firing_rate` with no spikes; `snr`
+#   and `num_spikes` never.
+# - Any other non-finite rule value raises `ValueError`, including any non-finite
+#   value on a column with no registered cases (template, custom, or
+#   `observed_*` columns). An error SI catches inside a referenced metric aborts
+#   the evaluation; one in an unreferenced metric is logged and its columns stay
+#   NaN.
+# - The shipped rules use `pass`, because `error` would abort a sort over a
+#   legitimately short train. `pass` and `fail` warn when a metric is non-finite
+#   for every unit. `pass` means unflagged, not good. The review's
+#   `unavailable_qc` column names missing inputs for enabled rules.
+# - Metric persistence accepts only numeric scalars (NaN included). Arrays and
+#   other objects raise `UnsupportedMetricValueError`.
 
 scripted_curation = None
 if run_scripted_curation_example:
@@ -764,3 +834,105 @@ if run_scripted_curation_example:
         f"{int(is_interneuron.sum())} putative interneuron(s), "
         f"{int((~is_interneuron).sum())} putative pyramidal"
     )
+
+# ## Appendix C. Browser review reference
+#
+# Details of the 3-browser review that the walkthrough above does not show.
+#
+# - **Profile.** One name binds the metric and rule recipes, ordered columns,
+#   label palette, and `replace` / `overlay` import mode.
+#   `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09_17`
+#   (`franklab_default` metrics, `franklab_default_auto_curation_2026_09` rules,
+#   `label_import_mode="replace"`, view version 4). Publishing location,
+#   credentials, and ephemeral mode are per review.
+# - **Labels.** The browser offers only the profile's `label_options` (nonempty,
+#   at most 32 characters). Labels already on the parent are kept on import.
+# - **Local serving.** `review.open()` starts or reuses one loopback server per
+#   Python process and serves `http://localhost:<port>/bundles/<id>/`. The
+#   `<id>` is random, so only someone given the URL can read or edit the review.
+#   A browser save writes the bundle's `annotations.json`, the file the importer
+#   reads; nothing else is writable.
+#     - The port is process state. `open(port=...)` on the first open requests
+#       the same port again; `open_browser=False` only returns the URL.
+#     - Every review, focused inspection, and merged-child review in one process
+#       shares the port, so one SSH tunnel covers the sequence.
+#     - A missing bundle raises with the recovery step (start the review again).
+#     - A reopened bundle gets the installed review controls; its data and saved
+#       annotations are unchanged.
+# - **Two tabs.** A stale save from an older tab is rejected without discarding
+#   its edits. Use **Open latest draft in a new tab** and reapply them.
+# - **Operations** (preview, commit, inspect) run one at a time in a worker with
+#   its own DataJoint connection.
+#     - Progress and committed identities persist in the bundle. Reloading
+#       reconnects; ownership survives the launcher exiting while its worker
+#       lives.
+#     - Progress requests retry automatically. After repeated failures, use
+#       **Reconnect review** to read the current operation without resubmitting.
+#     - After a restart, resume the review. A live worker keeps running; retry
+#       only an interrupted action. A failed re-evaluation keeps the child, and a
+#       retry reuses it.
+#     - Draft edits and commit stay disabled while an operation runs. Do not edit
+#       or discard the bundle meanwhile.
+#     - Operation and result journals live beside the bundle; there is no
+#       workflow-status table.
+# - **Where am I?** `changes.next_step()` and `receipt.next_step()` name one of
+#   four states: saved edits differ from the reviewed parent; no saved edits
+#   differ; merged result awaiting verification; result available for analysis.
+#   The preview compares with the parent only, so an already-committed diff
+#   still "differs" and committing it again reuses that child.
+# - **Undo a saved but uncommitted merge:** select its units, **Undo selected
+#   merge**, **Save draft**. `preview_import()` then shows no merge. A
+#   committed wrong merge is a branch; see 3-recover.
+# - **Finding a review.** `FigPackReview.resume(review_id)` rebuilds a handle.
+#   `FigPackReview.find(parent, profile=...)` lists every built review of a
+#   curation, oldest first; each `start_review` after a commit starts a new one.
+#   Before any child is committed, `parent.start_review(profile)` returns the
+#   existing review. `RunResult.start_review(source="auto_labeled")` raises when
+#   no analysis curation exists; it never falls back to the root.
+# - **Import safety.** Every import is pinned to the parent's `curation_uuid` and
+#   the exact figure and profile. `preview_import()` reports children other
+#   reviewers created since the review began. Commit still creates or reuses a
+#   sibling from the pinned parent; it never rebases. It re-reads the
+#   annotations and refuses a figure changed after preview. A zero-diff review
+#   needs `confirm_no_changes=True`. Conflicting contributor labels need
+#   `conflict_resolutions`; no contributor wins by precedence.
+#   `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` checks the
+#   figure's embedded `curation_uuid` and decodes its annotations before writing
+#   a child. Figures without identity fail closed.
+# - **Delivery.** Local is the default. `upload=True` publishes the identical
+#   seeded bundle. A persistent hosted review needs a FigPack API key
+#   (`dj.config["custom"]["figpack_api_key"]` or `FIGPACK_API_KEY`);
+#   `ephemeral=True` makes a temporary hosted figure. Both publish the same
+#   bundle, seeded annotations and identity sidecar included. Hosted figures
+#   have no compute service: save with **Save Annotations**, then import with
+#   `panel = review.commit_panel()` (`panel.receipt`,
+#   `panel.verification_review`).
+# - **Views.** The unit selector stays visible across **Waveforms**, **Spike
+#   amplitudes**, **Autocorrelograms**, **Cross-correlograms**, **Electrode
+#   geometry**, and **Raster**.
+# - **Display budgets.** Raster and amplitude budgets default to
+#   `floor(recording_duration_s * 50)` points per unit (3,000 for a minute,
+#   180,000 for an hour). Low-rate trains keep every point; higher-rate samples
+#   span the recording reproducibly.
+#     - `max_raster_spikes_per_unit` and `max_amplitudes_per_unit` set smaller
+#       caps.
+#     - Budgets affect display only, not waveform sampling or metrics. Absence
+#       from a display is not evidence.
+#     - Time plots over `max_initial_points` (default 1,000,000 per view) are
+#       **not loaded** in the initial bundle. **Inspect selected units / pairs**
+#       loads the selected units with their full budget, every spike in a
+#       `[start, stop)` raster window, and every selected CCG pair. A window of
+#       at most 10 s adds spikes on traces.
+#     - `review.summary()` reports unavailable rule inputs and budgets.
+# - **Times.** Displayed times are recording-relative seconds (the synthetic
+#   timeline for concatenations). **Time and sampling** maps them to original
+#   session seconds, gaps and member boundaries included. Red bands mark
+#   excluded time. Inspection opens separately and keeps the active draft and
+#   evaluation.
+#
+# **Hosted or static bundles** inspect from Python:
+#
+# ```python
+# view = review.inspect_units([1, 4], time_range=(100, 110), include_traces=True)
+# view.show(title="Selected units", upload=False, ephemeral=False)
+# ```
