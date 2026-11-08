@@ -200,8 +200,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 - Add Spike Sorting v2 documentation: a v1 to v2 migration guide, a developer
     guide, and the tutorial notebooks `10_Spike_SortingV2`,
-    `10_Spike_SortingV2_Curation`, `10_Spike_SortingV2_Presets` and
-    `10_Spike_SortingV2_CrossSession` #1609
+    `10_Spike_SortingV2_Tables`, `10_Spike_SortingV2_Curation`,
+    `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
 - Repair stale notebook cross-links and guard them with a test #1678
