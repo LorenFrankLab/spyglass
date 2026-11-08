@@ -141,6 +141,40 @@ def test_single_session_notebook_runs(dj_conn, smoke_nwb):
 
 
 @pytest.mark.slow
+def test_tables_notebook_runs(dj_conn, smoke_nwb):
+    """``10_Spike_SortingV2_Tables`` fills each stage table and its merge entry."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    nwb_file_name, sort_group_id = _prepare_notebook_session(
+        dj_conn, "notebook_tables.nwb"
+    )
+    params = _notebook_params(nwb_file_name, sort_group_id)
+    params.pop("pipeline_preset")  # the notebook names stage rows directly
+    namespace = _execute_notebook(
+        _NOTEBOOKS / "10_Spike_SortingV2_Tables.ipynb", params
+    )
+    sorting_key = namespace["sorting_key"]
+    curation_key = namespace["curation_key"]
+    assert curation_key["sorting_id"] == sorting_key["sorting_id"]
+    assert (SpikeSortingOutput.CurationV2 & curation_key).fetch1(
+        "merge_id"
+    ) == namespace["merge_id"]
+    assert len(namespace["spike_times"]) == len(Sorting.Unit & sorting_key)
+    evaluation_key = namespace["evaluation_key"]
+    assert CurationEvaluation & evaluation_key
+    sorting_id, curation_id = (
+        CurationEvaluationSelection & evaluation_key
+    ).fetch1("sorting_id", "curation_id")
+    assert str(sorting_id) == str(curation_key["sorting_id"])
+    assert curation_id == curation_key["curation_id"]
+
+
+@pytest.mark.slow
 def test_curation_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2_Curation`` runs end-to-end on the smoke session.
 
