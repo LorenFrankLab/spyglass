@@ -49,14 +49,10 @@ class _FailImport:
 
 
 def test_extra_modules_match_pyproject():
-    """The modules spyglass treats as the extra are the extra's packages.
-
-    ``pubnub`` is only a resolver pin; spyglass never imports it.
-    """
+    """The modules spyglass treats as the extra are the extra's packages."""
     from spyglass.utils.dj_helper_fn import SPIKESORTING_EXTRA_MODULES
 
-    assert _extra_packages() - SPIKESORTING_EXTRA_MODULES == {"pubnub"}
-    assert SPIKESORTING_EXTRA_MODULES <= _extra_packages()
+    assert SPIKESORTING_EXTRA_MODULES == _extra_packages()
 
 
 def test_non_sorting_pipelines_import_without_extra():
