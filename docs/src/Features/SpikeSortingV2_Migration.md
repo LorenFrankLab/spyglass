@@ -979,6 +979,7 @@ The production recipes also change these defaults from v1's shipped rows:
 | nn metrics space | v1 notebook: unwhitened | whitened metric analyzer |
 | nn `max_spikes` | 1000 | 20000 |
 | Burst `wf_similarity` | Pearson r of dense mean waveforms | SpikeInterface cosine template similarity (sparse); v1 thresholds do not transfer |
+
 - **Sorters are not exact oracles.** v2 pins SI's whitening and noise-level
     seeds. MS4's `isosplit`, MS5, and KS4 stay non-deterministic, so compare
     qualitatively (unit-count order, firing-rate distribution), not spike by
