@@ -113,16 +113,6 @@ the `spikesorting-v2-curation` extra):
 - `ReviewProfileRef`, `ReviewStageStatus`: a resolved profile, a review's
     status.
 
-`spyglass.spikesorting.v2.unit_annotation`:
-
-- `UnitAnnotationDefinition`: versioned custom unit-property definitions.
-    `CurationUnitAnnotationSet`: immutable sets over one curation's units.
-- `CurationUnitAnnotationSet.from_dataframe` writes a set;
-    `AnnotationSetRef.to_dataframe` reads one. `read_unit_properties`,
-    `AnnotationDefinitionRef`, `AnnotationSetRef`.
-- `annotation_api` exposes `read_unit_properties` and the two references without
-    importing the tables.
-
 `spyglass.spikesorting.v2.visualization` (`ssviz`):
 
 - `available_visualizations`: catalog of the helpers and the key each takes.
@@ -222,8 +212,7 @@ Both curation paths:
 - All tables live in `spikesorting_v2_*` schemas (`recording`, `artifact`,
     `artifact_output`, `sorting`, `curation`, `metric_curation`,
     `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
-    `unit_matching`, `unit_annotation`, `recompute`, `motion`), so v0/v1 schemas
-    are untouched.
+    `unit_matching`, `recompute`, `motion`), so v0/v1 schemas are untouched.
 - `CurationV2` and `ConcatMemberCurationV2` register as parts on the existing
     `SpikeSortingOutput`, so v0, v1, imported, and v2 curations share one merge
     surface. The concat `CurationV2` itself is not registered: its synthetic
@@ -244,7 +233,7 @@ implementation code in its domain, with short filenames:
 | `_artifacts`     | Artifact detection, interval computation, and persistence adapters                                               |
 | `_sorting`       | Sorter dispatch, artifact masking, analyzer computation, and sorting access adapters                             |
 | `_storage`       | NWB streaming, persisted traces/units, analyzer caches, output staging, and reconstruction                       |
-| `_curation`      | Curation plans and transforms, metrics, evaluation, and annotations                                              |
+| `_curation`      | Curation plans and transforms, metrics, evaluation, and unit selection                                           |
 | `_review`        | Figure composition, inspection, browser delivery, drafts, and review operations                                  |
 | `_matching`      | Input preparation, matching algorithms, graph construction, and result access                                    |
 | `_motion`        | Motion estimation, interpolation, selection adapters, and diagnostics                                            |

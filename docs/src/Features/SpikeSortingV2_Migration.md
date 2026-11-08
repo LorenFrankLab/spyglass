@@ -619,9 +619,8 @@ selection = select_units_for_analysis(
 - Criteria use the `UnitSelectionParams` operators. A missing value fails the
     predicate. A missing column, or an evaluation of another curation, is an
     error.
-- Membership (even empty), criteria, label policy, evaluation id and recipes,
-    and selected annotation sets are frozen in
-    `SortedSpikesGroup.UnitSelection`, with observed intervals in
+- Membership (even empty), criteria, label policy, and evaluation id and recipes
+    are frozen in `SortedSpikesGroup.UnitSelection`, with observed intervals in
     `selection_provenance`. Fetching and decoding read that population; later
     policy edits cannot change it.
 - `receipt.selection_snapshot` (or `resolve_unit_selection(...)`) is the same
@@ -762,7 +761,7 @@ Only stored per-pair burst metrics (`BurstPairUnit`) have no v2 table.
 | ----------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Metric / auto-merge curation              | `MetricCuration` rows stay readable                                      | `CurationEvaluation` (`QualityMetricParameters`, `AutoCurationRules`)                                                                        |
 | FigURL curation views                     | `FigURLCuration` rows stay readable                                      | `run.start_review(profile=...) → preview_import() → commit() → continue_review()`; local or hosted FigPack; `spikesorting-v2-curation` extra |
-| Custom unit properties                    | v1 curation `metrics` and `UnitAnnotation` rows stay readable            | typed, immutable `CurationUnitAnnotationSet`; explicit `read_unit_properties(..., evaluation=..., annotation_sets=...)` selection            |
+| Custom unit properties                    | v1 curation `metrics` and `UnitAnnotation` rows stay readable            | metrics on `CurationEvaluation`; lab-specific values in `UnitAnnotation` by `merge_id`                                                       |
 | Burst-pair curation                       | `BurstPair` rows stay readable; stored per-pair metrics exist only there | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table                                                                               |
 | Recording/analyzer recompute              | v1 recompute rows stay readable                                          | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`                                                                                |
 | Concatenated recording / session group    | (no v1 equivalent)                                                       | same-day concatenate-and-sort                                                                                                                |
@@ -933,7 +932,7 @@ through it. Reference details:
     `initialize_v2_defaults()` installs `franklab_hippocampus_2026_09_17`
     (`franklab_default` metrics, `franklab_default_auto_curation_2026_09` rules,
     `label_import_mode="replace"`, view version 4). Publishing location,
-    credentials, ephemeral mode, and annotation sets are per review.
+    credentials, and ephemeral mode are per review.
 
 - **Unit table values describe the committed curation under review.** A merge
     proposed in the browser has no merged metrics until committed; the continued
@@ -1062,24 +1061,12 @@ through it. Reference details:
 
 ### Custom unit properties
 
-Lab-specific computed values (not built-in metrics) live in typed, immutable
-annotation sets (`UnitAnnotationDefinition`,
-`CurationUnitAnnotationSet.from_dataframe`). The Curation notebook's
-3-annotations section has an example.
-
-- A set belongs to one exact curation and is selected explicitly
-    (`read_unit_properties(curation, evaluation=None, annotation_sets=[...])`,
-    `curation.start_review(..., annotation_sets=[...])`). Spyglass never picks a
-    "latest" set.
-- Columns are namespaced by definition version and full `set_hash`, so sets and
-    built-in metrics cannot overwrite each other. A set's `set_hash` joins the
-    review figure's identity.
-- Types: `float` (stored as `double`), `int`, `bool`, `text`. Definitions are
-    immutable by version; changed parameters or values create a new set.
-- Sets are **not labels**: they never write `CurationV2.UnitLabel` and do not
-    change a curation's UUID or `merge_id`.
-- Sets do not carry into a continuation review, because a committed child is a
-    new curation. Compute child-scoped sets explicitly.
+- Labels live on the curation (`CurationV2.UnitLabel`).
+- Metrics live on the evaluation (`CurationEvaluation`, like v1
+    `MetricCuration`).
+- Lab-specific per-unit values and analysis results go in v1 `UnitAnnotation`,
+    keyed by the final curation's `merge_id` and `unit_id` (per-member merge ids
+    for a concatenated sort).
 
 ### Disk space and recompute
 

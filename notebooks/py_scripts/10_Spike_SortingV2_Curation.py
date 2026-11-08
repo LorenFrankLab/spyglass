@@ -28,7 +28,6 @@
 # +
 import datajoint as dj
 import numpy as np
-import pandas as pd
 from IPython.display import display
 
 from spyglass.common import LabTeam
@@ -71,8 +70,6 @@ analysis_policy = "v2_accepted_single_units"
 inspection_unit_ids = []  # set after looking at the review, e.g. [3, 7]
 inspection_pair = []  # exactly two final-curation IDs to investigate
 snr_threshold = 5.0  # example analysis predicate: choose for your experiment
-# Optional executable example for typed, curation-scoped custom properties.
-run_custom_annotation_example = False
 # Opt-in scripted curation appendix (separate result names; never overwrites
 # the browser result).
 run_scripted_curation_example = False
@@ -175,57 +172,6 @@ run_summary = run_v2_pipeline(
 root_curation = run_summary.root_curation
 CurationV2.summarize_curation(root_curation.as_key())
 
-# ### 3-annotations. Optional typed custom unit properties
-#
-# Lab-specific computed values live in immutable annotation sets tied to this
-# exact curation. They are not labels and do not affect curation identity or the
-# final `merge_id`. The common reader never picks a latest evaluation/set: both
-# selections are explicit. Set `run_custom_annotation_example=True` to execute
-# this small example and include its column in the review's unit table.
-
-root_annotation_sets = []
-if run_custom_annotation_example:
-
-    from spyglass.spikesorting.v2.unit_annotation import (
-        CurationUnitAnnotationSet,
-        UnitAnnotationDefinition,
-        read_unit_properties,
-    )
-
-    annotation_definition = UnitAnnotationDefinition.insert_definition(
-        "custom_score",
-        1,
-        "float",
-        physical_unit="a.u.",
-        description="Example lab-specific score",
-    )
-    unit_rows = (CurationV2.Unit & root_curation.as_key()).fetch(
-        "unit_id", "n_spikes", as_dict=True, order_by="unit_id"
-    )
-    scale = max(1, max((int(row["n_spikes"]) for row in unit_rows), default=1))
-    custom_values = pd.DataFrame(
-        {"custom_score": [float(row["n_spikes"]) / scale for row in unit_rows]},
-        index=pd.Index(
-            [int(row["unit_id"]) for row in unit_rows], name="unit_id"
-        ),
-    )
-    custom_annotation = CurationUnitAnnotationSet.from_dataframe(
-        root_curation,
-        annotation_definition,
-        custom_values,
-        producer="curation-notebook-example",
-        producer_version="1",
-        producer_parameters={"normalization": "max_n_spikes"},
-    )
-    root_annotation_sets = [custom_annotation]
-    display(
-        read_unit_properties(
-            root_curation,
-            evaluation=None,
-            annotation_sets=root_annotation_sets,
-        )
-    )
-
 # ### 3-browser. Review in a browser with FigPack
 #
 # `start_review` resolves the profile, evaluates (or reuses) the exact root,
@@ -241,11 +187,11 @@ if run_custom_annotation_example:
 #
 # 1. Local reviews are ready to edit; hosted figures use **Curate Figure**.
 # 2. Select units in the unit table. Its columns are the profile's official
-#    evaluation metrics, any annotation columns, the rule set's
-#    `proposed_labels` / `proposed_merge_groups`, and `merged_from` (applied
-#    merge provenance). All values describe the **committed curation being
-#    reviewed**; a proposed merge has no merged metrics until it is committed
-#    and the continued review shows them.
+#    evaluation metrics, the rule set's `proposed_labels` /
+#    `proposed_merge_groups`, and `merged_from` (applied merge provenance).
+#    All values describe the **committed curation being reviewed**; a proposed
+#    merge has no merged metrics until it is committed and the continued review
+#    shows them.
 # 3. In the **Curation** pane, tick/untick labels for the selected units, or
 #    select two or more and **Merge Selected**.
 # 4. **Preview and commit**, choose final labels for any conflicting merge,
@@ -281,7 +227,6 @@ if figpack_available:
         source="root",
         profile=review_profile,
         upload=False,
-        annotation_sets=root_annotation_sets,
     )
     review_url = review.open(open_browser=open_review_in_browser)
     print(review.summary())
