@@ -48,6 +48,7 @@ from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v2 import initialize_v2_defaults
 from spyglass.spikesorting.v2.curation import CurationV2
 from spyglass.spikesorting.v2.pipeline import (
+    describe_pipeline_preset,
     describe_pipeline_presets,
     describe_run,
     describe_sort_groups,
@@ -361,6 +362,12 @@ CurationV2.summarize_curation(root_key)
 # Automatic labels are **suggestions written as labels, not approval**, and the
 # child holds **every** unit, including noise, reject and artifact. Choosing the
 # analysis population is a separate, explicit step (section 9).
+#
+# The labels come from the preset's metric and auto-curation rows. This shows
+# each metric's settings and each rule's threshold:
+
+preset_rows = describe_pipeline_preset(pipeline_preset)
+preset_rows[preset_rows["stage"].isin(["metric", "auto_curation"])]
 
 auto_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
@@ -386,11 +393,21 @@ auto_labeled
 # prints it). Select units, edit labels / merges, then **Preview and commit**.
 # Merge commits open a reevaluated child to inspect and record as reviewed.
 # **Save draft** keeps unfinished edits. After completing the browser sequence,
-# `review.result()` returns the exact reviewed curation for analysis. Hosted
-# figures use **Curate Figure**, **Save Annotations**, and the notebook commit
-# panel instead. The [Curation](./10_Spike_SortingV2_Curation.ipynb) notebook
-# covers commit, merged-unit verification, and the handoff to analysis. The
-# review packages are optional
+# `review.result()` returns the exact reviewed curation for analysis.
+#
+# You don't need a public link to curate: this local review supports labeling,
+# merging and committing. `upload=True` publishes the page to figpack.org for
+# sharing. It needs a FigPack API key, figpack.org expires it 24 hours after
+# upload unless you pin it there, and only the owner of the key can save edits
+# to it.
+#
+# This is the same review page as in the
+# [Curation](./10_Spike_SortingV2_Curation.ipynb) notebook. Here it opens on
+# the auto-labeled curation, so the automatic labels are already ticked; the
+# Curation notebook opens on the unlabeled sort and shows the suggestions as
+# columns. Reopening the same curation with the same profile continues the same
+# review. The Curation notebook also covers commit, merged-unit verification,
+# and the handoff to analysis. The review packages are optional
 # (`pip install "spyglass-neuro[spikesorting-v2-curation]"`), so this cell is
 # skipped when they are absent.
 
