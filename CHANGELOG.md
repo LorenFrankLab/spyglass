@@ -130,7 +130,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Add opt-in `PopulateMixin` cleanup of files a tri-part `make_compute` wrote
     when the populate fails before `make_insert` commits #1717
 - Add an opt-in `PopulateMixin` lock so jobs populating the same key wait for
-    each other instead of computing it twice #PRNUM
+    each other instead of computing it twice #1720
 
 ### Pipelines
 
