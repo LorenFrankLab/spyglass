@@ -1049,8 +1049,8 @@ Contracts:
     The port is never persisted; `review.uri` is the durable location, so a
     resumed review starts delivery again.
 - The server binds loopback only, serves only the requested bundle, and accepts
-    `PUT` only for `annotations.json`. `data.zarr`, the frontend assets and the
-    identity sidecar stay read-only.
+    `PUT` only for `annotations.json`. `data.zarr` and the frontend assets stay
+    read-only.
 - An optional operation adapter accepts same-origin, review-scoped POSTs. The
     HTTP handler has no database connection. Actions run in a worker process
     (`_review.operations`) that inherits the bundle's lock file descriptor, so

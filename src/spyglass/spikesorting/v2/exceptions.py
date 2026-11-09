@@ -223,8 +223,8 @@ class FigPackUploadError(SpikeSortingV2Error, RuntimeError):
 class FigPackIdentityError(SpikeSortingV2Error, ValueError):
     """Raise when a FigPack figure cannot prove its curation identity.
 
-    Verified imports require the embedded sorting id, curation UUID,
-    curation id, and FigPack configuration hash to be present and match.
+    Verified imports require a ``FigPackCuration`` row of the parent curation
+    with the figure's URI.
     """
 
 

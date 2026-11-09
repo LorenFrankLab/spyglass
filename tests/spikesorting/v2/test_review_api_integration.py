@@ -136,20 +136,23 @@ def test_browser_review_preview_commit_resume_and_continue(
         assert resumed.profile == review.profile
         assert resumed.uri == review.uri
 
-        figure_config = json.loads(
-            (Path(review.uri) / "spyglass_curation.json").read_text()
+        from spyglass.spikesorting.v2._review.annotations import (
+            unpack_display_config,
         )
-        assert figure_config["curation_uuid"] == str(
-            review.parent.curation_uuid
+        from spyglass.spikesorting.v2.figpack_curation import (
+            FigPackCurationSelection,
         )
-        assert figure_config["review"]["profile_hash"] == (
-            review.profile.profile_hash
+
+        _, review_config = unpack_display_config(
+            (
+                FigPackCurationSelection
+                & {"figpack_curation_id": review.review_id}
+            ).fetch1("displayed_unit_properties")
         )
+        assert review_config["profile_hash"] == review.profile.profile_hash
         # The display budget is part of the review's identity and resumes
         # with it.
-        assert figure_config["review"]["display"] == (
-            review.display_options.as_dict()
-        )
+        assert review_config["display"] == review.display_options.as_dict()
         assert resumed.display_options == review.display_options
         bounded = run.start_review(
             profile_name,
@@ -185,7 +188,7 @@ def test_browser_review_preview_commit_resume_and_continue(
         )
         assert continued.display_options == bounded.display_options
         assert continued.display_options.max_amplitudes_per_unit == 5
-        assert figure_config["review"]["evaluation_spec"] == {
+        assert review_config["evaluation_spec"] == {
             "metric_params_name": "minimal",
             "auto_curation_rules_name": "none",
         }

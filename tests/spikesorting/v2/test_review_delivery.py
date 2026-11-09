@@ -29,7 +29,6 @@ def bundle(tmp_path):
     (root / "index.html").write_text("<html><body>review</body></html>")
     (root / "data.zarr" / ".zmetadata").write_text("{}")
     (root / "annotations.json").write_text(json.dumps({"annotations": {}}))
-    (root / "spyglass_curation.json").write_text(json.dumps({"id": 1}))
     yield root
     from spyglass.spikesorting.v2._review.delivery import stop_review_servers
 
@@ -85,12 +84,10 @@ def test_serves_bundle_and_writes_only_annotations(bundle):
     assert json.loads((bundle / "annotations.json").read_text()) == json.loads(
         edited
     )
-    # Scientific data, assets and the identity sidecar stay read-only.
-    for path in ("spyglass_curation.json", "data.zarr/.zmetadata", "new.js"):
+    # Scientific data and assets stay read-only.
+    for path in ("index.html", "data.zarr/.zmetadata", "new.js"):
         assert _put(url + path, b"{}") == 403
-    assert (bundle / "spyglass_curation.json").read_text() == json.dumps(
-        {"id": 1}
-    )
+    assert (bundle / "data.zarr" / ".zmetadata").read_text() == "{}"
     assert not (bundle / "new.js").exists()
     assert _served_roots() == {bundle.resolve()}
 
@@ -236,7 +233,7 @@ def test_operation_destinations_share_port_and_isolate_bundles(bundle, action):
         "child": True
     }
     assert _put(child_base + "../annotations.json", b"{}") == 403
-    assert _put(child_base + "spyglass_curation.json", b"{}") == 403
+    assert _put(child_base + "index.html", b"{}") == 403
     # Closing the parent must not close an inspection or verification review.
     stop_review_servers(bundle)
     with urllib.request.urlopen(child_url) as response:

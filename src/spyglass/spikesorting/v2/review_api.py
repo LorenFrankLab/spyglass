@@ -469,16 +469,11 @@ class FigPackReview:
             )
         parent = CurationRef.from_key(selection)
         uri = str((FigPackCuration & key).fetch1("figpack_uri"))
-        figure_config = _assert_figure_identity(
+        _assert_figure_identity(
             uri,
             parent.as_key(),
             expected_config_hash=str(selection["figpack_config_hash"]),
         )
-        if figure_config.get("review") != config:
-            raise FigPackIdentityError(
-                "FigPack figure review snapshot differs from its persisted "
-                "selection configuration."
-            )
         profile = ReviewProfileRef.resolve(config["review_profile_name"])
         expected_profile = _profile_snapshot(profile)
         try:

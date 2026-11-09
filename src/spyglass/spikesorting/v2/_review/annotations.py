@@ -24,7 +24,6 @@ FIGPACK_INSTALL_HINT = (
 #: figure-root path it is stored under in ``annotations.json``.
 SORTING_CURATION_KEY = "sorting_curation"
 ANNOTATION_ROOT_PATH = "/"
-FIGURE_CONFIG_FILENAME = "spyglass_curation.json"
 
 
 def default_label_options() -> list[str]:

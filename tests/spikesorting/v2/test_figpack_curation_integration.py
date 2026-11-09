@@ -22,6 +22,49 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _figpack_rejected_files(bundle: Path) -> list[str]:
+    """Return bundle files figpack.org refuses to upload.
+
+    Mirrors ``validateFilePath`` in figpack's
+    ``figpack-api-cf/src/handlers/uploadHandler.ts`` (18f05ff314).
+    """
+    import re
+
+    exact = {
+        "index.html",
+        "manifest.json",
+        "extension_manifest.json",
+        "annotations.json",
+    }
+    zarr_meta = {".zattrs", ".zgroup", ".zarray", ".zmetadata"}
+    rejected = []
+    for file in sorted(p for p in bundle.rglob("*") if p.is_file()):
+        path = file.relative_to(bundle).as_posix()
+        name = path.rsplit("/", 1)[-1]
+        accepted = (
+            path in exact
+            or path.endswith(".html")
+            or (path.startswith("extension-") and path.endswith(".js"))
+            or (
+                path.startswith("assets/neurosift-logo")
+                and path.endswith(".png")
+            )
+            or (path.startswith("assets/") and path.endswith((".js", ".css")))
+            or (
+                path.startswith("data.zarr/")
+                and (
+                    re.fullmatch(r"[0-9]+(\.[0-9]+)*", name) is not None
+                    or name in zarr_meta
+                    or re.fullmatch(r"_consolidated_[0-9]+\.dat", name)
+                    is not None
+                )
+            )
+        )
+        if not accepted:
+            rejected.append(path)
+    return rejected
+
+
 def _units_table_column_keys(bundle: Path) -> list[list[str]]:
     """Return every FigPack UnitsTable's column keys from an offline bundle."""
     metadata = json.loads((bundle / "data.zarr" / ".zmetadata").read_text())
@@ -48,16 +91,8 @@ def test_build_curation_view_offline_creates_bundle(
     assert bundle.is_dir()
     assert (bundle / "index.html").exists()
     assert (bundle / "data.zarr").exists()
-    config = json.loads((bundle / "spyglass_curation.json").read_text())
-    assert config["sorting_id"] == str(
-        populated_sorting_with_curation["sorting_id"]
-    )
-    assert config["curation_id"] == int(
-        populated_sorting_with_curation["curation_id"]
-    )
-    assert "curation_uuid" in config
-    assert len(config["figpack_config_hash"]) == 64
-    assert "unit_namespace_hash" not in config
+    # A local bundle must also be uploadable.
+    assert _figpack_rejected_files(bundle) == []
 
 
 def test_displayed_unit_properties_render_in_bundle(
@@ -226,7 +261,7 @@ def test_make_compute_touches_no_database(
     try:
         assert staged.parent == Path(computed.figpack_uri).parent
         assert staged.is_dir()
-        assert (staged / "spyglass_curation.json").exists()
+        assert (staged / "annotations.json").exists()
     finally:
         import shutil
 
@@ -425,7 +460,7 @@ def test_verified_save_refuses_reused_numeric_curation_id(
         assert (CurationV2 & replacement).fetch1("curation_uuid") != (
             original_uuid
         )
-        with pytest.raises(FigPackIdentityError, match="curation_uuid"):
+        with pytest.raises(FigPackIdentityError, match="not a FigPack figure"):
             FigPackCuration.save_curation_from_uri(
                 uri, replacement, allow_empty=True
             )
@@ -462,7 +497,9 @@ def test_identityless_figure_is_rejected_without_creating_a_child(
         )
         before = len(CurationV2 & planted_two_unit_sort)
         for allow_empty in (False, True):
-            with pytest.raises(FigPackIdentityError, match="no verifiable"):
+            with pytest.raises(
+                FigPackIdentityError, match="not a FigPack figure"
+            ):
                 FigPackCuration.save_curation_from_uri(
                     str(bundle), root, allow_empty=allow_empty
                 )
@@ -488,7 +525,6 @@ def test_upload_without_api_key_raises(dj_conn, monkeypatch):
             title="x",
             figpack_curation_id="x",
             annotations={},
-            figure_config={},
         )
 
 
@@ -555,7 +591,7 @@ def test_merged_curation_opens(planted_two_unit_sort):
 def test_upload_of_labeled_curation_is_seeded(
     planted_two_unit_sort, monkeypatch
 ):
-    """Hosted publishing uploads the same seeded sidecars as local bundles."""
+    """Hosted publishing uploads the seeded annotations FigPack accepts."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
     from spyglass.spikesorting.v2._review.annotations import (
@@ -575,13 +611,16 @@ def test_upload_of_labeled_curation_is_seeded(
     captured = {}
 
     def fake_upload(tmpdir, **kwargs):
+        rejected = _figpack_rejected_files(Path(tmpdir))
+        if rejected:  # the message figpack.org returns
+            raise Exception(
+                f"Invalid file path {rejected[0]}. "
+                "Must be a valid figpack file type."
+            )
         captured["n_uploads"] = captured.get("n_uploads", 0) + 1
         captured["upload_kwargs"] = kwargs
         captured["annotations"] = json.loads(
             (Path(tmpdir) / "annotations.json").read_text()
-        )
-        captured["config"] = json.loads(
-            (Path(tmpdir) / "spyglass_curation.json").read_text()
         )
         return "https://example.test/seeded-figure"
 
@@ -600,9 +639,6 @@ def test_upload_of_labeled_curation_is_seeded(
         )
         assert labels == {unit_ids[0]: ["noise"]}
         assert merges == []
-        assert captured["config"]["curation_uuid"] == str(
-            (CurationV2 & labeled).fetch1("curation_uuid")
-        )
         # A hosted URI is not a local path, so the missing-bundle check must
         # not drop its row: the second build reuses it without re-uploading.
         again = FigPackCuration.build_curation_view_result(labeled, upload=True)

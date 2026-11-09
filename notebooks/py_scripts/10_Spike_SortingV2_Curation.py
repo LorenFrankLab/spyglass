@@ -928,14 +928,14 @@ if run_scripted_curation_example:
 #   annotations and refuses a figure changed after preview. A zero-diff review
 #   needs `confirm_no_changes=True`. Conflicting contributor labels need
 #   `conflict_resolutions`; no contributor wins by precedence.
-#   `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` checks the
-#   figure's embedded `curation_uuid` and decodes its annotations before writing
-#   a child. Figures without identity fail closed.
+#   `FigPackCuration.save_curation_from_uri(uri, parent_curation_key)` checks
+#   that `FigPackCuration` built the figure from that parent, then decodes its
+#   annotations before writing a child. Other figures fail closed.
 # - **Delivery.** Local is the default. `upload=True` publishes the identical
 #   seeded bundle. A persistent hosted review needs a FigPack API key
 #   (`dj.config["custom"]["figpack_api_key"]` or `FIGPACK_API_KEY`);
 #   `ephemeral=True` makes a temporary hosted figure. Both publish the same
-#   bundle, seeded annotations and identity sidecar included. Hosted figures
+#   bundle, seeded annotations included. Hosted figures
 #   have no compute service: save with **Save Annotations**, then import with
 #   `panel = review.commit_panel()` (`panel.receipt`,
 #   `panel.verification_review`).
