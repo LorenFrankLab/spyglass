@@ -65,6 +65,73 @@ def _figpack_rejected_files(bundle: Path) -> list[str]:
     return rejected
 
 
+class _FakeFigpackOrg:
+    """figpack.org for tests: its upload file rules, User-Agent block, expiry.
+
+    ``expiration`` is epoch milliseconds, ``0`` for a pinned figure.
+    """
+
+    def __init__(self):
+        self.files = {}
+        self.expiration = 0
+        self.n_uploads = 0
+        self.upload_kwargs = None
+
+    def install(self, monkeypatch):
+        import urllib.request
+
+        import figpack.core._upload_bundle as upload_module
+
+        monkeypatch.setenv("FIGPACK_API_KEY", "test-key")
+        monkeypatch.setattr(upload_module, "_upload_bundle", self.upload)
+        monkeypatch.setattr(urllib.request, "urlopen", self.urlopen)
+
+    def upload(self, tmpdir, **kwargs):
+        bundle = Path(tmpdir)
+        rejected = _figpack_rejected_files(bundle)
+        if rejected:  # the message figpack.org returns
+            raise Exception(
+                f"Invalid file path {rejected[0]}. "
+                "Must be a valid figpack file type."
+            )
+        self.n_uploads += 1
+        self.upload_kwargs = kwargs
+        base = f"https://figures.example.test/figures/{self.n_uploads}"
+        for file in bundle.rglob("*"):
+            if file.is_file():
+                path = file.relative_to(bundle).as_posix()
+                self.files[f"{base}/{path}"] = file.read_bytes()
+        return f"{base}/index.html"
+
+    def save_annotations(self, uri: str, annotations: dict) -> None:
+        base = uri.removesuffix("/index.html")
+        self.files[f"{base}/annotations.json"] = json.dumps(
+            annotations
+        ).encode()
+
+    def remove(self, uri: str) -> None:
+        base = uri.removesuffix("/index.html")
+        for url in [u for u in self.files if u.startswith(base + "/")]:
+            del self.files[url]
+
+    def urlopen(self, request, timeout=None):
+        import io
+        import urllib.error
+
+        url = getattr(request, "full_url", request)
+        agent = getattr(request, "get_header", lambda *_: "")("User-agent", "")
+        if not agent or agent.startswith("Python-urllib"):
+            raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+        base = url.rsplit("/", 1)[0]
+        if url.endswith("/figpack.json") and f"{base}/index.html" in self.files:
+            body = json.dumps({"expiration": self.expiration}).encode()
+        elif url in self.files:
+            body = self.files[url]
+        else:
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        return io.BytesIO(body)
+
+
 def _units_table_column_keys(bundle: Path) -> list[list[str]]:
     """Return every FigPack UnitsTable's column keys from an offline bundle."""
     metadata = json.loads((bundle / "data.zarr" / ".zmetadata").read_text())
@@ -159,11 +226,11 @@ def test_selection_and_view_are_idempotent(
     import shutil
 
     shutil.rmtree(second_build.uri)
-    message = FigPackCuration.drop_missing_local_bundle(first)
+    message = FigPackCuration.drop_unavailable_view(first)
     assert second_build.uri in message and "Draft labels" in message
     assert not (FigPackCuration & first)
     assert FigPackCurationSelection & first
-    assert FigPackCuration.drop_missing_local_bundle(first) is None
+    assert FigPackCuration.drop_unavailable_view(first) is None
 
     rebuilt = FigPackCuration.build_curation_view_result(
         populated_sorting_with_curation, upload=False
@@ -185,11 +252,11 @@ def test_selection_and_view_are_idempotent(
         custom = dict(dj.config.get("custom") or {})
         custom["spikesorting_v2_figpack_dir"] = str(tmp_path / "elsewhere")
         patch.setitem(dj.config, "custom", custom)
-        message = FigPackCuration.drop_missing_local_bundle(first)
+        message = FigPackCuration.drop_unavailable_view(first)
         assert "outside this machine's FigPack folder" in message
         assert (FigPackCuration & first).fetch1("figpack_uri") == rebuilt.uri
     # Back under its own folder, the missing bundle is dropped and rebuilt.
-    assert "Draft labels" in FigPackCuration.drop_missing_local_bundle(first)
+    assert "Draft labels" in FigPackCuration.drop_unavailable_view(first)
     restored = FigPackCuration.build_curation_view_result(
         populated_sorting_with_curation, upload=False
     )
@@ -591,12 +658,9 @@ def test_merged_curation_opens(planted_two_unit_sort):
 def test_upload_of_labeled_curation_is_seeded(
     planted_two_unit_sort, monkeypatch
 ):
-    """Hosted publishing uploads the seeded annotations FigPack accepts."""
+    """Hosted publishing uploads seeded annotations that read back."""
     from tests.spikesorting.v2._ingest_helpers import clear_curations_for
 
-    from spyglass.spikesorting.v2._review.annotations import (
-        curation_annotations_to_labels_and_merges,
-    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
     from spyglass.spikesorting.v2.sorting import Sorting
@@ -608,42 +672,64 @@ def test_upload_of_labeled_curation_is_seeded(
     labeled = CurationV2.insert_curation(
         sorting_key=planted_two_unit_sort, labels={unit_ids[0]: ["noise"]}
     )
-    captured = {}
-
-    def fake_upload(tmpdir, **kwargs):
-        rejected = _figpack_rejected_files(Path(tmpdir))
-        if rejected:  # the message figpack.org returns
-            raise Exception(
-                f"Invalid file path {rejected[0]}. "
-                "Must be a valid figpack file type."
-            )
-        captured["n_uploads"] = captured.get("n_uploads", 0) + 1
-        captured["upload_kwargs"] = kwargs
-        captured["annotations"] = json.loads(
-            (Path(tmpdir) / "annotations.json").read_text()
-        )
-        return "https://example.test/seeded-figure"
-
-    import figpack.core._upload_bundle as upload_module
-
-    monkeypatch.setenv("FIGPACK_API_KEY", "test-key")
-    monkeypatch.setattr(upload_module, "_upload_bundle", fake_upload)
+    host = _FakeFigpackOrg()
+    host.install(monkeypatch)
     try:
         uri = FigPackCuration.build_curation_view(labeled, upload=True)
-        assert uri == "https://example.test/seeded-figure"
-        assert (
-            captured["upload_kwargs"]["use_consolidated_metadata_only"] is True
-        )
-        labels, merges = curation_annotations_to_labels_and_merges(
-            captured["annotations"]
-        )
+        assert host.upload_kwargs["use_consolidated_metadata_only"] is True
+        labels, merges = FigPackCuration.fetch_curation_from_uri(uri)
         assert labels == {unit_ids[0]: ["noise"]}
         assert merges == []
-        # A hosted URI is not a local path, so the missing-bundle check must
-        # not drop its row: the second build reuses it without re-uploading.
+        # A live hosted figure is reused without re-uploading.
         again = FigPackCuration.build_curation_view_result(labeled, upload=True)
         assert again.reused and again.uri == uri
-        assert captured["n_uploads"] == 1
+        assert host.n_uploads == 1
+    finally:
+        clear_curations_for(planted_two_unit_sort)
+
+
+def test_expired_hosted_figure_is_rebuilt_unless_it_has_edits(
+    planted_two_unit_sort, monkeypatch
+):
+    """An expired or removed hosted figure is rebuilt; unimported edits raise."""
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    from spyglass.spikesorting.v2._review.annotations import (
+        default_label_options,
+        labels_and_merges_to_annotations,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.exceptions import FigPackRetrievalError
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    clear_curations_for(planted_two_unit_sort)  # package-scoped sort is shared
+    unit_ids = sorted(
+        int(u) for u in (Sorting.Unit & planted_two_unit_sort).fetch("unit_id")
+    )
+    root = CurationV2.create_initial_curation(planted_two_unit_sort)
+    host = _FakeFigpackOrg()
+    host.install(monkeypatch)
+    try:
+        first = FigPackCuration.build_curation_view(root, upload=True)
+        host.expiration = 1  # expired, still served
+        second = FigPackCuration.build_curation_view_result(root, upload=True)
+        assert not second.reused and second.uri != first
+        host.save_annotations(
+            second.uri,
+            labels_and_merges_to_annotations(
+                {unit_ids[0]: ["noise"]},
+                [],
+                label_options=default_label_options(),
+            ),
+        )
+        with pytest.raises(FigPackRetrievalError, match="not imported"):
+            FigPackCuration.build_curation_view(root, upload=True)
+        host.remove(second.uri)
+        with pytest.raises(FigPackRetrievalError, match="HTTP 404"):
+            FigPackCuration.fetch_curation_from_uri(second.uri)
+        third = FigPackCuration.build_curation_view_result(root, upload=True)
+        assert not third.reused and host.n_uploads == 3
     finally:
         clear_curations_for(planted_two_unit_sort)
 

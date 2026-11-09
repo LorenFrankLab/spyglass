@@ -20,12 +20,14 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 import urllib.error
+import urllib.request
 
 import datajoint as dj
 import pandas as pd
@@ -140,15 +142,27 @@ def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
     sidecar_url = base + f"/{filename}"
 
     if base.startswith(("http://", "https://")):
+        from spyglass import __version__
+
+        # figpack.org refuses Python's default User-Agent with HTTP 403.
+        request = urllib.request.Request(
+            sidecar_url, headers={"User-Agent": f"spyglass/{__version__}"}
+        )
         try:
             # A read timeout raises TimeoutError, not URLError.
-            with urllib.request.urlopen(sidecar_url, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=30) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if exc.code == 404 and missing_ok:
                 return {}
+            hint = (
+                " figpack.org removes unpinned figures after they expire "
+                "(24 hours, or 6 hours if ephemeral)."
+                if exc.code == 404
+                else ""
+            )
             raise FigPackRetrievalError(
-                f"Failed to fetch {sidecar_url}: HTTP {exc.code}."
+                f"Failed to fetch {sidecar_url}: HTTP {exc.code}.{hint}"
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", exc)
@@ -184,9 +198,51 @@ def _load_figure_json(uri: str, filename: str, *, missing_ok: bool) -> dict:
         ) from exc
 
 
+def _is_hosted(uri: str) -> bool:
+    """Return whether ``uri`` is a figpack.org figure, not a local bundle."""
+    return _figure_base(uri).startswith(("http://", "https://"))
+
+
 def _load_annotations_json(uri: str) -> dict:
-    """Load optional annotations; absence means a pristine figure."""
-    return _load_figure_json(uri, "annotations.json", missing_ok=True)
+    """Load a figure's annotations.
+
+    A local bundle without the file is a pristine figure. Every hosted figure
+    is uploaded with its annotations, so a missing file there raises.
+    """
+    return _load_figure_json(
+        uri, "annotations.json", missing_ok=not _is_hosted(uri)
+    )
+
+
+def _hosted_figure_state(uri: str) -> str:
+    """Return ``"live"``, ``"expired"`` or ``"removed"`` for a hosted figure.
+
+    figpack.org expires unpinned figures, then removes them. ``figpack.json``
+    gives the expiration in epoch milliseconds, ``0`` for never.
+    """
+    info = _load_figure_json(uri, "figpack.json", missing_ok=True)
+    if not info:
+        return "removed"
+    expiration = int(info.get("expiration") or 0)
+    if expiration and expiration <= time.time() * 1000:
+        return "expired"
+    return "live"
+
+
+def _hosted_figure_has_edits(selection: dict, uri: str) -> bool:
+    """Return whether a hosted figure's labels or merges differ from its seed."""
+    row = (FigPackCurationSelection & selection).fetch1()
+    curation_key = {
+        "sorting_id": row["sorting_id"],
+        "curation_id": int(row["curation_id"]),
+    }
+    seed = labels_and_merges_to_annotations(
+        *_existing_curation_state(curation_key),
+        label_options=list(row["label_options"]),
+    )
+    return curation_annotations_to_labels_and_merges(
+        _load_annotations_json(uri)
+    ) != curation_annotations_to_labels_and_merges(seed)
 
 
 def _assert_figure_identity(
@@ -964,7 +1020,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ephemeral=ephemeral,
             review_config=review_config,
         )
-        cls.drop_missing_local_bundle(selection)
+        cls.drop_unavailable_view(selection)
         reused = bool(cls & selection)
         if not reused:
             report_progress("Building the review page…")
@@ -976,13 +1032,17 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     @classmethod
-    def drop_missing_local_bundle(cls, selection: dict) -> "str | None":
-        """Forget a built local view whose bundle folder is gone; say so.
+    def drop_unavailable_view(cls, selection: dict) -> "str | None":
+        """Forget a built view that can no longer be opened; say so.
 
         The row is dropped so populate rebuilds it, with a warning that draft
-        labels saved only in that bundle are lost. Hosted views are skipped.
-        A bundle outside this machine's :func:`figpack_cache_root` may still
-        exist elsewhere, so its row is kept and only the warning is returned.
+        labels saved only in that page are lost:
+
+        - a local bundle whose folder is gone. A bundle outside this machine's
+          :func:`figpack_cache_root` may still exist elsewhere, so its row is
+          kept and only the warning is returned.
+        - a hosted figure that figpack.org removed, or that expired with no
+          edits.
 
         Parameters
         ----------
@@ -992,24 +1052,26 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Returns
         -------
         str or None
-            The warning, when the bundle is not readable here; otherwise
-            ``None``.
+            The warning, when the page cannot be opened; otherwise ``None``.
 
         Raises
         ------
+        FigPackRetrievalError
+            When a hosted figure expired with edits, so they can be imported
+            before it is rebuilt.
         PermissionError
             When dropping the row and the user is not on a lab team with the
             session's experimenter (the usual Spyglass delete permission).
         """
-        if (FigPackCurationSelection & selection).fetch1("upload"):
-            return None
+        upload = (FigPackCurationSelection & selection).fetch1("upload")
         # Populate's lock, so a concurrent rebuild cannot race the delete.
         with populate_key_lock(cls, selection):
             built = cls & selection
             if not built:
                 return None
             uri = built.fetch1("figpack_uri")
-            if Path(uri).exists():
+            state = _hosted_figure_state(uri) if upload else None
+            if state == "live" or (not upload and Path(uri).exists()):
                 return None
             sorting_id, curation_id = (
                 FigPackCurationSelection & selection
@@ -1019,7 +1081,29 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 f"{curation_id}"
             )
             root = figpack_cache_root()
-            if Path(uri).parent != root:
+            if upload:
+                if state == "expired" and _hosted_figure_has_edits(
+                    selection, uri
+                ):
+                    review_id = str(selection["figpack_curation_id"])
+                    raise FigPackRetrievalError(
+                        f"{page} expired on figpack.org ({uri}) and has edits "
+                        "that are not imported. Import them with "
+                        f"FigPackReview.resume({review_id!r}), or pin the "
+                        "figure on figpack.org. To discard the edits and "
+                        "rebuild, run (FigPackCuration & "
+                        f"{{'figpack_curation_id': {review_id!r}}}).delete()."
+                    )
+                gone = (
+                    "expired on" if state == "expired" else "was removed from"
+                )
+                message = (
+                    f"{page} {gone} figpack.org ({uri}). Unpinned figures "
+                    "expire after 24 hours, or 6 hours if ephemeral. "
+                    "Rebuilding it. Draft labels saved only in that page are "
+                    "lost; committed curations are unaffected."
+                )
+            elif Path(uri).parent != root:
                 message = (
                     f"{page} was built at {uri}, outside this machine's FigPack "
                     f"folder ({root}), and is not readable here. Open it on the "
@@ -1029,11 +1113,13 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 )
                 logger.warning(message)
                 return message
-            message = (
-                f"{page} is missing (expected at {uri}); it was moved or its "
-                "folder was cleaned up. Rebuilding it. Draft labels saved only "
-                "in that page are lost; committed curations are unaffected."
-            )
+            else:
+                message = (
+                    f"{page} is missing (expected at {uri}); it was moved or "
+                    "its folder was cleaned up. Rebuilding it. Draft labels "
+                    "saved only in that page are lost; committed curations are "
+                    "unaffected."
+                )
             logger.warning(message)
             # No table depends on this row; delete_quick raises if one does.
             built._check_delete_permission()

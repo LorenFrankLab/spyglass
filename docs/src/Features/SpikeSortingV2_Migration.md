@@ -759,7 +759,8 @@ through it in section 3-browser, with the review details in Appendix C.
 
 - Local is the default: `review.open()` serves the bundle from a loopback server
     in the Python process. `upload=True` publishes the identical seeded bundle
-    to figpack.org (a persistent hosted review needs a FigPack API key).
+    to figpack.org. It needs a FigPack API key, and figpack.org expires the
+    figure after 24 hours unless you pin it there.
 - Edits are imported as a new `CurationV2` child pinned to the parent's
     `curation_uuid`; a committed merge opens a verification review of the merged
     child.

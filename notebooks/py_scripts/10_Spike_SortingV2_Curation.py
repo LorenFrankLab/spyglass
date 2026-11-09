@@ -221,9 +221,14 @@ CurationV2.summarize_curation(root_curation.as_key())
 # Remote kernel: forward the port (`ssh -L <port>:localhost:<port> host`) and
 # open the same `localhost` URL on your machine. The frontend enables local
 # editing only for a `localhost` origin; a generic Jupyter proxy URL is not
-# equivalent. `upload=True` publishes the identical seeded bundle to
-# figpack.org instead (needs a FigPack API key unless `ephemeral=True`). The
-# optional `spikesorting-v2-curation` extra is required for this path.
+# equivalent.
+#
+# You don't need a public link to curate. `upload=True` publishes the identical
+# seeded bundle to figpack.org for sharing. It needs a FigPack API key unless
+# `ephemeral=True`, figpack.org expires it 24 hours after upload (6 hours if
+# ephemeral) unless you pin it there, and only the owner of the key that built
+# it can save edits. The optional `spikesorting-v2-curation` extra is required
+# for this path.
 # Appendix C lists the remaining review details.
 
 import importlib.util
@@ -932,11 +937,13 @@ if run_scripted_curation_example:
 #   that `FigPackCuration` built the figure from that parent, then decodes its
 #   annotations before writing a child. Other figures fail closed.
 # - **Delivery.** Local is the default. `upload=True` publishes the identical
-#   seeded bundle. A persistent hosted review needs a FigPack API key
+#   seeded bundle to figpack.org. It needs a FigPack API key
 #   (`dj.config["custom"]["figpack_api_key"]` or `FIGPACK_API_KEY`);
-#   `ephemeral=True` makes a temporary hosted figure. Both publish the same
-#   bundle, seeded annotations included. Hosted figures
-#   have no compute service: save with **Save Annotations**, then import with
+#   `ephemeral=True` makes a figure without one. figpack.org expires a figure
+#   24 hours after upload (6 hours if ephemeral) unless you pin it there. Only
+#   the owner of the key that built a figure can save edits to it. Hosted
+#   figures have no compute service: save with **Save Annotations**, then
+#   import with
 #   `panel = review.commit_panel()` (`panel.receipt`,
 #   `panel.verification_review`).
 # - **Views.** The unit selector stays visible across **Waveforms**, **Spike
