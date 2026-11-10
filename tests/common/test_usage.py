@@ -343,6 +343,104 @@ def test_intersect_export_populate(populate_intersect_export, common):
     ), "Intersection failed to censor entries"
 
 
+class _StopAfterCleanup(Exception):
+    """Stands in for the restriction graph build that follows cleanup."""
+
+
+def _make_until_cleanup(monkeypatch, export_id):
+    """Run ``Export.make`` up to and including superseded-export cleanup."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    def _stop(*args, **kwargs):
+        raise _StopAfterCleanup
+
+    monkeypatch.setattr(ExportSelection, "get_restr_graph", _stop)
+    with pytest.raises(_StopAfterCleanup):
+        Export().make({"export_id": export_id})
+
+
+def _insert_superseded_export(paper_id, file_path):
+    """Insert two selections and an exported, now superseded, first one."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    sel, export = ExportSelection(), Export()
+    export_ids = []
+    for analysis_id in ("a1", "a2"):
+        key = {"paper_id": paper_id, "analysis_id": analysis_id}
+        sel.insert1({**key, "spyglass_version": "test"})
+        export_ids.append((sel & key).fetch1("export_id"))
+    old_id, new_id = export_ids
+
+    export.insert1(
+        {"export_id": old_id, "paper_id": paper_id}, allow_direct_insert=True
+    )
+    export.Table.insert1(
+        {
+            "export_id": old_id,
+            "table_id": 0,
+            "table_name": "x",
+            "restriction": "x",
+        },
+        allow_direct_insert=True,
+    )
+    file_key = {"export_id": old_id, "file_id": 0, "file_path": file_path}
+    export.File.insert1(file_key, allow_direct_insert=True)
+    return old_id, new_id, file_key
+
+
+def test_reexport_deletes_superseded_parts(common, monkeypatch):
+    """Re-export removes both Table and File parts of a superseded export."""
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    paper = "export_overwrite_test"
+    try:
+        old_id, new_id, file_key = _insert_superseded_export(
+            paper, "/tmp/superseded.nwb"
+        )
+        _make_until_cleanup(monkeypatch, new_id)
+
+        assert len(Export.Table & {"export_id": old_id}) == 0
+        assert (
+            len(Export.File & file_key) == 0
+        ), "stale Export.File row leaked after re-export"
+    finally:
+        (ExportSelection & {"paper_id": paper}).super_delete(
+            warn=False, safemode=False
+        )
+
+
+def test_reexport_keeps_dandi_referenced_files(common, monkeypatch):
+    """A superseded File row with DANDI provenance survives cleanup."""
+    from spyglass.common.common_dandi import DandiPath
+    from spyglass.common.common_usage import Export, ExportSelection
+
+    paper = "export_dandi_retention_test"
+    try:
+        old_id, new_id, file_key = _insert_superseded_export(
+            paper, "/tmp/dandi-referenced.nwb"
+        )
+        DandiPath.insert1(
+            {
+                **file_key,
+                "dandiset_id": "000001",
+                "filename": "dandi-referenced.nwb",
+                "dandi_path": "sub-test/dandi-referenced.nwb",
+                "dandi_instance": "dandi",
+            },
+            ignore_extra_fields=True,
+        )
+        _make_until_cleanup(monkeypatch, new_id)
+
+        assert len(Export.Table & {"export_id": old_id}) == 0
+        assert len(Export.File & file_key) == 1
+        assert len(DandiPath & file_key) == 1
+    finally:
+        (DandiPath & {"dandiset_id": "000001"}).delete_quick()
+        (ExportSelection & {"paper_id": paper}).super_delete(
+            warn=False, safemode=False
+        )
+
+
 def test_invalid_export_id(export_tbls):
     ExportSelection, _ = export_tbls
     ExportSelection.start_export(paper_id=2, analysis_id=1)

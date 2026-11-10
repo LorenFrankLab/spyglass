@@ -1,0 +1,125 @@
+{
+  "fixtures": {
+    "mearec_neuropixels_60s": {
+      "drifting": false,
+      "duration_s": 60.0,
+      "ingestion": {
+        "ground_truth_units": 20,
+        "n_electrodes": 128,
+        "n_interval_lists": 2,
+        "n_probe_electrodes": 128,
+        "num_shanks": 1,
+        "nwb_file_name": "mearec_neuropixels_60s_.nwb"
+      },
+      "n_channels": 128,
+      "n_units": 20,
+      "nwb_sha256": "8e4e15f3ed7391d35f61ddb3dd80bdc8e32f34318e6246fdec8f9dbbde4292a3",
+      "probe_json_sha256": "83996fb6db1c413ffaa97d68e0bd30304c0ec2ae54da1326ac425e7b9226cc3a",
+      "probe_type": "neuropixels-128-sim",
+      "recording_h5_sha256": "d73d89da07d0a9ed7716fcfcd1a818d6000e8c0b79809b3b689e96bab9989a28",
+      "seed": 1
+    },
+    "mearec_polymer_128ch_2sessions_s1": {
+      "drifting": true,
+      "duration_s": 60.0,
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "2685682d2ccde21e46e9e9d67058449fea837f7ed90fbb941dee5ba0b3ae2f34",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "e10caf9df8eea5fb7246334bb572e383bf5d1f10ca794e9c2a705283334759d2",
+      "seed": 40
+    },
+    "mearec_polymer_128ch_2sessions_s2": {
+      "drifting": true,
+      "duration_s": 60.0,
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "8b8cc2b4a4e4070ffba62e6562c405f75b0ff330a8e8ccc1200e74085902d03a",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "974b97ac5be309c0dbead1d89e546cbd53e69a46807cda492f4275818a59d98d",
+      "seed": 41
+    },
+    "mearec_polymer_128ch_60s": {
+      "drifting": false,
+      "duration_s": 60.0,
+      "ingestion": {
+        "ground_truth_units": 24,
+        "n_electrodes": 128,
+        "n_interval_lists": 2,
+        "n_probe_electrodes": 128,
+        "num_shanks": 4,
+        "nwb_file_name": "mearec_polymer_128ch_60s_.nwb"
+      },
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "2b1fd2523f3c80ffb05cffcfdd8f07b8e62dd2cf45269acb8a59e21344429848",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "a9c301eb3d62dbe90dbac16f16afb0e8552cc8cb8a93967886595ed5ae966cb8",
+      "seed": 0
+    },
+    "mearec_polymer_128ch_drift_120s": {
+      "drifting": true,
+      "duration_s": 120.0,
+      "ingestion": {
+        "ground_truth_units": 24,
+        "n_electrodes": 128,
+        "n_interval_lists": 2,
+        "n_probe_electrodes": 128,
+        "num_shanks": 4,
+        "nwb_file_name": "mearec_polymer_128ch_drift_120s_.nwb"
+      },
+      "n_channels": 128,
+      "n_units": 24,
+      "nwb_sha256": "fcaf6d49453632b7418890fd57c6b043e02ab6ea68e9726a2006accf2cb99e57",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "dd03e30104775cf52440d6f7aaeeb15c80dd4a52b8a8019a0b95551cc7c62d36",
+      "seed": 2
+    },
+    "mearec_polymer_smoke": {
+      "drifting": false,
+      "duration_s": 4.0,
+      "ingestion": {
+        "ground_truth_units": 6,
+        "n_electrodes": 128,
+        "n_interval_lists": 2,
+        "n_probe_electrodes": 128,
+        "num_shanks": 4,
+        "nwb_file_name": "mearec_polymer_smoke_.nwb"
+      },
+      "n_channels": 128,
+      "n_units": 6,
+      "nwb_sha256": "a5e4fcd79f5bbd2b836ef51dda1457b6917312e6fda6bb8f44455f3d4237275e",
+      "probe_json_sha256": "3592da46c62a6e30abec43219ba73be3cb9a0060638293431764b8e30d3ce30c",
+      "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+      "recording_h5_sha256": "e539663f9bcf95f277cf231dcb982ff974b50980438458c490ad03aa6a5d21d2",
+      "seed": 0
+    },
+    "mearec_tetrode_60s": {
+      "drifting": false,
+      "duration_s": 60.0,
+      "ingestion": {
+        "ground_truth_units": 5,
+        "n_electrodes": 4,
+        "n_interval_lists": 2,
+        "n_probe_electrodes": 4,
+        "num_shanks": 1,
+        "nwb_file_name": "mearec_tetrode_60s_.nwb"
+      },
+      "n_channels": 4,
+      "n_units": 5,
+      "nwb_sha256": "d13a2c83dae15c4335305f46bc2e92e960159c8f449020a483e32fb0425ad9b5",
+      "probe_json_sha256": "ebd675ed700b8b3b8d3fdaddfbdbb71df4720ec024f11204907a2bf109713f98",
+      "probe_type": "tetrode_12.5",
+      "recording_h5_sha256": "0173765acfbe66a00f203034019b5b772753f6cce0f577bc4315b8f711738549",
+      "seed": 3
+    }
+  },
+  "mearec_version": "1.10.0",
+  "neuroconv_version": "0.9.3",
+  "profile": "full",
+  "spikeinterface_version": "0.104.3"
+}

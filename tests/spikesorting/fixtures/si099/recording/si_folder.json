@@ -1,0 +1,53 @@
+{
+    "class": "spikeinterface.core.binaryfolder.BinaryFolderRecording",
+    "module": "spikeinterface",
+    "kwargs": {
+        "folder_path": "."
+    },
+    "version": "0.99.1",
+    "relative_paths": true,
+    "annotations": {
+        "is_filtered": false,
+        "probes_info": [
+            {}
+        ]
+    },
+    "properties": {
+        "group": [
+            0,
+            0,
+            0,
+            0
+        ],
+        "location": [
+            [
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                12.5
+            ],
+            [
+                12.5,
+                0.0
+            ],
+            [
+                12.5,
+                12.5
+            ]
+        ],
+        "gain_to_uV": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+        ],
+        "offset_to_uV": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+        ]
+    }
+}

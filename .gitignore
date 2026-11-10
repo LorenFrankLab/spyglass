@@ -6,6 +6,9 @@ mysql_config
 memray*
 root_*.y*ml
 
+# Local dev
+.claude/*
+
 # Notebooks
 *.ipynb
 !notebooks/[0-9]*.ipynb
@@ -158,6 +161,11 @@ temp_nwb/*s
 *.csv
 *.pkl
 *.json
+# Spike sorting v2 JSON files that are tracked
+!tests/spikesorting/v2/baselines/legacy_schemas.json
+!tests/spikesorting/v2/fixtures/fixtures_manifest.json
+!tests/spikesorting/v2/motion_acceptance_development.json
+!tests/spikesorting/v2/motion_acceptance_held_out.json
 *.gz
 *.pdf
 *.lock
@@ -184,6 +192,10 @@ docs/site/
 !docs/src/notebooks/*.ipynb
 !docs/src/images/*png
 temp*
+tmp*
 
 # Version
 _version.py
+
+# SpikeInterface 0.99 fixtures; last, so it overrides the ignores above
+!tests/spikesorting/fixtures/si099/**

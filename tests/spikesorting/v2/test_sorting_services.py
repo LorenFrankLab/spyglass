@@ -1,0 +1,320 @@
+"""Tests for the sorting-stage service helpers.
+
+Covers ``_sorting.dispatch``, ``_sorting.artifact_mask``, ``_sorting.units``
+and ``_sorting.analyzer``. DB-free.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+
+def _rec(traces, fs=1000.0, gain=1.0, times=None):
+    import spikeinterface as si
+
+    n_ch = traces.shape[1]
+    rec = si.NumpyRecording(
+        traces_list=[traces.astype("float32")], sampling_frequency=fs
+    )
+    rec.set_channel_gains([gain] * n_ch)
+    rec.set_channel_offsets([0.0] * n_ch)
+    if times is not None:
+        rec.set_times(np.asarray(times, dtype=float))
+    return rec
+
+
+def test_clusterless_noise_levels_precedence():
+    """Explicit noise_levels win; else uv->[1.0], mad->None."""
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        _clusterless_noise_levels,
+    )
+
+    assert _clusterless_noise_levels([2.0, 3.0], "uv") == [2.0, 3.0]
+    assert _clusterless_noise_levels([2.0, 3.0], "mad") == [2.0, 3.0]
+    assert _clusterless_noise_levels(None, "uv") == [1.0]
+    assert _clusterless_noise_levels(None, "mad") is None
+
+
+def test_apply_artifact_mask_rejects_malformed_valid_times():
+    """The complement walker rejects inputs that would silently under-mask."""
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        EmptyArtifactValidTimesError,
+    )
+
+    rec = _rec(np.zeros((100, 2), dtype="float32"))
+    with pytest.raises(EmptyArtifactValidTimesError):
+        apply_artifact_mask(rec, np.empty((0, 2)))
+    with pytest.raises(ValueError):
+        apply_artifact_mask(rec, np.array([0.0, 1.0, 2.0]))  # not (n, 2)
+    with pytest.raises(ValueError):
+        apply_artifact_mask(rec, np.array([[1.0, 0.0]]))  # end < start
+    with pytest.raises(ValueError):
+        apply_artifact_mask(
+            rec, np.array([[0.0, 0.05], [0.02, 0.08]])
+        )  # overlapping / unsorted
+
+
+def test_apply_artifact_mask_rejects_nonmonotonic_recording_times():
+    """``apply_artifact_mask`` checks the timestamp endpoints; interior
+    monotonicity is checked upstream."""
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        apply_artifact_mask,
+    )
+
+    times = np.arange(100, dtype=float) / 1000.0
+    times[-1] = times[0] - 0.05  # last endpoint steps backward past the first
+    rec = _rec(np.zeros((100, 2), dtype="float32"), times=times)
+    with pytest.raises(ValueError, match="monotonic"):
+        apply_artifact_mask(rec, np.array([[0.0, 0.05]]))
+
+
+def test_build_sorting_unit_rows_constructs_rows_from_peak_metadata():
+    """One ``Sorting.Unit`` row per unit, carrying the peak channel's Electrode
+    FK fields, the peak amplitude (as float), and the precomputed spike count,
+    merged onto the base key."""
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
+
+    electrode_by_id = {
+        10: {
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": 10,
+            "ignored_extra_column": "dropped",
+        },
+        20: {
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "1",
+            "electrode_id": 20,
+        },
+    }
+    rows = build_sorting_unit_rows(
+        unit_ids=[0, 1],
+        peak_channels={0: 10, 1: 20},
+        peak_amplitudes={0: 50.0, 1: 30.5},
+        n_spikes_by_unit={0: 100, 1: 40},
+        electrode_by_id=electrode_by_id,
+        key={"sorting_id": "s"},
+        sort_group_id=0,
+        nwb_file_name="x.nwb",
+    )
+
+    assert rows == [
+        {
+            "sorting_id": "s",
+            "unit_id": 0,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": 10,
+            "peak_amplitude_uv": 50.0,
+            "n_spikes": 100,
+        },
+        {
+            "sorting_id": "s",
+            "unit_id": 1,
+            "nwb_file_name": "x.nwb",
+            "electrode_group_name": "1",
+            "electrode_id": 20,
+            "peak_amplitude_uv": 30.5,
+            "n_spikes": 40,
+        },
+    ]
+
+
+def test_build_sorting_unit_rows_rejects_peak_channel_outside_sort_group():
+    """A peak channel outside the sort group raises instead of building an
+    invalid Electrode FK."""
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
+
+    with pytest.raises(RuntimeError, match="not in sort group"):
+        build_sorting_unit_rows(
+            unit_ids=[0],
+            peak_channels={0: 99},  # 99 not in electrode_by_id
+            peak_amplitudes={0: 50.0},
+            n_spikes_by_unit={0: 100},
+            electrode_by_id={10: {"nwb_file_name": "x.nwb"}},
+            key={"sorting_id": "s"},
+            sort_group_id=0,
+            nwb_file_name="x.nwb",
+        )
+
+
+def test_build_sorting_unit_rows_raises_typed_error_on_non_integer_unit_id():
+    """A sorter unit id that does not convert to int raises the typed
+    NonIntegerUnitIDError (not a bare ValueError)."""
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
+    from spyglass.spikesorting.v2.exceptions import NonIntegerUnitIDError
+
+    with pytest.raises(NonIntegerUnitIDError):
+        build_sorting_unit_rows(
+            unit_ids=["noise_3"],
+            peak_channels={"noise_3": 10},
+            peak_amplitudes={"noise_3": 50.0},
+            n_spikes_by_unit={"noise_3": 100},
+            electrode_by_id={10: {"nwb_file_name": "x.nwb"}},
+            key={"sorting_id": "s"},
+            sort_group_id=0,
+            nwb_file_name="x.nwb",
+        )
+
+
+def test_load_or_rebuild_analyzer_raises_zero_unit_without_path_io():
+    """Zero-unit analyzer access fails before touching SI or cache paths."""
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        load_or_rebuild_analyzer,
+    )
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitAnalyzerError
+
+    class _ZeroUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "zero"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "zero", 0
+
+    with pytest.raises(ZeroUnitAnalyzerError, match="zero units"):
+        load_or_rebuild_analyzer(
+            _ZeroUnitSortingRelation(), {"sorting_id": "zero"}
+        )
+
+
+def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
+    monkeypatch, tmp_path
+):
+    """An existing but unloadable analyzer folder is not treated as healthy."""
+
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        load_or_rebuild_analyzer,
+    )
+    from spyglass.spikesorting.v2.exceptions import AnalyzerFolderInvalidError
+
+    folder = tmp_path / "bad.analyzer"
+    folder.mkdir()
+
+    class _OneUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "s1"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "s1", 1
+
+    def _raise_load(_folder, **_kwargs):
+        raise RuntimeError("not a valid analyzer folder")
+
+    monkeypatch.setattr(
+        _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
+    )
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", _raise_load)
+    # Stub the recipe-row lookup; "display" is a placeholder name.
+    monkeypatch.setattr(
+        _sorting_analyzer, "fetch_waveform_params", lambda name: {}
+    )
+    with pytest.raises(AnalyzerFolderInvalidError, match="could not be loaded"):
+        load_or_rebuild_analyzer(
+            _OneUnitSortingRelation(),
+            {"sorting_id": "s1"},
+            waveform_params_name="display",
+            rebuild=False,
+        )
+    assert folder.exists(), "no-rebuild audit path must not mutate the folder"
+
+
+def test_load_or_rebuild_analyzer_rebuilds_invalid_folder(
+    monkeypatch, tmp_path
+):
+    """Default analyzer access removes an invalid cache folder and rebuilds it."""
+
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+
+    folder = tmp_path / "bad.analyzer"
+    folder.mkdir()
+    traces = np.random.default_rng(0).normal(size=(10_000, 2)).astype("float32")
+    recording = _rec(traces)
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
+    recording = recording.save(
+        folder=tmp_path / "recording", n_jobs=1, progress_bar=False
+    )
+    sorting = si.NumpySorting.from_unit_dict(
+        {1: np.array([500, 1500])}, sampling_frequency=1000.0
+    )
+    rebuilds = []
+    recipe = {
+        "ms_before": 1.0,
+        "ms_after": 2.0,
+        "max_spikes_per_unit": 10,
+        "whiten": False,
+        "purpose": "display",
+        "sparsity": {"method": "dense"},
+    }
+
+    class _OneUnitSortingRelation:
+        def __and__(self, key):
+            assert key == {"sorting_id": "s1"}
+            return self
+
+        def fetch1(self, *attrs):
+            assert attrs == ("sorting_id", "n_units")
+            return "s1", 1
+
+    def _rebuild(_sorting_table, key, waveform_params_name=None):
+        assert key == {"sorting_id": "s1"}
+        assert waveform_params_name == "display"
+        assert (
+            not folder.exists()
+        ), "invalid folder must be removed before rebuild"
+        rebuilds.append(True)
+        _sorting_analyzer.build_analyzer(
+            sorting,
+            recording,
+            key,
+            sorter_row={"job_kwargs": {}},
+            job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
+            analyzer_folder=folder,
+            waveform_params=recipe,
+        )
+
+    monkeypatch.setattr(
+        _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder
+    )
+    monkeypatch.setattr(_sorting_analyzer, "rebuild_analyzer_folder", _rebuild)
+    # Only the recipe lookup and source reconstruction are stubbed.
+    monkeypatch.setattr(
+        _sorting_analyzer, "fetch_waveform_params", lambda name: recipe
+    )
+
+    analyzer = _sorting_analyzer.load_or_rebuild_analyzer(
+        _OneUnitSortingRelation(),
+        {"sorting_id": "s1"},
+        waveform_params_name="display",
+    )
+
+    assert rebuilds == [True]
+    np.testing.assert_array_equal(analyzer.unit_ids, [1])
+    snippets = np.stack([traces[499:502], traces[1499:1502]])
+    np.testing.assert_array_equal(
+        analyzer.get_extension("waveforms").get_waveforms_one_unit(1), snippets
+    )
+    np.testing.assert_array_equal(
+        analyzer.get_extension("templates").get_data()[0], snippets.mean(axis=0)
+    )
+    # Every saved extension is loaded: SI's save/select/merge copy only
+    # loaded ones.
+    assert set(analyzer.extensions) == set(
+        _sorting_analyzer.BASE_ANALYZER_EXTENSIONS
+    )

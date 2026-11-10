@@ -1129,6 +1129,17 @@ class SpyglassConfig:
             self._config["store_auto_upload"] = self._store_auto_upload
 
     @property
+    def figpack_api_key(self) -> "str | None":
+        """API key for publishing figpack.org figures, or None if unset.
+
+        Read from `dj.config['custom']['figpack_api_key']`, else the
+        `FIGPACK_API_KEY` environment variable.
+        """
+        return dj.config.get("custom", {}).get(
+            "figpack_api_key"
+        ) or os.environ.get("FIGPACK_API_KEY")
+
+    @property
     def dlc_project_dir(self) -> str:
         """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))

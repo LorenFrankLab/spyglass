@@ -285,6 +285,18 @@ __configs = dict()
 global invalid_electrode_index
 invalid_electrode_index = 99999999
 
+RAW_ELECTRICAL_SERIES_NAMES = (
+    "e-series",
+    "electricalseries",
+    "ephys",
+    "electrophysiology",
+)
+
+
+def sanitize_nwb_object_name(name):
+    """Return the case- and space-insensitive form of an NWB object name."""
+    return name.lower().replace(" ", "") if name else None
+
 
 def _open_nwb_file(nwb_file_path, source=None):
     """Open an NWB file, add to cache, return contents. Does not close file.
@@ -598,6 +610,108 @@ def get_raw_eseries(nwbfile):
         elif isinstance(nwb_object, pynwb.ecephys.LFP):
             ret.extend(nwb_object.electrical_series.values())
     return ret
+
+
+def get_raw_eseries_path(nwb_file_path, object_id=None):
+    """Return the in-file path of the raw acquisition ElectricalSeries.
+
+    SpikeInterface >= 0.100 raises when a file holds more than one
+    ``ElectricalSeries`` (e.g. raw plus LFP) unless the path is named.
+
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+    object_id : str, optional
+        NWB object id of the series to select (e.g. ``Raw.raw_object_id``).
+        When given, the acquisition ElectricalSeries with this object id is
+        returned whatever its name. When ``None`` (default), the series is
+        selected by name from ``RAW_ELECTRICAL_SERIES_NAMES``.
+
+    Returns
+    -------
+    str
+        In-file path of the raw acquisition ElectricalSeries.
+
+    Raises
+    ------
+    ValueError
+        If ``object_id`` is given and no acquisition ElectricalSeries has it,
+        or if ``object_id`` is ``None`` and the acquisition group does not
+        contain exactly one named raw ElectricalSeries candidate.
+    """
+    return raw_eseries_path_and_timestamp_mode(nwb_file_path, object_id)[0]
+
+
+def raw_eseries_path_and_timestamp_mode(
+    nwb_file_path, object_id=None
+) -> tuple[str, bool]:
+    """Return the raw ElectricalSeries' in-file path and timestamp mode.
+
+    Selects the series as :func:`get_raw_eseries_path` does. A series without
+    explicit ``timestamps`` stores ``starting_time`` + ``rate`` instead.
+
+    Parameters
+    ----------
+    nwb_file_path : str
+        Absolute path to the NWB file.
+    object_id : str, optional
+        NWB object id of the series to select; see
+        :func:`get_raw_eseries_path`.
+
+    Returns
+    -------
+    (path, uses_explicit_timestamps) : tuple of (str, bool)
+        In-file path (e.g. ``"acquisition/e-series"``) of the selected series
+        and whether it stores an explicit ``timestamps`` vector.
+
+    Raises
+    ------
+    ValueError
+        As :func:`get_raw_eseries_path`.
+    """
+    # h5py avoids a DB/pynwb load and yields SI's electrical_series_path form
+    import h5py
+
+    def _attr(obj, key):
+        value = obj.attrs.get(key, b"")
+        return value.decode() if isinstance(value, bytes) else value
+
+    series = []  # (name, object_id, has explicit timestamps)
+    with h5py.File(nwb_file_path, "r") as f:
+        acquisition = f.get("acquisition")
+        if acquisition is not None:
+            for name, obj in acquisition.items():
+                if _attr(obj, "neurodata_type") == "ElectricalSeries":
+                    series.append(
+                        (name, _attr(obj, "object_id"), "timestamps" in obj)
+                    )
+    if object_id is not None:
+        matches = [s for s in series if s[1] == object_id]
+        if not matches:
+            raise ValueError(
+                "No acquisition ElectricalSeries with "
+                f"object_id={object_id!r} found in {nwb_file_path}."
+            )
+    else:
+        wanted = {
+            sanitize_nwb_object_name(name)
+            for name in RAW_ELECTRICAL_SERIES_NAMES
+        }
+        matches = [
+            s for s in series if sanitize_nwb_object_name(s[0]) in wanted
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Expected exactly one raw acquisition ElectricalSeries named "
+                f"one of {list(RAW_ELECTRICAL_SERIES_NAMES)} in "
+                f"{nwb_file_path}; found {[s[0] for s in matches] or 'none'} "
+                f"among acquisition ElectricalSeries {[s[0] for s in series]}. "
+                "Pass electrical_series_path='acquisition/<name>' explicitly "
+                "to select one."
+            )
+    name, _, uses_explicit_timestamps = matches[0]
+    return f"acquisition/{name}", uses_explicit_timestamps
 
 
 def estimate_sampling_rate(

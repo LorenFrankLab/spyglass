@@ -1,11 +1,11 @@
 from typing import Any, List, Union
 
 import datajoint as dj
-import kachery_cloud as kcl
 import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
+from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.utils import _reformat_metrics
 from spyglass.spikesorting.v0.spikesorting_curation import Curation
 from spyglass.spikesorting.v0.spikesorting_recording import (
@@ -81,13 +81,15 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
             "labelsByUnit": initial_labels,
             "mergeGroups": initial_merge_groups,
         }
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         initial_curation_uri = kcl.store_json(initial_curation)
 
         # Get the recording/sorting extractors
         R = SpikeSortingRecording().load_recording(key)
         if R.get_num_segments() > 1:
             R = si.concatenate_recordings([R])
-        S = si.load_extractor(sorting_path)
+        S = _si_compat.load_extractor(sorting_path)
 
         # Generate the figURL
         url = _generate_the_figurl(

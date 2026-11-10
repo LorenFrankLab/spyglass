@@ -69,8 +69,8 @@ class DataDownloader:
         self.file_paths = file_paths if download_dlc else file_paths[:NON_DLC]
         self.base_dir.mkdir(exist_ok=True)
 
-        # Start downloads
-        _ = self.file_downloads
+        # Downloads start on first ``file_downloads`` access, so runs that
+        # need no data spawn no curl.
 
     @cached_property  # Only make list of processes once
     def file_downloads(self) -> Dict[str, Union[Popen, None]]:

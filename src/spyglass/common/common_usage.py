@@ -518,6 +518,49 @@ class Export(SpyglassMixin, dj.Computed):
             }
         )
 
+    def _delete_superseded_exports(self, all_export_ids, max_export_id):
+        """Delete part rows of exported ids superseded by ``max_export_id``.
+
+        ``Table`` rows are always removed. ``File`` rows are kept while a
+        child table (e.g., ``DandiPath``) still references them.
+
+        Parameters
+        ----------
+        all_export_ids : list of int
+            All export_ids for the paper.
+        max_export_id : int
+            The export_id being populated.
+
+        Returns
+        -------
+        set of int
+            The superseded export_ids that had part rows.
+        """
+        processed_ids = set(
+            list(self.Table.fetch("export_id"))
+            + list(self.File.fetch("export_id"))
+        )
+        overlap = (set(all_export_ids) - {max_export_id}) & processed_ids
+        if overlap:
+            logger.info(f"Overwriting export_ids {overlap}")
+            for export_id in overlap:
+                id_dict = {"export_id": export_id}
+                (self.Table & id_dict).delete_quick()
+                files = self.File & id_dict
+                referenced = [
+                    child.full_table_name
+                    for child in self.File().children(as_objects=True)
+                    if child & files
+                ]
+                if referenced:
+                    logger.info(
+                        "Keeping Export.File rows for superseded export_id "
+                        f"{export_id}: still referenced by {referenced}"
+                    )
+                    continue
+                files.delete_quick()
+        return overlap
+
     def make(self, key):
         """Populate Export table with the latest export for a given paper."""
         logger.debug(f"Populating Export for {key}")
@@ -538,16 +581,7 @@ class Export(SpyglassMixin, dj.Computed):
             return
 
         # If lesser ids are present, delete parts yielding null entries
-        processed_ids = set(
-            list(self.Table.fetch("export_id"))
-            + list(self.File.fetch("export_id"))
-        )
-        if overlap := set(all_export_ids) - {max_export_id} & processed_ids:
-            logger.info(f"Overwriting export_ids {overlap}")
-            for export_id in overlap:
-                id_dict = {"export_id": export_id}
-                (self.Table & id_dict).delete_quick()
-                (self.Table & id_dict).delete_quick()
+        self._delete_superseded_exports(all_export_ids, max_export_id)
 
         logger.debug(f"Building restr graph for {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
