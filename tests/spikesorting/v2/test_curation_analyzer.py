@@ -651,6 +651,327 @@ def test_concurrent_resolve_builds_once(tmp_path):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_merged_unit_waveform_correlogram_and_ssviz_render(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """Merged reads render, remain immutable, and obey cache lifecycle."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    from spyglass.spikesorting.v2 import visualization as ssviz
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _resolve_curation_analyzer,
+        curation_analyzer_with_extensions,
+        derived_extension_request_hash,
+        open_curation_analyzer,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluation,
+        CurationEvaluationSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(unit_id)
+        for unit_id in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(sorting_key)
+    folder = None
+    try:
+        root = CurationV2.insert_curation(sorting_key)
+        recipe = (Sorting & sorting_key).fetch1("display_waveform_params_name")
+        raw_curation_folder = _curation_cache_path(root, recipe)
+        raw_analyzer = _resolve_curation_analyzer(root, recipe)
+        assert list(raw_analyzer.unit_ids) == unit_ids
+        assert not raw_curation_folder.exists()
+
+        # Raw curations share the sort analyzer, so a requested extension is
+        # persisted once rather than recomputed on an in-memory copy per view.
+        with curation_analyzer_with_extensions(
+            root,
+            recipe,
+            extra_extensions={"spike_locations": {}},
+        ) as raw_with_locations:
+            assert raw_with_locations.has_extension("spike_locations")
+        assert _resolve_curation_analyzer(root, recipe).has_extension(
+            "spike_locations"
+        )
+
+        merged = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[unit_ids[:2]],
+            parent_curation_id=root["curation_id"],
+            apply_merge=True,
+        )
+        merged_id = int(merged["curation_id"])
+        merged_uuid = str((CurationV2 & merged).fetch1("curation_uuid"))
+        folder = _curation_cache_path(merged, recipe)
+        analyzer = _resolve_curation_analyzer(merged, recipe)
+        expected = CurationV2.get_sorting(merged)
+        assert list(analyzer.unit_ids) == list(expected.unit_ids)
+        for unit_id in expected.unit_ids:
+            np.testing.assert_array_equal(
+                analyzer.sorting.get_unit_spike_train(unit_id),
+                expected.get_unit_spike_train(unit_id),
+            )
+        published_hash = _folder_content_hash(folder)
+
+        # A second resolve reuses the validated generation instead of building
+        # or changing the published folder.
+        reused = _resolve_curation_analyzer(merged, recipe)
+        assert list(reused.unit_ids) == list(expected.unit_ids)
+        assert _folder_content_hash(folder) == published_hash
+
+        # Expert access is a disk-backed working copy. Even destructive
+        # mutation of that copy cannot remove an extension from the published
+        # analyzer, and the copy is gone once the context exits.
+        with open_curation_analyzer(merged, recipe) as working:
+            working_folder = Path(working.folder)
+            assert working_folder != folder
+            working.delete_extension("correlograms")
+            assert not working.has_extension("correlograms")
+        assert not working_folder.exists()
+        assert _resolve_curation_analyzer(merged, recipe).has_extension(
+            "correlograms"
+        )
+        assert _folder_content_hash(folder) == published_hash
+
+        # An unusual plot-only extension is computed ONCE into a disk-backed
+        # derivative keyed by the exact request, never into the immutable
+        # published base cache, and reused on the next identical request.
+        # The sort's polarity is part of a polarity extension's identity.
+        request = {"spike_locations": {}}
+        identity = {"spike_locations": {"peak_sign": "neg"}}
+        derived_folder = _curation_cache_path(merged, recipe).with_name(
+            folder.name.replace(
+                folder.suffix,
+                f"_ext_{derived_extension_request_hash(identity)}{folder.suffix}",
+            )
+        )
+        with curation_analyzer_with_extensions(
+            merged,
+            recipe,
+            extra_extensions=request,
+        ) as derivative:
+            assert derivative.has_extension("spike_locations")
+            assert Path(derivative.folder) == derived_folder
+        assert derived_folder.exists()
+        derived_hash = _folder_content_hash(derived_folder)
+        with curation_analyzer_with_extensions(
+            merged,
+            recipe,
+            extra_extensions=request,
+        ) as reused_derivative:
+            assert Path(reused_derivative.folder) == derived_folder
+        assert _folder_content_hash(derived_folder) == derived_hash
+        # Different extension parameters are a different derivative.
+        other_request = {"spike_locations": {"method": "center_of_mass"}}
+        assert derived_extension_request_hash(
+            other_request
+        ) != derived_extension_request_hash(request)
+        assert not _resolve_curation_analyzer(merged, recipe).has_extension(
+            "spike_locations"
+        )
+        assert _folder_content_hash(folder) == published_hash
+
+        # A present extension with different parameters is served from a
+        # derivative; the base keeps its own.
+        base_bin = (
+            _resolve_curation_analyzer(merged, recipe)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+        )
+        assert base_bin != 0.2
+        with curation_analyzer_with_extensions(
+            merged, recipe, extra_extensions={"correlograms": {"bin_ms": 0.2}}
+        ) as fine:
+            assert fine.get_extension("correlograms").params["bin_ms"] == 0.2
+            assert Path(fine.folder) != folder
+        assert (
+            _resolve_curation_analyzer(merged, recipe)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+            == base_bin
+        )
+        assert _folder_content_hash(folder) == published_hash
+        # On the root curation, an absent extension is persisted into the
+        # shared sort analyzer; different parameters come from a derivative.
+        # The package-scoped analyzer may already carry extensions, so set
+        # the starting state first.
+        from spyglass.spikesorting.v2._storage.analyzer_cache import (
+            analyzer_cache_lock,
+        )
+
+        with analyzer_cache_lock(sorting_key["sorting_id"]):
+            shared = Sorting().get_analyzer(sorting_key)
+            if shared.has_extension("template_similarity"):
+                shared.delete_extension("template_similarity")
+        with curation_analyzer_with_extensions(
+            root, recipe, extra_extensions={"correlograms": {}}
+        ):
+            pass
+        raw_base_bin = (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+        )
+        assert raw_base_bin != 0.2
+        with curation_analyzer_with_extensions(
+            root, recipe, extra_extensions={"correlograms": {"bin_ms": 0.2}}
+        ) as raw_fine:
+            assert (
+                raw_fine.get_extension("correlograms").params["bin_ms"] == 0.2
+            )
+            assert Path(raw_fine.folder) != Path(
+                Sorting().get_analyzer(sorting_key).folder
+            )
+        assert (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .get_extension("correlograms")
+            .params["bin_ms"]
+            == raw_base_bin
+        )
+        # A larger request is a different derivative (keyed by the full
+        # request) carrying every requested extension.
+        assert (
+            not Sorting()
+            .get_analyzer(sorting_key)
+            .has_extension("template_similarity")
+        )
+        with curation_analyzer_with_extensions(
+            root,
+            recipe,
+            extra_extensions={
+                "correlograms": {"bin_ms": 0.2},
+                "template_similarity": {},
+            },
+        ) as raw_both:
+            assert raw_both.has_extension("template_similarity")
+            assert (
+                raw_both.get_extension("correlograms").params["bin_ms"] == 0.2
+            )
+            assert Path(raw_both.folder) != Path(raw_fine.folder)
+        # ... and the absent extension was persisted to the shared analyzer.
+        assert (
+            Sorting()
+            .get_analyzer(sorting_key)
+            .has_extension("template_similarity")
+        )
+
+        selection = CurationEvaluationSelection.insert_selection(
+            {
+                **merged,
+                "metric_params_name": "minimal",
+                "auto_curation_rules_name": "none",
+            }
+        )
+        waveforms = CurationEvaluation().get_waveforms(selection)
+        merged_unit_id = int(expected.unit_ids[-1])
+        assert waveforms.get_waveforms(merged_unit_id).shape[0] > 0
+        ccgs, _bins, resolved_ids = CurationEvaluation().get_correlograms(
+            selection
+        )
+        assert ccgs.shape[:2] == (len(expected.unit_ids),) * 2
+        assert list(resolved_ids) == list(expected.unit_ids)
+        figure = CurationEvaluation().plot_correlograms(selection)
+        assert figure.axes
+        plt.close(figure)
+
+        metrics = pd.DataFrame(
+            {"snr": np.arange(len(expected.unit_ids), dtype=float)},
+            index=np.asarray(expected.unit_ids, dtype=int),
+        )
+        monkeypatch.setattr(
+            CurationEvaluation,
+            "get_metrics",
+            classmethod(lambda cls, key: metrics),
+        )
+        qc_axes = CurationEvaluation().plot_units_qc(selection)
+        assert qc_axes
+        plt.close("all")
+        widget = ssviz.plot_si_template_metrics(selection)
+        assert widget is not None
+        plt.close("all")
+
+        # Every supported read above leaves the cache byte-identical.
+        assert _folder_content_hash(folder) == published_hash
+
+        # The unified orphan collector recognizes this live curation reference
+        # and its derivative (keyed by the same live generation).
+        live_report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        assert str(folder) not in live_report["disk_side"]
+        assert str(derived_folder) not in live_report["disk_side"]
+
+        # Missing/invalid manifest and incomplete extensions are never surfaced;
+        # each state is rebuilt from the committed curation.
+        (folder / "spyglass_curation_analyzer_manifest.json").write_text("{}")
+        repaired = _resolve_curation_analyzer(merged, recipe)
+        assert repaired.has_extension("correlograms")
+        manifest_path = folder / "spyglass_curation_analyzer_manifest.json"
+        import json
+
+        manifest = json.loads(manifest_path.read_text())
+        expected_recipe_hash = manifest["waveform_recipe_hash"]
+        manifest["waveform_recipe_hash"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest))
+        repaired = _resolve_curation_analyzer(merged, recipe)
+        assert repaired.has_extension("correlograms")
+        assert (
+            json.loads(manifest_path.read_text())["waveform_recipe_hash"]
+            == expected_recipe_hash
+        )
+        repaired.delete_extension("correlograms")
+        repaired = _resolve_curation_analyzer(merged, recipe)
+        assert repaired.has_extension("correlograms")
+
+        # Once the owning curation is deleted, the same folder is classified
+        # and reclaimed through the one raw+curation cache entry point.
+        clear_curations_for(sorting_key)
+        recreated_root = CurationV2.insert_curation(sorting_key)
+        recreated = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[unit_ids[:2]],
+            parent_curation_id=recreated_root["curation_id"],
+            apply_merge=True,
+        )
+        assert int(recreated["curation_id"]) == merged_id
+        assert (
+            str((CurationV2 & recreated).fetch1("curation_uuid")) != merged_uuid
+        )
+        assert _curation_cache_path(recreated, recipe) != folder
+        orphan_report = Sorting.find_orphaned_analyzer_folders(dry_run=True)
+        assert str(folder) in orphan_report["disk_side"]
+        # The analyzers above map files in ``folder``. Unmap them before the
+        # cleanup removes it: on NFS a mapped file blocks the removal.
+        raw_analyzer = raw_with_locations = analyzer = reused = None
+        working = derivative = reused_derivative = fine = None
+        shared = raw_fine = raw_both = repaired = None
+        waveforms = figure = qc_axes = widget = None
+        gc.collect()
+        import datajoint as dj
+
+        monkeypatch.setattr(dj.utils, "user_choice", lambda message: "yes")
+        Sorting.find_orphaned_analyzer_folders(
+            sorting_id=sorting_key["sorting_id"], dry_run=False
+        )
+        assert not folder.exists()
+        clear_curations_for(sorting_key)
+        folder = None
+    finally:
+        clear_curations_for(sorting_key)
+        if folder is not None and folder.exists():
+            import shutil
+
+            shutil.rmtree(folder)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_preview_curation_requires_commit(
     planted_two_unit_sort, curation_evaluation_defaults
 ):

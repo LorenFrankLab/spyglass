@@ -1,0 +1,357 @@
+"""Normalization for persisted curation review profiles.
+
+Owns the canonical payload and hash without DataJoint or FigPack. Reuses the
+FigPack configuration helpers so list semantics cannot drift. Checking
+displayed properties imports SpikeInterface.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+import math
+
+from spyglass.spikesorting.v2._core.enums import CurationLabel
+from spyglass.spikesorting.v2._review.annotations import (
+    default_label_options,
+    normalize_displayed_unit_properties,
+)
+from spyglass.spikesorting.v2._curation.metrics import (
+    si_quality_metric_output_columns,
+)
+from spyglass.utils.identity import sha256_json
+
+_PROFILE_FIELDS = frozenset(
+    {
+        "review_profile_name",
+        "metric_params_name",
+        "auto_curation_rules_name",
+        "displayed_unit_properties",
+        "label_options",
+        "label_import_mode",
+        "profile_hash",
+    }
+)
+
+
+def profile_display_property_vocabulary(
+    metric_row: Mapping,
+) -> tuple[str, ...]:
+    """Return the ordered built-in columns one metric recipe can display."""
+    columns: list[str] = [
+        "observed_duration_s",
+        "observed_firing_rate_hz",
+        "observed_presence_ratio",
+    ]
+    for metric_name in metric_row["metric_names"]:
+        columns.extend(
+            si_quality_metric_output_columns(metric_name) or (metric_name,)
+        )
+    columns.extend(metric_row.get("template_metric_columns") or [])
+    # Keep recipe order; dedupe overlapping metric and template names.
+    return tuple(dict.fromkeys(str(column) for column in columns))
+
+
+def _normalize_label_options(label_options) -> list[str]:
+    """Normalize built-in aliases and configured lab labels."""
+    if label_options is None:
+        label_options = default_label_options()
+    if isinstance(label_options, (str, bytes)) or not isinstance(
+        label_options, (list, tuple)
+    ):
+        raise TypeError("label_options must be a list or tuple of strings.")
+    normalized: list[str] = []
+    for label in label_options:
+        value = CurationLabel.normalize(label)
+        if not isinstance(label, str) or not value.strip() or len(value) > 32:
+            raise ValueError(
+                "Each label must be a non-empty string of at most 32 characters."
+            )
+        if value != value.strip():
+            raise ValueError(
+                "Labels must not contain leading or trailing whitespace."
+            )
+        normalized.append(value)
+    duplicates = sorted(
+        {label for label in normalized if normalized.count(label) > 1}
+    )
+    if duplicates:
+        raise ValueError(
+            f"label_options contains duplicate entries: {duplicates}."
+        )
+    if not normalized:
+        raise ValueError("label_options must contain at least one label.")
+    return normalized
+
+
+def normalize_review_profile(
+    row: Mapping,
+    *,
+    available_displayed_properties: Iterable[str],
+) -> dict:
+    """Validate one profile input and return its canonical stored row.
+
+    Delivery and review-instance values are rejected as unknown fields. Only
+    the scientific and display configuration is hashed.
+    """
+    if not isinstance(row, Mapping):
+        raise TypeError(
+            "CurationReviewProfile rows must be mappings, not "
+            f"{type(row).__name__}."
+        )
+    unknown = sorted(set(row) - _PROFILE_FIELDS)
+    if unknown:
+        raise ValueError(
+            "CurationReviewProfile does not accept runtime/review fields "
+            f"{unknown}. Publishing location, upload/ephemeral mode, and "
+            "credentials belong to each review invocation."
+        )
+    required = (
+        "review_profile_name",
+        "metric_params_name",
+        "auto_curation_rules_name",
+        "displayed_unit_properties",
+        "label_import_mode",
+    )
+    missing = [field for field in required if field not in row]
+    if missing:
+        raise ValueError(
+            f"CurationReviewProfile is missing required field(s) {missing}."
+        )
+
+    name = str(row["review_profile_name"])
+    metric_name = str(row["metric_params_name"])
+    rules_name = str(row["auto_curation_rules_name"])
+    if not name or len(name) > 64:
+        raise ValueError(
+            "review_profile_name must be a non-empty string of at most 64 "
+            "characters."
+        )
+    for field, value in (
+        ("metric_params_name", metric_name),
+        ("auto_curation_rules_name", rules_name),
+    ):
+        if not value or len(value) > 64:
+            raise ValueError(
+                f"{field} must be a non-empty string of at most 64 characters."
+            )
+
+    displayed = normalize_displayed_unit_properties(
+        row["displayed_unit_properties"]
+    )
+    if displayed is None:
+        raise ValueError(
+            "CurationReviewProfile displayed_unit_properties must be an "
+            "explicit list; None would inherit changing backend defaults."
+        )
+    available = tuple(str(prop) for prop in available_displayed_properties)
+    unavailable = [prop for prop in displayed if prop not in available]
+    if unavailable:
+        raise ValueError(
+            "CurationReviewProfile displayed_unit_properties contains "
+            f"columns {unavailable} not produced by metric recipe "
+            f"{metric_name!r}; available built-in columns are {list(available)}."
+        )
+
+    label_options = _normalize_label_options(row.get("label_options"))
+    label_import_mode = str(row["label_import_mode"])
+    if label_import_mode not in {"replace", "overlay"}:
+        raise ValueError(
+            "label_import_mode must be 'replace' or 'overlay'; "
+            f"got {label_import_mode!r}."
+        )
+
+    semantic = {
+        "metric_params_name": metric_name,
+        "auto_curation_rules_name": rules_name,
+        "displayed_unit_properties": displayed,
+        "label_options": label_options,
+        "label_import_mode": label_import_mode,
+    }
+    profile_hash = sha256_json(semantic, allow_nan=False)
+    supplied_hash = row.get("profile_hash")
+    if supplied_hash is not None and str(supplied_hash) != profile_hash:
+        raise ValueError(
+            "CurationReviewProfile profile_hash does not match its normalized "
+            f"semantic content (expected {profile_hash})."
+        )
+    return {
+        "review_profile_name": name,
+        **semantic,
+        "profile_hash": profile_hash,
+    }
+
+
+REVIEW_DISPLAY_OPTIONS_VERSION = 2
+
+
+@dataclass(frozen=True)
+class ReviewDisplayOptions:
+    """Browser payload budget for one FigPack review (display-only).
+
+    Bounds what the bundle contains; never affects the scientific evaluation.
+
+    Attributes
+    ----------
+    max_raster_spikes_per_unit
+        Per-unit raster cap, sampled evenly across the full spike train.
+    max_amplitudes_per_unit
+        Per-unit amplitude-point cap, sampled at random across the whole
+        train. ``None`` leaves only the duration budget.
+    raster_max_firing_rate, amplitude_max_firing_rate
+        Duration budget rate (points/s per unit); ``None`` disables it.
+    max_initial_points
+        Total points per time-based view before deferring it to
+        selected-unit inspection. Controls payload, not sampling.
+    amplitude_sampling_seed
+        Seed for the amplitude subsample.
+    min_similarity_for_correlograms
+        Minimum template similarity for a pair's cross-correlogram.
+    version
+        Payload version, persisted with the review configuration.
+    """
+
+    max_raster_spikes_per_unit: int | None = None
+    max_amplitudes_per_unit: int | None = None
+    raster_max_firing_rate: float | None = 50.0
+    amplitude_max_firing_rate: float | None = 50.0
+    max_initial_points: int = 1_000_000
+    amplitude_sampling_seed: int = 0
+    min_similarity_for_correlograms: float = 0.2
+    version: int = REVIEW_DISPLAY_OPTIONS_VERSION
+
+    def __post_init__(self):
+        if (
+            isinstance(self.max_initial_points, bool)
+            or not isinstance(self.max_initial_points, int)
+            or self.max_initial_points < 1
+        ):
+            raise ValueError("max_initial_points must be a positive integer.")
+        if self.max_raster_spikes_per_unit is not None and (
+            isinstance(self.max_raster_spikes_per_unit, bool)
+            or not isinstance(self.max_raster_spikes_per_unit, int)
+            or self.max_raster_spikes_per_unit < 1
+        ):
+            raise ValueError(
+                "max_raster_spikes_per_unit must be a positive integer."
+            )
+        if self.max_amplitudes_per_unit is not None and (
+            isinstance(self.max_amplitudes_per_unit, bool)
+            or int(self.max_amplitudes_per_unit) < 1
+        ):
+            raise ValueError(
+                "max_amplitudes_per_unit must be a positive int or None; got "
+                f"{self.max_amplitudes_per_unit!r}."
+            )
+        if isinstance(self.amplitude_sampling_seed, bool) or (
+            int(self.amplitude_sampling_seed) < 0
+        ):
+            raise ValueError(
+                "amplitude_sampling_seed must be a non-negative int; got "
+                f"{self.amplitude_sampling_seed!r}."
+            )
+        if not 0.0 <= float(self.min_similarity_for_correlograms) <= 1.0:
+            raise ValueError(
+                "min_similarity_for_correlograms must be within [0, 1]; got "
+                f"{self.min_similarity_for_correlograms!r}."
+            )
+
+        for value in (
+            self.raster_max_firing_rate,
+            self.amplitude_max_firing_rate,
+        ):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                raise ValueError(
+                    "Display firing-rate limits must be finite and positive, or None."
+                )
+        if int(self.version) != REVIEW_DISPLAY_OPTIONS_VERSION:
+            raise ValueError(
+                "ReviewDisplayOptions version "
+                f"{self.version!r} is not the supported "
+                f"{REVIEW_DISPLAY_OPTIONS_VERSION}."
+            )
+
+    @classmethod
+    def from_mapping(cls, value) -> "ReviewDisplayOptions":
+        """Build from ``None`` (defaults), a mapping, or an instance."""
+        if value is None:
+            return cls()
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, Mapping):
+            raise TypeError(
+                "display_options must be a ReviewDisplayOptions, a mapping, "
+                f"or None; got {type(value).__name__}."
+            )
+        unknown = sorted(set(value) - set(cls.__dataclass_fields__))
+        if unknown:
+            raise ValueError(
+                f"display_options has unknown field(s) {unknown}; accepted: "
+                f"{sorted(cls.__dataclass_fields__)}."
+            )
+        return cls(**value)
+
+    def point_limit(self, kind, duration_s):
+        """Resolve the duration-scaled point budget and an optional cap."""
+        rate, cap = (
+            (self.raster_max_firing_rate, self.max_raster_spikes_per_unit)
+            if kind == "raster"
+            else (self.amplitude_max_firing_rate, self.max_amplitudes_per_unit)
+        )
+        limits = [int(cap)] if cap is not None else []
+        if rate is not None:
+            limits.append(math.floor(duration_s * rate))
+        return min(limits) if limits else None
+
+    def as_dict(self) -> dict:
+        """JSON-native form persisted in the review configuration."""
+        return {
+            "version": int(self.version),
+            "raster_max_firing_rate": self.raster_max_firing_rate,
+            "amplitude_max_firing_rate": self.amplitude_max_firing_rate,
+            "max_initial_points": self.max_initial_points,
+            "max_raster_spikes_per_unit": self.max_raster_spikes_per_unit,
+            "max_amplitudes_per_unit": (
+                None
+                if self.max_amplitudes_per_unit is None
+                else int(self.max_amplitudes_per_unit)
+            ),
+            "amplitude_sampling_seed": int(self.amplitude_sampling_seed),
+            "min_similarity_for_correlograms": float(
+                self.min_similarity_for_correlograms
+            ),
+        }
+
+    def describe(self) -> str:
+        """Short human-readable summary for view titles."""
+
+        def budget(kind, rate, cap):
+            limits = []
+            if rate is not None:
+                limits.append(f"floor(duration × {rate:g})")
+            if cap is not None:
+                limits.append(str(cap))
+            formula = ("minimum of " if len(limits) > 1 else "") + " and ".join(
+                limits
+            )
+            return f"{kind}: " + (
+                formula + " points/unit" if limits else "all spikes"
+            )
+
+        return (
+            budget(
+                "raster",
+                self.raster_max_firing_rate,
+                self.max_raster_spikes_per_unit,
+            )
+            + "; "
+            + budget(
+                "amplitudes",
+                self.amplitude_max_firing_rate,
+                self.max_amplitudes_per_unit,
+            )
+            + "; "
+            f"amplitude seed {self.amplitude_sampling_seed}; "
+            "budgets span the full recording. Cross-correlograms for pairs with template "
+            f"similarity >= {float(self.min_similarity_for_correlograms):g}"
+        )
