@@ -2330,6 +2330,30 @@ def test_clean_then_dirty_at_one_commit(user_env_tbl, same_commit_pair):
     assert dirty_id in list(user_env_tbl.dirty_installs().fetch("env_id"))
 
 
+def test_this_env_routes_a_dirty_install_off_a_clean_row(
+    user_env_tbl, same_commit_pair
+):
+    """`this_env` must not hand a dirty session a clean row's id.
+
+    The hash covers the commit, not the edits on top of it, so a clean row
+    logged at this commit matched and was returned: the session recorded no
+    dirty state and its files were attributed to a reproducible environment.
+    """
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    clean_id = _log_as(user_env_tbl, clean)["env_id"]
+
+    with _as_install(**dirty):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        key = user_env_tbl.this_env
+
+    assert key["env_id"] != clean_id
+    row = (user_env_tbl & f"env_id=\"{key['env_id']}\"").fetch1()
+    assert row["env_hash"] is None  # a partial row, as a dirty install gets
+
+
 def test_dirty_then_clean_at_one_commit_resolves(
     user_env_tbl, same_commit_pair
 ):
@@ -2819,6 +2843,64 @@ def test_stale_installs_excludes_abandoned_clone(user_env_tbl):
     finally:
         for eid in ids:
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
+def test_stale_row_in_daily_use_keeps_its_place(user_env_tbl):
+    """Using a full row refreshes `last_seen`, so it does not age out.
+
+    Only the dirty path wrote `last_seen`, so a full row kept its insert time
+    however often it was used, and `stale_installs` dropped exactly the users
+    who had been stale the longest.
+    """
+    from spyglass.utils.git_utils import WARN_STALE_DAYS
+
+    user_env_tbl.delete(safemode=False)
+    old_commit = date.today() - timedelta(days=WARN_STALE_DAYS + 40)
+    long_ago = datetime.now() - timedelta(days=2 * WARN_STALE_DAYS + 5)
+
+    clean = dict(_CLEAN_INFO, is_stale=True, is_official=False)
+    with _as_install(**clean):
+        for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        live_hash = user_env_tbl.env_hash  # so the session matches this row
+
+        user_env_tbl.insert1(
+            {
+                "env_id": "ghost_daily_00",
+                "env_hash": live_hash,
+                "env": {"dependencies": []},
+                "has_editable": False,
+                "spyglass_commit": "daily01",
+                "commit_date": old_commit,
+                "timestamp": long_ago,
+                "last_seen": long_ago,
+            }
+        )
+        try:
+            # Read back what MySQL stored: a `timestamp` column rounds to the
+            # nearest second, so a client-side expectation is a coin flip.
+            before = (user_env_tbl & 'env_id="ghost_daily_00"').fetch1(
+                "timestamp", "last_seen"
+            )
+            before_ts, before_seen = before
+
+            # Aged out: unused for two stale windows, by `last_seen`.
+            assert "ghost_daily_00" not in list(
+                user_env_tbl.stale_installs().fetch("env_id")
+            )
+
+            user_env_tbl.__dict__.pop("matching_env_id", None)
+            key = user_env_tbl.insert_current_env()
+            row = (user_env_tbl & 'env_id="ghost_daily_00"').fetch1()
+
+            assert key == {"env_id": "ghost_daily_00"}  # matched, not inserted
+            assert row["last_seen"] > before_seen  # refreshed
+            assert row["timestamp"] == before_ts  # the clock stays put
+            assert "ghost_daily_00" in list(
+                user_env_tbl.stale_installs().fetch("env_id")
+            )
+        finally:
+            (user_env_tbl & 'env_id="ghost_daily_00"').delete(safemode=False)
 
 
 def test_stale_row_stores_its_commit_date(user_env_tbl, stale_install_info):

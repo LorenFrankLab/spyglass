@@ -127,8 +127,15 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
     @cached_property
     def this_env(self) -> Optional[dict]:
-        """Return the environment key. Cached to avoid rerunning insert."""
+        """Return the environment key. Cached to avoid rerunning insert.
+
+        A dirty install never matches a stored row, however well its
+        environment hashes: the hash covers the commit, not the edits on top
+        of it, so a clean row logged at this commit describes different code.
+        """
         spyglass_install.warn_once()
+        if spyglass_install.has_local_changes:
+            return self.insert_current_env()  # partial row, never a match
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
         del self.matching_env_id  # clear the cached property
@@ -201,6 +208,15 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             return {"env_id": None}
 
         if self.matching_env_id:  # if env is already stored
+            # Refresh the activity window. `stale_installs` ages a row out on
+            # `last_seen`, and only the dirty path wrote it, so a full row kept
+            # its insert time however often it was used: the longest-stale
+            # users dropped off the list first.
+            self.connection.query(
+                f"UPDATE {self.full_table_name} "
+                + "SET `last_seen` = NOW() WHERE `env_id` = %s",
+                args=(self.matching_env_id,),
+            )
             return {"env_id": self.matching_env_id}
 
         # A clean-but-stale clone is an older official commit, not a dirty one:
