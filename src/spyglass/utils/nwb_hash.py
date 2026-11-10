@@ -541,3 +541,71 @@ class NwbfileHasher:
             self.add_to_cache(name, obj, this_digest)
 
         return self.hashed.hexdigest()
+
+
+def electrode_coordinates(electrical_series: pynwb.ecephys.ElectricalSeries):
+    """Return an ElectricalSeries' electrode coordinates in region order.
+
+    Parameters
+    ----------
+    electrical_series : pynwb.ecephys.ElectricalSeries
+        A series read from an open file.
+
+    Returns
+    -------
+    np.ndarray
+        ``(n_channels, n_coords)`` float64 of the ``rel_x`` / ``rel_y`` /
+        ``rel_z`` columns the electrodes table has; ``n_coords`` is 0 when it
+        has none.
+    """
+    region = electrical_series.electrodes
+    table = region.table
+    coord_cols = [c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames]
+    # One read per column, not per h5py element.
+    columns = [
+        np.asarray(table[col].data[:], dtype=np.float64) for col in coord_cols
+    ]
+    return np.asarray(
+        [
+            [float(column[int(row)]) for column in columns]
+            for row in region.data[:]
+        ],
+        dtype=np.float64,
+    )
+
+
+def electrode_geometry_hash(coords) -> str:
+    """Hash a ``(n_channels, n_coords)`` probe-geometry array.
+
+    Prefixed with the shape so a transpose or channel-count change cannot
+    collide.
+
+    Parameters
+    ----------
+    coords : array-like
+        ``(n_channels, n_coords)`` electrode coordinates, ``n_coords >= 1``.
+
+    Returns
+    -------
+    str
+        The md5 hex digest of the shape and little-endian float64 bytes.
+
+    Raises
+    ------
+    ValueError
+        If ``coords`` is not 2-D or has no coordinate columns.
+    """
+    arr = np.ascontiguousarray(
+        np.asarray(coords, dtype=np.float64).astype("<f8")
+    )
+    if arr.ndim != 2 or arr.shape[1] == 0:
+        raise ValueError(
+            "electrode_geometry_hash: expected a (n_channels, n_coords>=1) "
+            f"array but got shape {arr.shape} -- the persisted electrodes "
+            "region carries no rel_x/rel_y[/rel_z] coordinates (no probe "
+            "geometry). Refusing to hash an empty geometry component."
+        )
+    digest = md5()
+    digest.update(str(arr.shape).encode())
+    digest.update(arr.tobytes())
+    return digest.hexdigest()

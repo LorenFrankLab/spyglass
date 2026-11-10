@@ -1,0 +1,19 @@
+# Test env for the v2 spike sorting suite; CI pytest-v2 builds the same env.
+# 1. Create: `mamba env create -f environments/environment_spikesorting_v2.yml`
+# 2. Activate: `conda activate spyglass_spikesorting_v2`
+# 3. Run: `pytest tests/spikesorting/v2/ --no-docker --no-dlc`
+# The spikesorting-v2-matching extra stays out; CI tests it in its own env.
+name: spyglass_spikesorting_v2
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  - python=3.11
+  - numpy>=2,<3
+  - scipy>=1.13
+  - pip
+  - pip:
+      - --editable "..[test,spikesorting-v2,spikesorting-v2-validation]"
+      # must equal the pyproject pin; test_dependency_contract checks this
+      - "spikeinterface==0.104.3"

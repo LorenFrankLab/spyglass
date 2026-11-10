@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib import import_module
 from pathlib import Path
 
 import datajoint as dj
@@ -68,8 +69,8 @@ class AnalysisFileIssues(dj.Manual):
     def _get_recompute_deleted() -> set:
         """Return analysis file names intentionally deleted by recompute.
 
-        Queries the v1 spike sorting recompute table for files that were
-        successfully recomputed and then deleted (deleted=1).
+        Queries the v1 and v2 spike sorting recompute tables for files that
+        were successfully recomputed and then deleted (deleted=1).
 
         Returns
         -------
@@ -77,20 +78,22 @@ class AnalysisFileIssues(dj.Manual):
             Analysis file names that were intentionally deleted.
         """
         deleted = set()
-
-        try:
-            from spyglass.spikesorting.v1.recompute import (
-                RecordingRecompute as V1RecordingRecompute,
-            )
-
-            deleted.update(
-                (V1RecordingRecompute().with_names & "deleted=1").fetch(
-                    "analysis_file_name"
+        for module, table in (
+            ("spyglass.spikesorting.v1.recompute", "RecordingRecompute"),
+            (
+                "spyglass.spikesorting.v2.recompute",
+                "RecordingArtifactRecompute",
+            ),
+        ):
+            try:
+                recompute = getattr(import_module(module), table)
+                deleted.update(
+                    (recompute().with_names & "deleted=1").fetch(
+                        "analysis_file_name"
+                    )
                 )
-            )
-        except Exception as e:
-            logger.warning(f"Could not fetch v1 recompute deleted files: {e}")
-
+            except Exception as e:  # e.g., spike sorting extra not installed
+                logger.warning(f"Could not fetch {table} deleted files: {e}")
         return deleted
 
     @staticmethod
@@ -165,7 +168,8 @@ class AnalysisFileIssues(dj.Manual):
         full_table_name : str
             Full table name of the source analysis table.
         deleted_files : set
-            File names intentionally deleted by recompute (skip these).
+            File names intentionally deleted by recompute; skipped while
+            absent from disk.
         hash_map : dict
             Pre-fetched mapping of analysis_file_name -> stored contents_hash.
 
@@ -174,7 +178,8 @@ class AnalysisFileIssues(dj.Manual):
         insert_dict : dict or None
             Dict ready for insertion into AnalysisFileIssues, or None if OK.
         """
-        if analysis_file_name in deleted_files:
+        # A file may reappear after initial deletion
+        if analysis_file_name in deleted_files and not Path(fname).exists():
             return None
 
         key = dict(

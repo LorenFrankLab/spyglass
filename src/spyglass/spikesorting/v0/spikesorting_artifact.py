@@ -6,6 +6,9 @@ import spikeinterface as si
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
 from spyglass.common.common_interval import Interval, IntervalList
+from spyglass.spikesorting._legacy_runtime import (
+    _require_legacy_si_environment,
+)
 from spyglass.spikesorting.utils import (
     _check_artifact_thresholds,
     _compute_artifact_chunk,
@@ -100,6 +103,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             - Recording from SpikeSortingRecording (loads with spikeinterface)
         Uses module-level function _get_artifact_times to detect artifacts.
         """
+        _require_legacy_si_environment("v0 ArtifactDetection.make")
         query = ArtifactDetectionParameters * ArtifactDetectionSelection & key
 
         if query.fetch1("custom_artifact_detection"):

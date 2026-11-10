@@ -1,0 +1,110 @@
+{
+    "specification": "probeinterface",
+    "version": "0.2.28",
+    "probes": [
+        {
+            "ndim": 2,
+            "si_units": "um",
+            "annotations": {},
+            "contact_annotations": {},
+            "contact_positions": [
+                [
+                    0.0,
+                    0.0
+                ],
+                [
+                    0.0,
+                    12.5
+                ],
+                [
+                    12.5,
+                    0.0
+                ],
+                [
+                    12.5,
+                    12.5
+                ]
+            ],
+            "contact_plane_axes": [
+                [
+                    [
+                        1.0,
+                        0.0
+                    ],
+                    [
+                        0.0,
+                        1.0
+                    ]
+                ],
+                [
+                    [
+                        1.0,
+                        0.0
+                    ],
+                    [
+                        0.0,
+                        1.0
+                    ]
+                ],
+                [
+                    [
+                        1.0,
+                        0.0
+                    ],
+                    [
+                        0.0,
+                        1.0
+                    ]
+                ],
+                [
+                    [
+                        1.0,
+                        0.0
+                    ],
+                    [
+                        0.0,
+                        1.0
+                    ]
+                ]
+            ],
+            "contact_shapes": [
+                "circle",
+                "circle",
+                "circle",
+                "circle"
+            ],
+            "contact_shape_params": [
+                {
+                    "radius": 6.25
+                },
+                {
+                    "radius": 6.25
+                },
+                {
+                    "radius": 6.25
+                },
+                {
+                    "radius": 6.25
+                }
+            ],
+            "device_channel_indices": [
+                0,
+                1,
+                2,
+                3
+            ],
+            "contact_ids": [
+                "0",
+                "1",
+                "2",
+                "3"
+            ],
+            "shank_ids": [
+                "",
+                "",
+                "",
+                ""
+            ]
+        }
+    ]
+}

@@ -1,0 +1,16 @@
+# Test-only (v0/v1 suites, SI 0.99); pytest-legacy relaxes pyproject's SI pins
+name: spyglass_spikesorting_legacy
+channels:
+  - conda-forge
+  - franklab
+  - edeno
+dependencies:
+  - python=3.10
+  - numpy<2  # spikeinterface 0.99.x calls np.issctype, removed in numpy 2.0
+  - pybind11  # req by mountainsort4 -> isosplit5
+  - pytorch<1.12.0
+  - pip
+  - pip:
+      - "numpy<2"  # also on the pip layer, so pip cannot upgrade past it
+      - mountainsort4
+      - --editable "..[test,spikesorting]"

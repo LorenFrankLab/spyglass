@@ -1,10 +1,7 @@
 """Tests for ``SpikeSortingOutput.get_sort_group_info`` electrode coverage.
 
-Issue #1394: ``get_sort_group_info`` reported a single electrode per sort
-group, which is not what the method name promises. It now returns every
-electrode of each sort group, with no opt-out -- see the PR #1678 review
-discussion. These tests pin that return shape, the merge-id join that is the
-whole point of the method, and the signature parity the dispatch relies on.
+Regression for #1394: every electrode of each sort group is returned, with
+no opt-out. Also checks the merge-id join and signature parity across sources.
 """
 
 from inspect import signature
@@ -33,10 +30,7 @@ def merge_sort_group_key(spike_v1, spike_merge, pop_spike_merge):
 def merge_electrode_ids(spike_v1, merge_sort_group_key):
     """All electrode ids in the sort group, asserted to be more than one.
 
-    The minirec fixture's ``SortGroup.set_group_by_shank`` places the four
-    channels of a ``tetrode_12.5`` probe into ``sort_group_id`` 0. Asserting
-    that here keeps the multi-electrode tests from passing vacuously on a
-    single-electrode sort group.
+    Guards the multi-electrode tests against passing vacuously.
     """
     ids = sorted(
         (spike_v1.SortGroup.SortGroupElectrode & merge_sort_group_key).fetch(
@@ -91,10 +85,7 @@ def test_merge_sort_group_info_keeps_merge_id(
 def test_merge_sort_group_info_takes_only_key():
     """No electrode-coverage opt-out, on the merge table or its sources.
 
-    ``get_sort_group_info`` dispatches through ``source_class_dict``, so the
-    merge table and every source that defines the method must agree on the
-    signature. Reintroducing a coverage flag on one of them would fail only
-    at runtime, for that one source.
+    Dispatch through ``source_class_dict`` needs matching signatures.
     """
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
