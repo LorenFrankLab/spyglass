@@ -161,6 +161,11 @@ temp_nwb/*s
 *.csv
 *.pkl
 *.json
+# Spike sorting v2 JSON files that are tracked
+!tests/spikesorting/v2/baselines/legacy_schemas.json
+!tests/spikesorting/v2/fixtures/fixtures_manifest.json
+!tests/spikesorting/v2/motion_acceptance_development.json
+!tests/spikesorting/v2/motion_acceptance_held_out.json
 *.gz
 *.pdf
 *.lock
