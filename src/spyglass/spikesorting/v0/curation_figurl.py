@@ -1,7 +1,6 @@
 from typing import Any, List, Union
 
 import datajoint as dj
-import kachery_cloud as kcl
 import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
@@ -81,6 +80,8 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
             "labelsByUnit": initial_labels,
             "mergeGroups": initial_merge_groups,
         }
+        import kachery_cloud as kcl  # kachery-legacy extra
+
         initial_curation_uri = kcl.store_json(initial_curation)
 
         # Get the recording/sorting extractors

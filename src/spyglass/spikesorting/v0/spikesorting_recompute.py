@@ -844,8 +844,15 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             shutil_rmtree(old, ignore_errors=True)
             shutil_rmtree(new, ignore_errors=True)
 
-    def delete(self, *args, **kwargs) -> None:
-        """Delete recompute attempts when deleting rows."""
+    def delete(self, *restrictions, **kwargs) -> None:
+        """Delete recompute attempts when deleting rows.
+
+        Positional arguments are restrictions, applied before collecting
+        attempt directories.
+        """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(**kwargs)
+
         attempt_dirs = []
         for key in self:
             _, new = self._get_paths(key)
@@ -857,7 +864,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 for dir in attempt_dirs:
                     shutil_rmtree(dir, ignore_errors=True)
 
-        super().delete(*args, **kwargs)
+        super().delete(**kwargs)
 
     def update_secondary(
         self, restriction: Optional[Union[str, dict]] = True

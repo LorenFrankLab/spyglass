@@ -21,11 +21,11 @@ UNIT_CRITERIA_OPERATORS = {
     "<": np.less,
     "<=": np.less_equal,
     "==": np.equal,
-    "!=": lambda vals, target: np.not_equal(vals, target) & _not_missing(vals),
+    "!=": np.not_equal,
     "between": lambda vals, target: (vals >= target[0]) & (vals <= target[1]),
     "outside": lambda vals, target: (vals < target[0]) | (vals > target[1]),
     "isin": lambda vals, target: _isin(vals, target),
-    "notin": lambda vals, target: ~_isin(vals, target) & _not_missing(vals),
+    "notin": lambda vals, target: ~_isin(vals, target),
 }
 # Only "isin" and "notin" are list-aware, via _isin. The rest compare a
 # unit's value as a whole, so on a column holding a list per unit (e.g. the
@@ -212,7 +212,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         Notes
         -----
-        Units missing a value (NaN, or potentially None from an imported
+        Units missing a value (NaN, pd.NA, or None from an imported
         units table) fail every criterion on that column, negated ones
         ("!=", "notin") included: a metric that was never computed is no
         evidence that the unit is good. "isin" and "notin" also work on columns
@@ -253,6 +253,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     + "every unit."
                 )
             values = units_df[column].to_numpy()
+            present = units_df[column].notna().to_numpy(dtype=bool)
+            include_mask &= present
+            # pd.NA breaks NumPy comparisons; missing values fail every operator.
+            values = values[present]
 
             for operator, value in criterion.items():
                 if operator not in UNIT_CRITERIA_OPERATORS:
@@ -280,7 +284,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                         + "unit in or out at once. Use 'isin' or 'notin', "
                         + "which match any item of the list."
                     )
-                include_mask &= UNIT_CRITERIA_OPERATORS[operator](values, value)
+                include_mask[present] &= UNIT_CRITERIA_OPERATORS[operator](
+                    values, value
+                )
 
         return include_mask
 
@@ -345,8 +351,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
+        # A group may span sources (e.g. CurationV1 and ImportedSpikeSorting).
         nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
-            return_merge_ids=True
+            return_merge_ids=True, multi_source=True
         )
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
@@ -357,10 +364,14 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 continue
 
             units_df = nwb_file[nwb_field_name]
+            # A zero-unit sorting has an empty Units table without spike_times.
+            if "spike_times" not in units_df:
+                continue
+
             sorting_spike_times = units_df["spike_times"].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
-                for unit_id in range(len(sorting_spike_times))
+                for unit_id in _get_nwb_unit_ids(nwb_file, nwb_field_name)
             ]
 
             include_unit = np.ones(len(sorting_spike_times), dtype=bool)
@@ -376,6 +387,18 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                     include_labels,
                     exclude_labels,
                 )
+            elif group_col is None:
+                # Unlabeled curations omit the label column: no unit has labels.
+                include_unit &= SortedSpikesGroup.filter_units(
+                    [[] for _ in sorting_spike_times],
+                    [] if include_labels is None else include_labels,
+                    [] if exclude_labels is None else exclude_labels,
+                )
+                if include_labels is not None and len(include_labels) > 0:
+                    logger.warning(
+                        f"include_labels removed all units of {merge_id}: "
+                        + "its curation has no labels."
+                    )
 
             # filter on arbitrary criteria over the units table columns
             for column in criteria_columns:
@@ -549,32 +572,6 @@ def _skipped_criteria_error(skipped_by: dict, applied_to: dict) -> ValueError:
     )
 
 
-def _not_missing(values):
-    """False where a unit has no value for the column a criterion gates on
-
-    We need this check because a missing value satisfies the negated
-    operators ("!=", "notin") on its own, which fails open: a criterion
-    meant to drop bad units would instead admit the units missing the
-    metric it gates on.
-    """
-    if values.dtype.kind == "f":
-        return ~np.isnan(values)
-
-    if values.dtype == object:  # np.isnan takes neither a list nor a string
-        return np.array(
-            [
-                val is not None
-                and not (isinstance(val, float) and np.isnan(val))
-                for val in values
-            ]
-        )
-
-    # Only a float column, or an object column (what pandas falls back to for
-    # a column of mixed types), can hold a missing value. No other dtype can,
-    # so every one of their units passes.
-    return np.ones(len(values), dtype=bool)
-
-
 def _isin(values, target):
     """True where a unit's value, or any item of it, is in target
 
@@ -607,3 +604,11 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
     if nwb_field_name is None and not allow_empty:
         raise ValueError("NWB file does not have 'object_id' or 'units' field")
     return nwb_field_name
+
+
+def _get_nwb_unit_ids(nwb_file, nwb_field_name) -> list[int]:
+    """Return the NWB units table's ids, not positions.
+
+    Merged sortings have sparse ids, so positions do not map to ids.
+    """
+    return [int(uid) for uid in nwb_file[nwb_field_name].index]

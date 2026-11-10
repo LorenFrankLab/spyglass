@@ -126,6 +126,33 @@ These mixins form a dependency chain for NWB file fetching and export logging:
 - Handles copy-to-common for custom AnalysisNwbfile tables
 - See [Export Guide](../Features/Export.md)
 
+**Merge restriction routing** (`dj_merge_tables.py`,
+`Merge._restricted_sources`)
+
+`Merge.fetch_nwb` and `Merge.close_nwb` share `_restricted_sources`, so a
+release resolves the same rows the fetch held.
+
+- Master-column (`merge_id`, `source`) and un-introspectable (`True`, string)
+    restrictions use per-source `merge_restrict_class`. Source discovery applies
+    the full master restriction, so `{"source": X}` resolves to one source.
+- A string naming a parent attribute fails against the master, so each source's
+    `master * part * parent` join is probed instead. If no source can evaluate
+    it (a typo, bad SQL), the original error is re-raised rather than returning
+    an empty list.
+- Parent-attribute dict/list restrictions resolve through
+    `master * part * parent`, keeping per source only the clauses its parent can
+    evaluate (`_applicable_restriction`). This preserves OR structure:
+    `[{"leaf_a_id": 0}, {"leaf_b_id": 0}]` routes each branch to its own source.
+    A `True` or `{}` clause inside an OR matches everything.
+- Skipped sources and no-match results warn rather than raise, since a caller
+    may restrict on one source's key.
+- The parent is restricted by primary key from the matched join, because
+    DataJoint rejects `parent & matched` when they share a secondary attribute.
+    Parent key to `merge_id` is 1:1 because `Merge.insert` hashes the parent key
+    and source.
+- `Merge & {parent_attr: value}` silently drops a parent attribute; pass it as
+    the `fetch_nwb(restriction)` argument instead.
+
 \*\**IngestionMixin* (`mixins/ingestion.py`)
 
 - Defines a protocol for populating table entries from the raw nwb file

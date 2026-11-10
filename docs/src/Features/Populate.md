@@ -88,6 +88,48 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     time — inside the transaction — and then skips `make_insert`. Return `[]`
     when there is nothing to pass along.
 
+## Files written in `make_compute`
+
+A file `make_compute` writes is on disk before `make_insert` registers it. If
+the populate then fails (the second `make_fetch` differs, or `make_insert`
+raises), the file is left behind with no row. To remove it, define
+`_staged_outputs`, which maps a `make_compute` result to what it wrote:
+
+```python
+from spyglass.utils.mixins.populate import StagedOutputs
+
+
+class MyTable(SpyglassMixin, dj.Computed):
+    def _staged_outputs(self, computed):
+        analysis_file_name, results_path = computed
+        return StagedOutputs(
+            analysis_file_names=(analysis_file_name,),  # AnalysisNwbfile names
+            paths=(results_path,),  # other files or folders
+        )
+```
+
+Only list outputs unique to this attempt: they are deleted if the populate does
+not succeed. Outputs are kept once `make_insert` returns, so a failed commit
+after it, or a killed process, can still leave a file behind.
+
+## Several jobs populating the same key
+
+A tri-part `make_compute` runs outside the transaction, so two jobs that
+populate the same key at once both compute it, and the second insert is
+refused. For a slow table, set `_populate_key_lock = True`:
+
+```python
+class MyHeavyTable(SpyglassMixin, dj.Computed):
+    _populate_key_lock = True
+```
+
+Each job then takes a MySQL named lock on the table and key before computing.
+A job that finds the lock taken logs that it is waiting, then skips the key
+once the other job has populated it. The lock is best effort: if it cannot be
+taken, the populate goes ahead, and a dropped session releases it.
+`populate_key_lock(table, key)` takes the same lock in other code that must not
+run alongside a populate of that key.
+
 ## `_parallel_make`
 
 `_parallel_make = True` is unrelated to the tri-part split. It only takes effect
