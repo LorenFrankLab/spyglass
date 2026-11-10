@@ -60,6 +60,18 @@ git pull --quiet \
   https://github.com/LorenFrankLab/spyglass.git master > /dev/null || \
     { on_fail "Could not update the spyglass repo $PWD"; exit 1; }
 
+# Advance the official remote's tracking refs. Pulling by URL moves HEAD but
+# no ref, and the dirty-install check reads refs off disk, so this clone would
+# report itself as running unpublished code. Best-effort: a clone with no
+# official remote, or no network, must not fail the cron job.
+official_remote=$(git remote -v | \
+  awk 'tolower($2) ~ /lorenfranklab\/spyglass(\.git)?\/?$/ \
+       && $3 == "(fetch)" { print $1; exit }')
+if [[ -n "$official_remote" ]]; then
+  git fetch --quiet --prune "$official_remote" > /dev/null 2>&1 || \
+    echo "Note: could not fetch $official_remote; refs may be stale"
+fi
+
 # Test conda environment
 if ! conda env list | grep -q $SPYGLASS_CONDA_ENV; then
   on_fail "Conda environment $SPYGLASS_CONDA_ENV not found"
