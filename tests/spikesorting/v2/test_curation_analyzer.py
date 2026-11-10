@@ -1,0 +1,865 @@
+"""Curation-scoped analyzer cache and routing contracts."""
+
+from __future__ import annotations
+
+import gc
+import hashlib
+import multiprocessing
+import time
+import uuid
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+
+def _concurrent_cache_resolve_worker(
+    cache_root: str,
+    sorting_id: str,
+    folder: str,
+    start_event,
+    results,
+) -> None:
+    """Resolve one fake analyzer through the production cache transaction."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = cache_root
+
+    def _load(candidate, _expected, _role, **kwargs):
+        marker = Path(candidate) / "complete.txt"
+        return marker.read_text() if marker.exists() else None
+
+    def _build(staging_folder):
+        count_path = Path(cache_root) / "build_count.txt"
+        count = int(count_path.read_text()) if count_path.exists() else 0
+        count_path.write_text(str(count + 1))
+        time.sleep(0.25)
+        staging_folder = Path(staging_folder)
+        staging_folder.mkdir()
+        (staging_folder / "complete.txt").write_text("complete")
+
+    resolver._load_valid_cached_analyzer = _load
+    start_event.wait(timeout=10)
+    try:
+        value = resolver._resolve_published_analyzer(
+            Path(folder), sorting_id, {}, "display", _build
+        )
+        results.put(("ok", value))
+    except Exception:  # pragma: no cover - relayed to parent assertion
+        import traceback
+
+        results.put(("error", traceback.format_exc()))
+
+
+def _curation_cache_path(curation_ref, waveform_recipe: str) -> Path:
+    """The display analyzer cache path of one curation generation + recipe."""
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        curation_analyzer_path,
+        waveform_recipe_hash,
+    )
+
+    row = resolver._resolve_curation_row(curation_ref)
+    return curation_analyzer_path(
+        row["sorting_id"],
+        row["curation_uuid"],
+        "display",
+        waveform_recipe_hash(
+            resolver._resolve_recipe(waveform_recipe, "display")
+        ),
+        resolver._spikeinterface_version(),
+    )
+
+
+def _folder_content_hash(folder: Path) -> str:
+    """Hash relative paths and file bytes, ignoring filesystem metadata."""
+    digest = hashlib.sha256()
+    for path in sorted(
+        candidate for candidate in folder.rglob("*") if candidate.is_file()
+    ):
+        digest.update(path.relative_to(folder).as_posix().encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def test_curation_cache_path_covers_generation_recipe_role_and_si(
+    monkeypatch, tmp_path
+):
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+
+    monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
+    sorting_id = uuid.uuid4()
+    generation = uuid.uuid4()
+    digest = "a" * 64
+    base = cache.curation_analyzer_path(
+        sorting_id, generation, "display", digest, "0.104.3"
+    )
+    assert base.parent == tmp_path
+    parsed = cache.analyzer_cache_folder_identity(base.name)
+    assert parsed is not None
+    assert parsed.kind == "curation"
+    assert parsed.sorting_id == sorting_id
+    assert parsed.curation_uuid == generation
+    assert parsed.role == "display"
+    assert parsed.waveform_recipe_hash == digest
+    assert cache.is_canonical_analyzer_folder_name(base.name)
+    assert base != cache.curation_analyzer_path(
+        sorting_id, uuid.uuid4(), "display", digest, "0.104.3"
+    )
+    assert base != cache.curation_analyzer_path(
+        sorting_id, generation, "metric", digest, "0.104.3"
+    )
+    assert base != cache.curation_analyzer_path(
+        sorting_id, generation, "display", "b" * 64, "0.104.3"
+    )
+    assert base != cache.curation_analyzer_path(
+        sorting_id, generation, "display", digest, "0.105.0"
+    )
+
+
+def test_curation_cache_path_rejects_invalid_identity(tmp_path, monkeypatch):
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+
+    monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
+    with pytest.raises(ValueError, match="role"):
+        cache.curation_analyzer_path(
+            uuid.uuid4(), uuid.uuid4(), "other", "a" * 64, "0.104.3"
+        )
+    with pytest.raises(ValueError, match="SHA-256"):
+        cache.curation_analyzer_path(
+            uuid.uuid4(), uuid.uuid4(), "display", "short", "0.104.3"
+        )
+
+
+def test_reused_numeric_id_cannot_reuse_generation_cache(tmp_path, monkeypatch):
+    """A delete/recreate generation changes path even if curation_id repeats."""
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+
+    monkeypatch.setattr(cache, "analyzer_cache_root", lambda: tmp_path)
+    sorting_id = uuid.uuid4()
+    recipe_hash = "a" * 64
+    old_generation = cache.curation_analyzer_path(
+        sorting_id, uuid.uuid4(), "display", recipe_hash, "0.104.3"
+    )
+    recreated_generation = cache.curation_analyzer_path(
+        sorting_id, uuid.uuid4(), "display", recipe_hash, "0.104.3"
+    )
+    # curation_id is deliberately absent from the path function: two rows that
+    # both receive reusable numeric id 7 still cannot collide.
+    assert old_generation != recreated_generation
+
+
+def test_spike_content_hash_covers_units_segments_and_frames():
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        hash_sorting_spike_content,
+    )
+
+    first = si.NumpySorting.from_unit_dict(
+        [{0: np.array([10, 20]), 2: np.array([30])}],
+        sampling_frequency=30_000,
+    )
+    same = si.NumpySorting.from_unit_dict(
+        [{2: np.array([30]), 0: np.array([10, 20])}],
+        sampling_frequency=30_000,
+    )
+    changed = si.NumpySorting.from_unit_dict(
+        [{0: np.array([10, 21]), 2: np.array([30])}],
+        sampling_frequency=30_000,
+    )
+    same_frames_different_frequency = si.NumpySorting.from_unit_dict(
+        [{0: np.array([10, 20]), 2: np.array([30])}],
+        sampling_frequency=29_999.999999999996,
+    )
+    assert hash_sorting_spike_content(first) == hash_sorting_spike_content(same)
+    assert hash_sorting_spike_content(first) == hash_sorting_spike_content(
+        same_frames_different_frequency
+    )
+    assert hash_sorting_spike_content(first) != hash_sorting_spike_content(
+        changed
+    )
+
+
+def test_extension_inventory_never_reads_payload(monkeypatch):
+    """Cache hits validate small metadata without decoding extension arrays."""
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+
+    class _Extension:
+        def __init__(self):
+            self.params = {"operator": "average"}
+
+        def get_data(self):
+            raise AssertionError("extension payload must not be read")
+
+    class _Analyzer:
+        format = "memory"
+        extension = _Extension()
+
+        def get_saved_extension_names(self):
+            return ["templates"]
+
+        def get_extension(self, name):
+            assert name == "templates"
+            return self.extension
+
+    monkeypatch.setattr(
+        resolver,
+        "_expected_extensions",
+        lambda _role, _extra=(): ("templates",),
+    )
+    analyzer = _Analyzer()
+    original = resolver._extension_inventory(analyzer, "display")
+    analyzer.extension.params = {"operator": "median"}
+    modified = resolver._extension_inventory(analyzer, "display")
+    assert modified != original
+
+
+def test_folder_storage_fingerprint_tracks_file_stats_and_ignores_manifest(
+    tmp_path,
+):
+    """The cheap disk fingerprint covers analyzer files, not its own manifest."""
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+
+    payload = tmp_path / "extensions" / "templates" / "data.bin"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"stored extension bytes")
+    original = resolver._folder_storage_fingerprint(tmp_path)
+
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text("{}")
+    assert resolver._folder_storage_fingerprint(tmp_path) == original
+
+    payload.write_bytes(b"modified extension bytes with a new size")
+    assert resolver._folder_storage_fingerprint(tmp_path) != original
+
+
+def test_cache_rejects_storage_drift_before_loading_analyzer(
+    monkeypatch, tmp_path
+):
+    """Changed chunks invalidate a cache without opening their array payloads."""
+    import json
+
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+
+    expected = {
+        "sorting_id": "sorting-id",
+        "curation_uuid": "curation-uuid",
+        "curation_id": 1,
+        "role": "display",
+        "curated_unit_ids": (1,),
+        "contributor_map": {},
+        "merged_spike_content_hash": "spike-hash",
+        "merge_policy_version": "policy",
+        "source_artifact_hashes": {},
+        "waveform_recipe_hash": "recipe-hash",
+        "spikeinterface_version": "si-version",
+        "extension_request": {},
+    }
+    payload = tmp_path / "extensions" / "templates" / "data.bin"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"original")
+    manifest = {
+        **expected,
+        "curated_unit_ids": [1],
+        "extension_inventory": {"templates": "params-hash"},
+        "storage_fingerprint": resolver._folder_storage_fingerprint(tmp_path),
+    }
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text(
+        json.dumps(manifest)
+    )
+    payload.write_bytes(b"externally modified with a different size")
+    loads = []
+
+    def observed_loader(folder):
+        loads.append(folder)
+        raise RuntimeError("reached analyzer loader boundary")
+
+    monkeypatch.setattr(resolver, "load_analyzer_folder", observed_loader)
+    assert (
+        resolver._load_valid_cached_analyzer(tmp_path, expected, "display")
+        is None
+    )
+    assert loads == []
+
+    # Positive control: when the fingerprint matches the current files, the
+    # same manifest reaches the loader. Its deliberate failure still returns
+    # None, so the recorded call distinguishes loading from early rejection.
+    manifest["storage_fingerprint"] = resolver._folder_storage_fingerprint(
+        tmp_path
+    )
+    (tmp_path / resolver.CURATION_ANALYZER_MANIFEST).write_text(
+        json.dumps(manifest)
+    )
+    assert (
+        resolver._load_valid_cached_analyzer(tmp_path, expected, "display")
+        is None
+    )
+    assert loads == [tmp_path]
+
+
+def test_open_curation_analyzer_yields_disk_backed_working_copy(
+    monkeypatch, tmp_path
+):
+    """Expert access is a temp-dir ``binary_folder`` copy, removed on exit.
+
+    Never a memory copy (unbounded for long sorts) and never the published
+    cache itself (mutable SI object).
+    """
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+
+    seen: dict = {}
+
+    class _Working:
+        extensions: dict = {}
+
+        def get_saved_extension_names(self):
+            return []
+
+    class _Published:
+        pass
+
+    def copy_folder(published, folder):
+        assert isinstance(published, _Published)
+        seen["folder"] = Path(folder)
+        Path(folder).mkdir(parents=True)
+        return _Working()
+
+    monkeypatch.setattr(resolver, "copy_analyzer_folder", copy_folder)
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+    monkeypatch.setattr(
+        resolver, "_resolve_curation_analyzer", lambda *a, **k: _Published()
+    )
+    with resolver.open_curation_analyzer({}, "recipe") as working:
+        assert isinstance(working, _Working)
+        assert seen["folder"].is_relative_to(tmp_path)
+        assert seen["folder"].exists()
+    assert not seen["folder"].parent.exists()
+
+
+@pytest.mark.parametrize("wants_pc", [False, True])
+def test_evaluation_builds_temporary_analyzers_on_curated_units(
+    tmp_path, monkeypatch, wants_pc
+):
+    """The evaluation builds its temporary analyzers on the curated units."""
+    from types import SimpleNamespace
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import (
+        evaluation_analyzers as _evaluation_analyzers,
+    )
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+
+    sorting_id = uuid.uuid4()
+    recording, curated_sorting = object(), object()
+    sorter_row = {"job_kwargs": {"n_jobs": 1}}
+    spans = [{"start_frame": 0, "end_frame": 100}]
+    waveform_params = {"ms_before": 1.0, "ms_after": 2.0}
+    builds, saved, evaluations = [], {}, []
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+
+    def build(sorting, source, compute_key, **kwargs):
+        assert sorting is curated_sorting
+        assert source is recording
+        assert compute_key == {"sorting_id": sorting_id}
+        assert kwargs["waveform_params"] == waveform_params
+        assert kwargs["statistics_spans"] == spans
+        folder = Path(kwargs["analyzer_folder"])
+        folder.mkdir()
+        analyzer = SimpleNamespace(has_recording=lambda: True)
+        saved[folder] = analyzer
+        builds.append(folder)
+        return analyzer
+
+    monkeypatch.setattr(_sorting_analyzer, "build_analyzer", build)
+    monkeypatch.setattr(
+        _sorting_analyzer, "ensure_extensions", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        _analyzer_cache,
+        "load_analyzer_folder",
+        lambda folder: saved[Path(folder)],
+    )
+    monkeypatch.setattr(
+        _evaluation_analyzers,
+        "read_stored_units",
+        lambda units: curated_sorting,
+    )
+    metrics, labels, merges = object(), {17: ["accept"]}, []
+
+    def evaluate(display, metric, **kwargs):
+        evaluations.append((display, metric))
+        return metrics, labels, merges
+
+    monkeypatch.setattr(_metric_curation, "evaluate_analyzers", evaluate)
+    result = _evaluation_analyzers.evaluate_temporary_analyzers(
+        recording,
+        sorting_inputs=SimpleNamespace(
+            sorting_id=sorting_id,
+            curated_units=object(),
+            expected_unit_ids=[17],
+        ),
+        analyzer_inputs=SimpleNamespace(
+            sorter_row=sorter_row,
+            analyzer_job_kwargs={"n_jobs": 1},
+            display_waveform_params=waveform_params,
+            metric_waveform_params=waveform_params,
+            merged_display_cache=None,
+        ),
+        metric_inputs=object(),
+        wants_pc=wants_pc,
+        observation_metrics=object(),
+        statistics_spans=spans,
+        continuity_spans=None,
+    )
+    assert result == (metrics, labels, merges, None)
+    assert len(builds) == (2 if wants_pc else 1)
+    assert evaluations == [
+        (saved[builds[0]], saved[builds[1]] if wants_pc else None)
+    ]
+    assert all(not folder.exists() for folder in builds)
+
+
+def test_temporary_evaluation_unmaps_analyzers_before_cleanup(
+    tmp_path, monkeypatch
+):
+    """No analyzer file is still mapped when the temporary folder is removed.
+
+    The temporary display and metric analyzers are memory-mapped binary
+    folders, and each holds a reference cycle with its extensions, as
+    SpikeInterface analyzers do. On NFS (the lab's ``temp_dir``) a file
+    still mapped at cleanup makes the removal raise ``Directory not
+    empty``.
+    """
+    from types import SimpleNamespace
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import (
+        evaluation_analyzers as _evaluation_analyzers,
+    )
+    from spyglass.spikesorting.v2._curation import metrics as _metric_curation
+    from spyglass.spikesorting.v2._sorting import analyzer as _sorting_analyzer
+    from spyglass.spikesorting.v2._storage import (
+        analyzer_cache as _analyzer_cache,
+    )
+    from tests.spikesorting.v2._mapped_files import (
+        record_mapped_files_at_cleanup,
+    )
+
+    monkeypatch.setattr(settings, "temp_dir", str(tmp_path))
+
+    def build(sorting, source, compute_key, **kwargs):
+        folder = Path(kwargs["analyzer_folder"])
+        folder.mkdir()
+        np.save(folder / "waveforms.npy", np.zeros((64, 32)))
+
+    def load(folder):
+        analyzer = SimpleNamespace()
+        analyzer.waveforms = np.load(
+            Path(folder) / "waveforms.npy", mmap_mode="r"
+        )
+        analyzer.extension = SimpleNamespace(sorting_analyzer=analyzer)
+        return analyzer
+
+    monkeypatch.setattr(_sorting_analyzer, "build_analyzer", build)
+    monkeypatch.setattr(_analyzer_cache, "load_analyzer_folder", load)
+    monkeypatch.setattr(
+        _evaluation_analyzers, "read_stored_units", lambda units: object()
+    )
+    monkeypatch.setattr(
+        _metric_curation,
+        "evaluate_analyzers",
+        lambda display, metric, **kwargs: (object(), {}, []),
+    )
+    still_mapped = record_mapped_files_at_cleanup(monkeypatch)
+    _evaluation_analyzers.evaluate_temporary_analyzers(
+        object(),
+        sorting_inputs=SimpleNamespace(
+            sorting_id=uuid.uuid4(),
+            curated_units=object(),
+            expected_unit_ids=[],
+        ),
+        analyzer_inputs=SimpleNamespace(
+            sorter_row={},
+            analyzer_job_kwargs={"n_jobs": 1},
+            display_waveform_params={},
+            metric_waveform_params={},
+            merged_display_cache=None,
+        ),
+        metric_inputs=object(),
+        wants_pc=True,
+        observation_metrics=object(),
+        statistics_spans=None,
+        continuity_spans=None,
+    )
+    assert still_mapped, "the evaluation made no temporary folder"
+    assert all(not paths for paths in still_mapped), still_mapped
+
+
+def test_failed_validation_does_not_keep_the_analyzer_alive(
+    tmp_path, monkeypatch
+):
+    """A logged validation failure does not hold the rejected analyzer.
+
+    A log handler can keep its records (pytest's capture does, for a whole
+    test). A record that holds the exception also holds its traceback, whose
+    frames hold the loaded analyzer, so the analyzer's memory-mapped files
+    stay mapped. On NFS that blocks removing the stale cache folder.
+    """
+    import logging
+    import weakref
+
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from spyglass.utils import logger
+
+    class Loaded:
+        pass
+
+    loaded = []
+
+    def load(folder):
+        analyzer = Loaded()
+        loaded.append(weakref.ref(analyzer))
+        return analyzer
+
+    def reject(analyzer):
+        raise RuntimeError("corrupt cache")
+
+    prefix = {"curated_unit_ids": [1]}
+    monkeypatch.setattr(
+        resolver,
+        "_read_manifest",
+        lambda folder: {
+            **prefix,
+            "extension_inventory": {},
+            "storage_fingerprint": "same",
+        },
+    )
+    monkeypatch.setattr(
+        resolver, "_folder_storage_fingerprint", lambda folder: "same"
+    )
+    monkeypatch.setattr(resolver, "load_analyzer_folder", load)
+
+    class KeepRecords(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+
+        def emit(self, record):
+            self.records.append(record)
+
+    keep = KeepRecords()
+    logger.addHandler(keep)
+    try:
+        result = resolver._load_valid_cached_analyzer(
+            tmp_path, prefix, "display", validate_analyzer=reject
+        )
+        assert result is None
+        assert any("corrupt cache" in r.getMessage() for r in keep.records)
+        gc.collect()
+        assert loaded and loaded[0]() is None, "a log record keeps it alive"
+    finally:
+        logger.removeHandler(keep)
+
+
+def test_working_copy_is_unmapped_and_removed_at_exit(tmp_path, monkeypatch):
+    """The working copy's files are unmapped and its folder removed at exit.
+
+    The caller's ``as`` name still holds the analyzer, and on NFS mapped
+    files block removal, which ignores errors.
+    """
+    import spikeinterface.full as si
+
+    from spyglass import settings
+    from spyglass.spikesorting.v2._curation import analyzer as resolver
+    from tests.spikesorting.v2._mapped_files import mapped_paths_under
+
+    if not Path("/proc/self/maps").exists():
+        pytest.skip("needs /proc/self/maps (Linux)")
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[2.0], num_channels=4, num_units=2, seed=0
+    )
+    published = si.create_sorting_analyzer(
+        sorting,
+        recording,
+        format="binary_folder",
+        folder=tmp_path / "published.analyzer",
+        sparse=False,
+    )
+    published.compute(["random_spikes", "waveforms", "templates"])
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(settings, "temp_dir", str(scratch))
+    monkeypatch.setattr(
+        resolver, "_resolve_curation_analyzer", lambda *a, **k: published
+    )
+    with resolver.open_curation_analyzer(object(), "recipe") as working:
+        assert mapped_paths_under(scratch), "the working copy maps no file"
+    assert not mapped_paths_under(scratch)
+    assert not list(scratch.iterdir())
+    del working
+
+
+@pytest.mark.slow
+def test_concurrent_resolve_builds_once(tmp_path):
+    """Two processes serialize; the second sees the complete first publish."""
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("resolver cache concurrency test requires POSIX fork")
+    context = multiprocessing.get_context("fork")
+    sorting_id = str(uuid.uuid4())
+    generation = uuid.uuid4().hex
+    folder = tmp_path / (
+        f"{sorting_id}__curation_{generation}_display_"
+        f"{'a' * 64}_si_{'b' * 16}.analyzer"
+    )
+    start_event = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_concurrent_cache_resolve_worker,
+            args=(str(tmp_path), sorting_id, str(folder), start_event, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    try:
+        start_event.set()
+        for process in processes:
+            process.join(timeout=15)
+            assert not process.is_alive(), "concurrent resolver process hung"
+            assert process.exitcode == 0
+
+        outcomes = sorted(results.get(timeout=2) for _ in processes)
+        assert outcomes == [("ok", "complete"), ("ok", "complete")]
+        assert (tmp_path / "build_count.txt").read_text() == "1"
+        assert (folder / "complete.txt").read_text() == "complete"
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+            process.join(timeout=5)
+        results.close()
+        results.join_thread()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_preview_curation_requires_commit(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """A proposed merge has no final analyzer namespace until committed."""
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _resolve_curation_analyzer,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    unit_ids = sorted(
+        int(unit_id)
+        for unit_id in (Sorting.Unit & sorting_key).fetch("unit_id")
+    )
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationV2.insert_curation(sorting_key)
+        preview = CurationV2.insert_curation(
+            sorting_key,
+            merge_groups=[unit_ids[:2]],
+            parent_curation_id=root["curation_id"],
+            apply_merge=False,
+        )
+        recipe = (Sorting & sorting_key).fetch1("display_waveform_params_name")
+        with pytest.raises(ValueError, match="Commit the merge first"):
+            _resolve_curation_analyzer(preview, recipe)
+    finally:
+        clear_curations_for(sorting_key)
+
+
+def test_extension_params_match_semantics():
+    """Partial requests constrain only their keys; mismatches are not present."""
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        extension_params_match,
+    )
+
+    class _Ext:
+        def __init__(self, params):
+            self.params = params
+
+    class _Analyzer:
+        format = "memory"
+
+        def __init__(self, exts):
+            self._exts = exts
+
+        def has_extension(self, name):
+            return name in self._exts
+
+        def get_extension(self, name):
+            return _Ext(self._exts[name])
+
+    analyzer = _Analyzer({"correlograms": {"bin_ms": 1.0, "window_ms": 50.0}})
+    assert extension_params_match(analyzer, "correlograms", {})
+    assert extension_params_match(analyzer, "correlograms", {"bin_ms": 1})
+    assert not extension_params_match(analyzer, "correlograms", {"bin_ms": 0.2})
+    assert not extension_params_match(
+        analyzer, "correlograms", {"window_ms": 50.0, "bin_ms": 0.5}
+    )
+    assert not extension_params_match(analyzer, "spike_locations", {})
+
+
+def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
+    """Recomputing a parent restores every required dependent (real SI).
+
+    ``templates`` with new operators + ``template_similarity`` requested:
+    similarity is invalidated by SI and must come back; a waveform-window
+    change restores templates from the new window; a correlogram-only change
+    never re-extracts waveforms.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _compute_request_on_copy,
+        extension_params_match,
+    )
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[10.0], num_units=4, num_channels=8, seed=0
+    )
+    base = si.create_sorting_analyzer(
+        sort, rec, format="binary_folder", folder=tmp_path / "base.analyzer"
+    )
+    base.compute(
+        [
+            "random_spikes",
+            "noise_levels",
+            "waveforms",
+            "templates",
+            "correlograms",
+            "template_similarity",
+        ],
+        n_jobs=1,
+        progress_bar=False,
+    )
+
+    def _copy(name):
+        return load_analyzer_folder(
+            base.save_as(format="binary_folder", folder=tmp_path / name).folder
+        )
+
+    # 1. parent recompute + requested dependent
+    request = {
+        "templates": {"operators": ["average", "median"]},
+        "template_similarity": {},
+    }
+    copy1 = _copy("c1.analyzer")
+    wf_mtime = (
+        (tmp_path / "c1.analyzer/extensions/waveforms/waveforms.npy")
+        .stat()
+        .st_mtime_ns
+    )
+    _compute_request_on_copy(
+        copy1, request, {"templates": request["templates"]}, job_kwargs={}
+    )
+    assert copy1.has_extension("template_similarity")
+    assert set(copy1.get_extension("templates").params["operators"]) >= {
+        "average",
+        "median",
+    }
+    assert (
+        tmp_path / "c1.analyzer/extensions/waveforms/waveforms.npy"
+    ).stat().st_mtime_ns == wf_mtime  # waveforms untouched
+
+    # 2. waveform window change restores templates from the new window
+    request = {"waveforms": {"ms_before": 0.5, "ms_after": 1.0}}
+    copy2 = _copy("c2.analyzer")
+    _compute_request_on_copy(copy2, request, dict(request), job_kwargs={})
+    assert extension_params_match(copy2, "waveforms", request["waveforms"])
+    templates = copy2.get_extension("templates")
+    assert templates.nbefore == copy2.get_extension("waveforms").nbefore
+    for name in ("random_spikes", "noise_levels", "templates", "waveforms"):
+        assert copy2.has_extension(name)
+
+    # 3. leaf change: correlograms only, waveforms never re-extracted
+    request = {"correlograms": {"bin_ms": 0.2}}
+    copy3 = _copy("c3.analyzer")
+    wf_mtime = (
+        (tmp_path / "c3.analyzer/extensions/waveforms/waveforms.npy")
+        .stat()
+        .st_mtime_ns
+    )
+    _compute_request_on_copy(copy3, request, dict(request), job_kwargs={})
+    assert copy3.get_extension("correlograms").params["bin_ms"] == 0.2
+    assert copy3.has_extension("template_similarity")
+    assert (
+        tmp_path / "c3.analyzer/extensions/waveforms/waveforms.npy"
+    ).stat().st_mtime_ns == wf_mtime
+
+
+def test_compute_request_on_copy_keeps_si_metric_defaults(tmp_path):
+    """Recomputing stored template metrics leaves SI's defaults alone (real SI).
+
+    ``templates`` is recomputed, so SI drops the dependent
+    ``template_metrics`` and it is recomputed at its stored params, which
+    carry a non-default ``recovery_window_ms``. SI merges those params into
+    ``RecoverySlope``'s class-level defaults unless the compute is isolated.
+    """
+    import spikeinterface as si
+    from spikeinterface.metrics.template.metrics import RecoverySlope
+
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        load_analyzer_folder,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _compute_request_on_copy,
+    )
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    # SI 0.104.3 default (spikeinterface/metrics/template/metrics.py:1084).
+    assert RecoverySlope.metric_params == {"recovery_window_ms": 0.7}
+    defaults_before = RecoverySlope.metric_params
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[10.0], num_units=4, num_channels=4, seed=0
+    )
+    analyzer = si.create_sorting_analyzer(
+        sort, rec, format="binary_folder", folder=tmp_path / "a.analyzer"
+    )
+    analyzer.compute(
+        ["random_spikes", "noise_levels", "waveforms", "templates"],
+        n_jobs=1,
+        progress_bar=False,
+    )
+    with isolated_si_metric_defaults():
+        analyzer.compute(
+            "template_metrics",
+            metric_names=["recovery_slope"],
+            metric_params={"recovery_slope": {"recovery_window_ms": 0.5}},
+        )
+    analyzer = load_analyzer_folder(tmp_path / "a.analyzer")
+
+    request = {
+        "templates": {"operators": ["average", "median"]},
+        "template_metrics": {},
+    }
+    _compute_request_on_copy(
+        analyzer, request, {"templates": request["templates"]}, job_kwargs={}
+    )
+
+    applied = analyzer.get_extension("template_metrics").params
+    assert applied["metric_params"]["recovery_slope"] == {
+        "recovery_window_ms": 0.5
+    }
+    assert RecoverySlope.metric_params is defaults_before
+    assert RecoverySlope.metric_params == {"recovery_window_ms": 0.7}

@@ -196,6 +196,8 @@ def test_replace_still_reaches_immutable_parameter_guard():
             "ArtifactDetectionParameters",
             "artifact_detection_params_name",
         ),
+        ("sorting", "AnalyzerWaveformParameters", "waveform_params_name"),
+        ("sorting", "SorterParameters", "sorter_params_name"),
         (
             "motion",
             "MotionEstimationParameters",

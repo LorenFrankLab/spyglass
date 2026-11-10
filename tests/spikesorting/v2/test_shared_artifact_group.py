@@ -258,6 +258,157 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_artifact_detection_delete_tolerates_already_gone_interval_list():
+    """``RecordingArtifactDetection.delete`` does not raise when the paired
+    IntervalList rows were already removed.
+
+    Uses a dedicated planted selection so the shared fixture is untouched.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+
+    nwb = "a25_delete_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    params_name = "v2_a25_delete_params"
+    ilist_name = artifact_detection_interval_list_name(aid)
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingArtifactSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": params_name,
+                "recording_id": rec_id,
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+        # The IntervalList row the delete would resolve and try to clean.
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+                "valid_times": np.empty((0, 2)),
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.RemovedInterval.insert1(
+            {
+                "artifact_detection_id": aid,
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+            }
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        # Delete the IntervalList row out of band, keeping the ownership part.
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb,
+                    "interval_list_name": ilist_name,
+                }
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+        # Must not raise.
+        (RecordingArtifactDetection & {"artifact_detection_id": aid}).delete(
+            safemode=False
+        )
+        assert (
+            len(RecordingArtifactDetection & {"artifact_detection_id": aid})
+            == 0
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                RecordingArtifactSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_detection_delete_refuses_master_without_part_rows():
+    """Deleting a ``RecordingArtifactDetection`` master with no
+    ``RemovedInterval`` part row raises rather than guessing interval
+    ownership, and leaves the master in place."""
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    nwb = "ownership_nopart_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingArtifactSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": "v2_ownership_nopart_params",
+                "recording_id": rec_id,
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ValueError, match="Refusing to guess"):
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete(safemode=False)
+        assert (
+            len(RecordingArtifactDetection & {"artifact_detection_id": aid})
+            == 1
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                RecordingArtifactSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_shared_group_member_set_frozen(monkeypatch):
     """A ``SharedArtifactGroup.Member`` added after selection makes
     ``make_fetch`` raise a member-drift error; an unedited selection fetches."""
