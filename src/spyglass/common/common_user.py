@@ -169,10 +169,17 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         hashing runs. A clean install takes the full path and is stored for
         recompute.
 
+        The insert hook runs first, before an id is chosen. ``insert1`` below
+        re-enters it otherwise, and the inner call would insert the row this
+        one then collides with.
+
         Parameters
         ----------
         env_id : str, optional
             Preferred environment id. A numeric suffix is added when taken.
+            A flagged install whose hook has just logged the environment
+            returns that row's id instead, as it does for any environment
+            already on record.
 
         Returns
         -------
@@ -180,17 +187,18 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             ``{"env_id": <id>}``, or ``{"env_id": None}`` when the environment
             could not be captured.
         """
+        self._log_install_once()
 
         if spyglass_install.has_local_changes:
             return self._log_dirty_env(env_id)
 
+        # Back on a reproducible install: stop the clock on any open dirty
+        # episode before any return, including when the environment cannot be
+        # captured or is already on record.
+        self._mark_dirty_resolved()
+
         if not self.env:  # if conda dump fails, warned above
             return {"env_id": None}
-
-        # Back on a reproducible install: stop the clock on any open dirty
-        # episode before returning, including when the environment itself is
-        # already on record.
-        self._mark_dirty_resolved()
 
         if self.matching_env_id:  # if env is already stored
             return {"env_id": self.matching_env_id}
@@ -433,15 +441,23 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         Called when a full row is logged: the user is back on a reproducible
         install, so the escalation clock for their dirty episode stops. Uses
         server ``NOW()``, matching :data:`DIRTY_DAYS_SQL`.
+
+        Guarded: it runs on the way to every full row, including on an
+        instance whose table predates the release-note ``alter()``, where
+        restricting on ``resolved_at`` raises and would take the caller's
+        populate with it.
         """
         dj_user = dj.config.get("database.user", "")
-        open_rows = self.unresolved_dirty() & f"env_id LIKE '{dj_user}_%'"
-        for env_id in open_rows.fetch("env_id"):
-            self.connection.query(
-                f"UPDATE {self.full_table_name} "
-                + "SET `resolved_at` = NOW() "
-                + f"WHERE `env_id` = '{env_id}'"
-            )
+        try:
+            open_rows = self.unresolved_dirty() & f"env_id LIKE '{dj_user}_%'"
+            for env_id in open_rows.fetch("env_id"):
+                self.connection.query(
+                    f"UPDATE {self.full_table_name} "
+                    + "SET `resolved_at` = NOW() "
+                    + f"WHERE `env_id` = '{env_id}'"
+                )
+        except Exception as exc:
+            logger.debug(f"could not resolve dirty rows: {exc}")
 
     def dirty_installs(self) -> "dj.expression.QueryExpression":
         """Return active, unresolved dirty installs with days_since_warn.

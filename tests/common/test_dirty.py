@@ -2317,6 +2317,87 @@ def test_episode_after_resolution_starts_fresh(user_env_tbl, same_commit_pair):
     assert list(user_env_tbl.dirty_installs().fetch("env_id")) == [second]
 
 
+@pytest.mark.parametrize(
+    "info_name", ["dirty_install_info", "stale_install_info"]
+)
+def test_insert_current_env_survives_its_own_hook(
+    user_env_tbl, request, info_name
+):
+    """A direct call logs one row, though its own insert re-enters the hook.
+
+    `insert1` calls `BaseMixin.insert`, which logs the install, which calls
+    this method again. The inner call inserted first, so the outer one landed
+    on it: a primary-key `DuplicateError` for a flagged install taking the
+    default id, an `env_hash` collision for a clean-but-stale one, and two
+    partial rows for one episode when the ids differed. `Recompute.md` teaches
+    this call, so it is reached directly and not only through the hook.
+    """
+    from spyglass.utils.mixins.base import BaseMixin
+
+    info = request.getfixturevalue(info_name)
+    user_env_tbl.delete(safemode=False)
+    _cache_admin_check(is_admin=False)  # the test user is an admin otherwise
+
+    # The hook is gated off under test_mode, so the re-entry it causes can
+    # only be reproduced by ungating this one instance for this one call.
+    user_env_tbl.__dict__["_test_mode"] = False
+    BaseMixin._logged_install_mode = False
+    try:
+        with _as_install(**info):
+            for attr in ("env", "env_hash", "matching_env_id", "this_env"):
+                user_env_tbl.__dict__.pop(attr, None)
+            key = user_env_tbl.insert_current_env()
+    finally:
+        BaseMixin._logged_install_mode = True  # leave the session gated
+        user_env_tbl.__dict__.pop("_test_mode", None)
+
+    assert key["env_id"] is not None
+    assert len(user_env_tbl) == 1
+
+
+def test_resolution_survives_a_failed_capture(user_env_tbl, same_commit_pair):
+    """A clean session that cannot capture its env still stops the clock.
+
+    Resolution ran after the environment check, so a `pip freeze` line the
+    parser rejects left the row open, and `log_install` then cleared the
+    marker so no later session tried again. The user kept receiving email
+    after discarding their edits.
+    """
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+    dirty_id = _log_as(user_env_tbl, dirty)["env_id"]
+
+    with _as_install(**clean):
+        for attr in ("env_hash", "matching_env_id", "this_env"):
+            user_env_tbl.__dict__.pop(attr, None)
+        user_env_tbl.__dict__["env"] = {}  # capture failed
+        key = user_env_tbl.insert_current_env()
+    user_env_tbl.__dict__.pop("env", None)
+
+    assert key == {"env_id": None}
+    assert (user_env_tbl & f'env_id="{dirty_id}"').fetch1("resolved_at")
+    assert not user_env_tbl.unresolved_dirty()
+
+
+def test_resolve_survives_a_table_without_resolved_at(user_env_tbl):
+    """Resolution must not propagate a pre-alter restriction error.
+
+    It now runs on the way to every full row, including on an instance whose
+    table predates the release-note `alter()`, where restricting on
+    `resolved_at` raises and would take the caller's own populate with it.
+    """
+    import datajoint as dj
+
+    with patch.object(
+        type(user_env_tbl),
+        "unresolved_dirty",
+        side_effect=dj.DataJointError(
+            "Attribute `resolved_at` is not found in query"
+        ),
+    ):
+        user_env_tbl._mark_dirty_resolved()  # must not raise
+
+
 def test_stale_install_is_not_dirty(user_env_tbl, stale_install_info):
     """A clean-but-stale install gets a full row and is never escalated.
 

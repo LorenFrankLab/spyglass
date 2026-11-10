@@ -23,7 +23,9 @@ info.connection.query(
     + "ADD UNIQUE INDEX (`github_user_name`)"
 )
 
-# Add the dirty-install columns to UserEnvironment, and make env nullable
+# Add the dirty-install columns to UserEnvironment, and make env nullable.
+# Until this runs, recompute can reuse an environment already on record but
+# cannot log a new one, and no install is flagged as dirty or stale.
 from spyglass.common.common_user import UserEnvironment
 
 UserEnvironment().alter()
