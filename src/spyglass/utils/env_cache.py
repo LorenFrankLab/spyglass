@@ -7,7 +7,7 @@ single source of truth.
 
 Cache-file format
 -----------------
-``{temp_dir}/.spyglass_conda_{os_user}_{md5(sys.prefix)[:8]}.yaml``
+``{temp_dir}/.spyglass_conda_{os_user}_{md5(CONDA_PREFIX|sys.prefix)[:8]}.yaml``
 
 Contains two top-level keys::
 
@@ -169,7 +169,7 @@ class CondaEnvCache:
     def _cache_path(self) -> Optional[Path]:
         """Scoped cache file path, or ``None`` when ``temp_dir`` is unavailable.
 
-        Keyed on a digest of ``sys.prefix`` rather than the conda env name, so
+        Keyed on a digest of both prefixes rather than the conda env name, so
         two hosts whose environments share a name but not a prefix do not share
         one cache file on a common ``temp_dir``.
         """
@@ -179,7 +179,14 @@ class CondaEnvCache:
             return None
 
         os_user = getpass.getuser()
-        prefix_key = md5(sys_prefix.encode()).hexdigest()[:8]
+        # `conda env export` reads the activated env (CONDA_PREFIX) and
+        # `pip freeze` reads this interpreter (sys.prefix). A key on one alone
+        # files one env's export under another env's name whenever the two
+        # differ, as they do for a Jupyter kernel or an interpreter invoked by
+        # path without activation.
+        conda_prefix = os.environ.get("CONDA_PREFIX", "")
+        key = f"{conda_prefix}|{sys_prefix}"
+        prefix_key = md5(key.encode()).hexdigest()[:8]
         return Path(temp_dir) / f".spyglass_conda_{os_user}_{prefix_key}.yaml"
 
     @cached_property
@@ -456,6 +463,12 @@ class CondaEnvCache:
         """
         if self._cached_conda is _NOT_COMPUTED or not self._cached_conda:
             return {}
+        if self._cached_pip is _NOT_COMPUTED:
+            # `pip freeze` failed: only a caller that asked for pip data gets
+            # here, so treating its absence as "no pip packages" would store a
+            # full environment with has_editable=0, which `is_trusted` reads
+            # as examined and clean.
+            return {}
 
         # Reset merge state so re-runs are safe
         self.has_editable = False
@@ -484,10 +497,7 @@ class CondaEnvCache:
         conda_export["dependencies"] = conda_deps
 
         # Walk pip freeze, extending / overriding _conda_pip_dict
-        pip_list = (
-            self._cached_pip if self._cached_pip is not _NOT_COMPUTED else []
-        )
-        for line in pip_list:
+        for line in self._cached_pip:
             if not self._parse_pip_line(line):
                 return {}  # parse error already logged
 

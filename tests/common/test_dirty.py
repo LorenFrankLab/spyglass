@@ -668,6 +668,51 @@ def test_cache_scoped_by_env(tmp_path, monkeypatch, conda_env_cache_cls):
     assert path_a != path_b
 
 
+def test_cache_scoped_by_activated_env(
+    tmp_path, monkeypatch, conda_env_cache_cls
+):
+    """One interpreter under two activated envs gets two cache paths.
+
+    `conda env export` reads `CONDA_PREFIX` while `pip freeze` reads
+    `sys.prefix`. Keyed on the latter alone, a script started by path from
+    another activated env stored that env's export under this env's name, and
+    a correctly activated session then read it and ran no export at all.
+    """
+    monkeypatch.setattr("spyglass.settings.temp_dir", str(tmp_path))
+    monkeypatch.setattr(
+        "spyglass.utils.env_cache.sys_prefix", "/opt/envs/legacy"
+    )
+
+    monkeypatch.setenv("CONDA_PREFIX", "/opt/envs/base")
+    with patch("spyglass.utils.env_cache.getpass.getuser", return_value="user"):
+        path_unactivated = conda_env_cache_cls()._cache_path
+
+    monkeypatch.setenv("CONDA_PREFIX", "/opt/envs/legacy")
+    with patch("spyglass.utils.env_cache.getpass.getuser", return_value="user"):
+        path_activated = conda_env_cache_cls()._cache_path
+
+    assert path_unactivated != path_activated
+
+
+def test_failed_pip_freeze_stores_nothing(tmp_path, make_cache):
+    """A failed `pip freeze` yields no environment, not a trusted one.
+
+    Substituting an empty pip list left a full export with `has_editable=0`,
+    which `UserEnvironment.is_trusted` reads as examined and clean, so a venv
+    without pip could log a row that gates recompute open.
+    """
+    cache, _ = make_cache(tmp_path)
+
+    with patch(
+        "spyglass.utils.env_cache.sub_run",
+        side_effect=[_proc(_CONDA_STDOUT), _proc("", returncode=1)],
+    ):
+        merged = cache.get(with_pip=True)
+
+    assert merged == {}
+    assert cache.get() != {}  # the conda half is still usable on its own
+
+
 def test_atomic_write(tmp_path, make_cache):
     """save() produces a valid YAML file; a second save() overwrites cleanly."""
     cache, cache_path = make_cache(tmp_path)
@@ -2403,7 +2448,13 @@ def test_user_scoping_does_not_reach_another_user(
         }
     )
 
+    mine = None
     try:
+        # Read back what MySQL stored: a `timestamp` column has no fractional
+        # part and rounds to the nearest second, so a client-side expectation
+        # is right only about half the time.
+        before = (user_env_tbl & f'env_id="{other_id}"').fetch1("last_seen")
+
         mine = _log_as(user_env_tbl, dirty)["env_id"]
         assert mine != other_id  # its own episode, not the other user's
 
@@ -2412,10 +2463,10 @@ def test_user_scoping_does_not_reach_another_user(
 
         assert other["resolved_at"] is None  # not this user's to resolve
         assert other["spyglass_commit"] == "0ther123"  # never refreshed
-        assert other["last_seen"] == stamped.replace(microsecond=0)
+        assert other["last_seen"] == before
         assert other_id in list(user_env_tbl.dirty_installs().fetch("env_id"))
     finally:
-        for eid in (other_id, mine):
+        for eid in filter(None, (other_id, mine)):
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
 
 
