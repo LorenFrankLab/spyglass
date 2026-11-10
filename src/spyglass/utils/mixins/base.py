@@ -40,9 +40,9 @@ class BaseMixin:
         # because the insert it makes re-enters this hook.
         BaseMixin._logged_install_mode = True
 
-        from spyglass.common.common_user import UserEnvironment
+        try:  # the import is inside the guard: it declares a schema
+            from spyglass.common.common_user import UserEnvironment
 
-        try:
             UserEnvironment().log_install()
         except Exception as exc:  # never block the caller's own write
             self._logger.debug(f"dirty env logging failed: {exc}")

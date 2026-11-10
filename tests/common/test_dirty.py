@@ -1,7 +1,7 @@
 """Tests for the dirty-install and unification across conda calls.
 
 Split into two groups:
-  Mock-based (no DB): CondaEnvCache, get_install_info, warn_if_dirty logic
+  Mock-based (no DB): CondaEnvCache and SpyglassInstall, including warnings
   DB-required:        UserEnvironment dirty-column integration
 
 Run with: conda run -n dirty pytest tests/common/test_dirty.py --no-teardown
@@ -78,7 +78,7 @@ def _git_mock(
     """Return a ``git_utils.sub_run`` side effect keyed on the git subcommand.
 
     Dispatching on the command rather than on call order: which git commands
-    ``_compute_install_info`` runs, and in what sequence, is an implementation
+    ``SpyglassInstall`` runs, and in what sequence, is an implementation
     detail, and a positional ``side_effect`` list has to be re-shuffled every
     time it moves. Each argument takes a string (stdout, returncode 0) or a
     ``CompletedProcess`` for a non-zero exit.
@@ -892,7 +892,7 @@ def test_delim_split_none():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#     get_install_info / _compute_install_info (mock-based, no DB)
+#     SpyglassInstall (mock-based, no DB)
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -1518,7 +1518,7 @@ def test_clean_current_clone_is_official(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#     warn_if_dirty (mock DB, no real connection needed)
+#     SpyglassInstall.warn (no DB)
 # ═════════════════════════════════════════════════════════════════════════════
 
 
@@ -2109,7 +2109,7 @@ def test_log_install_does_not_cache_a_failed_admin_check():
 
 
 def test_warn_once_is_idempotent(caplog):
-    """_warn_once warns on the first call only.
+    """warn_once warns on the first call only.
 
     No retry path: the warning needs no database, so there is no "not ready
     yet" state for a later call to recover from.
