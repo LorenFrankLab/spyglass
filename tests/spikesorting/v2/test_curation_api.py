@@ -20,6 +20,22 @@ def test_non_root_facade_requires_typed_parent():
         save_manual_curation(parent_curation={"curation_id": -1})
 
 
+def test_merge_operations_have_one_public_form():
+    """Merges and reviews start from the facade objects, not module functions."""
+    from spyglass.spikesorting.v2 import curation_api, review_api
+
+    for name in (
+        "commit_merges",
+        "create_initial_curation",
+        "merge_and_evaluate",
+        "preview_merges",
+    ):
+        assert not hasattr(curation_api, name)
+    assert not hasattr(review_api, "start_review")
+    for method in ("preview_merges", "commit_merges", "start_review"):
+        assert callable(getattr(curation_api.CurationRef, method))
+
+
 def test_merge_group_normalization_is_lossless():
     """Malformed merge requests fail loudly instead of selecting other units.
 
@@ -180,6 +196,48 @@ def test_evaluation_plots_delegate_to_curation_evaluation(monkeypatch):
         ("plot_si_quality_metrics", key, (), {"compute_missing": True}),
         ("plot_si_template_metrics", key, (), {"backend": "ipywidgets"}),
         ("investigate_pair_peaks", key, ([(0, 1)],), {}),
+    ]
+
+
+def test_curation_plots_delegate_to_visualization(monkeypatch):
+    """``ref.plots`` passes the ref and arguments to each module function."""
+    from spyglass.spikesorting.v2 import visualization
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+
+    calls = []
+
+    def recorder(name):
+        def record(*args, **kwargs):
+            calls.append((name, args, kwargs))
+            return name
+
+        return record
+
+    for function in (
+        "plot_sorting_summary",
+        "plot_unit_summary",
+        "plot_waveforms",
+        "plot_spikes_on_traces",
+        "plot_unit_locations",
+    ):
+        monkeypatch.setattr(visualization, function, recorder(function))
+    ref = CurationRef(uuid.uuid4(), 1, uuid.uuid4())
+
+    assert ref.plots.sorting_summary(backend="figpack") == (
+        "plot_sorting_summary"
+    )
+    ref.plots.unit_summary(3, compute_missing=True)
+    ref.plots.waveforms([3, 4], backend="ipywidgets")
+    ref.plots.waveforms()
+    ref.plots.spikes_on_traces()
+    ref.plots.unit_locations(compute_missing=True)
+    assert calls == [
+        ("plot_sorting_summary", (ref,), {"backend": "figpack"}),
+        ("plot_unit_summary", (ref, 3), {"compute_missing": True}),
+        ("plot_waveforms", (ref, [3, 4]), {"backend": "ipywidgets"}),
+        ("plot_waveforms", (ref, None), {}),
+        ("plot_spikes_on_traces", (ref,), {}),
+        ("plot_unit_locations", (ref,), {"compute_missing": True}),
     ]
 
 
