@@ -538,6 +538,17 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         space-separated when there is more than one. Only users whose
         ``days_since_warn`` exceeds ``WARN_DIRTY_ENV_DAYS`` appear.
 
+        Admins are excluded. ``log_install`` exempts them, but
+        ``insert_current_env`` has no admin check and recompute reaches it
+        through ``RecordingRecomputeSelection.env_dict`` on every spike
+        sorting make, so an admin on a dirty clone accumulates partial rows
+        that no clean session of theirs resolves.
+
+        An absent commit or clone path is written as ``unknown`` rather than
+        left empty: a dirty wheel has neither, and ``run_jobs.sh`` reads these
+        lines with ``IFS=$'\\t'``, where bash collapses adjacent tabs and
+        shifts every later field left.
+
         Called by ``maintenance_scripts/cleanup.py``; output is consumed by
         ``run_jobs.sh`` which sends emails via ``script_utils.sh``.  A user with
         no ``LabMember.LabMemberInfo`` email record is reported once to stderr.
@@ -560,13 +571,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             return
 
         member_rows = LabMember.LabMemberInfo.fetch(
-            "datajoint_user_name", "google_user_name", as_dict=True
+            "datajoint_user_name", "google_user_name", "admin", as_dict=True
         )
         email_by_dj_user = {
             m["datajoint_user_name"]: m["google_user_name"]
             for m in member_rows
             if m["datajoint_user_name"]
         }
+        admins = {m["datajoint_user_name"] for m in member_rows if m["admin"]}
         known_users = sorted(email_by_dj_user, key=len, reverse=True)
 
         by_email: Dict[str, dict] = {}
@@ -577,6 +589,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 (u for u in known_users if env_id.startswith(u + "_")),
                 None,
             )
+            if dj_user in admins:  # exempt, and not an unmatched user
+                continue
             user_email = email_by_dj_user.get(dj_user) if dj_user else None
             if user_email is None:
                 unmatched.add(dj_user or env_id)
@@ -587,11 +601,12 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             # One clone may be logged at several commits. Name it once, at
             # its newest commit, i.e. the smallest days_since_warn, so the
             # email says where the clone is now.
-            path = row["dirty_path"] or ""
+            path = row["dirty_path"] or "unknown"
             age = row["days_since_warn"]
             seen = entry["clones"].get(path)
             if seen is None or age < seen[0]:
-                entry["clones"][path] = (age, row["spyglass_commit"] or "")
+                commit = row["spyglass_commit"] or "unknown"
+                entry["clones"][path] = (age, commit)
 
         for name in sorted(unmatched):
             print(

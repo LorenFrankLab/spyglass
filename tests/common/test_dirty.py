@@ -2942,9 +2942,21 @@ def test_write_dirty_notifications_writes_tsv(user_env_tbl, tmp_path):
         },
     ]
     member_rows = [
-        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
-        {"datajoint_user_name": "alice_bob", "google_user_name": "ab@lab.org"},
-        {"datajoint_user_name": "carol", "google_user_name": "carol@lab.org"},
+        {
+            "datajoint_user_name": "alice",
+            "google_user_name": "alice@lab.org",
+            "admin": 0,
+        },
+        {
+            "datajoint_user_name": "alice_bob",
+            "google_user_name": "ab@lab.org",
+            "admin": 0,
+        },
+        {
+            "datajoint_user_name": "carol",
+            "google_user_name": "carol@lab.org",
+            "admin": 0,
+        },
     ]
     mock_result = MagicMock()
     mock_result.fetch = MagicMock(return_value=overdue_rows)
@@ -3002,8 +3014,16 @@ def test_write_dirty_notifications_one_line_per_user(user_env_tbl, tmp_path):
         },
     ]
     member_rows = [
-        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
-        {"datajoint_user_name": "bob", "google_user_name": "bob@lab.org"},
+        {
+            "datajoint_user_name": "alice",
+            "google_user_name": "alice@lab.org",
+            "admin": 0,
+        },
+        {
+            "datajoint_user_name": "bob",
+            "google_user_name": "bob@lab.org",
+            "admin": 0,
+        },
     ]
     mock_result = MagicMock()
     mock_result.fetch = MagicMock(return_value=overdue_rows)
@@ -3082,7 +3102,11 @@ def test_write_dirty_notifications_skips_unknown_user(
         },
     ]
     member_rows = [
-        {"datajoint_user_name": "alice", "google_user_name": "alice@lab.org"},
+        {
+            "datajoint_user_name": "alice",
+            "google_user_name": "alice@lab.org",
+            "admin": 0,
+        },
     ]
     mock_result = MagicMock()
     mock_result.fetch = MagicMock(return_value=overdue_rows)
@@ -3098,6 +3122,102 @@ def test_write_dirty_notifications_skips_unknown_user(
 
     assert out_file.read_text().strip() == ""  # nothing written
     assert "ghost_env_00" in capsys.readouterr().err
+
+
+def test_write_dirty_notifications_skips_admins(user_env_tbl, tmp_path):
+    """An admin's overdue row is not emailed.
+
+    `log_install` exempts admins, but `insert_current_env` has no admin check
+    and recompute reaches it through `RecordingRecomputeSelection.env_dict` on
+    every spike sorting make. An admin on a dirty clone therefore accumulates
+    rows that no clean session of theirs resolves, and they were emailed about
+    them from day 30, with a copy to the admin address on every cron run.
+    """
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "root_env_00",
+            "days_since_warn": 45,
+            "spyglass_commit": "aaa1111",
+            "dirty_path": "/home/root/spyglass",
+        },
+        {
+            "env_id": "dave_env_00",
+            "days_since_warn": 45,
+            "spyglass_commit": "ddd4444",
+            "dirty_path": "/home/dave/spyglass",
+        },
+    ]
+    member_rows = [
+        {
+            "datajoint_user_name": "root",
+            "google_user_name": "root@lab.org",
+            "admin": 1,
+        },
+        {
+            "datajoint_user_name": "dave",
+            "google_user_name": "dave@lab.org",
+            "admin": 0,
+        },
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo,
+            "fetch",
+            return_value=member_rows,
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    lines = [ln for ln in out_file.read_text().splitlines() if ln]
+    assert len(lines) == 1
+    assert lines[0].startswith("dave@lab.org")
+    assert "root" not in out_file.read_text()
+
+
+def test_write_dirty_notifications_names_missing_fields(user_env_tbl, tmp_path):
+    """A dirty wheel has no clone path and no commit, so both read `unknown`.
+
+    Left empty, the email said "repository at  is not on an official commit
+    ()", and `run_jobs.sh` reads the line with `IFS=$'\\t'`, where bash
+    collapses the adjacent tabs and shifts the path into the commit field.
+    """
+    import spyglass.common.common_lab as _lab_mod
+
+    overdue_rows = [
+        {
+            "env_id": "erin_env_00",
+            "days_since_warn": 40,
+            "spyglass_commit": None,
+            "dirty_path": None,
+        },
+    ]
+    member_rows = [
+        {
+            "datajoint_user_name": "erin",
+            "google_user_name": "erin@lab.org",
+            "admin": 0,
+        },
+    ]
+    mock_result = MagicMock()
+    mock_result.fetch = MagicMock(return_value=overdue_rows)
+    out_file = tmp_path / "dirty.tsv"
+
+    with patch.object(user_env_tbl, "dirty_installs", return_value=mock_result):
+        with patch.object(
+            _lab_mod.LabMember.LabMemberInfo,
+            "fetch",
+            return_value=member_rows,
+        ):
+            user_env_tbl.write_dirty_notifications(str(out_file))
+
+    line = out_file.read_text().strip()
+    assert line == "erin@lab.org\t40\tunknown\tunknown"
+    assert line.split("\t") == ["erin@lab.org", "40", "unknown", "unknown"]
 
 
 def test_env_hash_clean_backward_compat(user_env_tbl, clean_install_info):
