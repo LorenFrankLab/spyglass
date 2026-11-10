@@ -7,8 +7,9 @@ on:
     branches:
       - '!test_branch'
       - '!documentation'
-  schedule:  # once a day at midnight UTC
-    - cron: '0 0 * * *'
+  schedule:  # once a day at midnight UTC; Sunday's run adds pytest-legacy
+    - cron: '0 0 * * 1-6'
+    - cron: '0 0 * * 0'
   pull_request: # requires approval for first-time contributors
     types: [synchronize, opened, reopened, labeled, closed]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
@@ -37,10 +38,14 @@ jobs:
     timeout-minutes: 90  # backstop; the step caps below are the real limits
     defaults:
      run:
-       shell: bash -l {0}
+       shell: bash -el {0}
+    outputs:  # the Codecov flag and name for the combined report
+      mode: ${{ steps.test_mode.outputs.mode }}
+      description: ${{ steps.test_mode.outputs.description }}
     env:
       OS: ubuntu-latest
       PYTHON: '3.10'
+      COVERAGE_FILE: coverage-run-tests.data  # combined in the coverage job
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -90,7 +95,7 @@ jobs:
     - name: Run pip install for test deps
       timeout-minutes: 15
       run: |
-        pip install --quiet .[test]
+        pip install --quiet .[test,spikesorting]
     - name: Cache test data
       timeout-minutes: 10
       id: cache-test-data
@@ -118,8 +123,11 @@ jobs:
         VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
-        curl_opts() { # Declare func with download options
-          curl -L --output "$1""$2" "$BASEURL""$3"
+        curl_opts() { # Download $3 to $1$2
+          # --fail: an HTTP error fails the step; .part: never cache a partial file
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
         }
         curl_opts $RAW_DIR $NWBFILE $NWB_URL
         curl_opts $VID_DIR $VID_ONE $VID1URL
@@ -170,15 +178,465 @@ jobs:
         # --base-dir matches the conftest default (./tests/_data/) and the
         # path covered by the cache-test-data step above. Pinned explicitly
         # so cache hits are stable across any future conftest default change.
-        pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
-          --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
+        pytest --lane core --no-docker --no-dlc --base-dir ./tests/_data/ \
+          --cov-config=.coveragerc --cov=spyglass-neuro \
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/
-    - name: Upload coverage reports to Codecov
+    - name: Upload raw coverage data
       timeout-minutes: 10
-      if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-run-tests
+        path: coverage-run-tests.data
+        if-no-files-found: ignore
+
+  pytest-v2: # Spikesorting V2
+    name: pytest-v2 ${{ matrix.shard.name }} (SpikeInterface 0.104)
+    # Skip if PR is closed but not merged
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    # Shards are balanced by runtime; separate-env lanes run beside them.
+    # New full-sort test file: add it to INTEGRATION_MODULES in tests/_ci_lanes.py.
+    env:
+      # CPU torch wheels; the CUDA ones have filled the runner disk.
+      PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+      COVERAGE_FILE: coverage-v2-${{ matrix.shard.name }}.data
+      # Push and PR: unit and db_unit tiers plus smoke tests. Schedule and
+      # dispatch: every tier.
+      V2_SCOPE: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && '--v2-pr' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch'
+          && '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"},{"name":"motion-benchmark"}]'
+          || '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"}]') }}
+    # Playwright 1.55 cannot install Chromium on ubuntu-26.04 (ubuntu-latest).
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash -el {0}
+    services:
+      mysql:
+        image: datajoint/mysql:8.0
+        env:
+          MYSQL_DATABASE: localhost
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libmysqlclient-dev
+    - name: Set up conda (SpikeInterface 0.104 environment)
+      # NEURON/LFPy are only for generating fixtures, which this job downloads.
+      # The matching extra gets its own env in a later step.
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        activate-environment: spyglass_spikesorting_v2
+        environment-file: environments/environment_spikesorting_v2.yml
+        miniforge-version: latest
+        use-mamba: true
+    - name: Verify the v2 environment (pip check + sorter runtime)
+      # Run a sorter, not just import it.
+      run: |
+        pip check
+        python tests/spikesorting/v2/scripts/smoke_supported_python.py
+    - name: Cache downloaded MEArec fixtures
+      # Keyed per event so PR (smoke only) and nightly/manual caches stay apart.
+      uses: actions/cache@v4
+      with:
+        path: tests/spikesorting/v2/fixtures/*.nwb
+        key: v2-fixtures-${{ github.event_name }}-${{ hashFiles('tests/spikesorting/v2/fixtures/fixtures_manifest.json', 'tests/spikesorting/v2/fixtures/_fetch.py') }}
+    - name: Download smoke fixture (canonical artifact from Box)
+      # No regeneration fallback: a hash mismatch or bad URL must fail the job.
+      # Larger fixtures download only on scheduled or manual runs.
+      run: |
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
+    - name: Download 60s polymer fixture (scheduled / manual full runs)
+      # Un-skips the merge frame-equality, MS5 ground-truth and clusterless
+      # sparse-id tests.
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_128ch_60s
+    - name: Download scenario fixtures (manual dispatch only)
+      # Neuropixels and tetrode fixtures change rarely: manual dispatch only.
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_neuropixels_60s
+        python tests/spikesorting/v2/fixtures/_fetch.py mearec_tetrode_60s
+    - name: Cache the real tetrode session (scheduled / manual runs)
+      id: cache-minirec
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: actions/cache@v4
+      with:
+        # Not the shared ``test-data-`` key: this subset would give run-tests and
+        # pytest-legacy an incomplete cache.
+        path: |
+          tests/_data/raw/minirec20230622.nwb
+          tests/_data/video/
+        key: v2-minirec-${{ hashFiles('.github/workflows/test-conda.yml') }}
+    - name: Download the real tetrode session (scheduled / manual runs)
+      # Real tetrode with x-z plane contacts, for single_session/test_recording.py.
+      # Ingestion also needs its ImageSeries videos.
+      if: |-
+        (github.event_name == 'schedule'
+          || github.event_name == 'workflow_dispatch')
+        && steps.cache-minirec.outputs.cache-hit != 'true'
+      env:
+        BASEURL: https://ucsf.box.com/shared/static/
+        NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
+        VID1URL: ykep8ek4ogad20wz4p0vuyuqfo60cv3w.h264
+        VID2URL: d2jjk0y565ru75xqojio3hymmehzr5he.h264
+        NWBFILE: minirec20230622.nwb
+        VID_ONE: 20230622_minirec_01_s1.1.h264
+        VID_TWO: 20230622_minirec_02_s2.1.h264
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
+      run: |
+        mkdir -p $RAW_DIR $VID_DIR
+        curl_opts() { # Download $3 to $1$2
+          # --fail: an HTTP error fails the step; .part: never cache a partial file
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
+        }
+        curl_opts $RAW_DIR $NWBFILE $NWB_URL
+        curl_opts $VID_DIR $VID_ONE $VID1URL
+        curl_opts $VID_DIR $VID_TWO $VID2URL
+    - name: Select required fixtures for this run
+      # conftest fails the session if a named fixture is missing.
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s minirec20230622"
+        elif [ "${{ github.event_name }}" = "schedule" ]; then
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s minirec20230622"
+        else
+          REQ="mearec_polymer_smoke"
+        fi
+        echo "SPYGLASS_V2_REQUIRE_FIXTURES=$REQ" >> "$GITHUB_ENV"
+    - name: Run modern spike-sorting tests
+      if: contains(fromJSON('["single-session", "integration", "unit"]'), matrix.shard.name)
+      run: |
+        # DB-free unit tier on xdist workers, then DB tiers serially; fail if either fails.
+        shard=${{ matrix.shard.name }}
+        common=(--lane "v2-$shard" --no-docker --no-dlc -q --v2-tier-budgets
+                --durations=25 --cov-config=tests/.coveragerc --cov-append)
+        unit_status=0
+        db_status=0
+        pytest --v2-tier unit -n auto "${common[@]}" \
+          --junitxml="junit-v2-$shard-unit.xml" || unit_status=$?
+        pytest --v2-tier database $V2_SCOPE "${common[@]}" \
+          --junitxml="junit-v2-$shard.xml" || db_status=$?
+        echo "unit tier exit $unit_status; database tiers exit $db_status"
+        [ "$unit_status" -eq 0 ] && [ "$db_status" -eq 0 ]
+    # --- Matching extra (own env); asserts the resolver keeps numpy>=2.
+    - name: Matching-extra resolver evidence (separate env)
+      if: matrix.shard.name == 'matching'
+      env:
+        # Missing extras fail the test instead of skipping it.
+        SPIKESORTING_V2_MATCHING_EXTRA_REQUIRED: "1"
+      run: |
+        conda create -y -n spyglass_v2_matching python=3.11
+        # Tolerate transient install failures; the flag above still fails the test
+        # if deps are missing. Never mask the pytest run.
+        conda run -n spyglass_v2_matching pip install \
+          -e ".[test,spikesorting-v2,spikesorting-v2-matching]" || true
+        # Only env with UnitMatchPy: owns matcher tests and the cross-session notebook.
+        # No ``|| true``: a missing smoke fixture must fail, not skip the match path.
+        conda run -n spyglass_v2_matching python \
+          tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
+        conda run -n spyglass_v2_matching pytest --lane v2-matching $V2_SCOPE \
+          --v2-tier-budgets --durations=25 --junitxml=junit-v2-matching.xml \
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
+    # --- Motion benchmark: development evidence with no pass/fail limits,
+    # ~50 min, so manual dispatch only.
+    - name: Motion-correction development benchmark (manual dispatch only)
+      if: matrix.shard.name == 'motion-benchmark'
+      run: |
+        SPYGLASS_V2_MOTION_BENCHMARK=1 \
+        SPYGLASS_V2_MOTION_BENCHMARK_OUT="$RUNNER_TEMP/motion-benchmark-development" \
+        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_polymer_128ch_drift_120s" \
+          pytest tests/spikesorting/v2/test_motion_acceptance.py \
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
+    - name: Upload the motion benchmark evidence (manual dispatch only)
+      # always(): publish partial results from failed or timed-out runs.
+      if: ${{ always() && matrix.shard.name == 'motion-benchmark' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: motion-benchmark-development
+        path: ${{ runner.temp }}/motion-benchmark-development
+        if-no-files-found: error
+    # --- FigPack curation extra, in its own env like the matching lane.
+    - name: FigPack curation tests (separate env)
+      if: matrix.shard.name == 'curation'
+      run: |
+        conda create -y -n spyglass_v2_curation python=3.11
+        # No ``|| true``: a failed install must fail, not leave figpack tests skipping.
+        conda run -n spyglass_v2_curation pip install \
+          -e ".[test,spikesorting-v2,spikesorting-v2-curation,spikesorting-v2-curation-test]"
+        # Chromium for the Playwright browser tests.
+        conda run -n spyglass_v2_curation playwright install --with-deps chromium
+        conda run -n spyglass_v2_curation python \
+          tests/spikesorting/v2/fixtures/_fetch.py mearec_polymer_smoke
+        # Missing figpack/playwright/browser fails the browser tests, not skips.
+        SPYGLASS_REQUIRE_BROWSER_TESTS=1 conda run -n spyglass_v2_curation pytest \
+          --lane v2-curation $V2_SCOPE --v2-tier-budgets --durations=25 \
+          --junitxml=junit-v2-curation.xml \
+          --no-docker --no-dlc -q --cov-config=tests/.coveragerc --cov-append
+    # --- Acceptance probes (nightly/manual, curation env): too slow per push.
+    # test_database_and_file_restore skips: no Docker client for its restore.
+    - name: End-to-end acceptance probes (nightly / manual dispatch)
+      if: matrix.shard.name == 'curation' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      run: |
+        SPYGLASS_V2_REQUIRE_FIXTURES="mearec_tetrode_60s mearec_polymer_smoke" \
+          conda run -n spyglass_v2_curation pytest \
+          tests/spikesorting/v2/acceptance --run-acceptance --no-docker --no-dlc -q \
+          --cov-config=tests/.coveragerc --cov-append
+    - name: Upload raw coverage data
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-v2-${{ matrix.shard.name }}
+        path: coverage-v2-${{ matrix.shard.name }}.data
+        if-no-files-found: ignore
+    - name: Upload v2 test reports
+      # Per-test durations, to track cost across runs; includes failed runs.
+      if: ${{ always() && hashFiles('junit-v2-*.xml') != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: junit-v2-${{ matrix.shard.name }}
+        path: junit-v2-*.xml
+
+  v2-supported-python:
+    # Supported Python endpoints (the full suite uses 3.11), without MySQL or fixtures.
+    name: v2 Python ${{ matrix.python-version }} smoke
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: pip
+    - name: Install v2 runtime and focused test dependencies
+      run: |
+        # CPU-only torch wheel, so the extra does not pull CUDA packages.
+        python -m pip install "torch>=2" \
+          --index-url https://download.pytorch.org/whl/cpu
+        python -m pip install ".[spikesorting-v2]" pytest pytest-env tomli
+        python -m pip check
+    - name: Check public and scientific contracts without the DB harness
+      run: |
+        python -m pytest --noconftest -p tests._ci_lanes -o addopts='' -q \
+          --lane v2-supported-python
+    - name: Exercise the installed v2 sorter runtime
+      run: python tests/spikesorting/v2/scripts/smoke_supported_python.py
+
+  legacy-changes:
+    # Did this pull request touch what pytest-legacy exercises?
+    if: |-
+      github.event_name == 'pull_request' && (
+        github.event.action != 'closed' ||
+        github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # paths-filter lists the PR's files through the API
+    outputs:
+      legacy: ${{ steps.filter.outputs.legacy }}
+    steps:
+    - uses: dorny/paths-filter@v4.0.3
+      id: filter
+      with:
+        filters: |
+          legacy:
+            - 'src/spyglass/spikesorting/*.py'
+            - 'src/spyglass/spikesorting/v0/**'
+            - 'src/spyglass/spikesorting/v1/**'
+            - 'src/spyglass/spikesorting/analysis/**'
+            - 'src/spyglass/decoding/v1/waveform_features.py'
+            - 'environments/environment_spikesorting_legacy.yml'
+            - 'pyproject.toml'
+            - '.github/workflows/test-conda.yml'
+            - 'tests/_ci_lanes.py'
+            - 'tests/spikesorting/*.py'
+            - 'tests/spikesorting/v0/**'
+            - 'tests/spikesorting/v1/**'
+            - 'tests/spikesorting/v2/test_clusterless_waveform_features.py'
+
+  pytest-legacy:
+    # v0/v1 tests need SpikeInterface 0.99 (_require_legacy_si_environment).
+    name: pytest-legacy (SpikeInterface 0.99)
+    # Weekly (Sunday's schedule), on manual dispatch, and on pull requests that
+    # touch the legacy pipelines.
+    needs: legacy-changes
+    if: |-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        github.event.schedule == '0 0 * * 0' ||
+        needs.legacy-changes.outputs.legacy == 'true')
+    runs-on: ubuntu-latest
+    env:
+      COVERAGE_FILE: coverage-legacy.data  # combined in the coverage job
+    defaults:
+      run:
+        shell: bash -el {0}
+    services:
+      mysql:
+        image: datajoint/mysql:8.0
+        env:
+          MYSQL_DATABASE: localhost
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update
+        # mysql for DataJoint; ffmpeg/libsm6/libxext6 for the minirec videos.
+        sudo apt-get install -y \
+          mysql-client libmysqlclient-dev ffmpeg libsm6 libxext6
+    - name: Pin SpikeInterface to the legacy 0.99 line (coherent resolve)
+      # Relax the SI pins in this checkout so the env resolves SI 0.99 in one pass;
+      # downgrading after a 0.104 install leaves an incompatible numpy 2 set.
+      run: |
+        sed -i \
+          -e 's/"spikeinterface==0.104.3"/"spikeinterface>=0.99.1,<0.100"/' \
+          -e 's/"probeinterface>=0.3.2"/"probeinterface>=0.2.19,<0.3"/' \
+          pyproject.toml
+        grep -nE '"(spikeinterface|probeinterface|numpy)' pyproject.toml
+    - name: Set up conda (legacy SpikeInterface 0.99 environment)
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        activate-environment: spyglass_spikesorting_legacy
+        environment-file: environments/environment_spikesorting_legacy.yml
+        miniforge-version: latest
+        use-mamba: true
+    - name: Verify the legacy SI-0.99 stack resolved coherently
+      # SI <0.100: 0.100.x broke NwbRecordingExtractor timestamps.
+      run: |
+        python - <<'PY'
+        from packaging.version import Version
+        import spikeinterface as si
+        import probeinterface as pi
+        import numpy as np
+        print("SI", si.__version__, "| probeinterface", pi.__version__,
+              "| numpy", np.__version__)
+        assert Version(si.__version__) < Version("0.100"), si.__version__
+        assert Version(pi.__version__) < Version("0.3"), pi.__version__
+        assert Version(np.__version__) < Version("2"), np.__version__
+        PY
+    - name: Cache test data
+      id: cache-test-data
+      uses: actions/cache@v4
+      with:
+        # Same key as run-tests, so minirec downloads at most once.
+        path: |
+          tests/_data/raw/
+          tests/_data/video/
+        key: |-
+          test-data-${{ hashFiles('.github/workflows/test-conda.yml') }}-v1
+        restore-keys: |
+          test-data-
+    - name: Download data
+      if: steps.cache-test-data.outputs.cache-hit != 'true'
+      env:
+        BASEURL: https://ucsf.box.com/shared/static/
+        NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
+        VID1URL: ykep8ek4ogad20wz4p0vuyuqfo60cv3w.h264
+        VID2URL: d2jjk0y565ru75xqojio3hymmehzr5he.h264
+        NWBFILE: minirec20230622.nwb
+        VID_ONE: 20230622_minirec_01_s1.1.h264
+        VID_TWO: 20230622_minirec_02_s2.1.h264
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
+      run: |
+        mkdir -p $RAW_DIR $VID_DIR
+        curl_opts() { # Download $3 to $1$2
+          # --fail: an HTTP error fails the step; .part: never cache a partial file
+          curl --fail -L --output "$1$2.part" "$BASEURL$3" \
+            || { rm -f "$1$2.part"; return 1; }
+          mv "$1$2.part" "$1$2"
+        }
+        curl_opts $RAW_DIR $NWBFILE $NWB_URL
+        curl_opts $VID_DIR $VID_ONE $VID1URL
+        curl_opts $VID_DIR $VID_TWO $VID2URL
+    - name: Move actions coveragerc
+      run: mv tests/.coveragerc .coveragerc
+    - name: Run legacy spike-sorting tests
+      run: |
+        pytest --lane legacy --no-docker --no-dlc --base-dir ./tests/_data/ -q \
+          --cov-config=.coveragerc
+    - name: Upload raw coverage data
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-legacy
+        path: coverage-legacy.data
+        if-no-files-found: ignore
+
+  coverage:
+    # One Codecov report: every test job's raw data, combined.
+    name: Combine coverage
+    needs: [run-tests, pytest-v2, pytest-legacy]
+    if: |-
+      !cancelled() && (
+        github.event_name != 'pull_request' ||
+        github.event.action != 'closed' ||
+        github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout  # the report reads the measured sources
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+    - name: Install coverage
+      run: python -m pip install coverage
+    - name: Download raw coverage data
+      uses: actions/download-artifact@v4
+      with:
+        pattern: coverage-*
+        path: coverage-data
+        merge-multiple: true
+    - name: Combine into one report
+      # [paths] in tests/.coveragerc maps site-packages installs onto src/.
+      run: |
+        coverage combine --rcfile=tests/.coveragerc coverage-data/*.data
+        coverage xml --rcfile=tests/.coveragerc -o coverage.xml
+    - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        flags: ${{ steps.test_mode.outputs.mode }}-tests
-        name: ${{ steps.test_mode.outputs.description }}
+        files: coverage.xml
+        disable_search: true
+        flags: ${{ needs.run-tests.outputs.mode || 'full' }}-tests
+        name: ${{ needs.run-tests.outputs.description || 'Full test suite' }}

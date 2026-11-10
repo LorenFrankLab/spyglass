@@ -10,6 +10,40 @@ import all foreign key references.
 -->
 
 ```python
+# Databases created before 0.6.0 also need these 0.6.0 alters. Skip any you
+# have already run.
+from spyglass.common.common_filter import FirFilterParameters
+from spyglass.decoding.v1.core import DecodingParameters
+from spyglass.position.v1.position_dlc_project import DLCProject
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
+FirFilterParameters().alter()  # #1464
+DecodingParameters().alter()  # #1463
+DLCProject().alter()  # #1534
+UnitSelectionParams().alter()  # #1670; only needed to use unit_criteria
+
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+```
+
+```python
 # Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
 # unique index, so run the DDL directly. `AFTER` keeps positional inserts in
 # the same order as a fresh instance. Restart Python afterward.
@@ -25,6 +59,93 @@ info.connection.query(
 ```
 
 ### Breaking Changes
+
+#### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
+
+This release adds the Spike Sorting v2 pipeline (`spyglass.spikesorting.v2`) and
+pins `spikeinterface==0.104.3`, which allows NumPy 2. New sorts use v2. See the
+[Spike Sorting v2 migration guide](Features/SpikeSortingV2_Migration.md).
+
+To upgrade an existing install, keep the current environment under a new name
+as a fallback and upgrade a copy of it. The new environment reads v0/v1 results.
+From the repository root:
+
+```bash
+conda deactivate
+# 1. Rename the existing environment
+conda create --name sg_spikesort_legacy --clone spyglass
+conda env remove -n spyglass
+# 2. Create a new `spyglass` environment from it
+conda create --name spyglass --clone sg_spikesort_legacy
+# 3. Upgrade the dependencies, with the v2 sorters
+mamba env update -f environments/environment.yml --prune
+conda activate spyglass
+pip install -e ".[spikesorting-v2]"
+```
+
+For v0/v1 users:
+
+- Existing v0/v1 rows, and their saved recordings, sortings and binary-folder
+    waveforms, stay readable, including through `SpikeSortingOutput` and
+    `SortedSpikesGroup`.
+- The `spike_location` waveform feature is v2-only and raises
+    `NotImplementedError` for v0/v1 sorts. Existing v0/v1 `spike_location`
+    features give each unit the locations of every unit's spikes, so they do not
+    align with the unit's spike times. v0/v1 `UnitWaveformFeatures` selections
+    need a features row without it (such as `amplitude`).
+- These v0/v1 entry points raise `RuntimeError` under SpikeInterface 0.104:
+    - v0 and v1 `SpikeSorting` populate with any sorter other than
+        `clusterless_thresholder`
+    - v0 `ArtifactDetection`, `Waveforms`, `QualityMetrics` and `BurstPair`
+        populate
+    - v1 `ArtifactDetection`, `MetricCuration` and `BurstPair` populate, and
+        `MetricCuration.get_waveforms` when it has to extract waveforms
+    - clusterless `UnitMarks` (decoding v0) and `UnitWaveformFeatures` (decoding
+        v1) for v0/v1 sorts
+    - loading a Zarr-format waveform folder
+
+#### Spike Sorting Dependencies Are an Extra (#1609)
+
+`pip install spyglass-neuro` no longer installs SpikeInterface, probeinterface,
+numba, pydantic or sortingview. Session ingestion, LFP, position, linearization
+and ripple detection work without them. Spike sorting, MUA, decoding and
+`RippleTimesV1.create_figurl` need the `spikesorting` extra:
+
+```bash
+pip install "spyglass-neuro[spikesorting]"
+```
+
+`environments/environment.yml` and the `spikesorting-v2` extras include it.
+
+#### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
+
+v0, v1 and v2 recordings now open the raw acquisition `ElectricalSeries` by name
+(`e-series`, `electricalseries`, `ephys` or `electrophysiology`, the names `Raw`
+ingestion uses) rather than letting SpikeInterface pick one. SpikeInterface
+0.104 will not guess when a file also stores LFP. A file with no matching
+series, or more than one, raises `ValueError`.
+
+#### Spike-sorting analysis results can change (#1609)
+
+- V2 specific and global-median referencing require uniform finite channel
+    offsets and uniform finite positive gains across all contributing channels,
+    including a specific reference electrode. Unsupported calibration raises
+    before raw-count subtraction can silently change physical units. Filtered
+    recordings are checked after the filter has cleared their offsets.
+- Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` stops at
+    gaps in the time axis.
+- `SortedSpikesDecodingV1` combines a user-supplied
+    `decoding_kwargs["is_missing"]` with the missingness derived from the
+    decoding intervals, so time outside the decoding intervals is not decoded.
+    Results change for calls that supply `is_missing`. For populations that
+    include v2 sorts, encoding and decoding are also restricted to the time
+    every unit was observed; when no observed training time remains it raises
+    `ValueError`. Results record the intervals used in
+    `spyglass_observation_intervals`, `spyglass_encoding_intervals` and
+    `spyglass_decoding_intervals` attributes.
+- `MuaEventsV1` smooths, normalizes and detects events within each contiguous
+    observed run, and numbers events uniquely in time order. Results change for
+    intervals with more than one valid-time segment.
 
 #### `LabMemberInfo` Takes Five Values (#1686)
 
@@ -77,6 +198,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 ### Documentation
 
+- Add Spike Sorting v2 documentation: a v1 to v2 migration guide, a developer
+    guide, and the tutorial notebooks `10_Spike_SortingV2`,
+    `10_Spike_SortingV2_Tables`, `10_Spike_SortingV2_Curation`,
+    `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
 - Repair stale notebook cross-links and guard them with a test #1678
@@ -87,6 +212,37 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 ### Infrastructure
 
+- Update dependency pins: `numpy>=1.26,<3`, `scipy>=1.13`,
+    `spikeinterface==0.104.3`, `probeinterface>=0.3.2`, `jax<0.10`,
+    `non-local-detector==0.6.9`, `ripple-detection>=1.7`, `keypoint-moseq>=0.6`;
+    declare `networkx`, and `numba` and `pydantic>=2` in the new `spikesorting`
+    extra; drop the `panel>=1.4` pin, which Spyglass does not import and which
+    blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`) #1609
+- `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
+    `environment.yml` installs `torch>=2` from pip instead of conda
+    `pytorch<1.12`; native MountainSort4 1.0.7 is installed through the v2 extra
+    and runs on NumPy 2 with the v2 compatibility path. The DLC and MoSeq
+    environments stay on NumPy < 2 #1609
+- Add `environments/environment_spikesorting_v2.yml` and the test-only
+    `environments/environment_spikesorting_legacy.yml` #1609
+- Add optional extras `spikesorting-v2` (MountainSort4, MountainSort5, torch),
+    `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
+    (FigPack browser review, ipywidgets), and the test-only
+    `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
+- Add the `spikesorting` extra (SpikeInterface, probeinterface, numba, pydantic,
+    sortingview), which the `spikesorting-v2` extras include. `insert_sessions`
+    skips the spike sorting and decoding merge tables without the extra #1609
+- The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
+    a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
+    deadlocks #1609
+- `cautious_delete` honors an explicit `force_masters=False` instead of always
+    forcing master deletion #1609
+- `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
+    `raw_eseries_path_and_timestamp_mode` #1609
+- Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
+    recompute and file namespace capture #1609
+- Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface
+    0.99, v0/v1) and a sharded `pytest-v2` (SpikeInterface 0.104) #1609
 - Prevent errors during update for dandi standard from propagating to other
     files #1677
 - Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
@@ -132,10 +288,15 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 - Common
 
+    - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
+        from disk, so a rebuilt file is checked again #1609
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
 
 - Decoding
 
+    - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
+        amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
+        #1609
     - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
@@ -163,6 +324,44 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         written before this have a null hash; a recompute of one warns and is
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
+    - Add Spike Sorting v2 (`spyglass.spikesorting.v2`). `run_v2_pipeline` runs
+        preprocessing, artifact detection, sorting and curation of one sort
+        group from a named preset and registers the result in
+        `SpikeSortingOutput`; `run_v2_concat_pipeline` does the same for a
+        same-day `SessionGroup` concatenation. v2 adds native MountainSort4 as
+        the default sorter (MountainSort5, Kilosort4, SpykingCircus2 and
+        Tridesclous2 also supported), content-addressed parameters and
+        selections, hash-verified recompute, optional experimental motion
+        correction, browser-based review with FigPack, and cross-session unit
+        tracking with UnitMatch. See the Spike Sorting v2 docs #1609
+    - v2 unit matching accepts disjoint epochs within one NWB, orders them on the
+        original acquisition clock, and rejects overlapping raw samples. Add
+        `describe_epochs`, `plan_v2_unit_match_from_curations`, and a read-only
+        matching preflight. Matching freezes the selected population's policy,
+        evidence and unit IDs using the same resolver as downstream analysis; the
+        snapshots and source coverage are also stored in the run's NWB #1609
+    - v2 sparse analyzers select channels using the sorter's spike polarity,
+        preserving positive and bidirectional peak electrode/amplitude metadata
+        #1609
+    - v2 `isi_violation` uses original spike timestamps and excludes artificial
+        concatenation joins, preventing acquisition gaps from creating false
+        refractory violations #1609
+    - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCurationV2` parts,
+        declared when the v2 module imports; if it cannot import, a warning names
+        the cause and the parts are omitted. `get_restricted_merge_ids` now
+        defaults to every available source, including v2 #1609
+    - `get_spike_indicator` gains keyword-only `return_validity` on
+        `SpikeSortingOutput` and `SortedSpikesGroup`, and
+        `SpikeSortingOutput.get_spike_indicator` gains `return_unit_ids`
+        (`SortedSpikesGroup` already had it). For v2 sorts, spike-indicator and
+        firing-rate bins outside observed time are NaN. Add
+        `SpikeSortingOutput.get_observation_intervals` and
+        `get_spike_times_by_unit`; `get_spike_times` warns when a restriction
+        spans sources #1609
+    - Add `SortedSpikesGroup.UnitSelection`, which records each group's selected
+        units at creation, and `create_group(unit_selections=...)` #1609
+    - v1 `show_available_metrics` skips metrics the installed SpikeInterface does
+        not provide #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

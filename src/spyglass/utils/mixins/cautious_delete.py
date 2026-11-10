@@ -231,7 +231,9 @@ class CautiousDeleteMixin(BaseMixin):
             return
 
         if self._has_updated_dj_version and not isinstance(self, dj.Part):
-            kwargs["force_masters"] = True
+            # Tables with nested parts pass False: DataJoint 0.14 can reach
+            # them again through a grandchild part and roll the delete back.
+            kwargs.setdefault("force_masters", True)
 
         external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 
