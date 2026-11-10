@@ -8,6 +8,34 @@ import pytest
 import uuid
 
 
+def test_public_curation_api_is_reexported():
+    """Facade value objects are discoverable beside the pipeline runner."""
+    from spyglass.spikesorting.v2 import pipeline
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+        EvaluationSpec,
+        MergeEvaluateReceipt,
+        RunResult,
+    )
+    from spyglass.spikesorting.v2.review_api import (
+        CurationChangeSet,
+        FigPackReview,
+        ReviewImportReceipt,
+        ReviewProfileRef,
+    )
+
+    assert pipeline.CurationRef is CurationRef
+    assert pipeline.EvaluationResult is EvaluationResult
+    assert pipeline.EvaluationSpec is EvaluationSpec
+    assert pipeline.MergeEvaluateReceipt is MergeEvaluateReceipt
+    assert pipeline.RunResult is RunResult
+    assert pipeline.ReviewProfileRef is ReviewProfileRef
+    assert pipeline.FigPackReview is FigPackReview
+    assert pipeline.CurationChangeSet is CurationChangeSet
+    assert pipeline.ReviewImportReceipt is ReviewImportReceipt
+
+
 def test_non_root_facade_requires_typed_parent():
     """Child facade operations expose no numeric root-sentinel escape hatch."""
     from spyglass.spikesorting.v2.curation_api import save_manual_curation

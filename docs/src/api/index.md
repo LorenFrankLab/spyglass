@@ -4,6 +4,10 @@ The files in this directory are automatically generated from the docstrings in
 the source code. They include descriptions of each of the DataJoint tables and
 other classes/methods within Spyglass.
 
+For spike sorting v2, the reference includes only public modules. The
+[developer guide](../ForDevelopers/SpikeSortingV2Architecture.md#public-api)
+lists the supported entry points and describes the private domain packages.
+
 ## Directories
 
 - `cli`: See README.md at `spyglass/examples/cli/README.md`
