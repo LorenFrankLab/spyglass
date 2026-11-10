@@ -19,8 +19,11 @@ def initialize_v2_defaults() -> None:
     """Install the default Lookup rows for the v2 spike-sorting stages.
 
     Calls ``insert_default()`` on ``PreprocessingParameters``,
-    ``ArtifactDetectionParameters``, and ``MotionCorrectionParameters`` (with
-    the estimation and interpolation recipes it names). Idempotent.
+    ``ArtifactDetectionParameters``, ``SorterParameters``,
+    ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
+    ``AutoCurationRules``, and ``MotionCorrectionParameters`` (with the
+    estimation and interpolation recipes it names), then adds the v2
+    unit-selection policies. Idempotent.
 
     Examples
     --------
@@ -28,12 +31,30 @@ def initialize_v2_defaults() -> None:
     >>> initialize_v2_defaults()
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
     from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
 
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
     MotionCorrectionParameters.insert_default()
+    # Additive rows in the shared UnitSelectionParams table.
+    from spyglass.spikesorting.v2.analysis_selection import (
+        ensure_v2_unit_selection_policies,
+    )
+
+    ensure_v2_unit_selection_policies()
 
 
 __all__ = [

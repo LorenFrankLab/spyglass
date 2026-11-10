@@ -161,6 +161,24 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
     assert m._available_merge_sources() == ["v0", "v1", "v2"]
 
 
+def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
+    """``restrict_by_artifact=True`` with a non-artifact interval name and
+    no ``artifact_detection_id`` warns that v2 results are NOT artifact-restricted,
+    instead of silently returning unrestricted merge ids.
+    """
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    captured = []
+    monkeypatch.setattr(
+        m.logger, "warning", lambda msg, *a, **k: captured.append(msg)
+    )
+    m.SpikeSortingOutput()._get_restricted_merge_ids_v2(
+        {"interval_list_name": "raw data valid times"},
+        restrict_by_artifact=True,
+    )
+    assert any("artifact-restricted" in msg for msg in captured), captured
+
+
 # ---------- v0/v1 and shared SpikeInterface-using modules load under SI 0.104
 
 _SI_DEPENDENT_IMPORTS_TO_VERIFY = [
