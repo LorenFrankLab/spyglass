@@ -249,7 +249,10 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             ``{"env_id": <id>}`` for the row that now represents this episode.
         """
         dj_user = dj.config.get("database.user", "")
-        mine = f"env_id LIKE '{dj_user}_%'"
+        # `_` is a single-character wildcard in LIKE, so an unescaped pattern
+        # lets a shorter username match a longer one: `ann_%` also matches
+        # `anna_base_00`, and `ann`'s session would adopt `anna`'s episode.
+        mine = f"env_id LIKE '{dj_user}\\_%'"
         episode = self.unresolved_dirty() & mine
 
         if episode:
@@ -449,7 +452,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         """
         dj_user = dj.config.get("database.user", "")
         try:
-            open_rows = self.unresolved_dirty() & f"env_id LIKE '{dj_user}_%'"
+            open_rows = self.unresolved_dirty() & f"env_id LIKE '{dj_user}\\_%'"
             for env_id in open_rows.fetch("env_id"):
                 self.connection.query(
                     f"UPDATE {self.full_table_name} "

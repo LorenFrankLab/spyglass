@@ -2299,6 +2299,56 @@ def test_dirty_episode_takes_the_oldest_row(user_env_tbl, same_commit_pair):
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
 
 
+def test_user_scoping_does_not_reach_another_user(
+    user_env_tbl, same_commit_pair
+):
+    """A username that prefixes another's must not touch their dirty row.
+
+    `_` is a single-character wildcard in LIKE, so `root_%` also matched
+    `rootx_base_00`: this user's session adopted the other user's episode,
+    refreshed it, added no row of its own, and a later clean session resolved
+    it, restarting the other user's countdown and delaying their email.
+    """
+    from datetime import datetime, timedelta
+
+    import datajoint as dj
+
+    clean, dirty = same_commit_pair
+    user_env_tbl.delete(safemode=False)
+
+    # One character longer than this user, so the unescaped pattern matches.
+    user = dj.config.get("database.user", "")
+    other_id = f"{user}x_base_00"
+    stamped = datetime.now() - timedelta(days=20)
+    user_env_tbl.insert1(
+        {
+            "env_id": other_id,
+            "env_hash": None,
+            "env": None,
+            "has_editable": None,
+            "dirty_path": "/home/other/spyglass",
+            "spyglass_commit": "0ther123",
+            "timestamp": stamped,
+            "last_seen": stamped,
+        }
+    )
+
+    try:
+        mine = _log_as(user_env_tbl, dirty)["env_id"]
+        assert mine != other_id  # its own episode, not the other user's
+
+        _log_as(user_env_tbl, clean)  # resolution
+        other = (user_env_tbl & f'env_id="{other_id}"').fetch1()
+
+        assert other["resolved_at"] is None  # not this user's to resolve
+        assert other["spyglass_commit"] == "0ther123"  # never refreshed
+        assert other["last_seen"] == stamped.replace(microsecond=0)
+        assert other_id in list(user_env_tbl.dirty_installs().fetch("env_id"))
+    finally:
+        for eid in (other_id, mine):
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
 def test_episode_after_resolution_starts_fresh(user_env_tbl, same_commit_pair):
     """A new dirty episode gets its own first-appeared date.
 
