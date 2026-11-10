@@ -1117,6 +1117,32 @@ def test_clean_wheel_is_not_flagged(compute_install_info_fn):
     assert result.is_official is True
 
 
+def test_cleaned_clone_keeps_its_dirty_version(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """In a clone, git decides, not the `.dYYYYMMDD` suffix.
+
+    hatch-vcs writes `_version.py` at install time and nothing rewrites it
+    afterwards, so an editable install made while the tree had edits carries
+    the suffix for the life of the install. Reading the suffix first flagged
+    such a clone however clean it later became, and told its owner to reset a
+    repository that was already on an official commit.
+    """
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev2203+g34e554ce9.d20261008"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(),  # clean diff, published HEAD
+            ):
+                result = compute_install_info_fn()
+
+    assert result.install_path is not None  # it is a clone
+    assert result.has_local_changes is False
+    assert result.is_official is True
+
+
 def test_venv_inside_another_repo_is_not_a_clone(
     tmp_path, compute_install_info_fn
 ):

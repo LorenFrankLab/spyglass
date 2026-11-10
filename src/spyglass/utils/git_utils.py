@@ -20,12 +20,13 @@ Reported facts
     ``None`` for any other layout, including an install inside an unrelated
     git repo.
 ``has_local_changes``
-    The install deviates from a commit on the official remote, by any of:
-    ``git diff --name-only HEAD -- src/`` returning output, scoped to ``src/``
-    so doc and notebook edits are ignored; HEAD not reachable from
-    :data:`OFFICIAL_REPO`, whether never committed, never pushed, or pushed
-    only to a fork; or ``__version__`` carrying hatch-vcs's ``.dYYYYMMDD``
-    suffix, left by a wheel built from a dirty tree.
+    The install deviates from a commit on the official remote. In a clone,
+    either ``git diff --name-only HEAD -- src/`` returns output, scoped to
+    ``src/`` so doc and notebook edits are ignored, or HEAD is not reachable
+    from :data:`OFFICIAL_REPO`, whether never committed, never pushed, or
+    pushed only to a fork. Without a clone, the one signal is ``__version__``
+    carrying hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a
+    dirty tree.
 ``commit_date``
     Committer date of HEAD. ``None`` outside a clone. Stored on the
     ``UserEnvironment`` row, so staleness is also measurable from the
@@ -362,15 +363,16 @@ class SpyglassInstall:
     def has_local_changes(self) -> bool:
         """The install deviates from a commit on the official remote.
 
-        Any of: modified sources under ``src/``; a HEAD contained by no remote
-        branch, i.e. committed locally and never pushed; or a version carrying
-        hatch-vcs's ``.dYYYYMMDD`` suffix, left by a wheel built from a dirty
-        tree. Only the last is detectable without a clone.
+        In a clone, git is the authority: modified sources under ``src/``, or a
+        HEAD that is not reachable from :data:`OFFICIAL_REPO`. Without one, the
+        only trace is hatch-vcs's ``.dYYYYMMDD`` suffix on ``__version__``,
+        left by a wheel built from a dirty tree.
         """
-        if self._VCS_DIRTY_RE.search(self._version):
-            return True
         if self.install_path is None:
-            return False
+            # A wheel: the .dYYYYMMDD suffix is the only dirty signal. In a
+            # clone, _version.py is not rewritten when the tree is cleaned, so
+            # the suffix outlives the edits that caused it. Ask git instead.
+            return bool(self._VCS_DIRTY_RE.search(self._version))
         return self.has_src_changes() or not self.head_is_published()
 
     @cached_property
