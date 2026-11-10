@@ -341,13 +341,16 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         window resolves in days, and the marker's ``last_logged`` date bounds
         it without a query.
 
-        A clean install with a marker is the resolution case: the full row is
-        logged so the escalation clock stops, and the marker is cleared.
+        A clean, current install with a marker is the resolution case: the
+        full row is logged so the escalation clock stops, and the marker is
+        cleared. A clean but stale install is still flagged, so it keeps its
+        marker as the daily gate.
 
         An admin is exempt from the record and the email. The check is a query,
         so its answer is cached in the marker, which both spares the query on
         later sessions and lets the import-time warning honour the exemption
-        without a connection of its own.
+        without a connection of its own. A check that could not run is not
+        cached.
 
         Fully guarded, so a user without write permission sees nothing.
         """
@@ -368,12 +371,17 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if is_admin is None:  # not cached, or cached too long ago
             from spyglass.common.common_lab import LabMember
 
+            answered = True
             try:
                 is_admin = LabMember().user_is_admin
             except Exception as exc:
                 logger.debug(f"admin check failed: {exc}")  # DB down
-                is_admin = False  # unknown: log, and ask again next session
-            if flagged:  # cached only where it silences a warning
+                is_admin = False  # treat as non-admin for this session only
+                answered = False
+            # Cached only where it silences a warning, and only when the query
+            # answered: storing a failure as "not admin" would warn an admin
+            # and log rows for them for WARN_ADMIN_TRUST_DAYS.
+            if flagged and answered:
                 sg_install.marker.write(is_admin=is_admin, admin_checked=today)
 
         if is_admin:
@@ -399,6 +407,12 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                     or today
                 ),
             )
+        elif sg_install.is_stale:
+            # Still flagged, so the marker is this install's daily gate and
+            # the home of its cached admin answer. Clearing it would re-run
+            # the admin query and the environment read every session. There is
+            # no dirty episode to resolve.
+            sg_install.marker.write(last_logged=today)
         else:  # resolution recorded; future clean sessions take the fast path
             sg_install.marker.clear()
 

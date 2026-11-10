@@ -2056,6 +2056,58 @@ def test_log_install_clean_with_marker_records_resolution():
     assert git_utils.spyglass_install.marker.exists() is False
 
 
+def test_log_install_stale_keeps_the_daily_gate():
+    """A stale clean install logs once a day, not once a session.
+
+    The marker was cleared on every clean path, stale included, so
+    `last_logged` was never written and each session re-ran the admin query,
+    the environment read and two more queries, against a docstring promising
+    "at most once a day". The cached admin answer went with it.
+    """
+    import spyglass.common.common_lab as _lab_mod
+    from spyglass.utils import git_utils
+
+    stale = dict(_CLEAN_INFO, is_stale=True, is_official=False)
+    mock_lab = MagicMock()
+    mock_lab.return_value.user_is_admin = False
+    tbl, inserted, patches = _patched_env()
+
+    with _as_install(**stale):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patches:
+                tbl().log_install()  # first session
+                marker = git_utils.spyglass_install.marker.read()
+                assert marker["last_logged"] == date.today().isoformat()
+                assert marker["is_admin"] is False  # answer kept, not lost
+
+                tbl().log_install()  # second session, same day
+
+    inserted.assert_called_once()  # gated, not repeated
+
+
+def test_log_install_does_not_cache_a_failed_admin_check():
+    """A check that could not run is not stored as "not admin".
+
+    Storing the failure left an admin warned, and logged rows for them, for
+    WARN_ADMIN_TRUST_DAYS, against the comment that said it would ask again
+    next session.
+    """
+    import spyglass.common.common_lab as _lab_mod
+    from spyglass.utils.git_utils import spyglass_install
+
+    mock_lab = MagicMock(side_effect=RuntimeError("database down"))
+    tbl, inserted, patches = _patched_env()
+
+    with _as_install(**_DIRTY_INFO):
+        with patch.object(_lab_mod, "LabMember", mock_lab):
+            with patches:
+                tbl().log_install()
+
+        assert spyglass_install.cached_is_admin is None  # nothing cached
+    assert "is_admin" not in spyglass_install.marker.read()
+    inserted.assert_called_once()  # treated as non-admin for this session
+
+
 def test_warn_once_is_idempotent(caplog):
     """_warn_once warns on the first call only.
 
