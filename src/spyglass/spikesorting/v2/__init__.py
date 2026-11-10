@@ -21,8 +21,8 @@ def initialize_v2_defaults() -> None:
     Calls ``insert_default()`` on ``PreprocessingParameters``,
     ``ArtifactDetectionParameters``, ``SorterParameters``,
     ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
-    ``AutoCurationRules``, ``CurationReviewProfile``, and
-    ``MotionCorrectionParameters`` (with the estimation and interpolation
+    ``AutoCurationRules``, ``CurationReviewProfile``, ``MatcherParameters``,
+    and ``MotionCorrectionParameters`` (with the estimation and interpolation
     recipes it names), then adds the v2 unit-selection policies. Idempotent.
 
     Examples
@@ -42,6 +42,7 @@ def initialize_v2_defaults() -> None:
         AnalyzerWaveformParameters,
         SorterParameters,
     )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
 
     PreprocessingParameters.insert_default()
     ArtifactDetectionParameters.insert_default()
@@ -49,6 +50,7 @@ def initialize_v2_defaults() -> None:
     AnalyzerWaveformParameters.insert_default()
     QualityMetricParameters.insert_default()
     AutoCurationRules.insert_default()
+    MatcherParameters.insert_default()
     CurationReviewProfile.insert_default()
     MotionCorrectionParameters.insert_default()
     # Additive rows in the shared UnitSelectionParams table.

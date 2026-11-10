@@ -1,0 +1,1063 @@
+"""Matching-input resolution and checks behind ``UnitMatchSelection``.
+
+``UnitMatch.make_fetch`` and the ``TrackedUnit`` readers re-run these checks
+on the frozen rows. DataJoint tables are imported inside the functions.
+"""
+
+from __future__ import annotations
+
+import functools
+import uuid
+
+import datajoint as dj
+import numpy as np
+
+from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
+from spyglass.spikesorting.v2._artifacts.readers import (
+    read_recording_artifact_valid_times,
+)
+from spyglass.spikesorting.v2._core.selection_identity import (
+    deterministic_id,
+    existing_selection_pk,
+)
+from spyglass.spikesorting.v2._core.signal_math import base_intervals_and_gaps
+from spyglass.spikesorting.v2._curation.unit_selection import (
+    validate_unit_selection_snapshot,
+)
+from spyglass.spikesorting.v2._matching.assets import (
+    validate_match_backend_availability,
+    validate_match_input_assets,
+)
+from spyglass.spikesorting.v2._matching.coverage import (
+    enrich_recording_source_coverage,
+    validate_source_coverage,
+)
+from spyglass.spikesorting.v2._matching.graph import (
+    assert_disjoint_source_coverage,
+    chronological_input_order,
+    frozen_order_errors,
+    input_part_structure_errors,
+    input_set_hash,
+    utc_datetime,
+)
+from spyglass.spikesorting.v2._storage.spikeinterface import close_nwb_recording
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatMemberDriftError,
+    MissingRecordingForConcatError,
+    SchemaBypassError,
+)
+from spyglass.utils import logger
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_clusterless_match_once(sorting_id: str) -> None:
+    """Warn once per clusterless sort that cross-session matching is degenerate.
+
+    Its units are threshold-crossing events, not sorted neurons.
+    ``cache_clear()`` resets the per-``sorting_id`` dedupe.
+    """
+    logger.warning(
+        "UnitMatchSelection: sort %s was produced by the clusterless "
+        "thresholder -- its units are threshold-crossing events, NOT sorted "
+        "neurons (CurationV2.get_unit_semantics == "
+        "'clusterless_threshold_crossings'). Cross-session matching tracks "
+        "sorted neurons, so matching this input is degenerate.",
+        sorting_id,
+    )
+
+
+def insert_inputs(
+    table_cls,
+    curations,
+    matcher_params_name: str,
+    session_group: tuple[str, str] | None = None,
+    *,
+    unit_selections=None,
+    unit_policy: str = "v2_accepted_single_units",
+    expected_input_set_hash: str | None = None,
+) -> dict:
+    """Find-existing-or-insert a match over explicit inputs; return its key.
+
+    The body of ``UnitMatchSelection.insert_inputs`` (see its docstring).
+    ``table_cls`` is ``UnitMatchSelection``.
+
+    Duplicate-key recovery has no savepoint, so the master insert must stay
+    the transaction's first statement.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    group_key = None
+    if session_group is not None:
+        owner, name = session_group
+        group_key = {"session_group_owner": owner, "session_group_name": name}
+        if not (SessionGroup & group_key):
+            raise ValueError(f"SessionGroup {group_key} does not exist.")
+    prepared = prepare_match_inputs(
+        curations,
+        matcher_params_name,
+        unit_selections=unit_selections,
+        unit_policy=unit_policy,
+        allow_rebuild=True,
+        validate_backend=False,
+    )
+    ordered = prepared["inputs"]
+    input_rows = prepared["input_rows"]
+    recording_rows = prepared["recording_rows"]
+    set_hash = prepared["input_set_hash"]
+    unitmatch_id = prepared["unitmatch_id"]
+    if (
+        expected_input_set_hash is not None
+        and set_hash != expected_input_set_hash
+    ):
+        raise ValueError(
+            "Matching inputs or eligibility changed since planning. Rebuild and review the plan."
+        )
+    identity = {
+        "matcher_params_name": matcher_params_name,
+        "input_set_hash": set_hash,
+    }
+
+    existing = table_cls._find_existing_pk(identity, unitmatch_id)
+    if existing is not None:
+        return existing
+
+    # Warn, not block: a clusterless sort is valid, just degenerate to match.
+    for item in ordered:
+        if (
+            CurationV2.get_unit_semantics({"sorting_id": item["sorting_id"]})
+            == "clusterless_threshold_crossings"
+        ):
+            _warn_clusterless_match_once(str(item["sorting_id"]))
+
+    # Preflight before UnitMatch.make's expensive bundle extraction.
+    choices_by_input = {
+        item["input_index"]: (item["sorting_id"], item["curation_id"])
+        for item in ordered
+    }
+    table_cls._warn_on_divergent_electrode_space(choices_by_input)
+    matcher_name, params = (
+        MatcherParameters & {"matcher_params_name": matcher_params_name}
+    ).fetch1("matcher", "params")
+    table_cls._validate_matcher_geometry(choices_by_input, matcher_name, params)
+
+    master_row = {**identity, "unitmatch_id": unitmatch_id}
+    if group_key is not None:
+        master_row.update(group_key)
+    try:
+        with table_cls._safe_context():
+            # This helper is the validation boundary.
+            table_cls().insert1(master_row, allow_direct_insert=True)
+            table_cls.Input.insert(
+                [{**row, "unitmatch_id": unitmatch_id} for row in input_rows]
+            )
+            table_cls.InputRecording.insert(
+                [
+                    {**row, "unitmatch_id": unitmatch_id}
+                    for row in recording_rows
+                ]
+            )
+    except dj.errors.DuplicateError:
+        # Lost a concurrent race on the deterministic unitmatch_id.
+        existing = table_cls._find_existing_pk(identity, unitmatch_id)
+        if existing is not None:
+            return existing
+        raise
+    return {"unitmatch_id": unitmatch_id}
+
+
+def prepare_match_inputs(
+    curations,
+    matcher_params_name,
+    *,
+    unit_selections=None,
+    unit_policy: str = "v2_accepted_single_units",
+    allow_rebuild=False,
+    validate_backend=True,
+) -> dict:
+    """Resolve and validate a matching request without inserting selection rows.
+
+    Planning disables reconstruction; execution can rebuild missing artifacts.
+    """
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatchSelection,
+    )
+
+    if not (MatcherParameters & {"matcher_params_name": matcher_params_name}):
+        raise ValueError(
+            f"Unknown matcher parameters {matcher_params_name!r}. "
+            "Initialize v2 defaults or choose an existing matcher recipe."
+        )
+    curations = list(curations)
+    requested = _normalize_input_curations(curations)
+    _check_input_count_and_sortings(requested, ValueError)
+    for sorting_id, curation_id in requested:
+        _check_input_curation(sorting_id, curation_id, ValueError)
+
+    resolved = [
+        _resolve_match_input(sorting_id, curation_id, ValueError)
+        for sorting_id, curation_id in requested
+    ]
+    for pin, item in zip(curations, resolved, strict=True):
+        if "curation_uuid" not in pin:
+            continue
+        expected = uuid.UUID(str(pin["curation_uuid"]))
+        if expected != uuid.UUID(str(item["curation_uuid"])):
+            raise ValueError(
+                "UnitMatchSelection.insert_inputs: input "
+                f"{_input_label(item['sorting_id'], item['curation_id'])} "
+                f"has changed curation_uuid since planning (expected "
+                f"{expected}, found {item['curation_uuid']}). The curation "
+                "was deleted and recreated; rebuild and review the plan "
+                "before matching."
+            )
+    start_times = _session_start_times(
+        {
+            recording["nwb_file_name"]
+            for item in resolved
+            for recording in item["recordings"]
+        }
+    )
+    for item in resolved:
+        for recording in item["recordings"]:
+            recording["session_start_time"] = start_times[
+                recording["nwb_file_name"]
+            ]
+        item["input_start_time"] = min(
+            recording["session_start_time"] for recording in item["recordings"]
+        )
+    for item in resolved:
+        # A single recording's frames and kept intervals need its traces.
+        _add_single_recording_frames(item, allow_rebuild=allow_rebuild)
+        enrich_recording_source_coverage(
+            item["recordings"], allow_rebuild=allow_rebuild
+        )
+    _check_input_sessions(resolved, ValueError)
+
+    selections = _resolve_unit_selections(
+        resolved, unit_selections, unit_policy
+    )
+    for item in resolved:
+        item["selection_snapshot"] = selections[str(item["sorting_id"])]
+    ordered = chronological_input_order(resolved)
+    for input_index, item in enumerate(ordered):
+        item["input_index"] = input_index
+    input_rows, recording_rows = _input_part_rows(ordered)
+    set_hash = input_set_hash(input_rows, recording_rows)
+    identity = {
+        "matcher_params_name": matcher_params_name,
+        "input_set_hash": set_hash,
+    }
+    unitmatch_id = deterministic_id("unitmatch", identity)
+
+    if validate_backend:
+        from spyglass.spikesorting.v2.matcher_protocol import get_matcher
+
+        validate_match_input_assets(ordered)
+        matcher_name, params = (
+            MatcherParameters & {"matcher_params_name": matcher_params_name}
+        ).fetch1("matcher", "params")
+        get_matcher(matcher_name)
+        validate_match_backend_availability(
+            matcher_name, needs_pair_inference=len(ordered) >= 2
+        )
+        UnitMatchSelection._validate_matcher_geometry(
+            {
+                i: (item["sorting_id"], item["curation_id"])
+                for i, item in enumerate(ordered)
+            },
+            matcher_name,
+            params,
+            allow_rebuild=allow_rebuild,
+        )
+    return {
+        "inputs": ordered,
+        "input_rows": input_rows,
+        "recording_rows": recording_rows,
+        "input_set_hash": set_hash,
+        "unitmatch_id": unitmatch_id,
+        "unit_selections": [item["selection_snapshot"] for item in ordered],
+    }
+
+
+def assert_matching_policy_excludes_mua(snapshot) -> None:
+    """Refuse a unit-selection policy that can admit multi-unit activity.
+
+    A ``mua`` unit has no single-neuron identity to track.
+
+    Raises
+    ------
+    ValueError
+        If the snapshot's policy does not exclude ``mua``.
+    """
+    if "mua" not in snapshot["policy"]["exclude_labels"]:
+        raise ValueError(
+            f"Unit matching refuses policy {snapshot['policy_name']!r}: it "
+            "does not exclude 'mua', so multi-unit activity could be matched. "
+            "Use 'v2_accepted_single_units' for reviewed curations or "
+            "'v2_unflagged_single_units' for automatic-only output."
+        )
+
+
+def _resolve_unit_selections(inputs, supplied, unit_policy) -> dict:
+    """Validate generation-pinned population snapshots for every matching input.
+
+    Without ``supplied`` snapshots, ``unit_policy`` is resolved for each input.
+    """
+    from spyglass.spikesorting.v2.analysis_selection import (
+        resolve_unit_selection,
+    )
+
+    if supplied is None:
+        supplied = [
+            resolve_unit_selection(
+                {
+                    "sorting_id": item["sorting_id"],
+                    "curation_id": item["curation_id"],
+                    "curation_uuid": item["curation_uuid"],
+                },
+                policy=unit_policy,
+            ).snapshot()
+            for item in inputs
+        ]
+    supplied = list(supplied)
+    snapshots = {}
+    for raw in supplied:
+        data = validate_unit_selection_snapshot(
+            raw.snapshot() if hasattr(raw, "snapshot") else raw
+        )
+        assert_matching_policy_excludes_mua(data)
+        sorting_id = str(data["sorting_id"])
+        if sorting_id in snapshots:
+            raise ValueError(
+                "Unit selections contain a duplicate sorting input."
+            )
+        snapshots[sorting_id] = data
+    if set(snapshots) != {str(item["sorting_id"]) for item in inputs}:
+        raise ValueError(
+            "Unit selections must name every matching input exactly once."
+        )
+    for item in inputs:
+        data = snapshots[str(item["sorting_id"])]
+        if int(data["curation_id"]) != item["curation_id"] or str(
+            data["curation_uuid"]
+        ) != str(item["curation_uuid"]):
+            raise ValueError(
+                "Unit selection pins a different curation generation. Rebuild the plan."
+            )
+        _check_selection_universe(
+            {
+                "sorting_id": item["sorting_id"],
+                "curation_id": item["curation_id"],
+            },
+            data,
+            ValueError,
+            "Unit selection universe differs from its pinned curation.",
+        )
+        if not data["included_unit_ids"]:
+            raise ValueError(
+                f"Matching input {item['sorting_id']} has no eligible units under "
+                f"policy {data['policy_name']!r}. Review labels or choose another policy."
+            )
+    return snapshots
+
+
+def _check_selection_universe(
+    curation_key: dict, snapshot: dict, exc_class: type, message: str
+) -> None:
+    """Require a unit-selection snapshot to label every unit of its curation.
+
+    Parameters
+    ----------
+    curation_key : dict
+        ``{"sorting_id", "curation_id"}`` of the pinned curation.
+    snapshot : dict
+        A validated unit-selection snapshot (``labels_by_unit``).
+    exc_class : type
+        Exception raised when the unit sets differ.
+    message : str
+        The exception's message.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    known_units = set(
+        map(int, (CurationV2.Unit & curation_key).fetch("unit_id"))
+    )
+    if set(map(int, snapshot["labels_by_unit"])) != known_units:
+        raise exc_class(message)
+
+
+def find_existing_pk(
+    table_cls, identity: dict, deterministic_unitmatch_id
+) -> dict | None:
+    """Return the canonical PK for this selection identity, or None.
+
+    Raises ``SchemaBypassError`` for a master with a non-deterministic
+    ``unitmatch_id``, or for a deterministic master whose parts are
+    malformed or do not realize its ``input_set_hash``.
+    """
+    master_ids = {
+        row["unitmatch_id"]
+        for row in (table_cls & identity).fetch("KEY", as_dict=True)
+    }
+    existing = existing_selection_pk(
+        master_ids,
+        deterministic_unitmatch_id,
+        pk_field="unitmatch_id",
+        bypass_message=lambda bypassed: (
+            f"UnitMatchSelection has {len(master_ids)} master row(s) for "
+            f"identity {identity} whose unitmatch_id is not the "
+            f"deterministic id {deterministic_unitmatch_id}: {bypassed}. "
+            "This is a non-deterministic selection row (a raw insert); "
+            "drop it and re-insert via insert_inputs."
+        ),
+    )
+    if existing is None:
+        return None
+    restriction = {"unitmatch_id": deterministic_unitmatch_id}
+    input_rows = (table_cls.Input & restriction).fetch(as_dict=True)
+    recording_rows = (table_cls.InputRecording & restriction).fetch(
+        as_dict=True
+    )
+    structure_errors = input_part_structure_errors(input_rows, recording_rows)
+    if not structure_errors:
+        _validate_frozen_source_coverage(recording_rows, SchemaBypassError)
+        structure_errors = frozen_order_errors(input_rows, recording_rows)
+    if structure_errors:
+        raise SchemaBypassError(
+            f"UnitMatchSelection master {deterministic_unitmatch_id} has "
+            f"malformed or misordered Input / InputRecording parts "
+            f"({'; '.join(structure_errors)}; a raw-insert orphan or "
+            "forgery). Drop the master and re-insert via insert_inputs()."
+        )
+    _validate_frozen_unit_selections(input_rows, SchemaBypassError)
+    if input_set_hash(input_rows, recording_rows) != identity["input_set_hash"]:
+        raise SchemaBypassError(
+            f"UnitMatchSelection master {deterministic_unitmatch_id} exists "
+            "but its Input / InputRecording parts do not realize its "
+            "input_set_hash (missing / stale parts -- a raw-insert orphan "
+            "or forgery). Drop the master and re-insert via "
+            "insert_inputs()."
+        )
+    return existing
+
+
+def _validate_frozen_unit_selections(rows, exc_class=ValueError):
+    """Validate population hashes and generation pins without reading live labels."""
+    for row in rows:
+        try:
+            data = validate_unit_selection_snapshot(row["selection_snapshot"])
+            if any(
+                str(data[key]) != str(row[key])
+                for key in ("sorting_id", "curation_id", "curation_uuid")
+            ):
+                raise ValueError(
+                    "Population snapshot pins a different curation generation."
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise exc_class(
+                f"Matching input has invalid frozen unit eligibility: {exc}"
+            ) from exc
+
+
+def _validate_frozen_source_coverage(rows, exc_class=ValueError):
+    """Reject missing or malformed acquisition coverage at a stored boundary."""
+    for row in rows:
+        try:
+            validate_source_coverage(row["source_coverage"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise exc_class(
+                f"Matching input has invalid frozen source coverage: {exc}"
+            ) from exc
+
+
+def _input_label(sorting_id, curation_id) -> str:
+    """Name one matching input in an error message."""
+    return f"(sorting_id={sorting_id}, curation_id={curation_id})"
+
+
+def _normalize_input_curations(curations) -> list[tuple]:
+    """``[{sorting_id, curation_id}, ...]`` -> ``[(uuid.UUID, int), ...]``.
+
+    A fractional or boolean curation id is rejected, not truncated.
+    """
+    return [
+        (
+            uuid.UUID(str(curation["sorting_id"])),
+            lossless_int(curation["curation_id"], "curation_id"),
+        )
+        for curation in curations
+    ]
+
+
+def _check_input_count_and_sortings(pairs, exc_class) -> None:
+    """Reject an empty input set or a sorting pinned more than once.
+
+    A single input is valid: its run writes zero pairs, and every matchable
+    unit becomes a singleton tracked unit.
+
+    Parameters
+    ----------
+    pairs : list of (sorting_id, curation_id)
+        The matching inputs.
+    exc_class : type
+        Exception raised on a violation.
+    """
+    if not pairs:
+        raise exc_class(
+            "UnitMatchSelection: a match selection needs at least one "
+            "matching input; got none."
+        )
+    curations_by_sorting: dict = {}
+    for sorting_id, curation_id in pairs:
+        curations_by_sorting.setdefault(str(sorting_id), []).append(
+            int(curation_id)
+        )
+    repeated = {
+        sorting_id: curation_ids
+        for sorting_id, curation_ids in curations_by_sorting.items()
+        if len(curation_ids) > 1
+    }
+    if repeated:
+        detail = "; ".join(
+            f"sorting_id={sorting_id}: curation_id {curation_ids}"
+            for sorting_id, curation_ids in sorted(repeated.items())
+        )
+        raise exc_class(
+            "UnitMatchSelection: each sorting may be matched through one "
+            "curation generation only, but these sortings are pinned more "
+            f"than once -- {detail}. Pick one curation per sorting."
+        )
+
+
+def _check_input_curation(sorting_id, curation_id, exc_class) -> None:
+    """Reject a missing curation or one with unapplied proposed merges."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    key = {"sorting_id": sorting_id, "curation_id": curation_id}
+    if not (CurationV2 & key):
+        raise exc_class(
+            f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
+            "pins a curation that does not exist."
+        )
+    # Unapplied merges would feed oversplit units to the matcher.
+    if CurationV2.has_unapplied_proposed_merges(key):
+        raise exc_class(
+            f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
+            "pins a curation with proposed merges that are NOT applied "
+            "(apply_merge=False); matching unmerged (oversplit) units across "
+            "sessions is wrong. Apply or drop the proposed merges first "
+            "(CurationV2.insert_curation(..., apply_merge=True)) before adding "
+            "the curation to a UnitMatch selection."
+        )
+
+
+def _resolve_match_input(
+    sorting_id,
+    curation_id,
+    exc_class,
+    *,
+    context: str = "UnitMatchSelection",
+    input_index: int | None = None,
+) -> dict:
+    """Resolve one matching input's pinned generation, source and recordings.
+
+    Database reads only; no trace file or ``Session`` is read. A
+    concatenation sort resolves to its frozen members in member order, each
+    with its frames in the concatenation and kept intervals on its own
+    clock. A single recording's frames are added later by
+    :func:`_add_single_recording_frames`.
+
+    Parameters
+    ----------
+    sorting_id : uuid.UUID
+    curation_id : int
+    exc_class : type
+        Exception raised when the concatenation's boundaries do not match its
+        frozen members, or (chained from the ``ConcatMemberDriftError`` /
+        ``MissingRecordingForConcatError`` it catches) when a member
+        ``Recording`` changed or is gone.
+    context : str, optional
+        Caller named at the start of the member-drift message. Default
+        ``"UnitMatchSelection"``.
+    input_index : int, optional
+        The input's frozen ``input_index``, named in the member-drift message
+        when known. Default ``None``.
+
+    Returns
+    -------
+    dict
+        ``sorting_id``, ``curation_id``, ``curation_uuid``, ``source_kind``
+        (the ``SortingSelection`` source kind), ``source_id``,
+        ``motion_corrected_recording_id`` (or ``None``),
+        ``artifact_detection_id`` (the sort's pinned detection, or ``None``),
+        and ``recordings``: one dict per constituent recording with
+        ``recording_index``, ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name``, ``recording_id``, ``recording_content_hash``
+        and, for a concatenation member, ``start_sample``, ``end_sample`` and
+        ``valid_times``.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2._recording.concat_fetch import (
+        resolve_snapshot_recordings,
+    )
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    curation_uuid = (
+        CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
+    ).fetch1("curation_uuid")
+    source = SortingSelection.resolve_effective_source(
+        {"sorting_id": sorting_id}
+    )
+    lineage = source.lineage
+    if lineage.kind == "recording":
+        source_id = lineage.key["recording_id"]
+        nwb_file_name, sort_group_id, interval_list_name = (
+            RecordingSelection & {"recording_id": source_id}
+        ).fetch1("nwb_file_name", "sort_group_id", "interval_list_name")
+        recordings = [
+            {
+                "recording_index": 0,
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": int(sort_group_id),
+                "interval_list_name": interval_list_name,
+                "recording_id": source_id,
+                "recording_content_hash": str(
+                    (Recording & {"recording_id": source_id}).fetch1(
+                        "content_hash"
+                    )
+                ),
+            }
+        ]
+    else:
+        source_id = lineage.key["concat_recording_id"]
+        concat_key = {"concat_recording_id": source_id}
+        snapshot = (
+            ConcatenatedRecordingSelection.MemberSnapshot & concat_key
+        ).fetch(as_dict=True, order_by="member_index")
+        boundaries = (ConcatenatedRecording.MemberBoundary & concat_key).fetch(
+            as_dict=True, order_by="member_index"
+        )
+        if [int(row["member_index"]) for row in snapshot] != [
+            int(row["member_index"]) for row in boundaries
+        ]:
+            raise exc_class(
+                "UnitMatchSelection: concatenation "
+                f"{source_id} of input {_input_label(sorting_id, curation_id)} "
+                "has MemberBoundary rows that do not match its frozen members."
+            )
+        # Members must still match their frozen content hash, so the
+        # snapshot hash below is also the live Recording's.
+        try:
+            resolve_snapshot_recordings(snapshot)
+        except (ConcatMemberDriftError, MissingRecordingForConcatError) as exc:
+            position = (
+                "" if input_index is None else f"input_index {input_index} "
+            )
+            raise exc_class(
+                f"{context}: {position}"
+                f"{_input_label(sorting_id, curation_id)} is a sort of "
+                f"concatenation {source_id}, whose member recordings no "
+                f"longer match its frozen members: {exc}"
+            ) from exc
+        recordings = []
+        start_sample = 0
+        for member, boundary in zip(snapshot, boundaries, strict=True):
+            end_sample = int(boundary["end_sample"])
+            recordings.append(
+                {
+                    "recording_index": int(member["member_index"]),
+                    "nwb_file_name": member["nwb_file_name"],
+                    "sort_group_id": int(member["sort_group_id"]),
+                    "interval_list_name": member["interval_list_name"],
+                    "recording_id": member["recording_id"],
+                    "recording_content_hash": str(
+                        member["recording_content_hash"]
+                    ),
+                    "start_sample": start_sample,
+                    "end_sample": end_sample,
+                    "valid_times": np.asarray(
+                        boundary["member_valid_times"], dtype=np.float64
+                    ).reshape(-1, 2),
+                }
+            )
+            start_sample = end_sample
+    return {
+        "sorting_id": sorting_id,
+        "curation_id": int(curation_id),
+        "curation_uuid": curation_uuid,
+        "source_kind": lineage.kind,
+        "source_id": source_id,
+        "motion_corrected_recording_id": source.traces.key.get(
+            "motion_corrected_recording_id"
+        ),
+        "artifact_detection_id": lineage.artifact_detection_id,
+        "recordings": recordings,
+    }
+
+
+def _session_start_times(nwb_file_names) -> dict:
+    """``{nwb_file_name: Session.session_start_time}`` in one query."""
+    from spyglass.common import Session
+
+    if not nwb_file_names:
+        return {}
+    rows = (
+        Session & [{"nwb_file_name": name} for name in nwb_file_names]
+    ).fetch("nwb_file_name", "session_start_time", as_dict=True)
+    return {row["nwb_file_name"]: row["session_start_time"] for row in rows}
+
+
+def _session_start_mismatches(recording_rows, live_start_times) -> list[str]:
+    """Describe frozen session start times that differ from ``Session``.
+
+    Both are read as UTC.
+
+    Parameters
+    ----------
+    recording_rows : iterable of dict
+        ``InputRecording`` rows (``recording_index``, ``nwb_file_name``,
+        ``session_start_time``).
+    live_start_times : dict
+        :func:`_session_start_times` of the rows' sessions.
+
+    Returns
+    -------
+    list of str
+        One message per differing or missing session; empty when every
+        frozen time equals the live one.
+    """
+    mismatches = []
+    for row in recording_rows:
+        name = row["nwb_file_name"]
+        label = f"recording {row['recording_index']} ({name})"
+        frozen = utc_datetime(row["session_start_time"])
+        if name not in live_start_times:
+            mismatches.append(f"{label} has no Session row")
+        elif utc_datetime(live_start_times[name]) != frozen:
+            mismatches.append(
+                f"{label} session_start_time frozen {frozen.isoformat()}, "
+                f"now {utc_datetime(live_start_times[name]).isoformat()}"
+            )
+    return mismatches
+
+
+def _add_single_recording_frames(item, *, allow_rebuild=True) -> None:
+    """Add a single-recording input's frames and kept intervals, in place.
+
+    Sets the recording's ``start_sample`` (0), ``end_sample`` (the persisted
+    traces' frame count) and ``valid_times``; a concatenation input already
+    carries its members' values from :func:`_resolve_match_input`.
+
+    Parameters
+    ----------
+    item : dict
+        A :func:`_resolve_match_input` result.
+    allow_rebuild : bool, optional
+        Rebuild a missing traces file (:func:`.coverage.open_base_recording`);
+        a plan passes ``False``. Default ``True``.
+    """
+    if item["source_kind"] != "recording":
+        return
+    from spyglass.spikesorting.v2._matching.coverage import (
+        open_base_recording,
+    )
+
+    recording = item["recordings"][0]
+    recording["start_sample"] = 0
+    traces = open_base_recording(recording, allow_rebuild=allow_rebuild)
+    try:
+        recording["end_sample"] = int(traces.get_num_samples())
+        recording["valid_times"] = _recording_valid_times(
+            traces, recording["nwb_file_name"], item["artifact_detection_id"]
+        )
+    finally:
+        close_nwb_recording(traces)
+
+
+def _recording_valid_times(traces, nwb_file_name, artifact_detection_id):
+    """Kept intervals of a single recording on its own clock, in seconds.
+
+    The sort's observation times: artifact-removed valid times when the
+    sort pins an artifact detection, else the recorded chunks of the traces.
+    Same rule as ``ConcatenatedRecording.member_valid_times``.
+
+    Parameters
+    ----------
+    traces : si.BaseRecording
+        The recording's opened persisted traces.
+    nwb_file_name : str
+    artifact_detection_id : uuid.UUID or None
+
+    Returns
+    -------
+    numpy.ndarray, shape (n_intervals, 2)
+    """
+    if artifact_detection_id is not None:
+        valid_times = read_recording_artifact_valid_times(
+            artifact_detection_id,
+            nwb_file_name,
+            caller="UnitMatchSelection.insert_inputs",
+        )
+    else:
+        valid_times = base_intervals_and_gaps(
+            traces, traces.get_sampling_frequency()
+        ).base_intervals
+    return np.asarray(valid_times, dtype=np.float64).reshape(-1, 2)
+
+
+def _check_input_sessions(inputs, exc_class) -> None:
+    """Reject a multi-day concatenation or repeated original acquisition samples.
+
+    Parameters
+    ----------
+    inputs : list of dict
+        Each with ``sorting_id``, ``curation_id``, ``source_kind`` and
+        ``recordings`` (``nwb_file_name``, ``session_start_time``,
+        ``source_coverage``).
+    exc_class : type
+        Exception raised for a multi-day concatenation input. Repeated
+        samples raise ``OverlappingMatchInputError``.
+    """
+    from spyglass.spikesorting.v2.session_group import (
+        distinct_recording_dates,
+    )
+
+    for item in inputs:
+        if item["source_kind"] == "recording":
+            continue
+        dates = distinct_recording_dates(
+            recording["session_start_time"] for recording in item["recordings"]
+        )
+        if len(dates) > 1:
+            raise exc_class(
+                "UnitMatchSelection: concatenation input "
+                f"{_input_label(item['sorting_id'], item['curation_id'])} "
+                f"spans {len(dates)} recording dates ({dates}); a matching "
+                "input must lie within one day. Match the days as separate "
+                "inputs instead."
+            )
+    assert_disjoint_source_coverage(inputs)
+
+
+def _input_part_rows(ordered) -> tuple[list[dict], list[dict]]:
+    """Build the ``Input`` / ``InputRecording`` part rows (without the PK).
+
+    Parameters
+    ----------
+    ordered : list of dict
+        Resolved inputs carrying ``input_index`` and ``input_start_time``;
+        each recording carries ``session_start_time``, ``start_sample``,
+        ``end_sample`` and ``valid_times`` (``None`` until read).
+
+    Returns
+    -------
+    tuple of (list of dict, list of dict)
+    """
+    input_rows = []
+    recording_rows = []
+    for item in ordered:
+        input_rows.append(
+            {
+                "input_index": item["input_index"],
+                "sorting_id": item["sorting_id"],
+                "curation_id": item["curation_id"],
+                "curation_uuid": item["curation_uuid"],
+                "source_kind": item["source_kind"],
+                "source_id": item["source_id"],
+                "motion_corrected_recording_id": item[
+                    "motion_corrected_recording_id"
+                ],
+                "input_start_time": item["input_start_time"],
+                "selection_snapshot": item["selection_snapshot"],
+            }
+        )
+        for recording in item["recordings"]:
+            recording_rows.append(
+                {
+                    "input_index": item["input_index"],
+                    "recording_index": recording["recording_index"],
+                    "nwb_file_name": recording["nwb_file_name"],
+                    "sort_group_id": recording["sort_group_id"],
+                    "interval_list_name": recording["interval_list_name"],
+                    "recording_id": recording["recording_id"],
+                    "recording_content_hash": recording[
+                        "recording_content_hash"
+                    ],
+                    "session_start_time": recording["session_start_time"],
+                    "start_sample": recording["start_sample"],
+                    "end_sample": recording["end_sample"],
+                    "valid_times": recording.get("valid_times"),
+                    "source_coverage": recording["source_coverage"],
+                }
+            )
+    return input_rows, recording_rows
+
+
+def _snapshot_mismatches(input_row, recording_rows, live) -> list[str]:
+    """Compare an input's frozen rows with its live resolution.
+
+    Parameters
+    ----------
+    input_row : dict
+        The frozen ``UnitMatchSelection.Input`` row.
+    recording_rows : list of dict
+        Its frozen ``InputRecording`` rows in ``recording_index`` order.
+    live : dict
+        :func:`_resolve_match_input` for the same curation now. Frames and
+        kept intervals are compared only where present.
+
+    Returns
+    -------
+    list of str
+        One message per differing field; empty when the live state matches.
+    """
+
+    def _text(value):
+        return None if value is None else str(value)
+
+    mismatches = []
+    for field in (
+        "curation_uuid",
+        "source_kind",
+        "source_id",
+        "motion_corrected_recording_id",
+    ):
+        if _text(input_row[field]) != _text(live[field]):
+            mismatches.append(
+                f"{field} frozen {_text(input_row[field])}, now "
+                f"{_text(live[field])}"
+            )
+    frozen_indexes = [int(row["recording_index"]) for row in recording_rows]
+    live_indexes = [
+        int(recording["recording_index"]) for recording in live["recordings"]
+    ]
+    if frozen_indexes != live_indexes:
+        mismatches.append(
+            f"recordings frozen {frozen_indexes}, now {live_indexes}"
+        )
+        return mismatches
+    fields = [
+        "nwb_file_name",
+        "sort_group_id",
+        "interval_list_name",
+        "recording_id",
+        "recording_content_hash",
+    ]
+    for frozen, current in zip(recording_rows, live["recordings"], strict=True):
+        with_frames = "valid_times" in current
+        for field in fields + (
+            ["start_sample", "end_sample"] if with_frames else []
+        ):
+            if _text(frozen[field]) != _text(current[field]):
+                mismatches.append(
+                    f"recording {frozen['recording_index']} {field} frozen "
+                    f"{_text(frozen[field])}, now {_text(current[field])}"
+                )
+        if (
+            "source_coverage" in current
+            and frozen.get("source_coverage") != current["source_coverage"]
+        ):
+            mismatches.append(
+                f"recording {frozen['recording_index']} source coverage changed"
+            )
+        if with_frames and not np.array_equal(
+            np.asarray(frozen["valid_times"], dtype=np.float64).reshape(-1, 2),
+            current["valid_times"],
+        ):
+            mismatches.append(
+                f"recording {frozen['recording_index']} valid_times changed"
+            )
+    return mismatches
+
+
+def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
+    """``{member_index: {sorting_id, curation_id}}`` -> ``{int: (sid, int)}``.
+
+    A fractional or boolean id is rejected, not truncated.
+    """
+    return {
+        lossless_int(idx, "member_index"): (
+            choice["sorting_id"],
+            lossless_int(choice["curation_id"], f"member {idx} curation_id"),
+        )
+        for idx, choice in curation_choices.items()
+    }
+
+
+def _validate_member_curations(members, choices_by_member) -> None:
+    """Validate per-member curation coverage and ownership for a group.
+
+    Raises ``ValueError`` when the choices do not exactly cover the members,
+    a curation does not exist, or a curation is not a sort of the member's
+    own recording.
+    """
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    member_indices = {int(member["member_index"]) for member in members}
+    chosen = set(choices_by_member)
+    missing = member_indices - chosen
+    extra = chosen - member_indices
+    if missing or extra:
+        raise ValueError(
+            "UnitMatchSelection: per-member curation choices must exactly cover "
+            f"the group's members. Missing member_index {sorted(missing)}; "
+            f"extra member_index {sorted(extra)}."
+        )
+    for member in members:
+        member_index = int(member["member_index"])
+        sorting_id, curation_id = choices_by_member[member_index]
+        if not (
+            CurationV2 & {"sorting_id": sorting_id, "curation_id": curation_id}
+        ):
+            raise ValueError(
+                f"UnitMatchSelection: member_index {member_index} pins curation "
+                f"(sorting_id={sorting_id}, curation_id={curation_id}) that does "
+                "not exist."
+            )
+        member_identity = (
+            str(member["nwb_file_name"]),
+            int(member["sort_group_id"]),
+            str(member["interval_list_name"]),
+            str(member["team_name"]),
+        )
+        source = SortingSelection.resolve_source({"sorting_id": sorting_id})
+        if source.kind != "recording":
+            raise ValueError(
+                f"UnitMatchSelection: member_index {member_index} "
+                f"({member_identity}) was pinned to curation "
+                f"(sorting_id={sorting_id}, curation_id={curation_id}), a "
+                "concatenation sort, not a sort of the member's recording. "
+                "Match concatenation sorts with "
+                "UnitMatchSelection.insert_inputs()."
+            )
+        nwb_file_name, sort_group_id, interval_list_name, team_name = (
+            RecordingSelection & source.key
+        ).fetch1(
+            "nwb_file_name", "sort_group_id", "interval_list_name", "team_name"
+        )
+        curation_identity = (
+            str(nwb_file_name),
+            int(sort_group_id),
+            str(interval_list_name),
+            str(team_name),
+        )
+        if curation_identity != member_identity:
+            raise ValueError(
+                f"UnitMatchSelection: member_index {member_index} "
+                f"({member_identity}) was pinned to a curation that belongs to "
+                f"{curation_identity}. A curation from another member cannot be "
+                "pinned here."
+            )
