@@ -71,9 +71,9 @@ def _git_mock(
     rev_parse="abc1234\n",
     diff="",
     log="4102444800",
-    branch="  origin/master\n",
+    branch="  sg/master\n",
     remote=_OFFICIAL_REMOTE_V,
-    merge_base="",
+    for_each_ref="abc1234 commit\trefs/remotes/sg/master\n",
 ):
     """Return a ``git_utils.sub_run`` side effect keyed on the git subcommand.
 
@@ -85,11 +85,16 @@ def _git_mock(
     """
     by_subcommand = {
         "rev-parse": rev_parse,
-        "merge-base": merge_base,  # default: HEAD is on the official remote
         "diff": diff,
         "log": log,
+        # Defaults: an official remote is configured, its refs have been
+        # fetched, and a remote branch contains HEAD. A non-empty
+        # `for-each-ref` matters — were it empty, every publication test would
+        # pass through the "nothing fetched, do not flag" escape instead of
+        # reaching the branch check.
         "branch": branch,
-        "remote": remote,  # default: an official remote is configured
+        "remote": remote,
+        "for-each-ref": for_each_ref,
     }
 
     def _dispatch(cmd, *_, **__):
@@ -1032,12 +1037,12 @@ def test_no_official_remote_is_not_published(
 def test_unpushed_head_is_not_official(
     tmp_path, fake_clone, compute_install_info_fn
 ):
-    """A commit not reachable from the official remote is a local change.
+    """A commit no official branch contains is a local change.
 
     `git diff` is empty once the work is committed, so committing was enough to
     read as clean. Pushing to a fork is likewise not enough: the code is still
-    unreviewed and unobtainable from the official repository, and both cases are
-    the one condition of HEAD not being an ancestor of the official branch.
+    unobtainable from the official repository, and both cases are the one
+    condition of no fetched official branch containing HEAD.
     """
     fake_pkg = fake_clone(tmp_path)
 
@@ -1045,9 +1050,8 @@ def test_unpushed_head_is_not_official(
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                # merge-base exits 1: HEAD is not an ancestor. rev-parse
-                # resolves, so the official branch exists to compare against.
-                side_effect=_git_mock(merge_base=_proc("", returncode=1)),
+                # No official branch contains HEAD, though refs were fetched.
+                side_effect=_git_mock(branch=""),
             ):
                 result = compute_install_info_fn()
 
@@ -1065,12 +1069,78 @@ def test_published_head_with_clean_diff_is_official(
         with patch("spyglass.__file__", str(fake_pkg)):
             with patch(
                 "spyglass.utils.git_utils.sub_run",
-                side_effect=_git_mock(diff="", branch="  origin/master\n"),
+                side_effect=_git_mock(diff="", branch="  sg/master\n"),
             ):
                 result = compute_install_info_fn()
 
     assert result.has_local_changes is False
     assert result.is_official is True
+
+
+def test_official_feature_branch_is_published(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """A clean checkout of an official branch other than master is official.
+
+    Obtainable, not reviewed, is the test: anyone can fetch
+    `spikesorting-v2` from the official remote, so a user testing it before it
+    merges is reproducible and owed no warning, no email and no partial row.
+    """
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(branch="  sg/spikesorting-v2\n"),
+            ):
+                result = compute_install_info_fn()
+
+    assert result.has_local_changes is False
+    assert result.is_official is True
+
+
+def test_unfetched_clone_does_not_flag(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """With no official ref on disk there is nothing to compare against.
+
+    A shallow or freshly-cloned-by-tag checkout has the remote configured but
+    no remote-tracking branches, so the containment test would answer "no"
+    about every commit.
+    """
+    fake_pkg = fake_clone(tmp_path)
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(for_each_ref="", branch=""),
+            ):
+                result = compute_install_info_fn()
+
+    assert result.has_local_changes is False
+
+
+def test_official_remote_matched_case_insensitively(
+    tmp_path, fake_clone, compute_install_info_fn
+):
+    """GitHub resolves `lorenfranklab/spyglass` to the same repository."""
+    from spyglass.utils.git_utils import SpyglassInstall
+
+    fake_pkg = fake_clone(tmp_path)
+    lowercase = (
+        "origin\thttps://github.com/lorenfranklab/Spyglass.git (fetch)\n"
+        "origin\thttps://github.com/lorenfranklab/Spyglass.git (push)\n"
+    )
+
+    with patch("spyglass.__version__", "0.6.1.dev1+gabc1234"):
+        with patch("spyglass.__file__", str(fake_pkg)):
+            with patch(
+                "spyglass.utils.git_utils.sub_run",
+                side_effect=_git_mock(remote=lowercase),
+            ):
+                assert SpyglassInstall().official_remote == "origin"
 
 
 def test_git_branch_failure_does_not_flag(

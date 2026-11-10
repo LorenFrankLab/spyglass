@@ -36,7 +36,7 @@ Reported facts
     behind does not flag.
 ``is_official``
     Neither dirty nor stale. Independent of ``is_dev``: a current, unmodified
-    clone tracking ``master`` is official.
+    clone on any branch of the official remote is official.
 """
 
 import os
@@ -61,6 +61,9 @@ DIRTY_MSG = (
     "Your Spyglass repository is not on an official commit. Please ensure you "
     "are running Spyglass from a clean repository to avoid issues with "
     "reproducibility.\n\n"
+    "If you have not fetched from github.com/" + OFFICIAL_REPO + " recently, "
+    "do that and import again: this check reads the branches you have "
+    "fetched, so stale references can flag a clean repository. "
     "If this is an important change, please open a pull request to merge your "
     "changes into the main branch. If not, please reset your repository to an "
     "official commit.\n\n"
@@ -199,17 +202,20 @@ class SpyglassInstall:
         Matched on the URL rather than the name, which is a local convention:
         a clone may call it ``sg``, ``upstream``, ``origin`` or nothing at all,
         and may hold several forks alongside it. Accepts both ``https://`` and
-        ``git@`` forms, with or without a trailing ``.git``.
+        ``git@`` forms, with or without a trailing ``.git``, and compares
+        case-insensitively, since GitHub resolves ``lorenfranklab/spyglass``
+        to the same repository.
         """
         out = self._remotes
         if not out:
             return None
+        official = OFFICIAL_REPO.lower()
         for line in out.splitlines():
             parts = line.split()
             if len(parts) < 3 or parts[2] != "(fetch)":
                 continue
-            url = parts[1].removesuffix("/").removesuffix(".git")
-            if url.endswith(OFFICIAL_REPO):
+            url = parts[1].lower().removesuffix("/").removesuffix(".git")
+            if url.endswith(official):
                 return parts[0]
         return None
 
@@ -271,32 +277,35 @@ class SpyglassInstall:
         return out.strip() or None if out is not None else None
 
     def head_is_published(self) -> bool:
-        """Return ``True`` if HEAD is an ancestor of the official remote.
+        """Return ``True`` if HEAD is obtainable from the official remote.
 
-        ``git diff`` is empty for a commit that exists only locally, so this is
-        what catches committed-but-unpushed work. Scoped to
-        :data:`OFFICIAL_REPO`: a push to a personal fork leaves the code where
-        no one else can obtain it, so it does not count. Reads the
-        remote-tracking refs already on disk, needing no network.
+        The test is whether anyone can fetch this commit from
+        :data:`OFFICIAL_REPO`, not whether it has been reviewed onto a default
+        branch: a clean checkout of an official feature branch is obtainable,
+        while a push to a personal fork leaves the code where no one else can
+        get it. ``git diff`` is empty for a commit that exists only locally, so
+        this is what catches committed-but-unpushed work.
+
+        Reads the remote-tracking refs already on disk, needing no network, so
+        the answer is only as current as the last fetch. A branch deleted
+        upstream still counts until ``git fetch --prune`` runs.
 
         ``False`` when git reports no official remote, since nothing in such a
         clone can be reached from the official repository. ``True`` whenever
-        git gives no answer at all, so an unusable git does not flag.
+        git gives no answer at all, or when no official ref has been fetched,
+        so neither an unusable git nor a shallow clone flags.
         """
         if self._remotes is None:  # git unusable: unknown, do not flag
             return True
         remote = self.official_remote
         if remote is None:  # git worked and found no official remote
             return False
-        for branch in ("master", "main"):
-            out = self._git(
-                "merge-base", "--is-ancestor", "HEAD", f"{remote}/{branch}"
-            )
-            if out is not None:  # exit 0: HEAD is contained
-                return True
-            if self._git("rev-parse", "--verify", f"{remote}/{branch}"):
-                return False  # the branch exists and does not contain HEAD
-        return True  # no branch to compare against; do not flag
+        if not self._git("for-each-ref", f"refs/remotes/{remote}/"):
+            return True  # nothing fetched to compare against; do not flag
+        out = self._git(
+            "branch", "-r", "--contains", "HEAD", "--list", f"{remote}/*"
+        )
+        return True if out is None else bool(out.strip())
 
     def has_src_changes(self) -> bool:
         """Return ``True`` if tracked files under ``src/`` differ from HEAD.
@@ -384,8 +393,8 @@ class SpyglassInstall:
     def is_official(self) -> bool:
         """Neither dirty nor stale.
 
-        Independent of :attr:`is_dev`: a clean, current clone tracking
-        ``master`` is official though it is a dev build.
+        Independent of :attr:`is_dev`: a clean, current clone on any branch of
+        the official remote is official though it is a dev build.
         """
         return not self.has_local_changes and not self.is_stale
 
