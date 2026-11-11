@@ -346,8 +346,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             f"BodyPart: {unresolved}"
         )
         # Plural insert, deliberately: the flag exists so a non-admin can
-        # import a model whose parts are novel. See
-        # TestAcceptNewBodypartsScope.
+        # import a model whose parts are novel.
         BodyPart().insert(
             [{"bodypart": bp, "source": "imported"} for bp in unresolved],
             skip_duplicates=True,
@@ -843,9 +842,9 @@ class ModelSelection(SpyglassMixin, dj.Manual):
     def _own_model_ids(cls, row):
         """model_id(s) already belonging to this exact selection (re-run).
 
-        A named touchpoint rather than an inline fetch: `TestGuardBranches`
-        stubs it, alongside `_skeleton_for_params` and `_subjects`, to test
-        the guard's decision logic without a database.
+        A named touchpoint rather than an inline fetch, so a test can stub
+        it alongside `_skeleton_for_params` and `_subjects` and drive the
+        guard's decision logic without a database.
         """
         return list((Model & row).fetch("model_id"))
 
@@ -2310,6 +2309,7 @@ class Model(SpyglassMixin, dj.Computed):
             if is_zoo_model(str(model_path)):
                 return self.load_from_dlc_zoo(
                     str(model_path),
+                    model_name=model_name,
                     model_params_id=model_params_id,
                     model_id=model_id,
                     allow_redundant_model=allow_redundant_model,

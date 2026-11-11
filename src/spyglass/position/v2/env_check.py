@@ -135,7 +135,10 @@ def _qt_platform_problem():
         return None  # X11 session; the xcb plugin ships with Qt
 
     searched = _qt_plugin_dirs()
-    if any(d.glob("libqwayland*.so") for d in searched):
+    # The inner any() consumes each generator. Testing the generators
+    # themselves is always true, so the check could never fail
+    # wherever a plugin directory exists.
+    if any(any(d.glob("libqwayland*.so")) for d in searched):
         return None
 
     where = "\n      ".join(str(d) for d in searched) or "(no plugin dir found)"
