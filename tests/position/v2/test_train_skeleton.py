@@ -328,3 +328,71 @@ class TestTopologyMatchesLabelsExactly:
             assert not is_duplicate_skeleton(
                 *self.NEW, *self.OLD, threshold=threshold
             )
+
+
+class TestExplicitIdIsIdempotent:
+    """An explicit `skeleton_id` with `skip_duplicates` must not half-write.
+
+    The explicit id skips the duplicate search, so `skip_duplicates` dropped
+    the master insert while the part insert still ran: the blob and hash kept
+    the old parts, the part table gained the new ones, and `get_bodyparts`
+    then disagreed with the stored blob.
+    """
+
+    def test_differing_shape_is_refused(self, pv2_train):
+        """The reviewer's reproduction: three parts into two-part 2LED."""
+        skeleton = pv2_train.Skeleton()
+        before = len(skeleton)
+        stored_parts = skeleton.get_bodyparts("2LED")
+
+        with pytest.raises(dj.DataJointError, match="different shape"):
+            skeleton.insert1(
+                {
+                    "skeleton_id": "2LED",
+                    "bodyparts": ["greenLED", "redLED_C", "redLED_L"],
+                    "edges": [("greenLED", "redLED_C")],
+                },
+                skip_duplicates=True,
+            )
+
+        assert len(skeleton) == before, "a skeleton was added"
+        assert (
+            skeleton.get_bodyparts("2LED") == stored_parts
+        ), "the part table gained rows the blob does not describe"
+
+    def test_matching_shape_returns_the_key(self, pv2_train):
+        """The same shape under the same id is a no-op returning the key."""
+        skeleton = pv2_train.Skeleton()
+        before = len(skeleton)
+
+        key = skeleton.insert1(
+            {
+                "skeleton_id": "2LED",
+                "bodyparts": ["greenLED", "redLED_C"],
+                "edges": [("greenLED", "redLED_C")],
+            },
+            skip_duplicates=True,
+        )
+
+        assert key == {"skeleton_id": "2LED"}
+        assert len(skeleton) == before
+
+    def test_parts_and_blob_agree_after_insert(self, pv2_train):
+        """A fresh insert leaves the part table matching the blob."""
+        skeleton = pv2_train.Skeleton()
+        parts = ["greenLED", "redLED_C", "redLED_L"]
+        key = skeleton.insert1(
+            {
+                "skeleton_id": "t7_agreement",
+                "bodyparts": parts,
+                "edges": [("greenLED", "redLED_C")],
+            },
+            skip_duplicates=True,
+        )
+        try:
+            blob = (skeleton & key).fetch1("bodyparts")
+            assert sorted(skeleton.get_bodyparts(key["skeleton_id"])) == sorted(
+                blob
+            )
+        finally:
+            (skeleton & key).super_delete(warn=False, safemode=False)
