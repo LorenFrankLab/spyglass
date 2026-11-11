@@ -515,3 +515,164 @@ class TestDLCContinueRouting:
             {}, params, "skel", {}, {"parent_id": "p"}, _Msg(), epochs=99
         )
         assert strategy.train_calls[0]["epochs"] == 99
+
+
+class TestShuffleReachesDLC:
+    """`create_training_dataset` must act on the requested shuffle.
+
+    DLC 3 reads `Shuffles=None` as "allocate the next free index", so a
+    dropped `shuffle` makes DLC build one dataset while `train_network`
+    trains another.
+
+    These drive the decision, with `_shuffle_net_type` patched as the seam
+    that answers "does this shuffle exist, and with what network". Its own
+    path resolution is covered by `TestShuffleNetTypePaths`, which needs a
+    real DeepLabCut.
+    """
+
+    CFG = {
+        "Task": "T",
+        "date": "2026",
+        "iteration": 0,
+        "scorer": "me",
+        "TrainingFraction": [0.95],
+        "project_path": "/tmp/project",
+    }
+
+    @staticmethod
+    def _run(ts, existing, params):
+        """Call the method with the shuffle probe pinned to *existing*."""
+        from unittest.mock import MagicMock, patch
+
+        captured = {}
+        dlc = MagicMock(
+            create_training_dataset=lambda path, **kw: captured.update(kw)
+        )
+        strategy = ts.DLCStrategy()
+        with (
+            patch.object(
+                type(strategy),
+                "_shuffle_net_type",
+                staticmethod(lambda *a, **k: existing),
+            ),
+            patch.dict("sys.modules", {"deeplabcut": dlc}),
+        ):
+            strategy._prepare_training_dataset(
+                Path("/tmp/project/config.yaml"),
+                params,
+                TestShuffleReachesDLC.CFG,
+                MagicMock(),
+            )
+        return captured
+
+    def test_requested_shuffle_and_prefix_are_passed(self, ts):
+        """`Shuffles=[N]` and `modelprefix` reach the DLC call."""
+        captured = self._run(
+            ts,
+            None,
+            {"shuffle": 3, "model_prefix": "pfx", "net_type": "resnet_50"},
+        )
+        assert captured["Shuffles"] == [3]
+        assert captured["modelprefix"] == "pfx"
+
+    def test_default_shuffle_is_one(self, ts):
+        """An unset shuffle is named explicitly, never left to DLC."""
+        assert self._run(ts, None, {})["Shuffles"] == [1]
+
+    def test_existing_dataset_is_not_rebuilt(self, ts):
+        """An existing shuffle keeps its train/test split."""
+        assert self._run(ts, "resnet_50", {"shuffle": 1}) == {}
+
+    def test_unknown_existing_net_type_does_not_raise(self, ts):
+        """A dataset whose network cannot be read still short circuits."""
+        assert self._run(ts, "", {"shuffle": 1, "net_type": "hrnet_w32"}) == {}
+
+    def test_net_type_mismatch_raises(self, ts):
+        """A different network on an existing shuffle is refused."""
+        with pytest.raises(ValueError, match="net_type"):
+            self._run(ts, "resnet_50", {"shuffle": 1, "net_type": "hrnet_w32"})
+
+
+class TestShuffleNetTypePaths:
+    """`_shuffle_net_type` resolves paths through DeepLabCut's own helpers.
+
+    Built with those same helpers, so the test fails if Spyglass and DLC ever
+    disagree about where a shuffle's dataset and config live.
+    """
+
+    @staticmethod
+    def _cfg(tmp_path):
+        return {
+            "Task": "T",
+            "date": "2026",
+            "iteration": 0,
+            "scorer": "me",
+            "TrainingFraction": [0.95],
+            "project_path": str(tmp_path),
+        }
+
+    def test_absent_dataset_is_none(self, ts, tmp_path, skip_if_no_dlc):
+        cfg = self._cfg(tmp_path)
+        assert (
+            ts.DLCStrategy._shuffle_net_type(
+                tmp_path / "config.yaml", cfg, 1, {}
+            )
+            is None
+        )
+
+    def test_dataset_without_config_is_empty_string(
+        self, ts, tmp_path, skip_if_no_dlc
+    ):
+        from deeplabcut.utils.auxiliaryfunctions import (
+            get_data_and_metadata_filenames,
+            get_training_set_folder,
+        )
+
+        cfg = self._cfg(tmp_path)
+        _, metadata = get_data_and_metadata_filenames(
+            get_training_set_folder(cfg), 0.95, 1, cfg
+        )
+        (tmp_path / metadata).parent.mkdir(parents=True)
+        (tmp_path / metadata).touch()
+
+        assert (
+            ts.DLCStrategy._shuffle_net_type(
+                tmp_path / "config.yaml", cfg, 1, {}
+            )
+            == ""
+        )
+
+    def test_net_type_is_read_from_the_shuffle_config(
+        self, ts, tmp_path, skip_if_no_dlc
+    ):
+        import yaml
+        from deeplabcut.core.engine import Engine
+        from deeplabcut.utils.auxiliaryfunctions import (
+            get_data_and_metadata_filenames,
+            get_model_folder,
+            get_training_set_folder,
+        )
+
+        cfg = self._cfg(tmp_path)
+        _, metadata = get_data_and_metadata_filenames(
+            get_training_set_folder(cfg), 0.95, 1, cfg
+        )
+        (tmp_path / metadata).parent.mkdir(parents=True)
+        (tmp_path / metadata).touch()
+
+        train = (
+            tmp_path
+            / get_model_folder(0.95, 1, cfg, "", engine=Engine.PYTORCH)
+            / "train"
+        )
+        train.mkdir(parents=True)
+        (train / Engine.PYTORCH.pose_cfg_name).write_text(
+            yaml.safe_dump({"net_type": "resnet_50"})
+        )
+
+        assert (
+            ts.DLCStrategy._shuffle_net_type(
+                tmp_path / "config.yaml", cfg, 1, {}
+            )
+            == "resnet_50"
+        )

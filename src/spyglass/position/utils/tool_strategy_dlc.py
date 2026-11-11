@@ -1576,10 +1576,108 @@ class DLCStrategy(PoseToolStrategy):
 
         return result
 
+    @staticmethod
+    def _shuffle_net_type(config_path, config, shuffle, params):
+        """Network recorded for an existing shuffle, or None.
+
+        Every path comes from DeepLabCut's own helpers, so a change to its
+        project layout is picked up rather than reimplemented here:
+        ``get_training_set_folder`` and ``get_data_and_metadata_filenames``
+        for the dataset, ``get_model_folder`` and the ``Engine`` enum for the
+        per-engine model directory and config name.
+
+        Parameters
+        ----------
+        config_path : Path
+            Path to the project ``config.yaml``.
+        config : dict
+            The parsed project configuration.
+        shuffle : int
+            Shuffle index to look for.
+        params : dict
+            Training parameters, read for ``trainingsetindex`` and
+            ``model_prefix``.
+
+        Returns
+        -------
+        str or None
+            The network name when a dataset exists and names one, ``""``
+            when a dataset exists but the network cannot be read, and None
+            when no dataset exists for this shuffle.
+        """
+        from deeplabcut.core.engine import Engine
+        from deeplabcut.utils.auxiliaryfunctions import (
+            get_data_and_metadata_filenames,
+            get_model_folder,
+            get_training_set_folder,
+        )
+
+        project = Path(config.get("project_path") or config_path.parent)
+        fractions = config.get("TrainingFraction") or []
+        index = int(params.get("trainingsetindex", 0) or 0)
+        if index >= len(fractions):
+            return None
+        fraction = fractions[index]
+
+        _, metadata = get_data_and_metadata_filenames(
+            get_training_set_folder(config), fraction, shuffle, config
+        )
+        if not (project / metadata).exists():
+            return None
+
+        prefix = params.get("model_prefix") or ""
+        for engine in Engine:
+            cfg_file = (
+                project
+                / get_model_folder(
+                    fraction, shuffle, config, prefix, engine=engine
+                )
+                / "train"
+                / engine.pose_cfg_name
+            )
+            if not cfg_file.exists():
+                continue
+            shuffle_cfg = load_yaml(cfg_file) or {}
+            net = shuffle_cfg.get("net_type")
+            if net:
+                return net
+            backbone = (shuffle_cfg.get("model") or {}).get("backbone") or {}
+            if backbone.get("type"):
+                return backbone["type"]
+        return ""
+
     def _prepare_training_dataset(
         self, config_path: Path, params: dict, config: dict, model_instance
     ) -> None:
-        """Prepare DLC training dataset using create_training_dataset."""
+        """Prepare the DLC training dataset for the requested shuffle.
+
+        The shuffle is named explicitly. DLC 3 reads ``Shuffles=None`` as
+        "allocate the next free index", so leaving it unset creates a dataset
+        that nothing trains while ``train_network`` runs against the Spyglass
+        value.
+
+        An existing dataset is left alone. With ``userfeedback=False`` DLC
+        accepts an index that already exists and makes a fresh train/test
+        split for it, which would move a continuation onto frames that were
+        held out.
+
+        Parameters
+        ----------
+        config_path : Path
+            Path to the DLC project ``config.yaml``.
+        params : dict
+            Training parameters from ModelParams.
+        config : dict
+            The parsed project configuration.
+        model_instance
+            Model table instance, for logging.
+
+        Raises
+        ------
+        ValueError
+            If the shuffle's dataset exists under a different ``net_type``
+            than the one requested.
+        """
         from spyglass.position.utils import get_param_names, test_mode_suppress
 
         # Check DLC version for Engine enum support
@@ -1616,7 +1714,33 @@ class DLCStrategy(PoseToolStrategy):
         # blocks on input() when the model folder already exists.
         training_dataset_kwargs.setdefault("userfeedback", False)
 
-        model_instance._info_msg("Creating DLC training dataset...")
+        # The filter above keeps only names create_training_dataset accepts,
+        # which excludes the Spyglass spellings of these two.
+        shuffle = int(params.get("shuffle", 1))
+        training_dataset_kwargs["Shuffles"] = [shuffle]
+        if params.get("model_prefix") is not None:
+            training_dataset_kwargs["modelprefix"] = params["model_prefix"]
+
+        existing = self._shuffle_net_type(config_path, config, shuffle, params)
+        if existing is not None:
+            requested = params.get("net_type") or config.get("default_net_type")
+            # "" means a dataset exists whose network could not be read.
+            if requested and existing and existing != requested:
+                raise ValueError(
+                    f"Shuffle {shuffle} was built with net_type "
+                    f"{existing!r}, and these parameters ask for "
+                    f"{requested!r}. DLC cannot change the network of an "
+                    "existing shuffle. Select a different shuffle."
+                )
+            model_instance._info_msg(
+                f"DLC training dataset for shuffle {shuffle} exists; "
+                "keeping its train/test split."
+            )
+            return
+
+        model_instance._info_msg(
+            f"Creating DLC training dataset for shuffle {shuffle}..."
+        )
 
         with test_mode_suppress():
             create_training_dataset(str(config_path), **training_dataset_kwargs)
@@ -1794,8 +1918,11 @@ class DLCStrategy(PoseToolStrategy):
             )
         train_fraction = fractions[set_index]
         shuffle = int(params.get("shuffle", dlc_config.get("shuffle", 1)))
-        model_prefix = params.get(
-            "modelprefix", dlc_config.get("modelprefix", "")
+        # Spyglass stores `model_prefix`; DLC spells it `modelprefix`.
+        model_prefix = (
+            params.get("modelprefix")
+            or params.get("model_prefix")
+            or dlc_config.get("modelprefix", "")
         )
 
         train_dir = None
