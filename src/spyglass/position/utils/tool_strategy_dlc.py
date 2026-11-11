@@ -569,7 +569,10 @@ class DLCStrategy(PoseToolStrategy):
         )
         latest_model = self.get_latest_model_info(config)
 
-        nwb_file_name = model_instance._write_model_metadata(
+        # Serialised here, written in make_insert: this runs during
+        # make_compute, which the tri-part contract keeps free of the
+        # database, and creating an analysis file registers a row.
+        metadata_payload = model_instance._model_metadata_payload(
             ModelMetadata(
                 model_id=model_id,
                 model_path=model_path,
@@ -579,6 +582,7 @@ class DLCStrategy(PoseToolStrategy):
                 config=config,
                 latest_model=latest_model,
                 skeleton_id=skeleton_id,
+                tool=self.tool_name,
                 parent_id=parent_id,
                 session_files=vid_group.get("nwb_file_names", []),
             )
@@ -588,7 +592,7 @@ class DLCStrategy(PoseToolStrategy):
         return dict(
             key,
             model_id=model_id,
-            analysis_file_name=nwb_file_name,
+            _metadata_payload=metadata_payload,
             model_path=to_stored_path(model_path),
             snapshot_path=(
                 to_stored_path(snapshot_path) if snapshot_path else None

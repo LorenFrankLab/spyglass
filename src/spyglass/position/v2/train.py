@@ -9,13 +9,11 @@ inefficient.
 
 import getpass
 import warnings
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import datajoint as dj
 import pandas as pd
-from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import suppress_print_from_package
@@ -1308,10 +1306,12 @@ class Model(SpyglassMixin, dj.Computed):
                 f"{verb} not implemented for {tool}: {e}"
             ) from e
 
-        return [model_result, vid_group["nwb_file_names"][0]]
+        # Lifted out of the row: it is a payload, not a column.
+        payload = model_result.pop("_metadata_payload", None)
+        return [model_result, vid_group["nwb_file_names"][0], payload]
 
-    def make_insert(self, key, model_result, analysis_parent):
-        """Register the metadata file and insert the trained model row.
+    def make_insert(self, key, model_result, analysis_parent, payload=None):
+        """Write the metadata file and insert the trained model row.
 
         Runs inside a transaction; the only database writes in the tri-part
         sequence. The ``AnalysisNwbfile`` row is created here rather than
@@ -1325,18 +1325,24 @@ class Model(SpyglassMixin, dj.Computed):
             Row assembled by the tool strategy in :meth:`make_compute`.
         analysis_parent : str
             Session that owns the metadata file, from :meth:`make_fetch`.
+        payload : dict, optional
+            Metadata record from :meth:`_model_metadata_payload`. A tool
+            whose strategy records none writes no file.
         """
-        if analysis_file := model_result.get("analysis_file_name"):
-            self._register_analysis_file(analysis_file, analysis_parent)
+        if payload:
+            model_result["analysis_file_name"] = self._write_metadata_file(
+                payload, analysis_parent
+            )
         self.insert1(model_result)
         self._info_msg(f"Model training complete: {model_result['model_id']}")
 
-    def _write_model_metadata(self, metadata: ModelMetadata) -> str:
-        """Write an NWB file holding the model's training metadata.
+    @staticmethod
+    def _model_metadata_payload(metadata: ModelMetadata) -> dict:
+        """Serialise a model's training metadata for its analysis file.
 
-        Writes to disk only. :meth:`make_insert` registers the result in
-        ``AnalysisNwbfile``, keeping that row inside the insertion
-        transaction per the tri-part contract.
+        Pure: no disk and no database, so a tool strategy may call it from
+        :meth:`make_compute`. :meth:`_write_metadata_file` turns the result
+        into the file during :meth:`make_insert`.
 
         Parameters
         ----------
@@ -1345,37 +1351,15 @@ class Model(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        str
-            NWB file name, for the row's ``analysis_file_name``.
+        dict
+            JSON-serialisable record of the trained model.
         """
-        from pynwb import NWBFile
-
-        nwb_file_name = f"{metadata.model_id}_model.nwb"
-
-        # Store in analysis directory for AnalysisNwbfile compatibility
-
-        analysis_dir = (
-            AnalysisNwbfile()._analysis_dir
-        )  # pylint: disable=protected-access
-        nwb_path = Path(analysis_dir) / nwb_file_name
-
-        # Create basic NWB file
-        nwbfile = NWBFile(
-            session_description=f"DLC model training: {metadata.model_id}",
-            identifier=f"model_{datetime.now(timezone.utc):%Y%m%d%H%M%S}",
-            session_start_time=datetime.now(timezone.utc),
-        )
-
-        # Store training metadata in scratch space
-        # Store training metadata as JSON string (NWB-compatible)
-        import json
-
         lm = (
             metadata.latest_model
         )  # may be {} if get_latest_model_info missed dir
-        training_metadata = {
+        return {
             "model_id": metadata.model_id,
-            "tool": "DLC",
+            "tool": metadata.tool,
             "project_path": str(metadata.project_path),
             "config_path": str(metadata.config_path),
             "model_path": to_stored_path(metadata.model_path),
@@ -1393,54 +1377,51 @@ class Model(SpyglassMixin, dj.Computed):
             "nwb_file_names": list(metadata.session_files),
         }
 
-        # Convert to JSON string for NWB storage
-        nwbfile.add_scratch(
-            data=json.dumps(training_metadata),
-            name="model_training_metadata",
-            description="Training metadata for position estimation model",
-        )
+    def _write_metadata_file(self, payload: dict, parent: str) -> str:
+        """Create and register the analysis file holding *payload*.
 
-        # Write NWB file
-        with NWBHDF5IO(str(nwb_path), mode="w") as nwb_io:
-            nwb_io.write(nwbfile)
-
-        self._info_msg(f"Model metadata saved to NWB: {nwb_path}")
-
-        return nwb_file_name
-
-    def _register_analysis_file(self, analysis_file_name: str, parent: str):
-        """Register a written metadata file under its parent session.
+        Uses ``AnalysisNwbfile().build()``, which names the file, derives it
+        from the parent session, and registers it on exit. Called from
+        :meth:`make_insert` so the ``AnalysisNwbfile`` row lands inside the
+        insertion transaction per the tri-part contract.
 
         Parameters
         ----------
-        analysis_file_name : str
-            File written by :meth:`_write_model_metadata`.
+        payload : dict
+            Record from :meth:`_model_metadata_payload`.
         parent : str
-            ``nwb_file_name`` of the session that owns it.
+            ``nwb_file_name`` of the session that owns the file.
+
+        Returns
+        -------
+        str
+            File name, for the row's ``analysis_file_name``.
 
         Raises
         ------
         ValueError
             If *parent* is empty.
         """
+        import json
+
         if not parent:
             raise ValueError(
-                f"No parent session for analysis file {analysis_file_name}. "
-                "A model's metadata file belongs to the session(s) its "
-                "training videos came from."
+                f"No parent session for the metadata file of model "
+                f"{payload.get('model_id')!r}. A model's metadata file "
+                "belongs to the session(s) its training videos came from."
             )
 
-        try:
-            AnalysisNwbfile().add(parent, analysis_file_name)
-            self._info_msg(f"Registered analysis file: {analysis_file_name}")
-        except Exception as e:
-            # Re-running a selection rewrites the same file name.
-            if AnalysisNwbfile() & {"analysis_file_name": analysis_file_name}:
-                self._info_msg(
-                    f"Analysis file already registered: {analysis_file_name}"
-                )
-            else:
-                raise e
+        with AnalysisNwbfile().build(parent) as builder:
+            _, nwbfile = builder.open_nwb
+            nwbfile.add_scratch(
+                data=json.dumps(payload),
+                name="model_training_metadata",
+                description="Training metadata for position estimation model",
+            )
+            analysis_file_name = builder.analysis_file_name
+
+        self._info_msg(f"Model metadata saved to NWB: {analysis_file_name}")
+        return analysis_file_name
 
     def train(
         self,

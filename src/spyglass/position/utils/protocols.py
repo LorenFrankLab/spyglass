@@ -72,7 +72,12 @@ class RealFileSystem:
 
 @dataclass
 class ModelMetadata:
-    """Parameter object for _write_model_metadata method."""
+    """Parameter object for the model metadata payload.
+
+    Consumed by ``Model._model_metadata_payload``, which serialises it into
+    the analysis file. ``tool`` carries the training tool's own name, so a
+    strategy records itself rather than inheriting a default.
+    """
 
     model_id: str
     model_path: str
@@ -82,6 +87,7 @@ class ModelMetadata:
     config: dict
     latest_model: dict
     skeleton_id: str
+    tool: str
     parent_id: Optional[str] = None
     # Sessions behind the training video group, sorted. The first is the
     # ``AnalysisNwbfile`` parent; training may span sessions, so all are
