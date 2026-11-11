@@ -343,8 +343,14 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             f"Auto-inserting {len(unresolved)} novel bodypart(s) into "
             f"BodyPart: {unresolved}"
         )
-        # Plural insert, deliberately: the flag exists so a non-admin can
-        # import a model whose parts are novel.
+        # Plural insert, deliberately. `BodyPart.insert1` refuses a
+        # non-admin, and the flag exists so a non-admin can import a model
+        # whose parts are novel. Its collision guard is unreachable from
+        # here regardless: `unresolved` holds only the names `canonicalize`
+        # could not resolve against every row, so none of them can
+        # normalize onto an existing part. `TestAcceptNewBodypartsScope`
+        # pins that invariant, and the batch is checked against itself
+        # above, which a one-row-at-a-time `insert1` cannot do.
         BodyPart().insert(
             [{"bodypart": bp, "source": "imported"} for bp in unresolved],
             skip_duplicates=True,
