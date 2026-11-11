@@ -1,5 +1,6 @@
 """Pure graph utilities for skeleton validation and duplicate detection."""
 
+import hashlib
 import re
 from difflib import SequenceMatcher
 
@@ -230,7 +231,14 @@ def shape_hash_from_edges(
     Returns
     -------
     str
-        Weisfeiler-Lehman graph hash (topology only, labels ignored).
+        A 32-character md5 over a canonical form of the unlabeled graph: the
+        node count, the edge count, and the sorted degree sequence.
+
+        This is a bucket key, not an identity. Two non-isomorphic graphs with
+        one degree sequence share a value, and the caller settles those: the
+        duplicate lookup collects rows by hash and ``is_duplicate_skeleton``
+        compares them exactly. A value computed here rather than returned by
+        a library cannot change when that library does.
 
     Raises
     ------
@@ -260,9 +268,13 @@ def shape_hash_from_edges(
         (idx_of[normalize_label(u)], idx_of[normalize_label(v)])
         for u, v in (edges or [])
     )
-    return nx.weisfeiler_lehman_graph_hash(
-        this_graph, node_attr=None, edge_attr=None
+    degrees = sorted(d for _, d in this_graph.degree())
+    canonical = (
+        f"n={this_graph.number_of_nodes()};"
+        f"e={this_graph.number_of_edges()};"
+        f"d={','.join(str(d) for d in degrees)}"
     )
+    return hashlib.md5(canonical.encode()).hexdigest()
 
 
 def build_labeled_graph(

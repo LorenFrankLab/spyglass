@@ -180,19 +180,20 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
     # Dicts, not positional rows: a later column with a default can then be
     # omitted here. Each `hash` is shape_hash_from_edges(bodyparts, edges),
-    # matching what insert1 computes.
+    # matching what insert1 computes. The values are Spyglass-computed, so a
+    # networkx release cannot move them out from under these constants.
     contents = [
         {
             "skeleton_id": "1LED",
             "bodyparts": ["whiteLED"],
             "edges": [],
-            "hash": "8999452509fdfa98335c5ba44ed05498",
+            "hash": "c305e12973b3d9ed3c36d38dd0fb895b",
         },
         {
             "skeleton_id": "2LED",
             "bodyparts": ["greenLED", "redLED_C"],
             "edges": [("greenLED", "redLED_C")],
-            "hash": "3ba4ffe16dfe637510ed1c3676ec6cb0",
+            "hash": "41b6347725857673189b4dd0d174abb5",
         },
         {
             "skeleton_id": "4LED",
@@ -207,7 +208,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 ("greenLED", "redLED_L"),
                 ("greenLED", "redLED_R"),
             ],
-            "hash": "cde6b48ed870286595c1455af7aff8bd",
+            "hash": "4ab61d4314b09e9227229f9166f15135",
         },
     ]
 
