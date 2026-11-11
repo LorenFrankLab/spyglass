@@ -39,6 +39,12 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
     except ImportError:
         return  # ndx-pose not installed; skip detection
 
+    # Read the cached namespaces first. Every ingested file reaches this
+    # screen, and building one through pynwb to look for pose objects costs
+    # far more than reading the header of a file that declares no ndx-pose.
+    if not _declares_ndx_pose(nwb_abs_path):
+        return
+
     with pynwb.NWBHDF5IO(
         str(nwb_abs_path), mode="r", load_namespaces=True
     ) as io:
@@ -68,10 +74,40 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
                 "acquisition, no epochs). Model files should not be passed "
                 "to insert_sessions: they have no session structure and "
                 "would create incomplete Nwbfile entries.\n\n"
-                "To register an ndx-pose model in Position V2 use:\n"
-                "    from spyglass.position.v2 import Model\n"
-                "    Model().import_model('<path to nwb>')"
+                "Pose data is ingested from a session file, not from a "
+                "file of its own: write the pose objects into the session "
+                "NWB, ingest that with insert_sessions, and ImportedPose "
+                "picks up its PoseEstimation objects. There is no route for "
+                "a pose-only file."
             )
+
+
+def _declares_ndx_pose(nwb_abs_path: Path) -> bool:
+    """Whether the file's cached namespaces include ndx-pose.
+
+    An NWB file embeds the specs it was written against, so this answers
+    from the header without building the file. A file that cannot be opened
+    is reported as declaring nothing, leaving the error to the reader that
+    needs the contents.
+
+    Parameters
+    ----------
+    nwb_abs_path : Path
+        Absolute path to the NWB file.
+
+    Returns
+    -------
+    bool
+        True when ``ndx-pose`` appears among the cached namespaces.
+    """
+    import h5py
+
+    try:
+        with h5py.File(nwb_abs_path, "r") as h5:
+            specs = h5.get("specifications")
+            return specs is not None and "ndx-pose" in specs
+    except (OSError, KeyError):
+        return False
 
 
 def insert_sessions(

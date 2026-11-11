@@ -550,3 +550,60 @@ class TestPoseModelArtifactDetection:
 
         path = self._write(tmp_path, "epoch_session.nwb", epochs=True)
         _check_not_pose_model(path)
+
+
+class TestPoseModelScreen:
+    """`_check_not_pose_model` ran a pynwb build for every ingested file.
+
+    The cached namespaces answer whether a file declares ndx-pose at all, so
+    a file that does not is now rejected from the screen on a header read.
+    """
+
+    @staticmethod
+    def _fn():
+        from spyglass.data_import.insert_sessions import _declares_ndx_pose
+
+        return _declares_ndx_pose
+
+    def test_declared_namespace_is_detected(self, tmp_path):
+        """A file whose cached specs name ndx-pose reaches the full check."""
+        import h5py
+
+        path = tmp_path / "declares.nwb"
+        with h5py.File(path, "w") as h5:
+            h5.create_group("specifications/ndx-pose/0.2.0")
+        assert self._fn()(path) is True
+
+    def test_other_namespaces_are_not_a_match(self, tmp_path):
+        """A file with specs but no ndx-pose is screened out."""
+        import h5py
+
+        path = tmp_path / "no_pose.nwb"
+        with h5py.File(path, "w") as h5:
+            h5.create_group("specifications/core/2.9.0")
+        assert self._fn()(path) is False
+
+    def test_missing_file_declares_nothing(self, tmp_path):
+        """An unreadable file is not an error here; the reader reports it."""
+        assert self._fn()(tmp_path / "absent.nwb") is False
+
+    def test_plain_hdf5_declares_nothing(self, tmp_path):
+        """A file with no `specifications` group is handled, not raised on."""
+        import h5py
+
+        path = tmp_path / "plain.h5"
+        with h5py.File(path, "w") as h5:
+            h5.create_dataset("x", data=[1, 2, 3])
+        assert self._fn()(path) is False
+
+    def test_message_names_no_absent_method(self, common):
+        """The guidance named `Model().import_model`, which does not exist."""
+        import inspect
+
+        # `from spyglass.data_import import insert_sessions` resolves to the
+        # re-exported function, not this module.
+        from spyglass.data_import.insert_sessions import _check_not_pose_model
+
+        source = inspect.getsource(_check_not_pose_model)
+        assert "import_model" not in source
+        assert "ImportedPose" in source
