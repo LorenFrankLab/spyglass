@@ -431,35 +431,127 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         explicit_id = key.get("skeleton_id")
         if check_duplicates and not explicit_id:
-            for row in self & dict(hash=shape_hash):
-                row_bodyparts = self.get_bodyparts(row["skeleton_id"])
-                if skel.is_duplicate_skeleton(
-                    bodyparts,
-                    edges,
-                    row_bodyparts,
-                    row["edges"],
-                    name_similarity,
-                ):
-                    if row.get("bodyparts") is None:
-                        super().update1(
-                            dict(
-                                skeleton_id=row["skeleton_id"],
-                                bodyparts=bodyparts,
-                            )
-                        )
-                    return dict(skeleton_id=row["skeleton_id"])
+            match = self._matching_skeleton(
+                shape_hash, bodyparts, edges, name_similarity
+            )
+            if match:
+                return match
 
         skeleton_id = key.get("skeleton_id") or default_pk_name("skel", key)
         insert_pk = dict(skeleton_id=skeleton_id)
-        super().insert1(
-            dict(insert_pk, bodyparts=bodyparts, edges=edges, hash=shape_hash),
-            **kwargs,
-        )
-        self.BodyPart.insert(
-            [{"skeleton_id": skeleton_id, "bodypart": bp} for bp in bodyparts],
-            skip_duplicates=True,
+
+        # An explicit id skips the duplicate search above, so `skip_duplicates`
+        # would drop the master insert while the part insert below still ran,
+        # leaving the blob and hash describing one skeleton and the part table
+        # another. Return the row when it already says the same thing, and
+        # refuse when it does not; `skip_duplicates` returns an existing row,
+        # it does not replace one.
+        if explicit_id and kwargs.get("skip_duplicates"):
+            existing = self & insert_pk
+            if existing:
+                stored = existing.fetch1("hash")
+                if stored != shape_hash:
+                    raise dj.DataJointError(
+                        f"Skeleton {skeleton_id!r} already exists with a "
+                        f"different shape: stored hash {stored}, given "
+                        f"{shape_hash}. Insert under a new skeleton_id, or "
+                        "delete the existing row first."
+                    )
+                return insert_pk
+
+        self._insert_with_parts(
+            insert_pk, bodyparts, edges, shape_hash, **kwargs
         )
         return insert_pk
+
+    def _matching_skeleton(self, shape_hash, bodyparts, edges, name_similarity):
+        """Key of an existing skeleton with this shape, or None.
+
+        The hash buckets candidates; `is_duplicate_skeleton` decides, since
+        two non-isomorphic graphs can share a hash. A matched row whose
+        `bodyparts` blob is NULL is backfilled, which is how the default
+        skeletons gain theirs.
+
+        Parameters
+        ----------
+        shape_hash : str
+            Value from :func:`shape_hash_from_edges`, used as a bucket key.
+        bodyparts : list[str]
+            Canonical body part names being inserted.
+        edges : list[tuple[str, str]]
+            Canonical edges being inserted.
+        name_similarity : float
+            Threshold passed to :func:`is_duplicate_skeleton`.
+
+        Returns
+        -------
+        dict or None
+            ``{"skeleton_id": ...}`` for the match, or None.
+        """
+        for row in self & dict(hash=shape_hash):
+            if not skel.is_duplicate_skeleton(
+                bodyparts,
+                edges,
+                self.get_bodyparts(row["skeleton_id"]),
+                row["edges"],
+                name_similarity,
+            ):
+                continue
+            if row.get("bodyparts") is None:
+                # Not super(): that changes method resolution, not the
+                # restriction, and update1 refuses any restricted table.
+                # `self` is whatever the caller held.
+                type(self)().update1(
+                    dict(
+                        skeleton_id=row["skeleton_id"],
+                        bodyparts=bodyparts,
+                    )
+                )
+            return dict(skeleton_id=row["skeleton_id"])
+        return None
+
+    def _insert_with_parts(
+        self, insert_pk, bodyparts, edges, shape_hash, **kwargs
+    ):
+        """Write the master row and its body parts in one transaction.
+
+        A failed part insert must not leave a master row whose ``BodyPart``
+        entries are missing, since ``get_bodyparts`` reads the part table
+        while the blob holds the same names.
+
+        Parameters
+        ----------
+        insert_pk : dict
+            ``{"skeleton_id": ...}`` for the row.
+        bodyparts : list[str]
+            Canonical body part names, for the blob and the part rows.
+        edges : list[tuple[str, str]]
+            Canonical edges for the blob.
+        shape_hash : str
+            Value from :func:`shape_hash_from_edges`.
+        **kwargs
+            Passed to the master insert.
+        """
+        with self._safe_context():
+            super().insert1(
+                dict(
+                    insert_pk,
+                    bodyparts=bodyparts,
+                    edges=edges,
+                    hash=shape_hash,
+                ),
+                **kwargs,
+            )
+            self.BodyPart.insert(
+                [
+                    {
+                        "skeleton_id": insert_pk["skeleton_id"],
+                        "bodypart": bp,
+                    }
+                    for bp in bodyparts
+                ],
+                skip_duplicates=True,
+            )
 
     def show_skeleton(self, skeleton_id: str = None):
         """Display skeleton graph visualization similar to datajoint.Diagram.
@@ -1920,14 +2012,21 @@ class Model(SpyglassMixin, dj.Computed):
         if frames_per_video < 1:
             raise ValueError("frames_per_video must be >= 1")
 
-        # ── 1. Resolve video paths via VideoFile; build a VidFileGroup ────────
-        # Each dict in video_list is a partial VideoFile key; get_abs_paths
-        # expands multi-camera epochs automatically.
-        resolved_videos = [
-            path
-            for item in video_list
-            for path in VideoFile.get_abs_paths(item)
-        ]
+        # ── 1. Resolve video keys via VideoFile; build a VidFileGroup ────────
+        # Each dict in video_list is a partial VideoFile key, which may name
+        # several rows for a multi-camera epoch. Keys are resolved once and
+        # kept: the group is built from them directly, so a path never has to
+        # be turned back into a key. Reducing them to paths and resolving
+        # again through `fetch_key_from_path` failed for a row whose `path`
+        # is NULL or a symlink, after the mp4 conversion moved the file.
+        resolved_keys = []
+        for item in video_list:
+            item_keys = (VideoFile & item).fetch("KEY", as_dict=True)
+            if not item_keys:  # per item, as get_abs_paths raises
+                raise ValueError(f"No VideoFile rows found for key: {item}")
+            resolved_keys.extend(item_keys)
+
+        resolved_videos = [VideoFile.get_abs_path(k) for k in resolved_keys]
 
         if not resolved_videos:
             raise ValueError(
@@ -1949,8 +2048,8 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Convert any raw video streams (h264/h265/hevc) to mp4 so DeepLabCut
         # can read them: DLC's frame extraction rejects raw streams. The
-        # original paths (which map to VideoFile)
-        # are kept for the VidFileGroup below; DLC gets the converted paths.
+        # resolved keys identify the VideoFile rows for the group; DLC gets
+        # the converted paths.
         convert_dir = (
             pose_video_dir
             or pose_project_dir
@@ -1998,7 +2097,7 @@ class Model(SpyglassMixin, dj.Computed):
             )
 
         vid_group_key = VidFileGroup.create_from_files(
-            video_files=resolved_videos,
+            video_files=resolved_keys,
             description=f"Training videos: {project_name}",
         )
 
