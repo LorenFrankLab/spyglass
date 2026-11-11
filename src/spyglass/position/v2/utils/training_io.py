@@ -1,8 +1,13 @@
-"""Training-history CSV discovery and parsing utilities."""
+"""Training-history CSV discovery and parsing utilities.
+
+TODO: Fold this into tool-specific strategies after #1647 merges.
+"""
 
 from pathlib import Path
 
 import pandas as pd
+
+from spyglass.utils import logger
 
 _CSV_PATTERNS = [
     "**/learning_stats.csv",
@@ -28,20 +33,31 @@ def discover_training_csvs(model_dir: Path) -> "list[Path]":
     list[Path]
         Unique paths to candidate CSV files.  Empty list if none found.
     """
-    search_roots = [model_dir, model_dir.parent, model_dir.parent.parent]
+    # A directory is searched as given; anything else, including a
+    # config.yaml that does not exist, resolves to its container.
+    root = model_dir if model_dir.is_dir() else model_dir.parent
     seen: set = set()
     found: list = []
-    for root in search_roots:
-        if not root.exists():
-            continue
-        for pattern in _CSV_PATTERNS:
-            for p in root.glob(pattern):
-                if p not in seen:
-                    seen.add(p)
-                    found.append(p)
-        if found:
-            break
-    return found
+    for pattern in _CSV_PATTERNS:
+        for path in root.glob(pattern):
+            if path not in seen:
+                seen.add(path)
+                found.append(path)
+
+    if len(found) < 2:
+        return found
+
+    # A project holds one CSV per shuffle and iteration. Concatenating them
+    # describes no single model, so only the newest model folder is kept.
+    # Selecting by shuffle needs an identity the Model row does not carry.
+    newest = max(found, key=lambda path: path.stat().st_mtime)
+    kept = [path for path in found if path.parent == newest.parent]
+    if len(kept) < len(found):
+        logger.warning(
+            f"{len(found)} training CSVs under {root}; reporting only "
+            f"{newest.parent}, the most recently written."
+        )
+    return kept
 
 
 def parse_training_csv(path: Path) -> "pd.DataFrame | None":
@@ -115,7 +131,13 @@ def parse_training_csv(path: Path) -> "pd.DataFrame | None":
         # Named columns identify themselves, so position is not consulted.
         aliases = {
             "iteration": ("iteration", "epoch", "step", "global_step"),
-            "loss": ("loss", "train_loss", "training_loss", "total_loss"),
+            "loss": (
+                "loss",
+                "losses/train.total_loss",  # DLC 3
+                "train_loss",
+                "training_loss",
+                "total_loss",
+            ),
             "learning_rate": ("learning_rate", "lr"),
         }
         by_name = {str(c).lower(): c for c in cols}
