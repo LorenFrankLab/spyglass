@@ -2002,10 +2002,8 @@ class Model(SpyglassMixin, dj.Computed):
         # ── 1. Resolve video keys via VideoFile; build a VidFileGroup ────────
         # Each dict in video_list is a partial VideoFile key, which may name
         # several rows for a multi-camera epoch. Keys are resolved once and
-        # kept: the group is built from them directly, so a path never has to
-        # be turned back into a key. Reducing them to paths and resolving
-        # again through `fetch_key_from_path` failed for a row whose `path`
-        # is NULL or a symlink, after the mp4 conversion moved the file.
+        # kept, so the group is built from them directly and a path never has
+        # to be turned back into a key.
         resolved_keys = []
         for item in video_list:
             item_keys = (VideoFile & item).fetch("KEY", as_dict=True)

@@ -17,11 +17,9 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
     """Raise if the file looks like a pose-model artifact rather than a session.
 
     Pose model NWB files (produced by tools like DeepLabCut or SLEAP and
-    imported via ``Model.import_model()``) contain ndx-pose objects
+    imported via ``Model.load()``) contain ndx-pose objects
     (``PoseEstimation`` / ``Skeletons``) but carry no session structure,
-    no electrode groups, no task epochs.  Passing them to
-    ``insert_sessions`` would register an incomplete ``Nwbfile`` entry and
-    could inadvertently trigger V1 ``ImportedPose`` population.
+    no electrode groups, no task epochs.
 
     Parameters
     ----------
@@ -39,9 +37,8 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
     except ImportError:
         return  # ndx-pose not installed; skip detection
 
-    # Read the cached namespaces first. Every ingested file reaches this
-    # screen, and building one through pynwb to look for pose objects costs
-    # far more than reading the header of a file that declares no ndx-pose.
+    # Read the header first: building the file through pynwb costs far more,
+    # and every ingested file reaches this screen.
     if not _declares_ndx_pose(nwb_abs_path):
         return
 
@@ -71,9 +68,8 @@ def _check_not_pose_model(nwb_abs_path: Path) -> None:
             raise ValueError(
                 f"'{nwb_abs_path.name}' appears to be a pose-model artifact "
                 "(ndx-pose objects present, no electrode groups, no "
-                "acquisition, no epochs). Model files should not be passed "
-                "to insert_sessions: they have no session structure and "
-                "would create incomplete Nwbfile entries.\n\n"
+                "acquisition, no epochs). Model files have no session "
+                "structure, so insert_sessions does not take them.\n\n"
                 "Pose data is ingested from a session file, not from a "
                 "file of its own: write the pose objects into the session "
                 "NWB, ingest that with insert_sessions, and ImportedPose "
