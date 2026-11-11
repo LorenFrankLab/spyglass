@@ -456,7 +456,6 @@ class TestSubjectInPath:
         assert not self.fn("J1", "/videos/J16_20210529_run1.mp4")
 
     def test_underscore_delimited_subject_matches(self):
-        """`\\b` would fail here, because `_` is a word character."""
         assert self.fn("J1", "/videos/J1_20210529_run1.mp4")
 
     def test_subject_at_path_start_matches(self):

@@ -363,9 +363,8 @@ class TestCreateProjectUnit:
 
         _, dlc_kwargs = fake_dlc.create_new_project.call_args
         assert dlc_kwargs["videos"] == [str(mp4)]  # DLC gets the mp4
-        # The group gets the resolved VideoFile keys. It used to get the
-        # original path and resolve it back, which failed for a row whose
-        # stored path is NULL or a symlink.
+        # The group gets the resolved VideoFile keys, not a path to
+        # resolve back.
         _, vg_kwargs = fake_vid_group.create_from_files.call_args
         assert vg_kwargs["video_files"] == [
             {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": 0}
