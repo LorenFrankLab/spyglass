@@ -713,7 +713,11 @@ class DLCStrategy(PoseToolStrategy):
             cfg = DlcConfig.read(project_dir)
 
         # Re-point video_sets at exactly the converted videos and set params.
-        cfg.keep_videos(want).set_bodyparts(bodyparts).set(
+        # The skeleton is written empty to match the `Skeleton` row
+        # `create_project` inserts, which carries `edges: []`. DLC's own
+        # default names placeholder parts, so leaving it would make the file
+        # disagree with the row, and `Model.load` reads the file.
+        cfg.keep_videos(want).set_bodyparts(bodyparts).set("skeleton", []).set(
             "numframes2pick", numframes2pick
         )
         return Path(cfg.write())

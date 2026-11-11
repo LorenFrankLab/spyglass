@@ -1660,7 +1660,10 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         if results:
-            (self & model_key).update1(
+            # DataJoint refuses update1 on a restricted table, so this runs
+            # on a plain instance. update1 still requires the primary key to
+            # match exactly one row.
+            type(self)().update1(
                 {"model_id": model_key["model_id"], "evaluation": results}
             )
 
@@ -2209,6 +2212,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_name: Union[str, None] = None,
         normalize_names: bool = False,
         allow_redundant_model: bool = False,
+        allow_invalid_edges: bool = False,
         external_videos: bool = False,
         vid_file_matches: Optional[Dict[str, Optional[Dict]]] = None,
         **kwargs,
@@ -2236,6 +2240,10 @@ class Model(SpyglassMixin, dj.Computed):
             ``Task`` for a project import, or the zoo dataset name for a zoo
             import. ``model_id`` is a date+hash, so this is what makes
             ``Model()`` previews legible.
+        allow_invalid_edges : bool, optional
+            Import a project whose skeleton edges name body parts it does not
+            declare, dropping those edges. Default False, which raises and
+            names the file to edit. The project file is never modified.
         external_videos : bool, optional
             Import even when the project's training videos are not registered
             in ``VideoFile``, recording them as ``VidFileGroup.ExternalVideo``
@@ -2324,6 +2332,7 @@ class Model(SpyglassMixin, dj.Computed):
                 model_name=model_name,
                 normalize_names=normalize_names,
                 allow_redundant_model=allow_redundant_model,
+                allow_invalid_edges=allow_invalid_edges,
                 external_videos=external_videos,
                 vid_file_matches=vid_file_matches,
             )
@@ -2544,6 +2553,71 @@ class Model(SpyglassMixin, dj.Computed):
         self._info_msg(f"Zoo model imported: {model_key['model_id']}")
         return model_key
 
+    @staticmethod
+    def _check_project_skeleton(
+        skeleton_config: dict,
+        model_path: Path,
+        allow_invalid_edges: bool = False,
+    ) -> dict:
+        """Reject a project skeleton whose edges name unknown body parts.
+
+        A DLC project created by `create_project` keeps DLC's placeholder
+        skeleton, `[[bodypart1, bodypart2], [objectA, bodypart3]]`, whose
+        parts no real project declares. Checking here names the offending
+        edges and the file to edit, rather than surfacing from the insert.
+
+        Parameters
+        ----------
+        skeleton_config : dict
+            The ``bodyparts`` and ``edges`` the project declares.
+        model_path : Path
+            Path to the project ``config.yaml``, named in the error.
+        allow_invalid_edges : bool, optional
+            Drop the offending edges and continue. For an admin importing a
+            project whose config cannot be edited. The dropped edges are
+            reported, and the file on disk is not touched.
+
+        Returns
+        -------
+        dict
+            The skeleton to insert, with invalid edges removed when
+            *allow_invalid_edges* is set.
+
+        Raises
+        ------
+        ValueError
+            When an edge names a body part the project does not declare and
+            *allow_invalid_edges* is False.
+        """
+        parts = set(skeleton_config.get("bodyparts") or [])
+        edges = list(skeleton_config.get("edges") or [])
+        invalid = [e for e in edges if not set(e) <= parts]
+        if not invalid:
+            return skeleton_config
+
+        if allow_invalid_edges:
+            logger.warning(
+                f"Dropping {len(invalid)} skeleton edge(s) naming body parts "
+                f"the project does not declare: {invalid}. "
+                f"{model_path} is unchanged."
+            )
+            return {
+                **skeleton_config,
+                "edges": [e for e in edges if set(e) <= parts],
+            }
+
+        raise ValueError(
+            f"Skeleton edges name body parts the project does not declare: "
+            f"{invalid}.\n"
+            f"Declared body parts: {sorted(parts)}.\n"
+            f"Edit the `skeleton` list in {model_path} so every edge uses "
+            "those names, or remove the edges. A project just made by "
+            "create_project still carries DeepLabCut's placeholder skeleton, "
+            "which names none of them.\n"
+            "To import it as it stands, dropping those edges, pass "
+            "allow_invalid_edges=True."
+        )
+
     def _import_dlc_model(self, model_path: Path, **kwargs):
         # This method is the DLC import path, reached through
         # `DLCStrategy.load`. The strategy answers the project-capability
@@ -2568,8 +2642,17 @@ class Model(SpyglassMixin, dj.Computed):
         project = dlc.read_project(model_path, extra_params)
         config = project["config"]
 
+        # Step 0: check the skeleton the project declares before anything is
+        # written. A new DLC project ships placeholder edges naming parts no
+        # real project has, so this is the first thing a fresh project trips
+        # on, and failing here means no row is left behind.
+        skeleton_config = self._check_project_skeleton(
+            project["skeleton"],
+            model_path,
+            allow_invalid_edges=kwargs.get("allow_invalid_edges", False),
+        )
+
         # Step 1: insert the skeleton the project declares
-        skeleton_config = project["skeleton"]
         try:
             skeleton_key = Skeleton().insert1(
                 skeleton_config,
