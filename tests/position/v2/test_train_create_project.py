@@ -331,6 +331,14 @@ class TestCreateProjectUnit:
         fake_skeleton.return_value.insert1.return_value = {"skeleton_id": "sk"}
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(h264)]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(h264)]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -355,8 +363,13 @@ class TestCreateProjectUnit:
 
         _, dlc_kwargs = fake_dlc.create_new_project.call_args
         assert dlc_kwargs["videos"] == [str(mp4)]  # DLC gets the mp4
+        # The group gets the resolved VideoFile keys. It used to get the
+        # original path and resolve it back, which failed for a row whose
+        # stored path is NULL or a symlink.
         _, vg_kwargs = fake_vid_group.create_from_files.call_args
-        assert vg_kwargs["video_files"] == [str(h264)]  # VidFileGroup: original
+        assert vg_kwargs["video_files"] == [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": 0}
+        ]
 
     def _create_project_and_capture_experimenter(
         self, tmp_path, monkeypatch, experimenter=None
@@ -386,6 +399,14 @@ class TestCreateProjectUnit:
         fake_skeleton.return_value.insert1.return_value = {"skeleton_id": "sk"}
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(h264)]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(h264)]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         kwargs = dict(
             project_name="wire_test",
@@ -529,6 +550,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -597,6 +626,14 @@ class TestCreateProjectUnit:
         }
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = videos
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = videos
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -703,6 +740,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -751,6 +796,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -802,6 +855,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -844,6 +905,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -888,6 +957,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -963,6 +1040,14 @@ class TestCreateProjectUnit:
 
         fake_vid_file = MagicMock()
         fake_vid_file.get_abs_paths.return_value = [str(tmp_path / "vid.avi")]
+        # create_project resolves keys and maps them to paths, so the
+        # double stands in for both steps.
+        _paths = [str(tmp_path / "vid.avi")]
+        fake_vid_file.__and__.return_value.fetch.return_value = [
+            {"nwb_file_name": "m_.nwb", "epoch": 1, "video_file_num": i}
+            for i, _ in enumerate(_paths)
+        ]
+        fake_vid_file.get_abs_path.side_effect = list(_paths)
 
         with (
             patch.dict("sys.modules", {"deeplabcut": fake_dlc}),
@@ -1123,3 +1208,85 @@ class TestCreateProjectIntegration:
             out_cfg = yaml.safe_load(f)
 
         assert out_cfg.get("numframes2pick") == 7
+
+    def test_create_project_config_skeleton_matches_the_row(
+        self, dlc_project_config
+    ):
+        """The written config agrees with the Skeleton row just inserted.
+
+        `create_project` inserts `edges: []`, while DeepLabCut's own default
+        names placeholder parts. Leaving the placeholder made the file
+        disagree with the row, and `Model.load` reads the file, so a fresh
+        project could not be imported.
+        """
+        import yaml
+
+        with open(dlc_project_config, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        result = self.model.create_project(
+            project_name="integration_skeleton_test",
+            bodyparts=cfg["bodyparts"],
+            video_list=[{"nwb_file_name": self.nwb_file_name, "epoch": 1}],
+            project_directory=str(self.tmp_path),
+            frames_per_video=7,
+        )
+
+        with open(Path(result["config_path"]), encoding="utf-8") as f:
+            out_cfg = yaml.safe_load(f)
+
+        assert (
+            out_cfg.get("skeleton") == []
+        ), "config kept DLC's placeholder skeleton, which Model.load rejects"
+        from spyglass.position.v2.train import Skeleton
+
+        row = Skeleton() & {"skeleton_id": result["skeleton_id"]}
+        assert row.fetch1("edges") == [], "row and file disagree"
+
+    def test_group_is_built_from_keys_not_paths(self, dlc_project_config):
+        """The group resolves from VideoFile keys, never from a path.
+
+        `create_project` reduced the keys to absolute paths and
+        `VidFileGroup.insert1` resolved them back with
+        `fetch_key_from_path`, which needs the stored `path` to match the
+        file on disk. After the mp4 conversion that round trip failed for a
+        row whose path is NULL or a symlink.
+        """
+        import yaml
+        from unittest.mock import patch
+
+        with open(dlc_project_config, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        from spyglass.common import VideoFile
+
+        with patch.object(
+            VideoFile,
+            "fetch_key_from_path",
+            side_effect=AssertionError("resolved a path instead of a key"),
+        ):
+            result = self.model.create_project(
+                project_name="integration_keys_test",
+                bodyparts=cfg["bodyparts"],
+                video_list=[{"nwb_file_name": self.nwb_file_name, "epoch": 1}],
+                project_directory=str(self.tmp_path),
+                frames_per_video=7,
+            )
+
+        assert result["vid_group_id"], "no group was created"
+
+    def test_unresolvable_video_list_entry_raises(self, dlc_project_config):
+        """A `video_list` item matching no row still raises, per item."""
+        import yaml
+
+        with open(dlc_project_config, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        with pytest.raises(ValueError, match="No VideoFile rows found"):
+            self.model.create_project(
+                project_name="integration_badlist_test",
+                bodyparts=cfg["bodyparts"],
+                video_list=[{"nwb_file_name": "no_such_session_.nwb"}],
+                project_directory=str(self.tmp_path),
+                frames_per_video=7,
+            )

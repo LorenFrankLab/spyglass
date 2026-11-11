@@ -437,3 +437,37 @@ class TestOverrideResolution:
         )
 
         assert len(VidFileGroup.File() & group) == 1
+
+
+class TestSubjectInPath:
+    """Pass 1 of `create_from_dlc_config` matched the subject as a substring.
+
+    Subject `J1` is inside `/videos/J16_20210529_run1.mp4`, which links a
+    model to the wrong animal with no error.
+    """
+
+    @pytest.fixture(autouse=True)
+    def fn(self):
+        from spyglass.position.v2.video import _subject_in_path
+
+        self.fn = _subject_in_path
+
+    def test_longer_subject_is_not_a_match(self):
+        assert not self.fn("J1", "/videos/J16_20210529_run1.mp4")
+
+    def test_underscore_delimited_subject_matches(self):
+        """`\\b` would fail here, because `_` is a word character."""
+        assert self.fn("J1", "/videos/J1_20210529_run1.mp4")
+
+    def test_subject_at_path_start_matches(self):
+        assert self.fn("J1", "J1_20210529.mp4")
+
+    def test_subject_followed_by_digit_is_not_a_match(self):
+        assert not self.fn("J1", "/videos/J12.mp4")
+
+    def test_subject_preceded_by_letter_is_not_a_match(self):
+        assert not self.fn("J1", "/videos/CJ1_2021.mp4")
+
+    def test_dash_and_dot_delimiters_match(self):
+        assert self.fn("J1", "/videos/J1-2021.mp4")
+        assert self.fn("J1", "/videos/run.J1.mp4")

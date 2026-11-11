@@ -176,6 +176,26 @@ class TestQtPlatformProbe:
             is None
         )
 
+    def test_present_dir_without_the_plugin_reports(self, monkeypatch):
+        """The case the probe could never report.
+
+        A directory that exists but holds no `libqwayland*.so` is every
+        machine with Qt and no Wayland plugin, which is the reported bug.
+        """
+        from spyglass.position.v2 import env_check
+
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+        monkeypatch.setattr(
+            env_check,
+            "_qt_plugin_dirs",
+            lambda: [_FakeDir(["libqxcb.so", "libqminimal.so"])],
+        )
+        msg = env_check._qt_platform_problem()
+        assert msg is not None, "a dir with no wayland plugin must report"
+        assert "QT_QPA_PLATFORM=xcb" in msg
+
     def test_wayland_without_plugin_reports_both_fixes(self, monkeypatch):
         """The one failing case names the env var and the package."""
         msg = self._probe(
@@ -200,7 +220,12 @@ class TestQtPlatformProbe:
 
 
 class _FakeDir:
-    """Stands in for a plugin directory, answering `glob`."""
+    """Stands in for a plugin directory, answering `glob`.
+
+    `glob` returns an iterator, as `Path.glob` does. Returning a list made
+    the empty case falsy, which hid that the probe was testing generator
+    objects rather than their contents.
+    """
 
     def __init__(self, names):
         self._names = names
@@ -208,7 +233,7 @@ class _FakeDir:
     def glob(self, pattern):
         import fnmatch
 
-        return [n for n in self._names if fnmatch.fnmatch(n, pattern)]
+        return iter(n for n in self._names if fnmatch.fnmatch(n, pattern))
 
     def __str__(self):
         return "/fake/plugins/platforms"

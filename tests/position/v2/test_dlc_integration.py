@@ -541,3 +541,65 @@ class TestImportModelErrors:
 
         with pytest.raises(ValueError, match="No Spyglass Session"):
             model.load(str(dlc_project_config))
+
+
+class TestTrainingCsvDiscovery:
+    """A DLC 3 header must be read by name, and the search must stay put.
+
+    The alias table had no DLC 3 loss column, so the positional fallback
+    labelled the first column after `step` as `loss`. The search also climbed
+    above the project, which can return another project's history.
+    """
+
+    @staticmethod
+    def _csv(path, header):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{header}\n1,0.5\n2,0.4\n")
+        return path
+
+    def test_dlc3_loss_column_is_read_by_name(self, tmp_path):
+        from spyglass.position.v2.utils import training_io as tio
+
+        path = self._csv(
+            tmp_path / "learning_stats.csv", "step,losses/train.total_loss"
+        )
+        df = tio.parse_training_csv(path)
+        assert list(df.columns)[:2] == ["iteration", "loss"]
+
+    def test_search_does_not_climb_above_the_project(self, tmp_path):
+        """A sibling project's CSV must not be returned."""
+        from spyglass.position.v2.utils import training_io as tio
+
+        other = tmp_path / "other_project"
+        self._csv(other / "dlc-models" / "learning_stats.csv", "step,loss")
+        mine = tmp_path / "my_project"
+        (mine).mkdir()
+        config = mine / "config.yaml"
+        config.touch()
+
+        assert tio.discover_training_csvs(config) == []
+
+    def test_one_shuffle_is_reported_not_all(self, tmp_path):
+        """Concatenating every shuffle describes no single model."""
+        import os
+        import time
+
+        from spyglass.position.v2.utils import training_io as tio
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "config.yaml").touch()
+        first = self._csv(
+            project / "dlc-models" / "shuffle1" / "learning_stats.csv",
+            "step,loss",
+        )
+        time.sleep(0.01)
+        second = self._csv(
+            project / "dlc-models" / "shuffle2" / "learning_stats.csv",
+            "step,loss",
+        )
+        os.utime(second, (time.time() + 5, time.time() + 5))
+
+        found = tio.discover_training_csvs(project / "config.yaml")
+        assert found == [second], f"expected only the newest, got {found}"
+        assert first not in found

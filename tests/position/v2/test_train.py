@@ -1,6 +1,6 @@
 """Tests for Model.make() and Model.train() methods."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -203,48 +203,41 @@ class TestModelMake:
             assert train_args[4] == sel_data
             mock_insert.assert_called_once_with(train_result)
 
-    def test_make_creates_nwb_file(
-        self,
-        pv2_train,
-        model,
-        skip_if_no_dlc,
-    ):
-        """Test that make() creates an NWB file with model metadata."""
-        # Import ModelMetadata class only when needed
-        with patch("spyglass.position.v2.train.ModelMetadata") as MockMetadata:
-            mock_metadata_obj = MagicMock()
-            mock_metadata_obj.model_id = "test_model_nwb"
-            mock_metadata_obj.model_path = Path("/test/model/path")
-            mock_metadata_obj.project_path = Path("/test/project")
-            mock_metadata_obj.config_path = Path("/test/config.yaml")
-            mock_metadata_obj.params = {"shuffle": 1, "trainingsetindex": 0}
-            mock_metadata_obj.config = {
-                "task": "TestTask",
-                "date": "2026-04-20",
-            }
-            mock_metadata_obj.latest_model = {
-                "iteration": 1000,
-                "trainFraction": 0.8,
-                "date_trained": datetime.now(timezone.utc),
-                "snapshot": "snapshot-1000",
-            }
-            mock_metadata_obj.skeleton_id = "test_skeleton"
-            mock_metadata_obj.parent_id = None
-            mock_metadata_obj.session_files = ["pv2_make_sess.nwb"]
+    def test_make_insert_writes_the_payload_it_was_given(self, model):
+        """The row's `analysis_file_name` comes from the written file."""
+        with (
+            patch.object(
+                model, "_write_metadata_file", return_value="made_me.nwb"
+            ) as mock_write,
+            patch.object(model, "insert1") as mock_insert,
+            patch.object(model, "_info_msg"),
+        ):
+            model.make_insert(
+                {"model_params_id": "p"},
+                {"model_id": "m1"},
+                "pv2_parent.nwb",
+                {"model_id": "m1", "tool": "DLC"},
+            )
 
-            MockMetadata.return_value = mock_metadata_obj
+        mock_write.assert_called_once_with(
+            {"model_id": "m1", "tool": "DLC"}, "pv2_parent.nwb"
+        )
+        assert mock_insert.call_args[0][0] == {
+            "model_id": "m1",
+            "analysis_file_name": "made_me.nwb",
+        }
 
-            with (
-                patch("spyglass.position.v2.train.NWBHDF5IO"),
-                patch("pynwb.NWBFile") as mock_nwb,
-                patch("spyglass.position.v2.train.AnalysisNwbfile"),
-            ):
+    def test_make_insert_writes_no_file_without_a_payload(self, model):
+        """A tool whose strategy records no metadata still inserts."""
+        with (
+            patch.object(model, "_write_metadata_file") as mock_write,
+            patch.object(model, "insert1") as mock_insert,
+            patch.object(model, "_info_msg"),
+        ):
+            model.make_insert({}, {"model_id": "m2"}, "pv2_parent.nwb", None)
 
-                result = model._write_model_metadata(mock_metadata_obj)
-
-                # Verify NWB file creation
-                mock_nwb.assert_called_once()
-                assert result == "test_model_nwb_model.nwb"
+        mock_write.assert_not_called()
+        assert mock_insert.call_args[0][0] == {"model_id": "m2"}
 
 
 class TestModelParams:
@@ -691,12 +684,13 @@ class TestModelTrain:
 
 
 class TestModelMetadataRegistration:
-    """Writing the metadata file is separate from registering it.
+    """Serialising a model's metadata is separate from writing its file.
 
-    The write runs in `make_compute` and the `AnalysisNwbfile` row in
-    `make_insert`, so a rolled-back insert leaves no orphan. The parent is a
-    session of the model's own video group, not whichever row `Nwbfile`
-    returned first.
+    `_model_metadata_payload` is pure, so `make_compute` may call it while
+    the tri-part contract keeps that step off the database.
+    `_write_metadata_file` runs in `make_insert`, so the `AnalysisNwbfile`
+    row rolls back with the insert. The parent is a session of the model's
+    own video group, not whichever row `Nwbfile` returned first.
     """
 
     @staticmethod
@@ -718,93 +712,90 @@ class TestModelMetadataRegistration:
                 "snapshot": "snapshot-2000",
             },
             skeleton_id="test_skeleton",
+            tool="DLC",
             parent_id="parent_model",
             session_files=["pv2_sess_b.nwb", "pv2_sess_a.nwb"],
         )
         return ModelMetadata(**{**defaults, **overrides})
 
-    def test_write_leaves_the_database_alone(self, model):
-        """`make_compute` calls this, so it must register nothing."""
-        mock_nwbfile = MagicMock()
-        mock_io = MagicMock()
-
-        with (
-            patch("pynwb.NWBFile", return_value=mock_nwbfile),
-            patch("spyglass.position.v2.train.NWBHDF5IO", return_value=mock_io),
-            patch(
-                "spyglass.position.v2.train.AnalysisNwbfile"
-            ) as mock_analysis,
-            patch.object(model, "_info_msg"),
-        ):
-            result = model._write_model_metadata(self._metadata())
-
-        assert result == "test_metadata_model.nwb"
-        mock_analysis.return_value.add.assert_not_called()
-        mock_io.__enter__.return_value.write.assert_called_once_with(
-            mock_nwbfile
-        )
-        assert (
-            mock_nwbfile.add_scratch.call_args[1]["name"]
-            == "model_training_metadata"
-        )
-
-    def test_write_serializes_the_training_metadata(self, model):
+    def test_payload_serializes_the_training_metadata(self, model):
         """Every session is recorded, since only the first becomes the FK."""
-        import json
+        recorded = model._model_metadata_payload(self._metadata())
 
-        mock_nwbfile = MagicMock()
-
-        with (
-            patch("pynwb.NWBFile", return_value=mock_nwbfile),
-            patch("spyglass.position.v2.train.NWBHDF5IO"),
-            patch("spyglass.position.v2.train.AnalysisNwbfile"),
-            patch.object(model, "_info_msg"),
-        ):
-            model._write_model_metadata(self._metadata())
-
-        recorded = json.loads(mock_nwbfile.add_scratch.call_args[1]["data"])
         assert recorded["model_id"] == "test_metadata"
         assert recorded["shuffle"] == 2
+        assert recorded["trainingsetindex"] == 1
         assert recorded["iteration"] == 2000
+        assert recorded["trainFraction"] == 0.85
+        assert recorded["snapshot"] == "snapshot-2000"
         assert recorded["parent_id"] == "parent_model"
+        assert recorded["skeleton_id"] == "test_skeleton"
         assert recorded["trained_date"] == "2026-04-20T10:30:00"
         assert recorded["nwb_file_names"] == [
             "pv2_sess_b.nwb",
             "pv2_sess_a.nwb",
         ]
 
-    def test_register_requires_a_parent(self, model):
+    def test_payload_records_the_tool_it_was_given(self, model):
+        """The tool is the strategy's own, not a literal."""
+        assert model._model_metadata_payload(self._metadata())["tool"] == "DLC"
+        sleap = self._metadata(tool="SLEAP")
+        assert model._model_metadata_payload(sleap)["tool"] == "SLEAP"
+
+    def test_payload_is_json_serialisable(self, model):
+        """`_write_metadata_file` stores it as JSON, so it must round-trip."""
+        import json
+
+        payload = model._model_metadata_payload(
+            self._metadata(latest_model={"date_trained": None})
+        )
+
+        assert json.loads(json.dumps(payload)) == payload
+
+    def test_payload_survives_a_missing_model_dir(self, model):
+        """`get_latest_model_info` returns {} when it finds no directory."""
+        recorded = model._model_metadata_payload(
+            self._metadata(latest_model={})
+        )
+
+        assert recorded["iteration"] == 0
+        assert recorded["trainFraction"] == 0.0
+        assert recorded["snapshot"] == ""
+        assert recorded["trained_date"] == ""
+
+    def test_write_requires_a_parent(self, model):
         """No session means no provenance; it must not invent one."""
         with pytest.raises(ValueError, match="No parent session"):
-            model._register_analysis_file("orphan_model.nwb", "")
+            model._write_metadata_file({"model_id": "orphan"}, "")
 
-    def test_register_tolerates_an_existing_row(self, model):
-        """Re-running a selection rewrites the same file name."""
-        with (
-            patch(
-                "spyglass.position.v2.train.AnalysisNwbfile"
-            ) as mock_analysis,
-            patch.object(model, "_info_msg") as mock_info,
-        ):
-            mock_analysis.return_value.add.side_effect = Exception("exists")
-            mock_analysis.return_value.__and__.return_value = ["a row"]
+    def test_write_goes_through_the_builder(self, model):
+        """`build()` names and registers the file; this must not do either."""
+        import json
 
-            model._register_analysis_file("test_model.nwb", "parent.nwb")
-
-        assert "already registered" in str(mock_info.call_args)
-
-    def test_register_reraises_when_nothing_was_written(self, model):
         with (
             patch(
                 "spyglass.position.v2.train.AnalysisNwbfile"
             ) as mock_analysis,
             patch.object(model, "_info_msg"),
         ):
-            mock_analysis.return_value.add.side_effect = Exception("boom")
-            mock_analysis.return_value.__and__.return_value = []
+            build = mock_analysis.return_value.build
+            builder = build.return_value.__enter__.return_value
+            builder.analysis_file_name = "pv2_parent_ABC123.nwb"
+            nwbfile = MagicMock()
+            builder.open_nwb = (MagicMock(), nwbfile)
 
-            with pytest.raises(Exception, match="boom"):
-                model._register_analysis_file("test_model.nwb", "parent.nwb")
+            written = model._write_metadata_file(
+                {"model_id": "test_metadata"}, "pv2_parent.nwb"
+            )
+
+        # The name is the builder's, not one this method invented.
+        assert written == "pv2_parent_ABC123.nwb"
+        build.assert_called_once_with("pv2_parent.nwb")
+        # Registration is the builder's job on exit, not a direct add().
+        mock_analysis.return_value.add.assert_not_called()
+        scratch = nwbfile.add_scratch.call_args[1]
+        assert scratch["name"] == "model_training_metadata"
+        assert json.loads(scratch["data"]) == {"model_id": "test_metadata"}
 
     def test_parent_comes_from_the_models_own_group(
         self, model, stub_model, two_sessions
@@ -875,6 +866,9 @@ class TestModelEvaluation:
 
         with (
             patch.object(type(model), "__and__", return_value=restricted),
+            # The row is a mock, so the real write has nothing to update.
+            # TestEvaluateStoresResult covers the write against a real row.
+            patch.object(type(model), "update1"),
             patch("spyglass.position.v2.train.ModelParams") as mock_mp,
             patch(
                 "spyglass.position.v2.train.ToolStrategyFactory"
@@ -1460,3 +1454,86 @@ class TestDerivedRunName:
     def test_absent_run_name_is_not_invented(self, model):
         """With no run_name the trainer's per-selection default applies."""
         assert self._derive(model, {"max_epochs": 5}) is None
+
+
+class TestEvaluateStoresResult:
+    """`evaluate` must land its result on the row.
+
+    `(self & key).update1(...)` raises `DataJointError: Update cannot be
+    applied to a restricted table`, so a real DLC evaluation ran and then
+    stored nothing, leaving `rank_for_skeleton` with no values to compare.
+    Only the tool call is stubbed here; the write is the real one.
+    """
+
+    def test_evaluation_is_written_to_the_row(self, pv2_train, stub_model):
+        model = pv2_train.Model()
+        key = {"model_id": stub_model["model_id"]}
+        results = {"test_error": 246.95, "train_error": 310.73}
+
+        assert (model & key).fetch1("evaluation") is None, "row starts clean"
+
+        fake = MagicMock()
+        fake.evaluate_model.return_value = results
+        with patch(
+            "spyglass.position.v2.train.ToolStrategyFactory.create_strategy",
+            return_value=fake,
+        ):
+            returned = model.evaluate(key)
+
+        assert returned == results
+        assert (model & key).fetch1(
+            "evaluation"
+        ) == results, "evaluate returned its result without storing it"
+
+
+class TestProjectSkeletonCheck:
+    """A project skeleton is checked before anything is written.
+
+    A project from `create_project` keeps DeepLabCut's placeholder skeleton,
+    `[[bodypart1, bodypart2], [objectA, bodypart3]]`, so this is the first
+    thing a fresh project trips on.
+    """
+
+    PARTS = ["whiteLED", "tailBase", "tailMid"]
+
+    @staticmethod
+    def _check(model, edges, parts, **kw):
+        return type(model)._check_project_skeleton(
+            {"bodyparts": parts, "edges": edges},
+            Path("/proj/config.yaml"),
+            **kw,
+        )
+
+    def test_placeholder_skeleton_raises_naming_the_file(self, model):
+        with pytest.raises(ValueError) as err:
+            self._check(
+                model,
+                [["bodypart1", "bodypart2"], ["objectA", "bodypart3"]],
+                self.PARTS,
+            )
+        message = str(err.value)
+        assert "bodypart1" in message, "names the offending edge"
+        assert "/proj/config.yaml" in message, "names the file to edit"
+        assert "allow_invalid_edges=True" in message, "names the bypass"
+
+    def test_valid_skeleton_passes_through_unchanged(self, model):
+        edges = [["whiteLED", "tailBase"], ["tailBase", "tailMid"]]
+        result = self._check(model, edges, self.PARTS)
+        assert result["edges"] == edges
+
+    def test_bypass_drops_only_the_invalid_edges(self, model):
+        result = self._check(
+            model,
+            [["whiteLED", "tailBase"], ["whiteLED", "bodypart2"]],
+            self.PARTS,
+            allow_invalid_edges=True,
+        )
+        assert result["edges"] == [["whiteLED", "tailBase"]]
+
+    def test_half_valid_edge_is_invalid(self, model):
+        """One unknown endpoint makes the edge unusable, not half usable."""
+        with pytest.raises(ValueError, match="bodypart2"):
+            self._check(model, [["whiteLED", "bodypart2"]], self.PARTS)
+
+    def test_absent_edges_key_is_accepted(self, model):
+        assert self._check(model, None, self.PARTS)["bodyparts"] == self.PARTS
