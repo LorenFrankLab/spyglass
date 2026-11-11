@@ -17,6 +17,7 @@ Typical workflow
    ``PoseEstimSelection`` to link a model to its input videos.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -42,6 +43,35 @@ class VideoGroupParams:
 
 
 schema = dj.schema("cbroz_position_v3_video")
+
+
+def _subject_in_path(subject_id: str, video_path: str) -> bool:
+    """Whether *subject_id* appears in *video_path* as its own token.
+
+    A bare substring test matches a longer name: subject ``J1`` is inside
+    ``/videos/J16_20210529_run1.mp4``, which links a model to the wrong
+    animal silently. A match therefore requires the characters either side to
+    be non-alphanumeric. ``\\b`` is not usable, since ``_`` is a word
+    character and ``J1_2021...`` is the common spelling.
+
+    Parameters
+    ----------
+    subject_id : str
+        The session's subject.
+    video_path : str
+        Path as it appears in the DLC config's ``video_sets``.
+
+    Returns
+    -------
+    bool
+        True when the subject appears as a whole token.
+    """
+    for match in re.finditer(re.escape(subject_id), video_path):
+        before = video_path[match.start() - 1] if match.start() else ""
+        after = video_path[match.end() : match.end() + 1]
+        if not before.isalnum() and not after.isalnum():
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +813,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             unresolved.discard(vp)
 
         # ── Pass 1: subject_id + YYYYMMDD in the video path ─────────────────
-        if unresolved:
+        if unresolved:  # TODO: After #1647, have upstream own parsing
             all_sessions = Session().with_date_str.fetch(as_dict=True)
             for vp in list(unresolved):
                 # Every matching session, not the first: one animal can have
@@ -792,8 +822,9 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 hits = [
                     session
                     for session in all_sessions
-                    if session["session_date_str"] in vp
-                    and session["subject_id"] in vp
+                    if session["subject_id"]
+                    and session["session_date_str"] in vp
+                    and _subject_in_path(session["subject_id"], vp)
                 ]
                 if len(hits) == 1:
                     _record_match(
