@@ -178,13 +178,23 @@ class TestCheckGpuAvailable:
         self.fn = check_gpu_available
 
     @pytest.mark.parametrize("device", [None, "cpu"])
-    def test_non_cuda_device_is_noop(self, device):
-        """Non-CUDA (or absent) device requests never touch torch.cuda."""
-        from unittest.mock import patch
+    def test_non_cuda_device_is_noop(self, device, monkeypatch):
+        """Non-CUDA (or absent) device requests never touch torch.cuda.
 
-        with patch("torch.cuda.is_available") as mock_avail:
-            self.fn(device)
-        mock_avail.assert_not_called()
+        The fake goes into ``sys.modules`` rather than patching
+        ``torch.cuda.is_available`` by name: that form imports torch to
+        resolve the target, so a test asserting torch is never reached
+        would need torch to load.
+        """
+        import sys
+        from unittest.mock import MagicMock
+
+        fake_torch = MagicMock()
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        self.fn(device)
+
+        fake_torch.cuda.is_available.assert_not_called()
 
 
 class _FakeCap:

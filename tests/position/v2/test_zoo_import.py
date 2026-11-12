@@ -555,6 +555,10 @@ class TestZooInferenceDispatch:
     is which function gets called with what.
     """
 
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """`capture_zoo` imports DLC's zoo entry point to patch it."""
+
     @pytest.fixture
     def runner(self, pv2_estim):
         from spyglass.position.v2.utils.nwb_io import PoseInferenceRunner

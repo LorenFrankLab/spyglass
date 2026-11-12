@@ -18,6 +18,13 @@ class _Abort(Exception):
     """Sentinel to stop ``make`` after the downstream call is captured."""
 
 
+def _fake_torch(cuda_available=True):
+    """A stand-in torch whose ``cuda.is_available()`` answers as asked."""
+    fake = MagicMock()
+    fake.cuda.is_available.return_value = cuda_available
+    return fake
+
+
 def _run_model_make(device):
     """Drive ``Model.make`` with mocked tables; capture downstream params.
 
@@ -149,7 +156,12 @@ def _run_pose_estim_make(device):
         # is_available() too, then calls the real (uncompiled, on a
         # CPU-only torch build) torch._C._cuda_getDeviceCount(), hence the
         # resolve_cuda_device mock above.
-        patch("torch.cuda.is_available", return_value=True),
+        #
+        # A whole fake module, not patch("torch.cuda.is_available"): that
+        # form imports torch to resolve the target, and this test needs no
+        # torch at all. A runner where the library will not load then fails
+        # a test about kwarg threading.
+        patch.dict("sys.modules", {"torch": _fake_torch()}),
     ):
         estim_mod.PoseEstimSelection.__and__.return_value.fetch1.return_value = (  # noqa: E501
             "trigger",
