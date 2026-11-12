@@ -87,19 +87,14 @@ def _git_mock(
         "rev-parse": rev_parse,
         "diff": diff,
         "log": log,
-        # Defaults: an official remote is configured, its refs have been
-        # fetched, and a remote branch contains HEAD. A non-empty
-        # `for-each-ref` matters — were it empty, every publication test would
-        # pass through the "nothing fetched, do not flag" escape instead of
-        # reaching the branch check.
+        # Defaults: official remote configured, refs fetched, HEAD on a branch
         "branch": branch,
         "remote": remote,
         "for-each-ref": for_each_ref,
     }
 
     def _dispatch(cmd, *_, **__):
-        # The subcommand only, not the whole command: a tmp_path can contain
-        # a word like "branch" and silently claim the wrong stub.
+        # The subcommand only: a tmp_path can contain a word like "branch"
         name = cmd[3] if len(cmd) > 3 and cmd[1] == "-C" else ""
         for subcommand, result in by_subcommand.items():
             if subcommand == name:
@@ -297,8 +292,7 @@ def test_conda_only_skips_pip_freeze(tmp_path, make_cache):
         cache.get()
 
     assert [c.args[0][0] for c in mock_run.call_args_list] == ["conda"]
-    # Disk holds conda only: no partial pip list a with_pip reader could
-    # mistake for "no pip packages".
+    # Disk holds conda only, with no partial pip list
     assert "pip" not in yaml.safe_load(cache_path.read_text())
 
 
@@ -565,8 +559,7 @@ def test_cache_hit_refreshes_mtime(tmp_path, make_cache, not_computed):
     ):
         cache.get()
 
-    # The file is old enough for the sweep, but still newer than every
-    # staleness signal, so the cache itself is valid.
+    # Old enough for the sweep, newer than every staleness signal
     day = 60 * 60 * 24
     for sig in (
         cache.__dict__["_history_path"],
@@ -913,9 +906,7 @@ def test_pip_install_no_git(tmp_path, compute_install_info_fn):
 
 def test_dev_version_is_dev(tmp_path, fake_clone, compute_install_info_fn):
     """A '.dev' version sets is_dev=True; local edits make it non-official."""
-    # Mocked so the result does not depend on this checkout's working tree:
-    # a dirty diff + a recent HEAD date. is_official derives from edits/stale,
-    # not is_dev.
+    # Mocked so the result does not depend on this working tree
     with patch("spyglass.__version__", "0.5.6.dev42+gb3db6d09"):
         with patch("spyglass.__file__", str(fake_clone(tmp_path))):
             with patch(
@@ -2447,8 +2438,7 @@ def test_dirty_episode_takes_the_oldest_row(user_env_tbl, same_commit_pair):
     _, dirty = same_commit_pair
     user_env_tbl.delete(safemode=False)
 
-    # The dedupe is scoped to this user's env_ids, so the rows have to carry
-    # the real prefix rather than a ghost one.
+    # The dedupe is scoped to this user's env_ids, so use the real prefix
     user = dj.config.get("database.user", "")
     older_id, newer_id = f"{user}_race_00", f"{user}_race_01"
 
@@ -2526,9 +2516,7 @@ def test_user_scoping_does_not_reach_another_user(
 
     mine = None
     try:
-        # Read back what MySQL stored: a `timestamp` column has no fractional
-        # part and rounds to the nearest second, so a client-side expectation
-        # is right only about half the time.
+        # MySQL rounds a `timestamp` to the nearest second; `replace` truncates
         before = (user_env_tbl & f'env_id="{other_id}"').fetch1("last_seen")
 
         mine = _log_as(user_env_tbl, dirty)["env_id"]
@@ -2583,10 +2571,9 @@ def test_insert_current_env_survives_its_own_hook(
 
     info = request.getfixturevalue(info_name)
     user_env_tbl.delete(safemode=False)
-    _cache_admin_check(is_admin=False)  # the test user is an admin otherwise
+    _cache_admin_check(is_admin=False)  # the test user is an admin
 
-    # The hook is gated off under test_mode, so the re-entry it causes can
-    # only be reproduced by ungating this one instance for this one call.
+    # test_mode gates the hook off, so ungate this one instance
     user_env_tbl.__dict__["_test_mode"] = False
     BaseMixin._logged_install_mode = False
     try:
@@ -2695,8 +2682,7 @@ def test_dirty_installs_excludes_inactive(user_env_tbl):
     old_ts = datetime.now() - timedelta(days=2 * WARN_DIRTY_ENV_DAYS + 5)
     active_ts = datetime.now() - timedelta(days=WARN_DIRTY_ENV_DAYS + 5)
 
-    # Partial rows: env_hash IS NULL is what marks a dirty install. Both went
-    # dirty long ago; they differ only in whether the user has been back.
+    # Partial rows: env_hash IS NULL marks a dirty install
     user_env_tbl.insert(
         [
             {
@@ -2731,6 +2717,11 @@ def test_dirty_installs_excludes_inactive(user_env_tbl):
             (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
 
 
+def _server_today(user_env_tbl):
+    """Today by the database's clock, which `DATEDIFF` measures against."""
+    return user_env_tbl.connection.query("SELECT CURDATE()").fetchone()[0]
+
+
 def _insert_dated_rows(user_env_tbl, rows):
     """Insert ghost rows with explicit commit_date/last_seen, and clean up."""
     user_env_tbl.insert(rows, skip_duplicates=True)
@@ -2745,8 +2736,11 @@ def test_stale_installs_surfaces_old_full_rows(user_env_tbl):
     """
     from spyglass.utils.git_utils import WARN_STALE_DAYS
 
-    old = date.today() - timedelta(days=WARN_STALE_DAYS + 40)
-    fresh = date.today() - timedelta(days=5)
+    # Server dates: `days_stale` is a server-side DATEDIFF, and the two clocks
+    # can disagree on today
+    server_today = _server_today(user_env_tbl)
+    old = server_today - timedelta(days=WARN_STALE_DAYS + 40)
+    fresh = server_today - timedelta(days=5)
     rows = [
         {
             "env_id": "ghost_stale_00",
@@ -2877,8 +2871,7 @@ def test_stale_row_in_daily_use_keeps_its_place(user_env_tbl):
             }
         )
         try:
-            # Read back what MySQL stored: a `timestamp` column rounds to the
-            # nearest second, so a client-side expectation is a coin flip.
+            # MySQL rounds a `timestamp`; a truncated expectation is a coin flip
             before = (user_env_tbl & 'env_id="ghost_daily_00"').fetch1(
                 "timestamp", "last_seen"
             )
@@ -3177,8 +3170,7 @@ def test_write_dirty_notifications_one_line_per_user(user_env_tbl, tmp_path):
     by_email = {ln.split("\t")[0]: ln.split("\t") for ln in lines}
     alice = by_email["alice@lab.org"]
     assert alice[1] == "45"  # oldest episode, not the first row seen
-    # Both clones named, each at its newest commit: /home/alice/spyglass was
-    # logged at aaa1111 (day 31) and bbb2222 (day 45), so day 31 wins.
+    # Each clone at its newest commit: day 31 wins over day 45
     assert alice[3] == "/home/alice/other /home/alice/spyglass"
     assert alice[2] == "ccc3333 aaa1111"  # paired with the paths, in order
     assert len(alice) == 4  # run_jobs.sh reads exactly four fields

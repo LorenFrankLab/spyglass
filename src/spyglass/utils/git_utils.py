@@ -378,9 +378,7 @@ class SpyglassInstall:
         left by a wheel built from a dirty tree.
         """
         if self.install_path is None:
-            # A wheel: the .dYYYYMMDD suffix is the only dirty signal. In a
-            # clone, _version.py is not rewritten when the tree is cleaned, so
-            # the suffix outlives the edits that caused it. Ask git instead.
+            # _version.py is written at install and outlives the edits it recorded
             return bool(self._VCS_DIRTY_RE.search(self._version))
         return self.has_src_changes() or not self.head_is_published()
 
@@ -498,6 +496,5 @@ class SpyglassInstall:
             logger.debug(f"install warning failed: {exc}")
 
 
-# The install this process is running from. Every fact is a cached property,
-# read on first use, so construction costs nothing at import.
+# Every fact is a cached property, so construction costs nothing
 spyglass_install = SpyglassInstall()

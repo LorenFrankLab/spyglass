@@ -179,11 +179,7 @@ class CondaEnvCache:
             return None
 
         os_user = getpass.getuser()
-        # `conda env export` reads the activated env (CONDA_PREFIX) and
-        # `pip freeze` reads this interpreter (sys.prefix). A key on one alone
-        # files one env's export under another env's name whenever the two
-        # differ, as they do for a Jupyter kernel or an interpreter invoked by
-        # path without activation.
+        # `conda env export` reads CONDA_PREFIX; `pip freeze` reads sys.prefix
         conda_prefix = os.environ.get("CONDA_PREFIX", "")
         key = f"{conda_prefix}|{sys_prefix}"
         prefix_key = md5(key.encode()).hexdigest()[:8]
@@ -413,9 +409,7 @@ class CondaEnvCache:
         Augments an already-fetched or disk-loaded conda export with pip data,
         leaving conda state alone.
         """
-        # Use the running interpreter's pip, not whatever is first on PATH:
-        # PATH may hold another env's pip, or none at all when the env's
-        # python is invoked by absolute path without activation.
+        # This interpreter's pip, not whatever is first on PATH
         pip_result = sub_run(
             [sys_executable, "-m", "pip", "freeze"], **SUBPROCESS_KWARGS
         )
@@ -464,10 +458,7 @@ class CondaEnvCache:
         if self._cached_conda is _NOT_COMPUTED or not self._cached_conda:
             return {}
         if self._cached_pip is _NOT_COMPUTED:
-            # `pip freeze` failed: only a caller that asked for pip data gets
-            # here, so treating its absence as "no pip packages" would store a
-            # full environment with has_editable=0, which `is_trusted` reads
-            # as examined and clean.
+            # An unavailable pip list is not "no pip packages"
             return {}
 
         # Reset merge state so re-runs are safe
@@ -483,10 +474,7 @@ class CondaEnvCache:
         )  # shallow copy; the cache must not be mutated
         conda_deps: list = list(conda_export.get("dependencies", []))
 
-        # Extract the pip sub-list that conda embeds inside dependencies.
-        # Both copies above are shallow, so `dep` is the dict held by
-        # `_cached_conda`. Read it; a `pop` here empties the cached export's
-        # pip entry for every later conda-only `get()`.
+        # Read, never pop: `dep` is the dict `_cached_conda` holds
         for i, dep in enumerate(conda_deps):
             if isinstance(dep, dict):
                 conda_deps.pop(i)  # drop from the copy only
@@ -576,10 +564,7 @@ class CondaEnvCache:
         if match := _EDITABLE_PATH.match(line):
             path = match.group("path")
             path_name = Path(path).name.replace("_", "-")
-            # pip emits the comment immediately before its own ``-e`` line, so
-            # the two pair positionally and the comment names the package. The
-            # directory need not: a git worktree or a renamed clone is commonly
-            # named for the branch instead.
+            # pip emits the comment just before its `-e` line; names may differ
             pkg, comment = self._last_comment or (path_name, None)
             self._last_comment = None  # consumed; the next -e needs its own
             if comment is None:  # out-of-order freeze: try the path's name

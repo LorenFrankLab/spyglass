@@ -64,10 +64,7 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
         print(f"Dry run of delete files in {temp_dir} older than {days_old}d")
         return
 
-    # The dirty-install marker is the escalation clock, not a cache: sweeping
-    # it restarts a user's 30-day countdown and loses the resolution that
-    # stops their email, so a user away longer than days_old keeps being
-    # emailed after they have cleaned up.
+    # Keep the dirty marker: it is the escalation clock, not a cache
     delete_cmd = (
         f"find {temp_dir} -type f -mtime +{days_old} "
         + "-not -name '.spyglass_git_status_*' -delete"

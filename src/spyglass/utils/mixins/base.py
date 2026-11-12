@@ -6,9 +6,7 @@ from re import match as re_match
 
 class BaseMixin:
 
-    # Set once per session, on the first insert or populate that logs the
-    # install. Class-level so every table shares it, as
-    # SpyglassMixin._fk_validated does.
+    # Class-level, as SpyglassMixin._fk_validated is
     _logged_install_mode = False
 
     def insert(self, *args, **kwargs):
@@ -35,9 +33,7 @@ class BaseMixin:
         if BaseMixin._logged_install_mode or self._test_mode:
             return
 
-        # Set on BaseMixin, not self: an instance attribute would shadow the
-        # class one and leave every other table unguarded. Set before logging,
-        # because the insert it makes re-enters this hook.
+        # Set on BaseMixin, not self, and before logging: the insert re-enters
         BaseMixin._logged_install_mode = True
 
         try:  # the import is inside the guard: it declares a schema

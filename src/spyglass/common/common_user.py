@@ -27,14 +27,10 @@ DEFAULT_ENV_ID = (
     + "_00"
 )
 
-# Single source of truth for "days since a dirty row was first logged",
-# computed DB-side (server NOW()) so the warning countdown and the admin
-# notification agree and neither is skewed by client-vs-server timezone.
+# Server NOW(), so the warning countdown and the email cannot disagree
 DIRTY_DAYS_SQL = "DATEDIFF(NOW(), `timestamp`)"
 
-# Age of the install's code, from the stored committer date. Server-side for
-# the same reason, and the counterpart of SpyglassInstall.is_stale, which can
-# only answer for the clone it runs in.
+# The database counterpart of SpyglassInstall.is_stale, for any row
 STALE_DAYS_SQL = "DATEDIFF(NOW(), `commit_date`)"
 
 
@@ -176,9 +172,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         hashing runs. A clean install takes the full path and is stored for
         recompute.
 
-        The insert hook runs first, before an id is chosen. ``insert1`` below
-        re-enters it otherwise, and the inner call would insert the row this
-        one then collides with.
+        The insert hook runs first, before an id is chosen, because
+        ``insert1`` below re-enters it.
 
         Parameters
         ----------
@@ -199,19 +194,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if spyglass_install.has_local_changes:
             return self._log_dirty_env(env_id)
 
-        # Back on a reproducible install: stop the clock on any open dirty
-        # episode before any return, including when the environment cannot be
-        # captured or is already on record.
+        # Stop the clock on any open dirty episode before any return
         self._mark_dirty_resolved()
 
         if not self.env:  # if conda dump fails, warned above
             return {"env_id": None}
 
         if self.matching_env_id:  # if env is already stored
-            # Refresh the activity window. `stale_installs` ages a row out on
-            # `last_seen`, and only the dirty path wrote it, so a full row kept
-            # its insert time however often it was used: the longest-stale
-            # users dropped off the list first.
+            # `stale_installs` ages a row out on `last_seen`, so refresh it
             self.connection.query(
                 f"UPDATE {self.full_table_name} "
                 + "SET `last_seen` = NOW() WHERE `env_id` = %s",
@@ -219,12 +209,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             )
             return {"env_id": self.matching_env_id}
 
-        # A clean-but-stale clone is an older official commit, not a dirty one:
-        # its environment is reproducible, so it gets a full row and never
-        # enters dirty_installs().
-        # If the name is taken, _increment_id yields a new suffix; capture it
-        # once so the inserted row and the returned id agree (callers query /
-        # delete by the returned id).
+        # Capture the incremented id once: the row and the return must agree
         new_env_id = self._increment_id(env_id)
         self.insert1(
             {
@@ -265,22 +250,14 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             ``{"env_id": <id>}`` for the row that now represents this episode.
         """
         dj_user = dj.config.get("database.user", "")
-        # `_` is a single-character wildcard in LIKE, so an unescaped pattern
-        # lets a shorter username match a longer one: `ann_%` also matches
-        # `anna_base_00`, and `ann`'s session would adopt `anna`'s episode.
+        # `_` is a LIKE wildcard: unescaped, `ann_%` matches `anna_base_00`
         mine = f"env_id LIKE '{dj_user}\\_%'"
         episode = self.unresolved_dirty() & mine
 
         if episode:
-            # Oldest first: `fetch` has no guaranteed order, and concurrent
-            # sessions can each find no row and each insert one, since MySQL
-            # permits repeated nulls under a unique index. The oldest carries
-            # the date the episode began.
+            # Oldest first: `fetch` has no order; the oldest dates the episode
             existing = episode.fetch("env_id", order_by="timestamp ASC")[0]
-            # One row covers the whole episode, so the commit and path are
-            # refreshed alongside the activity window to keep the email
-            # current. `timestamp` is the clock and stays put. Server-side
-            # NOW(), matching DIRTY_DAYS_SQL, so no client clock skews it.
+            # `timestamp` is the clock and stays put
             self.connection.query(
                 f"UPDATE {self.full_table_name} "
                 + "SET `last_seen` = NOW(), "
@@ -374,8 +351,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         flagged = sg_install.has_local_changes or sg_install.is_stale
         marker = sg_install.marker.read()
 
-        # Fast path: a clean install that was never flagged here has nothing to
-        # record and no resolution to log: no import, and no query.
+        # Fast path: nothing to record and no resolution to log
         if not flagged and not marker:
             return
 
@@ -394,9 +370,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 logger.debug(f"admin check failed: {exc}")  # DB down
                 is_admin = False  # treat as non-admin for this session only
                 answered = False
-            # Cached only where it silences a warning, and only when the query
-            # answered: storing a failure as "not admin" would warn an admin
-            # and log rows for them for WARN_ADMIN_TRUST_DAYS.
+            # Cache only an answered check that silences a warning
             if flagged and answered:
                 sg_install.marker.write(is_admin=is_admin, admin_checked=today)
 
@@ -412,9 +386,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             return
 
         if sg_install.has_local_changes:
-            # The row's date, else what the warning recorded locally, else
-            # today: the marker may be absent if it was swept between the
-            # warning and this write.
+            # The row's date, else the warning's, else today
             sg_install.marker.write(
                 last_logged=today,
                 first_seen=(
@@ -424,10 +396,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 ),
             )
         elif sg_install.is_stale:
-            # Still flagged, so the marker is this install's daily gate and
-            # the home of its cached admin answer. Clearing it would re-run
-            # the admin query and the environment read every session. There is
-            # no dirty episode to resolve.
+            # Still flagged: the marker is the daily gate
             sg_install.marker.write(last_logged=today)
         else:  # resolution recorded; future clean sessions take the fast path
             sg_install.marker.clear()
@@ -628,9 +597,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
 
             entry = by_email.setdefault(user_email, {"days": 0, "clones": {}})
             entry["days"] = max(entry["days"], row["days_since_warn"])
-            # One clone may be logged at several commits. Name it once, at
-            # its newest commit, i.e. the smallest days_since_warn, so the
-            # email says where the clone is now.
+            # Name each clone once, at its newest commit
             path = row["dirty_path"] or "unknown"
             age = row["days_since_warn"]
             seen = entry["clones"].get(path)

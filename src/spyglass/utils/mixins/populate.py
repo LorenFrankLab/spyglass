@@ -17,8 +17,7 @@ class PopulateMixin(BaseMixin):
         Supersedes datajoint.table.Table.populate for classes that spawn
         processes in their make function and always use transactions.
         """
-        # Here as well as on insert: a populate that computes nothing still
-        # means this session is doing work worth recording the install for.
+        # A populate that computes nothing is still a session doing work
         self._log_install_once()
 
         processes = kwargs.pop("processes", 1)

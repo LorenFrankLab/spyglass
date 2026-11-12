@@ -118,9 +118,7 @@ def test_parse_env_fail(user_env_tbl):
 def test_clear_cache(user_env_tbl):
     """Test that clearing cache returns same env id."""
     pre_env = user_env_tbl.this_env["env_id"]
-    # Read it first so `del` has something to clear: `this_env` leaves
-    # `matching_env_id` uncached whenever it had to insert, so the delete
-    # depends on the table already holding this env.
+    # Read it first so `del` has something to clear
     _ = user_env_tbl.matching_env_id
     del user_env_tbl.matching_env_id
     post_env = user_env_tbl.this_env["env_id"]
