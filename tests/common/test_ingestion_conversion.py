@@ -467,3 +467,143 @@ def test_video_partial_import_counts_source_series(common, monkeypatch):
     assert reported == {
         "placed nowhere"
     }, "A placed video must not report its non-owning epochs as mismatches"
+
+
+class TestPoseModelArtifactDetection:
+    """`_check_not_pose_model` must pass a video-only session through.
+
+    Electrode groups alone cannot separate a pose-model artifact from a
+    video-only session, because neither has any. The repo supports sessions
+    without ephys, so rejecting on electrodes blocked valid imports of their
+    ImportedPose data.
+    """
+
+    @staticmethod
+    def _write(tmp_path, name, *, acquisition=False, epochs=False):
+        """A pose-bearing NWB, optionally with session structure."""
+        import numpy as np
+        import pynwb
+        from ndx_pose import (
+            PoseEstimation,
+            PoseEstimationSeries,
+            Skeleton,
+            Skeletons,
+        )
+        from pynwb.testing.mock.file import mock_NWBFile
+
+        nwbfile = mock_NWBFile()
+        skeleton = Skeleton(
+            name="sk", nodes=["nose"], edges=np.empty((0, 2), "uint8")
+        )
+        module = nwbfile.create_processing_module("behavior", "pose")
+        # Skeletons must own the Skeleton; a bare link makes writing raise
+        # OrphanContainerBuildError.
+        module.add_data_interface(Skeletons(skeletons=[skeleton]))
+        series = PoseEstimationSeries(
+            name="nose",
+            data=np.zeros((3, 2)),
+            unit="pixels",
+            reference_frame="(0,0)",
+            timestamps=[0.0, 0.1, 0.2],
+        )
+        module.add_data_interface(
+            PoseEstimation(
+                name="PoseEstimation",
+                pose_estimation_series=[series],
+                skeleton=skeleton,
+            )
+        )
+        if acquisition:
+            nwbfile.add_acquisition(
+                pynwb.image.ImageSeries(
+                    name="video",
+                    external_file=["clip.mp4"],
+                    starting_frame=[0],
+                    format="external",
+                    timestamps=[0.0, 0.1],
+                )
+            )
+        if epochs:
+            nwbfile.add_epoch(0.0, 1.0, ["run"])
+
+        path = tmp_path / name
+        with pynwb.NWBHDF5IO(str(path), mode="w") as io:
+            io.write(nwbfile)
+        return path
+
+    def test_artifact_without_any_structure_is_rejected(self, tmp_path):
+        from spyglass.data_import.insert_sessions import _check_not_pose_model
+
+        path = self._write(tmp_path, "model.nwb")
+        with pytest.raises(ValueError, match="pose-model artifact"):
+            _check_not_pose_model(path)
+
+    def test_video_only_session_is_accepted(self, tmp_path):
+        """Video in acquisition is session structure, so this must not raise."""
+        from spyglass.data_import.insert_sessions import _check_not_pose_model
+
+        path = self._write(tmp_path, "video_session.nwb", acquisition=True)
+        _check_not_pose_model(path)
+
+    def test_epochs_alone_are_session_structure(self, tmp_path):
+        from spyglass.data_import.insert_sessions import _check_not_pose_model
+
+        path = self._write(tmp_path, "epoch_session.nwb", epochs=True)
+        _check_not_pose_model(path)
+
+
+class TestPoseModelScreen:
+    """`_check_not_pose_model` ran a pynwb build for every ingested file.
+
+    The cached namespaces answer whether a file declares ndx-pose at all, so
+    a file that does not is now rejected from the screen on a header read.
+    """
+
+    @staticmethod
+    def _fn():
+        from spyglass.data_import.insert_sessions import _declares_ndx_pose
+
+        return _declares_ndx_pose
+
+    def test_declared_namespace_is_detected(self, tmp_path):
+        """A file whose cached specs name ndx-pose reaches the full check."""
+        import h5py
+
+        path = tmp_path / "declares.nwb"
+        with h5py.File(path, "w") as h5:
+            h5.create_group("specifications/ndx-pose/0.2.0")
+        assert self._fn()(path) is True
+
+    def test_other_namespaces_are_not_a_match(self, tmp_path):
+        """A file with specs but no ndx-pose is screened out."""
+        import h5py
+
+        path = tmp_path / "no_pose.nwb"
+        with h5py.File(path, "w") as h5:
+            h5.create_group("specifications/core/2.9.0")
+        assert self._fn()(path) is False
+
+    def test_missing_file_declares_nothing(self, tmp_path):
+        """An unreadable file is not an error here; the reader reports it."""
+        assert self._fn()(tmp_path / "absent.nwb") is False
+
+    def test_plain_hdf5_declares_nothing(self, tmp_path):
+        """A file with no `specifications` group is handled, not raised on."""
+        import h5py
+
+        path = tmp_path / "plain.h5"
+        with h5py.File(path, "w") as h5:
+            h5.create_dataset("x", data=[1, 2, 3])
+        assert self._fn()(path) is False
+
+    def test_message_names_no_absent_method(self, common):
+        """The guidance named `Model().import_model`, which does not exist."""
+        import inspect
+
+        # `from spyglass.data_import import insert_sessions` resolves to the
+        # re-exported function, not this module.
+        from spyglass.data_import.insert_sessions import _check_not_pose_model
+
+        source = inspect.getsource(_check_not_pose_model)
+        assert "import_model" not in source
+        assert "ImportedPose" in source

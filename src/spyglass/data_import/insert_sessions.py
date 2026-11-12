@@ -13,6 +13,99 @@ from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
+def _check_not_pose_model(nwb_abs_path: Path) -> None:
+    """Raise if the file looks like a pose-model artifact rather than a session.
+
+    Pose model NWB files (produced by tools like DeepLabCut or SLEAP and
+    imported via ``Model.load()``) contain ndx-pose objects
+    (``PoseEstimation`` / ``Skeletons``) but carry no session structure,
+    no electrode groups, no task epochs.
+
+    Parameters
+    ----------
+    nwb_abs_path : Path
+        Absolute path to the NWB file to inspect.
+
+    Raises
+    ------
+    ValueError
+        If the file contains ndx-pose objects but no electrode groups.
+    """
+    try:
+        import ndx_pose  # noqa: F401  (isinstance checks only)
+        from ndx_pose import PoseEstimation, Skeletons
+    except ImportError:
+        return  # ndx-pose not installed; skip detection
+
+    # Read the header first: building the file through pynwb costs far more,
+    # and every ingested file reaches this screen.
+    if not _declares_ndx_pose(nwb_abs_path):
+        return
+
+    with pynwb.NWBHDF5IO(
+        str(nwb_abs_path), mode="r", load_namespaces=True
+    ) as io:
+        nwbf = io.read()
+        behavior = nwbf.processing.get("behavior")
+        if behavior is None:
+            return
+
+        has_pose_objects = any(
+            isinstance(obj, (PoseEstimation, Skeletons))
+            for obj in behavior.data_interfaces.values()
+        )
+        if not has_pose_objects:
+            return
+
+        # A pose-model artifact carries pose objects and no session
+        # structure. Video-only sessions have no electrode groups either, so
+        # electrodes alone cannot tell the two apart; require every structural
+        # marker to be absent.
+        has_session_structure = bool(
+            nwbf.electrode_groups or nwbf.acquisition
+        ) or (nwbf.epochs is not None)
+        if not has_session_structure:
+            raise ValueError(
+                f"'{nwb_abs_path.name}' appears to be a pose-model artifact "
+                "(ndx-pose objects present, no electrode groups, no "
+                "acquisition, no epochs). Model files have no session "
+                "structure, so insert_sessions does not take them.\n\n"
+                "Pose data is ingested from a session file, not from a "
+                "file of its own: write the pose objects into the session "
+                "NWB, ingest that with insert_sessions, and ImportedPose "
+                "picks up its PoseEstimation objects. There is no route for "
+                "a pose-only file."
+            )
+
+
+def _declares_ndx_pose(nwb_abs_path: Path) -> bool:
+    """Whether the file's cached namespaces include ndx-pose.
+
+    An NWB file embeds the specs it was written against, so this answers
+    from the header without building the file. A file that cannot be opened
+    is reported as declaring nothing, leaving the error to the reader that
+    needs the contents.
+
+    Parameters
+    ----------
+    nwb_abs_path : Path
+        Absolute path to the NWB file.
+
+    Returns
+    -------
+    bool
+        True when ``ndx-pose`` appears among the cached namespaces.
+    """
+    import h5py
+
+    try:
+        with h5py.File(nwb_abs_path, "r") as h5:
+            specs = h5.get("specifications")
+            return specs is not None and "ndx-pose" in specs
+    except (OSError, KeyError):
+        return False
+
+
 def insert_sessions(
     nwb_file_names: Union[str, List[str]],
     rollback_on_fail: bool = False,
@@ -72,6 +165,9 @@ def insert_sessions(
                     + f"{possible_matches}"
                 )
 
+        # Reject pose-model artifacts before any file operations.
+        _check_not_pose_model(nwb_file_abs_path)
+
         # file name for the copied raw data
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
@@ -103,8 +199,7 @@ def insert_sessions(
             )
         )
 
-    # One result per file. Previously returned from inside the loop, so only
-    # the first file of a list was ever processed.
+    # One result per file, collected across the loop.
     return results
 
 
