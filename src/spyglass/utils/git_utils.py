@@ -76,10 +76,6 @@ STALE_MSG = (
     "the latest version to ensure you have the latest features and bug fixes."
 )
 
-# A clone with no remote pointing at the official repository, which is what a
-# fork-only checkout looks like. Nothing local can be compared against the
-# official branches until the remote exists, so the fetch advice in DIRTY_MSG
-# has nothing to act on.
 NO_REMOTE_MSG = (
     "No remote in this repository points at github.com/{repo}, so Spyglass "
     "cannot check whether your commit is published. Add it and fetch:\n\n"
@@ -422,8 +418,8 @@ class SpyglassInstall:
         * **Dirty** (``has_local_changes``): the countdown warning. Days are
           counted from the marker's ``first_seen``, written the first time this
           clone was seen dirty.
-        * **No official remote**, alongside the countdown: the command that
-          adds one. A fork-only clone cannot act on the fetch advice.
+        * **No official remote**, alongside the countdown: the command
+          that adds one.
         * **Stale** (``is_stale``, no local changes): the softer "older
           commit" advisory, with no countdown, since an older official commit
           is reproducible.

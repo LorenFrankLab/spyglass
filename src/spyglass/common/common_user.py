@@ -154,7 +154,8 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         base_match = re.match(r"^(.*?)(?:_(\d{2}))?$", env_id)
         base_id = base_match.group(1) if base_match else env_id
         # Check for existing IDs with the same base
-        used_ids = (self & f"env_id LIKE '{base_id}%'").fetch("env_id")
+        escaped = base_id.replace("_", "\\_")
+        used_ids = (self & f"env_id LIKE '{escaped}%'").fetch("env_id")
         suffixes = [
             int(match.group(1))  # extract the numeric suffix
             for match in (re.search(r"_(\d{2})$", eid) for eid in used_ids)

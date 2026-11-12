@@ -1592,9 +1592,7 @@ def test_warn_official_remote_omits_the_remote_command(caplog):
     with caplog.at_level("WARNING"):
         _warn_with(info)
 
-    assert not any(
-        "git remote add" in r.message for r in caplog.records
-    )  # the fetch advice in the countdown is actionable here
+    assert not any("git remote add" in r.message for r in caplog.records)
 
 
 def test_warn_unusable_git_omits_the_remote_command(caplog):

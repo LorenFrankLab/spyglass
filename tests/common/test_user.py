@@ -132,6 +132,26 @@ def test_null_increment(user_env_tbl):
     assert got == new_env_name, f"Expected {new_env_name}, got {got}"
 
 
+def test_increment_matches_the_base_literally(user_env_tbl):
+    """Suffixes come from ids sharing the base, not from LIKE wildcards.
+
+    `_` matches any one character in LIKE, so `ann_base%` also matched
+    `annXbase_07` and the next id jumped to `ann_base_08`.
+    """
+    rows = [
+        {"env_id": "ann_base_00", "env_hash": None, "env": None},
+        {"env_id": "annXbase_07", "env_hash": None, "env": None},
+    ]
+    user_env_tbl.insert(rows, skip_duplicates=True)
+    try:
+        got = user_env_tbl._increment_id("ann_base_00")
+        assert got == "ann_base_01", f"Expected ann_base_01, got {got}"
+    finally:
+        for row in rows:
+            eid = row["env_id"]
+            (user_env_tbl & f'env_id="{eid}"').delete(safemode=False)
+
+
 def test_null_insert_env(user_env_tbl):
     """Test that inserting a new environment skips if exists."""
     env = user_env_tbl.env
