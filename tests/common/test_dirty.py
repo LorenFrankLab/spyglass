@@ -1557,6 +1557,56 @@ def test_warn_dirty_emits_warning(caplog, warn_dirty_days):
     assert any(f"{warn_dirty_days} days" in r.message for r in caplog.records)
 
 
+_FORK_ONLY_INFO = {
+    "is_official": False,
+    "is_dev": True,
+    "has_local_changes": True,
+    "is_stale": False,
+    "install_path": "/home/user/spyglass",
+    "commit_hash": "abc1234",
+    "_remotes": (
+        "me\thttps://github.com/CBroz1/spyglass (fetch)\n"
+        "me\thttps://github.com/CBroz1/spyglass (push)\n"
+    ),
+    "official_remote": None,
+}
+
+
+def test_warn_fork_only_names_the_remote_command(caplog):
+    """A clone with no official remote is told how to add one.
+
+    The countdown warning asks the user to fetch from the official repository,
+    which a fork-only clone has no remote for.
+    """
+    with caplog.at_level("WARNING"):
+        _warn_with(dict(_FORK_ONLY_INFO))
+
+    assert any("git remote add upstream" in r.message for r in caplog.records)
+    assert any("official commit" in r.message for r in caplog.records)
+
+
+def test_warn_official_remote_omits_the_remote_command(caplog):
+    """A clone that already has the official remote is not told to add it."""
+    info = dict(_FORK_ONLY_INFO, official_remote="sg")
+
+    with caplog.at_level("WARNING"):
+        _warn_with(info)
+
+    assert not any(
+        "git remote add" in r.message for r in caplog.records
+    )  # the fetch advice in the countdown is actionable here
+
+
+def test_warn_unusable_git_omits_the_remote_command(caplog):
+    """Git giving no answer is unknown, not a missing remote."""
+    info = dict(_FORK_ONLY_INFO, _remotes=None)
+
+    with caplog.at_level("WARNING"):
+        _warn_with(info)
+
+    assert not any("git remote add" in r.message for r in caplog.records)
+
+
 _ADMIN_INFO = {
     "is_official": False,
     "is_dev": True,

@@ -76,6 +76,17 @@ STALE_MSG = (
     "the latest version to ensure you have the latest features and bug fixes."
 )
 
+# A clone with no remote pointing at the official repository, which is what a
+# fork-only checkout looks like. Nothing local can be compared against the
+# official branches until the remote exists, so the fetch advice in DIRTY_MSG
+# has nothing to act on.
+NO_REMOTE_MSG = (
+    "No remote in this repository points at github.com/{repo}, so Spyglass "
+    "cannot check whether your commit is published. Add it and fetch:\n\n"
+    "\tgit remote add upstream https://github.com/{repo}.git\n"
+    "\tgit fetch upstream\n"
+)
+
 
 class _DirtyMarker:
     """The local "this clone has logged a dirty env" record.
@@ -406,11 +417,13 @@ class SpyglassInstall:
         session's first insert or populate, by
         :meth:`~spyglass.common.common_user.UserEnvironment.log_install`.
 
-        Two messages:
+        Three messages:
 
         * **Dirty** (``has_local_changes``): the countdown warning. Days are
           counted from the marker's ``first_seen``, written the first time this
           clone was seen dirty.
+        * **No official remote**, alongside the countdown: the command that
+          adds one. A fork-only clone cannot act on the fetch advice.
         * **Stale** (``is_stale``, no local changes): the softer "older
           commit" advisory, with no countdown, since an older official commit
           is reproducible.
@@ -426,6 +439,8 @@ class SpyglassInstall:
 
         if self.has_local_changes:
             logger.warning(DIRTY_MSG.format(days=self._days_remaining()))
+            if self._remotes is not None and self.official_remote is None:
+                logger.warning(NO_REMOTE_MSG.format(repo=OFFICIAL_REPO))
         if self.is_stale:
             logger.warning(STALE_MSG)
 
