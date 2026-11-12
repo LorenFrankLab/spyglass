@@ -388,8 +388,10 @@ class TestBodyPartSource:
         in the session imports a model that registers `imported` parts.
         """
         assert "source" in bodypart.heading.names
-        sources = set(bodypart.fetch("source"))
-        assert sources == {"curated"}
+
+        seeded = bodypart & [{"bodypart": bp} for bp in bodypart._curated]
+        assert len(seeded) == len(bodypart._curated)
+        assert set(seeded.fetch("source")) == {"curated"}
 
     def test_validation_ignores_imported_parts(self, bodypart, skeleton):
         """The whole point: a zoo-only name stays invalid for user projects."""
