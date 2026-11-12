@@ -305,6 +305,25 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         -> Calibration
         """
 
+    def insert(self, rows, **kwargs):
+        """Insert each row through :meth:`insert1`, so validation runs.
+
+        ``dj.Table.insert1`` delegates to ``insert``, so a plain
+        ``insert([...])`` would otherwise reach the database without
+        resolving the files or deriving the group id.
+
+        Parameters
+        ----------
+        rows : iterable
+            Rows to insert, each as :meth:`insert1` accepts them.
+
+        Returns
+        -------
+        list[dict]
+            One ``{"vid_group_id": ...}`` per row, in order.
+        """
+        return [self.insert1(row, **kwargs) for row in rows]
+
     def insert1(self, key, **kwargs):
         """Insert video file group with automatic ID generation.
 
@@ -459,7 +478,9 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 )
             )
 
-        super().insert1(dict(vid_group_key, **description_key), **kwargs)
+        # Not super().insert1: that delegates to self.insert, which
+        # routes back here.
+        super().insert([dict(vid_group_key, **description_key)], **kwargs)
         self.File().insert(file_rows)
         if external_rows:
             self.ExternalVideo().insert(external_rows)

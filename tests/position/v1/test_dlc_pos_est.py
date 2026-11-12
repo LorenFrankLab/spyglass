@@ -57,7 +57,9 @@ def test_invalid_video(pos_est_sel, pose_estimation_key):
     _ = pose_estimation_key  # Ensure populated
     example_key = pos_est_sel.fetch("KEY", as_dict=True)[0]
     example_key["nwb_file_name"] = "invalid.nwb"
-    with pytest.raises(FileNotFoundError):
+    # The ingestion mixin rejects an unregistered file by name before any
+    # path is touched, so this is a ValueError, not a FileNotFoundError.
+    with pytest.raises(ValueError, match="not found in database"):
         pos_est_sel.insert_estimation_task(example_key)
 
 

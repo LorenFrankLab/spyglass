@@ -19,9 +19,9 @@ _CSV_PATTERNS = [
 def discover_training_csvs(model_dir: Path) -> "list[Path]":
     """Return unique CSV files that may contain training loss data.
 
-    Searches *model_dir* and up to two parent directories using the
-    standard DLC CSV filename patterns.  Results are deduplicated while
-    preserving discovery order.
+    Searches *model_dir* only, using the standard DLC CSV filename
+    patterns. A project holds one CSV per model, so searching upward
+    returns a sibling model's history as this model's.
 
     Parameters
     ----------

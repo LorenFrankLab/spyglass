@@ -611,6 +611,7 @@ class DLCStrategy(PoseToolStrategy):
         experimenter: str,
         create_kwargs: dict = None,
         model_instance=None,
+        vid_group_id: str = None,
     ) -> Path:
         """Create or update a DLC training project; return its config path.
 
@@ -724,6 +725,11 @@ class DLCStrategy(PoseToolStrategy):
         cfg.keep_videos(want).set_bodyparts(bodyparts).set("skeleton", []).set(
             "numframes2pick", numframes2pick
         )
+        if vid_group_id:
+            # Records which VidFileGroup these videos came from, so `load`
+            # reads the group instead of matching the copied file names,
+            # which carry a `__<hash>` suffix no session path holds.
+            cfg.set("spyglass_vid_group_id", str(vid_group_id))
         return Path(cfg.write())
 
     def evaluate_model(

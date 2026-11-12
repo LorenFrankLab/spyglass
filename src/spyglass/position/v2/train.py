@@ -119,13 +119,30 @@ class BodyPart(SpyglassMixin, dj.Lookup):
                 "remove the other entry."
             ) from err
 
-    def insert1(self, key, warn=True, **kwargs):
+    def insert(self, rows, **kwargs):
+        """Insert each row through :meth:`insert1`, which validates.
+
+        `Table.insert1` delegates to `insert`, so a plain `insert([...])`
+        would otherwise store a colliding spelling. `contents` is exempt:
+        DataJoint inserts it at schema activation, where the admin check
+        would fail every non-admin.
+        """
+        rows = list(rows)
+        if rows == self.contents:
+            return super().insert(rows, **kwargs)
+        for row in rows:
+            self.insert1(row, **kwargs)
+
+    def insert1(self, key, warn=True, *, require_admin=True, **kwargs):
         """Insert body part into the database.
 
         A concept may have only one canonical spelling. A new surface form that
         normalizes to an existing entry (e.g. ``greenLed`` vs ``greenLED``) is
         rejected rather than inserted, so the table stays an unambiguous source
         of canonical names.
+
+        ``require_admin=False`` skips only the admin check, for the
+        auto-register path behind ``accept_new_bodyparts``.
         """
         bodypart = key["bodypart"]
         if self & {"bodypart": bodypart}:
@@ -149,9 +166,9 @@ class BodyPart(SpyglassMixin, dj.Lookup):
                 f"{collision!r} (both normalize to {norm!r}). Use the existing "
                 "spelling."
             )
-        if not LabMember().user_is_admin:
+        if require_admin and not LabMember().user_is_admin:
             raise PermissionError("Only admins can insert body parts")
-        super().insert1(key, **kwargs)
+        super().insert([key], **kwargs)
 
 
 @schema
@@ -343,19 +360,29 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             f"Auto-inserting {len(unresolved)} novel bodypart(s) into "
             f"BodyPart: {unresolved}"
         )
-        # Plural insert, deliberately. `BodyPart.insert1` refuses a
-        # non-admin, and the flag exists so a non-admin can import a model
-        # whose parts are novel. Its collision guard is unreachable from
-        # here regardless: `unresolved` holds only the names `canonicalize`
-        # could not resolve against every row, so none of them can
-        # normalize onto an existing part. `TestAcceptNewBodypartsScope`
-        # pins that invariant, and the batch is checked against itself
-        # above, which a one-row-at-a-time `insert1` cannot do.
+        # require_admin=False is the flag's purpose: a non-admin importing a
+        # model whose parts are novel. Every other guard still runs, the
+        # batch having been checked against itself above, which a
+        # one-row-at-a-time insert1 cannot do.
         BodyPart().insert(
             [{"bodypart": bp, "source": "imported"} for bp in unresolved],
+            require_admin=False,
             skip_duplicates=True,
             allow_direct_insert=True,
         )
+
+    def insert(self, rows, **kwargs):
+        """Insert each row through :meth:`insert1`, which validates.
+
+        `Table.insert1` delegates to `insert`, so a plain `insert([...])`
+        would otherwise store body parts absent from `BodyPart`, with no
+        hash and no part rows. `contents` is exempt, DataJoint inserting it
+        at schema activation.
+        """
+        rows = list(rows)
+        if rows == self.contents:
+            return super().insert(rows, **kwargs)
+        return [self.insert1(row, **kwargs) for row in rows]
 
     def insert1(
         self,
@@ -537,13 +564,15 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             Passed to the master insert.
         """
         with self._safe_context():
-            super().insert1(
-                dict(
-                    insert_pk,
-                    bodyparts=bodyparts,
-                    edges=edges,
-                    hash=shape_hash,
-                ),
+            super().insert(
+                [
+                    dict(
+                        insert_pk,
+                        bodyparts=bodyparts,
+                        edges=edges,
+                        hash=shape_hash,
+                    )
+                ],
                 **kwargs,
             )
             self.BodyPart.insert(
@@ -789,6 +818,18 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.get_accepted_params()
 
+    def insert(self, rows, **kwargs):
+        """Insert each row through :meth:`insert1`, which validates.
+
+        `Table.insert1` delegates to `insert`, so a plain `insert([...])`
+        would otherwise store an unsupported tool. `contents` is exempt,
+        DataJoint inserting it at schema activation.
+        """
+        rows = list(rows)
+        if rows == self.contents:
+            return super().insert(rows, **kwargs)
+        return [self.insert1(row, **kwargs) for row in rows]
+
     def insert1(self, key, accept_default: bool = False, **kwargs):
         """Insert model parameters after validation and duplicate check.
 
@@ -859,8 +900,8 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             )
 
         insert_kwargs = dict(kwargs)
-        super().insert1(
-            dict(key, params=params, **params_hash_dict), **insert_kwargs
+        super().insert(
+            [dict(key, params=params, **params_hash_dict)], **insert_kwargs
         )
 
         return dict(model_params_id=key["model_params_id"], tool=key["tool"])
@@ -905,6 +946,27 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         subs = (Session & files).fetch("subject_id")
         return {s for s in subs if s is not None}
 
+    def insert(self, rows, *, allow_redundant_model=False, **kwargs):
+        """Insert each row through :meth:`insert1`, so the guard runs.
+
+        ``dj.Table.insert1`` delegates to ``insert``, so a plain
+        ``insert([...])`` would otherwise reach the database with none of the
+        validation :meth:`insert1` carries.
+
+        Parameters
+        ----------
+        rows : iterable
+            Rows to insert, each as :meth:`insert1` accepts them.
+        allow_redundant_model : bool, optional
+            Applied to every row, by default False.
+        """
+        return [
+            self.insert1(
+                row, allow_redundant_model=allow_redundant_model, **kwargs
+            )
+            for row in rows
+        ]
+
     def insert1(self, row, *, allow_redundant_model=False, **kwargs):
         """Insert one selection, guarding against redundant model declaration.
 
@@ -913,7 +975,9 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         ``allow_redundant_model=True``. See :meth:`Model.reusable_for`.
         """
         self._guard_redundant_model(row, allow_redundant_model)
-        super().insert1(row, **kwargs)
+        # Not super().insert1: that delegates to self.insert, which routes
+        # back here.
+        super().insert([row], **kwargs)
 
     @staticmethod
     def _skeleton_for_params(params_id, tool=None):
@@ -2107,6 +2171,7 @@ class Model(SpyglassMixin, dj.Computed):
             experimenter=experimenter or getpass.getuser(),
             create_kwargs=create_kwargs,
             model_instance=self,
+            vid_group_id=vid_group_key["vid_group_id"],
         )
 
         # ── 3. Extract frames for each video that has none ────────────────────
@@ -2702,6 +2767,54 @@ class Model(SpyglassMixin, dj.Computed):
             "allow_invalid_edges=True."
         )
 
+    def _resolve_training_group(
+        self, config, model_path, *, external_videos, vid_file_matches
+    ):
+        """Group holding the project's training videos.
+
+        A project that :meth:`create_project` built records its group in
+        ``config.yaml`` as ``spyglass_vid_group_id``. Reading it avoids
+        matching video paths, which cannot work for those projects: their
+        videos are copies named ``<stem>__<hash>.mp4``, and no session path
+        carries that suffix.
+
+        A project from anywhere else carries no such key, so its videos are
+        matched against sessions as before. A recorded id whose group has
+        since been deleted falls back to matching too.
+
+        Parameters
+        ----------
+        config : dict
+            The project's parsed ``config.yaml``.
+        model_path : str or Path
+            Path to the project, for the matching fallback.
+        external_videos : bool
+            Record unmatched videos as ``ExternalVideo`` provenance.
+        vid_file_matches : dict or None
+            Caller-supplied path to ``VideoFile`` key mapping.
+
+        Returns
+        -------
+        dict
+            ``{"vid_group_id": ...}``.
+        """
+        recorded = config.get("spyglass_vid_group_id")
+        if recorded and (VidFileGroup & {"vid_group_id": str(recorded)}):
+            self._info_msg(
+                f"Using the VidFileGroup the project records: {recorded}"
+            )
+            return {"vid_group_id": str(recorded)}
+        if recorded:
+            self._warn_msg(
+                f"The project records VidFileGroup {recorded}, which no "
+                "longer exists. Matching its videos against sessions."
+            )
+        return VidFileGroup.create_from_dlc_config(
+            model_path,
+            external_videos=external_videos,
+            vid_file_matches=vid_file_matches,
+        )
+
     def _import_dlc_model(self, model_path: Path, **kwargs):
         # This method is the DLC import path, reached through
         # `DLCStrategy.load`. The strategy answers the project-capability
@@ -2771,7 +2884,8 @@ class Model(SpyglassMixin, dj.Computed):
         # unless external_videos=True, which records them as ExternalVideo
         # provenance instead. Register sessions with insert_sessions() first
         # when the training videos *are* Spyglass sessions.
-        vid_group_key = VidFileGroup.create_from_dlc_config(
+        vid_group_key = self._resolve_training_group(
+            config,
             model_path,
             external_videos=external_videos,
             vid_file_matches=vid_file_matches,
