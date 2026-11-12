@@ -1,0 +1,669 @@
+"""Integration tests for DLC-specific V2 functionality.
+
+Covers:
+- Path resolution utilities (resolve_model_path, to_stored_path)
+- DLCStrategy.get_latest_model_info() using the synthetic test project
+- Model.get_training_history() using the synthetic test project
+- Model.load() via DLC config.yaml with bootstrapped session
+- Model.load() error cases
+
+``TestResolveModelPath`` and ``TestToStoredPath`` have no external
+dependencies and always run in CI.
+
+All other classes use ``dlc_project_config`` (synthetic DLC project built
+from ``tests/_data/deeplabcut/``) together with ``dlc_bootstrapped_session``
+(minimal Spyglass DB entries).  Tests that additionally require a real DLC
+installation are gated by ``skip_if_no_dlc``.
+"""
+
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+# ---------------------------------------------------------------------------
+# Path Resolution: pure functions, no DB or DLC required
+# ---------------------------------------------------------------------------
+
+
+class TestResolveModelPath:
+    """Tests for resolve_model_path() in train.py."""
+
+    def test_absolute_path_returned_unchanged(self):
+        """An absolute stored path is returned as-is."""
+        from spyglass.position.utils.path_helpers import resolve_model_path
+
+        p = "/some/absolute/path/config.yaml"
+        assert resolve_model_path(p) == Path(p)
+
+    def test_relative_path_no_base_uses_cwd(self, monkeypatch):
+        """Relative path falls back to cwd when pose_project_dir is None."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", None)
+        from spyglass.position.utils.path_helpers import resolve_model_path
+
+        result = resolve_model_path("relative/config.yaml")
+        assert result == Path.cwd() / "relative/config.yaml"
+
+    def test_relative_path_with_base(self, monkeypatch, tmp_path):
+        """Relative path is joined to pose_project_dir."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
+        from spyglass.position.utils.path_helpers import resolve_model_path
+
+        result = resolve_model_path("project/config.yaml")
+        assert result == tmp_path / "project/config.yaml"
+
+    def test_absolute_path_ignores_base(self, monkeypatch, tmp_path):
+        """An absolute stored path is never prefixed with pose_project_dir."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
+        from spyglass.position.utils.path_helpers import resolve_model_path
+
+        p = "/fixed/absolute.yaml"
+        assert resolve_model_path(p) == Path(p)
+
+
+class TestToStoredPath:
+    """Tests for to_stored_path() in train.py."""
+
+    def test_under_base_stored_as_relative(self, monkeypatch, tmp_path):
+        """Path under pose_project_dir is stored as a relative string."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
+        from spyglass.position.utils.path_helpers import to_stored_path
+
+        full = tmp_path / "project" / "config.yaml"
+        assert to_stored_path(full) == "project/config.yaml"
+
+    def test_outside_base_stored_as_absolute(self, monkeypatch, tmp_path):
+        """Path outside pose_project_dir is stored as an absolute string."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
+        from spyglass.position.utils.path_helpers import to_stored_path
+
+        outside = Path("/other/location/config.yaml")
+        assert to_stored_path(outside) == str(outside)
+
+    def test_no_base_always_absolute(self, monkeypatch):
+        """With pose_project_dir=None, paths are always stored as absolute."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", None)
+        from spyglass.position.utils.path_helpers import to_stored_path
+
+        p = Path("/some/path/config.yaml")
+        assert to_stored_path(p) == str(p)
+
+    def test_roundtrip_under_base(self, monkeypatch, tmp_path):
+        """to_stored_path -> resolve_model_path recovers the original path."""
+        import spyglass.position.utils.path_helpers as ph_mod
+
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
+        from spyglass.position.utils.path_helpers import (
+            resolve_model_path,
+            to_stored_path,
+        )
+
+        original = tmp_path / "project" / "config.yaml"
+        stored = to_stored_path(original)
+        assert resolve_model_path(stored) == original
+
+
+# ---------------------------------------------------------------------------
+# DLC Model Info: synthetic project, skip_if_no_dlc guards DLC imports
+# ---------------------------------------------------------------------------
+
+
+class TestGetLatestDLCModelInfo:
+    """Test DLCStrategy.get_latest_model_info() using the synthetic DLC project.
+
+    The ``dlc_project_config`` fixture creates a project with a fake trained
+    model (pose_cfg.yaml) so the method can be exercised without GPU/DLC
+    training. ``skip_if_no_dlc`` ensures the test suite skips cleanly when
+    deeplabcut is not installed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    @pytest.fixture
+    def strategy(self):
+        from spyglass.position.utils.tool_strategies import DLCStrategy
+
+        return DLCStrategy()
+
+    def _read_config(self, config_path):
+        import yaml
+
+        with open(config_path) as f:
+            return yaml.safe_load(f)
+
+    def test_returns_nonempty_dict(self, strategy, dlc_project_config):
+        """Returns a dict with exactly the five model-info keys."""
+        config = self._read_config(dlc_project_config)
+        result = strategy.get_latest_model_info(config)
+        assert isinstance(result, dict)
+        # Source builds exactly: path, iteration, trainFraction, shuffle,
+        # date_trained.
+        assert len(result) == 5
+
+    def test_has_required_keys(self, strategy, dlc_project_config):
+        """Result has path, iteration, trainFraction, shuffle, date_trained."""
+        config = self._read_config(dlc_project_config)
+        result = strategy.get_latest_model_info(config)
+        for key in (
+            "path",
+            "iteration",
+            "trainFraction",
+            "shuffle",
+            "date_trained",
+        ):
+            assert key in result, f"Missing key: {key!r}"
+
+    def test_path_exists_on_disk(self, strategy, dlc_project_config):
+        """The returned path actually exists on the filesystem."""
+        config = self._read_config(dlc_project_config)
+        result = strategy.get_latest_model_info(config)
+        assert Path(result["path"]).is_dir()
+
+    def test_iteration_is_zero(self, strategy, dlc_project_config):
+        """Fake project has only iteration-0; returned iteration == 0."""
+        config = self._read_config(dlc_project_config)
+        result = strategy.get_latest_model_info(config)
+        assert result["iteration"] == 0
+
+    def test_train_fraction_is_point_eight(self, strategy, dlc_project_config):
+        """trainFraction parses to 0.8 (project model dir is 'trainset80')."""
+        config = self._read_config(dlc_project_config)
+        result = strategy.get_latest_model_info(config)
+        assert result["trainFraction"] == 0.8
+
+    def test_nonexistent_project_raises(self, strategy):
+        """Raises FileNotFoundError for a project_path that does not exist."""
+        with pytest.raises(FileNotFoundError):
+            strategy.get_latest_model_info(
+                {"project_path": "/nonexistent/dlc/project"}
+            )
+
+    def test_empty_project_returns_empty(self, strategy, tmp_path):
+        """Returns {} when project has no trained models."""
+        result = strategy.get_latest_model_info({"project_path": str(tmp_path)})
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# Training history: exercises get_training_history() via synthetic CSV
+# ---------------------------------------------------------------------------
+
+
+class TestGetTrainingHistory:
+    """Test Model.get_training_history() with the synthetic DLC project.
+
+    After a successful load() the stored model_path is the
+    config.yaml, so get_training_history() returns None (expected for
+    imported models; only trained models have a learning_stats.csv
+    in the stored path).
+
+    The fake CSV produced by make_dlc_project is tested via direct CSV
+    parsing, mirroring the internal logic.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    def test_fake_csv_parses_correctly(self, dlc_project_config):
+        """Synthetic learning_stats.csv has expected columns and shape."""
+        import yaml
+
+        with open(dlc_project_config) as f:
+            cfg = yaml.safe_load(f)
+
+        # The fixture's own CSV, named exactly. `rglob` picked whichever
+        # match came first, and a live training test in this session-scoped
+        # project leaves a real DLC 3 file alongside it.
+        project_dir = Path(cfg["project_path"])
+        stats_file = next(
+            (project_dir / "dlc-models" / "iteration-0").glob(
+                "*trainset80shuffle1/train/learning_stats.csv"
+            )
+        )
+
+        df = pd.read_csv(
+            stats_file,
+            header=None,
+            names=["iteration", "loss", "learning_rate"],
+        )
+        assert list(df.columns) == ["iteration", "loss", "learning_rate"]
+        assert len(df) == 3  # three snapshot rows from make_dlc_project
+
+    def test_nonexistent_model_raises(self, model):
+        """Raises ValueError when model_key is not in the database."""
+        with pytest.raises(ValueError, match="Model not found"):
+            model.get_training_history({"model_id": "nonexistent_xyz"})
+
+    def test_nwb_file_raises_with_guidance(self, model, mock_ndx_pose_nwb_file):
+        """Model.load() raises ValueError for ndx-pose NWB with guidance."""
+        with pytest.raises(ValueError, match="ImportedPose"):
+            model.load(str(mock_ndx_pose_nwb_file))
+
+
+# ---------------------------------------------------------------------------
+# Full DLC import: requires bootstrapped Spyglass session
+# ---------------------------------------------------------------------------
+
+
+class TestDLCFullImport:
+    """Test Model.load() with a real config.yaml and session.
+
+    ``dlc_bootstrapped_session`` inserts the minimal Spyglass DB entries
+    (Nwbfile, Session, VideoFile) so that create_from_dlc_config() succeeds.
+    These tests exercise the complete DLC import path without GPU/training.
+
+    Gated by ``skip_if_no_dlc`` because _import_dlc_model() reads yaml and
+    exercises DLC-adjacent code paths.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    def test_import_succeeds_with_bootstrapped_session(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """load(config.yaml) returns a valid model_key dict."""
+        model_key = model.load(str(dlc_project_config))
+        assert "model_id" in model_key
+        assert model & model_key
+
+    def test_import_creates_skeleton(
+        self, model, skeleton, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """Imported skeleton exists in the Skeleton table.
+
+        skeleton_id lives in ModelParams, not directly in the Model key,
+        so fetch it via the model_params_id.
+        """
+        from spyglass.position.v2.train import (
+            Model,
+            ModelParams,
+            Skeleton,
+        )
+
+        model_key = model.load(str(dlc_project_config))
+        # `load` returns the model key only, so the params come off the row.
+        params_id = (Model() & model_key).fetch1("model_params_id")
+        params_entry = (ModelParams() & {"model_params_id": params_id}).fetch1()
+        skel = Skeleton() & {"skeleton_id": params_entry["skeleton_id"]}
+        assert skel, "Skeleton not found after import"
+
+    def test_import_is_idempotent(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """Importing the same config twice returns the same model_id."""
+        key1 = model.load(str(dlc_project_config))
+        key2 = model.load(str(dlc_project_config))
+        assert key1["model_id"] == key2["model_id"]
+
+    def test_explicit_model_id_is_used(
+        self, model, dlc_project_config, dlc_bootstrapped_session, tmp_path
+    ):
+        """An explicit model_id wins over the generated one.
+
+        Imports a copy of the project: `load` returns an existing Model when
+        one is already registered on the path, and other tests in this file
+        register one on the shared project.
+        """
+        import shutil
+
+        project = tmp_path / "explicit_id_project"
+        shutil.copytree(Path(dlc_project_config).parent, project)
+        cfg = project / Path(dlc_project_config).name
+
+        model_key = model.load(str(cfg), model_id="pv2_d1_custom_id")
+
+        assert model_key["model_id"] == "pv2_d1_custom_id"
+
+    def test_load_model_path_stored(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """Imported model stores a non-empty model_path."""
+        model_key = model.load(str(dlc_project_config))
+        stored_path = (model & model_key).fetch1("model_path")
+        assert stored_path  # non-empty string
+
+
+class TestReturnShapes:
+    """`load` and `train` each return one shape per outcome.
+
+    A caller could not tell which of three shapes `load` had handed back,
+    and the full-row shape carried `evaluation`, so restricting on it
+    raised once `evaluate` had run.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    def test_load_returns_the_model_key_alone(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """A trained project yields the model key, with no extra fields."""
+        key = model.load(str(dlc_project_config))
+        assert set(key) == {"model_id"}
+
+    def test_second_load_returns_the_same_shape(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """The already-exists path returned a whole row, not a key."""
+        first = model.load(str(dlc_project_config))
+        second = model.load(str(dlc_project_config))
+        assert second == first
+        assert set(second) == {"model_id"}
+
+    def test_restriction_survives_a_stored_evaluation(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """`Model & load(...)` holds after `evaluate` stores a dict.
+
+        The old full-row return carried `evaluation`, and a dict is not a
+        valid restriction value, so this raised `QuerySyntaxError`.
+        """
+        key = model.load(str(dlc_project_config))
+        model.update1({**key, "evaluation": {"loss": 0.05}})
+
+        assert len(model & key) == 1
+
+    def test_train_without_epochs_returns_the_existing_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """A bare second call trained a child; now it returns what exists."""
+        key = model.load(str(dlc_project_config))
+        before = len(model)
+
+        again = model.train(key)
+
+        assert again == {"model_id": key["model_id"]}
+        assert len(model) == before
+
+
+class TestLoadUntrainedProject:
+    """A project holding no weights registers a selection, not a Model.
+
+    `project_training_mode` reports `inference_only` both for a TensorFlow
+    project that can infer and for one with no weights, which can do neither.
+    A Model row for the latter claims a capability it does not have.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    @staticmethod
+    def _strip_weights(config_path):
+        """Remove every snapshot from a copy of the project."""
+        import shutil
+
+        source = Path(config_path).parent
+        bare = source.parent / f"{source.name}_untrained"
+        if not bare.exists():
+            shutil.copytree(source, bare)
+        for pattern in ("snapshot-*.pt", "*.index"):
+            for snap in bare.rglob(pattern):
+                snap.unlink()
+
+        import yaml
+
+        cfg_path = bare / Path(config_path).name
+        cfg = yaml.safe_load(cfg_path.read_text())
+        cfg["project_path"] = str(bare)
+        cfg_path.write_text(yaml.safe_dump(cfg))
+        return cfg_path
+
+    def test_untrained_project_makes_no_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """No weights means no Model row to run inference with."""
+        from spyglass.position.v2.train import ModelSelection
+
+        before = set(model.fetch("model_id"))
+        key = self._strip_weights(dlc_project_config)
+
+        result = model.load(str(key))
+
+        assert "model_id" not in result
+        assert set(model.fetch("model_id")) == before
+        assert ModelSelection() & result
+
+    def test_untrained_project_is_trainable(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """The returned key is a selection `populate` can train."""
+        from spyglass.position.v2.train import ModelSelection
+
+        key = self._strip_weights(dlc_project_config)
+
+        result = model.load(str(key))
+
+        assert set(result) >= set(ModelSelection.primary_key)
+
+    def test_trained_project_still_makes_a_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """Positive control: the snapshot-bearing project is unaffected."""
+        result = model.load(str(dlc_project_config))
+
+        assert "model_id" in result
+
+    def test_has_weights_detects_both_engines(self, model, tmp_path):
+        """PyTorch writes `snapshot-*.pt`; TensorFlow writes a `*.index`."""
+        from spyglass.position.utils.tool_strategies import DLCStrategy
+
+        for name in ("snapshot-010.pt", "snapshot-010.index"):
+            project = tmp_path / name.replace(".", "_")
+            train = project / "dlc-models" / "iteration-0" / "m" / "train"
+            train.mkdir(parents=True)
+            cfg = {"project_path": str(project)}
+
+            assert not DLCStrategy.project_has_weights(
+                cfg, project / "config.yaml"
+            )
+            (train / name).touch()
+            assert DLCStrategy.project_has_weights(cfg, project / "config.yaml")
+
+
+class TestLoadVidFileMatches:
+    """`load` forwards explicit video matches to the group builder.
+
+    `create_from_dlc_config` has always accepted `vid_file_matches`, but
+    `load` swallowed it in `**kwargs`, so a project whose videos cannot be
+    matched automatically had no way through `load` at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    @staticmethod
+    def _config(tmp_path, video_path, task):
+        """A DLC config naming one unmatchable video and curated bodyparts."""
+        import yaml
+
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            yaml.safe_dump(
+                {
+                    "Task": task,
+                    "project_path": str(tmp_path),
+                    "video_sets": {video_path: {"crop": "0,1,0,1"}},
+                    "bodyparts": ["whiteLED", "tailBase"],
+                    "skeleton": [["whiteLED", "tailBase"]],
+                }
+            )
+        )
+        return path
+
+    def test_load_without_matches_raises(self, model, tmp_path):
+        """The path cannot be resolved, so the import stops."""
+        cfg = self._config(
+            tmp_path, "/nowhere/pv2_t15_unmatched.mp4", "pv2_t15_none"
+        )
+
+        with pytest.raises(ValueError, match="pv2_t15_unmatched.mp4"):
+            model.load(str(cfg))
+
+    def test_load_forwards_vid_file_matches(
+        self, model, tmp_path, two_sessions
+    ):
+        """With an explicit match the same project imports."""
+        from spyglass.position.v2.video import VidFileGroup
+
+        video = "/nowhere/pv2_t15_overridden.mp4"
+        cfg = self._config(tmp_path, video, "pv2_t15_override")
+
+        result = model.load(
+            str(cfg),
+            vid_file_matches={video: dict(two_sessions["keys"][0])},
+        )
+        group = {"vid_group_id": result["vid_group_id"]}
+
+        try:
+            files = VidFileGroup.File() & group
+            assert len(files) == 1
+            assert files.fetch1("nwb_file_name") == two_sessions["names"][0]
+        finally:
+            # `two_sessions` teardown cascades to `VidFileGroup.File` but not
+            # to the master, and DataJoint refuses to delete a part before its
+            # master. Deleting it also clears ModelSelection and Model.
+            (VidFileGroup & group).super_delete(warn=False, safemode=False)
+
+
+# ---------------------------------------------------------------------------
+# load() error cases: DB required, no DLC or session needed
+# ---------------------------------------------------------------------------
+
+
+class TestImportModelErrors:
+    """Error-path tests for Model.load() raised before DB access."""
+
+    def test_nonexistent_path_raises_file_not_found(self, model):
+        """FileNotFoundError when model_path does not exist."""
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            model.load("/nonexistent/path/config.yaml")
+
+    def test_unrecognised_extension_raises_value_error(self, model, tmp_path):
+        """ValueError when file extension cannot be mapped to a known tool."""
+        bad_file = tmp_path / "weights.h5"
+        bad_file.write_text("dummy weights")
+        with pytest.raises(ValueError, match="Cannot auto-detect tool"):
+            model.load(str(bad_file))
+
+    def test_explicit_unsupported_tool_raises_not_implemented(
+        self, model, tmp_path
+    ):
+        """NotImplementedError when an unsupported tool name is given."""
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("dummy: true")
+        with pytest.raises(ValueError):
+            model.load(str(cfg), tool="SLEAP_future")
+
+    def test_import_dlc_no_session_raises_value_error(
+        self, model, dlc_project_config
+    ):
+        """load(config.yaml) raises ValueError when no session matches.
+
+        Uses the dlc_project_config without bootstrapping a session, so
+        create_from_dlc_config() must raise ValueError.
+        """
+        # Avoid an already-imported entry, which imports idempotently
+        # Use a fresh config with a non-matching video path
+        import yaml
+
+        with open(dlc_project_config) as f:
+            cfg = yaml.safe_load(f)
+
+        # Verify no Nwbfile stem matches the video paths in a bare test
+        from spyglass.common import Nwbfile
+
+        video_paths = list(cfg.get("video_sets", {}).keys())
+        matched = any(
+            (nwb[:-5] if nwb.endswith("_.nwb") else nwb[:-4]) in vp
+            for nwb in Nwbfile().fetch("nwb_file_name")
+            for vp in video_paths
+        )
+        if matched:
+            pytest.skip(
+                "Session already bootstrapped; skipping no-session check"
+            )
+
+        with pytest.raises(ValueError, match="No Spyglass Session"):
+            model.load(str(dlc_project_config))
+
+
+class TestTrainingCsvDiscovery:
+    """A DLC 3 header must be read by name, and the search must stay put.
+
+    The alias table had no DLC 3 loss column, so the positional fallback
+    labelled the first column after `step` as `loss`. The search also climbed
+    above the project, which can return another project's history.
+    """
+
+    @staticmethod
+    def _csv(path, header):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{header}\n1,0.5\n2,0.4\n")
+        return path
+
+    def test_dlc3_loss_column_is_read_by_name(self, tmp_path):
+        from spyglass.position.v2.utils import training_io as tio
+
+        path = self._csv(
+            tmp_path / "learning_stats.csv", "step,losses/train.total_loss"
+        )
+        df = tio.parse_training_csv(path)
+        assert list(df.columns)[:2] == ["iteration", "loss"]
+
+    def test_search_does_not_climb_above_the_project(self, tmp_path):
+        """A sibling project's CSV must not be returned."""
+        from spyglass.position.v2.utils import training_io as tio
+
+        other = tmp_path / "other_project"
+        self._csv(other / "dlc-models" / "learning_stats.csv", "step,loss")
+        mine = tmp_path / "my_project"
+        (mine).mkdir()
+        config = mine / "config.yaml"
+        config.touch()
+
+        assert tio.discover_training_csvs(config) == []
+
+    def test_one_shuffle_is_reported_not_all(self, tmp_path):
+        """Concatenating every shuffle describes no single model."""
+        import os
+        import time
+
+        from spyglass.position.v2.utils import training_io as tio
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "config.yaml").touch()
+        first = self._csv(
+            project / "dlc-models" / "shuffle1" / "learning_stats.csv",
+            "step,loss",
+        )
+        time.sleep(0.01)
+        second = self._csv(
+            project / "dlc-models" / "shuffle2" / "learning_stats.csv",
+            "step,loss",
+        )
+        os.utime(second, (time.time() + 5, time.time() + 5))
+
+        found = tio.discover_training_csvs(project / "config.yaml")
+        assert found == [second], f"expected only the newest, got {found}"
+        assert first not in found

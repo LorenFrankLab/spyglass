@@ -1,0 +1,398 @@
+"""Tests for skeleton table (train.py)."""
+
+import datajoint as dj
+import networkx as nx
+import pytest
+
+
+@pytest.fixture
+def skel_utils():
+    """The skeleton primitives, called directly rather than via the table.
+
+    `Skeleton` used to carry thin instance-method wrappers for these purely
+    so tests could reach them; the wrappers are gone.
+    """
+    from spyglass.position.v2.utils import skeleton as skel
+
+    return skel
+
+
+INSERT_KWARGS = dict(skip_duplicates=True, accept_default=True)
+
+
+class TestSkeletonInsert:
+    """Test skeleton.insert1() functionality."""
+
+    def test_insert_from_config_dict(self, skeleton):
+        """Test inserting skeleton from config dictionary."""
+        config = {
+            "bodyparts": ["nose", "earL", "earR"],
+            "skeleton": [("nose", "earL"), ("nose", "earR")],
+        }
+
+        skeleton_key = skeleton.insert1(config, **INSERT_KWARGS)
+
+        assert "skeleton_id" in skeleton_key
+        skeleton = (skeleton & skeleton_key).fetch1()
+        assert set(skeleton["bodyparts"]) == set(config["bodyparts"])
+
+    def test_insert_with_custom_skeleton_id(self, skeleton):
+        """Test inserting skeleton with custom skeleton_id."""
+        expected_id = "test-skel-001"
+        config = {
+            "skeleton_id": expected_id,
+            "bodyparts": ["nose", "head"],
+            "skeleton": [("nose", "head")],
+        }
+
+        skeleton_key = skeleton.insert1(config, **INSERT_KWARGS)
+
+        assert skeleton_key["skeleton_id"] == expected_id
+
+    def test_insert_duplicate_skeleton_skips(self, skeleton):
+        """Test inserting duplicate skeleton with skip_duplicates."""
+        config = {
+            "bodyparts": ["nose", "head"],
+            "skeleton": [("nose", "head")],
+        }
+
+        # Insert once
+        key1 = skeleton.insert1(config, **INSERT_KWARGS)
+        skeleton_count_before = len(skeleton)
+
+        # Insert again
+        key2 = skeleton.insert1(config, **INSERT_KWARGS)
+        skeleton_count_after = len(skeleton)
+
+        # Should not create duplicate
+        assert skeleton_count_after == skeleton_count_before
+
+        # Should return same skeleton_id (if not None)
+        assert key1["skeleton_id"] == key2["skeleton_id"]
+
+    def test_insert_validates_bodyparts(self, skeleton):
+        """Test insert validates bodyparts exist in BodyPart table."""
+
+        config = {
+            "bodyparts": ["invalid_bodypart_xyz"],
+            "skeleton": ["invalid_bodypart_xyz"],
+        }
+
+        with pytest.raises(dj.DataJointError, match="Unknown bodypart"):
+            skeleton.insert1(config, accept_default=True)
+
+    def test_insert_requires_bodyparts(self, skeleton):
+        """Test insert fails without bodyparts field."""
+        config = {"skeleton": [("nose", "head")]}
+
+        with pytest.raises(dj.DataJointError, match="bodyparts"):
+            skeleton.insert1(config, accept_default=True)
+
+    def test_insert_no_edges(self, skeleton):
+        """Test insert ok without edges field."""
+        config = {"bodyparts": ["nose", "head"]}
+        key = skeleton.insert1(config, accept_default=True)
+        assert "skeleton_id" in key
+        # No edges supplied -> stored edges blob is an empty list, not None.
+        row = (skeleton & key).fetch1()
+        assert list(row["edges"]) == []
+
+
+class TestSkeletonTopology:
+    """Test skeleton topology hash computation."""
+
+    def test_shape_hash_same_for_equivalent_skeletons(self, skel_utils):
+        """Test topology hash is same for equivalent skeletons."""
+
+        bodyparts = ["nose", "earL", "earR"]
+        edges1 = [("nose", "earL"), ("nose", "earR")]
+        edges2 = [("nose", "earR"), ("nose", "earL")]  # Different order
+
+        hash1 = skel_utils.shape_hash_from_edges(bodyparts, edges1)
+        hash2 = skel_utils.shape_hash_from_edges(bodyparts, edges2)
+
+        # Same topology should give same hash (order-independent)
+        assert hash1 == hash2
+        # Pinned shape hash for this 3-node, 2-edge star.
+        assert hash1 == "aeff26fd2685c094f661e9d8901b207d"
+
+    def test_shape_hash_different_for_different_skeletons(self, skel_utils):
+        """Test topology hash differs for different skeletons."""
+
+        bodyparts = ["nose", "earL", "earR", "tailbase"]
+        edges1 = [("nose", "earL"), ("nose", "earR")]
+        edges2 = [
+            ("nose", "tailbase"),
+            ("tailbase", "earL"),
+            ("tailbase", "earR"),
+        ]
+
+        hash1 = skel_utils.shape_hash_from_edges(bodyparts, edges1)
+        hash2 = skel_utils.shape_hash_from_edges(bodyparts, edges2)
+
+        # Different topology should give different hash
+        assert hash1 != hash2
+        assert hash1 == "2e1161f925156932ac287681e700110a"
+        assert hash2 == "4ab61d4314b09e9227229f9166f15135"
+
+    def test_build_labeled_graph_has_correct_parts(self, skel_utils):
+        """Test graph has correct number of nodes/edges."""
+        bodyparts = ["nose", "earL", "earR"]
+        edges = [("nose", "earL"), ("nose", "earR")]
+
+        graph = skel_utils.build_labeled_graph(bodyparts, edges)
+
+        assert isinstance(graph, nx.Graph)
+        # Nodes/edges carry normalized labels ('earL' -> 'ear l').
+        assert set(graph.nodes) == {"nose", "ear l", "ear r"}
+        assert {tuple(sorted(e)) for e in graph.edges} == {
+            ("ear l", "nose"),
+            ("ear r", "nose"),
+        }
+
+
+class TestSkeletonDuplicateDetection:
+    """Test skeleton duplicate detection with graph isomorphism."""
+
+    def test_fuzzy_equal_match(self, skel_utils):
+        """Test fuzzy matching for matches."""
+        assert skel_utils.fuzzy_equal("nose", "nose", threshold=0.85)
+        assert skel_utils.fuzzy_equal("Nose", "nose", threshold=0.85)
+        assert skel_utils.fuzzy_equal("LEFT_EAR", "left_ear", threshold=0.85)
+        assert skel_utils.fuzzy_equal("leftear", "left_ear", threshold=0.85)
+        assert not skel_utils.fuzzy_equal("nose", "tailbase", threshold=0.85)
+
+    def test_isomorphic_with_distinct_parts_not_duplicate(self):
+        """Same topology + fuzzy-similar but distinct parts -> not duplicate.
+
+        ``redLED_L`` and ``redLED_R`` fuzzy-match above 0.85, so a pure
+        isomorphism check would wrongly merge these two single-edge skeletons.
+        Requiring equal normalized node sets keeps them distinct.
+        """
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        new_bp = ["redLED_L", "greenLED"]
+        new_e = [("greenLED", "redLED_L")]
+        old_bp = ["redLED_R", "greenLED"]
+        old_e = [("greenLED", "redLED_R")]
+        assert not is_duplicate_skeleton(new_bp, new_e, old_bp, old_e)
+
+    def test_same_parts_variant_spelling_is_duplicate(self):
+        """Same parts named with variant spelling still merge."""
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        new_bp = ["greenLED", "redLED_C"]
+        new_e = [("greenLED", "redLED_C")]
+        old_bp = ["green_led", "red_led_c"]
+        old_e = [("green_led", "red_led_c")]
+        assert is_duplicate_skeleton(new_bp, new_e, old_bp, old_e)
+
+
+class TestSkeletonCanonical:
+    """Skeleton stores one canonical namespace for bodyparts and edges."""
+
+    def test_variant_spelling_inserts_and_canonicalizes(self, skeleton):
+        """A separator-variant config inserts cleanly via canonicalization.
+
+        'green_led'/'red_led_c' are separator variants of the curated
+        'greenLED'/'redLED_C'. Normalized validation passes while
+        the raw part-table FK insert failed with an IntegrityError. Now the
+        names canonicalize and the stored bodyparts are the canonical spelling.
+        """
+        sid = "nb06-variant"
+        config = {
+            "skeleton_id": sid,
+            "bodyparts": ["green_led", "red_led_c"],
+            "skeleton": [["green_led", "red_led_c"]],
+        }
+        try:
+            skeleton.insert1(config, skip_duplicates=True)
+            assert set(skeleton.get_bodyparts(sid)) == {"greenLED", "redLED_C"}
+        finally:
+            (skeleton & {"skeleton_id": sid}).delete(safemode=False)
+
+    def test_stored_edge_labels_subset_of_bodyparts(self, skeleton):
+        """Every label in stored edges appears verbatim in stored bodyparts."""
+        sid = "nb06-namespace"
+        config = {
+            "skeleton_id": sid,
+            "bodyparts": ["nose", "earL", "earR"],
+            "skeleton": [["nose", "earL"], ["nose", "earR"]],
+        }
+        try:
+            skeleton.insert1(config, skip_duplicates=True)
+            bodyparts = set(skeleton.get_bodyparts(sid))
+            edges = (skeleton & {"skeleton_id": sid}).fetch1("edges")
+            edge_labels = {lbl for edge in edges for lbl in edge}
+            # Every edge label appears verbatim in the (canonical) bodyparts;
+            # here all three bodyparts are used, so the sets are equal.
+            assert edge_labels == bodyparts == {"nose", "earL", "earR"}
+        finally:
+            (skeleton & {"skeleton_id": sid}).delete(safemode=False)
+
+
+class TestSkeletonEdgeCases:
+    """Test edge cases and error handling for skeleton."""
+
+    def test_single_bodypart_single_edge(self, skeleton):
+        """A single-bodypart self-edge inserts and stores the self-loop."""
+        config = {
+            "bodyparts": ["nose"],
+            "skeleton": [("nose", "nose")],
+        }
+        key = skeleton.insert1(config, **INSERT_KWARGS)
+        assert "skeleton_id" in key
+        row = (skeleton & key).fetch1()
+        assert [tuple(e) for e in row["edges"]] == [("nose", "nose")]
+
+    def test_nested_edge_group_is_flattened(self, skeleton):
+        """Malformed DLC configs store groups of edges as a single nested list.
+
+        The real-world form is e.g.:
+            skeleton: [['a', 'b'], [['c', 'c'], ['d', 'd']]]
+        where the second element should have been three separate pairs.
+        insert1 must flatten one nesting level and warn, not raise.
+        """
+        config = {
+            "bodyparts": ["redLED_C", "greenLED", "tailBase", "tailMid"],
+            "skeleton": [
+                ["redLED_C", "greenLED"],
+                # Nested group: expanded to two individual edges:
+                [["tailBase", "tailBase"], ["tailMid", "tailMid"]],
+            ],
+        }
+        key = skeleton.insert1(config, **INSERT_KWARGS)
+        assert "skeleton_id" in key
+        row = (skeleton & key).fetch1()
+        # After flattening: the plain pair plus the two self-loops from the
+        # nested group, canonicalized and sorted.
+        assert {tuple(e) for e in row["edges"]} == {
+            ("greenLED", "redLED_C"),
+            ("tailBase", "tailBase"),
+            ("tailMid", "tailMid"),
+        }
+
+    def test_disconnected_graph(self, skeleton):
+        """Test skeleton with disconnected components."""
+        config = {
+            "bodyparts": ["nose", "earL", "earR", "tailBase"],
+            "skeleton": [
+                ("nose", "earL"),  # Component 1
+                ("earR", "tailBase"),  # Component 2 (disconnected)
+            ],
+        }
+
+        # Should handle disconnected graphs (may be valid for some animals)
+        skeleton_key = skeleton.insert1(config, **INSERT_KWARGS)
+
+        row = (skeleton & skeleton_key).fetch1()
+        # Two disconnected edges, canonicalized and sorted.
+        assert {tuple(e) for e in row["edges"]} == {
+            ("earL", "nose"),
+            ("earR", "tailBase"),
+        }
+
+
+class TestTopologyMatchesLabelsExactly:
+    """Isomorphism must not treat similar labels as the same node.
+
+    `redLED_L` and `redLED_R` normalize to `red led l` / `red led r`, whose
+    SequenceMatcher ratio is 0.889, above the 0.85 node-match threshold,
+    so skeletons wired to opposite sides compared as duplicates.
+    """
+
+    NEW = (["greenLED", "redLED_L"], [("greenLED", "redLED_L")])
+    OLD = (["greenLED", "redLED_R"], [("greenLED", "redLED_R")])
+
+    def test_opposite_sides_are_not_duplicates(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        assert not is_duplicate_skeleton(*self.NEW, *self.OLD)
+
+    def test_identical_skeletons_still_match(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        assert is_duplicate_skeleton(*self.NEW, *self.NEW)
+
+    def test_spelling_variants_still_match(self):
+        """Normalization is kept: `green_led` and `greenLED` are one node."""
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        variant = (["green_led", "red_led_l"], [("green_led", "red_led_l")])
+        assert is_duplicate_skeleton(*variant, *self.NEW)
+
+    def test_threshold_no_longer_changes_the_verdict(self):
+        from spyglass.position.v2.utils.skeleton import is_duplicate_skeleton
+
+        for threshold in (0.0, 0.85, 1.0):
+            assert not is_duplicate_skeleton(
+                *self.NEW, *self.OLD, threshold=threshold
+            )
+
+
+class TestExplicitIdIsIdempotent:
+    """An explicit `skeleton_id` with `skip_duplicates` must not half-write.
+
+    The explicit id skips the duplicate search, so `skip_duplicates` dropped
+    the master insert while the part insert still ran: the blob and hash kept
+    the old parts, the part table gained the new ones, and `get_bodyparts`
+    then disagreed with the stored blob.
+    """
+
+    def test_differing_shape_is_refused(self, pv2_train):
+        """The reviewer's reproduction: three parts into two-part 2LED."""
+        skeleton = pv2_train.Skeleton()
+        before = len(skeleton)
+        stored_parts = skeleton.get_bodyparts("2LED")
+
+        with pytest.raises(dj.DataJointError, match="different shape"):
+            skeleton.insert1(
+                {
+                    "skeleton_id": "2LED",
+                    "bodyparts": ["greenLED", "redLED_C", "redLED_L"],
+                    "edges": [("greenLED", "redLED_C")],
+                },
+                skip_duplicates=True,
+            )
+
+        assert len(skeleton) == before, "a skeleton was added"
+        assert (
+            skeleton.get_bodyparts("2LED") == stored_parts
+        ), "the part table gained rows the blob does not describe"
+
+    def test_matching_shape_returns_the_key(self, pv2_train):
+        """The same shape under the same id is a no-op returning the key."""
+        skeleton = pv2_train.Skeleton()
+        before = len(skeleton)
+
+        key = skeleton.insert1(
+            {
+                "skeleton_id": "2LED",
+                "bodyparts": ["greenLED", "redLED_C"],
+                "edges": [("greenLED", "redLED_C")],
+            },
+            skip_duplicates=True,
+        )
+
+        assert key == {"skeleton_id": "2LED"}
+        assert len(skeleton) == before
+
+    def test_parts_and_blob_agree_after_insert(self, pv2_train):
+        """A fresh insert leaves the part table matching the blob."""
+        skeleton = pv2_train.Skeleton()
+        parts = ["greenLED", "redLED_C", "redLED_L"]
+        key = skeleton.insert1(
+            {
+                "skeleton_id": "t7_agreement",
+                "bodyparts": parts,
+                "edges": [("greenLED", "redLED_C")],
+            },
+            skip_duplicates=True,
+        )
+        try:
+            blob = (skeleton & key).fetch1("bodyparts")
+            assert sorted(skeleton.get_bodyparts(key["skeleton_id"])) == sorted(
+                blob
+            )
+        finally:
+            (skeleton & key).super_delete(warn=False, safemode=False)

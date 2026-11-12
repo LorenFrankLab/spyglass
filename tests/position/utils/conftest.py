@@ -1,8 +1,81 @@
 """Test fixtures for position utils tests."""
 
+import importlib
+import sys
+import types
+from contextlib import contextmanager
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
+
+_SRC = Path(__file__).resolve().parents[3] / "src"
+
+# Parent packages to stub, and their paths under src/.
+_STUBBED = {
+    "spyglass": "spyglass",
+    "spyglass.position": "spyglass/position",
+    "spyglass.position.utils": "spyglass/position/utils",
+}
+
+
+@contextmanager
+def _import_without_position_init(dotted_path: str):
+    """Import a module without executing ``spyglass.position.__init__``.
+
+    ``spyglass.position.__init__`` imports ``PositionOutput``, which activates
+    the DataJoint position schema and so needs a database. Importing the root
+    ``spyglass`` package alone does not, which is why the decision below turns
+    on whether ``spyglass.position`` is loaded rather than ``spyglass``.
+
+    Parameters
+    ----------
+    dotted_path : str
+        Module to import, e.g. ``spyglass.position.utils.dlc_config``.
+
+    Yields
+    ------
+    module
+        The imported module.
+    """
+    if "spyglass.position" in sys.modules:  # already paid for; use it
+        yield importlib.import_module(dotted_path)
+        return
+
+    # Keep every pre-existing spyglass module so the stubs can be swapped out
+    # again; `spyglass` itself may be genuinely imported.
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "spyglass" or name.startswith("spyglass.")
+    }
+    for name, relative in _STUBBED.items():
+        stub = types.ModuleType(name)
+        stub.__path__ = [str(_SRC / relative)]
+        sys.modules[name] = stub
+    try:
+        yield importlib.import_module(dotted_path)
+    finally:
+        for name in list(sys.modules):
+            if name == "spyglass" or name.startswith("spyglass."):
+                del sys.modules[name]
+        sys.modules.update(saved)
+
+
+@pytest.fixture(scope="session")
+def import_without_position_init():
+    """The context manager above, for tests that must stay DB-free."""
+    return _import_without_position_init
+
+
+@pytest.fixture(scope="session")
+def DlcConfig():
+    """``DlcConfig`` loaded without activating the position schema."""
+    with _import_without_position_init(
+        "spyglass.position.utils.dlc_config"
+    ) as module:
+        yield module.DlcConfig
 
 
 @pytest.fixture(scope="session")
