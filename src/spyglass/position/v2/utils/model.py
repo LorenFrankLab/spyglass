@@ -103,8 +103,12 @@ def reuse_candidates(rows, subjects=None) -> list:
     ]
 
 
-def redundant_model_msg(skeleton_id, candidates) -> str:
-    """Actionable message listing reusable models for a skeleton."""
+def redundant_model_msg(skeleton_id, candidates, declare_call=None) -> str:
+    """Actionable message listing reusable models for a skeleton.
+
+    *declare_call* is the call that bypasses the guard on the path the user
+    is actually on, since naming the wrong one sends them nowhere.
+    """
     lines = [
         f"  model_id={c['model_id']} subjects={c['subjects']}"
         + (f" (overlaps {c['overlap']})" if c["overlap"] else "")
@@ -125,5 +129,9 @@ def redundant_model_msg(skeleton_id, candidates) -> str:
         "    1.3. Run inference with that model (queue a "
         "`PoseEstimSelection` task, then `PoseEstim.populate`)\n"
         "2. Declare a new model with "
-        "`ModelSelection().insert1(your_key, allow_redundant_model=True)`"
+        + (
+            declare_call
+            or "`ModelSelection().insert1(your_key, "
+            "allow_redundant_model=True)`"
+        )
     )

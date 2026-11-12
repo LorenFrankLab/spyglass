@@ -967,14 +967,16 @@ class ModelSelection(SpyglassMixin, dj.Manual):
             for row in rows
         ]
 
-    def insert1(self, row, *, allow_redundant_model=False, **kwargs):
+    def insert1(
+        self, row, *, allow_redundant_model=False, declare_call=None, **kwargs
+    ):
         """Insert one selection, guarding against redundant model declaration.
 
         Blocks declaring a new model whose skeleton already has trained models
         (to promote reuse) unless it is a fine-tune (``parent_id`` set) or
         ``allow_redundant_model=True``. See :meth:`Model.reusable_for`.
         """
-        self._guard_redundant_model(row, allow_redundant_model)
+        self._guard_redundant_model(row, allow_redundant_model, declare_call)
         # Not super().insert1: that delegates to self.insert, which routes
         # back here.
         super().insert([row], **kwargs)
@@ -1008,7 +1010,9 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         """
         return list((Model & row).fetch("model_id"))
 
-    def _guard_redundant_model(self, row, allow_redundant_model):
+    def _guard_redundant_model(
+        self, row, allow_redundant_model, declare_call=None
+    ):
         """Raise if *row* would declare a model redundant with existing ones."""
         if allow_redundant_model or not isinstance(row, dict):
             return
@@ -1027,7 +1031,9 @@ class ModelSelection(SpyglassMixin, dj.Manual):
         )
         if not candidates:
             return
-        raise ValueError(mdl.redundant_model_msg(skeleton_id, candidates))
+        raise ValueError(
+            mdl.redundant_model_msg(skeleton_id, candidates, declare_call)
+        )
 
 
 @schema
@@ -1540,7 +1546,9 @@ class Model(SpyglassMixin, dj.Computed):
         Returns
         -------
         dict
-            Primary key for the trained (new) ``Model`` entry.
+            ``{"model_id": ...}``. With neither ``epochs`` nor overrides, a
+            key already naming a ``Model`` returns that model rather than
+            training a child.
 
         Raises
         ------
@@ -1560,7 +1568,13 @@ class Model(SpyglassMixin, dj.Computed):
         >>> # Train a freshly declared selection
         >>> model_key = Model().train(selection_key)
         """
-        if self & key:  # a Model row exists → continue / fine-tune
+        if self & key:  # a Model row exists
+            if epochs is None and not overrides:
+                # Nothing asked for more training, so return what exists.
+                # Deriving a child here made a bare second call train again.
+                existing = (self & key).fetch1("KEY")
+                self._info_msg(f"Model exists: {existing['model_id']}")
+                return {"model_id": existing["model_id"]}
             model_entry = (self & key).fetch1()
             return self._derive_model(
                 model_entry, epochs=epochs, overrides=overrides
@@ -2359,7 +2373,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_id: Union[str, None] = None,
         model_name: Union[str, None] = None,
         normalize_names: bool = False,
-        allow_redundant_model: bool = False,
+        allow_redundant_model: bool = True,
         allow_invalid_edges: bool = False,
         external_videos: bool = False,
         vid_file_matches: Optional[Dict[str, Optional[Dict]]] = None,
@@ -2417,9 +2431,10 @@ class Model(SpyglassMixin, dj.Computed):
             ``config.yaml.<timestamp>.bak`` beside it). Default False. Offered
             as a backup when an import is blocked by variant-spelling names.
         allow_redundant_model : bool, optional
-            When False (default), declaring a model whose skeleton already has
-            trained models raises with a list of reusable models (to curb model
-            proliferation). Set True to declare a new model anyway. Fine-tunes
+            Default True: an import of trained weights costs no training, so
+            the guard that curbs model proliferation does not apply. Pass
+            False to apply it anyway, which raises with a list of reusable
+            models when the skeleton already has some. Fine-tunes
             (``parent_id`` set) are always exempt. See
             :meth:`Model.reusable_for`.
         **kwargs
@@ -2429,11 +2444,12 @@ class Model(SpyglassMixin, dj.Computed):
         Returns
         -------
         dict
-            Primary key for the created Model entry. For a DLC project that
-            holds no trained snapshot, a ``ModelSelection`` key instead: there
-            is nothing to run inference with, so no ``Model`` row is created.
-            Pass that key to ``populate`` to train it. The two are told apart
-            by the presence of ``model_id``.
+            ``{"model_id": ...}``, whether the model was imported now or
+            already existed. For a DLC project holding no trained snapshot,
+            a full ``ModelSelection`` key instead: there is nothing to run
+            inference with, so no ``Model`` row is created. Pass that key to
+            ``populate`` to train it. The two are told apart by the presence
+            of ``model_id``.
 
         Raises
         ------
@@ -2571,7 +2587,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_name: Union[str, None] = None,
         model_params_id: Union[str, None] = None,
         model_id: Union[str, None] = None,
-        allow_redundant_model: bool = False,
+        allow_redundant_model: bool = True,
         **kwargs,
     ):
         """Import a DeepLabCut Model Zoo (SuperAnimal) model.
@@ -2595,8 +2611,8 @@ class Model(SpyglassMixin, dj.Computed):
         model_params_id, model_id : str, optional
             Override the generated ids.
         allow_redundant_model : bool, optional
-            Bypass the reuse guard, e.g. to import a second backbone for a
-            skeleton that already has models.
+            Default True, an import costing no training. Pass False to apply
+            the reuse guard anyway.
 
         Returns
         -------
@@ -2680,6 +2696,7 @@ class Model(SpyglassMixin, dj.Computed):
             sel_key,
             skip_duplicates=True,
             allow_redundant_model=allow_redundant_model,
+            declare_call="`Model().load(..., allow_redundant_model=True)`",
         )
 
         # Step 5: the weights the strategy placed for us.
@@ -2688,7 +2705,7 @@ class Model(SpyglassMixin, dj.Computed):
         existing = self & {"model_path": stored_path}
         if existing:
             key = existing.fetch("KEY", order_by="model_id DESC", limit=1)[0]
-            return (self & key).fetch1()
+            return {"model_id": key["model_id"]}
 
         model_key = {
             **sel_key,
@@ -2700,7 +2717,7 @@ class Model(SpyglassMixin, dj.Computed):
         }
         self.insert1(model_key, allow_direct_insert=True)
         self._info_msg(f"Zoo model imported: {model_key['model_id']}")
-        return model_key
+        return {"model_id": model_key["model_id"]}
 
     @staticmethod
     def _check_project_skeleton(
@@ -2821,7 +2838,7 @@ class Model(SpyglassMixin, dj.Computed):
         # questions below.
         dlc = ToolStrategyFactory.create_strategy("DLC")
         normalize_names = kwargs.pop("normalize_names", False)
-        allow_redundant_model = kwargs.pop("allow_redundant_model", False)
+        allow_redundant_model = kwargs.pop("allow_redundant_model", True)
         external_videos = kwargs.pop("external_videos", False)
         vid_file_matches = kwargs.pop("vid_file_matches", None)
         extra_params = kwargs.pop("extra_params", None) or {}
@@ -2918,12 +2935,13 @@ class Model(SpyglassMixin, dj.Computed):
         )
         if existing:
             key = existing.fetch("KEY", order_by="model_id DESC", limit=1)[0]
-            return (self & key).fetch1()
+            return {"model_id": key["model_id"]}
 
         ModelSelection().insert1(
             sel_key,
             skip_duplicates=True,
             allow_redundant_model=allow_redundant_model,
+            declare_call="`Model().load(..., allow_redundant_model=True)`",
         )
 
         # Step 4b: A project with no snapshot has nothing to run inference
@@ -2936,7 +2954,9 @@ class Model(SpyglassMixin, dj.Computed):
                 f"{sel_key['model_selection_id']} instead of a Model. Train "
                 "it with `Model().populate(<the returned key>)`."
             )
-            return sel_key
+            # The full primary key: `model_selection_id` alone does not
+            # identify the row, so `populate` could not use it.
+            return {k: sel_key[k] for k in ModelSelection.primary_key}
 
         # Step 5: Generate model_id and insert directly into Model. The
         # prefix stays short so the identifying hash of (task, model_path)
@@ -2956,7 +2976,7 @@ class Model(SpyglassMixin, dj.Computed):
         self.insert1(model_key, allow_direct_insert=True)
         self._info_msg(f"Model imported: {model_id}")
 
-        return model_key
+        return {"model_id": model_id}
 
     def verify(
         self,
