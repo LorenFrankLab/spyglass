@@ -6,6 +6,43 @@ from re import match as re_match
 
 class BaseMixin:
 
+    # Class-level, as SpyglassMixin._fk_validated is
+    _logged_install_mode = False
+
+    def insert(self, *args, **kwargs):
+        """Log a dirty Spyglass install before the session's first insert.
+
+        The import-time hook warns but does not write, so that importing
+        spyglass never opens a connection. This is where the record is made:
+        by the first insert a connection exists, and a process that never
+        writes is never logged.
+
+        At most one call per session does any work, so every later insert
+        costs one attribute read.
+        """
+        self._log_install_once()
+        return super().insert(*args, **kwargs)
+
+    def _log_install_once(self) -> None:
+        """Record a dirty install once per session (best-effort).
+
+        Skipped under test_mode, as the import-time warning is: the suite runs
+        from a developer's working tree, which is dirty by definition, so
+        logging here would write rows the tests under way did not ask for.
+        """
+        if BaseMixin._logged_install_mode or self._test_mode:
+            return
+
+        # Set on BaseMixin, not self, and before logging: the insert re-enters
+        BaseMixin._logged_install_mode = True
+
+        try:  # the import is inside the guard: it declares a schema
+            from spyglass.common.common_user import UserEnvironment
+
+            UserEnvironment().log_install()
+        except Exception as exc:  # never block the caller's own write
+            self._logger.debug(f"dirty env logging failed: {exc}")
+
     def restrict(self, restriction, *args, **kwargs):
         """Intercept no-op restrict calls to throw warning.
 

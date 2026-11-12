@@ -22,6 +22,13 @@ info.connection.query(
     + 'COMMENT "For shared-store identity" AFTER `datajoint_user_name`, '
     + "ADD UNIQUE INDEX (`github_user_name`)"
 )
+
+# Add the dirty-install columns to UserEnvironment, and make env nullable.
+# Until this runs, recompute can reuse an environment already on record but
+# cannot log a new one, and no install is flagged as dirty or stale.
+from spyglass.common.common_user import UserEnvironment
+
+UserEnvironment().alter()
 ```
 
 ### Breaking Changes
@@ -127,6 +134,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Warn users on dirty installs #1601
+    - `UserEnvironment.env_hash` now includes the Spyglass commit, so a dev clone
+        logs one row per commit. `RecordingRecomputeSelection` keys on `env_id`,
+        so each row carries its own recompute selections.
 
 ### Pipelines
 
