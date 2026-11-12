@@ -144,7 +144,7 @@ def admin_trust_days():
 
 
 @pytest.fixture(scope="module")
-def compute_install_info_fn():
+def fresh_install():
     """Inspect the install afresh, bypassing the process-wide instance.
 
     Every fact is read before returning. They are cached properties, so a
@@ -889,7 +889,7 @@ def test_delim_split_none():
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def test_pip_install_no_git(tmp_path, compute_install_info_fn):
+def test_pip_install_no_git(tmp_path, fresh_install):
     """Standard pip install: no .git ancestor → install_path None, no changes."""
     fake_pkg = tmp_path / "site-packages" / "spyglass" / "__init__.py"
     fake_pkg.parent.mkdir(parents=True)
@@ -897,14 +897,14 @@ def test_pip_install_no_git(tmp_path, compute_install_info_fn):
 
     with patch("spyglass.__version__", "0.5.6"):
         with patch("spyglass.__file__", str(fake_pkg)):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.install_path is None
     assert result.has_local_changes is False
     assert result.is_official is True
 
 
-def test_dev_version_is_dev(tmp_path, fake_clone, compute_install_info_fn):
+def test_dev_version_is_dev(tmp_path, fake_clone, fresh_install):
     """A '.dev' version sets is_dev=True; local edits make it non-official."""
     # Mocked so the result does not depend on this working tree
     with patch("spyglass.__version__", "0.5.6.dev42+gb3db6d09"):
@@ -913,14 +913,14 @@ def test_dev_version_is_dev(tmp_path, fake_clone, compute_install_info_fn):
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(diff="src/x.py\n"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.is_dev is True
     assert result.has_local_changes is True
     assert result.is_official is False
 
 
-def test_release_version_not_dev(tmp_path, compute_install_info_fn):
+def test_release_version_not_dev(tmp_path, fresh_install):
     """A clean release version string gives is_dev=False."""
     fake_pkg = tmp_path / "spyglass" / "__init__.py"
     fake_pkg.parent.mkdir(parents=True)
@@ -928,14 +928,12 @@ def test_release_version_not_dev(tmp_path, compute_install_info_fn):
 
     with patch("spyglass.__version__", "0.5.6"):
         with patch("spyglass.__file__", str(fake_pkg)):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.is_dev is False
 
 
-def test_commit_hash_parsed_from_version(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_commit_hash_parsed_from_version(tmp_path, fake_clone, fresh_install):
     """The +g<hash> suffix in __version__ parses into commit_hash.
 
     Mocked rev-parse, because this test file lives inside a clone: left
@@ -948,14 +946,12 @@ def test_commit_hash_parsed_from_version(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(rev_parse=_proc("", returncode=128)),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.commit_hash == "abcd1234"
 
 
-def test_git_dirty_sets_has_local_changes(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_git_dirty_sets_has_local_changes(tmp_path, fake_clone, fresh_install):
     """git diff returning output means has_local_changes=True."""
     dirty_proc = _proc("src/spyglass/something.py\n")
 
@@ -965,13 +961,13 @@ def test_git_dirty_sets_has_local_changes(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(diff=dirty_proc.stdout),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is True
     assert result.is_official is False
 
 
-def test_git_clean_no_changes(tmp_path, fake_clone, compute_install_info_fn):
+def test_git_clean_no_changes(tmp_path, fake_clone, fresh_install):
     """git diff returning empty output means has_local_changes=False."""
     clean_proc = _proc("")
 
@@ -981,14 +977,12 @@ def test_git_clean_no_changes(tmp_path, fake_clone, compute_install_info_fn):
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(diff=clean_proc.stdout),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
 
-def test_git_unavailable_no_crash(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_git_unavailable_no_crash(tmp_path, fake_clone, fresh_install):
     """FileNotFoundError from git is swallowed; has_local_changes=False."""
     with patch("spyglass.__version__", "0.5.6.dev1+gabc1234"):
         with patch("spyglass.__file__", str(fake_clone(tmp_path))):
@@ -996,12 +990,12 @@ def test_git_unavailable_no_crash(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=FileNotFoundError("git not found"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
 
-def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
+def test_git_short_hash_fallback(tmp_path, fake_clone, fresh_install):
     """When version has no +g hash, git rev-parse is called as a fallback."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1016,14 +1010,12 @@ def test_git_short_hash_fallback(tmp_path, fake_clone, compute_install_info_fn):
                     rev_parse=hash_proc.stdout, diff=diff_proc.stdout
                 ),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.commit_hash == "abc1234"
 
 
-def test_official_remote_found_by_url(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_official_remote_found_by_url(tmp_path, fake_clone, fresh_install):
     """The official remote is identified by URL, whatever it is named.
 
     Remote names are a local convention: a clone may call it `sg`, `upstream`
@@ -1049,7 +1041,7 @@ def test_official_remote_found_by_url(
 
 
 def test_no_official_remote_is_not_published(
-    tmp_path, fake_clone, compute_install_info_fn
+    tmp_path, fake_clone, fresh_install
 ):
     """A clone with no official remote cannot be reached from upstream."""
     fake_pkg = fake_clone(tmp_path)
@@ -1064,15 +1056,13 @@ def test_no_official_remote_is_not_published(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(remote=fork_only),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.install_path is not None  # it is a clone
     assert result.has_local_changes is True
 
 
-def test_unpushed_head_is_not_official(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_unpushed_head_is_not_official(tmp_path, fake_clone, fresh_install):
     """A commit no official branch contains is a local change.
 
     `git diff` is empty once the work is committed, so committing was enough to
@@ -1089,14 +1079,14 @@ def test_unpushed_head_is_not_official(
                 # No official branch contains HEAD, though refs were fetched.
                 side_effect=_git_mock(branch=""),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is True
     assert result.is_official is False
 
 
 def test_published_head_with_clean_diff_is_official(
-    tmp_path, fake_clone, compute_install_info_fn
+    tmp_path, fake_clone, fresh_install
 ):
     """A pushed HEAD and a clean diff is still official."""
     fake_pkg = fake_clone(tmp_path)
@@ -1107,14 +1097,14 @@ def test_published_head_with_clean_diff_is_official(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(diff="", branch="  sg/master\n"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
     assert result.is_official is True
 
 
 def test_official_feature_branch_is_published(
-    tmp_path, fake_clone, compute_install_info_fn
+    tmp_path, fake_clone, fresh_install
 ):
     """A clean checkout of an official branch other than master is official.
 
@@ -1130,15 +1120,13 @@ def test_official_feature_branch_is_published(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(branch="  sg/spikesorting-v2\n"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
     assert result.is_official is True
 
 
-def test_unfetched_clone_does_not_flag(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_unfetched_clone_does_not_flag(tmp_path, fake_clone, fresh_install):
     """With no official ref on disk there is nothing to compare against.
 
     A shallow or freshly-cloned-by-tag checkout has the remote configured but
@@ -1153,13 +1141,13 @@ def test_unfetched_clone_does_not_flag(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(for_each_ref="", branch=""),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
 
 def test_official_remote_matched_case_insensitively(
-    tmp_path, fake_clone, compute_install_info_fn
+    tmp_path, fake_clone, fresh_install
 ):
     """GitHub resolves `lorenfranklab/spyglass` to the same repository."""
     from spyglass.utils.git_utils import SpyglassInstall
@@ -1179,9 +1167,7 @@ def test_official_remote_matched_case_insensitively(
                 assert SpyglassInstall().official_remote == "origin"
 
 
-def test_git_branch_failure_does_not_flag(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_git_branch_failure_does_not_flag(tmp_path, fake_clone, fresh_install):
     """A failing `git branch` leaves the install unflagged, not flagged."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1191,12 +1177,12 @@ def test_git_branch_failure_does_not_flag(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(branch=_proc("", returncode=129)),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
 
-def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
+def test_wheel_built_from_dirty_tree_is_flagged(fresh_install):
     """A `.dYYYYMMDD` version flags an install with no repo to inspect.
 
     hatch-vcs adds the suffix when the tree it built from had uncommitted
@@ -1206,25 +1192,25 @@ def test_wheel_built_from_dirty_tree_is_flagged(compute_install_info_fn):
     """
     with patch("spyglass.__version__", "0.6.1.dev1+gabcdef0.d20260101"):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.install_path is None
     assert result.has_local_changes is True
     assert result.is_official is False
 
 
-def test_clean_wheel_is_not_flagged(compute_install_info_fn):
+def test_clean_wheel_is_not_flagged(fresh_install):
     """A plain `+g` version with no dirty suffix stays official."""
     with patch("spyglass.__version__", "0.6.1.dev1+gabcdef0"):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.has_local_changes is False
     assert result.is_official is True
 
 
 def test_cleaned_clone_keeps_its_dirty_version(
-    tmp_path, fake_clone, compute_install_info_fn
+    tmp_path, fake_clone, fresh_install
 ):
     """In a clone, git decides, not the `.dYYYYMMDD` suffix.
 
@@ -1242,16 +1228,14 @@ def test_cleaned_clone_keeps_its_dirty_version(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(),  # clean diff, published HEAD
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.install_path is not None  # it is a clone
     assert result.has_local_changes is False
     assert result.is_official is True
 
 
-def test_venv_inside_another_repo_is_not_a_clone(
-    tmp_path, compute_install_info_fn
-):
+def test_venv_inside_another_repo_is_not_a_clone(tmp_path, fresh_install):
     """A release install in a venv inside someone else's repo is not a clone.
 
     uv puts `.venv` in the project directory by default, and an analysis
@@ -1274,7 +1258,7 @@ def test_venv_inside_another_repo_is_not_a_clone(
 
     with patch("spyglass.__version__", "0.6.1"):
         with patch("spyglass.__file__", str(pkg_init)):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.install_path is None
     assert result.commit_hash is None
@@ -1282,9 +1266,7 @@ def test_venv_inside_another_repo_is_not_a_clone(
     assert result.is_official is True
 
 
-def test_sibling_src_spyglass_is_not_this_install(
-    tmp_path, compute_install_info_fn
-):
+def test_sibling_src_spyglass_is_not_this_install(tmp_path, fresh_install):
     """A repo that merely contains a `src/spyglass` is not accepted either.
 
     The check compares resolved paths, not the layout alone, so vendoring or a
@@ -1301,14 +1283,12 @@ def test_sibling_src_spyglass_is_not_this_install(
 
     with patch("spyglass.__version__", "0.6.1"):
         with patch("spyglass.__file__", str(elsewhere)):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.install_path is None
 
 
-def test_src_layout_clone_is_accepted(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_src_layout_clone_is_accepted(tmp_path, fake_clone, fresh_install):
     """A real clone at <root>/src/spyglass still resolves to its root."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1318,15 +1298,13 @@ def test_src_layout_clone_is_accepted(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(rev_parse="abc1234\n"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.install_path == str(tmp_path)
     assert result.commit_hash == "abc1234"
 
 
-def test_head_outranks_version_hash(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_head_outranks_version_hash(tmp_path, fake_clone, fresh_install):
     """In a clone, HEAD supplies commit_hash even when __version__ carries one.
 
     hatch-vcs writes ``_version.py`` at ``pip install -e .`` and a ``git pull``
@@ -1342,22 +1320,22 @@ def test_head_outranks_version_hash(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(rev_parse="bbbbbbb\n"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.commit_hash == "bbbbbbb"
 
 
-def test_version_hash_used_without_a_clone(compute_install_info_fn):
+def test_version_hash_used_without_a_clone(fresh_install):
     """With no repo, commit_hash still comes from the __version__ suffix."""
     with patch("spyglass.__version__", "0.5.6.dev1+gaaaaaaa"):
         with patch("spyglass.__file__", "/opt/env/lib/spyglass/__init__.py"):
-            result = compute_install_info_fn()
+            result = fresh_install()
 
     assert result.install_path is None
     assert result.commit_hash == "aaaaaaa"
 
 
-def test_git_diff_nonzero_exit(tmp_path, fake_clone, compute_install_info_fn):
+def test_git_diff_nonzero_exit(tmp_path, fake_clone, fresh_install):
     """git diff non-zero exit code is handled gracefully; has_local_changes=False."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1369,14 +1347,12 @@ def test_git_diff_nonzero_exit(tmp_path, fake_clone, compute_install_info_fn):
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=_git_mock(diff=error_proc),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
 
-def test_git_diff_generic_exception(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_git_diff_generic_exception(tmp_path, fake_clone, fresh_install):
     """Generic exception from git diff is swallowed; has_local_changes=False."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1386,7 +1362,7 @@ def test_git_diff_generic_exception(
                 "spyglass.utils.git_utils.sub_run",
                 side_effect=RuntimeError("unexpected"),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
 
@@ -1461,7 +1437,7 @@ def test_stale_false_without_a_commit_date():
     assert inst.is_stale is False
 
 
-def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
+def test_git_stale_old_head(tmp_path, fake_clone, fresh_install):
     """A clean clone with a months-old HEAD is is_stale=True, not official."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1476,16 +1452,14 @@ def test_git_stale_old_head(tmp_path, fake_clone, compute_install_info_fn):
                     diff=clean_proc.stdout, log=old_proc.stdout
                 ),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.has_local_changes is False
     assert result.is_stale is True
     assert result.is_official is False
 
 
-def test_clean_current_clone_is_official(
-    tmp_path, fake_clone, compute_install_info_fn
-):
+def test_clean_current_clone_is_official(tmp_path, fake_clone, fresh_install):
     """A clean, recently-fetched dev clone is official despite is_dev=True."""
     fake_pkg = fake_clone(tmp_path)
 
@@ -1500,7 +1474,7 @@ def test_clean_current_clone_is_official(
                     diff=clean_proc.stdout, log=recent_proc.stdout
                 ),
             ):
-                result = compute_install_info_fn()
+                result = fresh_install()
 
     assert result.is_dev is True
     assert result.has_local_changes is False
