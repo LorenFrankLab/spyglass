@@ -53,13 +53,19 @@ def test_prepare_training_dataset(skip_if_no_dlc):
             )
 
             # Verify DLC function called correctly (engine filtered out by
-            # get_param_names; userfeedback=False always injected).
+            # get_param_names; userfeedback=False always injected). Shuffles
+            # names the shuffle being built: DLC 3 reads None as "the next
+            # free index", which trains a different shuffle than the one
+            # recorded.
             mock_create.assert_called_once_with(
-                str(config_path), batch_size=8, userfeedback=False
+                str(config_path),
+                batch_size=8,
+                userfeedback=False,
+                Shuffles=[1],
             )
             # Verify info message was logged
             model_instance._info_msg.assert_called_once_with(
-                "Creating DLC training dataset..."
+                "Creating DLC training dataset for shuffle 1..."
             )
 
 

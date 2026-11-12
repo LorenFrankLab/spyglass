@@ -1408,7 +1408,11 @@ class TestDerivedRunName:
     }
 
     def _derive(self, model, params, **overrides):
-        """Run ``train`` down the continue path; return the child's params."""
+        """Run ``train`` down the continue path; return the child's params.
+
+        Passes ``epochs`` so the call asks for more training: without it,
+        ``train`` returns the model that exists instead of deriving.
+        """
         mock_restricted = MagicMock()
         mock_restricted.fetch1.return_value = dict(self.PARENT)
 
@@ -1431,7 +1435,7 @@ class TestDerivedRunName:
                 None
             )
 
-            model.train({"model_id": "parent_model"}, **overrides)
+            model.train({"model_id": "parent_model"}, epochs=1, **overrides)
 
             if not mock_params.return_value.insert1.called:
                 return None
@@ -1453,7 +1457,9 @@ class TestDerivedRunName:
 
     def test_absent_run_name_is_not_invented(self, model):
         """With no run_name the trainer's per-selection default applies."""
-        assert self._derive(model, {"max_epochs": 5}) is None
+        child = self._derive(model, {"max_epochs": 5})
+
+        assert "run_name" not in child
 
 
 class TestEvaluateStoresResult:

@@ -229,6 +229,36 @@ class TestVidFileGroupHelpers:
         assert group_key["vid_group_id"] == _EMPTY_FILES_HASH
         assert len(group_key["vid_group_id"]) == 32
 
+    def test_bulk_insert_casts_each_id(self, position_v2):
+        """`insert([...])` routes through `insert1`, which casts the id.
+
+        `dj.Table.insert1` delegates to `insert`, so without the override a
+        plural insert stores the row untouched: an int id stays an int and an
+        absent one is never derived.
+        """
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        keys = VidFileGroup().insert(
+            [
+                {"vid_group_id": 7, "description": "bulk int id"},
+                {"vid_group_id": "bulk_str_id", "description": "bulk str id"},
+            ],
+            skip_duplicates=True,
+        )
+
+        assert keys == [
+            {"vid_group_id": "7"},
+            {"vid_group_id": "bulk_str_id"},
+        ]
+        assert VidFileGroup() & {"vid_group_id": "7"}
+
+    def test_bulk_insert_rejects_a_non_dict_row(self, position_v2):
+        """The type gate in `insert1` applies to every row of a bulk call."""
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        with pytest.raises(TypeError, match="must be a dictionary"):
+            VidFileGroup().insert(["not_a_dict"])
+
 
 class TestVidFileGroupGetNwbFile:
     """Tests for VidFileGroup.get_nwb_file() method."""

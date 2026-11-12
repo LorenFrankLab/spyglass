@@ -136,10 +136,13 @@ class TestBodyPartCollisionGuard:
     def test_canon_map_collision_gives_admin_guidance(self, bodypart):
         """A colliding pair in the table raises clear admin-actionable error.
 
-        The duplicate is injected via bulk insert (bypassing the insert1
-        guard) to mimic a pre-existing / admin-introduced inconsistency.
+        The duplicate goes in through DataJoint's own `insert`, since no
+        path on `BodyPart` produces one: `insert1` and the plural `insert`
+        both refuse it. That models a row written before the guard existed,
+        or by an admin working outside the table's API.
         """
-        bodypart.insert(
+        dj.Table.insert(
+            bodypart,
             [{"bodypart": "green_led"}],
             allow_direct_insert=True,
             skip_duplicates=True,
@@ -152,6 +155,78 @@ class TestBodyPartCollisionGuard:
             assert "greenLED" in msg and "green_led" in msg
         finally:
             (bodypart & {"bodypart": "green_led"}).delete(safemode=False)
+
+
+class TestLookupBulkInsert:
+    """`insert([...])` routes through `insert1` on the Lookup tables.
+
+    `dj.Table.insert1` delegates to `insert`, so without the override a
+    plural insert reaches the database with none of the validation. The
+    declared `contents` are exempt: DataJoint fills a Lookup through
+    `insert` at schema activation, before any user code runs.
+    """
+
+    def test_bulk_insert_rejects_a_colliding_spelling(self, bodypart):
+        """The collision guard applies to every row of a bulk call."""
+        assert bodypart & {"bodypart": "greenLED"}
+        before = set(bodypart.fetch("bodypart"))
+
+        with pytest.raises(dj.DataJointError, match="collides with existing"):
+            bodypart.insert([{"bodypart": "green_led"}])
+
+        assert set(bodypart.fetch("bodypart")) == before
+
+    def test_bulk_insert_applies_the_admin_check(self, bodypart, monkeypatch):
+        """A non-admin bulk insert is refused, as the singular one is."""
+        from spyglass.common import LabMember
+
+        monkeypatch.setattr(
+            LabMember, "user_is_admin", property(lambda self: False)
+        )
+        with pytest.raises(PermissionError, match="Only admins"):
+            bodypart.insert([{"bodypart": "bulkNovelPartXyz"}])
+
+    def test_contents_are_exempt(self, bodypart, monkeypatch):
+        """Schema activation inserts `contents`, so it skips the checks.
+
+        A non-admin importing spyglass must not trip the admin check.
+        """
+        from spyglass.common import LabMember
+
+        monkeypatch.setattr(
+            LabMember, "user_is_admin", property(lambda self: False)
+        )
+        bodypart.insert(list(type(bodypart).contents), skip_duplicates=True)
+
+        with pytest.raises(PermissionError):
+            bodypart.insert([{"bodypart": "notContentsXyz"}])
+
+    def test_skeleton_bulk_insert_validates(self, skeleton):
+        """An unknown body part is refused through the plural path."""
+        with pytest.raises(dj.DataJointError):
+            skeleton.insert(
+                [
+                    {
+                        "skeleton_id": "bulk_unknown_probe",
+                        "bodyparts": ["definitelyNovelXyz", "nose"],
+                        "edges": [("definitelyNovelXyz", "nose")],
+                    }
+                ],
+                check_duplicates=False,
+            )
+
+    def test_model_params_bulk_insert_rejects_unknown_tool(self, model_params):
+        """An unsupported tool is refused through the plural path."""
+        with pytest.raises(ValueError, match="Tool not supported"):
+            model_params.insert(
+                [
+                    {
+                        "model_params_id": "bulk_bad_tool",
+                        "tool": "NOT_A_TOOL",
+                        "params": {},
+                    }
+                ]
+            )
 
 
 class TestBodyPartValidation:

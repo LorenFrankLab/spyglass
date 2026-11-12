@@ -118,6 +118,46 @@ class TestGuardBranches:
         with pytest.raises(ValueError, match="m1"):
             self.ms._guard_redundant_model(self._row(), False)
 
+    def test_bulk_insert_reaches_the_guard(self):
+        """`insert([...])` routes through `insert1`, so the guard runs.
+
+        `dj.Table.insert1` delegates to `insert`, so without the override a
+        plural insert reaches the database with no guard at all.
+        """
+        self._set_candidates(
+            [{"model_id": "m1", "subjects": ["A"], "overlap": ["A"]}]
+        )
+        with pytest.raises(ValueError, match="m1"):
+            self.ms.insert([self._row()])
+
+    def test_bulk_insert_checks_every_row(self):
+        """Each row goes through `insert1`, in order, not just the first."""
+        seen = []
+        self.monkeypatch.setattr(
+            self.MS,
+            "insert1",
+            lambda self_, row, **kw: seen.append(row["model_params_id"]),
+        )
+        self.MS().insert(
+            [self._row(model_params_id="a"), self._row(model_params_id="b")]
+        )
+
+        assert seen == ["a", "b"]
+
+    def test_bulk_insert_forwards_the_allow_flag(self):
+        """`allow_redundant_model` applies to every row, not just the call."""
+        seen = []
+        self.monkeypatch.setattr(
+            self.MS,
+            "insert1",
+            lambda self_, row, *, allow_redundant_model=False, **kw: seen.append(
+                allow_redundant_model
+            ),
+        )
+        self.MS().insert([self._row(), self._row()], allow_redundant_model=True)
+
+        assert seen == [True, True]
+
     def test_allow_flag_bypasses(self):
         self._set_candidates(
             [{"model_id": "m1", "subjects": [], "overlap": []}]
@@ -151,6 +191,56 @@ class TestGuardBranches:
             [{"model_id": "m1", "subjects": [], "overlap": []}]
         )
         self.ms._guard_redundant_model(("mp1", "dlc"), False)  # no raise
+
+
+class TestGuardExemptsImports:
+    """The guard curbs training proliferation, not importing weights.
+
+    An import of already-trained weights pays no training cost, so the
+    second `load` of a shared skeleton in a lab must not raise.
+    """
+
+    def test_load_defaults_to_exempt(self, pv2_train):
+        from inspect import signature
+
+        for name in ("load", "load_from_dlc_zoo"):
+            sig = signature(getattr(pv2_train.Model, name))
+            assert (
+                sig.parameters["allow_redundant_model"].default is True
+            ), f"{name} should exempt imports by default"
+
+    def test_selection_insert_still_guards(self, pv2_train):
+        """A direct selection insert keeps the default it always had."""
+        from inspect import signature
+
+        sig = signature(pv2_train.ModelSelection.insert1)
+        assert sig.parameters["allow_redundant_model"].default is False
+
+
+class TestRedundantMessageCall:
+    """The message names the call for the path the user is on."""
+
+    @staticmethod
+    def _candidates():
+        return [{"model_id": "m1", "subjects": ["A"], "overlap": ["A"]}]
+
+    def test_default_names_the_selection_insert(self):
+        from spyglass.position.v2.utils.model import redundant_model_msg
+
+        msg = redundant_model_msg("skelX", self._candidates())
+        assert "ModelSelection().insert1" in msg
+
+    def test_import_path_names_load(self):
+        """Naming the selection insert here sends the user nowhere."""
+        from spyglass.position.v2.utils.model import redundant_model_msg
+
+        msg = redundant_model_msg(
+            "skelX",
+            self._candidates(),
+            declare_call="`Model().load(..., allow_redundant_model=True)`",
+        )
+        assert "Model().load(..., allow_redundant_model=True)" in msg
+        assert "ModelSelection().insert1" not in msg
 
 
 class TestCreateProjectNudge:

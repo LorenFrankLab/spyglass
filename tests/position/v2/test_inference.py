@@ -792,7 +792,7 @@ class TestInsertFromVideoFile:
 class TestPoseEstimMakeValidation:
     """Tests for PoseEstim.make() fail-fast validation."""
 
-    def test_make_raises_when_no_nwb_parent(
+    def test_selection_refuses_a_group_with_no_session(
         self,
         position_v2,
         model,
@@ -801,13 +801,12 @@ class TestPoseEstimMakeValidation:
         tmp_path,
         skip_if_no_dlc,
     ):
-        """PoseEstim.make() raises ValueError when VidFileGroup has no NWB parent.
+        """Queuing on a group with no session is refused.
 
-        Set up all required DB entries (model, vid_group, params, selection)
-        and a real h5 output file, but deliberately leave the VidFileGroup
-        unlinked from any Session/Nwbfile.  The make() call must fail at the
-        AnalysisNwbfile storage step with a descriptive ValueError, not silently
-        store partial data.
+        Sets up the model, params and h5 output, with a `VidFileGroup` that
+        is deliberately unlinked from any `Session` or `Nwbfile`.
+        `PoseEstimSelection.insert1` resolves the group to exactly one
+        `Nwbfile` and raises here, before `populate` does any work.
         """
         import pandas as pd
 
@@ -843,25 +842,25 @@ class TestPoseEstimMakeValidation:
         h5_path = tmp_path / f"{scorer}DLC_output.h5"
         df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
 
-        # 5. Insert PoseEstimSelection with output_dir pointing at tmp_path
+        # 5. Queuing is where the group is checked: `insert1` resolves it to
+        #    exactly one Nwbfile and refuses anything else, so a fileless
+        #    group never reaches `populate`.
         selection_key = {
             "model_id": model_key["model_id"],
             "vid_group_id": vg_id,
             "pose_estim_params_id": params_id,
         }
-        PoseEstimSelection().insert1(
-            {
-                **selection_key,
-                "task_mode": "load",
-                "output_dir": str(tmp_path),
-            },
-            skip_duplicates=True,
-        )
+        with pytest.raises(ValueError, match="Cannot queue pose estimation"):
+            PoseEstimSelection().insert1(
+                {
+                    **selection_key,
+                    "task_mode": "load",
+                    "output_dir": str(tmp_path),
+                },
+                skip_duplicates=True,
+            )
 
-        # 6. make_fetch() fails fast: the missing Nwbfile parent is detected
-        #    while reading upstream inputs, before any inference runs.
-        with pytest.raises(ValueError, match="Cannot store pose estimation"):
-            PoseEstim().make_fetch(selection_key)
+        assert not (PoseEstim() & selection_key)
 
 
 class TestLoadDLCOutputTimestamps:

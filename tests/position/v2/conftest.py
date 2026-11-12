@@ -548,10 +548,23 @@ def _register_sessions(stems, videos_per_session=1):
 
 
 def _drop_sessions(names):
-    """Delete synthetic sessions, cascading to everything built on them."""
-    from spyglass.common import Nwbfile
+    """Delete synthetic sessions, cascading to everything built on them.
 
-    query = Nwbfile & [{"nwb_file_name": n} for n in names]
+    Groups go first. Deleting `Nwbfile` reaches `VidFileGroup.File` through
+    `VideoFile` but not the master, and DataJoint refuses a part delete that
+    leaves its master behind.
+    """
+    from spyglass.common import Nwbfile
+    from spyglass.position.v2.video import VidFileGroup
+
+    restr = [{"nwb_file_name": n} for n in names]
+    groups = (VidFileGroup.File & restr).fetch("vid_group_id")
+    if len(groups):
+        (
+            VidFileGroup & [{"vid_group_id": g} for g in set(groups)]
+        ).super_delete(warn=False, safemode=False)
+
+    query = Nwbfile & restr
     if query:
         query.super_delete(warn=False, safemode=False)
 

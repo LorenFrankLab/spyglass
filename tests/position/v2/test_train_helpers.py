@@ -28,12 +28,18 @@ class TestDiscoverTrainingCsvs:
         f.write_text("1,0.5,0.001\n2,0.4,0.001\n")
         assert f in self.fn(tmp_path)
 
-    def test_finds_csv_in_parent_dir(self, tmp_path):
+    def test_ignores_a_csv_in_the_parent_dir(self, tmp_path):
+        """A sibling model's history is not this model's.
+
+        A DLC project holds one CSV per model, so a search that walks
+        upward reports the parent's run as belonging to this one.
+        """
         subdir = tmp_path / "subdir"
         subdir.mkdir()
         f = tmp_path / "learning_stats.csv"
         f.write_text("1,0.5,0.001\n")
-        assert f in self.fn(subdir)
+        assert self.fn(subdir) == []
+        assert f not in self.fn(subdir)
 
     def test_returns_empty_when_nothing_found(self, tmp_path):
         isolated = tmp_path / "project" / "training" / "snapshot"

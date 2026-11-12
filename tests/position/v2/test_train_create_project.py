@@ -1289,3 +1289,152 @@ class TestCreateProjectIntegration:
                 project_directory=str(self.tmp_path),
                 frames_per_video=7,
             )
+
+
+class TestTrainingGroupResolution:
+    """`load` uses the group a `create_project` project records.
+
+    Those projects hold copies named `<stem>__<hash>.mp4`, which no session
+    path carries, so matching cannot resolve them.
+    """
+
+    @staticmethod
+    def _model(position_v2):
+        return position_v2.train.Model()
+
+    def test_recorded_group_is_used(self, position_v2, make_vid_group):
+        """The recorded id wins, and no path matching is attempted."""
+        group_id = make_vid_group("pv2_i15_recorded", [])
+        model = self._model(position_v2)
+
+        with patch.object(
+            position_v2.video.VidFileGroup, "create_from_dlc_config"
+        ) as mock_match:
+            key = model._resolve_training_group(
+                {"spyglass_vid_group_id": group_id},
+                "/no/such/project",
+                external_videos=False,
+                vid_file_matches=None,
+            )
+
+        assert key == {"vid_group_id": group_id}
+        mock_match.assert_not_called()
+
+    def test_absent_key_falls_back_to_matching(self, position_v2):
+        """A project from elsewhere records nothing, so matching still runs."""
+        model = self._model(position_v2)
+
+        with patch.object(
+            position_v2.video.VidFileGroup,
+            "create_from_dlc_config",
+            return_value={"vid_group_id": "matched"},
+        ) as mock_match:
+            key = model._resolve_training_group(
+                {"Task": "SomeProject"},
+                "/some/project",
+                external_videos=False,
+                vid_file_matches=None,
+            )
+
+        assert key == {"vid_group_id": "matched"}
+        mock_match.assert_called_once()
+
+    def test_stale_recorded_group_falls_back(self, position_v2):
+        """A recorded group that was deleted must not break the import."""
+        model = self._model(position_v2)
+
+        with patch.object(
+            position_v2.video.VidFileGroup,
+            "create_from_dlc_config",
+            return_value={"vid_group_id": "matched"},
+        ) as mock_match:
+            key = model._resolve_training_group(
+                {"spyglass_vid_group_id": "pv2_i15_never_existed"},
+                "/some/project",
+                external_videos=False,
+                vid_file_matches=None,
+            )
+
+        assert key == {"vid_group_id": "matched"}
+        mock_match.assert_called_once()
+
+    def test_ensure_project_records_the_group(self, monkeypatch, tmp_path):
+        """`ensure_project` writes the group id into the project config.
+
+        Captures the config through `save_yaml`, as the sibling
+        `ensure_project` unit tests do, so no real DLC project is needed.
+        """
+        from spyglass.position.utils import dlc_io
+        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
+
+        proj = tmp_path / "rec-rec-2026-01-01"
+        (proj / "videos").mkdir(parents=True)
+        (proj / "config.yaml").touch()
+        mp4_in_proj = str(proj / "videos" / "clip.mp4")
+        cfg = (
+            "config.yaml",
+            {"video_sets": {mp4_in_proj: {"crop": "0,1,0,1"}}},
+        )
+
+        monkeypatch.setattr(dlc_io, "read_yaml", lambda *a, **k: cfg)
+        saved = {}
+        monkeypatch.setattr(
+            dlc_io,
+            "save_yaml",
+            lambda d, c, **k: saved.update(c) or str(proj / "config.yaml"),
+        )
+        fake_dlc = MagicMock()
+        fake_dlc.create_new_project.return_value = str(proj / "config.yaml")
+
+        with patch.dict("sys.modules", {"deeplabcut": fake_dlc}):
+            ToolStrategyFactory.create_strategy("DLC").ensure_project(
+                project_name="rec",
+                project_directory=str(tmp_path),
+                videos=[mp4_in_proj],
+                bodyparts=["greenLED"],
+                numframes2pick=7,
+                sanitize=lambda x: x,
+                experimenter="rec",
+                vid_group_id="grp_abc123",
+            )
+
+        assert saved["spyglass_vid_group_id"] == "grp_abc123"
+
+    def test_ensure_project_records_nothing_without_a_group(
+        self, monkeypatch, tmp_path
+    ):
+        """A caller that names no group leaves the key out of the config."""
+        from spyglass.position.utils import dlc_io
+        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
+
+        proj = tmp_path / "nog-nog-2026-01-01"
+        (proj / "videos").mkdir(parents=True)
+        (proj / "config.yaml").touch()
+        mp4_in_proj = str(proj / "videos" / "clip.mp4")
+        cfg = (
+            "config.yaml",
+            {"video_sets": {mp4_in_proj: {"crop": "0,1,0,1"}}},
+        )
+
+        monkeypatch.setattr(dlc_io, "read_yaml", lambda *a, **k: cfg)
+        saved = {}
+        monkeypatch.setattr(
+            dlc_io,
+            "save_yaml",
+            lambda d, c, **k: saved.update(c) or str(proj / "config.yaml"),
+        )
+        fake_dlc = MagicMock()
+        fake_dlc.create_new_project.return_value = str(proj / "config.yaml")
+
+        with patch.dict("sys.modules", {"deeplabcut": fake_dlc}):
+            ToolStrategyFactory.create_strategy("DLC").ensure_project(
+                project_name="nog",
+                project_directory=str(tmp_path),
+                videos=[mp4_in_proj],
+                bodyparts=["greenLED"],
+                numframes2pick=7,
+                sanitize=lambda x: x,
+                experimenter="nog",
+            )
+
+        assert "spyglass_vid_group_id" not in saved

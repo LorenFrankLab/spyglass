@@ -226,12 +226,18 @@ class TestGetTrainingHistory:
         with open(dlc_project_config) as f:
             cfg = yaml.safe_load(f)
 
+        # The fixture's own CSV, named exactly. `rglob` picked whichever
+        # match came first, and a live training test in this session-scoped
+        # project leaves a real DLC 3 file alongside it.
         project_dir = Path(cfg["project_path"])
-        stats_files = list(project_dir.rglob("learning_stats.csv"))
-        assert stats_files, "No learning_stats.csv found in synthetic project"
+        stats_file = next(
+            (project_dir / "dlc-models" / "iteration-0").glob(
+                "*trainset80shuffle1/train/learning_stats.csv"
+            )
+        )
 
         df = pd.read_csv(
-            stats_files[0],
+            stats_file,
             header=None,
             names=["iteration", "loss", "learning_rate"],
         )
@@ -285,12 +291,16 @@ class TestDLCFullImport:
         skeleton_id lives in ModelParams, not directly in the Model key,
         so fetch it via the model_params_id.
         """
-        from spyglass.position.v2.train import ModelParams, Skeleton
+        from spyglass.position.v2.train import (
+            Model,
+            ModelParams,
+            Skeleton,
+        )
 
         model_key = model.load(str(dlc_project_config))
-        params_entry = (
-            ModelParams() & {"model_params_id": model_key["model_params_id"]}
-        ).fetch1()
+        # `load` returns the model key only, so the params come off the row.
+        params_id = (Model() & model_key).fetch1("model_params_id")
+        params_entry = (ModelParams() & {"model_params_id": params_id}).fetch1()
         skel = Skeleton() & {"skeleton_id": params_entry["skeleton_id"]}
         assert skel, "Skeleton not found after import"
 
@@ -328,6 +338,60 @@ class TestDLCFullImport:
         model_key = model.load(str(dlc_project_config))
         stored_path = (model & model_key).fetch1("model_path")
         assert stored_path  # non-empty string
+
+
+class TestReturnShapes:
+    """`load` and `train` each return one shape per outcome.
+
+    A caller could not tell which of three shapes `load` had handed back,
+    and the full-row shape carried `evaluation`, so restricting on it
+    raised once `evaluate` had run.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_dlc(self, skip_if_no_dlc):
+        """Apply DLC skip guard to every test in this class."""
+
+    def test_load_returns_the_model_key_alone(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """A trained project yields the model key, with no extra fields."""
+        key = model.load(str(dlc_project_config))
+        assert set(key) == {"model_id"}
+
+    def test_second_load_returns_the_same_shape(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """The already-exists path returned a whole row, not a key."""
+        first = model.load(str(dlc_project_config))
+        second = model.load(str(dlc_project_config))
+        assert second == first
+        assert set(second) == {"model_id"}
+
+    def test_restriction_survives_a_stored_evaluation(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """`Model & load(...)` holds after `evaluate` stores a dict.
+
+        The old full-row return carried `evaluation`, and a dict is not a
+        valid restriction value, so this raised `QuerySyntaxError`.
+        """
+        key = model.load(str(dlc_project_config))
+        model.update1({**key, "evaluation": {"loss": 0.05}})
+
+        assert len(model & key) == 1
+
+    def test_train_without_epochs_returns_the_existing_model(
+        self, model, dlc_project_config, dlc_bootstrapped_session
+    ):
+        """A bare second call trained a child; now it returns what exists."""
+        key = model.load(str(dlc_project_config))
+        before = len(model)
+
+        again = model.train(key)
+
+        assert again == {"model_id": key["model_id"]}
+        assert len(model) == before
 
 
 class TestLoadUntrainedProject:

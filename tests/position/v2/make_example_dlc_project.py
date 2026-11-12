@@ -198,6 +198,32 @@ def make_dlc_project(output_dir, overwrite=False):
     return config_path.resolve()
 
 
+def _write_minimal_nwb(nwb_file_path: Path) -> None:
+    """Write a readable NWB file at *nwb_file_path*.
+
+    A real session file, not an empty one. `AnalysisNwbfile.build()` derives
+    an analysis file from its parent session, so it opens this file with
+    pynwb: a zero-byte placeholder fails with "file signature not found".
+
+    Parameters
+    ----------
+    nwb_file_path : Path
+        Where to write. Overwritten if present.
+    """
+    from datetime import datetime, timezone
+
+    from pynwb import NWBHDF5IO, NWBFile
+
+    nwb_file_path.parent.mkdir(parents=True, exist_ok=True)
+    nwbfile = NWBFile(
+        session_description="DLC integration test session",
+        identifier=_NWB_STEM,
+        session_start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    with NWBHDF5IO(str(nwb_file_path), mode="w") as io:
+        io.write(nwbfile)
+
+
 def bootstrap_dlc_session(config_path):
     """Register minimal Spyglass DB entries so create_from_dlc_config() works.
 
@@ -236,7 +262,7 @@ def bootstrap_dlc_session(config_path):
 
     nwb_file_name = f"{_NWB_STEM}.nwb"
     nwb_file_path = Path(raw_dir) / nwb_file_name
-    nwb_file_path.touch()  # satisfy Nwbfile path constraints
+    _write_minimal_nwb(nwb_file_path)
 
     video_paths = list(cfg.get("video_sets", {}).keys())
     now = datetime.now()
