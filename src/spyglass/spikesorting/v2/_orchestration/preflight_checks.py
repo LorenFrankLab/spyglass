@@ -1,7 +1,7 @@
 """Per-stage prerequisite checks for ``preflight_v2_pipeline``.
 
-The concat preflight runs the same checks through ``_raising_check``: the
-preset rows via :func:`assert_preset_compute_rows`, and the per-session,
+The concat preflight runs the same checks through ``_collecting_check``:
+the preset rows via :func:`_check_preset_compute_rows`, and the per-session,
 sort-group, sampling-rate and motion checks once per member.
 """
 
@@ -67,6 +67,26 @@ def _raising_check(
         if not bool(ok):
             raise PreflightError(fix if caller is None else f"{caller}: {fix}")
         return True
+
+    return _check
+
+
+def _collecting_check(
+    checks: list,
+) -> "Callable[[str, Any, str], bool]":
+    """A check callback that records every outcome and keeps going.
+
+    Appends a ``PreflightCheck`` per call to ``checks`` and returns whether
+    it passed, so a report can list every failure.
+    """
+    from spyglass.spikesorting.v2._orchestration.preflight_report import (
+        PreflightCheck,
+    )
+
+    def _check(name: str, ok, fix: str) -> bool:
+        ok = bool(ok)
+        checks.append(PreflightCheck(name, ok, "" if ok else fix))
+        return ok
 
     return _check
 
@@ -634,12 +654,36 @@ def assert_preset_compute_rows(
         The preset's ``SorterParameters`` row, or ``None`` when
         ``sort_checks`` is False.
     """
-    check = _raising_check(caller)
-    _check_source_param_rows(check, bundle)
+    return _check_preset_compute_rows(
+        _raising_check(caller), bundle, sort_checks=sort_checks
+    )
+
+
+def _check_preset_compute_rows(
+    check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
+) -> "dict | None":
+    """Check a preset's compute-time rows and sorter runtime via ``check``.
+
+    The mode-independent half of ``preflight_v2_pipeline``, run once per
+    concat preflight. ``sort_checks=False`` stops after the preprocessing
+    and artifact rows.
+
+    Returns
+    -------
+    dict or None
+        The preset's ``SorterParameters`` row, or ``None`` when it is
+        missing or ``sort_checks`` is False.
+    """
+    preprocessing_params_exist = _check_source_param_rows(check, bundle)
     if not sort_checks:
         return None
     sorter_row = _check_sorter_param_rows(check, bundle, sort_checks=True)[1]
-    _check_display_waveform_params(check, bundle, sort_checks=True)
+    _check_display_waveform_params(
+        check,
+        bundle,
+        sort_checks=True,
+        preprocessing_params_exist=preprocessing_params_exist,
+    )
     # No preset name; the container advisory is dropped.
     _check_sorter_execution(
         check,

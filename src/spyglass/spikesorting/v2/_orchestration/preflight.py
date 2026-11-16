@@ -1,10 +1,11 @@
 """Read-only configuration checks run before any pipeline populate.
 
-Holds ``preflight_v2_pipeline`` / ``preflight_v2_pipeline_session`` and
-re-exports its siblings:
+Holds ``preflight_v2_pipeline`` / ``preflight_v2_concat_pipeline`` /
+``preflight_v2_pipeline_session`` and re-exports its siblings:
 
 - ``preflight_checks``: per-stage checks and ``assert_preset_compute_rows``
-- ``preflight_concat``: ``assert_concat_preflight``, run by a concat run
+- ``preflight_concat``: the concat checks and ``assert_concat_preflight``,
+  run by a concat run
 - ``preflight_runtime``: installed sorters and container runtimes
 - ``preflight_motion``: motion request, recipe and supplied-estimate checks
 - ``preflight_geometry``: missing or coincident sort-group contacts
@@ -33,11 +34,13 @@ from spyglass.spikesorting.v2._orchestration.preflight_checks import (
     _check_sort_group,
     _check_sorter_param_rows,
     _check_source_param_rows,
+    _collecting_check,
     assert_preset_compute_rows,
     kilosort4_double_reference_warning,
 )
 from spyglass.spikesorting.v2._orchestration.preflight_concat import (
     assert_concat_preflight,
+    collect_concat_checks,
 )
 from spyglass.spikesorting.v2._orchestration.preflight_geometry import (
     sort_group_geometry_problem,
@@ -271,6 +274,121 @@ def preflight_v2_pipeline(
             manual_excluded_times=manual_excluded_times,
             motion_mode=motion_mode,
             motion_recipe=motion_recipe,
+        ),
+    )
+
+
+def preflight_v2_concat_pipeline(
+    session_group_owner: str,
+    session_group_name: str,
+    *,
+    pipeline_preset: str = DEFAULT_PIPELINE_PRESET,
+    auto_curate: bool = False,
+    manual_excluded_times=None,
+    motion_mode: MotionMode = "off",
+    motion_correction_params_name: "str | None" = None,
+    motion_estimate_id=None,
+    sort_checks: bool = True,
+) -> PreflightReport:
+    """Read-only pre-populate configuration check for ``run_v2_concat_pipeline``.
+
+    Checks, without inserting, the session group, every member's session
+    rows, sort group, manual exclusions and sampling rate, the preset rows,
+    the sorter runtime and the motion stage. Every problem is listed, each
+    member's prefixed ``"concat member {i}: "``; an
+    unknown preset, an invalid motion request, or a missing or empty group
+    stops before the rest.
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name : str
+        The primary key of the ``SessionGroup``.
+    pipeline_preset, auto_curate, motion_mode, \
+motion_correction_params_name, motion_estimate_id
+        The same inputs as :func:`run_v2_concat_pipeline`.
+    manual_excluded_times : dict, optional
+        ``member_index`` to that member's [start, stop) exclusions, as in
+        :func:`run_v2_concat_pipeline`.
+    sort_checks : bool
+        If False, skip the sort-only checks (sorter rows, display analyzer,
+        sampling rate, runtime). Default True.
+
+    Returns
+    -------
+    PreflightReport
+        Truthy when the run's prerequisites are in place. ``errors`` lists
+        every blocking problem with its fix; ``warnings`` the advisories
+        (per-member sampling rate and Kilosort4 re-referencing, no
+        masking). ``expected_ids`` is empty for a concat run.
+    """
+    checks: list[PreflightCheck] = []
+    warnings: list[str] = []
+    _check = _collecting_check(checks)
+
+    bundle = _find_pipeline_preset(pipeline_preset)
+    if bundle is None:
+        _check(
+            "pipeline_preset_known",
+            False,
+            _unknown_pipeline_preset_message(pipeline_preset),
+        )
+        return _blocked_preflight_report(pipeline_preset, checks, warnings)
+    _check("pipeline_preset_known", True, "")
+    motion_problem = motion_request_problem(
+        motion_mode, motion_correction_params_name, motion_estimate_id
+    )
+    if not _check(
+        "motion_request_valid", motion_problem is None, motion_problem
+    ):
+        return _blocked_preflight_report(pipeline_preset, checks, warnings)
+
+    manual_excluded_times = resolve_manual_exclusions(
+        manual_excluded_times, concat=True
+    )
+    bundle = artifact_recipe_with_manual_exclusions(
+        bundle, manual_excluded_times
+    )
+    members, sorter_row, motion_recipe = collect_concat_checks(
+        _check,
+        warnings,
+        session_group_owner,
+        session_group_name,
+        bundle,
+        pipeline_preset=pipeline_preset,
+        auto_curate=auto_curate,
+        manual_excluded_times=manual_excluded_times,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        motion_estimate_id=motion_estimate_id,
+        sort_checks=sort_checks,
+    )
+    effective_config = (
+        resolve_preset_sort_config(bundle) if sorter_row is not None else None
+    )
+    return PreflightReport(
+        warnings=warnings,
+        resolved_pipeline_preset=pipeline_preset,
+        expected_ids={},
+        checks=checks,
+        effective_config=effective_config,
+        scientific_config=(
+            describe_scientific_setup(
+                bundle,
+                [
+                    {
+                        "nwb_file_name": member["nwb_file_name"],
+                        "sort_group_id": member["sort_group_id"],
+                    }
+                    for member in members
+                ],
+                effective_config,
+                manual_excluded_times=manual_excluded_times,
+                concat=True,
+                motion_mode=motion_mode,
+                motion_recipe=motion_recipe,
+            )
+            if members
+            else {}
         ),
     )
 

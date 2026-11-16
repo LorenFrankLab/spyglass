@@ -152,6 +152,7 @@ __all__ = [
     "plan_v2_unit_match_from_curations",
     "preflight_v2_unit_match",
     "preflight_v2_pipeline",
+    "preflight_v2_concat_pipeline",
     "preflight_v2_pipeline_session",
     "describe_run",
     "describe_units",

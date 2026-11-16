@@ -245,6 +245,109 @@ def test_assert_concat_preflight_rejects_member_with_coincident_contacts(
     assert problem in str(raised.value)
 
 
+_CONCAT_PRESET = "franklab_concat_hippocampus_30khz_ms5_2026_09"
+
+
+@pytest.mark.slow
+def test_concat_preflight_report_lists_every_member_problem(
+    same_day_group, monkeypatch
+):
+    """The public concat preflight collects every failing member, each
+    prefixed with its member, instead of stopping at the first; the raising
+    check used by a concat run lists the same problems."""
+    import spyglass.spikesorting.v2._orchestration.preflight_checks as checks
+    from spyglass.spikesorting.v2._orchestration.preflight import (
+        assert_concat_preflight,
+    )
+    from spyglass.spikesorting.v2.exceptions import PreflightError
+    from spyglass.spikesorting.v2.pipeline import (
+        _PIPELINE_PRESETS,
+        PreflightReport,
+        preflight_v2_concat_pipeline,
+    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    gk = same_day_group["group_key"]
+    member_indexes = sorted(
+        int(i) for i in (SessionGroup.Member & gk).fetch("member_index")
+    )
+    assert len(member_indexes) >= 2
+    monkeypatch.setattr(
+        checks,
+        "sort_group_geometry_problem",
+        lambda nwb_file_name, sort_group_id: (
+            f"contacts coincide for sort group {sort_group_id}"
+        ),
+    )
+
+    report = preflight_v2_concat_pipeline(
+        gk["session_group_owner"],
+        gk["session_group_name"],
+        pipeline_preset=_CONCAT_PRESET,
+    )
+    assert isinstance(report, PreflightReport)
+    assert not report.ok
+    geometry_errors = [e for e in report.errors if "contacts coincide" in e]
+    assert len(geometry_errors) == len(member_indexes), report.errors
+    for member_index, error in zip(member_indexes, geometry_errors):
+        assert error.startswith(f"concat member {member_index}: ")
+
+    with pytest.raises(PreflightError) as raised:
+        assert_concat_preflight(
+            gk["session_group_owner"],
+            gk["session_group_name"],
+            _PIPELINE_PRESETS[_CONCAT_PRESET],
+        )
+    for error in geometry_errors:
+        assert error in str(raised.value)
+
+
+@pytest.mark.slow
+def test_concat_preflight_keeps_rate_and_kilosort4_warnings_together(
+    same_day_group, monkeypatch
+):
+    """A group that triggers both the per-member sampling-rate advisory and
+    the Kilosort4 double-reference advisory reports both, in the public
+    report and in the list a concat run receives."""
+    import spyglass.spikesorting.v2._orchestration.preflight_concat as concat
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2._orchestration.preflight import (
+        assert_concat_preflight,
+    )
+    from spyglass.spikesorting.v2.pipeline import preflight_v2_concat_pipeline
+
+    gk = same_day_group["group_key"]
+    rate_agnostic = presets_mod._PIPELINE_PRESETS[_CONCAT_PRESET].model_copy(
+        update={"sampling_rate_hz": None}
+    )
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        {**presets_mod._PIPELINE_PRESETS, "h8_rate_agnostic": rate_agnostic},
+    )
+    monkeypatch.setattr(
+        concat,
+        "kilosort4_double_reference_warning",
+        lambda sorter_row, nwb_file_name, sort_group_id: (
+            f"planted double reference for {nwb_file_name}"
+        ),
+    )
+
+    report = preflight_v2_concat_pipeline(
+        gk["session_group_owner"],
+        gk["session_group_name"],
+        pipeline_preset="h8_rate_agnostic",
+    )
+    run_warnings = assert_concat_preflight(
+        gk["session_group_owner"], gk["session_group_name"], rate_agnostic
+    )
+    for warnings in (list(report.warnings), run_warnings):
+        rate = [w for w in warnings if "sampling_rate_hz=None" in w]
+        double = [w for w in warnings if "planted double reference" in w]
+        assert rate and double, warnings
+        assert all(w.startswith("concat member ") for w in rate + double)
+
+
 @pytest.mark.usefixtures("dj_conn")
 def test_create_group_rejects_missing_member_key():
     """A member dict missing a required key raises a typed error, not KeyError."""
