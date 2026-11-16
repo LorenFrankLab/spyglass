@@ -7,6 +7,7 @@ Intervals in seconds map to half-open ``[start, end)`` frames for
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 
 def _consolidate(intervals):
@@ -64,3 +65,41 @@ def test_consolidate_combined_reorder_merge_and_split():
     """
     out = _consolidate([[5.0, 7.0], [2.0, 4.0], [8.0, 8.0]])
     np.testing.assert_array_equal(out, np.array([[2, 9]]))
+
+
+@pytest.mark.parametrize("t_start", [0.0, 3600.0, 1.7e9, 1.7e9 + 0.123456])
+def test_regular_restriction_matches_timestamp_search(t_start):
+    """On-sample bounds map like ``searchsorted`` on ``t_start + k / fs``.
+
+    At epoch-scale start times, ``(t - t_start) * fs`` is off an integer by
+    up to ~4e-3 frames, so a tolerance snap misses the sample line.
+    """
+    from spyglass.spikesorting.v2._recording.restriction import (
+        _consolidate_regular_intervals,
+    )
+
+    fs = 30000.0
+    n_samples = 2_000_000
+    rng = np.random.default_rng(0)
+    frames = np.sort(rng.choice(n_samples - 2, size=400, replace=False)) + 1
+    timestamps = t_start + np.arange(n_samples, dtype=np.float64) / fs
+    # Separate intervals so no two merge; each bound is a sample's timestamp.
+    starts, stops = timestamps[frames[0::2]], timestamps[frames[1::2]]
+    got = np.concatenate(
+        [
+            _consolidate_regular_intervals(
+                np.array([[a, b]]),
+                n_samples=n_samples,
+                sampling_frequency=fs,
+                t_start=t_start,
+            )
+            for a, b in zip(starts, stops)
+        ]
+    )
+    expected = np.column_stack(
+        (
+            np.searchsorted(timestamps, starts, side="left"),
+            np.searchsorted(timestamps, stops, side="right"),
+        )
+    )
+    np.testing.assert_array_equal(got, expected)

@@ -229,6 +229,40 @@ def _recording_num_frames(recording) -> int:
     return int(recording.get_num_frames(segment_index=0))
 
 
+def _regular_grid_searchsorted(times, t_start, sampling_frequency, *, side):
+    """``searchsorted(t_start + arange(n) / fs, times, side)`` without ``t``.
+
+    Compares candidate frames with the exact float timestamps SpikeInterface
+    produces, since ``(time - t_start) * fs`` loses the sample line at large
+    ``t_start``. Results are unclipped.
+
+    Parameters
+    ----------
+    times : numpy.ndarray
+        ``(n_times,)`` query times in seconds.
+    t_start : float
+        Time of frame 0 in seconds.
+    sampling_frequency : float
+        Sampling rate in Hz.
+    side : {"left", "right"}
+        As in ``numpy.searchsorted``.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_times,)`` int64 frame indices.
+    """
+    import numpy as np
+
+    times = np.asarray(times, dtype=np.float64)
+    estimate = np.floor((times - t_start) * sampling_frequency).astype(np.int64)
+    # The estimate is within one frame while fs * ulp(t) < 0.5.
+    candidates = estimate[:, None] + np.arange(-1, 3, dtype=np.int64)
+    grid = t_start + candidates / sampling_frequency
+    after = grid >= times[:, None] if side == "left" else grid > times[:, None]
+    return candidates[np.arange(times.size), np.argmax(after, axis=1)]
+
+
 def _consolidate_regular_intervals(
     intervals, *, n_samples: int, sampling_frequency: float, t_start: float
 ):
@@ -252,19 +286,12 @@ def _consolidate_regular_intervals(
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = intervals[np.argsort(intervals[:, 0])]
 
-    def _snap_to_grid(frames, atol: float = 1e-6):
-        """Snap frame coordinates within ``atol`` of an integer onto it.
-
-        Absorbs round-off for a boundary on a sample line, so ``ceil``/
-        ``floor`` agree with ``frames_for_times``.
-        """
-        rounded = np.round(frames)
-        return np.where(np.abs(frames - rounded) <= atol, rounded, frames)
-
-    rel_start = _snap_to_grid((intervals[:, 0] - t_start) * sampling_frequency)
-    rel_stop = _snap_to_grid((intervals[:, 1] - t_start) * sampling_frequency)
-    start_indices = np.ceil(rel_start).astype(np.int64)
-    stop_indices = (np.floor(rel_stop).astype(np.int64) + 1).astype(np.int64)
+    start_indices = _regular_grid_searchsorted(
+        intervals[:, 0], t_start, sampling_frequency, side="left"
+    )
+    stop_indices = _regular_grid_searchsorted(
+        intervals[:, 1], t_start, sampling_frequency, side="right"
+    )
 
     start_indices = np.clip(start_indices, 0, int(n_samples))
     stop_indices = np.clip(stop_indices, 0, int(n_samples))
