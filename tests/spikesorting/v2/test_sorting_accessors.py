@@ -143,7 +143,7 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
     import pandas as pd
 
     from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-    from spyglass.spikesorting.v2._recording.source import SourceResolution
+    from spyglass.spikesorting.v2._recording.source import SourceLineage
 
     template_unit = (Sorting.Unit & populated_sorting).fetch(as_dict=True)[0]
 
@@ -176,7 +176,7 @@ def test_sorting_get_unit_brain_regions_concat_anchor_member_df(
             {"sorting_id": sid}, allow_anchor_member=True
         )
         assert isinstance(result, pd.DataFrame)
-        assert not isinstance(result, SourceResolution)
+        assert not isinstance(result, SourceLineage)
         assert "region_resolution" in result.columns
         assert len(result) == 1, "anchor-member df should carry the one unit"
         assert (result["region_resolution"] == "anchor_member").all()

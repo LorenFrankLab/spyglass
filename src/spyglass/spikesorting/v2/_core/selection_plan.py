@@ -54,7 +54,7 @@ class SortingSelectionPlan(NamedTuple):
       normalized UUIDs or ``None``. ``insert_selection`` builds the
       ``ArtifactDetectionSource`` row, which needs a DB-side merge id.
     - ``source_kind`` ``"concat"`` corresponds to
-      ``SourceResolution.kind`` ``"concatenated_recording"``.
+      ``SourceLineage.kind`` ``"concatenated_recording"``.
     """
 
     sorting_id: uuid.UUID

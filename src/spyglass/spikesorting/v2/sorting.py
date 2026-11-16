@@ -100,7 +100,6 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     optional_part_value,
     single_source_part,
 )
-from spyglass.spikesorting.v2._recording.source import SourceResolution
 from spyglass.spikesorting.v2._core.job_config import resolve_effective_seed
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
@@ -147,7 +146,7 @@ class SortingFetched(NamedTuple):
 
     Attributes
     ----------
-    source : SourceResolution
+    source : SourceLineage
         Resolved sort input source (``kind == "recording"`` or
         ``"concatenated_recording"``).
     recording_id : str
@@ -175,7 +174,7 @@ class SortingFetched(NamedTuple):
         The validated ``SorterParameters.execution_params`` blob.
     """
 
-    source: SourceResolution
+    source: SourceLineage
     recording_id: str
     sel_row: dict
     sorter_row: dict
@@ -639,10 +638,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def resolve_source(cls, key: dict) -> SourceResolution:
-        """Return the source-resolution record for a sorting selection.
+    def resolve_source(cls, key: dict) -> SourceLineage:
+        """Return a sorting selection's source and its pinned artifact mask.
 
-        Returns ``SourceResolution(kind, key)`` for the one source part.
+        Returns ``SourceLineage(kind, key, artifact_detection_id)`` for the
+        one source part.
 
         Raises
         ------
@@ -650,7 +650,11 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             If zero or multiple source part rows exist for ``key``.
         """
         kind, source_key = single_source_part(cls, key)
-        return SourceResolution(kind=kind, key=source_key)
+        return SourceLineage(
+            kind=kind,
+            key=source_key,
+            artifact_detection_id=cls.resolve_artifact_detection(key),
+        )
 
     @classmethod
     def resolve_artifact_detection(cls, key: dict):
@@ -720,12 +724,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             ``sorting_id`` (a part row inserted or deleted without
             :meth:`insert_selection`).
         """
-        source = cls.resolve_source(key)
-        lineage = SourceLineage(
-            kind=source.kind,
-            key=source.key,
-            artifact_detection_id=cls.resolve_artifact_detection(key),
-        )
+        lineage = cls.resolve_source(key)
         corrected_id = cls.resolve_motion_correction(key)
         if corrected_id is not None:
             mismatches = correction_lineage_mismatch(
@@ -766,7 +765,7 @@ class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
                 "(and its sort) and re-insert it with insert_selection."
             )
         if corrected_id is None:
-            row = (_TRACE_TABLES[source.kind] & source.key).fetch1()
+            row = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
             return effective_source_from_base(lineage, row)
         corrected_key = {"motion_corrected_recording_id": corrected_id}
         row = (MotionCorrectedRecording & corrected_key).fetch1()
@@ -1001,7 +1000,7 @@ class Sorting(
         ----------
         key : dict
             Primary key of the sorting being populated.
-        source : SourceResolution
+        source : SourceLineage
             Resolved sort input source.
         recording_id : str
             The anchor ``recording_id``.
@@ -1226,7 +1225,7 @@ class Sorting(
         ----------
         key : dict
             Primary key of the sorting being populated.
-        source : SourceResolution
+        source : SourceLineage
             Resolved sort input source.
         sel_row : dict
             The ``SortingSelection`` row.

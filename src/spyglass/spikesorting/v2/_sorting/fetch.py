@@ -23,7 +23,7 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
 from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
 if TYPE_CHECKING:
-    from spyglass.spikesorting.v2._recording.source import SourceResolution
+    from spyglass.spikesorting.v2._recording.source import SourceLineage
     from spyglass.spikesorting.v2.sorting import SortingFetched
 
 
@@ -91,9 +91,7 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     sel_row = (SortingSelection & key).fetch1()
     # Lives on a part table, but downstream readers expect it on sel_row;
     # without it every artifact-backed sort would silently skip masking.
-    sel_row["artifact_detection_id"] = (
-        SortingSelection.resolve_artifact_detection(key)
-    )
+    sel_row["artifact_detection_id"] = source.artifact_detection_id
     sorter_row = (
         SorterParameters
         & {
@@ -204,7 +202,7 @@ def fetch_motion_correction(corrected_key, sorter_row, source):
         ``{"motion_corrected_recording_id": ...}``.
     sorter_row : dict
         The sort's ``SorterParameters`` row.
-    source : SourceResolution
+    source : SourceLineage
         The sort's source.
 
     Returns
@@ -294,7 +292,7 @@ class SortAnchor(NamedTuple):
     preprocessing_params_name: str
 
 
-def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
+def resolve_sort_anchor(source: SourceLineage) -> SortAnchor:
     """Resolve a sort source to its anchor recording.
 
     A concat sort reads the frozen ``MemberSnapshot``, never the live
@@ -302,7 +300,7 @@ def resolve_sort_anchor(source: SourceResolution) -> SortAnchor:
 
     Parameters
     ----------
-    source : SourceResolution
+    source : SourceLineage
         The sort's source, from ``SortingSelection.resolve_source``.
 
     Returns

@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import numpy as np
@@ -415,14 +414,3 @@ def read_persisted_traces(
     return read_effective_recording(
         abs_path, traces._replace(apply_artifact_mask=False)
     )
-
-
-@dataclass(frozen=True)
-class SourceResolution:
-    """Result of ``SortingSelection.resolve_source(key)``.
-
-    ``key`` is ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``.
-    """
-
-    kind: Literal["recording", "concatenated_recording"]
-    key: dict
