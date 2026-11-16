@@ -311,3 +311,66 @@ def test_matcher_run_diagnostics_reads_the_registered_backend():
     finally:
         backend.last_run_diagnostics = None
     assert compute.matcher_run_diagnostics("unitmatch") is None
+
+
+def _unitmatch_backend_with_defaults(monkeypatch, **overrides):
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as module
+
+    um = module._require_unitmatch()
+    real = um.default_params.get_default_param
+
+    def patched(*args, **kwargs):
+        return {**real(*args, **kwargs), **overrides}
+
+    monkeypatch.setattr(um.default_params, "get_default_param", patched)
+    return module.UnitMatchBackend()
+
+
+def test_unitmatch_fingerprints_change_with_a_unitmatch_default(monkeypatch):
+    """The effective UnitMatchPy defaults are fingerprinted, so an upgrade
+    that changes one is visible in the run's provenance."""
+    same = _unitmatch_backend_with_defaults(monkeypatch)
+    base = same.provenance_fingerprints({})
+    assert set(base) == {"default_params_sha256", "niter", "numpy_arange_shim"}
+    assert base["niter"] == "2"
+    assert base["numpy_arange_shim"] == "true"
+    assert same.provenance_fingerprints({}) == base
+
+    changed = _unitmatch_backend_with_defaults(monkeypatch, channel_radius=151)
+    assert (
+        changed.provenance_fingerprints({})["default_params_sha256"]
+        != base["default_params_sha256"]
+    )
+
+
+def test_unitmatch_fingerprints_ignore_derived_arrays(monkeypatch):
+    import numpy as np
+
+    backend = _unitmatch_backend_with_defaults(monkeypatch)
+    base = backend.provenance_fingerprints({})
+    other = _unitmatch_backend_with_defaults(
+        monkeypatch, bins=np.arange(3), waveidx=np.arange(5)
+    )
+    assert other.provenance_fingerprints({}) == base
+
+
+def test_unitmatch_fingerprints_reach_the_producer_provenance():
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching.unitmatch_backend import (
+        UnitMatchBackend,
+    )
+
+    values = matcher_provenance(UnitMatchBackend(), object(), {})
+    validate_matcher_provenance(values)
+    assert "default_params_sha256" in values["backend"]["fingerprints"]
+
+
+def test_unitmatch_fingerprints_are_empty_without_unitmatchpy(monkeypatch):
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as module
+
+    def missing():
+        raise ImportError("UnitMatchPy is required")
+
+    monkeypatch.setattr(module, "_require_unitmatch", missing)
+    assert module.UnitMatchBackend().provenance_fingerprints({}) == {}

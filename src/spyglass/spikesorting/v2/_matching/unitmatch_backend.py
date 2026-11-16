@@ -14,6 +14,8 @@ UnitMatchPy is optional (``.[spikesorting-v2-matching]``); see
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 from types import SimpleNamespace
 import importlib.metadata
 
@@ -46,6 +48,9 @@ _INSTALL_HINT = (
 
 # Advisory only: a session with fewer matchable units only triggers a warning.
 UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION = 10
+
+# UnitMatchPy passes; 2 means one pass of between-session drift correction.
+_UNITMATCH_NITER = 2
 
 # UnitMatchPy's threshold search finds no candidate below this many units.
 _MIN_UNITS_TO_CALIBRATE = 3
@@ -228,6 +233,47 @@ class UnitMatchBackend:
         assert_consistent_channel_geometry(named_positions)
 
     @staticmethod
+    def provenance_fingerprints(params: dict) -> dict[str, str]:
+        """Fingerprint the UnitMatchPy settings that determine a run.
+
+        Covers the scalar entries of UnitMatchPy's ``get_default_param()``
+        (radii, distances, smoothing, shank thresholds), the number of
+        drift-corrected passes, and whether the numpy-2 ``arange`` shim is
+        installed. Returns ``{}`` when UnitMatchPy is not installed.
+
+        Parameters
+        ----------
+        params : dict
+            The matcher parameters row; unused, UnitMatchPy's own settings
+            are not part of it.
+
+        Returns
+        -------
+        dict of str to str
+            ``default_params_sha256``, ``niter`` and ``numpy_arange_shim``.
+        """
+        try:
+            um = _require_unitmatch()
+        except ImportError:
+            return {}
+        defaults = um.default_params.get_default_param()
+        scalars = {
+            key: value
+            for key, value in sorted(defaults.items())
+            if isinstance(value, (bool, int, float, str))
+        }
+        digest = hashlib.sha256(
+            json.dumps(scalars, sort_keys=True).encode()
+        ).hexdigest()
+        return {
+            "default_params_sha256": digest,
+            "niter": str(_UNITMATCH_NITER),
+            "numpy_arange_shim": str(
+                isinstance(um.param_functions.np, _ArangeProxy)
+            ).lower(),
+        }
+
+    @staticmethod
     def backend_version() -> str | None:
         """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
 
@@ -328,7 +374,7 @@ class UnitMatchBackend:
                     session_switch,
                     within_session,
                     param,
-                    niter=2,
+                    niter=_UNITMATCH_NITER,
                 )
             )
         except IndexError as exc:
