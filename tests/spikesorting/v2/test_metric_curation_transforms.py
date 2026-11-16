@@ -1197,3 +1197,57 @@ def test_isi_violation_lands_on_each_units_own_row(monkeypatch):
     assert actual.keys() == expected.keys()
     for unit_id, value in expected.items():
         np.testing.assert_equal(actual[unit_id], value, err_msg=str(unit_id))
+
+
+@pytest.mark.medium
+def test_pc_metrics_pick_neighbor_units_with_the_sort_polarity():
+    """Quality-metric-level ``peak_sign`` follows the sort, not SI's "neg".
+
+    SI selects each unit's neighbor units on a sparse analyzer from the
+    template extremum at the extension-level ``peak_sign``; a positive sort
+    must use "pos" for the PCA metrics.
+    """
+    import spikeinterface as si
+    import spikeinterface.preprocessing as sip
+    from spikeinterface.metrics import compute_quality_metrics
+
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[20.0], num_channels=16, num_units=8, seed=3
+    )
+    sorting = sorting.rename_units(np.arange(sorting.get_num_units()))
+    positive = sip.scale(recording, gain=-1.0)
+    analyzer = si.create_sorting_analyzer(
+        sorting, positive, sparse=True, peak_sign="pos"
+    )
+    analyzer.compute(
+        ["random_spikes", "waveforms", "templates", "noise_levels"],
+        extension_params={"random_spikes": {"seed": 0}},
+    )
+    metrics = compute_metrics(
+        analyzer,
+        analyzer,
+        ["d_prime", "nearest_neighbor"],
+        {},
+        False,
+        statistics_spans=None,
+        continuity_spans=None,
+        peak_sign="pos",
+        noise_seed=0,
+    )
+    stored = analyzer.get_extension("quality_metrics").params
+    assert stored["peak_sign"] == "pos"
+    reference = compute_quality_metrics(
+        analyzer,
+        metric_names=["d_prime", "nearest_neighbor"],
+        skip_pc_metrics=False,
+        delete_existing_metrics=True,
+        peak_sign="pos",
+    )
+    for column in ("d_prime", "nn_hit_rate", "nn_miss_rate"):
+        np.testing.assert_allclose(
+            metrics[column].to_numpy(dtype=float),
+            reference[column].to_numpy(dtype=float),
+            equal_nan=True,
+        )

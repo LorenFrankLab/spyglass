@@ -1158,6 +1158,7 @@ def compute_metrics(
                 # The analyzer is shared across curations; drop stored
                 # metrics so stale columns cannot leak in.
                 delete_existing_metrics=True,
+                peak_sign=peak_sign,
             )
         voltage_df.index = pd.Index(
             _metric_unit_ids(voltage_df.index), name=voltage_df.index.name
@@ -1223,6 +1224,8 @@ def compute_metrics(
                 or None,
                 skip_pc_metrics=False,
                 delete_existing_metrics=True,
+                # SI picks PCA neighbor units at this polarity's extremum.
+                peak_sign=peak_sign,
                 # Spawned SI workers would not see the main-process patches
                 # or the noise_cluster_spans ContextVar.
                 n_jobs=1,
