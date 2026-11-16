@@ -32,6 +32,8 @@ existing v0/v1 behavior are in the [CHANGELOG](../CHANGELOG.md).
     and `SpikeSortingOutput` in the main environment.
 - **New v0/v1 output is not supported.** Under SI 0.104 these raise a clear
     `RuntimeError`; run new sorts through v2 instead:
+    - v0 and v1 `SpikeSorting` populate with any sorter other than
+        `clusterless_thresholder`;
     - v0 `ArtifactDetection` / `Waveforms` / `QualityMetrics` / `BurstPair`
         populate;
     - v1 `ArtifactDetection` / `MetricCuration` / `BurstPair` populate, and
@@ -161,8 +163,26 @@ permissions and path handling are in the
     can cascade-delete another team's rows.
     `SortGroupV2.preview_existing_entries` lists that blast radius; it does not
     block.
-- Users need insert/create privileges on the `spikesorting_v2_motion` schema, as
-    on every other `spikesorting_v2_*` schema.
+- Users need insert privileges on the `spikesorting_v2_motion` schema, as on
+    every other `spikesorting_v2_*` schema. On a lab database `dj_user` cannot
+    create tables under the shared `spikesorting` prefix, so an admin declares
+    the v2 tables once; the [CHANGELOG](../CHANGELOG.md) release notes give the
+    imports.
+
+### Databases that already hold v2 tables
+
+If your database declared the v2 tables before this release, an admin runs the
+two schema changes in the [CHANGELOG](../CHANGELOG.md) release notes: the
+`compared` column on `UnitMatch.MatchableUnit` and the `MemberSnapshot` foreign
+key to `Recording`. Existing `MatchableUnit` rows get `compared = 1`, including
+units the matcher never saw.
+
+- A `recording_id` also depends on the saved time cut (the sort interval
+    intersected with the raw data's valid times, after `min_segment_length`).
+    Selections made before this release are not reused: rerunning a pipeline
+    call mints a new recording and sort.
+- Editing an `IntervalList` in place makes the next `insert_selection` mint a
+    new recording; the old selection raises `RecordingInputDriftError`.
 
 ## Porting a v1 sort to v2
 
@@ -172,8 +192,10 @@ permissions and path handling are in the
 2. Build v2 sort groups (`SortGroupV2.set_group_by_shank`) and call
     `run_v2_pipeline(...)` with the matching preset. The run summary's
     `root_merge_id` is the **root** (uncurated, `parent_curation_id=-1`)
-    curation. `auto_labeled_merge_id` is `None` until you curate. There is no
-    bare `merge_id`.
+    curation. `auto_labeled_merge_id` is `None` unless the run passed
+    `auto_curate=True`. There is no bare `merge_id`. The v2 production recipes
+    change several v1 defaults; see
+    [What v1 and v2 comparisons show](#what-v1-and-v2-comparisons-show).
 
 3. Curate from that root: review in the browser (`run.start_review(...)`),
     evaluate and merge by script, or pass `auto_curate=True` for an
@@ -190,9 +212,12 @@ permissions and path handling are in the
     spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
     ```
 
-    Decoding reads the receipt's `SortedSpikesGroup`. A curation's `merge_id`
-    still resolves through `SpikeSortingOutput` like a v1 row, but
-    `SpikeSortingOutput.get_spike_times({"merge_id": ...})` returns **every**
+    Decoding reads the receipt's `SortedSpikesGroup`.
+    `SortedSpikesGroup().create_group(...)` raises for a v2 merge id without
+    `unit_selections`, and for a group that mixes v2 and v0/v1 outputs; build
+    v2 groups with `select_units_for_analysis`. A curation's `merge_id` still
+    resolves through `SpikeSortingOutput` like a v1 row, but
+    `SpikeSortingOutput().get_spike_times({"merge_id": ...})` returns **every**
     unit, labels ignored. Use it for inspection, not analysis. Exports
     (`ssviz.export_to_phy(curated, ...)`) are curation-scoped and ignore the
     selection policy too.
@@ -201,6 +226,23 @@ permissions and path handling are in the
 
 ### Names
 
+- **v1 to v2 tables.** `SortGroup` → `SortGroupV2`;
+    `SpikeSortingPreprocessingParameters` → `PreprocessingParameters`;
+    `SpikeSortingRecordingSelection` / `SpikeSortingRecording` →
+    `RecordingSelection` / `Recording`; `ArtifactDetectionSelection` /
+    `ArtifactDetection` → `RecordingArtifactSelection` /
+    `RecordingArtifactDetection`; `SpikeSorterParameters` → `SorterParameters`;
+    `SpikeSortingSelection` / `SpikeSorting` → `SortingSelection` / `Sorting`;
+    `CurationV1` → `CurationV2`; `WaveformParameters` →
+    `AnalyzerWaveformParameters`; `MetricParameters` / `MetricCurationParameters`
+    / `MetricCurationSelection` / `MetricCuration` → `QualityMetricParameters`
+    / `AutoCurationRules` / `CurationEvaluationSelection` / `CurationEvaluation`;
+    `FigURLCurationSelection` / `FigURLCuration` → `FigPackCurationSelection`
+    / `FigPackCuration` (driven through `FigPackReview`).
+- **Public names.** The supported functions, handles and typed results are
+    listed in the developer guide's
+    [Public API](../ForDevelopers/SpikeSortingV2Architecture.md#public-api) and
+    the API reference; this guide names only those that change a v1 habit.
 - **Renamed fields and tags.**
     - `SpikeSorterParameters.sorter_param_name` is
         `SorterParameters.sorter_params_name`. A v1 restriction
@@ -234,7 +276,8 @@ onto them, so v1 strings do not resolve.
     band lives on the preprocessing row.
 - `SorterParameters` (other): v1's `mountainsort5` `default` (SpikeInterface's
     defaults) → `franklab_30khz_ms5_2026_06`; `clusterless_thresholder`
-    `default_clusterless` → `default`; `kilosort4` `default` →
+    `default_clusterless` → `default` (the clusterless preset uses
+    `franklab_clusterless_60uv_2026_11`); `kilosort4` `default` →
     `franklab_neuropixels_default`.
 - `ArtifactDetectionParameters`: production rows are
     `franklab_100uv_p07_2026_06` / `franklab_50uv_p07_2026_06`. The 500 µV
@@ -255,6 +298,11 @@ Name and content rules:
 - **Duplicate content is refused.** A second name for existing content raises
     `DuplicateParameterContentError`. `allow_duplicate_params=True` opts in; the
     row then shows `duplicate_of`.
+- **A stored name keeps its content.** Inserting a row under a stored name with
+    different content raises `DuplicateParameterContentError`, also with
+    `skip_duplicates=True`; insert it under a new name.
+    `allow_duplicate_params=True` does not change this. `insert_default()`
+    inserts only shipped rows that are missing.
 - **v1 sorter names are opt-in.**
     `SorterParameters.insert_default_legacy_si_sorters()` inserts
     `('<sorter>', 'default')` rows for installed, non-MATLAB SI sorters outside
@@ -278,21 +326,28 @@ a dated name):
     `container_runtime_available` and never falls back to a local run. A Docker
     row, or another rate, is a user-inserted `SorterParameters` row with the
     same `execution_params` mechanism.
-- `franklab_probe_hippocampus_30khz_ms5_2026_06`: MountainSort5, `alternative`.
+- `franklab_probe_hippocampus_30khz_ms5_2026_06` and
+    `franklab_tetrode_hippocampus_30khz_ms5_2026_06`: MountainSort5,
+    `alternative`. Both resolve to the same parameter rows.
 - `franklab_concat_hippocampus_30khz_ms5_2026_09`: **experimental** same-day
     recipe for `run_v2_concat_pipeline`. Otherwise the single-session MS5
     hippocampus recipe.
-- `franklab_clusterless_2026_06`: peak detection only, for clusterless decoding.
-    Hand the root curation's `merge_id` to `UnitWaveformFeatures`. There is no
+- `franklab_clusterless_2026_11`: peak detection only, for clusterless decoding,
+    `production`. A 60 µV threshold (`franklab_clusterless_60uv_2026_11`) on the
+    hippocampus preprocessing row, with the `default` artifact row. Hand the
+    root curation's `merge_id` to `UnitWaveformFeatures`. There is no
     unit-selection step: the thresholder yields one "unit" per channel group.
+    The `franklab_clusterless_2026_06` preset is no longer shipped; the
+    `default` clusterless sorter row (100 µV) remains.
 - `franklab_neuropixels_ks4_2026_06`: **experimental** Kilosort4 recipe matched
     to the
     [AIND `aind-ephys-spikesort-kilosort4`](https://github.com/AllenNeuralDynamics/aind-ephys-spikesort-kilosort4)
     config (`nblocks=5` non-rigid drift; KS4 does its own high-pass, CAR and
     whitening). Not validated on Frank-lab data. Needs a GPU and is
     non-deterministic. Set the sort group's `reference_mode="none"` to avoid
-    double referencing. It selects no artifact masking, and Kilosort's drift
-    correction is not artifact rejection.
+    double referencing; preflight warns when the group is referenced. It selects
+    no artifact masking, and Kilosort's drift correction is not artifact
+    rejection.
 
 `recommendation_status` (`describe_recommendation_status()` returns it as a
 table):
@@ -380,14 +435,21 @@ channels:
 - **Manual exclusions.**
     `run_v2_pipeline(..., manual_excluded_times=[[start, stop], ...])` adds
     manual artifact exclusions to automatic detection.
-    - Intervals are half-open, in the **original session's seconds**.
+    - Intervals are half-open, in **absolute session timestamps**: the clock of
+        `IntervalList.valid_times`, not seconds from the recording start.
+    - Each interval must overlap the time being sorted. Otherwise preflight fails
+        its `manual_exclusions_overlap_sorted_time` check (a run raises
+        `PreflightError`), and with `preflight=False` the artifact stage raises
+        `IneffectiveManualExclusionError`, naming the interval and the sorted time
+        range.
     - They are stored on the artifact selection and part of its identity: changing
         them creates a new artifact result and sort.
     - A preset with automatic detection off still applies them. `min_length_s`
         applies to the remaining valid spans.
     - The session runner applies them to every requested group. For
         `run_v2_concat_pipeline`, pass `{member_index: [[start, stop], ...]}` in
-        each member's own timestamps.
+        each member's own timestamps; a `member_index` the group does not have
+        raises.
     - They mask time ranges; they do not edit spikes.
 
 ### Running stages by hand
@@ -451,7 +513,14 @@ freezes the checked groups as `sort_group_ids=`, and describes
 
 - **`get_restricted_merge_ids` includes v2 by default.** With an explicit
     `sources=` list the v2 resolver is strict: an unknown key raises
-    `ValueError`.
+    `ValueError`. Under the default sources it warns when both v2 and v0/v1
+    outputs match. Pass `sources=["v1"]` or `sources=["v2"]` before building a
+    group, since a group cannot mix them.
+
+- **A session key finds concat members.** `{"nwb_file_name": ...}` also returns
+    the concat-member outputs recorded in that session; add `member_index` to
+    select member outputs only. The lookup warns when a session has both a
+    single-session sort and a concat-member sort of one sort group.
 
 ### Which recording?
 
@@ -579,8 +648,13 @@ its observed intervals.
     `spike_location` (v2 only) for a v2 `merge_id`. Other features raise
     `NotImplementedError`. A zero-unit curation yields an empty, valid row.
 
-- **v2 amplitudes are in µV; v0/v1 used raw counts.** Retrain decoders per
-    pipeline version.
+- v2 marks are read from the traces the sorter saw (masked, and motion-corrected
+    when the sort was). Spikes too near a recording edge for a full waveform
+    window are dropped, with a warning.
+
+- **v2 amplitudes are always in µV.** v0/v1 marks were scaled to µV only when
+    the recording carried gains, and came from different preprocessing. Retrain
+    decoders per pipeline version.
 
 - A v2 `merge_id` exports like a v1 one: fetch it with
     `SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})` between
@@ -638,7 +712,11 @@ its observed intervals.
     recipe (hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms, both 20000 spikes),
     recorded on `Sorting.display_waveform_params_name`. Template values
     (`peak_amplitude_uv`, SNR, amplitude) depend on it; spike-train metrics do
-    not.
+    not. `default`, `default_neuropixels` and `no_filter` use the cortex window.
+    A custom preprocessing row needs a `PreprocessingWaveformParameters` row;
+    without one, preflight and the sort raise
+    `UnmappedPreprocessingWaveformsError`, whose message gives the `insert1` to
+    run. `clone_pipeline_preset` writes it for you.
 
 ## What has a v2 replacement
 
@@ -690,6 +768,9 @@ and custom-rule details.
 - Each rule's `missing_policy` handles units SI cannot assess (a NaN it leaves
     on purpose): `error` raises, `fail` applies the label, `pass` leaves the
     unit unlabeled by that rule. This is not SI's `nan_policy`.
+- `CurationEvaluation().get_waveforms(key)` returns the sort-time waveform
+    subsample. v1's `fetch_all=True` raises, because v2 keeps only that
+    subsample.
 
 ### Curation lineage
 
@@ -708,13 +789,13 @@ and custom-rule details.
     parent's labels and overlays the supplied ones per unit. A committed merge
     inherits the **union** of its contributors' labels. `label_policy="replace"`
     makes the supplied labels the whole state.
-- **Root idempotency.** A second default root `insert_curation`
-    (`parent_curation_id=-1`, no labels, merge groups, description, or
-    `apply_merge`, default `curation_source`) returns the existing key with a
-    warning. A second root with content raises `ValueError` unless
-    `reuse_existing=True`; or curate a child of the existing root.
+- **Root idempotency.** A root always has `curation_id` 0. A second default root
+    `insert_curation` (`parent_curation_id=-1`, no labels, merge groups,
+    description, or `apply_merge`, default `curation_source`) returns the
+    existing key with a warning. A second root with content raises `ValueError`
+    unless `reuse_existing=True`; or curate a child of the existing root.
 - `CurationV2.get_merged_sorting` applies merges at fetch whatever
-    `merges_applied` says. `Sorting.get_sorting(key, as_dataframe=True)` and
+    `merges_applied` says. `Sorting().get_sorting(key, as_dataframe=True)` and
     `CurationV2.get_sorting(key, as_dataframe=True)` return a DataFrame indexed
     by `unit_id` with `spike_times` (s), plus `curation_label` for curations.
 - Single-recording curations register on `SpikeSortingOutput.CurationV2`. Concat
@@ -759,8 +840,17 @@ through it in section 3-browser, with the review details in Appendix C.
 
 - Local is the default: `review.open()` serves the bundle from a loopback server
     in the Python process. `upload=True` publishes the identical seeded bundle
-    to figpack.org. It needs a FigPack API key, and figpack.org expires the
-    figure after 24 hours unless you pin it there.
+    to figpack.org. It needs a FigPack API key
+    (`dj.config["custom"]["figpack_api_key"]` or `FIGPACK_API_KEY`), and
+    figpack.org expires the figure after 24 hours unless you pin it there.
+- Each DataJoint user gets their own review of a curation (bundle, draft and
+    result). Open a colleague's review with `FigPackReview.resume(review_id)`.
+    Reviews started before this release stay resumable by id, but `start_review`
+    does not reuse them.
+- `describe_review_profiles()` lists the stored profiles and the presets whose
+    metric and rule recipes each matches. `run.start_review(...)` warns when the
+    profile's recipes differ from the run's preset, since its verdicts then
+    differ from the run's auto-labels.
 - Edits are imported as a new `CurationV2` child pinned to the parent's
     `curation_uuid`; a committed merge opens a verification review of the merged
     child.
@@ -829,6 +919,8 @@ RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)
         file's modification time; for analyzers, the recompute's populate time, so
         a newly verified analyzer waits seven days. Unknown timestamps are
         skipped.
+    - A recording whose inputs changed, or can no longer be read, since its
+        selection is kept with a warning, because it could not be rebuilt.
 - `attempt_all`, `remove_matched` (on `*RecomputeSelection`) and `with_names`,
     `get_parent_key`, `recheck`, `get_disk_space`, `update_secondary` (on
     `*Recompute`) are the v1 `RecordingRecompute` operations.
@@ -866,6 +958,13 @@ Sorting.find_orphaned_analyzer_folders(dry_run=False)
     merge ids, and analysis files in a dry run, then remove the rows. Their
     analysis files are left for `AnalysisNwbfile().cleanup()`, like any other
     pipeline's.
+- Deleting a `Sorting`, `CurationV2`, `FigPackCurationSelection` or
+    `FigPackCuration` also removes its local review bundles; hosted figures
+    stay. After an upstream delete,
+    `FigPackCuration.find_orphaned_bundles(dry_run=True)` lists bundles no
+    review references.
+- Deleting an artifact detection refuses, naming the tables, when another table
+    (a sort, LFP or decoding selection) uses its artifact-removed interval.
 
 ### Same-day concatenation
 
@@ -916,7 +1015,8 @@ saved estimate rather than trusting a sort's improvement. No real lab recording
 with drift has been tested.
 
 `motion_mode` on `run_v2_pipeline`, `run_v2_pipeline_session`,
-`run_v2_concat_pipeline`, and their preflights:
+`run_v2_concat_pipeline`, `preflight_v2_pipeline` and
+`preflight_v2_pipeline_session`:
 
 - `"off"` (default): no motion stage.
 - `"estimate"`: saves a `MotionEstimate` under the source's mask but sorts the
@@ -972,7 +1072,7 @@ The production recipes also change these defaults from v1's shipped rows:
 | Hippocampus high-pass | 300 Hz (v1's 600 Hz sat on an MS4 row with `filter=False`) | 600 Hz (`franklab_hippocampus_2026_06`) |
 | Minimum segment length | 1 s | 1.5 ms |
 | Artifact detection | 3000 µV, all channels | 100 µV on 70% of channels (`franklab_100uv_p07_2026_06`) |
-| Artifact intervals | pieces under 1 s dropped | 1 ms join window; untouched chunks kept; no interval spans a gap |
+| Artifact intervals | pieces under 1 s dropped | 1 ms join window; cut pieces under 1 s (`min_length_s`) dropped, untouched chunks kept; no interval spans a gap |
 | Whitening | unseeded; covariance includes masked zeros | seeded; covariance from unmasked spans only |
 | Empty units after trimming | kept | dropped |
 | ISI refractory window | 1.5 ms | 2.0 ms |
@@ -1003,6 +1103,10 @@ The production recipes also change these defaults from v1's shipped rows:
     runtime or pick another preset.
 - **The sort group looks wrong.** Re-run `describe_sort_groups(nwb_file_name)`.
     Recreate groups only after `SortGroupV2.preview_existing_entries`.
+- **A helper raises on a name.** Inspection helpers such as
+    `plot_sort_group_geometry`, `suggest_bad_channels` and `plot_units_qc` raise
+    on an id or name they cannot find instead of skipping it; the message lists
+    the valid ones.
 - **Zero units.** A zero-unit sort writes an empty but real curation and
     `merge_id`, valid for a quiet shank. `require_units=True` makes it an error.
 - **Unexpectedly few units.** Check `run_summary["warnings"]`, the preset's
