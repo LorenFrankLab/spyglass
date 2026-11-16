@@ -169,7 +169,7 @@ class MotionEstimationParameters(
     @classmethod
     def insert_default(cls):
         """Insert the shipped motion-estimation recipes if missing."""
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._DEFAULT_CONTENTS)
 
 
 @schema
@@ -214,7 +214,7 @@ class MotionInterpolationParameters(
     @classmethod
     def insert_default(cls):
         """Insert the shipped motion-interpolation recipes if missing."""
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._DEFAULT_CONTENTS)
 
 
 @schema

@@ -9,6 +9,7 @@ from __future__ import annotations
 import datajoint as dj
 
 from spyglass.spikesorting.v2._core.lookup_validation import (
+    _insert_row_to_dict,
     reject_duplicate_parameter_content,
     validate_lookup_rows,
 )
@@ -353,6 +354,31 @@ class ImmutableParamsLookup:
                 "existing ids mean. Insert a NEW named row instead."
             )
         super().insert(rows, replace, *args, **kwargs)
+
+    def _insert_missing_defaults(self, rows) -> None:
+        """Insert the shipped default rows whose key is not stored yet.
+
+        A stored default keeps its content even if it diverged from the
+        shipped one; ``verify_v2_default_catalog`` reports that divergence.
+
+        Parameters
+        ----------
+        rows : iterable
+            Shipped default rows, as mappings or positional sequences.
+        """
+        names = self.heading.names
+        rows = [_insert_row_to_dict(row, names) for row in rows]
+        stored = {
+            tuple(row[field] for field in self.primary_key)
+            for row in self.fetch(as_dict=True)
+        }
+        missing = [
+            row
+            for row in rows
+            if tuple(row[field] for field in self.primary_key) not in stored
+        ]
+        # skip_duplicates tolerates a concurrent installer.
+        self.insert(missing, skip_duplicates=True)
 
 
 def _insert_parameter_rows(

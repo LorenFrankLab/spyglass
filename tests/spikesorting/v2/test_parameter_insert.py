@@ -30,6 +30,7 @@ class _InsertSink:
 
 
 class _Table(ImmutableParamsLookup, _InsertSink):
+    primary_key = ["params_name"]
     heading = SimpleNamespace(
         names=["params_name", "params", "params_schema_version", "job_kwargs"]
     )
@@ -255,3 +256,54 @@ def test_parameter_table_adapters_preserve_insert_contract(
         assert (table & keys[0]).fetch1("params") == original["params"]
     finally:
         (table & keys).delete_quick()
+
+
+def _stored(name, threshold):
+    return {
+        "params_name": name,
+        "params": {"schema_version": 1, "threshold": float(threshold)},
+        "params_schema_version": 1,
+    }
+
+
+@pytest.mark.parametrize("allow_duplicate_params", [False, True])
+def test_existing_name_with_different_content_is_rejected(
+    allow_duplicate_params,
+):
+    table = _Table([_stored("existing", 1)])
+    with pytest.raises(
+        DuplicateParameterContentError,
+        match="'existing' already exists with different content",
+    ):
+        _insert(
+            table,
+            [_row("existing", 2)],
+            skip_duplicates=True,
+            allow_duplicate_params=allow_duplicate_params,
+        )
+    assert table.writes == []
+
+
+def test_one_name_with_two_contents_in_one_batch_is_rejected():
+    table = _Table()
+    with pytest.raises(
+        DuplicateParameterContentError, match="different content"
+    ):
+        _insert(
+            table,
+            [_row("same", 1), _row("same", 2)],
+            skip_duplicates=True,
+            allow_duplicate_params=True,
+        )
+    assert table.writes == []
+
+
+def test_insert_missing_defaults_skips_stored_names_whatever_their_content():
+    table = _Table([_stored("shipped", 1)])
+    table._insert_missing_defaults(
+        [_row("shipped", 5), ("new", {"threshold": 3}, 0, None)]
+    )
+    assert len(table.writes) == 1
+    rows, _replace, _args, flags = table.writes[0]
+    assert [row["params_name"] for row in rows] == ["new"]
+    assert flags == {"skip_duplicates": True}

@@ -149,7 +149,7 @@ class ArtifactDetectionParameters(
     @classmethod
     def insert_default(cls):
         """Insert v2 default artifact-detection presets if missing."""
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._DEFAULT_CONTENTS)
 
 
 @schema

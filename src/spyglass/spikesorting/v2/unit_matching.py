@@ -231,7 +231,7 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     @classmethod
     def insert_default(cls):
         """Insert the ``unitmatch_default`` row if missing (idempotent)."""
-        cls().insert(cls._default_rows(), skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._default_rows())
 
 
 @schema

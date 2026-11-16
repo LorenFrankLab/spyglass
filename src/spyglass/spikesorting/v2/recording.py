@@ -736,7 +736,7 @@ class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
     @classmethod
     def insert_default(cls):
         """Insert v2 default preprocessing presets if missing."""
-        cls.insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._DEFAULT_CONTENTS)
 
 
 def resolve_recording_input_hash(

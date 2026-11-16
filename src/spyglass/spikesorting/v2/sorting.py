@@ -337,7 +337,7 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
                 "spikeinterface.sorters.installed_sorters() on this "
                 "platform."
             )
-        cls.insert(insertable, skip_duplicates=True)
+        cls()._insert_missing_defaults(insertable)
 
     @classmethod
     def _gated_default_rows(cls):
@@ -386,8 +386,8 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         >>> SorterParameters.insert_default_legacy_si_sorters()
         """
 
-        cls.insert(
-            _sorter_parameters.legacy_si_sorter_rows(), skip_duplicates=True
+        cls()._insert_missing_defaults(
+            _sorter_parameters.legacy_si_sorter_rows()
         )
 
 
@@ -446,7 +446,7 @@ class AnalyzerWaveformParameters(
     @classmethod
     def insert_default(cls):
         """Insert the region display/metric waveform recipes (idempotent)."""
-        cls().insert(cls._DEFAULT_CONTENTS, skip_duplicates=True)
+        cls()._insert_missing_defaults(cls._DEFAULT_CONTENTS)
 
 
 @schema

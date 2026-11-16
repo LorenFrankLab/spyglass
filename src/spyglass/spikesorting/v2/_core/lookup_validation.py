@@ -208,11 +208,11 @@ def reject_duplicate_parameter_content(
     matcher_keyed: bool = False,
     allow_duplicate_params: bool = False,
 ) -> None:
-    """Reject a validated row whose content duplicates an existing row name.
+    """Reject a validated row that conflicts with a stored or earlier row.
 
-    A second name for the same content forks provenance. Compares against
-    stored rows and earlier rows in the batch. Re-inserting the same
-    ``(name, content)`` is a no-op.
+    A stored name must keep its content, and a second name for the same
+    content forks provenance. Compares against stored rows and earlier rows
+    in the batch. Re-inserting the same ``(name, content)`` is a no-op.
 
     Parameters
     ----------
@@ -228,15 +228,16 @@ def reject_duplicate_parameter_content(
         Scope detection per sorter (``SorterParameters``) or per matcher
         (``MatcherParameters``).
     allow_duplicate_params : bool, optional
-        Opt out of the guard.
+        Allow content already stored under a different name. A stored name
+        with different content is rejected regardless.
 
     Raises
     ------
     DuplicateParameterContentError
-        If a row's content is already stored under a different name.
+        If a row's name is already stored (or repeated in the batch) with
+        different content, or, unless ``allow_duplicate_params``, if its
+        content is already stored under a different name.
     """
-    if allow_duplicate_params:
-        return
 
     def _fingerprint(row: dict) -> str:
         return parameter_row_fingerprint(
@@ -258,6 +259,7 @@ def reject_duplicate_parameter_content(
         name_attr=name_attr,
         fingerprint=_fingerprint,
         pk=_pk,
+        check_cross_name=not allow_duplicate_params,
     )
 
 
@@ -269,13 +271,18 @@ def _reject_duplicate_fingerprints(
     name_attr: str,
     fingerprint: Callable[[dict], str],
     pk: Callable[[dict], Hashable],
+    check_cross_name: bool = True,
 ) -> None:
-    """Raise if an incoming row reuses another row name's content fingerprint.
+    """Raise if an incoming row conflicts with a stored or earlier row.
+
+    A row whose key is already claimed must carry the same content, so
+    ``skip_duplicates=True`` can never silently keep different parameters.
 
     Parameters
     ----------
     stored_rows : list[dict]
-        Rows already in the table; they claim their fingerprints first.
+        Rows already in the table; they claim their keys and fingerprints
+        first.
     incoming_rows : list[dict]
         Rows about to be inserted, checked in order against the stored rows
         and the earlier incoming rows.
@@ -286,28 +293,42 @@ def _reject_duplicate_fingerprints(
     fingerprint : Callable[[dict], str]
         Content fingerprint of one row (row name excluded).
     pk : Callable[[dict], Hashable]
-        The row's primary key; an incoming row whose key is already stored is
-        a re-insert and is skipped.
+        The row's primary key. An incoming row whose key is claimed with the
+        same fingerprint is a re-insert and is skipped.
+    check_cross_name : bool, optional
+        Also reject content already claimed by a different name. Default
+        ``True``; ``allow_duplicate_params=True`` turns it off.
 
     Raises
     ------
     DuplicateParameterContentError
-        If an incoming row's content was already claimed by a different name.
+        If an incoming row's key is claimed with different content, or, with
+        ``check_cross_name``, if its content was claimed by a different name.
     """
-    existing_pks = {pk(row) for row in stored_rows}
+    fingerprint_by_pk = {pk(row): fingerprint(row) for row in stored_rows}
     # fingerprint -> first row name to claim it
     claimed: dict[str, str] = {}
     for stored in stored_rows:
         claimed.setdefault(fingerprint(stored), stored[name_attr])
 
     for row in incoming_rows:
-        # Keeps insert_default re-runnable after an opted-in duplicate.
-        if pk(row) in existing_pks:
-            continue
         name = row[name_attr]
         row_fingerprint = fingerprint(row)
+        existing = fingerprint_by_pk.get(pk(row))
+        if existing is not None:
+            if existing != row_fingerprint:
+                raise DuplicateParameterContentError(
+                    f"{table_name}: a row named {name!r} already exists with "
+                    f"different content (stored {existing[:12]}, new "
+                    f"{row_fingerprint[:12]}). Parameter rows are immutable "
+                    "and downstream ids use the name, so the stored content "
+                    "would be used. Insert the new parameters under a new "
+                    f"name, or delete {name!r} first if nothing depends on it."
+                )
+            continue
+        fingerprint_by_pk[pk(row)] = row_fingerprint
         prior = claimed.get(row_fingerprint)
-        if prior is not None and prior != name:
+        if check_cross_name and prior is not None and prior != name:
             raise DuplicateParameterContentError(
                 f"{table_name}: row {name!r} duplicates the content of "
                 f"existing row {prior!r} (fingerprint "
@@ -322,9 +343,9 @@ def _reject_duplicate_fingerprints(
 def _quality_metric_content(row: dict) -> dict:
     """Extract one ``QualityMetricParameters`` row's ``params``-like content.
 
-    Excludes the name, ``params_schema_version`` and ``job_kwargs``, as the
-    sibling Lookups do. Adding a field changes every stored row's
-    fingerprint.
+    Excludes the name, ``params_schema_version`` and ``job_kwargs``, which
+    the fingerprint carries separately, as for the sibling Lookups. Adding a
+    field changes every stored row's fingerprint.
     """
     return {
         "metric_names": row["metric_names"],
@@ -347,7 +368,7 @@ def reject_duplicate_quality_metric_content(
 
     The table spreads content across columns instead of one ``params`` blob,
     so it cannot use :func:`reject_duplicate_parameter_content`. Re-inserting
-    a stored name is a no-op.
+    a stored name with the same content is a no-op.
 
     Parameters
     ----------
@@ -356,15 +377,16 @@ def reject_duplicate_quality_metric_content(
     incoming_rows : list[dict]
         The validated rows about to be inserted.
     allow_duplicate_params : bool, optional
-        Opt out of the guard.
+        Allow content already stored under a different name. A stored name
+        with different content is rejected regardless.
 
     Raises
     ------
     DuplicateParameterContentError
-        If a row's content is already stored under a different name.
+        If a row's name is already stored (or repeated in the batch) with
+        different content, or, unless ``allow_duplicate_params``, if its
+        content is already stored under a different name.
     """
-    if allow_duplicate_params:
-        return
 
     def _fingerprint(row: dict) -> str:
         return parameter_fingerprint(
@@ -381,6 +403,7 @@ def reject_duplicate_quality_metric_content(
         name_attr="metric_params_name",
         fingerprint=_fingerprint,
         pk=lambda row: row["metric_params_name"],
+        check_cross_name=not allow_duplicate_params,
     )
 
 
