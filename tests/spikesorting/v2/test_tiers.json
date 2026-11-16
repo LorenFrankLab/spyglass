@@ -638,6 +638,7 @@
       "tier": "unit",
       "overrides": {
         "test_binned_counts_and_smoothing_do_not_bridge_exclusions": "db_unit",
+        "test_report_rate_denominator_is_the_stored_observed_duration": "pipeline",
         "test_group_smoothing_splits_a_jump_with_every_bin_observed": "db_unit",
         "test_group_smoothing_stops_at_a_timestamp_jump": "db_unit"
       }

@@ -635,3 +635,76 @@ def test_membership_preserves_query_shape_and_rejects_nonfinite_queries(known):
     with pytest.raises(ValueError, match="time"):
         availability.valid_bins([[0.0, 1.0]])
     assert availability.valid_bins([]).shape == (0,)
+
+
+def test_unmasked_kept_intervals_give_the_timestamp_duration_not_n_over_fs():
+    """Without an artifact pass the kept intervals are the gap-split chunks,
+    and their observed duration follows the timestamps, not ``n / fs``."""
+    import spikeinterface.core as si
+
+    from spyglass.spikesorting.v2._core.signal_math import kept_intervals
+
+    fs = 1000.0
+    n = 20_000
+    # A clock 50 ppm slow with one 5 s gap, as on real acquisition hardware.
+    times = np.arange(n) * (1.0 + 50e-6) / fs
+    times[n // 2 :] += 5.0
+    recording = si.NumpyRecording(np.zeros((n, 1), dtype="float32"), fs)
+    recording.set_times(times)
+
+    kept = np.asarray(kept_intervals(recording, None))
+    assert kept.shape == (2, 2)
+    observed = observed_intervals(recording, kept)
+    duration = float(np.diff(observed, axis=1).sum())
+    assert duration == pytest.approx(
+        observed_metrics([], observed)["observed_duration_s"], rel=0, abs=1e-12
+    )
+    # One sample period per chunk plus the chunk's timestamp span.
+    expected = sum(
+        times[stop - 1] - times[start] + 1.0 / fs
+        for start, stop in ((0, n // 2), (n // 2, n))
+    )
+    assert duration == pytest.approx(expected, rel=0, abs=1e-9)
+    assert abs(duration - n / fs) > 1e-4
+
+
+def test_kept_intervals_return_artifact_valid_times_unchanged():
+    """A pinned artifact pass's valid times are the kept intervals as given."""
+    import spikeinterface.core as si
+
+    from spyglass.spikesorting.v2._core.signal_math import kept_intervals
+
+    recording = si.NumpyRecording(np.zeros((10, 1), dtype="float32"), 10.0)
+    valid_times = [[0.1, 0.4], [0.6, 0.9]]
+    assert kept_intervals(recording, valid_times) is valid_times
+
+
+def test_report_rate_denominator_is_the_stored_observed_duration(
+    populated_sorting,
+):
+    """``describe_units``' denominator equals the duration the stored
+    observation metrics use for the same sort."""
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.spikesorting.v2._orchestration.reporting import (
+        _observed_duration_s,
+    )
+    from spyglass.spikesorting.v2._storage.observation_io import (
+        observation_metrics_from_nwb,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    source = SortingSelection.resolve_effective_source(populated_sorting)
+    recording = SortingSelection.load_stored_traces(source.traces)
+    metrics, _ = observation_metrics_from_nwb(
+        AnalysisNwbfile.get_abs_path(
+            (Sorting & populated_sorting).fetch1("analysis_file_name")
+        ),
+        recording,
+        bin_duration_s=60.0,
+    )
+    assert len(metrics)
+    assert _observed_duration_s(
+        populated_sorting["sorting_id"]
+    ) == pytest.approx(
+        float(metrics["observed_duration_s"].iloc[0]), rel=0, abs=1e-9
+    )

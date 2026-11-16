@@ -488,6 +488,31 @@ def base_intervals_and_gaps(recording, fs=None):
     )
 
 
+def kept_intervals(recording, valid_times):
+    """The seconds a sort observes: ``valid_times``, else every recorded chunk.
+
+    The one rule for a sort's kept intervals. ``valid_times`` (artifact-removed
+    intervals) is returned unchanged; ``None`` means no artifact pass, so the
+    recording's contiguous chunks are kept, split at timestamp gaps.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording whose timestamps define the chunks.
+    valid_times : array_like or None
+        ``(n, 2)`` artifact-removed ``[start, end]`` seconds, or ``None``.
+
+    Returns
+    -------
+    array_like or list
+        ``valid_times`` as given, or
+        :func:`base_intervals_and_gaps` ``.base_intervals``.
+    """
+    if valid_times is not None:
+        return valid_times
+    return base_intervals_and_gaps(recording).base_intervals
+
+
 def timestamp_fingerprint(recording):
     """SHA-256 over the recording's timestamp vector, computed chunked.
 

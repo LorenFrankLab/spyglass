@@ -25,8 +25,8 @@ from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._core.signal_math import (
     _MERGE_DEDUP_DELTA_MS,
     _segment_times_at,
-    base_intervals_and_gaps,
     intersect_interval_sets,
+    kept_intervals,
 )
 from spyglass.spikesorting.v2._storage.provenance import (
     validate_curation_header,
@@ -651,24 +651,9 @@ def _write_sorting_units_nwb_body(
     spike_times_by_unit = _sample_indices_to_times_by_unit(
         recording, sample_indices_by_unit
     )
-    sampling_frequency = finite_scalar(
-        recording.get_sampling_frequency(),
-        name="sampling_frequency",
-        positive=True,
+    obs_intervals_arr = finite_intervals(
+        kept_intervals(recording, obs_intervals), name="obs_intervals"
     )
-    if obs_intervals is None:
-        # No artifact pass: every recorded sample was observed. Split at gaps
-        # so a disjoint recording's duration excludes them.
-        obs_intervals_arr = finite_intervals(
-            base_intervals_and_gaps(
-                recording, sampling_frequency
-            ).base_intervals,
-            name="obs_intervals",
-        )
-    else:
-        obs_intervals_arr = finite_intervals(
-            obs_intervals, name="obs_intervals"
-        )
 
     with pynwb.NWBHDF5IO(
         path=analysis_abs_path, mode="a", load_namespaces=True

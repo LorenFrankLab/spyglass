@@ -13,9 +13,6 @@ import pandas as pd
 from spyglass.spikesorting.v2._orchestration.presets import (
     _all_pipeline_presets,
 )
-from spyglass.spikesorting.v2._artifacts.readers import (
-    read_recording_artifact_valid_times,
-)
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
     json_values_equal,
@@ -734,47 +731,54 @@ _UNIT_COLUMNS = [
 
 
 def _observed_duration_s(sorting_id) -> float:
-    """Seconds the sort actually observed, for a firing-rate denominator.
+    """Seconds the sort observed, for a firing-rate denominator.
 
-    Mirrors ``Sorting.make_fetch``: the artifact-retained duration if masked,
-    else sample count / sampling frequency.
+    Reads the sort's stored per-unit ``obs_intervals`` (every unit shares
+    them at sort time) and converts them as ``CurationEvaluation``'s
+    ``observed_duration_s`` does, so the two agree.
+
+    Raises
+    ------
+    ValueError
+        If the sort has no units, so stores no observation intervals.
     """
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2._storage.units_nwb import read_units_columns
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 
     sorting_key = {"sorting_id": sorting_id}
-    source, traces = SortingSelection.resolve_effective_source(sorting_key)
+    unit_ids = (Sorting.Unit & sorting_key).fetch(
+        "unit_id", order_by="unit_id", limit=1
+    )
+    if not len(unit_ids):
+        raise ValueError(
+            f"sorting_id {sorting_id!r} has no units, so it stores no "
+            "observation intervals."
+        )
+    source = SortingSelection.resolve_effective_source(sorting_key)
+    units_path = SortingSelection.resolve_stored_units(
+        (Sorting & sorting_key).fetch1("analysis_file_name"), source
+    ).abs_path
+    (intervals,) = read_units_columns(
+        units_path, ("obs_intervals",), unit_ids=[int(unit_ids[0])]
+    )
     # Only samples and timestamps are read; no mask needed.
-    recording = SortingSelection.load_stored_traces(traces)
-    if source.kind == "concatenated_recording":
-        from spyglass.spikesorting.v2.session_group import (
-            ConcatenatedRecording,
-        )
-
-        intervals = (ConcatenatedRecording & source.key).fetch1("obs_intervals")
-        return float(
-            np.diff(observed_intervals(recording, intervals), axis=1).sum()
-        )
-    recording_id = source.key["recording_id"]
-    artifact_detection_id = source.artifact_detection_id
-    if artifact_detection_id is not None:
-        nwb_file_name = (
-            RecordingSelection & {"recording_id": recording_id}
-        ).fetch1("nwb_file_name")
-        valid_times = read_recording_artifact_valid_times(
-            artifact_detection_id, nwb_file_name, caller="describe_units"
-        )
-        return float(
-            np.diff(observed_intervals(recording, valid_times), axis=1).sum()
-        )
-    return recording.get_num_samples() / recording.sampling_frequency
+    recording = SortingSelection.load_stored_traces(source.traces)
+    return float(
+        np.diff(
+            observed_intervals(recording, intervals[int(unit_ids[0])]),
+            axis=1,
+        ).sum()
+    )
 
 
 def describe_units(sorting_id) -> "pd.DataFrame":
     """Return a per-unit, sort-time quality snapshot for one sort.
 
-    Read-only, from sort-time metadata. ``firing_rate_hz`` divides by the
-    observed (artifact-removed) duration. ``peak_electrode_id`` and
+    Read-only, from sort-time metadata. ``firing_rate_hz`` divides each
+    unit's sort-time spike count by the sort's observed duration, the
+    denominator of ``CurationEvaluation``'s ``observed_firing_rate_hz``;
+    that metric counts only spikes inside the observed intervals and is
+    per curated unit, so the two can differ. ``peak_electrode_id`` and
     ``brain_region`` come from the peak-amplitude electrode (the first
     member's for concat sorts).
 

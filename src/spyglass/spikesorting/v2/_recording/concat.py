@@ -6,7 +6,7 @@ import numpy as np
 
 from spyglass.spikesorting.v2._core.signal_math import (
     _segment_times_at,
-    base_intervals_and_gaps,
+    kept_intervals,
 )
 from spyglass.spikesorting.v2._recording.geometry import flatten_planar_geometry
 from spyglass.spikesorting.v2._sorting.artifact_mask import (
@@ -666,13 +666,7 @@ def member_kept_intervals(member_plan, recordings) -> list:
         ``(n_intervals, 2)`` valid times per member.
     """
     return [
-        (
-            plan["valid_times"]
-            if plan["valid_times"] is not None
-            else base_intervals_and_gaps(
-                recording, recording.get_sampling_frequency()
-            ).base_intervals
-        )
+        kept_intervals(recording, plan["valid_times"])
         for plan, recording in zip(member_plan, recordings, strict=True)
     ]
 

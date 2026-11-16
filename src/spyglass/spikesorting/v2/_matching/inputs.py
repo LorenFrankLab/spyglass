@@ -20,7 +20,7 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     deterministic_id,
     existing_selection_pk,
 )
-from spyglass.spikesorting.v2._core.signal_math import base_intervals_and_gaps
+from spyglass.spikesorting.v2._core.signal_math import kept_intervals
 from spyglass.spikesorting.v2._curation.unit_selection import (
     validate_unit_selection_snapshot,
 )
@@ -857,17 +857,16 @@ def _recording_valid_times(traces, nwb_file_name, artifact_detection_id):
     -------
     numpy.ndarray, shape (n_intervals, 2)
     """
+    valid_times = None
     if artifact_detection_id is not None:
         valid_times = read_recording_artifact_valid_times(
             artifact_detection_id,
             nwb_file_name,
             caller="UnitMatchSelection.insert_inputs",
         )
-    else:
-        valid_times = base_intervals_and_gaps(
-            traces, traces.get_sampling_frequency()
-        ).base_intervals
-    return np.asarray(valid_times, dtype=np.float64).reshape(-1, 2)
+    return np.asarray(
+        kept_intervals(traces, valid_times), dtype=np.float64
+    ).reshape(-1, 2)
 
 
 def _check_input_sessions(inputs, exc_class) -> None:
