@@ -419,7 +419,21 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         return f"{base_id}_{next_int:02d}"
 
     def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
-        """Insert the current environment into the table."""
+        """Insert the current environment into the table.
+
+        Parameters
+        ----------
+        env_id : str, optional
+            Requested id; incremented when another environment already uses
+            it. Default ``DEFAULT_ENV_ID``.
+
+        Returns
+        -------
+        dict
+            ``{"env_id": ...}`` of the row holding the current environment
+            (the stored match, else the inserted row), or ``None`` as the id
+            when the environment could not be read.
+        """
 
         if not self.env:  # if conda dump fails, warned above
             return {"env_id": None}
@@ -427,9 +441,11 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         if self.matching_env_id:  # if env is already stored
             return {"env_id": self.matching_env_id}
 
+        # If the current env is not stored but the name is taken, increment.
+        new_env_id = self._increment_id(env_id)
         self.insert1(
-            {  # if current env not stored, but name taken, increment
-                "env_id": self._increment_id(env_id),
+            {
+                "env_id": new_env_id,
                 "env_hash": self.env_hash,
                 "env": self.env,
                 "has_editable": self._has_editable,
@@ -437,7 +453,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
-        return {"env_id": env_id}
+        return {"env_id": new_env_id}
 
     def write_env_yaml(
         self,

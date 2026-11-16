@@ -111,3 +111,34 @@ def test_write_env_yaml(common):
     assert (
         env_data["name"] == env_id
     ), f"Expected env name {env_id}, got {env_data['name']}"
+
+
+def test_insert_env_returns_the_id_it_inserted(user_env_tbl):
+    """When the requested env_id is taken by another environment, the
+    current environment is stored under an incremented id, and that id is
+    the one returned (recompute rows are keyed on it)."""
+    taken = "test_taken_env_00"
+    current_hash = user_env_tbl.env_hash
+    current = (user_env_tbl & {"env_hash": current_hash}).fetch(as_dict=True)
+    (user_env_tbl & {"env_hash": current_hash}).delete_quick()
+    user_env_tbl.insert1(
+        {
+            "env_id": taken,
+            "env_hash": "f" * 32,
+            "env": {"dependencies": ["other==1.0"]},
+            "has_editable": 0,
+        }
+    )
+    del user_env_tbl.matching_env_id
+    inserted = None
+    try:
+        got = user_env_tbl.insert_current_env(taken)
+        inserted = (user_env_tbl & {"env_hash": current_hash}).fetch1("env_id")
+        assert got == {"env_id": inserted}
+        assert inserted != taken
+    finally:
+        (user_env_tbl & {"env_id": taken}).delete_quick()
+        if inserted is not None:
+            (user_env_tbl & {"env_id": inserted}).delete_quick()
+        user_env_tbl.insert(current, skip_duplicates=True)
+        user_env_tbl.__dict__.pop("matching_env_id", None)  # cached property
