@@ -1453,6 +1453,11 @@ class DriftEstimate(SpyglassMixin, dj.Computed):
     ``max_abs_displacement_um``. To correct motion, use ``motion_mode`` on
     ``run_v2_pipeline`` (:mod:`.motion`). Populated on demand only.
 
+    Its numbers differ from ``MotionEstimate``'s by construction: this runs
+    ``compute_motion`` with ``dredge_fast`` on the whole unmasked recording,
+    while ``MotionEstimate`` estimates over the artifact-free statistics
+    spans with its own recipe. Do not compare the two displacements.
+
     Steps
     -----
     1. Resolve the cached recording, rebuilding a missing file.
