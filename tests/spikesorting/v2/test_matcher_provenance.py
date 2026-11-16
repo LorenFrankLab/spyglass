@@ -277,3 +277,37 @@ def test_matcher_asset_provenance_round_trips_in_pairs_nwb(tmp_path):
     assert input_row["curation_uuid"] == CURATION_UUID
     assert input_row["curation_id"] == 2
     assert input_row["source_id"] == RECORDING_ID
+
+
+def test_run_diagnostics_join_the_producer_provenance():
+    import json
+
+    from spyglass.spikesorting.v2._matching.provenance import (
+        with_run_diagnostics,
+    )
+
+    base = matcher_provenance(object(), object(), {})
+    diagnostics = {
+        "n_units": 11,
+        "n_units_per_input": [6, 5],
+        "n_expected_matches": 17,
+    }
+    got = with_run_diagnostics(base, diagnostics)
+    validate_matcher_provenance(got)
+    assert got["run_diagnostics"] == diagnostics
+    assert "run_diagnostics" not in base
+    json.dumps(got, default=str)
+    assert with_run_diagnostics(base, None) == base
+
+
+def test_matcher_run_diagnostics_reads_the_registered_backend():
+    from spyglass.spikesorting.v2._matching import compute
+    from spyglass.spikesorting.v2.matcher_protocol import get_matcher
+
+    backend = get_matcher("unitmatch")
+    backend.last_run_diagnostics = {"n_units": 3}
+    try:
+        assert compute.matcher_run_diagnostics("unitmatch") == {"n_units": 3}
+    finally:
+        backend.last_run_diagnostics = None
+    assert compute.matcher_run_diagnostics("unitmatch") is None

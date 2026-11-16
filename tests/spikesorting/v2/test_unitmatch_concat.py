@@ -3753,6 +3753,13 @@ def test_daily_concat_workflow_matches_planted_neurons_end_to_end(
             str(s["sorting_id"]): label for label, s in corrected.items()
         }
         pk = {"unitmatch_id": match["unit_match_id"]}
+        diagnostics = (UnitMatch & pk).fetch1("matcher_provenance")[
+            "run_diagnostics"
+        ]
+        n_units = len(UnitMatch.MatchableUnit & pk)
+        assert diagnostics["n_units"] <= n_units
+        assert sum(diagnostics["n_units_per_input"]) == diagnostics["n_units"]
+        assert diagnostics["n_expected_matches"] >= diagnostics["n_units"]
         reloaded = _run_state(pk, label_of)
         assert reloaded["tracked"] == record["state"]["tracked"]
         assert reloaded["regions"] == record["state"]["regions"]

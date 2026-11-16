@@ -77,6 +77,29 @@ def validate_matcher_provenance(values: Mapping) -> None:
     validate_runtime_provenance(values)
 
 
+def with_run_diagnostics(provenance: Mapping, diagnostics) -> dict:
+    """Copy of ``provenance`` with the backend's run diagnostics attached.
+
+    Parameters
+    ----------
+    provenance : Mapping
+        Producer provenance from :func:`matcher_provenance`.
+    diagnostics : Mapping or None
+        What the backend measured while matching (for UnitMatch ``n_units``,
+        ``n_units_per_input`` and ``n_expected_matches``). ``None`` leaves
+        the provenance unchanged.
+
+    Returns
+    -------
+    dict
+        A new mapping; ``run_diagnostics`` is added when given.
+    """
+    values = dict(provenance)
+    if diagnostics is not None:
+        values["run_diagnostics"] = dict(diagnostics)
+    return values
+
+
 def spyglass_version() -> str | None:
     """Installed Spyglass version; unknown when distribution metadata is absent."""
     try:

@@ -68,6 +68,7 @@ from spyglass.spikesorting.v2._matching.graph import (
 )
 from spyglass.spikesorting.v2._matching.provenance import (
     validate_matcher_provenance,
+    with_run_diagnostics,
 )
 from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 from spyglass.spikesorting.v2._sorting.fetch import resolve_sort_anchor
@@ -904,18 +905,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         recording_spike_counts = _unit_match_compute.recording_spike_counts(
             input_plan, sortings
         )
-        provenance_tables = _unit_match_compute.unit_match_provenance_tables(
-            key,
-            input_plan,
-            session_group_owner=session_group_owner,
-            session_group_name=session_group_name,
-            matcher_params_name=matcher_params_name,
-            matcher_backend=matcher_backend,
-            matcher_backend_version=matcher_backend_version,
-            spikeinterface_version=spikeinterface_version,
-            matcher_provenance=producer_provenance,
-        )
-
         # 4. Stage the pairs NWB under the first input's first recording.
         with staged_analysis_file(
             anchor_nwb_file_name, context="UnitMatch.make_compute"
@@ -940,7 +929,27 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         sortings=sortings,
                     )
                 )
-            # 6. Write the canonicalized pairs with provenance.
+            # 6. Write the canonicalized pairs with provenance, including
+            # what the matcher measured in this run.
+            if len(input_plan) >= 2:
+                producer_provenance = with_run_diagnostics(
+                    producer_provenance,
+                    _unit_match_compute.matcher_run_diagnostics(matcher_name),
+                )
+            provenance_tables = (
+                _unit_match_compute.unit_match_provenance_tables(
+                    key,
+                    input_plan,
+                    session_group_owner=session_group_owner,
+                    session_group_name=session_group_name,
+                    matcher_params_name=matcher_params_name,
+                    matcher_backend=matcher_backend,
+                    matcher_backend_version=matcher_backend_version,
+                    spikeinterface_version=spikeinterface_version,
+                    matcher_provenance=producer_provenance,
+                )
+            )
+
             pairs_object_id = write_pairs_table(
                 abs_path, oriented_pairs, provenance_tables=provenance_tables
             )

@@ -23,6 +23,7 @@ from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
 from spyglass.spikesorting.v2._matching.waveforms import (
     WaveformInputPreparer,
 )
+from spyglass.utils import logger
 from spyglass.spikesorting.v2.matcher_protocol import (
     MatchPair,
     SessionMatcherInput,
@@ -42,6 +43,9 @@ _INSTALL_HINT = (
     "environment."
 )
 
+
+# Advisory only: a session with fewer matchable units only triggers a warning.
+UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION = 10
 
 # UnitMatchPy's threshold search finds no candidate below this many units.
 _MIN_UNITS_TO_CALIBRATE = 3
@@ -197,6 +201,10 @@ class UnitMatchBackend:
 
     name = "unitmatch"
 
+    #: ``{"n_units", "n_units_per_input", "n_expected_matches"}`` of the last
+    #: ``match`` call that reached UnitMatch, else ``None``.
+    last_run_diagnostics: dict | None = None
+
     @staticmethod
     def _validate_bundle_layouts(session_inputs) -> None:
         for bundle in session_inputs:
@@ -238,8 +246,17 @@ class UnitMatchBackend:
         """Run UnitMatch over the prepared per-input bundles.
 
         Returns ``[]`` for the degenerate single-session case without importing
-        or calling UnitMatch.
+        or calling UnitMatch. Warns when a session has fewer than
+        ``UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION`` units, and sets
+        ``last_run_diagnostics`` once UnitMatch has run.
+
+        Raises
+        ------
+        ValueError
+            Fewer than ``_MIN_UNITS_TO_CALIBRATE`` units in total, or
+            UnitMatch's threshold search failed on a degenerate population.
         """
+        self.last_run_diagnostics = None
         if len(session_inputs) < 2:
             return []
 
@@ -294,6 +311,7 @@ class UnitMatchBackend:
             raise ValueError(
                 self._too_few_units_message(session_inputs, good_units)
             )
+        self._warn_if_small_population(session_inputs, good_units)
         clus_info = {
             "good_units": good_units,
             "session_switch": session_switch,
@@ -306,7 +324,11 @@ class UnitMatchBackend:
         try:
             total_score, candidate_pairs, scores_to_include, predictors = (
                 um.overlord.extract_metric_scores(
-                    extracted, session_switch, within_session, param, niter=2
+                    extracted,
+                    session_switch,
+                    within_session,
+                    param,
+                    niter=2,
                 )
             )
         except IndexError as exc:
@@ -315,6 +337,11 @@ class UnitMatchBackend:
             raise ValueError(
                 self._too_few_units_message(session_inputs, good_units)
             ) from exc
+        self.last_run_diagnostics = {
+            "n_units": int(param["n_units"]),
+            "n_units_per_input": [len(g) for g in good_units],
+            "n_expected_matches": int(param["n_expected_matches"]),
+        }
         prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
         priors = np.array((prior_match, 1 - prior_match))
         labels = candidate_pairs.astype(int)
@@ -335,6 +362,22 @@ class UnitMatchBackend:
             clus_info["original_ids"],
             session_inputs,
             match_threshold,
+        )
+
+    @staticmethod
+    def _warn_if_small_population(session_inputs, good_units) -> None:
+        """Warn when a session is below the advisory matchable-unit count."""
+        if all(
+            len(g) >= UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION
+            for g in good_units
+        ):
+            return
+        logger.warning(
+            "UnitMatch probabilities are relative to the population in the "
+            "run and are unreliable for small populations; a session has "
+            f"fewer than {UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION} matchable "
+            "units (" + _unit_count_summary(session_inputs, good_units) + "). "
+            "Units from different cells can match with high probability."
         )
 
     @staticmethod

@@ -369,6 +369,63 @@ def test_match_converts_unitmatch_threshold_indexerror(tmp_path, monkeypatch):
     assert "3 units" in str(exc.value)
 
 
+def test_match_warns_when_a_session_has_few_units(tmp_path, caplog):
+    """Under 10 matchable units in any session warns, naming each session's
+    count and saying probabilities are relative to the run's population.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    inputs = _synthetic_inputs(tmp_path, [12, 4])
+    with caplog.at_level("WARNING", logger="spyglass"):
+        backend.UnitMatchBackend().match(inputs, {})
+    texts = [
+        r.getMessage()
+        for r in caplog.records
+        if "relative to the population" in r.getMessage()
+    ]
+    assert len(texts) == 1
+    assert "sort0: 12 units" in texts[0] and "sort1: 4 units" in texts[0]
+    assert "unreliable" in texts[0]
+
+
+def test_match_does_not_warn_when_every_session_is_large_enough(
+    tmp_path, caplog
+):
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    inputs = _synthetic_inputs(tmp_path, [10, 11])
+    with caplog.at_level("WARNING", logger="spyglass"):
+        backend.UnitMatchBackend().match(inputs, {})
+    assert not [
+        r
+        for r in caplog.records
+        if "relative to the population" in r.getMessage()
+    ]
+
+
+def test_match_records_run_diagnostics(tmp_path):
+    """The backend exposes ``n_units``, the per-input counts and UnitMatch's
+    ``n_expected_matches`` for the run it just did.
+
+    ``n_expected_matches`` counts thresholded pairs of the n x n matrix,
+    diagonal included, so it lies between ``n_units`` and ``n_units ** 2``.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    inputs = _synthetic_inputs(tmp_path, [6, 5])
+    matcher = backend.UnitMatchBackend()
+    assert matcher.last_run_diagnostics is None
+    matcher.match(inputs, {})
+    diagnostics = matcher.last_run_diagnostics
+    assert diagnostics["n_units"] == 11
+    assert diagnostics["n_units_per_input"] == [6, 5]
+    assert 11 <= diagnostics["n_expected_matches"] <= 11**2
+    assert isinstance(diagnostics["n_expected_matches"], int)
+
+
 def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     """Sessions with different channel geometry raise before UnitMatch runs.
 

@@ -226,6 +226,23 @@ def _input_recording_spike_counts(plan: dict, sorting) -> list[dict]:
     ]
 
 
+def matcher_run_diagnostics(matcher_name: str) -> dict | None:
+    """What the registered backend measured in its last ``match`` call.
+
+    Returns
+    -------
+    dict or None
+        The backend's ``last_run_diagnostics``, or ``None`` when it has none
+        (a backend that does not report them, or no run reached it).
+    """
+    from spyglass.spikesorting.v2.matcher_protocol import get_matcher
+
+    diagnostics = getattr(
+        get_matcher(matcher_name), "last_run_diagnostics", None
+    )
+    return None if diagnostics is None else dict(diagnostics)
+
+
 def matcher_run_provenance(matcher_name: str, params, job_kwargs) -> tuple:
     """Provenance of the registered matcher that actually runs.
 
