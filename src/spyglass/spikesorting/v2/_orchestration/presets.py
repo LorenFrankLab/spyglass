@@ -68,6 +68,34 @@ _PIPELINE_PRESETS: dict[str, _PipelinePreset] = {
 }
 
 
+def _saved_pipeline_presets(name: "str | None" = None) -> dict:
+    """Presets saved in ``PipelinePreset`` by name; only ``name`` if given."""
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    rel = PipelinePreset & ({"pipeline_preset": name} if name else {})
+    saved = {}
+    for row in rel.fetch(as_dict=True):
+        for field in ("created_by", "created_at"):
+            row.pop(field)
+        preset_name = row.pop("pipeline_preset")
+        saved[preset_name] = _PipelinePreset(**row)
+    return saved
+
+
+def _find_pipeline_preset(name) -> "_PipelinePreset | None":
+    """The preset called ``name`` from code or the database, else None."""
+    if name in _PIPELINE_PRESETS:
+        return _PIPELINE_PRESETS[name]
+    if not isinstance(name, str) or not name:
+        return None
+    return _saved_pipeline_presets(name).get(name)
+
+
+def _all_pipeline_presets() -> dict:
+    """Every preset by name; a code preset wins over a saved one."""
+    return {**_saved_pipeline_presets(), **_PIPELINE_PRESETS}
+
+
 def _unknown_pipeline_preset_message(
     name,
     *,
@@ -80,7 +108,7 @@ def _unknown_pipeline_preset_message(
     """
     message = (
         f"unknown pipeline_preset {name!r}. Available pipeline presets: "
-        f"{sorted(_PIPELINE_PRESETS)}. {hint}"
+        f"{sorted(_all_pipeline_presets())}. {hint}"
     )
     return message if caller is None else f"{caller}: {message}"
 
@@ -128,13 +156,14 @@ def list_pipeline_presets() -> list[str]:
     >>> any("ms4_2026_06" in p for p in list_pipeline_presets())
     True
     """
-    return sorted(_PIPELINE_PRESETS)
+    return sorted(_all_pipeline_presets())
 
 
 def describe_pipeline_presets() -> "pd.DataFrame":
     """Return a table describing each pipeline preset accepted by ``run_v2_pipeline``.
 
-    Database-free. :func:`describe_recommendation_status` defines the
+    Includes the presets saved in ``PipelinePreset``.
+    :func:`describe_recommendation_status` defines the
     ``recommendation_status`` values.
 
     Returns
@@ -174,7 +203,7 @@ def describe_pipeline_presets() -> "pd.DataFrame":
     ]
     rows = [
         {"pipeline_preset": name, **preset.model_dump()}
-        for name, preset in sorted(_PIPELINE_PRESETS.items())
+        for name, preset in sorted(_all_pipeline_presets().items())
     ]
     return pd.DataFrame(rows, columns=columns)
 
@@ -242,10 +271,9 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         is a ``rule.<index>`` entry. ``"sorter_execution"`` rows leave
         ``params_schema_version`` blank; their ``schema_version`` is a key.
     """
-    # Before table imports, which connect to the database.
-    if name not in _PIPELINE_PRESETS:
+    preset = _find_pipeline_preset(name)
+    if preset is None:
         raise ValueError(_unknown_pipeline_preset_message(name))
-    preset = _PIPELINE_PRESETS[name]
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -551,20 +579,24 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
 def register_pipeline_preset(
     name: str, preset, *, validate_rows: bool = True
 ) -> str:
-    """Register a custom pipeline preset at runtime; return its name.
+    """Save a custom pipeline preset in ``PipelinePreset``; return its name.
 
     Use the dated ``{lab}_..._{date}`` naming of the built-ins. The preset is
-    validated and, by default, its referenced rows must exist.
+    validated and its referenced rows must exist. Saved presets are shared by
+    every session and user. Re-registering the same name and content is a
+    no-op.
 
     Parameters
     ----------
     name : str
-        Registry name. Must not already exist.
+        Preset name, at most 64 characters. An existing name is accepted only
+        with identical content.
     preset : dict or _PipelinePreset
-        The preset bundle. The registry stores a freshly validated copy.
+        The preset bundle.
     validate_rows : bool, optional
-        If True (default), verify the referenced Lookup rows exist (requires a
-        database connection). Pass False to register without the DB check.
+        If True (default), check the referenced rows and save the preset.
+        Pass False to register it for this Python session only, without the
+        database.
 
     Returns
     -------
@@ -574,27 +606,49 @@ def register_pipeline_preset(
     Raises
     ------
     ValueError
-        If ``name`` is not a non-empty string, already exists, the preset fails
-        Pydantic validation, or (when ``validate_rows``) a referenced parameter
-        row is missing.
+        If ``name`` is not a non-empty string of at most 64 characters, is
+        already used with different content, the preset fails Pydantic
+        validation, or (when ``validate_rows``) a referenced parameter row is
+        missing.
     """
     # list_pipeline_presets sorts keys, so names must be strings.
-    if not isinstance(name, str) or not name.strip():
+    if not isinstance(name, str) or not name.strip() or len(name) > 64:
         raise ValueError(
-            f"register_pipeline_preset: name must be a non-empty string, got {name!r}."
-        )
-    if name in _PIPELINE_PRESETS:
-        raise ValueError(
-            f"pipeline preset {name!r} is already registered. Choose a fresh "
-            f"name; existing presets: {sorted(_PIPELINE_PRESETS)}."
+            "register_pipeline_preset: name must be a non-empty string of at "
+            f"most 64 characters, got {name!r}."
         )
     content = (
         preset.model_dump() if isinstance(preset, _PipelinePreset) else preset
     )
     validated = _PipelinePreset(**content)
-    if validate_rows:
-        _assert_preset_rows_exist(name, validated)
-    _PIPELINE_PRESETS[name] = validated
+    existing = (
+        _PIPELINE_PRESETS.get(name)
+        if not validate_rows
+        else _find_pipeline_preset(name)
+    )
+    if existing is not None:
+        if existing.model_dump() == validated.model_dump():
+            return name
+        raise ValueError(
+            f"pipeline preset {name!r} already exists with different content. "
+            "Choose a different name, or delete the saved preset first: "
+            f"(PipelinePreset & {{'pipeline_preset': {name!r}}}).delete()."
+        )
+    if not validate_rows:
+        _PIPELINE_PRESETS[name] = validated
+        return name
+    _assert_preset_rows_exist(name, validated)
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    PipelinePreset.insert1(
+        {
+            "pipeline_preset": name,
+            **validated.model_dump(),
+            "created_by": str(dj.config["database.user"]),
+        }
+    )
     return name
 
 
@@ -669,9 +723,9 @@ def clone_pipeline_preset(
 ) -> str:
     """Clone a pipeline preset with one or more parameter values changed.
 
-    Inserts the changed stage rows under ``new_name`` and registers the
-    preset; untouched stages reuse the base rows. Re-running with identical
-    overrides reuses the rows.
+    Inserts the changed stage rows under ``new_name`` and saves the preset in
+    ``PipelinePreset``; untouched stages reuse the base rows. Re-running with
+    identical overrides is a no-op, in any session.
 
     Each override key is a dotted path into one stage's ``params`` blob,
     e.g. ``detect_threshold=4.0`` or ``**{"bandpass_filter.freq_min": 700.0}``.
@@ -683,8 +737,8 @@ def clone_pipeline_preset(
     base_name : str
         A registered pipeline-preset name (see :func:`list_pipeline_presets`).
     new_name : str
-        The fresh name for the clone. Must be a non-empty string not already in
-        the preset registry, and is also used to name each derived parameter row.
+        The name for the clone, also used to name each derived parameter row.
+        An existing name is accepted only with identical content.
     allow_duplicate_params : bool, optional
         If True, allow a derived row whose content matches an existing row
         under a different name. Default False.
@@ -699,27 +753,22 @@ def clone_pipeline_preset(
     Raises
     ------
     ValueError
-        If ``base_name`` is unknown; ``new_name`` is not a fresh non-empty
-        string; no overrides are given; an override key matches no stage param
-        (or is ambiguous across stages); an override value fails the stage's
+        If ``base_name`` is unknown; ``new_name`` is empty or already used with
+        different content; no overrides are given; an override key matches no
+        stage param (or is ambiguous across stages); an override value fails the stage's
         Pydantic schema; or a derived row name already exists with different
         content.
     DuplicateParameterContentError
         If a derived row's content matches an existing row under a different
         name and ``allow_duplicate_params`` is False.
     """
-    # Before table imports, which connect to the database.
-    if base_name not in _PIPELINE_PRESETS:
+    base = _find_pipeline_preset(base_name)
+    if base is None:
         raise ValueError(_unknown_pipeline_preset_message(base_name))
     if not isinstance(new_name, str) or not new_name.strip():
         raise ValueError(
             f"clone_pipeline_preset: new_name must be a non-empty string, got "
             f"{new_name!r}."
-        )
-    if new_name in _PIPELINE_PRESETS:
-        raise ValueError(
-            f"pipeline preset {new_name!r} is already registered. Choose a "
-            f"fresh name; existing presets: {sorted(_PIPELINE_PRESETS)}."
         )
     if not overrides:
         raise ValueError(
@@ -727,7 +776,6 @@ def clone_pipeline_preset(
             "to register an alias of an existing preset under a new name use "
             "register_pipeline_preset()."
         )
-    base = _PIPELINE_PRESETS[base_name]
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
@@ -801,6 +849,16 @@ def clone_pipeline_preset(
     touched, derived_params = _derive_preset_parameters(
         stages, overrides, base_name
     )
+    derived_preset = base.model_copy(
+        update={stages[name]["pk_field"]: new_name for name in touched}
+    )
+    # Refuse a name clash before inserting any rows.
+    existing = _find_pipeline_preset(new_name)
+    if existing is not None and existing != derived_preset:
+        raise ValueError(
+            f"clone_pipeline_preset: pipeline preset {new_name!r} already "
+            "exists with different content. Choose a different new_name."
+        )
 
     def _fingerprint(stage, row):
         return parameter_row_fingerprint(
@@ -866,8 +924,5 @@ def clone_pipeline_preset(
                 skip_duplicates=True,
             )
 
-    derived_preset = base.model_copy(
-        update={stages[name]["pk_field"]: new_name for name in touched}
-    )
     register_pipeline_preset(new_name, derived_preset, validate_rows=True)
     return new_name

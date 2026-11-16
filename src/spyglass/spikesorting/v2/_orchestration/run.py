@@ -185,8 +185,8 @@ def run_v2_pipeline(
     Raises
     ------
     PipelineInputError
-        Before any database access: a source input is ``None``, the preset is
-        unknown, or the motion request is contradictory.
+        Before any insert or compute: a source input is ``None``, the preset
+        is unknown, or the motion request is contradictory.
     PreflightError
         If ``preflight=True`` and a prerequisite is missing.
     PipelineStageError
@@ -307,7 +307,7 @@ def _run_pipeline(
     motion_estimate_id: "uuid.UUID | str | None",
 ) -> "RunResult":
     """Shared body of ``run_v2_pipeline`` / ``run_v2_concat_pipeline``."""
-    # Before table imports, which need a live connection.
+    # A bad request fails before any schema activates.
     bundle, manual_excluded_times, source_inputs = _validate_run_request(
         caller,
         is_concat=is_concat,

@@ -3298,7 +3298,9 @@ def self_correcting_preset(dj_conn):
         ),
     )
     yield name
-    _PIPELINE_PRESETS.pop(name, None)
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    (PipelinePreset & {"pipeline_preset": name}).delete_quick()
 
 
 @pytest.fixture
@@ -3665,7 +3667,9 @@ def unfiltered_preset(dj_conn):
         ),
     )
     yield name
-    _PIPELINE_PRESETS.pop(name, None)
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    (PipelinePreset & {"pipeline_preset": name}).delete_quick()
 
 
 @pytest.mark.parametrize("mode", ["estimate", "apply"])

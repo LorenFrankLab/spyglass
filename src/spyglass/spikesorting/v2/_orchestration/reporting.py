@@ -528,6 +528,7 @@ def _v2_default_catalog_tables():
         MotionEstimationParameters,
         MotionInterpolationParameters,
     )
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import (
         AnalyzerWaveformParameters,
@@ -546,6 +547,7 @@ def _v2_default_catalog_tables():
         (MotionEstimationParameters, "motion_estimation_params_name"),
         (MotionInterpolationParameters, "motion_interpolation_params_name"),
         (MotionCorrectionParameters, "motion_correction_params_name"),
+        (PipelinePreset, "pipeline_preset"),
     ]
 
 

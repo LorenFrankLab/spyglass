@@ -371,7 +371,7 @@ def _run_auto_curation_stage(
         registration fails (stage ``"auto_curation"``).
     """
     from spyglass.spikesorting.v2._orchestration.presets import (
-        _PIPELINE_PRESETS,
+        _all_pipeline_presets,
     )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.metric_curation import (
@@ -405,7 +405,7 @@ def _run_auto_curation_stage(
                 for row in sibling_rows
                 if row["parent_curation_id"] == curation_key["curation_id"]
             },
-            _PIPELINE_PRESETS,
+            _all_pipeline_presets(),
         )
         child = CurationEvaluation().use_evaluation_labels(
             eval_key, description=description, reuse_existing=True

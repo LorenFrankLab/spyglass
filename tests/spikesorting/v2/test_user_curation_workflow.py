@@ -49,9 +49,6 @@ def test_pipeline_reviewed_generation_to_selected_analysis(
 
     from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-    from spyglass.spikesorting.v2._orchestration.presets import (
-        _PIPELINE_PRESETS,
-    )
     from spyglass.spikesorting.v2.curation_api import (
         CurationRef,
         save_manual_curation,
@@ -349,5 +346,7 @@ def test_pipeline_reviewed_generation_to_selected_analysis(
     finally:
         for key in created_groups:
             (SortedSpikesGroup & key).super_delete(warn=False)
-        _PIPELINE_PRESETS.pop(preset_name, None)
+        from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+        (PipelinePreset & {"pipeline_preset": preset_name}).delete_quick()
         _clean_session_v2(session)

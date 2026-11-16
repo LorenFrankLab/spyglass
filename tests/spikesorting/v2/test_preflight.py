@@ -973,18 +973,13 @@ def test_preflight_missing_params_row_points_to_initialize_defaults(
     A copy of the default preset with a bogus ``PreprocessingParameters``
     name, so no shared row is deleted.
     """
-    import spyglass.spikesorting.v2._orchestration.preflight as preflight_mod
     from spyglass.spikesorting.v2.pipeline import _PIPELINE_PRESETS
 
     base = _PIPELINE_PRESETS["franklab_tetrode_hippocampus_30khz_ms5_2026_06"]
     bogus = base.model_copy(
         update={"preprocessing_params_name": "missing_preproc_preflight"}
     )
-    monkeypatch.setattr(
-        preflight_mod,
-        "_PIPELINE_PRESETS",
-        {**_PIPELINE_PRESETS, "bogus_missing_row_preset": bogus},
-    )
+    monkeypatch.setitem(_PIPELINE_PRESETS, "bogus_missing_row_preset", bogus)
 
     report = preflight_v2_pipeline(
         **{**preflight_inputs, "pipeline_preset": "bogus_missing_row_preset"}

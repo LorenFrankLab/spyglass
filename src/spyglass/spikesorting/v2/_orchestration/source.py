@@ -12,7 +12,7 @@ from spyglass.spikesorting.v2._orchestration.preflight import (
     preflight_v2_pipeline,
 )
 from spyglass.spikesorting.v2._orchestration.presets import (
-    _PIPELINE_PRESETS,
+    _find_pipeline_preset,
     _unknown_pipeline_preset_message,
 )
 from spyglass.spikesorting.v2._orchestration.stages import (
@@ -49,11 +49,12 @@ def _validate_run_request(
     manual_excluded_times,
     motion_estimate_id=None,
 ) -> tuple[Any, Any, dict]:
-    """Validate a run request without touching the database.
+    """Validate a run request before any stage runs.
 
     Checks the source inputs, preset name and motion request, and folds
     manual exclusions into the preset's artifact recipe. Runs before table
-    imports, so a bad request fails even offline.
+    imports. A shipped preset name needs no database; any other name is
+    looked up in ``PipelinePreset``.
 
     Parameters
     ----------
@@ -67,7 +68,7 @@ def _validate_run_request(
     concat_session_group_owner, concat_session_group_name
         The concat inputs (``None`` in single-session mode).
     pipeline_preset : str
-        A ``_PIPELINE_PRESETS`` name.
+        A pipeline-preset name.
     motion_mode, motion_correction_params_name
         The motion request (see :func:`motion_request_problem`).
     manual_excluded_times
@@ -115,7 +116,8 @@ def _validate_run_request(
             f"{caller}: required input(s) {', '.join(missing)} cannot be None."
         )
 
-    if pipeline_preset not in _PIPELINE_PRESETS:
+    preset = _find_pipeline_preset(pipeline_preset)
+    if preset is None:
         raise PipelineInputError(
             _unknown_pipeline_preset_message(
                 pipeline_preset,
@@ -137,7 +139,7 @@ def _validate_run_request(
         manual_excluded_times, concat=is_concat
     )
     bundle = artifact_recipe_with_manual_exclusions(
-        _PIPELINE_PRESETS[pipeline_preset], manual_excluded_times
+        preset, manual_excluded_times
     )
     return bundle, manual_excluded_times, source_inputs
 

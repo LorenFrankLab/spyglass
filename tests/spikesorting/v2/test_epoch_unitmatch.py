@@ -560,7 +560,9 @@ def test_public_epoch_matching_journey(
         )
         if saved_matcher is not None:
             restore_matcher_registry(saved_matcher)
-        presets._PIPELINE_PRESETS.pop(params_name, None)
+        from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+        (PipelinePreset & {"pipeline_preset": params_name}).delete_quick()
         _clean_session_v2(session_key)
 
 

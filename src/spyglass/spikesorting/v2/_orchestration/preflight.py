@@ -69,7 +69,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_scientific_setup import (
     resolve_preset_sort_config,
 )
 from spyglass.spikesorting.v2._orchestration.presets import (
-    _PIPELINE_PRESETS,
+    _find_pipeline_preset,
     _unknown_pipeline_preset_message,
 )
 from spyglass.spikesorting.v2._orchestration.types import (
@@ -101,7 +101,7 @@ def preflight_v2_pipeline(
     Checks, without inserting, that the session rows, sort group, preset
     parameter rows, and sorter runtime are in place. Most checks run after a
     failure so the report lists every problem; an unknown preset or invalid
-    motion request stops before any database access.
+    motion request stops before the session checks.
 
     Parameters
     ----------
@@ -138,7 +138,8 @@ def preflight_v2_pipeline(
         return ok
 
     # Later checks need the preset's param names.
-    if pipeline_preset not in _PIPELINE_PRESETS:
+    bundle = _find_pipeline_preset(pipeline_preset)
+    if bundle is None:
         _check(
             "pipeline_preset_known",
             False,
@@ -153,7 +154,6 @@ def preflight_v2_pipeline(
         "motion_request_valid", motion_problem is None, motion_problem
     ):
         return _blocked_preflight_report(pipeline_preset, checks, warnings)
-    bundle = _PIPELINE_PRESETS[pipeline_preset]
 
     manual_excluded_times = resolve_manual_exclusions(manual_excluded_times)
     bundle = artifact_recipe_with_manual_exclusions(
@@ -256,7 +256,7 @@ def preflight_v2_pipeline(
 def _blocked_preflight_report(
     pipeline_preset: str, checks: list[PreflightCheck], warnings: list[str]
 ) -> PreflightReport:
-    """The report of a request that fails before any database check."""
+    """The report of a request that fails before the session checks."""
     return PreflightReport(
         warnings=warnings,
         resolved_pipeline_preset=pipeline_preset,
@@ -275,7 +275,7 @@ def _resolve_session_sort_group_ids(
 
     Shared by :func:`preflight_v2_pipeline_session` and
     :func:`run_v2_pipeline_session`. Session helpers require an explicit
-    ``pipeline_preset``, checked before any database access.
+    ``pipeline_preset``, checked first.
 
     Parameters
     ----------
@@ -307,7 +307,7 @@ def _resolve_session_sort_group_ids(
             "not infer a default. Call describe_pipeline_presets() to choose "
             "one, then pass pipeline_preset=..."
         )
-    if pipeline_preset not in _PIPELINE_PRESETS:
+    if _find_pipeline_preset(pipeline_preset) is None:
         raise PipelineInputError(
             _unknown_pipeline_preset_message(
                 pipeline_preset,

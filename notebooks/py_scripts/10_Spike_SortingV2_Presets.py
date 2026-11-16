@@ -176,9 +176,10 @@ describe_pipeline_preset(pipeline_preset)
 # knob: pass the parameter you want to change as a keyword and it builds only the
 # new parameter rows that differ, reusing the base preset's rows for every
 # untouched stage. Here we lower the MountainSort4 detection threshold (a common
-# tweak for low-amplitude units). The clone is then selectable by name like any
-# shipping preset; set `pipeline_preset` to it to use it below. (Registering a
-# name that already exists raises, so each cell is guarded to be safe to re-run.)
+# tweak for low-amplitude units). The clone is saved in the `PipelinePreset`
+# table, so it is selectable by name in any session and by anyone in the lab;
+# set `pipeline_preset` to it to use it below. Re-running the same call is a
+# no-op; reusing a name with different content raises.
 
 if "my_lab_ms4_lower_threshold" not in list_pipeline_presets():
     clone_pipeline_preset(
@@ -191,9 +192,8 @@ describe_pipeline_preset("my_lab_ms4_lower_threshold")
 # For a fully custom pipeline (a different sorter, or a stage combination no
 # shipping preset covers), `register_pipeline_preset(name, {...})` adds a preset
 # from the parameter-row names you choose (each must already exist;
-# `initialize_v2_defaults` seeded the rows below). The registration lives for
-# this session; to ship a durable recipe, add it to the preset catalog. The
-# mapping is the stages a run touches:
+# `initialize_v2_defaults` seeded the rows below). It is saved in
+# `PipelinePreset` like a clone. The mapping is the stages a run touches:
 
 if "my_lab_custom" not in list_pipeline_presets():
     register_pipeline_preset(

@@ -120,20 +120,6 @@ def test_describe_pipeline_presets_threshold_units_clusterless():
 
 
 @pytest.mark.unit
-def test_describe_pipeline_presets_no_db(monkeypatch):
-    """``describe_pipeline_presets`` issues no database query."""
-
-    def _boom(*args, **kwargs):
-        raise AssertionError(
-            "describe_pipeline_presets() issued a database query; it must be DB-free"
-        )
-
-    monkeypatch.setattr(dj.Connection, "query", _boom)
-    df = describe_pipeline_presets()
-    assert set(df["pipeline_preset"]) == set(list_pipeline_presets())
-
-
-@pytest.mark.unit
 def test_describe_pipeline_presets_matches_preset_objects():
     """Each row's static fields equal the backing ``_PipelinePreset`` attributes."""
     df = describe_pipeline_presets().set_index("pipeline_preset")
@@ -369,9 +355,9 @@ def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
 
 @pytest.mark.unit
 def test_register_pipeline_preset_rejects_duplicate():
-    """Re-registering an existing name raises rather than overwriting."""
+    """Re-registering an existing name with other content raises."""
     existing = next(iter(_PIPELINE_PRESETS))
-    with pytest.raises(ValueError, match="already registered"):
+    with pytest.raises(ValueError, match="different content"):
         register_pipeline_preset(existing, _custom_spec(), validate_rows=False)
 
 
@@ -462,6 +448,7 @@ def clone_env(dj_conn, monkeypatch):
     yield names
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import (
         PreprocessingWaveformParameters,
@@ -469,6 +456,7 @@ def clone_env(dj_conn, monkeypatch):
     )
 
     for table, col in (
+        (PipelinePreset, "pipeline_preset"),
         (PreprocessingWaveformParameters, "preprocessing_params_name"),
         (PreprocessingParameters, "preprocessing_params_name"),
         (ArtifactDetectionParameters, "artifact_detection_params_name"),
@@ -494,12 +482,16 @@ def test_clone_pipeline_preset_unknown_base_raises():
         )
 
 
-@pytest.mark.unit
-def test_clone_pipeline_preset_rejects_duplicate_new_name():
-    """A new_name already in the registry raises rather than overwriting."""
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_clone_pipeline_preset_rejects_duplicate_new_name(dj_conn, clone_env):
+    """A new_name used by another preset raises before any row insert."""
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
     existing = next(iter(_PIPELINE_PRESETS))
-    with pytest.raises(ValueError, match="already registered"):
+    with pytest.raises(ValueError, match="different content"):
         clone_pipeline_preset(_CLONE_BASE, existing, detect_threshold=4.0)
+    assert not SorterParameters & {"sorter_params_name": existing}
 
 
 @pytest.mark.unit
@@ -555,7 +547,7 @@ def test_clone_pipeline_preset_flat_sorter_override_round_trips(
     assert returned == new_name
     assert new_name in list_pipeline_presets()
 
-    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    clone = presets_mod._find_pipeline_preset(new_name)
     # Only the sorter row is forked; untouched stages reuse the base rows.
     assert clone.sorter_params_name == new_name
     assert clone.preprocessing_params_name == base.preprocessing_params_name
@@ -602,7 +594,7 @@ def test_clone_pipeline_preset_nested_dotted_override_round_trips(
     )
 
     base = presets_mod._PIPELINE_PRESETS[_CLONE_BASE]
-    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    clone = presets_mod._find_pipeline_preset(new_name)
     assert clone.preprocessing_params_name == new_name
     # The sorter row is untouched, so it is reused, not forked.
     assert clone.sorter_params_name == base.sorter_params_name
@@ -784,18 +776,11 @@ def test_clone_pipeline_preset_name_collision_different_content_raises(
 @pytest.mark.database
 @pytest.mark.db_unit
 def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
-    """Re-running a clone with identical overrides in a fresh process reuses
-    the existing rows.
-    """
-    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
-
+    """Re-running a clone with identical overrides reuses the saved rows."""
     new_name = "lab_idempotent_2026_06"
     clone_env.append(new_name)
 
     clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
-    # Simulate a fresh process: the DB rows persist but the registry does not.
-    presets_mod._PIPELINE_PRESETS.pop(new_name)
-
     # Identical re-run must succeed and reflect the same override.
     clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
     assert new_name in list_pipeline_presets()
@@ -806,6 +791,148 @@ def test_clone_pipeline_preset_idempotent_rerun(dj_conn, clone_env):
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     assert len(SorterParameters & {"sorter_params_name": new_name}) == 1
+
+
+# --------------------------------------------------------------------------- #
+# PipelinePreset: presets saved in the database
+# --------------------------------------------------------------------------- #
+
+
+def _fresh_session_registry(monkeypatch):
+    """Reset the in-memory registry to the code presets, as a new kernel has."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        pipeline_preset_specs,
+    )
+
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        {
+            name: presets_mod._PipelinePreset(**spec)
+            for name, spec in pipeline_preset_specs().items()
+        },
+    )
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_cloned_preset_is_found_in_a_new_session(
+    dj_conn, clone_env, monkeypatch
+):
+    """A clone is saved with its creator and is listed, described and
+    resolvable after the in-memory registry is reset."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    new_name = "lab_saved_clone_2026_11"
+    clone_env.append(new_name)
+    clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+
+    row = (PipelinePreset & {"pipeline_preset": new_name}).fetch1()
+    assert row["sorter_params_name"] == new_name
+    assert row["created_by"] == str(dj.config["database.user"])
+    assert row["created_at"] is not None
+
+    _fresh_session_registry(monkeypatch)
+    assert new_name not in presets_mod._PIPELINE_PRESETS
+    assert new_name in list_pipeline_presets()
+    assert new_name in set(describe_pipeline_presets()["pipeline_preset"])
+    detail = describe_pipeline_preset(new_name)
+    assert float(_stage_value(detail, "sorter", "detect_threshold")) == 4.0
+    found = presets_mod._find_pipeline_preset(new_name)
+    assert found.sorter_params_name == new_name
+
+    # The unchanged call is a no-op in the new session.
+    assert (
+        clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=4.0)
+        == new_name
+    )
+    assert len(PipelinePreset & {"pipeline_preset": new_name}) == 1
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_register_pipeline_preset_saves_and_reruns(dj_conn, clone_env):
+    """Registering saves a row; the same content again is a no-op and other
+    content under the name raises."""
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    name = "lab_registered_2026_11"
+    clone_env.append(name)
+    spec = {**_custom_spec(), "artifact_detection_params_name": None}
+    assert register_pipeline_preset(name, spec) == name
+    assert register_pipeline_preset(name, spec) == name
+
+    row = (PipelinePreset & {"pipeline_preset": name}).fetch1()
+    assert row["artifact_detection_params_name"] is None
+    assert row["created_by"] == str(dj.config["database.user"])
+
+    changed = {**spec, "notes": "different"}
+    with pytest.raises(ValueError, match="different content"):
+        register_pipeline_preset(name, changed)
+    assert (PipelinePreset & {"pipeline_preset": name}).fetch1("notes") == (
+        spec["notes"]
+    )
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_register_pipeline_preset_refuses_a_shipped_name(dj_conn, clone_env):
+    """A shipped preset name with other content raises and saves nothing."""
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    shipped = "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
+    before = (PipelinePreset & {"pipeline_preset": shipped}).fetch1()
+    with pytest.raises(ValueError, match="different content"):
+        register_pipeline_preset(shipped, _custom_spec())
+    assert (PipelinePreset & {"pipeline_preset": shipped}).fetch1() == before
+
+
+@pytest.mark.unit
+def test_register_pipeline_preset_rejects_a_long_name():
+    """A name longer than the 64-character column is refused up front."""
+    with pytest.raises(ValueError, match="at most 64 characters"):
+        register_pipeline_preset("x" * 65, _custom_spec(), validate_rows=False)
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_initialize_v2_defaults_saves_the_shipped_presets(dj_conn, clone_env):
+    """Every code preset is a PipelinePreset row created by "spyglass", and an
+    edited shipped row is reported as diverged."""
+    from spyglass.spikesorting.v2 import verify_v2_default_catalog
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    rows = {
+        row["pipeline_preset"]: row
+        for row in PipelinePreset.fetch(as_dict=True)
+    }
+    for name, preset in _PIPELINE_PRESETS.items():
+        sorter_key = {
+            "sorter": preset.sorter,
+            "sorter_params_name": preset.sorter_params_name,
+        }
+        if SorterParameters & sorter_key:
+            assert rows[name]["created_by"] == "spyglass"
+        else:  # sorter not installed here
+            assert name not in rows
+
+    shipped = "franklab_tetrode_hippocampus_30khz_ms4_2026_06"
+    key = {"pipeline_preset": shipped}
+    original = (PipelinePreset & key).fetch1("notes")
+    PipelinePreset.update1({**key, "notes": "edited"})
+    try:
+        stale = verify_v2_default_catalog(strict=False)
+        assert {
+            "table": "PipelinePreset",
+            "name": shipped,
+            "fields": ["notes"],
+        } in stale
+    finally:
+        PipelinePreset.update1({**key, "notes": original})
 
 
 # --------------------------------------------------------------------------- #
@@ -1235,7 +1362,7 @@ def test_clone_pipeline_preset_no_artifact_base(dj_conn, clone_env):
     ].model_copy(update={"artifact_detection_params_name": None})
     clone_pipeline_preset(base_name, new_name, detect_threshold=4.0)
 
-    clone = presets_mod._PIPELINE_PRESETS[new_name]
+    clone = presets_mod._find_pipeline_preset(new_name)
     assert clone.artifact_detection_params_name is None
     assert clone.sorter_params_name == new_name
 

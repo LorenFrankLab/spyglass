@@ -81,6 +81,7 @@ def test_service_module_imports_without_db_layer(modname):
             "spyglass.spikesorting.v2.figpack_curation",
             "spyglass.spikesorting.v2.metric_curation",
             "spyglass.spikesorting.v2.motion",
+            "spyglass.spikesorting.v2.pipeline_preset",
             "spyglass.spikesorting.v2.recompute",
             "spyglass.spikesorting.v2.review_profile",
             "spyglass.spikesorting.v2.session_group",

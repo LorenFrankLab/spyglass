@@ -25,7 +25,8 @@ def initialize_v2_defaults() -> None:
     ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
     ``AutoCurationRules``, ``MatcherParameters``, ``CurationReviewProfile``,
     and ``MotionCorrectionParameters`` (with the estimation and interpolation
-    recipes it names), then adds the v2 unit-selection policies. Idempotent.
+    recipes it names), saves the shipped presets in ``PipelinePreset``, then
+    adds the v2 unit-selection policies. Idempotent.
     Warns when a stored default row differs from the shipped content.
 
     Examples
@@ -39,6 +40,7 @@ def initialize_v2_defaults() -> None:
         QualityMetricParameters,
     )
     from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
     from spyglass.spikesorting.v2.sorting import (
@@ -56,6 +58,7 @@ def initialize_v2_defaults() -> None:
     MatcherParameters.insert_default()
     CurationReviewProfile.insert_default()
     MotionCorrectionParameters.insert_default()
+    PipelinePreset.insert_default()
     # Additive rows in the shared UnitSelectionParams table.
     from spyglass.spikesorting.v2.analysis_selection import (
         ensure_v2_unit_selection_policies,
@@ -106,6 +109,7 @@ _TABLE_MODULES = {
     "MotionEstimate": "motion",
     "MotionCorrectedRecordingSelection": "motion",
     "MotionCorrectedRecording": "motion",
+    "PipelinePreset": "pipeline_preset",
     "RecordingArtifactVersions": "recompute",
     "RecordingArtifactRecomputeSelection": "recompute",
     "RecordingArtifactRecompute": "recompute",
