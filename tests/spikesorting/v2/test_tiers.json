@@ -257,6 +257,9 @@
     "test_ci_shards.py": {
       "tier": "unit"
     },
+    "test_clusterless_timing.py": {
+      "tier": "unit"
+    },
     "test_clusterless_waveform_features.py": {
       "tier": "db_unit",
       "overrides": {
