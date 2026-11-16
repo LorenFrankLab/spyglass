@@ -191,12 +191,14 @@ def recording_input_hash(
     reference_mode,
     reference_electrode_id,
     interpolated_bad_channel_ids,
+    saved_intervals,
 ) -> str:
     """Content-address a recording's RESOLVED construction inputs.
 
-    Electrode membership, reference, and interpolated bad channels can change
-    outside the FK identity. The hash is stored on ``RecordingSelection`` so
-    ``make_fetch`` rejects drift. Id sets are order-independent.
+    Electrode membership, reference, interpolated bad channels and the saved
+    time intervals can change outside the FK identity. The hash is part of
+    ``recording_id`` and is stored on ``RecordingSelection`` so ``make_fetch``
+    rejects drift. Id sets are order-independent.
 
     Parameters
     ----------
@@ -209,6 +211,10 @@ def recording_input_hash(
     interpolated_bad_channel_ids : iterable
         The resolved interior bad-channel ids re-included on the ``interpolate``
         path; empty on ``remove`` / ``none``.
+    saved_intervals : array_like
+        The ``[start, end]`` seconds the recording is cut to, shape
+        ``(n_intervals, 2)``: the sort interval intersected with the raw valid
+        times after ``min_segment_length`` filtering. Hashed as exact floats.
 
     Returns
     -------
@@ -226,6 +232,9 @@ def recording_input_hash(
         "interpolated_bad_channel_ids": sorted(
             int(c) for c in interpolated_bad_channel_ids
         ),
+        "saved_intervals": [
+            [float(start), float(end)] for start, end in saved_intervals
+        ],
     }
     return sha256_json(payload)
 

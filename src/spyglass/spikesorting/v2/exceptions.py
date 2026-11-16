@@ -435,7 +435,8 @@ class RecordingInputDriftError(SpikeSortingV2Error, RuntimeError):
     """Raise when a recording's resolved construction inputs drifted post-select.
 
     ``recording_id`` includes ``recording_input_hash`` (electrodes, reference,
-    and on the ``interpolate`` path the interior bad channels).
+    on the ``interpolate`` path the interior bad channels, and the saved time
+    intervals).
     ``make_fetch`` raises when the live inputs no longer match. Re-run
     ``insert_selection`` to mint a new ``recording_id``, or restore the inputs.
     """

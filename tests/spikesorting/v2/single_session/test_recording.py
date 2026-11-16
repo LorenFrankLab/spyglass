@@ -1265,7 +1265,7 @@ def test_recording_selection_raises_on_duplicate_logical_identity(
     # Raw insert bypasses the helper. Both rows share the logical identity
     # (FK set + recording_input_hash).
     input_hash = resolve_recording_input_hash(
-        nwb_file_name, sort_group_id, "default"
+        nwb_file_name, sort_group_id, "default", "raw data valid times"
     )
     planted_ids = []
     RecordingSelection().insert1(

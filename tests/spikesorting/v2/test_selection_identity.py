@@ -301,6 +301,7 @@ def _rih(**over):
         reference_mode="none",
         reference_electrode_id=None,
         interpolated_bad_channel_ids=[],
+        saved_intervals=[[0.0, 10.0]],
     )
     base.update(over)
     return recording_input_hash(**base)
@@ -360,6 +361,22 @@ def test_recording_input_hash_numpy_ints_match_plain_ints():
     assert _rih(
         reference_mode="specific", reference_electrode_id=np.int64(3)
     ) == _rih(reference_mode="specific", reference_electrode_id=3)
+
+
+def test_recording_input_hash_sensitive_to_saved_intervals():
+    """Any change in the saved time cut changes the hash."""
+    base = _rih(saved_intervals=[[0.0, 10.0]])
+    assert base != _rih(saved_intervals=[[0.0, 10.5]])
+    assert base != _rih(saved_intervals=[[0.0, 5.0], [6.0, 10.0]])
+    assert base != _rih(saved_intervals=[])
+
+
+def test_recording_input_hash_saved_intervals_array_matches_list():
+    """A fetched float64 interval array hashes like the same plain floats."""
+    np = pytest.importorskip("numpy")
+    assert _rih(saved_intervals=np.array([[0.0, 10.0]])) == _rih(
+        saved_intervals=[[0, 10.0]]
+    )
 
 
 def _bypass_message(bypassed):
@@ -465,6 +482,7 @@ def test_recording_selection_writes_deterministic_pk(fresh_recording_identity):
         identity["nwb_file_name"],
         identity["sort_group_id"],
         identity["preprocessing_params_name"],
+        identity["interval_list_name"],
     )
     expected = deterministic_id(
         "recording", {**identity, "recording_input_hash": input_hash}
@@ -632,6 +650,7 @@ def test_recording_selection_rejects_single_nondeterministic_row(
         identity["nwb_file_name"],
         identity["sort_group_id"],
         identity["preprocessing_params_name"],
+        identity["interval_list_name"],
     )
     RecordingSelection.insert1(
         {
@@ -680,6 +699,68 @@ def test_make_fetch_rejects_input_hash_drift(fresh_recording_identity):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_changed_sort_interval_mints_a_new_recording(fresh_recording_identity):
+    """Changing a sort interval's times in place gives a new recording_id,
+    and the old selection's make_fetch rejects the drifted cut."""
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.spikesorting.v2._orchestration.reporting import (
+        audit_recording_input_hashes,
+    )
+    from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
+    identity = dict(fresh_recording_identity)
+    source = (
+        IntervalList
+        & {
+            "nwb_file_name": identity["nwb_file_name"],
+            "interval_list_name": identity["interval_list_name"],
+        }
+    ).fetch1()
+    interval = {
+        "nwb_file_name": identity["nwb_file_name"],
+        "interval_list_name": "v2_selection_identity_changed_interval",
+    }
+    start, end = float(source["valid_times"][0][0]), float(
+        source["valid_times"][-1][1]
+    )
+    (RecordingSelection & interval).delete_quick()
+    (IntervalList & interval).delete_quick()
+    IntervalList.insert1(
+        {**interval, "valid_times": np.array([[start, end]])},
+    )
+    identity["interval_list_name"] = interval["interval_list_name"]
+    try:
+        first = RecordingSelection.insert_selection(dict(identity))
+        assert RecordingSelection.insert_selection(dict(identity)) == first
+        # A lab edit of the interval in place (cautious_insert update path).
+        IntervalList.insert1(
+            {
+                **interval,
+                "valid_times": np.array([[start, start + (end - start) / 2]]),
+            },
+            update=True,
+        )
+        second = RecordingSelection.insert_selection(dict(identity))
+        assert second != first
+        with pytest.raises(RecordingInputDriftError, match="fingerprint"):
+            Recording().make_fetch(first)
+        stale = audit_recording_input_hashes(interval)
+        assert [entry["recording_id"] for entry in stale] == [
+            first["recording_id"]
+        ]
+    finally:
+        (RecordingSelection & interval).delete_quick()
+        (IntervalList & interval).delete_quick()
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_recording_input_hash_matches_make_fetch(populated_sorting):
     """The hash ``insert_selection`` stores equals the one ``make_fetch``
     re-derives for an unchanged recording."""
@@ -698,6 +779,7 @@ def test_recording_input_hash_matches_make_fetch(populated_sorting):
         row["nwb_file_name"],
         row["sort_group_id"],
         row["preprocessing_params_name"],
+        row["interval_list_name"],
     )
     assert live == stored
 

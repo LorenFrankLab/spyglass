@@ -673,6 +673,52 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
     return stale
 
 
+def audit_recording_input_hashes(restriction=None) -> list[dict]:
+    """List recording selections whose stored input hash no longer matches.
+
+    Read-only. A mismatched row cannot be reused: ``insert_selection`` mints a
+    new ``recording_id`` for the live inputs, and ``Recording.make_fetch``
+    raises ``RecordingInputDriftError`` for it.
+
+    Parameters
+    ----------
+    restriction : optional
+        DataJoint restriction on ``RecordingSelection``. ``None`` audits every
+        row.
+
+    Returns
+    -------
+    list[dict]
+        One ``{"recording_id", "stored_hash", "live_hash"}`` entry per
+        mismatched row; empty when every row matches.
+    """
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        resolve_recording_input_hash,
+    )
+
+    selections = RecordingSelection()
+    if restriction is not None:
+        selections = selections & restriction
+    stale = []
+    for row in selections.fetch(as_dict=True):
+        live = resolve_recording_input_hash(
+            row["nwb_file_name"],
+            row["sort_group_id"],
+            row["preprocessing_params_name"],
+            row["interval_list_name"],
+        )
+        if live != row["recording_input_hash"]:
+            stale.append(
+                {
+                    "recording_id": row["recording_id"],
+                    "stored_hash": row["recording_input_hash"],
+                    "live_hash": live,
+                }
+            )
+    return stale
+
+
 _UNIT_COLUMNS = [
     "sorting_id",
     "unit_id",

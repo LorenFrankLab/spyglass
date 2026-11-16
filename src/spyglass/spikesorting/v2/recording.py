@@ -743,12 +743,15 @@ def resolve_recording_input_hash(
     nwb_file_name: str,
     sort_group_id: int,
     preprocessing_params_name: str,
+    interval_list_name: str,
 ) -> str:
     """Resolve + content-address a recording's live construction inputs.
 
     Hashes the inputs ``Recording.make_fetch`` builds from: the sort group's
-    electrodes and reference, plus the interior bad-channel set on the
-    ``interpolate`` path. ``make_fetch`` recomputes it to detect drift.
+    electrodes and reference, the interior bad-channel set on the
+    ``interpolate`` path, and the saved time intervals (the sort interval
+    intersected with the raw valid times). ``make_fetch`` recomputes it to
+    detect drift.
 
     Parameters
     ----------
@@ -760,14 +763,25 @@ def resolve_recording_input_hash(
         Selects the ``PreprocessingParameters`` row whose
         ``bad_channel_handling`` decides whether the interpolate bad-channel set
         enters the content.
+    interval_list_name : str
+        The sort interval the recording is cut to.
 
     Returns
     -------
     str
         The 64-char sha256 hex digest of the resolved inputs.
+
+    Raises
+    ------
+    ValueError
+        If the sort interval or ``raw data valid times`` IntervalList is
+        missing.
     """
     return _recording_fetch.resolve_recording_inputs(
-        nwb_file_name, sort_group_id, preprocessing_params_name
+        nwb_file_name,
+        sort_group_id,
+        preprocessing_params_name,
+        interval_list_name,
     ).input_hash
 
 
@@ -794,8 +808,10 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         """Find-existing-or-insert; returns a single PK-only dict.
 
         ``recording_id`` is a deterministic UUID derived from the FK set
-        (Raw, SortGroupV2, IntervalList, PreprocessingParameters, LabTeam).
-        A concurrent insert of the same row returns the existing row.
+        (Raw, SortGroupV2, IntervalList, PreprocessingParameters, LabTeam)
+        and ``recording_input_hash``, so changed electrodes, reference, bad
+        channels or saved time intervals mint a new id. A concurrent insert
+        of the same row returns the existing row.
 
         Parameters
         ----------
@@ -812,7 +828,8 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         Raises
         ------
         ValueError
-            If ``key`` supplies a non-deterministic ``recording_id``.
+            If ``key`` supplies a non-deterministic ``recording_id``, or the
+            sort interval or ``raw data valid times`` IntervalList is missing.
         DuplicateSelectionError
             If an existing row for this identity has a non-deterministic
             ``recording_id`` (a raw ``insert`` bypass).
@@ -834,6 +851,7 @@ class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             identity["nwb_file_name"],
             identity["sort_group_id"],
             identity["preprocessing_params_name"],
+            identity["interval_list_name"],
         )
         plan = build_recording_selection_plan(
             key, recording_input_hash=input_hash

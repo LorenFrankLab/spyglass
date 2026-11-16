@@ -298,7 +298,10 @@ def expected_source_ids(
             "team_name": team_name,
         },
         recording_input_hash=resolve_recording_input_hash(
-            nwb_file_name, sort_group_id, bundle.preprocessing_params_name
+            nwb_file_name,
+            sort_group_id,
+            bundle.preprocessing_params_name,
+            interval_list_name,
         ),
     ).recording_id
     if bundle.artifact_detection_params_name is None:

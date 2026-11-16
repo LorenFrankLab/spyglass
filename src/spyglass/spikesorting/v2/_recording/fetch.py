@@ -23,6 +23,9 @@ from spyglass.spikesorting.v2._core.reference_resolution import (
     _validate_reference_fields,
 )
 
+from spyglass.spikesorting.v2._recording.restriction import (
+    intended_save_intervals,
+)
 from spyglass.spikesorting.v2._recording.types import RecordingFetched
 from spyglass.common.common_ephys import Raw
 from spyglass.common.common_interval import IntervalList
@@ -46,8 +49,15 @@ class ResolvedRecordingInputs(NamedTuple):
     bad_channel_ids : tuple
         Interior curated-bad electrode ids the ``interpolate`` path fills;
         empty for ``remove``.
+    sort_valid_times : numpy.ndarray
+        The sort interval's ``valid_times``, shape ``(n_intervals, 2)`` in
+        seconds.
+    raw_valid_times : numpy.ndarray
+        The session's ``raw data valid times``, shape ``(n_intervals, 2)`` in
+        seconds.
     input_hash : str
-        :func:`recording_input_hash` of the inputs above.
+        :func:`recording_input_hash` of the inputs above, including the saved
+        intervals they cut.
     """
 
     channel_ids: list
@@ -55,6 +65,8 @@ class ResolvedRecordingInputs(NamedTuple):
     reference_electrode_id: int | None
     preprocessing_params: PreprocessingParamsSchema
     bad_channel_ids: tuple
+    sort_valid_times: object
+    raw_valid_times: object
     input_hash: str
 
 
@@ -62,6 +74,7 @@ def resolve_recording_inputs(
     nwb_file_name: str,
     sort_group_id: int,
     preprocessing_params_name: str,
+    interval_list_name: str,
 ) -> ResolvedRecordingInputs:
     """Read a recording's live construction inputs and hash them.
 
@@ -77,12 +90,20 @@ def resolve_recording_inputs(
     preprocessing_params_name : str
         Selects the ``PreprocessingParameters`` row whose
         ``bad_channel_handling`` decides whether the interpolate bad-channel set
-        enters the content.
+        enters the content, and whose ``min_segment_length`` shapes the cut.
+    interval_list_name : str
+        The sort interval, intersected with the raw valid times.
 
     Returns
     -------
     ResolvedRecordingInputs
         The resolved inputs and their ``recording_input_hash``.
+
+    Raises
+    ------
+    ValueError
+        If the sort interval or the ``raw data valid times`` IntervalList is
+        missing for ``nwb_file_name``.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
@@ -116,19 +137,50 @@ def resolve_recording_inputs(
         bad_channel_ids = fetch_interior_bad_channel_ids(
             nwb_file_name, channel_ids
         )
+    sort_valid_times = _fetch_valid_times(nwb_file_name, interval_list_name)
+    raw_valid_times = _fetch_valid_times(nwb_file_name, "raw data valid times")
+    saved_intervals = intended_save_intervals(
+        sort_valid_times,
+        raw_valid_times,
+        preprocessing_params.min_segment_length,
+    )
     return ResolvedRecordingInputs(
         channel_ids=channel_ids,
         reference_mode=reference_mode,
         reference_electrode_id=reference_electrode_id,
         preprocessing_params=preprocessing_params,
         bad_channel_ids=bad_channel_ids,
+        sort_valid_times=sort_valid_times,
+        raw_valid_times=raw_valid_times,
         input_hash=recording_input_hash(
             electrode_ids=channel_ids,
             reference_mode=reference_mode,
             reference_electrode_id=reference_electrode_id,
             interpolated_bad_channel_ids=bad_channel_ids,
+            saved_intervals=saved_intervals,
         ),
     )
+
+
+def _fetch_valid_times(nwb_file_name: str, interval_list_name: str):
+    """Return one IntervalList's ``valid_times``, shape ``(n_intervals, 2)``.
+
+    Raises
+    ------
+    ValueError
+        If the IntervalList row does not exist.
+    """
+    rel = IntervalList & {
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_list_name,
+    }
+    if not rel:
+        raise ValueError(
+            f"IntervalList {interval_list_name!r} does not exist for "
+            f"{nwb_file_name!r}; a recording needs it to resolve its time "
+            "cut. Insert the interval list (or check its name) first."
+        )
+    return rel.fetch1("valid_times")
 
 
 def fetch_recording_inputs(key: dict) -> RecordingFetched:
@@ -160,7 +212,10 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     interval_list_name = sel["interval_list_name"]
 
     resolved = resolve_recording_inputs(
-        nwb_file_name, sort_group_id, sel["preprocessing_params_name"]
+        nwb_file_name,
+        sort_group_id,
+        sel["preprocessing_params_name"],
+        interval_list_name,
     )
     channel_ids = resolved.channel_ids
     if len(channel_ids) == 0:
@@ -175,20 +230,6 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
             "reference_electrode_id": resolved.reference_electrode_id,
         }
     )
-    sort_valid_times = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_list_name,
-        }
-    ).fetch1("valid_times")
-    raw_valid_times = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        }
-    ).fetch1("valid_times")
     # Compute reads the raw ElectricalSeries by this id, not by scanning
     # acquisition, so a multi-series NWB cannot feed a different source.
     raw_object_id = (Raw & {"nwb_file_name": nwb_file_name}).fetch1(
@@ -203,21 +244,21 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     if live_input_hash != stored_input_hash:
         raise RecordingInputDriftError(
             f"Recording {sel['recording_id']} was selected with input "
-            f"fingerprint {stored_input_hash} but the live sort-group "
-            f"inputs now hash to {live_input_hash}: the electrode "
-            "membership, reference, or interpolate bad-channel set "
-            "changed after insert_selection. Re-run insert_selection "
-            "for the current inputs (it mints a new recording_id for "
-            "the changed set), or restore the sort group's membership / "
-            "bad-channel flags."
+            f"fingerprint {stored_input_hash} but the live inputs now hash "
+            f"to {live_input_hash}: the electrode membership, reference, "
+            "interpolate bad-channel set, or the sort interval / raw valid "
+            "times it is cut to changed after insert_selection. Re-run "
+            "insert_selection for the current inputs (it mints a new "
+            "recording_id for the changed set), or restore the sort group "
+            "or IntervalList."
         )
     return RecordingFetched(
         sel=sel,
         channel_ids=channel_ids,
         reference_mode=resolved.reference_mode,
         reference_electrode_id=resolved.reference_electrode_id,
-        sort_valid_times=sort_valid_times,
-        raw_valid_times=raw_valid_times,
+        sort_valid_times=resolved.sort_valid_times,
+        raw_valid_times=resolved.raw_valid_times,
         preprocessing_params=resolved.preprocessing_params,
         probe_types=probe_types,
         electrode_group_names=electrode_group_names,

@@ -257,6 +257,7 @@ def plan_concat_selection(
             rec_sel_key["nwb_file_name"],
             rec_sel_key["sort_group_id"],
             preprocessing_params_name,
+            rec_sel_key["interval_list_name"],
         )
         rec_sel = RecordingSelection & {
             **rec_sel_key,

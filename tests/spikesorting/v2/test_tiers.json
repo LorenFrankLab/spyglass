@@ -897,6 +897,7 @@
       "tier": "unit",
       "overrides": {
         "test_artifact_detection_selection_shared_group_writes_deterministic_pk": "pipeline",
+        "test_changed_sort_interval_mints_a_new_recording": "pipeline",
         "test_direct_master_insert_rejected_all_masters": "db_unit",
         "test_direct_master_insert_rejected_without_flag": "pipeline",
         "test_factory_master_direct_insert_rejected": "db_unit",
