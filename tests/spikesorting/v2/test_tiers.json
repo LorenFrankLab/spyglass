@@ -718,6 +718,7 @@
         "test_register_pipeline_preset_catches_missing_lookup_row": "db_unit",
         "test_register_pipeline_preset_catches_missing_metric_row": "db_unit",
         "test_run_v2_concat_pipeline_accepts_single_session_preset": "pipeline",
+        "test_run_entry_points_forward_every_option_to_its_stage": "db_unit",
         "test_run_v2_unit_match_unknown_matcher_raises": "db_unit"
       }
     },
@@ -1241,6 +1242,7 @@
     "tests/spikesorting/v2/test_pipeline_observability.py:first_run": "pipeline",
     "tests/spikesorting/v2/test_pipeline_observability.py:obs_session": "db_unit",
     "tests/spikesorting/v2/test_pipeline_presets.py:clone_env": "db_unit",
+    "tests/spikesorting/v2/test_pipeline_presets.py:run_forwarding_spies": "db_unit",
     "tests/spikesorting/v2/test_pipeline_session.py:session_inputs": "db_unit",
     "tests/spikesorting/v2/test_pipeline_session.py:session_run": "pipeline",
     "tests/spikesorting/v2/test_preflight.py:preflight_inputs": "db_unit",

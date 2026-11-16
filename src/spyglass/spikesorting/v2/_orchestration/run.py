@@ -19,6 +19,7 @@ from spyglass.spikesorting.v2._orchestration.motion import (
     _run_motion_estimate,
 )
 from spyglass.spikesorting.v2._orchestration.source import (
+    _RunRequest,
     _build_run_source,
     _run_preflight,
     _validate_run_request,
@@ -203,13 +204,16 @@ def run_v2_pipeline(
     datajoint.errors.IntegrityError
         If an upstream row is missing and ``preflight=False``.
     """
-    return _run_pipeline(
+    # A bad request fails before any schema activates.
+    request = _validate_run_request(
         "run_v2_pipeline",
         is_concat=False,
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
+        source_inputs={
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "team_name": team_name,
+        },
         pipeline_preset=pipeline_preset,
         curation_description=curation_description,
         require_units=require_units,
@@ -220,6 +224,7 @@ def run_v2_pipeline(
         motion_correction_params_name=motion_correction_params_name,
         motion_estimate_id=motion_estimate_id,
     )
+    return _run_pipeline(request)
 
 
 def run_v2_concat_pipeline(
@@ -273,11 +278,14 @@ motion_mode, motion_correction_params_name
 ValueError
         As in :func:`run_v2_pipeline`.
     """
-    return _run_pipeline(
+    # A bad request fails before any schema activates.
+    request = _validate_run_request(
         "run_v2_concat_pipeline",
         is_concat=True,
-        concat_session_group_owner=session_group_owner,
-        concat_session_group_name=session_group_name,
+        source_inputs={
+            "concat_session_group_owner": session_group_owner,
+            "concat_session_group_name": session_group_name,
+        },
         pipeline_preset=pipeline_preset,
         curation_description=curation_description,
         require_units=require_units,
@@ -288,45 +296,16 @@ ValueError
         motion_correction_params_name=motion_correction_params_name,
         motion_estimate_id=motion_estimate_id,
     )
+    return _run_pipeline(request)
 
 
-def _run_pipeline(
-    caller: str,
-    *,
-    is_concat: bool,
-    nwb_file_name: "str | None" = None,
-    sort_group_id: "int | None" = None,
-    interval_list_name: "str | None" = None,
-    team_name: "str | None" = None,
-    concat_session_group_owner: "str | None" = None,
-    concat_session_group_name: "str | None" = None,
-    pipeline_preset: str,
-    curation_description: str,
-    require_units: bool,
-    auto_curate: bool,
-    preflight: bool,
-    manual_excluded_times,
-    motion_mode: MotionMode,
-    motion_correction_params_name: "str | None",
-    motion_estimate_id: "uuid.UUID | str | None",
-) -> "RunResult":
+def _run_pipeline(request: _RunRequest) -> "RunResult":
     """Shared body of ``run_v2_pipeline`` / ``run_v2_concat_pipeline``."""
-    # A bad request fails before any schema activates.
-    bundle, manual_excluded_times, source_inputs = _validate_run_request(
-        caller,
-        is_concat=is_concat,
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
-        concat_session_group_owner=concat_session_group_owner,
-        concat_session_group_name=concat_session_group_name,
-        pipeline_preset=pipeline_preset,
-        motion_mode=motion_mode,
-        motion_correction_params_name=motion_correction_params_name,
-        manual_excluded_times=manual_excluded_times,
-        motion_estimate_id=motion_estimate_id,
-    )
+    bundle = request.bundle
+    is_concat = request.is_concat
+    source_inputs = request.source_inputs
+    pipeline_preset = request.pipeline_preset
+    motion_mode = request.motion_mode
 
     # A schema that cannot activate should fail before any compute.
     for schema_module in (
@@ -338,26 +317,15 @@ def _run_pipeline(
         importlib.import_module(schema_module)
 
     preflight_warnings: list[str] = []
-    if preflight:
-        preflight_warnings = _run_preflight(
-            caller,
-            is_concat=is_concat,
-            source_inputs=source_inputs,
-            bundle=bundle,
-            pipeline_preset=pipeline_preset,
-            auto_curate=auto_curate,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-            motion_estimate_id=motion_estimate_id,
-        )
+    if request.preflight:
+        preflight_warnings = _run_preflight(request)
 
     run_summary: dict[str, Any] = {
         "pipeline_preset": pipeline_preset,
         "motion_mode": motion_mode,
-        "motion_correction_params_name": motion_correction_params_name,
+        "motion_correction_params_name": request.motion_correction_params_name,
         "motion_estimate_id": None,
-        "motion_estimate_supplied": motion_estimate_id is not None,
+        "motion_estimate_supplied": request.motion_estimate_id is not None,
         "motion_corrected_recording_id": None,
         "motion_estimation_preset": None,
         "motion_removed_channel_ids": None,
@@ -367,7 +335,7 @@ def _run_pipeline(
     motion_recipe = (
         None
         if motion_mode == "off"
-        else resolve_motion_recipe(motion_correction_params_name)
+        else resolve_motion_recipe(request.motion_correction_params_name)
     )
     # Resolved up front so a reused sort still reports its configuration.
     run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
@@ -380,24 +348,23 @@ def _run_pipeline(
         bundle,
         _run_sort_group_keys(
             is_concat,
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            concat_session_group_owner=concat_session_group_owner,
-            concat_session_group_name=concat_session_group_name,
+            nwb_file_name=source_inputs.get("nwb_file_name"),
+            sort_group_id=source_inputs.get("sort_group_id"),
+            concat_session_group_owner=source_inputs.get(
+                "concat_session_group_owner"
+            ),
+            concat_session_group_name=source_inputs.get(
+                "concat_session_group_name"
+            ),
         ),
         run_summary["sorter_config"],
-        manual_excluded_times=manual_excluded_times,
+        manual_excluded_times=request.manual_excluded_times,
         concat=is_concat,
         motion_mode=motion_mode,
         motion_recipe=motion_recipe,
     )
     source = _build_run_source(
-        is_concat=is_concat,
-        source_inputs=source_inputs,
-        bundle=bundle,
-        manual_excluded_times=manual_excluded_times,
-        run_summary=run_summary,
-        stage_seconds=stage_seconds,
+        request, run_summary=run_summary, stage_seconds=stage_seconds
     )
     # Only ``"apply"`` changes what the sort reads.
     corrected: dict = {}
@@ -408,7 +375,7 @@ def _run_pipeline(
             run_summary,
             stage_seconds,
             warnings_list,
-            motion_estimate_id=motion_estimate_id,
+            motion_estimate_id=request.motion_estimate_id,
         )
         if motion_mode == "apply":
             corrected = _run_motion_correction(
@@ -418,7 +385,7 @@ def _run_pipeline(
         source.selection_fields,
         corrected,
         bundle,
-        require_units=require_units,
+        require_units=request.require_units,
         run_summary=run_summary,
         stage_seconds=stage_seconds,
         warnings_list=warnings_list,
@@ -430,7 +397,7 @@ def _run_pipeline(
 
     curation_key = _run_root_curation_stage(
         sorting_key,
-        curation_description=curation_description,
+        curation_description=request.curation_description,
         pipeline_preset=pipeline_preset,
         is_concat=is_concat,
         run_summary=run_summary,
@@ -442,7 +409,7 @@ def _run_pipeline(
     run_summary["auto_labeled_merge_id"] = None
     run_summary["auto_labeled_curation_uuid"] = None
 
-    if auto_curate:
+    if request.auto_curate:
         _run_auto_curation_stage(
             sorting_key,
             curation_key,

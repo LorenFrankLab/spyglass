@@ -132,22 +132,27 @@ def run_v2_pipeline_session(
             preflight_warnings_by_group=preflight_warnings_by_group,
         )
 
+    # Every group runs the same request; preflight already ran above.
+    run_kwargs = {
+        "nwb_file_name": nwb_file_name,
+        "interval_list_name": interval_list_name,
+        "team_name": team_name,
+        "pipeline_preset": pipeline_preset,
+        "curation_description": curation_description,
+        "require_units": require_units,
+        "auto_curate": auto_curate,
+        "preflight": False,
+        "manual_excluded_times": manual_excluded_times,
+        "motion_mode": motion_mode,
+        "motion_correction_params_name": motion_correction_params_name,
+    }
     for sort_group_id in targets:
         if sort_group_id in failed_preflight_ids:
             continue
         results.append(
             _run_session_group(
                 sort_group_id,
-                nwb_file_name=nwb_file_name,
-                interval_list_name=interval_list_name,
-                team_name=team_name,
-                pipeline_preset=pipeline_preset,
-                curation_description=curation_description,
-                require_units=require_units,
-                auto_curate=auto_curate,
-                manual_excluded_times=manual_excluded_times,
-                motion_mode=motion_mode,
-                motion_correction_params_name=motion_correction_params_name,
+                run_kwargs=run_kwargs,
                 continue_on_error=continue_on_error,
                 preflight_warnings_by_group=preflight_warnings_by_group,
             )
@@ -249,23 +254,15 @@ def _run_session_preflight(
 def _run_session_group(
     sort_group_id: int,
     *,
-    nwb_file_name: str,
-    interval_list_name: str,
-    team_name: str,
-    pipeline_preset: str,
-    curation_description: str,
-    require_units: bool,
-    auto_curate: bool,
-    manual_excluded_times,
-    motion_mode,
-    motion_correction_params_name: "str | None",
+    run_kwargs: dict,
     continue_on_error: bool,
     preflight_warnings_by_group: dict[int, list[str]],
 ) -> RunV2PipelineSessionResult:
     """Run one sort group of a session batch; return its result entry.
 
-    The group runs :func:`run_v2_pipeline` with ``preflight=False``; its
-    preflight advisories are folded into the entry either way.
+    The group runs ``run_v2_pipeline(sort_group_id=..., **run_kwargs)``, with
+    ``preflight=False`` in ``run_kwargs``; its preflight advisories are
+    folded into the entry either way.
 
     Raises
     ------
@@ -274,20 +271,7 @@ def _run_session_group(
         True they become an ``outcome="failed"`` entry.
     """
     try:
-        summary = run_v2_pipeline(
-            nwb_file_name=nwb_file_name,
-            sort_group_id=sort_group_id,
-            interval_list_name=interval_list_name,
-            team_name=team_name,
-            pipeline_preset=pipeline_preset,
-            curation_description=curation_description,
-            require_units=require_units,
-            auto_curate=auto_curate,
-            preflight=False,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-        )
+        summary = run_v2_pipeline(sort_group_id=sort_group_id, **run_kwargs)
     except (
         PipelineStageError,
         PreflightError,
@@ -301,7 +285,7 @@ def _run_session_group(
         )
         return RunV2PipelineSessionFailed(
             sort_group_id=sort_group_id,
-            pipeline_preset=pipeline_preset,
+            pipeline_preset=run_kwargs["pipeline_preset"],
             outcome="failed",
             error_type=type(exc).__name__,
             error=str(exc),

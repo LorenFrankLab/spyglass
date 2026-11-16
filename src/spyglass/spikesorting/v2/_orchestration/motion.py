@@ -298,10 +298,12 @@ def estimate_motion(
     return _estimate_motion(
         "estimate_motion",
         is_concat=False,
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
+        source_inputs={
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "team_name": team_name,
+        },
         motion_correction_params_name=motion_correction_params_name,
         pipeline_preset=pipeline_preset,
         preflight=preflight,
@@ -347,8 +349,10 @@ def estimate_concat_motion(
     return _estimate_motion(
         "estimate_concat_motion",
         is_concat=True,
-        concat_session_group_owner=session_group_owner,
-        concat_session_group_name=session_group_name,
+        source_inputs={
+            "concat_session_group_owner": session_group_owner,
+            "concat_session_group_name": session_group_name,
+        },
         motion_correction_params_name=motion_correction_params_name,
         pipeline_preset=pipeline_preset,
         preflight=preflight,
@@ -360,46 +364,31 @@ def _estimate_motion(
     caller: str,
     *,
     is_concat: bool,
-    nwb_file_name: "str | None" = None,
-    sort_group_id: "int | None" = None,
-    interval_list_name: "str | None" = None,
-    team_name: "str | None" = None,
-    concat_session_group_owner: "str | None" = None,
-    concat_session_group_name: "str | None" = None,
+    source_inputs: dict,
     motion_correction_params_name: str,
     pipeline_preset: str,
     preflight: bool,
     manual_excluded_times,
 ) -> "EstimateMotionReceipt":
     """Shared body of ``estimate_motion`` / ``estimate_concat_motion``."""
-    bundle, manual_excluded_times, source_inputs = _validate_run_request(
+    # No sort or curation runs, so their options are inert.
+    request = _validate_run_request(
         caller,
         is_concat=is_concat,
-        nwb_file_name=nwb_file_name,
-        sort_group_id=sort_group_id,
-        interval_list_name=interval_list_name,
-        team_name=team_name,
-        concat_session_group_owner=concat_session_group_owner,
-        concat_session_group_name=concat_session_group_name,
+        source_inputs=source_inputs,
         pipeline_preset=pipeline_preset,
+        curation_description="",
+        require_units=False,
+        auto_curate=False,
+        preflight=preflight,
+        manual_excluded_times=manual_excluded_times,
         motion_mode="estimate",
         motion_correction_params_name=motion_correction_params_name,
-        manual_excluded_times=manual_excluded_times,
+        motion_estimate_id=None,
     )
     warnings_list: list[str] = []
-    if preflight:
-        warnings_list = _run_preflight(
-            caller,
-            is_concat=is_concat,
-            source_inputs=source_inputs,
-            bundle=bundle,
-            pipeline_preset=pipeline_preset,
-            auto_curate=False,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode="estimate",
-            motion_correction_params_name=motion_correction_params_name,
-            sort_checks=False,
-        )
+    if request.preflight:
+        warnings_list = _run_preflight(request, sort_checks=False)
     from spyglass.spikesorting.v2.motion import MotionEstimate
 
     stage_seconds: dict[str, float] = {}
@@ -414,12 +403,7 @@ def _estimate_motion(
     }
     motion_recipe = resolve_motion_recipe(motion_correction_params_name)
     source = _build_run_source(
-        is_concat=is_concat,
-        source_inputs=source_inputs,
-        bundle=bundle,
-        manual_excluded_times=manual_excluded_times,
-        run_summary=run_summary,
-        stage_seconds=stage_seconds,
+        request, run_summary=run_summary, stage_seconds=stage_seconds
     )
     estimate_key = _run_motion_estimate(
         source.selection_fields,

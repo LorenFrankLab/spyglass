@@ -1111,6 +1111,178 @@ def test_single_and_concat_entry_points_share_their_options(single, concat):
 
 
 @pytest.mark.unit
+def test_run_options_typeddict_matches_entry_point_options():
+    """``RunV2PipelineOptions`` names exactly the run entry points' options."""
+    import inspect
+
+    from spyglass.spikesorting.v2 import pipeline
+
+    options = [
+        p.name
+        for p in inspect.signature(pipeline.run_v2_pipeline).parameters.values()
+        if p.kind is p.KEYWORD_ONLY
+    ]
+    assert set(pipeline.RunV2PipelineOptions.__annotations__) == set(options)
+
+
+@pytest.mark.unit
+def test_run_request_carries_every_run_option():
+    """The validated request below the entry points holds every run option."""
+    import dataclasses
+
+    from spyglass.spikesorting.v2 import pipeline
+    from spyglass.spikesorting.v2._orchestration.source import _RunRequest
+
+    fields = {field.name for field in dataclasses.fields(_RunRequest)}
+    assert set(pipeline.RunV2PipelineOptions.__annotations__) <= fields
+
+
+_FORWARDED_ESTIMATE_ID = "0a3f9e9e-7d55-4a4e-9d55-0a3f9e9e7d55"
+
+
+@pytest.fixture
+def run_forwarding_spies(dj_conn, monkeypatch):
+    """Replace every run stage with a spy that records what reached it."""
+    from spyglass.spikesorting.v2._orchestration import run as run_mod
+    from spyglass.spikesorting.v2._orchestration import source as source_mod
+
+    seen: dict = {}
+
+    class _Report:
+        ok = True
+        errors: list = []
+        warnings: list = []
+
+    def _preflight(*args, **kwargs):
+        seen["preflight"] = (args, kwargs)
+        return _Report()
+
+    def _concat_preflight(*args, **kwargs):
+        seen["preflight"] = (args, kwargs)
+        return []
+
+    def _stage(name, result):
+        def spy(*args, **kwargs):
+            seen[name] = (args, kwargs)
+            return result
+
+        return spy
+
+    monkeypatch.setattr(source_mod, "preflight_v2_pipeline", _preflight)
+    monkeypatch.setattr(
+        source_mod, "assert_concat_preflight", _concat_preflight
+    )
+    monkeypatch.setattr(run_mod, "resolve_motion_recipe", _stage("recipe", {}))
+    monkeypatch.setattr(run_mod, "resolve_preset_sort_config", lambda b: {})
+    monkeypatch.setattr(
+        run_mod, "describe_scientific_setup", _stage("scientific", {})
+    )
+    monkeypatch.setattr(
+        run_mod,
+        "_build_run_source",
+        _stage(
+            "source",
+            source_mod._RunSource({"recording_id": "r"}, {"concat": "k"}),
+        ),
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_motion_estimate", _stage("motion_estimate", {"e": 1})
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_motion_correction", _stage("motion_correction", {})
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_sorting_stage", _stage("sorting", ({"s": 1}, 2))
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_root_curation_stage", _stage("root", {"c": 1})
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_auto_curation_stage", _stage("auto", None)
+    )
+    monkeypatch.setattr(
+        run_mod, "_run_member_curation_stage", _stage("members", None)
+    )
+    return seen
+
+
+@pytest.mark.parametrize("concat", [False, True])
+def test_run_entry_points_forward_every_option_to_its_stage(
+    run_forwarding_spies, concat
+):
+    """Each non-default run option reaches the stage that consumes it."""
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
+
+    options = dict(
+        pipeline_preset="franklab_clusterless_2026_11",
+        curation_description="forwarded description",
+        require_units=True,
+        auto_curate=True,
+        preflight=True,
+        manual_excluded_times=({0: [[1.0, 2.0]]} if concat else [[1.0, 2.0]]),
+        motion_mode="apply",
+        motion_correction_params_name="forwarded_motion_recipe",
+        motion_estimate_id=_FORWARDED_ESTIMATE_ID,
+    )
+    if concat:
+        result = run_v2_concat_pipeline("owner", "group", **options)
+    else:
+        result = run_v2_pipeline("s.nwb", 3, "interval", "team", **options)
+    seen = run_forwarding_spies
+
+    preflight_args, preflight_kwargs = seen["preflight"]
+    if concat:
+        assert preflight_args[:2] == ("owner", "group")
+        assert preflight_args[2].sorter == "clusterless_thresholder"
+        assert preflight_kwargs["manual_excluded_times"] == {0: [[1.0, 2.0]]}
+        assert preflight_kwargs["caller"] == "run_v2_concat_pipeline"
+    else:
+        assert {
+            key: preflight_kwargs[key]
+            for key in (
+                "nwb_file_name",
+                "sort_group_id",
+                "interval_list_name",
+                "team_name",
+                "pipeline_preset",
+            )
+        } == {
+            "nwb_file_name": "s.nwb",
+            "sort_group_id": 3,
+            "interval_list_name": "interval",
+            "team_name": "team",
+            "pipeline_preset": "franklab_clusterless_2026_11",
+        }
+        assert preflight_kwargs["manual_excluded_times"] == [[1.0, 2.0]]
+    assert preflight_kwargs["auto_curate"] is True
+    assert preflight_kwargs["motion_mode"] == "apply"
+    assert (
+        preflight_kwargs["motion_correction_params_name"]
+        == "forwarded_motion_recipe"
+    )
+    assert preflight_kwargs["motion_estimate_id"] == _FORWARDED_ESTIMATE_ID
+
+    assert seen["recipe"][0] == ("forwarded_motion_recipe",)
+    assert (
+        seen["motion_estimate"][1]["motion_estimate_id"]
+        == _FORWARDED_ESTIMATE_ID
+    )
+    assert "motion_correction" in seen
+    assert seen["sorting"][1]["require_units"] is True
+    root_kwargs = seen["root"][1]
+    assert root_kwargs["curation_description"] == "forwarded description"
+    assert root_kwargs["pipeline_preset"] == "franklab_clusterless_2026_11"
+    assert root_kwargs["is_concat"] is concat
+    assert seen["auto"][1]["pipeline_preset"] == "franklab_clusterless_2026_11"
+    assert ("members" in seen) is concat
+    assert result["pipeline_preset"] == "franklab_clusterless_2026_11"
+    assert result["motion_estimate_supplied"] is True
+
+
+@pytest.mark.unit
 def test_run_v2_pipeline_rejects_a_none_source_input():
     """A source field passed as ``None`` fails DB-free, naming the called
     entry point's own fields, even when every one of them is ``None``."""

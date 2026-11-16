@@ -4,6 +4,9 @@ Schema tables are imported only when their stage is requested."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, NamedTuple
 
 from spyglass.spikesorting.v2._orchestration.preflight import (
@@ -19,6 +22,7 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _populate_once,
     _run_stage,
 )
+from spyglass.spikesorting.v2._orchestration.types import MotionMode
 from spyglass.spikesorting.v2._artifacts.manual import (
     artifact_recipe_with_manual_exclusions,
     resolve_manual_exclusions,
@@ -33,22 +37,70 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.utils import logger
 
 
+@dataclass(frozen=True)
+class _RunRequest:
+    """A validated run request, read by every step below the entry points.
+
+    Built only by :func:`_validate_run_request`, the one place the run options
+    are named, so a step cannot fall back to an option's default.
+
+    Attributes
+    ----------
+    caller : str
+        The public entry point, named in errors and logged advisories.
+    is_concat : bool
+        True for a concat entry point.
+    source_inputs : Mapping[str, Any]
+        Read-only source fields: ``nwb_file_name``, ``sort_group_id``,
+        ``interval_list_name`` and ``team_name``, or
+        ``concat_session_group_owner`` and ``concat_session_group_name``.
+    pipeline_preset : str
+        The preset name.
+    bundle : _PipelinePreset
+        The preset, with a ``"none"`` artifact recipe when manual exclusions
+        need a detection output and the preset scans for none.
+    manual_excluded_times : list or dict
+        The normalized manual exclusions (a member-index mapping for concat).
+    curation_description : str
+    require_units : bool
+    auto_curate : bool
+    preflight : bool
+    motion_mode : MotionMode
+    motion_correction_params_name : str or None
+    motion_estimate_id : uuid.UUID, str or None
+        The caller's options, unchanged.
+    """
+
+    caller: str
+    is_concat: bool
+    source_inputs: Mapping[str, Any]
+    pipeline_preset: str
+    bundle: Any
+    manual_excluded_times: Any
+    curation_description: str
+    require_units: bool
+    auto_curate: bool
+    preflight: bool
+    motion_mode: MotionMode
+    motion_correction_params_name: "str | None"
+    motion_estimate_id: Any
+
+
 def _validate_run_request(
     caller: str,
     *,
     is_concat: bool,
-    nwb_file_name,
-    sort_group_id,
-    interval_list_name,
-    team_name,
-    concat_session_group_owner,
-    concat_session_group_name,
+    source_inputs: dict,
     pipeline_preset: str,
-    motion_mode,
-    motion_correction_params_name,
+    curation_description: str,
+    require_units: bool,
+    auto_curate: bool,
+    preflight: bool,
     manual_excluded_times,
-    motion_estimate_id=None,
-) -> tuple[Any, Any, dict]:
+    motion_mode: MotionMode,
+    motion_correction_params_name: "str | None",
+    motion_estimate_id,
+) -> _RunRequest:
     """Validate a run request before any stage runs.
 
     Checks the source inputs, preset name and motion request, and folds
@@ -63,31 +115,23 @@ def _validate_run_request(
     is_concat : bool
         True when ``caller`` is a concat entry point, which supplies the
         concat inputs instead of the single-session ones.
-    nwb_file_name, sort_group_id, interval_list_name, team_name
-        The single-session inputs (``None`` in concat mode).
-    concat_session_group_owner, concat_session_group_name
-        The concat inputs (``None`` in single-session mode).
+    source_inputs : dict
+        ``nwb_file_name``, ``sort_group_id``, ``interval_list_name`` and
+        ``team_name``, or ``concat_session_group_owner`` and
+        ``concat_session_group_name``; any may be ``None`` (rejected here).
     pipeline_preset : str
         A pipeline-preset name.
-    motion_mode, motion_correction_params_name
-        The motion request (see :func:`motion_request_problem`).
+    curation_description, require_units, auto_curate, preflight
+        The caller's run options, carried unchanged.
     manual_excluded_times
         The caller's manual exclusions (intervals, or a member-index mapping
         for concat).
-    motion_estimate_id
-        A saved estimate to apply (see :func:`motion_request_problem`).
+    motion_mode, motion_correction_params_name, motion_estimate_id
+        The motion request (see :func:`motion_request_problem`).
 
     Returns
     -------
-    bundle : _PipelinePreset
-        The preset, with a ``"none"`` artifact recipe when manual exclusions
-        need a detection output and the preset scans for none.
-    manual_excluded_times : list or dict
-        The normalized manual exclusions.
-    source_inputs : dict
-        The mode's source fields: ``nwb_file_name``, ``sort_group_id``,
-        ``interval_list_name`` and ``team_name``, or
-        ``concat_session_group_owner`` and ``concat_session_group_name``.
+    _RunRequest
 
     Raises
     ------
@@ -95,17 +139,6 @@ def _validate_run_request(
         On a missing source input, an unknown preset, or a contradictory
         motion request.
     """
-    single_named = {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": sort_group_id,
-        "interval_list_name": interval_list_name,
-        "team_name": team_name,
-    }
-    concat_named = {
-        "concat_session_group_owner": concat_session_group_owner,
-        "concat_session_group_name": concat_session_group_name,
-    }
-    source_inputs = concat_named if is_concat else single_named
     missing = [
         name.removeprefix("concat_")
         for name, value in source_inputs.items()
@@ -141,43 +174,36 @@ def _validate_run_request(
     bundle = artifact_recipe_with_manual_exclusions(
         preset, manual_excluded_times
     )
-    return bundle, manual_excluded_times, source_inputs
+    return _RunRequest(
+        caller=caller,
+        is_concat=is_concat,
+        source_inputs=MappingProxyType(dict(source_inputs)),
+        pipeline_preset=pipeline_preset,
+        bundle=bundle,
+        manual_excluded_times=manual_excluded_times,
+        curation_description=curation_description,
+        require_units=require_units,
+        auto_curate=auto_curate,
+        preflight=preflight,
+        motion_mode=motion_mode,
+        motion_correction_params_name=motion_correction_params_name,
+        motion_estimate_id=motion_estimate_id,
+    )
 
 
 def _run_preflight(
-    caller: str,
-    *,
-    is_concat: bool,
-    source_inputs: dict,
-    bundle,
-    pipeline_preset: str,
-    auto_curate: bool,
-    manual_excluded_times,
-    motion_mode,
-    motion_correction_params_name,
-    motion_estimate_id=None,
-    sort_checks: bool = True,
+    request: _RunRequest, *, sort_checks: bool = True
 ) -> list[str]:
     """Run the mode's read-only preflight; return its advisories.
 
     :func:`preflight_v2_pipeline` for single-session,
-    :func:`assert_concat_preflight` for concat.
+    :func:`assert_concat_preflight` for concat. Each logged advisory and
+    each concat preflight error names ``request.caller``.
 
     Parameters
     ----------
-    caller : str
-        The public entry point, prefixed to each logged advisory and each
-        concat preflight error.
-    is_concat : bool
-        The input mode.
-    source_inputs : dict
-        The mode's source fields: ``nwb_file_name``, ``sort_group_id``,
-        ``interval_list_name`` and ``team_name``, or
-        ``concat_session_group_owner`` and ``concat_session_group_name``.
-    bundle, pipeline_preset, auto_curate, manual_excluded_times
-        As validated by :func:`_validate_run_request`.
-    motion_mode, motion_correction_params_name, motion_estimate_id
-        The motion request.
+    request : _RunRequest
+        The validated request.
     sort_checks : bool
         False skips the checks only a sort needs (see
         :func:`preflight_v2_pipeline`).
@@ -192,33 +218,33 @@ def _run_preflight(
     PreflightError
         If a prerequisite is missing.
     """
-    if not is_concat:
+    if not request.is_concat:
         report = preflight_v2_pipeline(
-            **source_inputs,
-            pipeline_preset=pipeline_preset,
-            auto_curate=auto_curate,
-            manual_excluded_times=manual_excluded_times,
-            motion_mode=motion_mode,
-            motion_correction_params_name=motion_correction_params_name,
-            motion_estimate_id=motion_estimate_id,
+            **request.source_inputs,
+            pipeline_preset=request.pipeline_preset,
+            auto_curate=request.auto_curate,
+            manual_excluded_times=request.manual_excluded_times,
+            motion_mode=request.motion_mode,
+            motion_correction_params_name=request.motion_correction_params_name,
+            motion_estimate_id=request.motion_estimate_id,
             sort_checks=sort_checks,
         )
         if not report.ok:
             raise PreflightError("\n".join(report.errors))
         warnings = list(report.warnings)
         for warning in warnings:
-            logger.warning(f"{caller} preflight: {warning}")
+            logger.warning(f"{request.caller} preflight: {warning}")
         return warnings
     return assert_concat_preflight(
-        source_inputs["concat_session_group_owner"],
-        source_inputs["concat_session_group_name"],
-        bundle,
-        auto_curate=auto_curate,
-        manual_excluded_times=manual_excluded_times,
-        motion_mode=motion_mode,
-        motion_correction_params_name=motion_correction_params_name,
-        motion_estimate_id=motion_estimate_id,
-        caller=caller,
+        request.source_inputs["concat_session_group_owner"],
+        request.source_inputs["concat_session_group_name"],
+        request.bundle,
+        auto_curate=request.auto_curate,
+        manual_excluded_times=request.manual_excluded_times,
+        motion_mode=request.motion_mode,
+        motion_correction_params_name=request.motion_correction_params_name,
+        motion_estimate_id=request.motion_estimate_id,
+        caller=request.caller,
         sort_checks=sort_checks,
     )
 
@@ -241,13 +267,7 @@ class _RunSource(NamedTuple):
 
 
 def _build_run_source(
-    *,
-    is_concat: bool,
-    source_inputs: dict,
-    bundle,
-    manual_excluded_times,
-    run_summary: dict,
-    stage_seconds: dict,
+    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
 ) -> _RunSource:
     """Select and populate the source stages a sort reads.
 
@@ -256,12 +276,8 @@ def _build_run_source(
 
     Parameters
     ----------
-    is_concat : bool
-        The input mode.
-    source_inputs : dict
-        The mode's source fields (see :func:`_run_preflight`).
-    bundle, manual_excluded_times
-        As validated by :func:`_validate_run_request`.
+    request : _RunRequest
+        The validated request; its source inputs, preset and exclusions.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
 
@@ -276,30 +292,16 @@ def _build_run_source(
     PipelineInputError
         If concat manual exclusions name an absent member.
     """
-    if not is_concat:
-        return _build_single_session_source(
-            source_inputs=source_inputs,
-            bundle=bundle,
-            manual_excluded_times=manual_excluded_times,
-            run_summary=run_summary,
-            stage_seconds=stage_seconds,
-        )
-    return _build_concat_source(
-        source_inputs=source_inputs,
-        bundle=bundle,
-        manual_excluded_times=manual_excluded_times,
-        run_summary=run_summary,
-        stage_seconds=stage_seconds,
+    build = (
+        _build_concat_source
+        if request.is_concat
+        else _build_single_session_source
     )
+    return build(request, run_summary=run_summary, stage_seconds=stage_seconds)
 
 
 def _build_single_session_source(
-    *,
-    source_inputs: dict,
-    bundle,
-    manual_excluded_times,
-    run_summary: dict,
-    stage_seconds: dict,
+    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
 ) -> _RunSource:
     """Select and populate the ``Recording`` and its artifact detection.
 
@@ -315,6 +317,8 @@ def _build_single_session_source(
         RecordingSelection,
     )
 
+    source_inputs = request.source_inputs
+    bundle = request.bundle
     nwb_file_name = source_inputs["nwb_file_name"]
     sort_group_id = source_inputs["sort_group_id"]
     run_summary["source_mode"] = "single_session"
@@ -348,7 +352,7 @@ def _build_single_session_source(
             {
                 "recording_id": recording_key["recording_id"],
                 "artifact_detection_params_name": bundle.artifact_detection_params_name,
-                "manual_excluded_times": manual_excluded_times,
+                "manual_excluded_times": request.manual_excluded_times,
             }
         )
         (
@@ -373,12 +377,7 @@ def _build_single_session_source(
 
 
 def _build_concat_source(
-    *,
-    source_inputs: dict,
-    bundle,
-    manual_excluded_times,
-    run_summary: dict,
-    stage_seconds: dict,
+    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
 ) -> _RunSource:
     """Build each member's recording and artifact mask, then the concat.
 
@@ -391,8 +390,14 @@ def _build_concat_source(
         SessionGroup,
     )
 
-    concat_session_group_owner = source_inputs["concat_session_group_owner"]
-    concat_session_group_name = source_inputs["concat_session_group_name"]
+    bundle = request.bundle
+    manual_excluded_times = request.manual_excluded_times
+    concat_session_group_owner = request.source_inputs[
+        "concat_session_group_owner"
+    ]
+    concat_session_group_name = request.source_inputs[
+        "concat_session_group_name"
+    ]
     group_key = {
         "session_group_owner": concat_session_group_owner,
         "session_group_name": concat_session_group_name,
