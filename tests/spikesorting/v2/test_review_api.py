@@ -294,6 +294,7 @@ def test_review_config_hash_is_pinned():
         upload=False,
         ephemeral=False,
         display_options=ReviewDisplayOptions(),
+        reviewer="pinned_user",
     )
     config_hash = figpack_config_hash(
         sorting_id=uuid.UUID(int=1),
@@ -306,5 +307,5 @@ def test_review_config_hash_is_pinned():
         review_config=config,
     )
     assert config_hash == (
-        "ee3e17e7a86f20590bf44ddb5a46ee6c882a1f962c8d23ca974d02f261b37d1b"
+        "6d09c6c5acb6eda1346c371765640f4d0a24f17f80d64fb5d13b7a4d3135f59f"
     )

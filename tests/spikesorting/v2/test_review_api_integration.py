@@ -608,3 +608,66 @@ def test_start_review_evaluates_with_a_requested_recipe(
         ] == "reused"
     finally:
         clear_curations_for(sorting_key)
+
+
+def test_each_reviewer_starts_their_own_review(
+    planted_two_unit_sort, curation_evaluation_defaults, monkeypatch
+):
+    """Two DataJoint users reviewing one curation get separate reviews
+    (bundle, draft and result); one user's repeated start reuses theirs, and
+    a review stored without a reviewer stays resumable by id."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._review.annotations import (
+        unpack_display_config,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        profile = _ensure_test_profile()
+        first = root.start_review(profile, upload=False)
+        assert root.start_review(profile, upload=False).review_id == (
+            first.review_id
+        )
+        with monkeypatch.context() as patch:
+            patch.setitem(dj.config, "database.user", "second_reviewer")
+            second = root.start_review(profile, upload=False)
+        assert second.review_id != first.review_id
+        assert Path(second.uri) != Path(first.uri)
+        assert FigPackReview.resume(second.review_id).uri == second.uri
+
+        selection = (
+            FigPackCurationSelection & {"figpack_curation_id": first.review_id}
+        ).fetch1()
+        properties, config = unpack_display_config(
+            selection["displayed_unit_properties"]
+        )
+        assert config["reviewer"] == str(dj.config["database.user"])
+        legacy = FigPackCuration.build_curation_view_result(
+            root.as_key(),
+            label_options=list(selection["label_options"]),
+            displayed_unit_properties=properties,
+            upload=False,
+            review_config={k: v for k, v in config.items() if k != "reviewer"},
+        )
+        assert legacy.figpack_curation_id not in (
+            first.review_id,
+            second.review_id,
+        )
+        assert FigPackReview.resume(legacy.figpack_curation_id).uri == (
+            legacy.uri
+        )
+    finally:
+        clear_curations_for(sorting_key)

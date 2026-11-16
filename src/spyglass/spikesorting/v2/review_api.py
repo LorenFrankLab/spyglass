@@ -16,6 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+import datajoint as dj
 import pandas as pd
 
 from spyglass.spikesorting.v2._curation.transforms import (
@@ -760,11 +761,19 @@ def _review_config(
     upload: bool,
     ephemeral: bool,
     display_options: ReviewDisplayOptions,
+    reviewer: str,
 ) -> dict:
+    """Return the immutable review snapshot hashed into the review id.
+
+    ``reviewer`` (the DataJoint user) is part of the identity, so each
+    reviewer of a curation gets their own bundle, draft and result. Another
+    reviewer's review is opened deliberately with ``FigPackReview.resume``.
+    """
     config = _profile_snapshot(profile)
     config.update(
         {
             "view_version": 4,
+            "reviewer": reviewer,
             "curation_evaluation_id": str(evaluation.evaluation_id),
             "delivery": {
                 "upload": bool(upload),
@@ -863,6 +872,7 @@ def _start_review(
         upload=upload,
         ephemeral=ephemeral,
         display_options=resolved_display,
+        reviewer=str(dj.config["database.user"]),
     )
     view_result = FigPackCuration.build_curation_view_result(
         parent.as_key(),
