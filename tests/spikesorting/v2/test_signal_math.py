@@ -251,3 +251,105 @@ def test_timestamp_fingerprint_matches_array_equal_semantics():
     assert timestamp_fingerprint(rate_rec) == timestamp_fingerprint(
         _explicit_recording(rate_rec.get_times())
     )
+
+
+_GRID = 40
+
+
+def _random_disjoint_intervals(rng, n_max, *, min_gap=0):
+    """Sorted, disjoint integer intervals of positive length on the grid."""
+    import numpy as np
+
+    n = int(rng.integers(0, n_max + 1))
+    edges = np.sort(rng.choice(_GRID, size=2 * n, replace=False))
+    intervals = [(float(a), float(b)) for a, b in edges.reshape(-1, 2) if b > a]
+    kept = []
+    for start, stop in intervals:
+        if not kept or start - kept[-1][1] >= min_gap:
+            kept.append((start, stop))
+    return kept
+
+
+def _sample_mask(pieces, *, closed_stops=()):
+    """Integer samples in half-open pieces, plus each stop in closed_stops."""
+    import numpy as np
+
+    samples = np.arange(-5, _GRID + 5)
+    mask = np.zeros(samples.shape, dtype=bool)
+    for start, stop in pieces:
+        mask |= (samples >= start) & (samples < stop)
+        if stop in closed_stops:
+            mask |= samples == stop
+    return mask
+
+
+@pytest.mark.parametrize("inclusive_stop", [False, True])
+def test_subtract_intervals_matches_per_sample_mask(inclusive_stop):
+    """Kept samples equal base samples minus removed samples, per base row.
+
+    With ``inclusive_stop`` a base row's stop is its last sample, so a piece
+    ending exactly at that stop keeps it and any other end is exclusive.
+    """
+    import numpy as np
+
+    from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+
+    rng = np.random.default_rng(20261116)
+    for _ in range(2000):
+        base = _random_disjoint_intervals(rng, 4, min_gap=2)
+        n_removed = int(rng.integers(0, 6))
+        starts = np.sort(rng.integers(-3, _GRID + 3, size=n_removed))
+        removed = [(float(s), float(s + rng.integers(0, 7))) for s in starts]
+        kept = subtract_intervals(base, removed, inclusive_stop=inclusive_stop)
+
+        removed_mask = _sample_mask(removed)
+        cursor = 0
+        for start, stop in base:
+            closed = (stop,) if inclusive_stop else ()
+            expected = _sample_mask([(start, stop)], closed_stops=closed)
+            expected &= ~removed_mask
+            # Pieces come out in base order and never leave their base row.
+            own = []
+            while cursor < len(kept) and kept[cursor][1] <= stop:
+                own.append(kept[cursor])
+                cursor += 1
+            assert all(start <= a and b <= stop for a, b in own), (
+                base,
+                removed,
+            )
+            # Only the inclusive final piece ``(stop, stop)`` may be empty.
+            positive = own[:-1] if inclusive_stop else own
+            assert all(a < b for a, b in positive), (base, removed)
+            np.testing.assert_array_equal(
+                _sample_mask(own, closed_stops=closed),
+                expected,
+                err_msg=f"base={base} removed={removed} kept={kept}",
+            )
+        assert cursor == len(kept), (base, removed, kept)
+
+
+def test_intersect_interval_sets_matches_per_sample_mask():
+    """The intersection holds exactly the samples present in every set."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2._core.signal_math import (
+        intersect_interval_sets,
+    )
+
+    rng = np.random.default_rng(1116)
+    for _ in range(2000):
+        sets = [
+            _random_disjoint_intervals(rng, 5)
+            for _ in range(int(rng.integers(1, 5)))
+        ]
+        with_none = sets + [None] if rng.random() < 0.3 else sets
+        result = intersect_interval_sets(with_none)
+        assert result.shape[1:] == (2,)
+        assert np.all(result[:, 0] < result[:, 1]), (sets, result)
+        assert np.all(result[1:, 0] >= result[:-1, 1]), (sets, result)
+        expected = np.logical_and.reduce([_sample_mask(s) for s in sets])
+        np.testing.assert_array_equal(
+            _sample_mask(result.tolist()),
+            expected,
+            err_msg=f"sets={sets} result={result}",
+        )
