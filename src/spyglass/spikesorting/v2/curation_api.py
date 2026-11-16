@@ -1451,11 +1451,77 @@ class RunResult(dict):
     ``*_curation_uuid`` keys the run recorded, so a receipt kept across a
     delete-and-recreate of the same numeric ``curation_id`` raises
     ``CurationNotFoundError`` instead of resolving the replacement row.
+
+    No merge id in the receipt is a filtered unit set: ``root_merge_id``,
+    ``auto_labeled_merge_id`` and each ``member_merge_ids`` value hold every
+    unit the sorter found, labeled or not. Pass a curation to
+    ``select_units_for_analysis`` to choose the units analysis reads.
+    :meth:`summary` renders the receipt as text.
     """
 
     @property
     def sorting_id(self) -> uuid.UUID:
         return _uuid(self["sorting_id"])
+
+    def summary(self) -> str:
+        """Render this run as a short text receipt, without database reads.
+
+        Returns
+        -------
+        str
+            The preset, ``sorting_id`` and ``n_units``; each stage with its
+            status and seconds; the root and auto-labeled curations (or the
+            concat member merge ids); every warning; and the next call.
+        """
+        from spyglass.spikesorting.v2._orchestration.reporting import (
+            _describe_run_single_rows,
+        )
+
+        group = (
+            f" (sort group {self['sort_group_id']})"
+            if "sort_group_id" in self
+            else ""
+        )
+        stages = "; ".join(
+            f"{row['stage']} {row['status']}"
+            + (f" {row['seconds']:.1f} s" if row["seconds"] is not None else "")
+            for row in _describe_run_single_rows(self)
+            if row["row_type"] == "stage"
+        )
+        lines = [
+            f"Run result{group}: pipeline_preset={self.get('pipeline_preset')!r}, "
+            f"sorting_id={self.get('sorting_id')}, n_units={self.get('n_units')}",
+            f"  stages: {stages or 'none recorded'}",
+            f"  root curation: curation_id={self.get('root_curation_id')}, "
+            f"merge_id={self.get('root_merge_id')} (uncurated; every unit)",
+        ]
+        if self.get("auto_labeled_curation_id") is None:
+            lines.append("  auto-labeled curation: none (auto_curate=False)")
+        else:
+            lines.append(
+                "  auto-labeled curation: curation_id="
+                f"{self['auto_labeled_curation_id']}, merge_id="
+                f"{self.get('auto_labeled_merge_id')} (labels only; every "
+                "unit is still present)"
+            )
+        member_merge_ids = self.get("member_merge_ids") or {}
+        if member_merge_ids:
+            lines.append(
+                "  member merge ids (every unit, per member session): "
+                + ", ".join(
+                    f"{index} -> {merge_id}"
+                    for index, merge_id in sorted(member_merge_ids.items())
+                )
+            )
+        warnings = list(self.get("warnings") or [])
+        lines.append(f"  warnings ({len(warnings)}):")
+        lines.extend(f"    - {warning}" for warning in warnings)
+        lines.append(
+            "  Next: select_units_for_analysis(result.auto_labeled_curation "
+            "or result.root_curation, policy=...) chooses the units analysis "
+            "reads; describe_run(result) shows the full receipt."
+        )
+        return "\n".join(lines)
 
     def _pinned_ref(self, id_key: str, uuid_key: str) -> CurationRef:
         ref = CurationRef(

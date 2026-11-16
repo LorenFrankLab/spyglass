@@ -36,6 +36,90 @@ def test_public_curation_api_is_reexported():
     assert pipeline.ReviewImportReceipt is ReviewImportReceipt
 
 
+def _single_session_run_summary():
+    return {
+        "pipeline_preset": "franklab_probe_hippocampus_30khz_ms4_2026_06",
+        "source_mode": "single_session",
+        "sorting_id": "11111111-1111-1111-1111-111111111111",
+        "recording_id": "22222222-2222-2222-2222-222222222222",
+        "recording_status": "reused",
+        "artifact_detection_status": "computed",
+        "sorting_status": "computed",
+        "curation_status": "computed",
+        "auto_curation_status": "computed",
+        "stage_seconds": {
+            "recording": 0.25,
+            "artifact_detection": 3.5,
+            "sorting": 812.0,
+            "curation": 1.0,
+            "auto_curation": 95.0,
+        },
+        "n_units": 12,
+        "root_curation_id": 0,
+        "root_merge_id": "33333333-3333-3333-3333-333333333333",
+        "auto_labeled_curation_id": 1,
+        "auto_labeled_merge_id": "44444444-4444-4444-4444-444444444444",
+        "warnings": ["zero spikes in one span", "check the reference"],
+    }
+
+
+def test_run_result_summary_states_stages_curations_and_warnings(
+    monkeypatch,
+):
+    """A run receipt reads as stages, both curations and every warning.
+
+    It says both merge ids hold every unit and names the call that chooses
+    the analysis units, without reading the database.
+    """
+    from spyglass.spikesorting.v2.curation_api import CurationRef, RunResult
+
+    def _no_db(self):
+        raise AssertionError("summary() must not read the database")
+
+    monkeypatch.setattr(CurationRef, "_current_row", _no_db)
+    summary = _single_session_run_summary()
+    text = RunResult(summary).summary()
+
+    assert "n_units=12" in text
+    for stage, status in (
+        ("recording", "reused"),
+        ("artifact_detection", "computed"),
+        ("sorting", "computed"),
+        ("curation", "computed"),
+        ("auto_curation", "computed"),
+    ):
+        assert f"{stage} {status}" in text
+    assert summary["root_merge_id"] in text
+    assert summary["auto_labeled_merge_id"] in text
+    assert text.count("every unit") >= 2
+    for warning in summary["warnings"]:
+        assert warning in text
+    assert "select_units_for_analysis(" in text
+    assert "describe_run(" in text
+
+
+def test_run_result_summary_lists_concat_member_merge_ids():
+    """A concat receipt points at its per-member merge ids."""
+    from spyglass.spikesorting.v2.curation_api import RunResult
+
+    summary = _single_session_run_summary()
+    summary.update(
+        source_mode="concat",
+        root_merge_id=None,
+        auto_labeled_merge_id=None,
+        member_merge_ids={
+            0: "55555555-5555-5555-5555-555555555555",
+            1: "66666666-6666-6666-6666-666666666666",
+        },
+        warnings=[],
+    )
+    text = RunResult(summary).summary()
+
+    for member_index, merge_id in summary["member_merge_ids"].items():
+        assert f"{member_index} -> {merge_id}" in text
+    assert "member merge ids" in text
+
+
 def test_non_root_facade_requires_typed_parent():
     """Child facade operations expose no numeric root-sentinel escape hatch."""
     from spyglass.spikesorting.v2.curation_api import save_manual_curation
