@@ -1400,7 +1400,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         ``motion_corrected_recording_id``, ``None`` matches only sorts
         without one; only an absent key is a wildcard. A detection id
         matches a concat if any member uses it.
-        ``SpikeSortingOutput._get_restricted_merge_ids_v2`` delegates here.
+        ``SpikeSortingOutput._get_restricted_merge_ids_v2`` resolves
+        single-session outputs here and concat-member outputs through
+        ``ConcatMemberCurationV2.resolve_restriction``, which matches
+        recording keys against each member's own session.
 
         Parameters
         ----------

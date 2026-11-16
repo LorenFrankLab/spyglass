@@ -329,6 +329,100 @@ def test_member_sort_group_info_pairs_each_member_with_its_session(
 
 
 @pytest.mark.slow
+def test_session_lookup_warns_when_single_and_member_sort_one_sort_group(
+    concat_member_curation, monkeypatch
+):
+    """A session sorted singly and as a concat member of the same sort group
+    yields both outputs for a session key; the lookup warns once, naming the
+    session and sort group. A session or key matching one kind is silent."""
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting import spikesorting_merge as m
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    ctx = concat_member_curation
+    snapshot = (
+        ConcatenatedRecordingSelection.MemberSnapshot
+        & ctx["concat_key"]
+        & {"member_index": 0}
+    ).fetch1()
+    other_session = (
+        ConcatenatedRecordingSelection.MemberSnapshot
+        & ctx["concat_key"]
+        & {"member_index": 1}
+    ).fetch1("nwb_file_name")
+    single_sort = SortingSelection.insert_selection(
+        {
+            "recording_id": snapshot["recording_id"],
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "concat_member_curation_two_unit",
+        }
+    )
+
+    def _plant(sorter, sorter_params, recording, sorting_id, **kwargs):
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[np.asarray([100, 200], dtype=np.int64)],
+            labels_list=[np.asarray([0, 1], dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    def overlap_warnings(key):
+        captured = []
+        monkeypatch.setattr(
+            m.logger, "warning", lambda msg, *a, **k: captured.append(msg)
+        )
+        m.SpikeSortingOutput().get_restricted_merge_ids(key, sources=["v2"])
+        return [msg for msg in captured if "single-session" in msg]
+
+    try:
+        with monkeypatch.context() as patch:
+            plant_sorter(patch, _plant)
+            Sorting.populate(single_sort, reserve_jobs=False)
+        CurationV2.insert_curation(sorting_key=single_sort)
+        curation_id = ctx["curation_key"]["curation_id"]
+
+        warnings = overlap_warnings(
+            {"nwb_file_name": snapshot["nwb_file_name"]}
+        )
+        assert len(warnings) == 1, warnings
+        assert snapshot["nwb_file_name"] in warnings[0]
+        assert f"sort_group_id {snapshot['sort_group_id']}" in warnings[0]
+
+        assert overlap_warnings({"nwb_file_name": other_session}) == []
+        assert overlap_warnings(dict(single_sort)) == []
+        assert (
+            overlap_warnings(
+                {
+                    "nwb_file_name": snapshot["nwb_file_name"],
+                    "member_index": 0,
+                }
+            )
+            == []
+        )
+        assert (
+            overlap_warnings(
+                {
+                    "concat_recording_id": ctx["concat_key"][
+                        "concat_recording_id"
+                    ],
+                    "curation_id": curation_id,
+                }
+            )
+            == []
+        )
+    finally:
+        clear_curations_for(single_sort)
+        (Sorting & single_sort).super_delete(warn=False)
+        (SortingSelection & single_sort).super_delete(warn=False)
+
+
+@pytest.mark.slow
 def test_session_restriction_returns_that_sessions_member_outputs(
     concat_member_curation,
 ):

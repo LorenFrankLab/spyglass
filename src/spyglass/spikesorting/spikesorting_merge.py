@@ -120,6 +120,72 @@ def _available_merge_sources() -> list:
     return sources
 
 
+def _warn_single_and_member_overlap(single, members) -> None:
+    """Warn when single-session and concat-member outputs share a sort group.
+
+    Both sorts read the same electrodes of one session, so a group built
+    from both counts those neurons twice.
+
+    Parameters
+    ----------
+    single : datajoint.expression.QueryExpression
+        Matched ``SpikeSortingOutput.CurationV2`` rows.
+    members : datajoint.expression.QueryExpression
+        Matched ``SpikeSortingOutput.ConcatMemberCurationV2`` rows.
+    """
+    from collections import Counter
+
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    # Fetch ids first: the matched rows' query already joins these parts.
+    single_ids = single.fetch("sorting_id")
+    member_ids = list(zip(*members.fetch("sorting_id", "member_index")))
+    sorts = [{"sorting_id": sid} for sid in set(single_ids)]
+    sorts += [{"sorting_id": sid} for sid, _ in set(member_ids)]
+
+    single_group = {
+        row["sorting_id"]: (row["nwb_file_name"], row["sort_group_id"])
+        for row in (
+            (SortingSelection.RecordingSource & sorts).proj("recording_id")
+            * RecordingSelection.proj("nwb_file_name", "sort_group_id")
+        ).fetch(as_dict=True)
+    }
+    member_group = {
+        (row["sorting_id"], row["member_index"]): (
+            row["nwb_file_name"],
+            row["sort_group_id"],
+        )
+        for row in (
+            (SortingSelection.ConcatenatedRecordingSource & sorts).proj(
+                "concat_recording_id"
+            )
+            * ConcatenatedRecordingSelection.MemberSnapshot.proj(
+                "nwb_file_name", "sort_group_id"
+            )
+        ).fetch(as_dict=True)
+    }
+    n_single = Counter(single_group[sid] for sid in single_ids)
+    n_member = Counter(member_group[mid] for mid in member_ids)
+    shared = sorted(set(n_single) & set(n_member))
+    if not shared:
+        return
+    overlaps = "; ".join(
+        f"session {nwb} sort_group_id {group}: {n_single[(nwb, group)]} "
+        f"single-session and {n_member[(nwb, group)]} concat-member output(s)"
+        for nwb, group in shared
+    )
+    logger.warning(
+        f"get_restricted_merge_ids: {overlaps}. Both sort the same "
+        "electrodes, so a group built from all of them counts those neurons "
+        "twice. Keep one: add the single sort's sorting_id, or "
+        "concat_recording_id or member_index for the concat member."
+    )
+
+
 schema = dj.schema("spikesorting_merge")
 
 source_class_dict = {
@@ -243,10 +309,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     f"Affected sorting_id(s): {multi}."
                 )
 
-        merge_ids = []
+        single_ids, member_ids = [], []
         if not member_only:
             joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
-            merge_ids.extend(joined.fetch("merge_id", as_dict=as_dict))
+            single_ids = list(joined.fetch("merge_id", as_dict=as_dict))
         if ConcatMemberCurationV2 is not None:
             members = ConcatMemberCurationV2.resolve_restriction(
                 key, restrict_by_artifact=restrict_by_artifact, strict=strict
@@ -254,8 +320,10 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             member_joined = (
                 SpikeSortingOutput.ConcatMemberCurationV2 * members.proj()
             )
-            merge_ids.extend(member_joined.fetch("merge_id", as_dict=as_dict))
-        return merge_ids
+            member_ids = list(member_joined.fetch("merge_id", as_dict=as_dict))
+        if single_ids and member_ids:
+            _warn_single_and_member_overlap(joined, member_joined)
+        return single_ids + member_ids
 
     def _get_restricted_merge_ids_v1(
         self,
