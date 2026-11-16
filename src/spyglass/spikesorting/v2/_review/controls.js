@@ -70,6 +70,10 @@ window.figpack_p1.registerFPViewComponent({
       node.onclick = action;
       return node;
     };
+    // The server answers failures with {"error": ...}; fall back when it did not.
+    const serverError = async (response, fallback) => {
+      try { return (await response.json()).error || fallback; } catch { return fallback; }
+    };
     const saveDraft = async () => {
       const snapshot = payload();
       if (snapshot === session.saved) return;
@@ -85,7 +89,7 @@ window.figpack_p1.registerFPViewComponent({
           session.preview = null;
           throw new Error("Another tab changed this draft. Your unsaved edits are still here. Open the latest draft, review its changes, and reapply your edits there.");
         }
-        if (!response.ok) throw new Error(`Draft was not saved (HTTP ${response.status}). Retry before committing.`);
+        if (!response.ok) throw new Error(await serverError(response, `Draft was not saved (HTTP ${response.status}). Retry before committing.`));
         session.saved = snapshot;
         session.revision = response.headers.get("ETag");
         // New edits are not in an earlier commit; stop showing it as ready.
@@ -118,7 +122,7 @@ window.figpack_p1.registerFPViewComponent({
       const activeOperation = session.activeOperation;
       try {
         const response = await fetch("api/operation", {cache: "no-store"});
-        if (!response.ok) throw new Error("The Python review session is unavailable. Reopen review.open() to reconnect.");
+        if (!response.ok) throw new Error(await serverError(response, "The Python review session is unavailable. Reopen review.open() to reconnect."));
         const operation = await response.json();
         session.polling = false;
         // A newly submitted action can overtake the initial status request.
@@ -348,7 +352,7 @@ window.figpack_p1.registerFPViewComponent({
     if (local && firstMount) {
       try {
         const response = await fetch(new URL("annotations.json", window.location.href), {cache: "no-store"});
-        if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok && response.status !== 404) throw new Error(await serverError(response, `HTTP ${response.status}`));
         const data = response.status === 404 ? {annotations: {"/": {sorting_curation: JSON.stringify(seed)}}} : await response.json();
         annotations.dispatch({type: "setAllAnnotations", annotations: data.annotations || {}});
         session.saved = payload();

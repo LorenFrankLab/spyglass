@@ -67,6 +67,24 @@ class ReviewBundleRequestMixin:
             raise TypeError(type_message)
         return value
 
+    def _storage_error(self, exc):
+        """Answer a failed read or write of the bundle's files as JSON.
+
+        An exception escaping a handler drops the connection, so the browser
+        would only show a network error.
+        """
+        if isinstance(exc, json.JSONDecodeError):
+            detail = f"a review file in {self.bundle.root} is not valid JSON"
+        else:
+            detail = f"could not read or write the review files in {self.bundle.root}"
+        self._json(
+            {
+                "error": f"The review server {detail} ({exc}). Check the "
+                "folder's permissions and free space, then retry."
+            },
+            500,
+        )
+
     def _json(self, value, status=200, *, etag=None):
         self._respond(
             json.dumps(value).encode(), "application/json", status, etag=etag
@@ -109,12 +127,16 @@ class ReviewBundleRequestMixin:
                 "Draft must be smaller than 10 MB.",
                 "Draft must be a JSON object.",
             )
+        except (ValueError, TypeError, UnicodeError) as exc:
+            self._json({"error": str(exc)}, 400)
+            return
+        try:
             etag = self.drafts.save(value, revision)
         except DraftError as exc:
             self._json({"error": str(exc)}, exc.status)
             return
-        except (ValueError, TypeError, UnicodeError) as exc:
-            self._json({"error": str(exc)}, 400)
+        except OSError as exc:
+            self._storage_error(exc)
             return
         self._json({"saved": True}, etag=etag)
 
@@ -130,6 +152,9 @@ class ReviewBundleRequestMixin:
         except DraftError as exc:
             self.send_error(exc.status, str(exc))
             return
+        except (OSError, json.JSONDecodeError) as exc:
+            self._storage_error(exc)
+            return
         self._json(value, 200 if present else 404, etag=revision)
 
     def _serve_api(self, path):
@@ -142,7 +167,12 @@ class ReviewBundleRequestMixin:
                 }
             )
         elif path == "/api/operation" and service is not None:
-            self._json(service.status())
+            try:
+                state = service.status()
+            except (OSError, json.JSONDecodeError) as exc:
+                self._storage_error(exc)
+                return
+            self._json(state)
         else:
             self._json(
                 {"error": "This bundle has no connected review operation."}, 404
@@ -184,6 +214,11 @@ class ReviewBundleRequestMixin:
                 "Review request must be a JSON object smaller than 1 MB.",
                 "Review request must be an object.",
             )
-            self._json(service.start(request), 202)
+            started = service.start(request)
         except (ValueError, TypeError) as exc:
             self._json({"error": str(exc)}, 400)
+            return
+        except OSError as exc:
+            self._storage_error(exc)
+            return
+        self._json(started, 202)

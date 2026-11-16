@@ -356,3 +356,94 @@ def test_focus_units_merge_into_an_existing_query():
     assert (
         with_focus_units("http://localhost:1/b/", ()) == "http://localhost:1/b/"
     )
+
+
+def _error_response(request):
+    """Return ``(status, content type, JSON body)`` of a failing request."""
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        urllib.request.urlopen(request, timeout=5)
+    body = raised.value.read()
+    return (
+        raised.value.code,
+        raised.value.headers["Content-Type"],
+        json.loads(body),
+    )
+
+
+def test_corrupt_draft_is_reported_as_json_naming_the_bundle(bundle):
+    """A draft file that is not valid JSON gets a JSON error naming its
+    bundle, not a dropped connection."""
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    (bundle / "annotations.json").write_text("{")
+    url = serve_review_bundle(bundle) + "annotations.json"
+    status, content_type, body = _error_response(url)
+    assert status == 500
+    assert content_type == "application/json"
+    assert str(bundle.resolve()) in body["error"]
+
+
+def test_failed_draft_write_is_reported_as_json_naming_the_bundle(
+    bundle, monkeypatch
+):
+    """A draft that cannot be written (full disk, permissions) gets a JSON
+    error naming the bundle."""
+    import errno
+
+    from spyglass.spikesorting.v2._review import drafts
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    def full_disk(self, value, expected_revision):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(drafts.ReviewDraftStore, "save", full_disk)
+    target = serve_review_bundle(bundle) + "annotations.json"
+    request = urllib.request.Request(
+        target,
+        data=b'{"annotations": {}}',
+        method="PUT",
+        headers={
+            "Content-Type": "application/json",
+            "If-Match": _revision(target),
+        },
+    )
+    status, content_type, body = _error_response(request)
+    assert status == 500
+    assert content_type == "application/json"
+    assert str(bundle.resolve()) in body["error"]
+    assert "No space left" in body["error"]
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_unreadable_operation_files_are_reported_as_json(bundle, method):
+    """Operation start or status failing on the bundle's files gets a JSON
+    error naming the bundle."""
+    from spyglass.spikesorting.v2._review.delivery import serve_review_bundle
+
+    class Operations:
+        review_id = "pinned-review"
+
+        def start(self, request):
+            raise PermissionError(13, "Permission denied")
+
+        def status(self):
+            raise PermissionError(13, "Permission denied")
+
+        def close(self):
+            pass
+
+    url = serve_review_bundle(bundle, operation_factory=Operations)
+    request = urllib.request.Request(
+        url + "api/operation",
+        data=b'{"action":"preview"}' if method == "POST" else None,
+        method=method,
+        headers={
+            "Content-Type": "application/json",
+            "X-Spyglass-Review": "pinned-review",
+        },
+    )
+    status, content_type, body = _error_response(request)
+    assert status == 500
+    assert content_type == "application/json"
+    assert str(bundle.resolve()) in body["error"]
+
