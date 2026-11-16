@@ -115,20 +115,100 @@ def resolve_restriction(
                 artifact_detection_source.proj(),
                 concat_match.proj(),
             ]
-    corrected_id = plan.motion_corrected_recording_id
-    if corrected_id is not NO_MOTION_CORRECTION_RESTRICTION:
-        correction_source = SortingSelection.MotionCorrectionSource
-        if corrected_id is None:
-            sort_master = sort_master - correction_source.proj()
-        else:
-            sort_master = (
-                sort_master
-                & (
-                    correction_source
-                    & {"motion_corrected_recording_id": corrected_id}
-                ).proj()
-            )
+    sort_master = _restrict_motion(
+        sort_master, plan.motion_corrected_recording_id
+    )
 
     return (
         table_cls * sort_master.proj("sorting_id")
     ) & plan.curation_restriction
+
+
+def resolve_member_restriction(
+    member_cls,
+    key: dict,
+    *,
+    restrict_by_artifact: bool = True,
+    strict: bool = True,
+):
+    """Resolve a restriction to the matching concat-member output rows.
+
+    Recording keys (``nwb_file_name``, ``sort_group_id``,
+    ``interval_list_name``, ``team_name``, ``recording_id``),
+    ``member_index`` and ``artifact_detection_id`` match each member's own
+    frozen ``MemberSnapshot``; concat, shared, sort, motion and curation
+    keys match its concat sort. Mixed concat and recording keys raise, as
+    in ``resolve_restriction``, which logs the unresolved-artifact warning.
+
+    Parameters
+    ----------
+    member_cls : type
+        ``ConcatMemberCurationV2``.
+    key : dict
+        Interpretable restriction.
+    restrict_by_artifact : bool, optional
+        Map an ``artifact_detection_{uuid}`` interval name to its id.
+    strict : bool, optional
+        Raise on an unknown key; ``False`` returns ``None`` instead.
+
+    Returns
+    -------
+    datajoint.expression.QueryExpression or None
+        The matching ``member_cls`` rows, or ``None`` when ``strict=False``
+        and the key names no v2 column.
+    """
+    plan = classify_and_normalize_restriction(
+        key,
+        restrict_by_artifact=restrict_by_artifact,
+        strict=strict,
+        member_keys=True,
+    )
+    if plan is None:
+        return None
+    concat_sel = ConcatenatedRecordingSelection & {
+        **plan.concat_restriction,
+        **plan.shared_restriction,
+    }
+    sort_master = (
+        SortingSelection
+        & (
+            SortingSelection.ConcatenatedRecordingSource * concat_sel.proj()
+        ).proj()
+        & plan.sort_restriction
+    )
+    sort_master = _restrict_motion(
+        sort_master, plan.motion_corrected_recording_id
+    )
+    snapshot = (
+        ConcatenatedRecordingSelection.MemberSnapshot
+        & plan.rec_restriction
+        & plan.member_restriction
+    )
+    if plan.artifact_detection_id is None:
+        snapshot = snapshot & "artifact_detection_id IS NULL"
+    elif plan.artifact_detection_id is not NO_ARTIFACT_RESTRICTION:
+        snapshot = snapshot & {
+            "artifact_detection_id": plan.artifact_detection_id
+        }
+    member_sources = (
+        SortingSelection.ConcatenatedRecordingSource.proj("concat_recording_id")
+        * snapshot.proj()
+    ).proj()
+    return (
+        member_cls & plan.curation_restriction & sort_master.proj()
+    ) & member_sources
+
+
+def _restrict_motion(sort_master, corrected_id):
+    """Restrict sorts by motion correction: a UUID, ``None`` or wildcard."""
+    if corrected_id is NO_MOTION_CORRECTION_RESTRICTION:
+        return sort_master
+    correction_source = SortingSelection.MotionCorrectionSource
+    if corrected_id is None:
+        return sort_master - correction_source.proj()
+    return (
+        sort_master
+        & (
+            correction_source & {"motion_corrected_recording_id": corrected_id}
+        ).proj()
+    )

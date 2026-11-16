@@ -44,6 +44,8 @@ _PART_RESOLVED_SORT_KEYS = (
     "motion_corrected_recording_id",
 )
 _CURATION_KEYS = ("curation_id",)
+# Only concat-member outputs have a member position.
+_MEMBER_KEYS = ("member_index",)
 _ALLOWED_KEYS = frozenset(
     _REC_KEYS + _CONCAT_KEYS + _SHARED_SOURCE_KEYS + _SORT_KEYS + _CURATION_KEYS
 )
@@ -66,6 +68,8 @@ class RestrictionPlan(NamedTuple):
       :data:`NO_MOTION_CORRECTION_RESTRICTION` both.
     - ``unresolved_name_warning``: emitted by the join assembly when
       ``restrict_by_artifact`` found no artifact id, else ``None``.
+    - ``member_restriction``: ``member_index`` when ``member_keys`` allowed
+      it; may be ``{}``.
     """
 
     rec_restriction: dict
@@ -76,6 +80,7 @@ class RestrictionPlan(NamedTuple):
     artifact_detection_id: object
     motion_corrected_recording_id: object
     unresolved_name_warning: "str | None"
+    member_restriction: dict = {}
 
 
 def classify_and_normalize_restriction(
@@ -83,14 +88,19 @@ def classify_and_normalize_restriction(
     *,
     restrict_by_artifact: bool,
     strict: bool,
+    member_keys: bool = False,
 ) -> "RestrictionPlan | None":
     """Classify+normalize a user restriction into the per-source dicts.
 
     Returns ``None`` for an unknown key when ``strict=False``. Raises
     ``ValueError`` for an unknown key when ``strict=True`` or for mixed
-    concat and single-recording keys.
+    concat and single-recording keys. ``member_keys=True`` also accepts
+    ``member_index`` (concat-member outputs only).
     """
-    unknown = set(key) - _ALLOWED_KEYS
+    allowed = (
+        _ALLOWED_KEYS | set(_MEMBER_KEYS) if member_keys else _ALLOWED_KEYS
+    )
+    unknown = set(key) - allowed
     if unknown:
         if not strict:
             # Another pipeline's key: contribute no v2 rows.
@@ -98,7 +108,7 @@ def classify_and_normalize_restriction(
         raise ValueError(
             "CurationV2.resolve_restriction: "
             f"unknown restriction keys {sorted(unknown)}. Allowed: "
-            f"{sorted(_ALLOWED_KEYS)}."
+            f"{sorted(allowed)}."
         )
 
     key = dict(key)
@@ -171,4 +181,5 @@ def classify_and_normalize_restriction(
         artifact_detection_id=artifact_detection_id,
         motion_corrected_recording_id=motion_corrected_recording_id,
         unresolved_name_warning=unresolved_name_warning,
+        member_restriction={k: key[k] for k in _MEMBER_KEYS if k in key},
     )

@@ -329,6 +329,49 @@ def test_member_sort_group_info_pairs_each_member_with_its_session(
 
 
 @pytest.mark.slow
+def test_session_restriction_returns_that_sessions_member_outputs(
+    concat_member_curation,
+):
+    """A session key returns the concat-member outputs recorded in that
+    session; ``member_index`` selects one member of a concat key."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    ctx = concat_member_curation
+    merge_ids = {
+        int(row["member_index"]): row["merge_id"]
+        for row in (
+            SpikeSortingOutput.ConcatMemberCurationV2 & ctx["curation_key"]
+        ).fetch("merge_id", "member_index", as_dict=True)
+    }
+    sessions = {
+        int(row["member_index"]): row["nwb_file_name"] for row in ctx["rows"]
+    }
+    assert sessions[0] != sessions[1]
+    sso = SpikeSortingOutput()
+    for sources in (["v2"], None):
+        got = sso.get_restricted_merge_ids(
+            {"nwb_file_name": sessions[0]}, sources=sources
+        )
+        assert merge_ids[0] in got
+        assert merge_ids[1] not in got
+
+    concat = {"concat_recording_id": ctx["concat_key"]["concat_recording_id"]}
+    got = sso.get_restricted_merge_ids(
+        {
+            **concat,
+            "curation_id": ctx["curation_key"]["curation_id"],
+            "member_index": 1,
+        },
+        sources=["v2"],
+    )
+    assert list(got) == [merge_ids[1]]
+    with pytest.raises(ValueError, match="cannot combine"):
+        sso.get_restricted_merge_ids(
+            {**concat, "nwb_file_name": sessions[0]}, sources=["v2"]
+        )
+
+
+@pytest.mark.slow
 def test_decoding_duplicate_guard_is_scoped_to_one_member(
     concat_member_curation,
 ):

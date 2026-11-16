@@ -63,7 +63,9 @@ def get_spike_sorting_v2_merge_ids(
         ``sort_group_id``, ``interval_list_name``,
         ``preprocessing_params_name``, ``recording_id``, ``artifact_detection_id``,
         ``sorter``, ``sorter_params_name``, ``sorting_id``,
-        ``curation_id``). Unknown keys raise ``ValueError``.
+        ``curation_id``), or ``member_index`` for concat-member outputs.
+        Recording keys match a concat member's own session. Unknown keys
+        raise ``ValueError``.
     as_dict : bool, optional
         Return list of ``{"merge_id": uuid}`` dicts when True;
         a list of UUIDs when False (default).

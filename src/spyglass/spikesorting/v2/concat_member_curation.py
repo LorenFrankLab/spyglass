@@ -579,6 +579,44 @@ class ConcatMemberCurationV2(
             )
 
     @classmethod
+    def resolve_restriction(
+        cls,
+        key: dict,
+        *,
+        restrict_by_artifact: bool = True,
+        strict: bool = True,
+    ):
+        """Resolve an interpretable restriction to matching member rows.
+
+        Accepts ``CurationV2.resolve_restriction``'s keys plus
+        ``member_index``. Recording keys, ``member_index`` and
+        ``artifact_detection_id`` match each member's own frozen snapshot,
+        so ``{"nwb_file_name": X}`` returns the members recorded in X.
+
+        Parameters
+        ----------
+        key : dict
+            Interpretable restriction.
+        restrict_by_artifact : bool, optional
+            Map an ``artifact_detection_{uuid}`` interval name to its id.
+        strict : bool, optional
+            Raise on an unknown key; ``False`` returns ``None`` instead.
+
+        Returns
+        -------
+        datajoint.expression.QueryExpression or None
+            Matching ``ConcatMemberCurationV2`` rows, or ``None`` when
+            ``strict=False`` and the key names no v2 column.
+        """
+        from spyglass.spikesorting.v2._curation.restriction import (
+            resolve_member_restriction,
+        )
+
+        return resolve_member_restriction(
+            cls, key, restrict_by_artifact=restrict_by_artifact, strict=strict
+        )
+
+    @classmethod
     def get_recording(cls, key: dict) -> "si.BaseRecording":
         """Return this member's preprocessed recording in session time.
 

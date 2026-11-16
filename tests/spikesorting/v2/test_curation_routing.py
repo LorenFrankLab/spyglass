@@ -178,12 +178,29 @@ def test_classify_leaves_interval_name_as_recording_key_when_not_restricting():
     assert plan.artifact_detection_id is NO_ARTIFACT_RESTRICTION
 
 
+def test_classify_accepts_member_index_only_for_member_outputs():
+    """``member_index`` is a concat-member key: unknown to a curation
+    restriction, routed to ``member_restriction`` for member outputs."""
+    with pytest.raises(ValueError, match="unknown restriction keys"):
+        _classify({"member_index": 1})
+    plan = classify_and_normalize_restriction(
+        {"nwb_file_name": "a.nwb", "member_index": 1},
+        restrict_by_artifact=True,
+        strict=True,
+        member_keys=True,
+    )
+    assert plan.member_restriction == {"member_index": 1}
+    assert plan.rec_restriction == {"nwb_file_name": "a.nwb"}
+    assert _classify({"sorting_id": "s"}).member_restriction == {}
+
+
 def test_classify_does_not_emit_include_exclude_directive():
     """The plan carries only normalized restrictions + an artifact id + a
     motion-correction id + a warning flag, with no exclude/include
     directive."""
     plan = _classify({"sorting_id": "s"})
     assert set(plan._fields) == {
+        "member_restriction",
         "rec_restriction",
         "concat_restriction",
         "shared_restriction",

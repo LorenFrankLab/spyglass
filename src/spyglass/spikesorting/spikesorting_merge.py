@@ -171,8 +171,11 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     ) -> Union[None, list, dict]:
         """Resolve v2-source merge ids for a restriction key.
 
-        Maps ``CurationV2.resolve_restriction`` rows to merge ids; see it
-        for accepted keys. With ``strict=False`` an unknown key returns no
+        Maps ``CurationV2.resolve_restriction`` rows and
+        ``ConcatMemberCurationV2.resolve_restriction`` rows to merge ids;
+        see them for accepted keys. Recording keys such as ``nwb_file_name``
+        match a concat member's own session, and ``member_index`` selects
+        member outputs only. With ``strict=False`` an unknown key returns no
         rows instead of raising.
         """
         if CurationV2 is None:
@@ -180,15 +183,18 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 "SpikeSortingOutput._get_restricted_merge_ids_v2"
             )
 
+        member_only = "member_index" in key
         curation_table = CurationV2.resolve_restriction(
-            key, restrict_by_artifact=restrict_by_artifact, strict=strict
+            {k: v for k, v in key.items() if k != "member_index"},
+            restrict_by_artifact=restrict_by_artifact,
+            strict=strict,
         )
         if curation_table is None:
             # strict=False and the key names no v2 column.
             return []
 
         # Several curations of one sorting would double-count units.
-        if "curation_id" not in key:
+        if "curation_id" not in key and not member_only:
             multi = sorted(
                 str(sid)
                 for sid in (
@@ -209,12 +215,16 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     f"Affected sorting_id(s): {multi}."
                 )
 
-        joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
-        merge_ids = list(joined.fetch("merge_id", as_dict=as_dict))
+        merge_ids = []
+        if not member_only:
+            joined = SpikeSortingOutput.CurationV2 * curation_table.proj()
+            merge_ids.extend(joined.fetch("merge_id", as_dict=as_dict))
         if ConcatMemberCurationV2 is not None:
+            members = ConcatMemberCurationV2.resolve_restriction(
+                key, restrict_by_artifact=restrict_by_artifact, strict=strict
+            )
             member_joined = (
-                SpikeSortingOutput.ConcatMemberCurationV2
-                * curation_table.proj()
+                SpikeSortingOutput.ConcatMemberCurationV2 * members.proj()
             )
             merge_ids.extend(member_joined.fetch("merge_id", as_dict=as_dict))
         return merge_ids
