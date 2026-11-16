@@ -374,3 +374,86 @@ def test_display_build_stores_review_template_percentiles(complete_analyzer):
     sw.plot_unit_templates(analyzer, backend="matplotlib")
     plt.close("all")
     assert _folder_digest(original.folder) == digest
+
+
+def _transient_load_options(tmp_path, monkeypatch, load_error, restore=None):
+    """A present cache folder whose load raises ``load_error``."""
+    from contextlib import nullcontext
+
+    folder = tmp_path / "cache.analyzer"
+    folder.mkdir()
+    (folder / "waveforms.npy").write_bytes(b"cached bytes")
+    monkeypatch.setattr(
+        cache, "analyzer_cache_lock", lambda _key: nullcontext()
+    )
+
+    def raise_load(_folder, **_kwargs):
+        raise load_error
+
+    monkeypatch.setattr(cache, "load_analyzer_folder", raise_load)
+    rebuilds = []
+    options = {
+        "folder": folder,
+        "recipe_label": "display",
+        "sorting_id": "test",
+        "rebuild_fn": lambda: rebuilds.append(True),
+        "restore_recording": restore,
+    }
+    return folder, rebuilds, options
+
+
+@pytest.mark.parametrize(
+    "load_error",
+    [MemoryError(), OSError(116, "Stale file handle"), RuntimeError("busy")],
+    ids=["memory", "nfs_stale", "runtime"],
+)
+@pytest.mark.parametrize("rebuild", [True, False])
+def test_transient_load_failure_keeps_the_cache_folder(
+    tmp_path, monkeypatch, load_error, rebuild
+):
+    """A failure that does not show the cache is invalid neither removes nor
+    rebuilds the folder; the original error reaches the caller."""
+    folder, rebuilds, options = _transient_load_options(
+        tmp_path, monkeypatch, load_error
+    )
+    with pytest.raises(type(load_error)) as raised:
+        _load_analyzer_folder_or_rebuild(**options, rebuild=rebuild)
+    assert raised.value is load_error
+    assert (folder / "waveforms.npy").read_bytes() == b"cached bytes"
+    assert rebuilds == []
+
+
+def test_failed_recording_restore_keeps_the_cache_folder(tmp_path, monkeypatch):
+    """Restoring the trace file can fail for reasons unrelated to the cache
+    (drifted inputs, database errors); the analyzer folder is kept."""
+    from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
+
+    def restore():
+        raise RecordingInputDriftError("sort group inputs changed")
+
+    folder, rebuilds, options = _transient_load_options(
+        tmp_path,
+        monkeypatch,
+        cache.AnalyzerRecordingUnavailableError("no recording"),
+        restore=restore,
+    )
+    with pytest.raises(RecordingInputDriftError, match="inputs changed"):
+        _load_analyzer_folder_or_rebuild(**options, rebuild=True)
+    assert (folder / "waveforms.npy").read_bytes() == b"cached bytes"
+    assert rebuilds == []
+
+
+def test_unparseable_cache_is_still_rebuilt(tmp_path, monkeypatch):
+    """Corruption (malformed JSON or array headers) still rebuilds."""
+    import json
+
+    folder, rebuilds, options = _transient_load_options(
+        tmp_path, monkeypatch, json.JSONDecodeError("bad", "{", 1)
+    )
+    with pytest.raises(AnalyzerFolderInvalidError):
+        _load_analyzer_folder_or_rebuild(**options, rebuild=False)
+    assert folder.exists()
+    with pytest.raises(json.JSONDecodeError):
+        # The rebuild stub writes nothing, so the reload fails again.
+        _load_analyzer_folder_or_rebuild(**options, rebuild=True)
+    assert rebuilds == [True]

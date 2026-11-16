@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 import inspect
+import pickle
 import shutil
 
 import numpy as np
@@ -98,6 +99,22 @@ def ensure_review_template_percentiles(analyzer) -> None:
 
 class _AnalyzerSparsityInputsError(RuntimeError):
     """Unavailable sorter parameters do not establish that a cache is invalid."""
+
+
+class _RecordingRestoreError(RuntimeError):
+    """Wrap a failed trace restore so it is not read as an invalid cache."""
+
+
+# What a damaged folder raises on load: malformed JSON or array headers (and
+# our own validation) are ValueError; a missing piece is FileNotFoundError.
+_INVALID_CACHE_ERRORS = (
+    ValueError,
+    KeyError,
+    EOFError,
+    pickle.UnpicklingError,
+    FileNotFoundError,
+    NotADirectoryError,
+)
 
 
 def ensure_extensions(
@@ -211,6 +228,11 @@ def _load_analyzer_folder_or_rebuild(
       ``AnalyzerFolderInvalidError`` instead of rebuilding.
     - ``restore_recording``: optional zero-arg callable restoring the trace
       file; a folder missing only its recording is retried once after it.
+
+    Only errors that show the folder is damaged (``_INVALID_CACHE_ERRORS``)
+    remove and rebuild it. Any other load error (``MemoryError``, an NFS
+    ``OSError``) and any ``restore_recording`` error propagate unchanged and
+    leave the folder in place.
     """
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         AnalyzerRecordingUnavailableError,
@@ -227,7 +249,10 @@ def _load_analyzer_folder_or_rebuild(
                 raise
             # Cheaper than a rebuild. Reload in a fresh frame: pyparsing's
             # packrat cache can pin this one and its memmapped waveforms.
-            restore()
+            try:
+                restore()
+            except Exception as exc:
+                raise _RecordingRestoreError() from exc
             return load(restore=None)
         _assert_complete_base_extensions(analyzer)
         if validate_analyzer is not None:
@@ -241,9 +266,9 @@ def _load_analyzer_folder_or_rebuild(
         if folder.exists():
             try:
                 return load()
-            except _AnalyzerSparsityInputsError:
-                raise
-            except Exception as exc:
+            except _RecordingRestoreError as exc:
+                raise exc.__cause__ from None
+            except _INVALID_CACHE_ERRORS as exc:
                 message = (
                     "Sorting.get_analyzer: analyzer folder for "
                     f"sorting_id={sorting_id!r}, recipe={recipe_label!r} "

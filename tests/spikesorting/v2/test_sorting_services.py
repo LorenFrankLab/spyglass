@@ -210,7 +210,7 @@ def test_load_or_rebuild_analyzer_no_rebuild_raises_invalid_for_bad_folder(
             return "s1", 1
 
     def _raise_load(_folder, **_kwargs):
-        raise RuntimeError("not a valid analyzer folder")
+        raise ValueError("not a valid analyzer folder")
 
     monkeypatch.setattr(
         _analyzer_cache, "analyzer_path", lambda _sid, _recipe: folder

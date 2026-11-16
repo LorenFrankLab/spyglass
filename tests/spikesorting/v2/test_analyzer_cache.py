@@ -114,6 +114,42 @@ def test_remove_analyzer_cache_removes_all_recipes(
     assert other.exists()
 
 
+def test_remove_analyzer_cache_skips_a_still_mapped_folder(
+    tmp_path, restore_custom_config, monkeypatch
+):
+    """A folder still mapped by another process (NFS ``EBUSY``) does not abort
+    removal of the sort's other folders; it is left as a trash sibling that
+    the staging sweep removes later."""
+    import errno
+    import shutil
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._storage import analyzer_cache as cache
+
+    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    sid = "deadbeef"
+    busy = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
+    free = analyzer_path(sid, "franklab_hippocampus_metric_waveforms")
+    for folder in (busy, free):
+        folder.mkdir(parents=True)
+        (folder / "waveforms.npy").write_text("scratch")
+    real_rmtree = shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        if busy.stem in str(path):
+            raise OSError(errno.EBUSY, "Device or resource busy", str(path))
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(cache.shutil, "rmtree", rmtree)
+    assert remove_analyzer_cache(sid) is True
+    assert not busy.exists()
+    assert not free.exists()
+    leftovers = [p.name for p in tmp_path.iterdir() if p.is_dir()]
+    assert len(leftovers) == 1
+    assert leftovers[0].startswith(f".{busy.stem}.trash-")
+
+
 def test_analyzer_cache_import_pulls_no_db_layer_modules():
     """A cold import of ``_analyzer_cache`` pulls in neither
     ``spyglass.common`` nor any v2 *schema* module (it reads ``dj.config`` /

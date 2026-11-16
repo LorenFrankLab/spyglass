@@ -762,7 +762,10 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
     """Remove ALL analyzer-cache folders for a ``sorting_id``.
 
     Removes every ``{sorting_id}__*.analyzer`` folder (display, metric and
-    curation caches) and abandoned staging. Removal errors propagate.
+    curation caches) and abandoned staging. Each folder is renamed to a trash
+    sibling first; one still mapped by another process (NFS ``EBUSY`` /
+    ``ENOTEMPTY``) is left there for :func:`cleanup_analyzer_staging`. Other
+    removal errors propagate.
 
     Parameters
     ----------
@@ -793,7 +796,9 @@ def remove_analyzer_cache(sorting_id, *, missing_ok: bool = True) -> bool:
                 return False
             raise FileNotFoundError(root / pattern)
         for folder in folders:
-            shutil.rmtree(folder, ignore_errors=False)
+            trash = _publish_sibling(folder, "trash")
+            os.replace(folder, trash)
+            _remove_unless_in_use(trash)
     return True
 
 
