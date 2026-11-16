@@ -14,6 +14,10 @@ from spyglass.spikesorting.v2._orchestration.preflight import (
     motion_request_problem,
     preflight_v2_pipeline,
 )
+from spyglass.spikesorting.v2._orchestration.preflight_report import (
+    preflight_blocked_message,
+    preflight_plan_text,
+)
 from spyglass.spikesorting.v2._orchestration.presets import (
     _find_pipeline_preset,
     _unknown_pipeline_preset_message,
@@ -251,23 +255,36 @@ def _run_preflight(
             sort_checks=sort_checks,
         )
         if not report.ok:
-            raise PreflightError("\n".join(report.errors))
+            raise PreflightError(
+                preflight_blocked_message(
+                    request.caller, request.target, report.errors
+                )
+            )
         warnings = list(report.warnings)
-        for warning in warnings:
-            logger.warning(f"{request.caller} preflight: {warning}")
-        return warnings
-    return assert_concat_preflight(
-        request.source_inputs["concat_session_group_owner"],
-        request.source_inputs["concat_session_group_name"],
-        request.bundle,
-        auto_curate=request.auto_curate,
-        manual_excluded_times=request.manual_excluded_times,
-        motion_mode=request.motion_mode,
-        motion_correction_params_name=request.motion_correction_params_name,
-        motion_estimate_id=request.motion_estimate_id,
-        caller=request.caller,
-        sort_checks=sort_checks,
+        plan = preflight_plan_text(report.expected_ids)
+        detail = f"{len(report.checks)} checks, {len(warnings)} warning(s)" + (
+            f"; plan: {plan}" if plan else ""
+        )
+    else:
+        warnings = assert_concat_preflight(
+            request.source_inputs["concat_session_group_owner"],
+            request.source_inputs["concat_session_group_name"],
+            request.bundle,
+            auto_curate=request.auto_curate,
+            manual_excluded_times=request.manual_excluded_times,
+            motion_mode=request.motion_mode,
+            motion_correction_params_name=request.motion_correction_params_name,
+            motion_estimate_id=request.motion_estimate_id,
+            caller=request.caller,
+            sort_checks=sort_checks,
+        )
+        detail = f"{len(warnings)} warning(s)"
+    for warning in warnings:
+        logger.warning(f"{request.caller} preflight: {warning}")
+    logger.info(
+        f"{request.caller} preflight passed for {request.target}: {detail}."
     )
+    return warnings
 
 
 class _RunSource(NamedTuple):

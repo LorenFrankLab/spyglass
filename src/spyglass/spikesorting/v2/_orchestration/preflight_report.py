@@ -151,6 +151,65 @@ class PreflightSessionReport:
         return "\n".join(lines)
 
 
+def _expected_id_action(selection: dict) -> str:
+    """What a run would do with one ``expected_ids`` entry."""
+    if selection.get("pending"):
+        return f"compute (id known once {selection['pending']})"
+    if selection["id"] is None:
+        return "skip"
+    if selection["computed_exists"]:
+        return "reuse completed output"
+    return "compute"
+
+
+def preflight_plan_text(expected_ids: dict) -> str:
+    """One line of what a run would compute or reuse, stage by stage.
+
+    Parameters
+    ----------
+    expected_ids : dict
+        ``PreflightReport.expected_ids``.
+
+    Returns
+    -------
+    str
+        ``"recording: reuse completed output, sorting: compute"``; empty
+        when there are no expected ids.
+    """
+    return ", ".join(
+        f"{key.removesuffix('_id')}: {_expected_id_action(selection)}"
+        for key, selection in expected_ids.items()
+    )
+
+
+def preflight_blocked_message(
+    caller: str, target: "str | None", errors: list[str]
+) -> str:
+    """The ``PreflightError`` text of a blocked run.
+
+    Parameters
+    ----------
+    caller : str
+        The public entry point.
+    target : str or None
+        What the run reads (see ``_run_target_label``).
+    errors : list of str
+        Each failed check's fix.
+
+    Returns
+    -------
+    str
+        A header naming the caller and target, one bullet per problem, and
+        the way forward.
+    """
+    return (
+        f"{caller}: preflight blocked{f' {target}' if target else ''}:\n"
+        + "\n".join(f"  - {error}" for error in errors)
+        + "\nFix these and re-run the same call, or pass preflight=False to "
+        "attempt the run anyway."
+    )
+
+
 def _preflight_details(
     errors,
     warnings,
@@ -169,15 +228,9 @@ def _preflight_details(
             for line in pformat(scientific_config, width=76).splitlines()
         )
     for key, selection in expected_ids.items():
-        if selection.get("pending"):
-            action = f"compute (id known once {selection['pending']})"
-        elif selection["id"] is None:
-            action = "skip"
-        elif selection["computed_exists"]:
-            action = "reuse completed output"
-        else:
-            action = "compute"
-        lines.append(f"  {key.removesuffix('_id')}: {action}")
+        lines.append(
+            f"  {key.removesuffix('_id')}: {_expected_id_action(selection)}"
+        )
     if effective_config is not None:
         lines.append("  Effective sorter configuration:")
         lines.extend(

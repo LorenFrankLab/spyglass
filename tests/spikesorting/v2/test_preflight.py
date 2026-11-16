@@ -1832,8 +1832,12 @@ def test_assert_concat_preflight_raises_on_missing_group(dj_conn):
 
     initialize_v2_defaults()
     bundle = _PIPELINE_PRESETS[_CONCAT_PRESET]
-    with pytest.raises(PreflightError, match="does not exist"):
+    with pytest.raises(PreflightError, match="does not exist") as error:
         assert_concat_preflight("no_owner_xyz", "no_group_xyz", bundle)
+    assert str(error.value).startswith(
+        "run_v2_concat_pipeline: preflight blocked session group "
+        "'no_owner_xyz'/'no_group_xyz'"
+    )
 
 
 @pytest.mark.database
@@ -1969,3 +1973,97 @@ def test_preflight_says_a_missing_row_needs_its_sorter_installed(
     assert repr(row[1]) in fix
     assert "not installed" in fix
     assert "Install the sorter" in fix
+
+
+def _single_request():
+    from spyglass.spikesorting.v2._orchestration.source import (
+        _validate_run_request,
+    )
+
+    return _validate_run_request(
+        "run_v2_pipeline",
+        is_concat=False,
+        source_inputs={
+            "nwb_file_name": "s.nwb",
+            "sort_group_id": 3,
+            "interval_list_name": "i",
+            "team_name": "t",
+        },
+        pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
+        curation_description="",
+        require_units=False,
+        auto_curate=False,
+        preflight=True,
+        manual_excluded_times=None,
+        motion_mode="off",
+        motion_correction_params_name=None,
+        motion_estimate_id=None,
+    )
+
+
+def test_run_preflight_logs_one_line_when_it_passes(monkeypatch, caplog):
+    """A passing preflight logs one INFO line naming the run, its target,
+    the warning count and what will be reused or computed."""
+    from spyglass.spikesorting.v2._orchestration import source
+    from spyglass.spikesorting.v2.pipeline import PreflightCheck
+
+    report = PreflightReport(
+        warnings=["an advisory"],
+        resolved_pipeline_preset="p",
+        expected_ids={
+            "recording_id": {
+                "id": "r",
+                "exists": True,
+                "computed_exists": True,
+            },
+            "sorting_id": {
+                "id": "s",
+                "exists": False,
+                "computed_exists": False,
+            },
+        },
+        checks=[PreflightCheck("session_exists", True, "")],
+    )
+    monkeypatch.setattr(source, "preflight_v2_pipeline", lambda **kw: report)
+    with caplog.at_level("INFO", logger="spyglass"):
+        assert source._run_preflight(_single_request()) == ["an advisory"]
+    passed = [
+        r.getMessage()
+        for r in caplog.records
+        if "preflight passed" in r.getMessage()
+    ]
+    assert len(passed) == 1, passed
+    line = passed[0]
+    assert line.startswith("run_v2_pipeline preflight passed for")
+    assert "'s.nwb' sort group 3" in line
+    assert "1 warning(s)" in line
+    assert "recording: reuse completed output" in line
+    assert "sorting: compute" in line
+
+
+def test_run_preflight_block_names_the_target_and_every_problem(
+    monkeypatch,
+):
+    """A blocked preflight raises naming the run, its target and every
+    failed check, and says how to proceed."""
+    from spyglass.spikesorting.v2._orchestration import source
+    from spyglass.spikesorting.v2.pipeline import PreflightCheck
+
+    report = PreflightReport(
+        warnings=[],
+        resolved_pipeline_preset="p",
+        expected_ids={},
+        checks=[
+            PreflightCheck("session_exists", False, "session missing"),
+            PreflightCheck("team_exists", False, "team missing"),
+        ],
+    )
+    monkeypatch.setattr(source, "preflight_v2_pipeline", lambda **kw: report)
+    with pytest.raises(PreflightError) as error:
+        source._run_preflight(_single_request())
+    message = str(error.value)
+    assert message.startswith(
+        "run_v2_pipeline: preflight blocked 's.nwb' sort group 3"
+    )
+    assert "session missing" in message and "team missing" in message
+    assert "preflight=False" in message

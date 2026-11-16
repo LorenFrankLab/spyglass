@@ -878,3 +878,51 @@ def test_session_runner_logs_which_group_of_how_many_it_starts(
     ):
         assert "'s.nwb'" in line
         assert f"sort group {sort_group_id} ({position}/3)" in line
+
+
+@pytest.mark.unit
+def test_session_preflight_logs_success_and_names_the_session_when_blocked(
+    monkeypatch, caplog
+):
+    """A passing session preflight logs one line naming the session and its
+    groups; a blocked one raises naming them and the way forward."""
+    monkeypatch.setattr(
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 1]
+    )
+    monkeypatch.setattr(
+        plr, "run_v2_pipeline", lambda *, sort_group_id, **kw: {"n_units": 1}
+    )
+    monkeypatch.setattr(
+        plr,
+        "preflight_v2_pipeline_session",
+        lambda **kw: _session_report({0: True, 1: True}),
+    )
+    kwargs = dict(
+        nwb_file_name="s.nwb",
+        interval_list_name=_INTERVAL,
+        team_name=_TEAM,
+        pipeline_preset=_PRESET,
+    )
+    with caplog.at_level("INFO", logger="spyglass"):
+        run_v2_pipeline_session(**kwargs)
+    passed = [
+        r.getMessage()
+        for r in caplog.records
+        if "preflight passed" in r.getMessage()
+    ]
+    assert len(passed) == 1, passed
+    assert passed[0].startswith("run_v2_pipeline_session")
+    assert "'s.nwb'" in passed[0] and "[0, 1]" in passed[0]
+
+    monkeypatch.setattr(
+        plr,
+        "preflight_v2_pipeline_session",
+        lambda **kw: _session_report({0: True, 1: False}),
+    )
+    with pytest.raises(PreflightError) as exc:
+        run_v2_pipeline_session(**kwargs)
+    message = str(exc.value)
+    assert message.startswith("run_v2_pipeline_session: preflight blocked")
+    assert "'s.nwb'" in message
+    assert "group 1 misconfigured" in message
+    assert "preflight=False" in message

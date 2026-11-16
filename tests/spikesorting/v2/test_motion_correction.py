@@ -3124,7 +3124,8 @@ def test_concat_preflight_names_the_calling_entry_point(dj_conn):
     )
 
     with pytest.raises(
-        PreflightError, match="^estimate_concat_motion: SessionGroup"
+        PreflightError,
+        match="^estimate_concat_motion: preflight blocked(.|\n)*SessionGroup",
     ):
         estimate_concat_motion(
             session_group_owner="no_such_owner",

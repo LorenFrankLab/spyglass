@@ -23,7 +23,9 @@ from spyglass.spikesorting.v2._orchestration.preflight_motion import (
 )
 from spyglass.spikesorting.v2._orchestration.preflight_report import (
     PreflightCheck,
+    preflight_blocked_message,
 )
+from spyglass.spikesorting.v2._orchestration.stages import _run_target_label
 from spyglass.spikesorting.v2.exceptions import PreflightError
 
 if TYPE_CHECKING:
@@ -46,8 +48,8 @@ def assert_concat_preflight(
     """Raise ``PreflightError`` if a concat run's prerequisites are missing.
 
     Runs every check of :func:`collect_concat_checks` and raises once with
-    all failures, each prefixed with ``caller`` (and the member when it is
-    a member's). Returns advisory warnings.
+    all failures (see ``preflight_blocked_message``), a member's prefixed
+    with the member. Returns advisory warnings.
     """
     checks: list[PreflightCheck] = []
     warnings: list[str] = []
@@ -67,7 +69,13 @@ def assert_concat_preflight(
     )
     errors = [check.fix for check in checks if not check.ok]
     if errors:
-        raise PreflightError("\n".join(f"{caller}: {e}" for e in errors))
+        target = _run_target_label(
+            {
+                "concat_session_group_owner": concat_session_group_owner,
+                "concat_session_group_name": concat_session_group_name,
+            }
+        )
+        raise PreflightError(preflight_blocked_message(caller, target, errors))
     return warnings
 
 

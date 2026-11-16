@@ -1152,6 +1152,8 @@ def run_forwarding_spies(dj_conn, monkeypatch):
         ok = True
         errors: list = []
         warnings: list = []
+        checks: list = []
+        expected_ids: dict = {}
 
     def _preflight(*args, **kwargs):
         seen["preflight"] = (args, kwargs)

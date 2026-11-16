@@ -9,6 +9,9 @@ from spyglass.spikesorting.v2._orchestration.preflight import (
     motion_request_problem,
     preflight_v2_pipeline_session,
 )
+from spyglass.spikesorting.v2._orchestration.preflight_report import (
+    preflight_blocked_message,
+)
 from spyglass.spikesorting.v2._orchestration.reporting import (
     _session_outcome_counts,
 )
@@ -223,15 +226,25 @@ def _run_session_preflight(
         motion_mode=motion_mode,
         motion_correction_params_name=motion_correction_params_name,
     )
+    target = f"{nwb_file_name!r} sort groups {targets}"
     # Groups run with preflight=False, so carry advisories forward here.
     for row in session_report.group_reports:
         if row.get("warnings"):
             preflight_warnings_by_group[row["sort_group_id"]] = list(
                 row["warnings"]
             )
-    if not session_report.ok:
+    if session_report.ok:
+        logger.info(
+            f"run_v2_pipeline_session preflight passed for {target}: "
+            f"{len(session_report.warnings)} warning(s)."
+        )
+    else:
         if not continue_on_error:
-            raise PreflightError("\n".join(session_report.errors))
+            raise PreflightError(
+                preflight_blocked_message(
+                    "run_v2_pipeline_session", target, session_report.errors
+                )
+            )
         for row in session_report.group_reports:
             if row["ok"]:
                 continue
