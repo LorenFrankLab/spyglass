@@ -161,6 +161,86 @@ def unlabeled_units_warning(snapshot) -> "str | None":
     )
 
 
+def _motion_recipe_hash(motion_corrected_recording_id) -> str:
+    """Resolved interpolation hash of one corrected recording's selection."""
+    from spyglass.spikesorting.v2.motion import (
+        MotionCorrectedRecordingSelection,
+    )
+
+    return (
+        MotionCorrectedRecordingSelection
+        & {"motion_corrected_recording_id": motion_corrected_recording_id}
+    ).fetch1("resolved_params_hash")
+
+
+def motion_treatment_by_input(inputs, recipe_hash_of=None):
+    """Each input's motion treatment: ``None`` or its interpolation recipe hash.
+
+    Parameters
+    ----------
+    inputs : sequence of dict
+        Prepared matching inputs with ``input_index`` and
+        ``motion_corrected_recording_id`` (``None`` for an uncorrected sort).
+    recipe_hash_of : callable, optional
+        Maps a ``motion_corrected_recording_id`` to its resolved
+        interpolation hash; reads ``MotionCorrectedRecordingSelection`` by
+        default.
+
+    Returns
+    -------
+    dict
+        ``{input_index: None | resolved_params_hash}``.
+    """
+    recipe_hash_of = recipe_hash_of or _motion_recipe_hash
+    return {
+        int(item["input_index"]): (
+            None
+            if item["motion_corrected_recording_id"] is None
+            else recipe_hash_of(item["motion_corrected_recording_id"])
+        )
+        for item in inputs
+    }
+
+
+def mixed_motion_treatment_warning(treatment_by_input) -> "str | None":
+    """Warn when inputs were not given the same motion treatment.
+
+    Parameters
+    ----------
+    treatment_by_input : dict
+        ``{input_index: None | interpolation recipe hash}``; ``None`` means
+        the input was sorted without motion correction.
+
+    Returns
+    -------
+    str or None
+        Warning text naming the uncorrected and differently corrected
+        inputs, or ``None`` when every input has the same treatment.
+    """
+    if len(set(treatment_by_input.values())) < 2:
+        return None
+    uncorrected = sorted(i for i, t in treatment_by_input.items() if t is None)
+    recipes = {}
+    for index, treatment in sorted(treatment_by_input.items()):
+        if treatment is not None:
+            recipes.setdefault(treatment, []).append(index)
+    parts = []
+    if uncorrected:
+        parts.append(f"input(s) {uncorrected} have no motion correction")
+    if len(recipes) > 1 or (uncorrected and recipes):
+        parts.extend(
+            f"input(s) {indices} use interpolation recipe {recipe[:12]}"
+            for recipe, indices in recipes.items()
+        )
+    return (
+        "Matching inputs have different motion treatment ("
+        + "; ".join(parts)
+        + "). Waveforms of a corrected and an uncorrected sort, or of two "
+        "recipes, differ by the correction itself and can lower match "
+        "probabilities; give every input the same treatment."
+    )
+
+
 def preflight_v2_unit_match(
     plan: UnitMatchPlan | UnitMatchInputPlan,
 ) -> UnitMatchPreflightReport:
@@ -325,6 +405,12 @@ def preflight_v2_unit_match(
             tuple(selections),
             tuple(warnings),
         )
+
+    motion_warning = mixed_motion_treatment_warning(
+        motion_treatment_by_input(prepared["inputs"])
+    )
+    if motion_warning:
+        warnings.append(motion_warning)
 
     order = {
         (str(item["sorting_id"]), int(item["curation_id"])): int(

@@ -731,6 +731,7 @@ def explicit_matching_plan(monkeypatch):
         prepared=[],
         source_hash="checked-sources",
         preparation_error=None,
+        motion_ids={},
         eligibility_error=None,
         changed_labels=False,
         resolver_kwargs=[],
@@ -809,6 +810,7 @@ def explicit_matching_plan(monkeypatch):
                 "input_index": index,
                 "source_kind": "recording",
                 "source_id": uuid.UUID(int=index + 200),
+                "motion_corrected_recording_id": state.motion_ids.get(index),
                 "recordings": [
                     {
                         "nwb_file_name": f"epoch-{index}.nwb",
@@ -1140,6 +1142,29 @@ def test_matching_preflight_rejects_drift_from_reviewed_plan(
     checked = preflight_v2_unit_match(plan)
     assert not checked.ok
     assert any(expected in value for value in checked.errors)
+
+
+def test_preflight_warns_when_inputs_have_different_motion_treatment(
+    explicit_matching_plan, monkeypatch
+):
+    from spyglass.spikesorting.v2._matching import preflight
+    from spyglass.spikesorting.v2.pipeline import (
+        plan_v2_unit_match_from_curations,
+        preflight_v2_unit_match,
+    )
+
+    state = explicit_matching_plan
+    plan = plan_v2_unit_match_from_curations(state.refs)
+    clean = preflight_v2_unit_match(plan)
+    assert not any("motion treatment" in w for w in clean.warnings)
+
+    state.motion_ids[1] = uuid.UUID(int=77)
+    monkeypatch.setattr(preflight, "_motion_recipe_hash", lambda _: "c" * 64)
+    mixed = preflight_v2_unit_match(plan)
+    assert mixed.ok
+    assert any(
+        "input(s) [0] have no motion correction" in w for w in mixed.warnings
+    )
 
 
 def test_explicit_plan_rejects_empty_duplicate_and_untyped_inputs():

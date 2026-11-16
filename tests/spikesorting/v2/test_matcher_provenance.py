@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from spyglass.spikesorting.v2._matching.preflight import (
+    mixed_motion_treatment_warning,
+)
 from spyglass.spikesorting.v2._matching.provenance import (
     matcher_provenance,
     validate_matcher_provenance,
@@ -374,3 +377,45 @@ def test_unitmatch_fingerprints_are_empty_without_unitmatchpy(monkeypatch):
 
     monkeypatch.setattr(module, "_require_unitmatch", missing)
     assert module.UnitMatchBackend().provenance_fingerprints({}) == {}
+
+
+@pytest.mark.parametrize(
+    "treatment",
+    [
+        {0: None, 1: None},
+        {0: "a" * 64, 1: "a" * 64, 2: "a" * 64},
+        {0: None},
+    ],
+)
+def test_same_motion_treatment_gives_no_warning(treatment):
+    assert mixed_motion_treatment_warning(treatment) is None
+
+
+def test_corrected_and_uncorrected_inputs_warn_and_name_the_uncorrected():
+    text = mixed_motion_treatment_warning({0: None, 1: "a" * 64, 2: "a" * 64})
+    assert "different motion treatment" in text
+    assert "input(s) [0] have no motion correction" in text
+    assert "input(s) [1, 2] use interpolation recipe aaaaaaaaaaaa" in text
+
+
+def test_two_interpolation_recipes_warn_and_group_inputs_by_recipe():
+    text = mixed_motion_treatment_warning({0: "a" * 64, 1: "b" * 64})
+    assert "no motion correction" not in text
+    assert "input(s) [0] use interpolation recipe aaaaaaaaaaaa" in text
+    assert "input(s) [1] use interpolation recipe bbbbbbbbbbbb" in text
+
+
+def test_motion_treatment_by_input_maps_uncorrected_to_none():
+    from spyglass.spikesorting.v2._matching.preflight import (
+        motion_treatment_by_input,
+    )
+
+    got = motion_treatment_by_input(
+        [
+            {"input_index": 0, "motion_corrected_recording_id": None},
+            {"input_index": 1, "motion_corrected_recording_id": "m1"},
+            {"input_index": 2, "motion_corrected_recording_id": "m2"},
+        ],
+        recipe_hash_of={"m1": "h1", "m2": "h2"}.__getitem__,
+    )
+    assert got == {0: None, 1: "h1", 2: "h2"}
