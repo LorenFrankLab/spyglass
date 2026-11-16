@@ -60,7 +60,7 @@ Package root, `spyglass.spikesorting.v2`:
     them as a table. `describe_pipeline_preset`: one preset's validated values.
     `describe_recommendation_status`: the `recommendation_status` legend.
 - `register_pipeline_preset` / `clone_pipeline_preset`: add a preset, or copy
-    one with some values changed.
+    one with some values changed. Both save it in `PipelinePreset`.
 - `describe_parameter_rows`: catalog the parameter rows in the database.
 - `describe_run`: a run summary as a receipt (stages, warnings, effective sorter
     configuration, merge ids). `describe_units`: per-unit sort-time snapshot.
@@ -155,6 +155,7 @@ planned with `attempt_all`. Parameter tables provide `insert_default()`.
 | `concat_member_curation`             | `ConcatMemberCurationV2`                                                                                                                                                                                    |
 | `unit_matching`                      | `MatcherParameters`, `UnitMatchSelection`, `UnitMatch`, `TrackedUnit`                                                                                                                                     |
 | `recompute`                          | `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`              |
+| `pipeline_preset`                    | `PipelinePreset`                                                                                                                                                                                          |
 
 - `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
     two artifact-detection tables. `SortingSelection.ArtifactDetectionSource`
@@ -212,7 +213,8 @@ Both curation paths:
 - All tables live in `spikesorting_v2_*` schemas (`recording`, `artifact`,
     `artifact_output`, `sorting`, `curation`, `metric_curation`,
     `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
-    `unit_matching`, `recompute`, `motion`), so v0/v1 schemas are untouched.
+    `unit_matching`, `recompute`, `motion`, `pipeline_preset`), so v0/v1 schemas
+    are untouched.
 - `CurationV2` and `ConcatMemberCurationV2` register as parts on the existing
     `SpikeSortingOutput`, so v0, v1, imported, and v2 curations share one merge
     surface. The concat `CurationV2` itself is not registered: its synthetic
@@ -961,6 +963,34 @@ each patch once a fixed SpikeInterface is adopted.
     post-trough peak, which on a 0.5 ms post-window saturates at the waveform's
     edge (pyramidal trough-to-peak is about 0.5-0.8 ms). They are reliable on
     the 1.0/2.0 ms cortex window; add them to `template_metric_columns`.
+
+### Pipeline presets
+
+A preset names one parameter row per stage: preprocessing, artifact detection
+(optional), sorter, quality metrics, and auto-curation rules.
+
+- `_orchestration.presets._PipelinePreset` is the validated bundle. The shipped
+    presets are built from `_core.recipe_catalog.pipeline_preset_specs()` into
+    the module dict `_PIPELINE_PRESETS` at import.
+- `PipelinePreset` (`pipeline_preset.py`) saves presets in the database with a
+    foreign key to each stage's parameter table, so a saved preset cannot name a
+    missing row. The artifact key is nullable; NULL means no artifact detection.
+- `initialize_v2_defaults` inserts the shipped presets with
+    `created_by="spyglass"`. A preset whose sorter row is absent (sorter not
+    installed) is skipped. `verify_v2_default_catalog` compares the stored
+    shipped presets with the code.
+- `register_pipeline_preset` and `clone_pipeline_preset` insert a row with
+    `created_by` set to the database user. The same name with the same content
+    is a no-op; the same name with different content raises.
+- Lookup is `_find_pipeline_preset`: the code dict first, then the table. A
+    shipped name therefore resolves without a query, and a saved row cannot
+    replace a shipped preset.
+- `register_pipeline_preset(..., validate_rows=False)` adds to the code dict
+    only, for one Python session, without the database.
+- Results are keyed by the parameter rows, not the preset name. Deleting a
+    preset leaves its runs in place, and the parameter rows it named stay.
+- The unit test tier blocks database access, so its conftest guard replaces
+    `_saved_pipeline_presets` with an empty result.
 
 ## Unit matching
 
