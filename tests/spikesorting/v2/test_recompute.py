@@ -628,6 +628,58 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_invalidating_analyzer_inventory_needs_no_delete_permission(
+    populated_sorting, clean_recompute, monkeypatch
+):
+    """A rebuild on a read path retires the inventory and its verdicts
+    without a team-permission check or the lab-wide file sweep a cautious
+    delete runs."""
+    from spyglass.spikesorting.v2.recompute import (
+        SortingAnalyzerRecompute,
+        SortingAnalyzerRecomputeSelection,
+        SortingAnalyzerVersions,
+        invalidate_sorting_analyzer_inventory,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from spyglass.utils.mixins.cautious_delete import CautiousDeleteMixin
+
+    Sorting().get_analyzer(populated_sorting)  # the shared folder may be gone
+    recipe = (Sorting & populated_sorting).fetch1(
+        "display_waveform_params_name"
+    )
+    restriction = {
+        "sorting_id": populated_sorting["sorting_id"],
+        "waveform_params_name": recipe,
+    }
+    SortingAnalyzerVersions.populate(restriction, reserve_jobs=False)
+    SortingAnalyzerRecomputeSelection.attempt_all(restriction)
+    selection = (SortingAnalyzerRecomputeSelection & restriction).fetch1("KEY")
+    SortingAnalyzerRecompute.insert1(
+        {**selection, "matched": 0, "err_msg": "planted verdict"},
+        allow_direct_insert=True,
+    )
+    SortingAnalyzerRecompute.Name.insert1(
+        {**selection, "name": "templates", "missing_from": "new"},
+        allow_direct_insert=True,
+    )
+
+    def refuse(_self):
+        raise PermissionError("not on a team with the session experimenter")
+
+    # Scoped: the fixture teardown deletes with the real permission check.
+    with monkeypatch.context() as patch:
+        patch.setattr(CautiousDeleteMixin, "_check_delete_permission", refuse)
+        assert invalidate_sorting_analyzer_inventory(
+            populated_sorting["sorting_id"], recipe
+        )
+    assert not (SortingAnalyzerVersions & restriction)
+    assert not (SortingAnalyzerRecomputeSelection & restriction)
+    assert not (SortingAnalyzerRecompute & restriction)
+    assert not (SortingAnalyzerRecompute.Name & restriction)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_sorting_analyzer_recompute_fetch_resolves_inputs_and_compute_needs_no_db(
     populated_sorting, clean_recompute, monkeypatch
 ):

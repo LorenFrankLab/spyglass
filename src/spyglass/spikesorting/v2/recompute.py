@@ -1339,8 +1339,23 @@ def invalidate_sorting_analyzer_inventory(
     """Remove an inventory and verdicts tied to a folder being rebuilt.
 
     The inventory describes one on-disk generation, so its verdicts are stale
-    after a rebuild. Returns whether a row existed, so the rebuild path can
-    restore the inventory afterwards.
+    after a rebuild. Rows are removed child first with ``delete_quick``: this
+    runs on read paths (``Sorting.get_analyzer``), so it needs no delete
+    permission and runs no external-file sweep. An unexpected referencing row
+    raises, so no stale verdict can outlive its generation.
+
+    Parameters
+    ----------
+    sorting_id : uuid.UUID or str
+        The sort whose analyzer folder is being rebuilt.
+    waveform_params_name : str
+        The analyzer recipe of that folder.
+
+    Returns
+    -------
+    bool
+        Whether an inventory row existed, so the rebuild path can restore the
+        inventory afterwards.
     """
     restriction = {
         "sorting_id": sorting_id,
@@ -1349,11 +1364,15 @@ def invalidate_sorting_analyzer_inventory(
     inventory = SortingAnalyzerVersions & restriction
     if not inventory:
         return False
-    # Delete selections first so per-env recompute rows cascade.
-    selections = SortingAnalyzerRecomputeSelection & restriction
-    if selections:
-        selections.delete(safemode=False)
-    inventory.delete(safemode=False)
+    with SortingAnalyzerVersions._safe_context():
+        for table in (
+            SortingAnalyzerRecompute.Name,
+            SortingAnalyzerRecompute.Hash,
+            SortingAnalyzerRecompute,
+            SortingAnalyzerRecomputeSelection,
+            SortingAnalyzerVersions,
+        ):
+            (table & restriction).delete_quick()
     return True
 
 
