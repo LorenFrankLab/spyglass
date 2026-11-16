@@ -307,6 +307,11 @@ def _custom_spec() -> dict:
     return base.model_dump()
 
 
+def _no_saved(name=None) -> dict:
+    """``_saved_pipeline_presets`` for an empty ``PipelinePreset`` table."""
+    return {}
+
+
 @pytest.mark.unit
 def test_register_pipeline_preset_adds_to_registry(monkeypatch):
     """A registered preset appears in the catalog (no DB row check)."""
@@ -317,6 +322,8 @@ def test_register_pipeline_preset_adds_to_registry(monkeypatch):
         "_PIPELINE_PRESETS",
         dict(presets_mod._PIPELINE_PRESETS),
     )
+    # No saved presets: the name-clash lookup reads none.
+    monkeypatch.setattr(presets_mod, "_saved_pipeline_presets", _no_saved)
     register_pipeline_preset(
         "lab_custom_2026_06", _custom_spec(), validate_rows=False
     )
@@ -336,6 +343,7 @@ def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
         "_PIPELINE_PRESETS",
         dict(presets_mod._PIPELINE_PRESETS),
     )
+    monkeypatch.setattr(presets_mod, "_saved_pipeline_presets", _no_saved)
     supplied = _PipelinePreset(**_custom_spec())
     original_sorter = supplied.sorter
     register_pipeline_preset("lab_owned_2026_06", supplied, validate_rows=False)
@@ -1506,3 +1514,28 @@ def test_clone_refuses_an_existing_different_waveform_mapping(
         clone_pipeline_preset(
             _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
         )
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_session_only_preset_cannot_shadow_a_saved_preset(dj_conn, clone_env):
+    """``validate_rows=False`` refuses a name already saved with other
+    content, so this session's runs cannot silently use a different recipe."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+
+    name = "lab_saved_then_shadowed_2026_11"
+    clone_env.append(name)
+    register_pipeline_preset(name, _custom_spec())
+    assert name not in presets_mod._PIPELINE_PRESETS
+    with pytest.raises(ValueError, match="already exists with different"):
+        register_pipeline_preset(
+            name,
+            _spec_with(notes="a different recipe note"),
+            validate_rows=False,
+        )
+    assert name not in presets_mod._PIPELINE_PRESETS
+    # Identical content stays a no-op.
+    assert (
+        register_pipeline_preset(name, _custom_spec(), validate_rows=False)
+        == name
+    )

@@ -601,8 +601,9 @@ def register_pipeline_preset(
         The preset bundle.
     validate_rows : bool, optional
         If True (default), check the referenced rows and save the preset.
-        Pass False to register it for this Python session only, without the
-        database.
+        Pass False to register it for this Python session only, without
+        checking rows or saving; ``PipelinePreset`` is still read so a saved
+        preset of the same name with other content is refused.
 
     Returns
     -------
@@ -628,11 +629,8 @@ def register_pipeline_preset(
         preset.model_dump() if isinstance(preset, _PipelinePreset) else preset
     )
     validated = _PipelinePreset(**content)
-    existing = (
-        _PIPELINE_PRESETS.get(name)
-        if not validate_rows
-        else _find_pipeline_preset(name)
-    )
+    # A session-only preset must not shadow a saved one of the same name.
+    existing = _find_pipeline_preset(name)
     if existing is not None:
         if existing.model_dump() == validated.model_dump():
             return name
