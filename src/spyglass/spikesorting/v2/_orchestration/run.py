@@ -32,6 +32,7 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _run_sorting_stage,
 )
 from spyglass.spikesorting.v2.curation_api import RunResult
+from spyglass.spikesorting.v2.exceptions import PipelineInputError
 from spyglass.spikesorting.v2._orchestration.preflight import (
     describe_scientific_setup,
 )
@@ -333,11 +334,14 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
         "motion_spans_without_evidence": None,
     }
     # Fails before any populate when preflight is off.
-    motion_recipe = (
-        None
-        if motion_mode == "off"
-        else resolve_motion_recipe(request.motion_correction_params_name)
-    )
+    motion_recipe = None
+    if motion_mode != "off":
+        try:
+            motion_recipe = resolve_motion_recipe(
+                request.motion_correction_params_name
+            )
+        except ValueError as exc:
+            raise PipelineInputError(f"{request.caller}: {exc}") from exc
     # Resolved up front so a reused sort still reports its configuration.
     run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
     stage_seconds: dict[str, float] = {}

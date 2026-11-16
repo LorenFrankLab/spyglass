@@ -26,6 +26,7 @@ from spyglass.spikesorting.v2._orchestration.stages import (
     _run_stage,
 )
 from spyglass.spikesorting.v2._recording.source import SourceLineage
+from spyglass.spikesorting.v2.exceptions import PipelineInputError
 from spyglass.utils import logger
 
 
@@ -413,7 +414,10 @@ def _estimate_motion(
         "stage_seconds": stage_seconds,
         "warnings": warnings_list,
     }
-    motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+    try:
+        motion_recipe = resolve_motion_recipe(motion_correction_params_name)
+    except ValueError as exc:
+        raise PipelineInputError(f"{caller}: {exc}") from exc
     source = _build_run_source(
         request, run_summary=run_summary, stage_seconds=stage_seconds
     )

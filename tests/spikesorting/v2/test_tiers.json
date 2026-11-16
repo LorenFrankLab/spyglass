@@ -725,7 +725,8 @@
         "test_register_with_an_unknown_sorter_row_says_initialize_will_not_add_it": "db_unit",
         "test_run_v2_concat_pipeline_accepts_single_session_preset": "pipeline",
         "test_run_entry_points_forward_every_option_to_its_stage": "db_unit",
-        "test_run_v2_unit_match_unknown_matcher_raises": "db_unit"
+        "test_run_v2_unit_match_unknown_matcher_raises": "db_unit",
+        "test_unknown_motion_recipe_without_preflight_names_the_entry_point": "db_unit"
       }
     },
     "test_pipeline_session.py": {

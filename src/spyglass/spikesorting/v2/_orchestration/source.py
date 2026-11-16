@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._core.signal_math import artifact_frame_ranges
 from spyglass.spikesorting.v2.exceptions import (
     PipelineInputError,
     PreflightError,
+    SpikeSortingV2Error,
 )
 from spyglass.utils import logger
 
@@ -146,8 +147,11 @@ def _validate_run_request(
     Raises
     ------
     PipelineInputError
-        On a missing source input, an unknown preset, or a contradictory
-        motion request.
+        On a missing source input, an unknown preset, a contradictory motion
+        request, or a malformed manual exclusion interval.
+    TypeError
+        If ``manual_excluded_times`` has the wrong shape for the mode (a
+        member-index mapping for single-session, or a list for concat).
     """
     missing = [
         name.removeprefix("concat_")
@@ -178,9 +182,16 @@ def _validate_run_request(
     if motion_problem is not None:
         raise PipelineInputError(f"{caller}: {motion_problem}")
 
-    manual_excluded_times = resolve_manual_exclusions(
-        manual_excluded_times, concat=is_concat
-    )
+    try:
+        manual_excluded_times = resolve_manual_exclusions(
+            manual_excluded_times, concat=is_concat
+        )
+    except SpikeSortingV2Error:
+        raise
+    except TypeError as exc:
+        raise TypeError(f"{caller}: {exc}") from exc
+    except ValueError as exc:
+        raise PipelineInputError(f"{caller}: {exc}") from exc
     bundle = artifact_recipe_with_manual_exclusions(
         preset, manual_excluded_times
     )

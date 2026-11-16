@@ -1954,3 +1954,70 @@ def test_register_with_an_unknown_sorter_row_says_initialize_will_not_add_it(
     assert "'h9_never_inserted'" in message
     assert "not a shipped default" in message
 
+
+@pytest.mark.unit
+def test_run_entry_points_name_themselves_on_bad_manual_exclusions():
+    """Malformed manual exclusions fail before any DB work with the entry
+    point named once: a bad interval is a PipelineInputError, a mapping
+    passed to a single-session run stays a TypeError."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import (
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
+
+    with pytest.raises(PipelineInputError) as error:
+        run_v2_pipeline("x.nwb", 0, "i", "t", manual_excluded_times=[[2, 1]])
+    assert str(error.value).startswith("run_v2_pipeline: ")
+    assert "start < stop" in str(error.value)
+
+    with pytest.raises(TypeError) as type_error:
+        run_v2_pipeline(
+            "x.nwb", 0, "i", "t", manual_excluded_times={0: [[1.0, 2.0]]}
+        )
+    assert not isinstance(type_error.value, PipelineInputError)
+    assert str(type_error.value).startswith("run_v2_pipeline: ")
+
+    with pytest.raises(PipelineInputError) as error:
+        run_v2_concat_pipeline(
+            "owner", "group", manual_excluded_times={0: [[2, 1]]}
+        )
+    assert str(error.value).count("run_v2_concat_pipeline: ") == 1
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_unknown_motion_recipe_without_preflight_names_the_entry_point(
+    dj_conn,
+):
+    """With preflight off, an unknown motion recipe still fails before any
+    stage as a PipelineInputError naming the entry point and the recipe."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from spyglass.spikesorting.v2.pipeline import (
+        estimate_motion,
+        run_v2_pipeline,
+    )
+
+    with pytest.raises(PipelineInputError) as error:
+        run_v2_pipeline(
+            "x.nwb",
+            0,
+            "i",
+            "t",
+            preflight=False,
+            motion_mode="estimate",
+            motion_correction_params_name="no_such_motion_recipe",
+        )
+    assert str(error.value).startswith("run_v2_pipeline: ")
+    assert "'no_such_motion_recipe'" in str(error.value)
+
+    with pytest.raises(PipelineInputError) as error:
+        estimate_motion(
+            "x.nwb",
+            0,
+            "i",
+            "t",
+            preflight=False,
+            motion_correction_params_name="no_such_motion_recipe",
+        )
+    assert str(error.value).startswith("estimate_motion: ")
