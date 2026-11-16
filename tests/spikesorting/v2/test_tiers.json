@@ -1092,7 +1092,7 @@
         "test_clusterless_unit_semantics_derived_and_warned": "stage",
         "test_derive_tracked_units_budget_cap_raises": "unit",
         "test_derive_tracked_units_counts_sessions_by_nwb_not_curation": "unit",
-        "test_derive_tracked_units_equal_strength_tie_break_is_member_sorted": "unit",
+        "test_derive_tracked_units_equal_strength_tie_break_is_lowest_unit": "unit",
         "test_derive_tracked_units_full_triangle_is_one_component": "unit",
         "test_derive_tracked_units_open_path_splits": "unit",
         "test_derive_tracked_units_partition_no_unit_in_two_groups": "unit",

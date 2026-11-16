@@ -108,9 +108,11 @@ def test_concat_selection_member_snapshot_part_shape():
         assert column in attrs, column
     assert "member_index" in snapshot.primary_key
     from spyglass.spikesorting.v2.artifact import RecordingArtifactDetection
+    from spyglass.spikesorting.v2.recording import Recording
 
     assert set(snapshot.parents()) == {
         ConcatenatedRecordingSelection.full_table_name,
+        Recording.full_table_name,
         RecordingArtifactDetection.full_table_name,
     }
     assert attrs["artifact_detection_id"].nullable
