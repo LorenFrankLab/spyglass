@@ -144,6 +144,107 @@ def _split_runs_at_gaps(runs, gap_after):
     return np.array(out, dtype=np.int64)
 
 
+def max_reachable_zscore(n_channels: int, n_required: int) -> float:
+    """Largest threshold the cross-channel z-score can exceed on k channels.
+
+    Per frame, z uses the population std across channels, so the z values sum
+    to 0 and their squares to ``n_channels``. The bound is reached with +a on
+    ceil(k/2) channels, -a on floor(k/2) and the rest balancing the mean.
+
+    Parameters
+    ----------
+    n_channels : int
+        Channels in the frame, ``n``.
+    n_required : int
+        Channels that must exceed the threshold together, ``1 <= k <= n``.
+
+    Returns
+    -------
+    float
+        ``sqrt(n / k)`` for even k, ``sqrt(n (n - k) / (k (n - k) + 1))`` for
+        odd k < n, ``sqrt((n - 1) / (n + 1))`` for odd k = n. A threshold at or
+        above it can never flag a frame.
+    """
+    n, k = int(n_channels), int(n_required)
+    if k % 2 == 0:
+        return float(np.sqrt(n / k))
+    if k == n:
+        return float(np.sqrt((n - 1) / (n + 1)))
+    return float(np.sqrt(n * (n - k) / (k * (n - k) + 1)))
+
+
+def _check_zscore_detector(validated, n_channels, n_required, context):
+    """Raise or warn when the cross-channel z-score cannot flag a frame.
+
+    Raises when z is the only detector, warns when amplitude also fires: with
+    < 3 channels z ignores amplitude, and a threshold at or above
+    :func:`max_reachable_zscore` is never exceeded.
+
+    Parameters
+    ----------
+    validated : ArtifactDetectionParamsSchema
+        Validated detection parameters.
+    n_channels, n_required : int
+        Channels scanned, and channels that must be flagged in one frame.
+    context : str
+        Diagnostic suffix identifying the selection.
+
+    Raises
+    ------
+    InsufficientZScoreChannelsError
+        If ``zscore_threshold`` is the only detector and cannot flag a frame.
+    """
+    threshold = validated.zscore_threshold
+    if threshold is None:
+        return
+    z_only = validated.amplitude_threshold_uv is None
+    if n_channels < 3:
+        if z_only:
+            raise InsufficientZScoreChannelsError(
+                "Artifact detection: zscore_threshold is the only detector on a "
+                f"{n_channels}-channel recording{context}, but the cross-channel "
+                "z-score is amplitude-sensitive only with >= 3 channels (on 1 "
+                "channel it is identically zero; on 2 it is a constant +/-1 for "
+                "any two distinct values), so it would not detect artifacts by "
+                "amplitude. Use amplitude_threshold_uv for 1-2 channel sort "
+                "groups."
+            )
+        logger.warning(
+            "Artifact detection: zscore_threshold is inert on a "
+            f"{n_channels}-channel recording{context} (the cross-channel "
+            "z-score is amplitude-insensitive with < 3 channels); only "
+            "amplitude_threshold_uv will fire."
+        )
+        return
+    # With amplitude also set, z can fire on one channel alongside it.
+    k = n_required if z_only else 1
+    bound = max_reachable_zscore(n_channels, k)
+    if threshold < bound:
+        return
+    requirement = (
+        "proportion_above_threshold="
+        f"{validated.proportion_above_threshold:g} requires"
+        if z_only
+        else "it needs"
+    )
+    message = (
+        f"Artifact detection: zscore_threshold={threshold:g} can never flag a "
+        f"frame on this {n_channels}-channel recording{context}: {requirement} "
+        f"{k} channel(s) above threshold in one frame, and the cross-channel "
+        "z-score (population std across the frame's channels) cannot exceed "
+        f"{bound:.3f} on {k} of {n_channels} channels."
+    )
+    if z_only:
+        raise InsufficientZScoreChannelsError(
+            f"{message} Lower zscore_threshold below {bound:.3f}, lower "
+            "proportion_above_threshold, or use amplitude_threshold_uv."
+        )
+    logger.warning(
+        f"{message} Only amplitude_threshold_uv will fire; lower "
+        f"zscore_threshold below {bound:.3f} to use the z-score."
+    )
+
+
 def detect_artifacts(recording, validated, context="", job_kwargs=None):
     """Run amplitude / z-score artifact scan on a SI recording.
 
@@ -191,27 +292,10 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
         f"min_length_s={validated.min_length_s}."
     )
 
-    # The cross-channel z-score ignores amplitude with fewer than 3 channels.
     n_channels = recording.get_num_channels()
-    if validated.zscore_threshold is not None and n_channels < 3:
-        if validated.amplitude_threshold_uv is None:
-            raise InsufficientZScoreChannelsError(
-                "Artifact detection: zscore_threshold is the only detector on a "
-                f"{n_channels}-channel recording{context}, but the cross-channel "
-                "z-score is amplitude-sensitive only with >= 3 channels (on 1 "
-                "channel it is identically zero; on 2 it is a constant +/-1 for "
-                "any two distinct values), so it would not detect artifacts by "
-                "amplitude. Use amplitude_threshold_uv for 1-2 channel sort "
-                "groups."
-            )
-        logger.warning(
-            "Artifact detection: zscore_threshold is inert on a "
-            f"{n_channels}-channel recording{context} (the cross-channel "
-            "z-score is amplitude-insensitive with < 3 channels); only "
-            "amplitude_threshold_uv will fire."
-        )
-    # ceil() can turn a sub-1.0 proportion into all channels on small groups.
     n_required = int(np.ceil(validated.proportion_above_threshold * n_channels))
+    _check_zscore_detector(validated, n_channels, n_required, context)
+    # ceil() can turn a sub-1.0 proportion into all channels on small groups.
     if validated.proportion_above_threshold < 1.0 and n_required >= n_channels:
         logger.warning(
             "Artifact detection: proportion_above_threshold="

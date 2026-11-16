@@ -381,6 +381,93 @@ def test_detect_artifacts_warns_zscore_inert_on_single_channel(caplog):
     assert any("inert" in r.message.lower() for r in caplog.records)
 
 
+@pytest.mark.parametrize(
+    "n_channels,n_required",
+    [(3, 1), (4, 1), (4, 2), (4, 3), (4, 4), (5, 4), (5, 5), (8, 3), (8, 8)],
+)
+def test_max_reachable_zscore_is_attained_and_never_exceeded(
+    n_channels, n_required
+):
+    """The bound is reached by an explicit frame and no random frame beats it
+    on ``n_required`` channels (z uses the population std across channels)."""
+    from spyglass.spikesorting.v2._artifacts.intervals import (
+        max_reachable_zscore,
+    )
+
+    bound = max_reachable_zscore(n_channels, n_required)
+
+    def kth_largest_abs_z(frame):
+        frame = np.asarray(frame, dtype=float)
+        z = np.abs((frame - frame.mean()) / frame.std())
+        return np.sort(z)[-n_required]
+
+    # Extremal frame: +a on ceil(k/2) channels, -a on floor(k/2), the rest
+    # sharing the leftover so the frame mean is zero.
+    k_pos, k_neg = (n_required + 1) // 2, n_required // 2
+    rest = n_channels - n_required
+    frame = [1.0] * k_pos + [-1.0] * k_neg
+    if rest:
+        frame += [-(k_pos - k_neg) / rest] * rest
+    elif k_pos != k_neg:
+        frame = [1.0] * k_pos + [-k_pos / k_neg] * k_neg
+    assert kth_largest_abs_z(frame) == pytest.approx(bound, rel=1e-9)
+
+    rng = np.random.default_rng(0)
+    frames = (
+        rng.standard_normal((20000, n_channels))
+        * rng.exponential(1.0, (20000, n_channels)) ** 3
+    )
+    assert max(kth_largest_abs_z(f) for f in frames) <= bound + 1e-9
+    assert max_reachable_zscore(n_channels, 1) == pytest.approx(
+        np.sqrt(n_channels - 1)
+    )
+
+
+def test_detect_artifacts_raises_on_unreachable_zscore_only_threshold():
+    """A z-only detector whose threshold no frame can reach on the required
+    channels raises, naming the bound; the default proportion 1.0 caps z at 1.
+    """
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
+    from spyglass.spikesorting.v2.exceptions import (
+        InsufficientZScoreChannelsError,
+    )
+
+    rec = _rec(np.zeros((3000, 4), dtype="float32"))
+    # One channel required: |z| <= sqrt(3) ~= 1.732 on a tetrode.
+    params = _artifact_params(
+        amplitude_threshold_uv=None,
+        zscore_threshold=1.8,
+        proportion_above_threshold=0.25,
+    )
+    with pytest.raises(InsufficientZScoreChannelsError, match="1.732"):
+        detect_artifacts(rec, params)
+    rec8 = _rec(np.zeros((3000, 8), dtype="float32"))
+    params = _artifact_params(
+        amplitude_threshold_uv=None,
+        zscore_threshold=1.2,
+        proportion_above_threshold=1.0,
+    )
+    with pytest.raises(
+        InsufficientZScoreChannelsError, match="8 of 8 channels"
+    ):
+        detect_artifacts(rec8, params)
+
+
+def test_detect_artifacts_warns_unreachable_zscore_with_amplitude(caplog):
+    """With amplitude also set, an unreachable z threshold only warns."""
+    from spyglass.spikesorting.v2._artifacts.intervals import detect_artifacts
+
+    rec = _rec(np.zeros((3000, 4), dtype="float32"))
+    params = _artifact_params(
+        amplitude_threshold_uv=1000.0,
+        zscore_threshold=1.8,
+        proportion_above_threshold=0.25,
+    )
+    with caplog.at_level("WARNING", logger="spyglass"):
+        detect_artifacts(rec, params)
+    assert any("can never" in r.message for r in caplog.records)
+
+
 def test_detect_artifacts_warns_proportion_rounds_to_all_channels(caplog):
     """On two channels, ``proportion_above_threshold=0.7`` rounds up to both
     channels; a warning states the realized requirement."""
