@@ -990,6 +990,7 @@
     "test_sorting_accessors.py": {
       "tier": "db_unit",
       "overrides": {
+        "test_analyzer_inputs_use_the_sorts_recorded_seed": "pipeline",
         "test_get_sorting_dataframe_casts_unit_ids_to_python_int": "pipeline",
         "test_get_sorting_zero_unit_returns_empty_numpysorting": "pipeline",
         "test_populate_unit_part_peak_channel_not_in_sort_group": "pipeline",

@@ -31,10 +31,25 @@ def fetch_sorter_analyzer_inputs(key) -> tuple[dict, dict]:
     """Resolve the sorter row and execution kwargs before an analyzer build.
 
     Shared by populate, rebuild and recompute, so the computation never
-    reads tables or ambient configuration.
+    reads tables or ambient configuration. Once the sort exists, its stored
+    ``effective_random_seed`` replaces the resolved ``random_seed``.
+
+    Parameters
+    ----------
+    key : dict
+        Restriction selecting one ``SortingSelection`` row.
+
+    Returns
+    -------
+    sorter_row : dict
+        The ``SorterParameters`` row.
+    job_kwargs : dict
+        The resolved job kwargs, carrying the seed the analyzers and metrics
+        use.
     """
     from spyglass.spikesorting.v2.sorting import (
         SorterParameters,
+        Sorting,
         SortingSelection,
     )
 
@@ -42,7 +57,12 @@ def fetch_sorter_analyzer_inputs(key) -> tuple[dict, dict]:
         SorterParameters
         & ((SortingSelection & key).proj("sorter", "sorter_params_name"))
     ).fetch1()
-    return sorter_row, _resolved_job_kwargs(sorter_row["job_kwargs"])
+    job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
+    # Ambient config can change after the sort; rebuilds reuse its seed.
+    stored_seed = (Sorting & key).fetch("effective_random_seed")
+    if len(stored_seed) and stored_seed[0] is not None:
+        job_kwargs["random_seed"] = int(stored_seed[0])
+    return sorter_row, job_kwargs
 
 
 def fetch_sorting_inputs(key) -> SortingFetched:

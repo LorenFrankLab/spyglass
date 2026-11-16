@@ -460,3 +460,30 @@ def test_populate_unit_part_peak_channel_not_in_sort_group(
             nwb_file_name=nwb_file_name,
             key=dict(populated_sorting),
         )
+
+
+def test_analyzer_inputs_use_the_sorts_recorded_seed(
+    populated_sorting, monkeypatch
+):
+    """Rebuilds, evaluations and recomputes read the seed the sort recorded,
+    not whatever ambient random_seed the session sets later."""
+    from spyglass.spikesorting.v2._core import job_config
+    from spyglass.spikesorting.v2._sorting.fetch import (
+        fetch_sorter_analyzer_inputs,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    stored = (Sorting & populated_sorting).fetch1("effective_random_seed")
+    assert stored is not None
+    ambient = int(stored) + 12345
+    real_ambient = job_config._ambient_job_kwargs
+    monkeypatch.setattr(
+        job_config,
+        "_ambient_job_kwargs",
+        lambda: {**real_ambient(), "random_seed": ambient},
+    )
+
+    _sorter_row, job_kwargs = fetch_sorter_analyzer_inputs(
+        {"sorting_id": populated_sorting["sorting_id"]}
+    )
+    assert job_kwargs["random_seed"] == int(stored)
