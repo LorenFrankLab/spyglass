@@ -217,9 +217,6 @@ def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
     """A curated export's per-unit obs_intervals match the source sort, and a
     merged unit gets the intersection of its contributors' windows."""
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._core.signal_math import (
-        intersect_interval_sets,
-    )
     from spyglass.spikesorting.v2._storage.units_nwb import (
         read_units_abs_times_and_sample_indices,
     )
@@ -247,8 +244,10 @@ def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
         for uid in unit_ids:
             np.testing.assert_array_equal(root_obs[uid], src_obs[uid])
 
-        # Merged curation: the merged unit's obs is the contributors'
-        # intersection (= the shared window for one sort).
+        # Both units of one sort share its window, so their intersection is
+        # that window.
+        shared = src_obs[unit_ids[0]]
+        np.testing.assert_array_equal(src_obs[unit_ids[1]], shared)
         merged = CurationV2.insert_curation(
             sorting_key=sort,
             parent_curation_id=root["curation_id"],
@@ -262,10 +261,7 @@ def test_curated_units_carry_obs_intervals(planted_two_unit_sort):
             merged_abs
         )
         assert merged_obs is not None
-        expected = intersect_interval_sets(
-            [src_obs[unit_ids[0]], src_obs[unit_ids[1]]]
-        )
         merged_uid = max(unit_ids) + 1  # apply_merge mints max+1
-        np.testing.assert_array_equal(merged_obs[merged_uid], expected)
+        np.testing.assert_array_equal(merged_obs[merged_uid], shared)
     finally:
         clear_curations_for(sort)

@@ -12,6 +12,7 @@ import contextlib
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from spyglass.spikesorting.v2._params.analyzer_waveform import (
     AnalyzerWaveformParamsSchema,
@@ -124,15 +125,15 @@ def _planted_source_sort(
 
 def test_analyzer_waveform_params_schema_rejects_extra():
     """An unknown key raises (``extra='forbid'``)."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         AnalyzerWaveformParamsSchema(unexpected_key=1)
 
 
 def test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch():
     """display must be unwhitened; metric must be whitened."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="display .* must be unwhitened"):
         AnalyzerWaveformParamsSchema(purpose="display", whiten=True)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="metric .* must be whitened"):
         AnalyzerWaveformParamsSchema(purpose="metric", whiten=False)
 
 
@@ -146,7 +147,8 @@ def test_analyzer_waveform_params_schema_rejects_nonpositive_bounds():
         {"max_spikes_per_unit": 0},
         {"max_spikes_per_unit": -10},
     ):
-        with pytest.raises(Exception):
+        (field,) = bad
+        with pytest.raises(ValidationError, match=rf"{field}\n.*greater"):
             AnalyzerWaveformParamsSchema(**bad)
 
 
@@ -280,7 +282,7 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
     # Rejected at table insert, not only at schema construction.
     bad_blob = AnalyzerWaveformParamsSchema().model_dump()
     bad_blob["whiten"] = True  # display + whiten=True -> invalid pair
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError, match="display .* must be unwhitened"):
         AnalyzerWaveformParameters().insert1(
             {"waveform_params_name": "bad_pair", "params": bad_blob}
         )

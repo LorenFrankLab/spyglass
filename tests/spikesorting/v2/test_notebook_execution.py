@@ -117,6 +117,8 @@ def _notebook_params(nwb_file_name, sort_group_id):
 @pytest.mark.slow
 def test_single_session_notebook_runs(dj_conn, smoke_nwb):
     """``10_Spike_SortingV2`` (the lean first-sort path) runs end-to-end."""
+    from spyglass.spikesorting.v2.sorting import Sorting
+
     nwb_file_name, sort_group_id = _prepare_notebook_session(
         dj_conn, "notebook_single.nwb"
     )
@@ -126,7 +128,10 @@ def test_single_session_notebook_runs(dj_conn, smoke_nwb):
     )
     # An auto-labeled child, a receipt pinned to it, and (with FigPack) a
     # review reopened from its persisted id.
-    assert namespace["run_summary"]["n_units"] >= 0
+    stored_units = Sorting.Unit & {
+        "sorting_id": namespace["run_summary"]["sorting_id"]
+    }
+    assert namespace["run_summary"]["n_units"] == len(stored_units) > 0
     assert namespace["auto_summary"]["auto_labeled_merge_id"] is not None
     receipt = namespace["receipt"]
     assert receipt.curation == namespace["auto_summary"].auto_labeled_curation
@@ -181,6 +186,8 @@ def test_curation_notebook_runs(dj_conn, smoke_nwb):
     The reviewed parent is the ``final_curation`` handed to
     ``select_units_for_analysis``; the scripted appendix must not replace it.
     """
+    from spyglass.spikesorting.v2.sorting import Sorting
+
     nwb_file_name, sort_group_id = _prepare_notebook_session(
         dj_conn, "notebook_curation.nwb"
     )
@@ -191,7 +198,10 @@ def test_curation_notebook_runs(dj_conn, smoke_nwb):
             "run_scripted_curation_example": True,
         },
     )
-    assert namespace["run_summary"]["n_units"] >= 0
+    stored_units = Sorting.Unit & {
+        "sorting_id": namespace["run_summary"]["sorting_id"]
+    }
+    assert namespace["run_summary"]["n_units"] == len(stored_units) > 0
     assert namespace["final_merge_id"] is not None
     final_curation = namespace["final_curation"]
     assert final_curation == namespace["run_summary"].root_curation

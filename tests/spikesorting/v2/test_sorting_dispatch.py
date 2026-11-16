@@ -1196,6 +1196,7 @@ def test_v2_preprocessed_rows_skip_filtering_but_keep_whitening(
 
     import spikeinterface.core as si
     import spikeinterface.sorters as sis
+    from spikeinterface.sorters.utils import SpikeSortingError
 
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         sorter_default_contents,
@@ -1224,7 +1225,7 @@ def test_v2_preprocessed_rows_skip_filtering_but_keep_whitening(
     monkeypatch.setattr(internal, "whiten", whiten)
     recording = si.generate_recording(num_channels=4, durations=[1.0], seed=0)
     config = resolve_sort_config(sorter, params)
-    with pytest.raises(Exception):
+    with pytest.raises(SpikeSortingError, match="_StopAfterWhiten"):
         sis.run_sorter(
             sorter,
             recording,

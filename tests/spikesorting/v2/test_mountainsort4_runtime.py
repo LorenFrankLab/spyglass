@@ -107,8 +107,11 @@ def test_native_ms4_recovers_planted_spikes(tmp_path, monkeypatch):
     assert spikes.size > 0
     assert np.all(spikes["sample_index"] >= 0)
     assert np.all(spikes["sample_index"] < recording.get_num_samples())
-    # MS4 can oversplit, so require one planted unit at >=70% accuracy.
+    # Measured: precision 1.0 for both units, recall 0.58 and 0.97.
     performance = compare_sorter_to_ground_truth(
         ground_truth, sorting
     ).get_performance()
-    assert (performance["accuracy"] >= 0.7).any(), performance
+    assert len(performance) == 2, performance
+    assert (performance["precision"] >= 0.9).all(), performance
+    assert (performance["recall"] >= 0.4).all(), performance
+    assert performance["accuracy"].max() >= 0.9, performance
