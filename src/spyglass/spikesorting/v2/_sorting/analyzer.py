@@ -54,17 +54,21 @@ STANDARD_DISPLAY_ANALYZER_EXTENSIONS = (
 )
 
 # Extensions that read each spike at its template extremum for a
-# ``peak_sign``; SI's default ``"neg"`` misreads a positive-going sort.
+# ``peak_sign``; a cache at another polarity is invalid and rebuilt.
 POLARITY_EXTENSIONS = ("spike_amplitudes", "spike_locations")
+# Every extension computed at the sort's ``peak_sign``; a stale
+# template_metrics is recomputed alone, not the whole cache.
+PEAK_SIGN_EXTENSIONS = (*POLARITY_EXTENSIONS, "template_metrics")
 
 
 def polarity_extension_params(names, peak_sign, extension_params=None):
-    """``extension_params`` with the sort's ``peak_sign`` on polarity extensions.
+    """``extension_params`` with the sort's ``peak_sign`` on each
+    :data:`PEAK_SIGN_EXTENSIONS` member in ``names``.
 
     The sort's polarity overrides a requested ``peak_sign``.
     """
     params = {name: dict(p) for name, p in (extension_params or {}).items()}
-    for name in POLARITY_EXTENSIONS:
+    for name in PEAK_SIGN_EXTENSIONS:
         if name in names:
             params[name] = {**params.get(name, {}), "peak_sign": peak_sign}
     return params
@@ -91,7 +95,7 @@ def expected_extension_params(
 
     SpikeInterface's defaults for the installed version, overridden by
     ``requested`` and, when ``peak_sign`` is given, the sort's polarity on a
-    :data:`POLARITY_EXTENSIONS` member. Nothing is computed.
+    :data:`PEAK_SIGN_EXTENSIONS` member. Nothing is computed.
 
     Parameters
     ----------
@@ -232,7 +236,7 @@ def ensure_extensions(
         Extension names to ensure are present.
     peak_sign : {"neg", "pos", "both"}
         The sort's polarity (``resolve_peak_sign``), applied to every
-        :data:`POLARITY_EXTENSIONS` member being added.
+        :data:`PEAK_SIGN_EXTENSIONS` member being added.
     job_kwargs : dict, optional
         Resolved concurrency kwargs forwarded to ``analyzer.compute``.
     extension_params : dict, optional

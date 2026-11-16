@@ -37,7 +37,7 @@ from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 from spyglass.spikesorting.v2._sorting.analyzer import (
     BASE_ANALYZER_EXTENSIONS,
-    POLARITY_EXTENSIONS,
+    PEAK_SIGN_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
     _AnalyzerSparsityInputsError,
     _json_params,
@@ -752,7 +752,7 @@ def _resolve_curation_analyzer(
     # The full request (not ``needs_compute``) keys the derivative, so a
     # larger request never reuses a smaller derivative.
     request = normalize_extension_request(extra_extensions)
-    if any(name in request for name in POLARITY_EXTENSIONS):
+    if any(name in request for name in PEAK_SIGN_EXTENSIONS):
         # Polarity joins the identity so requests with and without it differ.
         request = normalize_extension_request(
             polarity_extension_params(

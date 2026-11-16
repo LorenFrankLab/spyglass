@@ -1084,7 +1084,7 @@ def test_expected_extension_params_match_what_spikeinterface_stores(tmp_path):
         _PCA_EXTENSION_PARAMS,
     )
     from spyglass.spikesorting.v2._sorting.analyzer import (
-        POLARITY_EXTENSIONS,
+        PEAK_SIGN_EXTENSIONS,
         STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
         _json_params,
         expected_extension_params,
@@ -1096,7 +1096,7 @@ def test_expected_extension_params_match_what_spikeinterface_stores(tmp_path):
         "spike_locations",
         "principal_components",
     ]
-    requested = {name: {"peak_sign": "pos"} for name in POLARITY_EXTENSIONS}
+    requested = {name: {"peak_sign": "pos"} for name in PEAK_SIGN_EXTENSIONS}
     requested["principal_components"] = dict(_PCA_EXTENSION_PARAMS)
     analyzer = _small_analyzer(tmp_path / "a.analyzer", names, requested)
     for name in names:
@@ -1155,6 +1155,72 @@ def test_ensure_extensions_recomputes_stored_non_default_params(tmp_path):
     assert (
         analyzer.get_extension("correlograms").params["bin_ms"]
         == expected_extension_params(analyzer, "correlograms")["bin_ms"]
+    )
+
+
+def test_cached_both_polarity_template_metrics_are_recomputed_once(tmp_path):
+    """``template_metrics`` reads each unit at the sort's polarity.
+
+    A cache stored at SpikeInterface's ``peak_sign="both"`` on a negative
+    sort is recomputed once at "neg"; a second ensure recomputes nothing,
+    and the sparsity validator does not reject the stale cache.
+    """
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        analyzer_sparsity_validator,
+        ensure_extensions,
+    )
+    from spyglass.spikesorting.v2._storage.analyzer_cache import (
+        write_analyzer_sparsity_receipt,
+    )
+
+    analyzer = _small_analyzer(tmp_path / "a.analyzer", ["template_metrics"])
+    assert analyzer.get_extension("template_metrics").params["peak_sign"] == (
+        "both"
+    )
+    # A stale template_metrics alone must not invalidate the whole cache.
+    write_analyzer_sparsity_receipt(tmp_path / "a.analyzer", peak_sign="neg")
+    analyzer_sparsity_validator(lambda: {"detect_sign": -1})(analyzer)
+
+    jobs = {"n_jobs": 1, "progress_bar": False}
+    first = ensure_extensions(
+        analyzer, ["template_metrics"], peak_sign="neg", job_kwargs=jobs
+    )
+    assert first == ["template_metrics"]
+    assert (
+        analyzer.get_extension("template_metrics").params["peak_sign"] == "neg"
+    )
+    second = ensure_extensions(
+        analyzer, ["template_metrics"], peak_sign="neg", job_kwargs=jobs
+    )
+    assert second == []
+
+
+def test_default_template_metrics_request_carries_the_sort_polarity(tmp_path):
+    """The shared-analyzer resolver treats defaults as SI's plus polarity."""
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        _requests_default_params,
+    )
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        PEAK_SIGN_EXTENSIONS,
+        POLARITY_EXTENSIONS,
+        polarity_extension_params,
+    )
+
+    assert "template_metrics" in PEAK_SIGN_EXTENSIONS
+    assert set(POLARITY_EXTENSIONS) < set(PEAK_SIGN_EXTENSIONS)
+    assert polarity_extension_params(["template_metrics"], "pos") == {
+        "template_metrics": {"peak_sign": "pos"}
+    }
+    analyzer = _small_analyzer(tmp_path / "a.analyzer", [])
+    positive_sort = {"detect_sign": 1}
+    assert _requests_default_params(
+        analyzer, "template_metrics", {}, positive_sort
+    )
+    assert _requests_default_params(
+        analyzer, "template_metrics", {"peak_sign": "pos"}, positive_sort
+    )
+    assert not _requests_default_params(
+        analyzer, "template_metrics", {"upsampling_factor": 3}, positive_sort
     )
 
 
