@@ -320,7 +320,7 @@ jobs:
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_neuropixels_60s mearec_tetrode_60s minirec20230622"
         elif [ "${{ github.event_name }}" = "schedule" ]; then
-          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s minirec20230622"
+          REQ="mearec_polymer_smoke mearec_polymer_128ch_60s mearec_tetrode_60s minirec20230622"
         else
           REQ="mearec_polymer_smoke"
         fi
