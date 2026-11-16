@@ -688,3 +688,40 @@ def test_resume_of_an_unknown_review_id_names_the_id_and_the_lookup_call(
     message = str(error.value)
     assert str(review_id) in message
     assert "FigPackReview.find(" in message
+
+
+def test_resume_of_a_review_whose_view_was_never_built_says_to_rebuild(
+    planted_two_unit_sort, curation_evaluation_defaults
+):
+    """A review selected but never built (its build died) is named and the
+    error says to start the review again, not that the ID is unknown."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation_api import CurationRef
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+
+    sorting_key = dict(planted_two_unit_sort)
+    clear_curations_for(sorting_key)
+    try:
+        root = CurationRef.from_key(
+            CurationV2.create_initial_curation(sorting_key)
+        )
+        review = root.start_review(_ensure_test_profile(), upload=False)
+        key = {"figpack_curation_id": review.review_id}
+        # The selection stays; only the built output is gone.
+        (FigPackCuration & key).delete_quick()
+        assert FigPackCurationSelection & key
+
+        with pytest.raises(LookupError) as error:
+            FigPackReview.resume(review.review_id)
+        message = str(error.value)
+        assert str(review.review_id) in message
+        assert "never built" in message
+        assert "start_review(" in message
+        assert "FigPackReview.find(" not in message
+    finally:
+        clear_curations_for(sorting_key)
