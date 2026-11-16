@@ -32,6 +32,10 @@ from tests.spikesorting.v2._motion_db_helpers import (
     sorter_key,
 )
 from tests.spikesorting.v2._sorter_stub import active_sorter, plant_sorter
+from tests.spikesorting.v2._smoke_constants import (
+    DEFAULT_PREPROC_CLUSTERLESS_PRESET,
+    default_preproc_clusterless_preset,
+)
 
 
 @pytest.fixture
@@ -2238,10 +2242,27 @@ def test_corrected_sort_reads_the_corrected_traces(
 
 # ---- pipeline motion modes ----------------------------------------------------
 
-#: A fast catalog preset (peak detection only, no internal motion correction)
-#: whose preprocessing row is the drift fixture's.
-PIPELINE_PRESET = "franklab_clusterless_2026_06"
+#: A fast peak-detection preset (no internal motion correction) whose
+#: preprocessing row is the drift fixture's.
+PIPELINE_PRESET = DEFAULT_PREPROC_CLUSTERLESS_PRESET
 MOTION_RECIPE = "dredge_fast_v1"
+
+
+@pytest.fixture(autouse=True)
+def _register_pipeline_preset():
+    """Register ``PIPELINE_PRESET`` for this module's runs.
+
+    Its own patch context, so a test's ``monkeypatch.undo()`` keeps it.
+    """
+    from spyglass.spikesorting.v2._orchestration import presets
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(
+            presets._PIPELINE_PRESETS,
+            PIPELINE_PRESET,
+            default_preproc_clusterless_preset(),
+        )
+        yield
 
 
 def _pipeline_inputs(drift_recording) -> dict:

@@ -247,6 +247,27 @@ def _disable_datajoint_safemode(request):
     yield
 
 
+@pytest.fixture
+def default_preproc_clusterless(monkeypatch):
+    """Register the 100 uV clusterless test preset on the "default" rows.
+
+    It finds zero peaks on the smoke fixture, so zero-unit paths stay
+    reachable. Returns the preset name.
+    """
+    from spyglass.spikesorting.v2._orchestration import presets
+    from tests.spikesorting.v2._smoke_constants import (
+        DEFAULT_PREPROC_CLUSTERLESS_PRESET,
+        default_preproc_clusterless_preset,
+    )
+
+    monkeypatch.setitem(
+        presets._PIPELINE_PRESETS,
+        DEFAULT_PREPROC_CLUSTERLESS_PRESET,
+        default_preproc_clusterless_preset(),
+    )
+    return DEFAULT_PREPROC_CLUSTERLESS_PRESET
+
+
 @pytest.fixture(autouse=True)
 def _isolate_si_metric_defaults():
     """Keep SpikeInterface's metric defaults from leaking between tests.

@@ -786,13 +786,20 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
     )
 
     # The clusterless preset is the only one on the generic 500 uV "default"
-    # artifact + "default" preproc rows.
+    # artifact row; it preprocesses with the hippocampus row, so no preset
+    # uses the generic "default" preproc row.
     assert _cell(
         "ArtifactDetectionParameters", "default", "used_by_pipeline_presets"
-    ) == ["franklab_clusterless_2026_06"]
-    assert _cell(
-        "PreprocessingParameters", "default", "used_by_pipeline_presets"
-    ) == ["franklab_clusterless_2026_06"]
+    ) == ["franklab_clusterless_2026_11"]
+    assert (
+        _cell("PreprocessingParameters", "default", "used_by_pipeline_presets")
+        == []
+    )
+    assert "franklab_clusterless_2026_11" in _cell(
+        "PreprocessingParameters",
+        "franklab_hippocampus_2026_06",
+        "used_by_pipeline_presets",
+    )
 
     # The hippocampus region preproc row is a shipped catalog default.
     assert bool(
@@ -813,7 +820,7 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
         "used_by_pipeline_presets",
     )
     assert _cell("AutoCurationRules", "none", "used_by_pipeline_presets") == [
-        "franklab_clusterless_2026_06"
+        "franklab_clusterless_2026_11"
     ]
 
 

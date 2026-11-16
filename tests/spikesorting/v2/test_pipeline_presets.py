@@ -110,7 +110,7 @@ def test_describe_recommendation_status_defines_every_used_status():
 def test_describe_pipeline_presets_threshold_units_clusterless():
     """The clusterless row's threshold units are µV, never the MAD ``σ``."""
     df = describe_pipeline_presets()
-    row = df.loc[df["pipeline_preset"] == "franklab_clusterless_2026_06"].iloc[
+    row = df.loc[df["pipeline_preset"] == "franklab_clusterless_2026_11"].iloc[
         0
     ]
     units = row["threshold_units"]
@@ -964,7 +964,7 @@ def test_every_preset_declares_curation_params():
     for name, preset in _PIPELINE_PRESETS.items():
         assert preset.artifact_detection_params_name is not None, name
 
-    clusterless = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
+    clusterless = _PIPELINE_PRESETS["franklab_clusterless_2026_11"]
     assert clusterless.metric_params_name == "minimal"
     assert clusterless.auto_curation_rules_name == "none"
 
@@ -973,7 +973,7 @@ def test_every_preset_declares_curation_params():
     assert npx.auto_curation_rules_name == "v1_default_nn_noise_2026_09"
 
     excluded = {
-        "franklab_clusterless_2026_06",
+        "franklab_clusterless_2026_11",
         "franklab_neuropixels_ks4_2026_06",
     }
     for name, preset in _PIPELINE_PRESETS.items():
@@ -1538,4 +1538,67 @@ def test_session_only_preset_cannot_shadow_a_saved_preset(dj_conn, clone_env):
     assert (
         register_pipeline_preset(name, _custom_spec(), validate_rows=False)
         == name
+    )
+
+
+#: ``SorterParameters`` fingerprint of the shipped 100 uV "default"
+#: clusterless row; databases already hold it under that name.
+_DEFAULT_CLUSTERLESS_FINGERPRINT = (
+    "ee2a831a3ac152088d0c0d5f833a31a36e61bb39257bac658fc75b84d1d13e42"
+)
+
+
+@pytest.mark.unit
+def test_shipped_clusterless_preset_is_the_hippocampus_60uv_recipe():
+    """The clusterless preset uses the hippocampus preprocessing row and its
+    0.5/0.5 ms windows and detects at 60 uV; the 100 uV "default" sorter row
+    keeps its content."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        HIPPOCAMPUS_DISPLAY_WAVEFORMS,
+        HIPPOCAMPUS_METRIC_WAVEFORMS,
+        HIPPOCAMPUS_PREPROC,
+        sorter_default_contents,
+        waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+
+    preset = _PIPELINE_PRESETS["franklab_clusterless_2026_11"]
+    assert "franklab_clusterless_2026_06" not in _PIPELINE_PRESETS
+    assert preset.sorter == "clusterless_thresholder"
+    assert preset.preprocessing_params_name == HIPPOCAMPUS_PREPROC
+    assert waveform_params_for_preprocessing(
+        preset.preprocessing_params_name
+    ) == (HIPPOCAMPUS_DISPLAY_WAVEFORMS, HIPPOCAMPUS_METRIC_WAVEFORMS)
+    assert preset.target_region == "hippocampus"
+
+    columns = (
+        "sorter",
+        "sorter_params_name",
+        "params",
+        "params_schema_version",
+        "job_kwargs",
+        "execution_params",
+        "execution_params_schema_version",
+    )
+    rows = {
+        (row[0], row[1]): dict(zip(columns, row))
+        for row in sorter_default_contents()
+    }
+    sorter_row = rows[("clusterless_thresholder", preset.sorter_params_name)]
+    params = _get_sorter_schema("clusterless_thresholder").model_validate(
+        sorter_row["params"]
+    )
+    assert params.detect_threshold == 60.0
+    assert params.threshold_unit == "uv"
+    assert "60" in preset.threshold_units
+
+    default_row = rows[("clusterless_thresholder", "default")]
+    assert (
+        parameter_row_fingerprint(
+            "SorterParameters", default_row, sorter_keyed=True
+        )
+        == _DEFAULT_CLUSTERLESS_FINGERPRINT
     )

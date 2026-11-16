@@ -1,7 +1,7 @@
 """Shared constants for the MEArec smoke-fixture sorts and v1/v2 parity tests.
 
 - Smoke clusterless row: the fixture's templates are a few microvolts, so the
-  100 uV production default finds no peaks.
+  60 uV production preset finds no peaks.
 - ``V1_TO_V2_*_NAMES``: map v1 shipped row names to their v2 equivalents.
 """
 
@@ -111,3 +111,25 @@ def v2_preproc_name_for_v1(v1_name: str) -> str:
 def v2_sorter_name_for_v1(v1_name: str) -> str:
     """Map a v1 ``sorter_param_name`` to v2; unmapped names pass through."""
     return V1_TO_V2_SORTER_PARAM_NAMES.get(v1_name, v1_name)
+
+
+#: A cheap peak-detection preset on the generic "default" preprocessing row
+#: and the 100 uV "default" clusterless sorter row, for fixtures whose
+#: ``Recording`` rows use "default" preprocessing.
+DEFAULT_PREPROC_CLUSTERLESS_PRESET = "test_clusterless_default_preproc"
+
+
+def default_preproc_clusterless_preset():
+    """Return the ``_PipelinePreset`` for ``DEFAULT_PREPROC_CLUSTERLESS_PRESET``."""
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+    )
+
+    return _PIPELINE_PRESETS["franklab_clusterless_2026_11"].model_copy(
+        update={
+            "preprocessing_params_name": "default",
+            "sorter_params_name": "default",
+            "threshold_units": "µV (100 µV)",
+            "notes": "Test preset on the generic default rows.",
+        }
+    )

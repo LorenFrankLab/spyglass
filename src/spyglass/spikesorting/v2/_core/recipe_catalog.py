@@ -45,6 +45,8 @@ MS4_30KHZ = "franklab_30khz_ms4_2026_06"
 MS4_20KHZ = "franklab_20khz_ms4_2026_06"
 MS5_30KHZ = "franklab_30khz_ms5_2026_06"
 KS4_NEUROPIXELS = "franklab_neuropixels_default"
+# Clusterless peak detection at 60 uV on hippocampus-filtered traces.
+CLUSTERLESS_60UV = "franklab_clusterless_60uv_2026_11"
 # Containerized MS4: same science as the local 30 kHz row in a pinned
 # Singularity image. The image tag is the MountainSort4 runtime version, not a
 # SpikeInterface release; MS4_CONTAINER_SI_VERSION is the SI installed into it.
@@ -392,6 +394,15 @@ def sorter_default_contents() -> tuple:
             # ``noise_levels=[1.0]`` keeps it uV even if threshold_unit is lost.
             {"threshold_unit": "uv", "noise_levels": [1.0]},
         ),
+        _sorter_row(
+            "clusterless_thresholder",
+            CLUSTERLESS_60UV,
+            {
+                "detect_threshold": 60.0,
+                "threshold_unit": "uv",
+                "noise_levels": [1.0],
+            },
+        ),
         _ms4_singularity_sorter_row(),
     )
 
@@ -404,7 +415,8 @@ _REGION_PREPROC = {
 }
 
 # Shipped preprocessing recipe -> (display, metric) waveform-params rows.
-# Region-less rows use the wider cortex window.
+# "default", the Neuropixels row and "no_filter" are region-less rows that
+# use the wider cortex window.
 _PREPROC_WAVEFORM_PARAMS = {
     HIPPOCAMPUS_PREPROC: (
         HIPPOCAMPUS_DISPLAY_WAVEFORMS,
@@ -635,11 +647,11 @@ def pipeline_preset_specs() -> dict[str, dict]:
         ),
         MS5_TETRODE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("tetrode"),
         MS5_PROBE_HIPPOCAMPUS_30KHZ: _franklab_ms5_spec("probe"),
-        "franklab_clusterless_2026_06": dict(
-            preprocessing_params_name="default",
+        "franklab_clusterless_2026_11": dict(
+            preprocessing_params_name=HIPPOCAMPUS_PREPROC,
             artifact_detection_params_name="default",
             sorter="clusterless_thresholder",
-            sorter_params_name="default",
+            sorter_params_name=CLUSTERLESS_60UV,
             # No clustered units to curate.
             metric_params_name="minimal",
             auto_curation_rules_name="none",
@@ -650,13 +662,15 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "Peak detection only (no clustering); feeds the clusterless "
                 "decoding pipeline."
             ),
-            threshold_units="µV (100 µV)",
+            threshold_units="µV (60 µV)",
             notes=(
-                "The 'default' clusterless SorterParameters row sets "
-                "threshold_unit='uv' with detect_threshold=100, so traces are "
-                "scaled to microvolts before detection -- a true 100 µV "
-                "threshold, not a MAD multiplier. Preprocessing and artifact "
-                "detection use the 'default' rows."
+                f"The {CLUSTERLESS_60UV!r} clusterless SorterParameters row "
+                "sets threshold_unit='uv' with detect_threshold=60, so traces "
+                "are scaled to microvolts before detection: a true 60 µV "
+                "threshold, not a MAD multiplier. Preprocessing uses the "
+                f"hippocampus row {HIPPOCAMPUS_PREPROC!r} (600-6000 Hz band, "
+                "1.5 ms minimum segment) and its 0.5/0.5 ms analyzer "
+                "windows; artifact detection uses the 'default' row."
             ),
         ),
         "franklab_neuropixels_ks4_2026_06": dict(

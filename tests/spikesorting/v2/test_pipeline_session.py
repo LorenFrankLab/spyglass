@@ -39,7 +39,7 @@ from tests.spikesorting.v2._ingest_helpers import (
 )
 
 # Fast and rate-agnostic, so the sampling-rate preflight check is avoided.
-_PRESET = "franklab_clusterless_2026_06"
+_PRESET = "franklab_clusterless_2026_11"
 
 _FIXTURE_NAME = "mearec_polymer_smoke"
 _FIXTURE_PATH = (

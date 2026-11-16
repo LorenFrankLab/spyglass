@@ -408,7 +408,7 @@ def test_estimate_motion_options_are_keyword_only():
 
     with pytest.raises(TypeError, match="positional"):
         estimate_motion(
-            "x.nwb", 0, _INTERVAL, "team", "franklab_clusterless_2026_06"
+            "x.nwb", 0, _INTERVAL, "team", "franklab_clusterless_2026_11"
         )
 
 
@@ -1158,7 +1158,7 @@ def test_preflight_sorter_not_installed(preflight_inputs, monkeypatch):
     clusterless = preflight_v2_pipeline(
         **{
             **preflight_inputs,
-            "pipeline_preset": "franklab_clusterless_2026_06",
+            "pipeline_preset": "franklab_clusterless_2026_11",
         }
     )
     (cl_check,) = [

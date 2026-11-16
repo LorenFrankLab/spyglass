@@ -284,10 +284,12 @@ def test_pipeline_runner_applies_manual_exclusions(
         },
         allow_duplicate_params=True,
     )
+    # The fixture's recordings use the generic "default" preprocessing row.
     preset = presets._PIPELINE_PRESETS[
-        "franklab_clusterless_2026_06"
+        "franklab_clusterless_2026_11"
     ].model_copy(
         update={
+            "preprocessing_params_name": fixture["preprocessing_params_name"],
             "artifact_detection_params_name": name if automatic else None,
             "sorter_params_name": name,
         }
@@ -399,7 +401,7 @@ def test_runners_reject_exclusions_outside_sorted_time(
     inputs = {
         **member,
         "team_name": fixture["owner"],
-        "pipeline_preset": "franklab_clusterless_2026_06",
+        "pipeline_preset": "franklab_clusterless_2026_11",
     }
     n_selections = len(RecordingArtifactSelection())
 
@@ -437,13 +439,13 @@ def test_runners_reject_exclusions_outside_sorted_time(
         with pytest.raises(PreflightError, match="concat member 1"):
             run_v2_concat_pipeline(
                 **group,
-                pipeline_preset="franklab_clusterless_2026_06",
+                pipeline_preset="franklab_clusterless_2026_11",
                 manual_excluded_times={1: before_start},
             )
         with pytest.raises(PreflightError, match=r"member_index \[5\]"):
             run_v2_concat_pipeline(
                 **group,
-                pipeline_preset="franklab_clusterless_2026_06",
+                pipeline_preset="franklab_clusterless_2026_11",
                 manual_excluded_times={5: [[t0 + 1.0, t0 + 2.0]]},
             )
     finally:

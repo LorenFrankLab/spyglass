@@ -210,16 +210,18 @@ def test_v2_export_captures_curation_and_recording_files(export_smoke_session):
 
 
 @pytest.mark.slow
-def test_v2_zero_unit_export_path(export_smoke_session):
+def test_v2_zero_unit_export_path(
+    export_smoke_session, default_preproc_clusterless
+):
     """A zero-unit curation exports without error, capturing its empty units
     NWB and the recording cache."""
     paper_id = "v2_export_zero_unit"
     run_summary = _run_pipeline(
-        export_smoke_session, "franklab_clusterless_2026_06"
+        export_smoke_session, default_preproc_clusterless
     )
     assert run_summary["n_units"] == 0, (
-        "shipped clusterless default should find zero units on the smoke "
-        f"fixture; got {run_summary['n_units']}"
+        "the 100 uV clusterless test preset should find zero units on the "
+        f"smoke fixture; got {run_summary['n_units']}"
     )
     assert (
         run_summary["root_merge_id"] is not None

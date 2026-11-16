@@ -265,17 +265,16 @@ def test_curation_stage_error_partial_has_n_units(first_run, monkeypatch):
 
 @pytest.mark.database
 @pytest.mark.slow
-def test_zero_unit_warning_in_run_summary(first_run):
+def test_zero_unit_warning_in_run_summary(
+    first_run, default_preproc_clusterless
+):
     """A zero-unit sort records its advisory on the run summary ``warnings``.
 
-    The clusterless preset (100 µV) finds no peaks on the smoke fixture.
+    The 100 µV clusterless test preset finds no peaks on the smoke fixture.
     """
     _, inputs = first_run
     run_summary = run_v2_pipeline(
-        **{
-            **inputs,
-            "pipeline_preset": "franklab_clusterless_2026_06",
-        }
+        **{**inputs, "pipeline_preset": default_preproc_clusterless}
     )
     assert run_summary["n_units"] == 0
     assert any("zero units" in w for w in run_summary["warnings"]), run_summary[

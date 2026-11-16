@@ -327,6 +327,9 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     from spyglass.spikesorting.v2 import initialize_v2_defaults
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
     from spyglass.spikesorting.v2.recording import SortGroupV2
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        CLUSTERLESS_60UV,
+    )
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     _clean_session_v2(polymer_smoke_session)
@@ -344,12 +347,11 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # The 100 uV default finds zero peaks on the smoke fixture. The preset
-    # hard-codes sorter_params_name="default", so lower that row in place
-    # and restore it in ``finally`` for later tests.
+    # The 60 uV shipped row finds zero peaks on the smoke fixture. The preset
+    # names that row, so lower it in place and restore it in ``finally``.
     default_key = {
         "sorter": "clusterless_thresholder",
-        "sorter_params_name": "default",
+        "sorter_params_name": CLUSTERLESS_60UV,
     }
     original_default = (SorterParameters & default_key).fetch1()
     # SMOKE_CLUSTERLESS_PARAMS already fits the extra="forbid" schema.
@@ -363,7 +365,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
     SorterParameters.update1(
         {
             "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
+            "sorter_params_name": CLUSTERLESS_60UV,
             "params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
@@ -377,9 +379,9 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
             team_name="v2_test_team",
-            pipeline_preset="franklab_clusterless_2026_06",
+            pipeline_preset="franklab_clusterless_2026_11",
         )
-        assert run_summary["pipeline_preset"] == "franklab_clusterless_2026_06"
+        assert run_summary["pipeline_preset"] == "franklab_clusterless_2026_11"
         for key in (
             "recording_id",
             "artifact_detection_id",
@@ -391,16 +393,16 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
                 run_summary.get(key) is not None
             ), f"Run summary missing {key!r}; got {run_summary}."
     finally:
-        # Restore the 100 uV default (update1 for the same FK reason).
+        # Restore the 60 uV row (update1 for the same FK reason).
         SorterParameters.update1(original_default, allow_param_mutation=True)
 
 
 @pytest.mark.slow
 def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
-    polymer_smoke_session,
+    polymer_smoke_session, default_preproc_clusterless
 ):
-    """The shipped 100 uV clusterless default finds zero peaks on the smoke
-    fixture and still completes.
+    """The 100 uV clusterless test preset finds zero peaks on the smoke
+    fixture and the run still completes.
 
     A zero-unit sort yields an empty but real curation and merge row, so the
     run_summary has ``root_curation_id``, ``root_merge_id`` and ``n_units=0``.
@@ -426,13 +428,13 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
         sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
     )
 
-    # Shipped default, no row mutation.
+    # Shipped "default" rows, no row mutation.
     run_summary = run_v2_pipeline(
         nwb_file_name=nwb_file_name,
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name="v2_test_team",
-        pipeline_preset="franklab_clusterless_2026_06",
+        pipeline_preset=default_preproc_clusterless,
     )
 
     # Complete, merge-keyable run_summary (v1 parity).
@@ -453,7 +455,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
     sort_pk = {"sorting_id": run_summary["sorting_id"]}
     sort_row = (Sorting & sort_pk).fetch1()
     assert sort_row["n_units"] == 0, (
-        f"Expected zero units from shipped clusterless default "
+        f"Expected zero units from the 100 uV clusterless test preset "
         f"on the smoke fixture, got n_units={sort_row['n_units']}. "
         "Either the smoke fixture's amplitudes changed (unlikely) "
         "or the unit-conversion semantics shifted -- check the "
@@ -479,7 +481,7 @@ def test_run_v2_pipeline_clusterless_default_handles_zero_units_gracefully(
             sort_group_id=sort_group_id,
             interval_list_name="raw data valid times",
             team_name="v2_test_team",
-            pipeline_preset="franklab_clusterless_2026_06",
+            pipeline_preset=default_preproc_clusterless,
             require_units=True,
         )
 
@@ -522,7 +524,7 @@ def test_list_pipeline_presets_enumerates_all_pipeline_presets():
     for name in (
         "franklab_tetrode_hippocampus_30khz_ms4_2026_06",
         "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
-        "franklab_clusterless_2026_06",
+        "franklab_clusterless_2026_11",
     ):
         assert name in presets
 
@@ -546,7 +548,7 @@ def test_run_v2_pipeline_idempotent_existing_root(polymer_smoke_session):
         sort_group_id=sort_group_id,
         interval_list_name="raw data valid times",
         team_name=team_name,
-        pipeline_preset="franklab_clusterless_2026_06",
+        pipeline_preset="franklab_clusterless_2026_11",
     )
     try:
         first = run_v2_pipeline(**common)
