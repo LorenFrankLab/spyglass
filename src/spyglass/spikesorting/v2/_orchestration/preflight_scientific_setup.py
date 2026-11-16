@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from spyglass.spikesorting.v2._orchestration.types import MotionMode
+from spyglass.spikesorting.v2._orchestration.preflight_geometry import (
+    sort_group_geometry_description,
+)
+from spyglass.spikesorting.v2._orchestration.stages import _run_target_label
 from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     MotionRecipe,
 )
@@ -87,6 +91,8 @@ def describe_scientific_setup(
 
     ``concat=True`` adds where the artifact mask is applied. ``motion``
     describes the motion stage; a Kilosort4 sort adds its own ``nblocks``.
+    ``geometry`` (one per group for several) says whether the recording uses
+    the registered contact positions or the assumed tetrode_12.5 square.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.recording import (
@@ -124,6 +130,20 @@ def describe_scientific_setup(
         "artifact_detection": dict(artifacts[0]) if len(artifacts) else None,
         "motion": _describe_motion(motion_mode, motion_recipe, concat=concat),
     }
+    # One row per group, as members of a concat can sit on different probes.
+    for key in group_keys:
+        geometry = sort_group_geometry_description(
+            key["nwb_file_name"],
+            key["sort_group_id"],
+            bundle.preprocessing_params_name,
+        )
+        if geometry is not None:
+            label = (
+                "geometry"
+                if len(group_keys) == 1
+                else f"geometry ({_run_target_label(key)})"
+            )
+            result[label] = geometry
     if manual_excluded_times:
         result["manual_excluded_times"] = manual_excluded_times
     if concat:

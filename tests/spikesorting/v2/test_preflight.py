@@ -2067,3 +2067,49 @@ def test_run_preflight_block_names_the_target_and_every_problem(
     )
     assert "session missing" in message and "team missing" in message
     assert "preflight=False" in message
+
+
+@pytest.mark.database
+def test_scientific_setup_says_whether_geometry_is_registered_or_assumed(
+    preflight_inputs, monkeypatch
+):
+    """The scientific setup names the contact geometry the recording will
+    use: the registered positions, or the 12.5 um tetrode square assumed
+    from the probe type when none are registered. It is a setup row, not a
+    warning."""
+    import numpy as np
+
+    import spyglass.spikesorting.v2._recording.fetch as fetch
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    registered = preflight_v2_pipeline(**preflight_inputs)
+    assert "registered contact positions" in (
+        registered.scientific_config["geometry"]
+    )
+    assert not [w for w in registered.warnings if "tetrode" in w]
+
+    nwb_file_name = preflight_inputs["nwb_file_name"]
+    restr, _ = _make_sort_group(nwb_file_name, 987103, 4)
+    monkeypatch.setattr(
+        fetch,
+        "fetch_sort_group_contact_positions",
+        lambda _f, channel_ids: np.zeros((len(channel_ids), 3)),
+    )
+    monkeypatch.setattr(
+        fetch,
+        "fetch_sort_group_probe_info",
+        lambda _f, channel_ids: (
+            ("tetrode_12.5",) * len(channel_ids),
+            ("0",) * len(channel_ids),
+        ),
+    )
+    try:
+        assumed = preflight_v2_pipeline(
+            **{**preflight_inputs, "sort_group_id": 987103}
+        )
+        geometry = assumed.scientific_config["geometry"]
+        assert "tetrode_12.5" in geometry and "assumed" in geometry
+        assert not [w for w in assumed.warnings if "tetrode" in w]
+    finally:
+        (SortGroupV2.SortGroupElectrode & restr).delete_quick()
+        (SortGroupV2 & restr).delete_quick()

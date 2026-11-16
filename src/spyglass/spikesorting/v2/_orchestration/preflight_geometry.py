@@ -88,6 +88,96 @@ def _coincident_contact_report(channel_ids, positions) -> str:
     return report + (f" (+{omitted} more position(s))" if omitted else "")
 
 
+def resolve_sort_group_geometry(
+    nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
+):
+    """The kept contacts of a sort group and the recording stage's verdict.
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        The raw NWB file.
+    sort_group_id : int
+        The sort group.
+    preprocessing_params_name : str
+        The run's ``PreprocessingParameters`` row.
+
+    Returns
+    -------
+    tuple of (SortGroupContacts, SortGroupGeometry) or None
+        ``None`` when the preprocessing row is missing or the group has no
+        members.
+
+    Raises
+    ------
+    ValueError
+        As ``fetch_sort_group_contacts``.
+    """
+    from spyglass.spikesorting.v2._recording.fetch import (
+        fetch_sort_group_contacts,
+    )
+    from spyglass.spikesorting.v2._recording.geometry import (
+        effective_sort_group_geometry,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    if not (
+        PreprocessingParameters
+        & {"preprocessing_params_name": preprocessing_params_name}
+    ):
+        return None
+    contacts = fetch_sort_group_contacts(
+        nwb_file_name, sort_group_id, preprocessing_params_name
+    )
+    if contacts is None:
+        return None
+    return contacts, effective_sort_group_geometry(
+        contacts.positions,
+        probe_types=contacts.probe_types,
+        electrode_group_names=contacts.electrode_group_names,
+        n_members=contacts.n_members,
+    )
+
+
+def sort_group_geometry_description(
+    nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
+) -> "str | None":
+    """Say which contact geometry the recording of a sort group will use.
+
+    Returns
+    -------
+    str or None
+        The assumed ``tetrode_12.5`` square or the registered positions;
+        ``None`` when the group cannot be resolved or is refused (its
+        preflight check reports why).
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    # A missing sort group is its own preflight check.
+    if not (
+        SortGroupV2
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": int(sort_group_id)}
+    ):
+        return None
+    try:
+        resolved = resolve_sort_group_geometry(
+            nwb_file_name, sort_group_id, preprocessing_params_name
+        )
+    except ValueError:
+        return None
+    if resolved is None:
+        return None
+    geometry = resolved[1]
+    if geometry.verdict == "tetrode":
+        return (
+            "tetrode_12.5 square (assumed from probe_type, not registered "
+            "positions)"
+        )
+    if geometry.verdict == "plane":
+        return f"registered contact positions ({geometry.source} plane)"
+    return None
+
+
 def sort_group_geometry_problem(
     nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
 ) -> "str | None":
@@ -117,35 +207,16 @@ def sort_group_geometry_problem(
         ``None`` when the group's contacts are distinct (or will be made so
         by the tetrode repair); otherwise the operator-facing fix text.
     """
-    from spyglass.spikesorting.v2._recording.fetch import (
-        fetch_sort_group_contacts,
-    )
-    from spyglass.spikesorting.v2._recording.geometry import (
-        effective_sort_group_geometry,
-    )
-    from spyglass.spikesorting.v2.recording import PreprocessingParameters
-
-    if not (
-        PreprocessingParameters
-        & {"preprocessing_params_name": preprocessing_params_name}
-    ):
-        # ``_check_source_param_rows`` reports the missing row.
-        return None
     try:
-        contacts = fetch_sort_group_contacts(
+        resolved = resolve_sort_group_geometry(
             nwb_file_name, sort_group_id, preprocessing_params_name
         )
     except ValueError as exc:
         return f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r}: {exc}"
-    if contacts is None:
-        # ``sort_group_has_electrodes`` reports this.
+    if resolved is None:
+        # ``_check_source_param_rows`` / ``sort_group_has_electrodes`` report.
         return None
-    geometry = effective_sort_group_geometry(
-        contacts.positions,
-        probe_types=contacts.probe_types,
-        electrode_group_names=contacts.electrode_group_names,
-        n_members=contacts.n_members,
-    )
+    contacts, geometry = resolved
     if geometry.verdict == "partial":
         report = _missing_coordinate_report(
             contacts.channel_ids, geometry.positions
