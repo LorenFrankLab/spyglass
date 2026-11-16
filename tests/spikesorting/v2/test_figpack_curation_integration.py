@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 _FIGPACK_MISSING = (
     importlib.util.find_spec("figpack") is None
@@ -475,7 +476,7 @@ def test_save_curation_from_uri_commits_browser_edits(
     root = populated_sorting_with_curation
     unit_ids = sorted(int(u) for u in (CurationV2.Unit & root).fetch("unit_id"))
     if not unit_ids:
-        pytest.skip("need >=1 curated unit to label")
+        skip_unless_fixtures_required("need >=1 curated unit to label")
     labeled = unit_ids[0]
 
     uri = FigPackCuration.build_curation_view(root, upload=False)

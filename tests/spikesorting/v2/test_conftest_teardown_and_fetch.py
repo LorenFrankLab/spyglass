@@ -146,6 +146,30 @@ def test_eager_fetch_names_ignores_unknown_required(monkeypatch):
     assert _eager_fetch_names() == []
 
 
+@pytest.mark.parametrize(
+    "required, outcome",
+    [
+        ("", pytest.skip.Exception),
+        ("mearec_polymer_smoke", pytest.fail.Exception),
+    ],
+)
+def test_missing_data_skips_only_when_no_fixtures_are_required(
+    monkeypatch, required, outcome
+):
+    """A run that requires fixtures fails on data they should have provided."""
+    from tests.spikesorting.v2._required_data import (
+        skip_unless_fixtures_required,
+    )
+
+    monkeypatch.setenv("SPYGLASS_V2_REQUIRE_FIXTURES", required)
+    # Catch both so a wrong outcome fails here instead of skipping this test.
+    with pytest.raises(
+        (pytest.skip.Exception, pytest.fail.Exception), match="need >=1 unit"
+    ) as raised:
+        skip_unless_fixtures_required("need >=1 unit")
+    assert raised.type is outcome
+
+
 def test_smoke_fixture_fetches_missing_verified_artifact(tmp_path, monkeypatch):
     """The explicit dependency downloads before a consumer's existence check."""
     import hashlib

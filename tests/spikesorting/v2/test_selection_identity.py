@@ -83,7 +83,8 @@ def test_deterministic_id_repeated_call_stable():
 def test_numpy_int_matches_plain_int():
     """A numpy ``sort_group_id`` hashes the same as the plain int it
     becomes once stored, so a fetched-then-reinserted id is idempotent."""
-    np = pytest.importorskip("numpy")
+    import numpy as np
+
     assert deterministic_id(
         "recording", {"sort_group_id": np.int64(3)}
     ) == deterministic_id("recording", {"sort_group_id": 3})
@@ -354,7 +355,8 @@ def test_recording_input_hash_sensitive_to_interpolate_set():
 def test_recording_input_hash_numpy_ints_match_plain_ints():
     """A numpy electrode id hashes identically to the plain int it becomes
     once stored, so a fetched-then-rehashed set is idempotent."""
-    np = pytest.importorskip("numpy")
+    import numpy as np
+
     assert _rih(electrode_ids=[np.int64(0), np.int64(1)]) == _rih(
         electrode_ids=[0, 1]
     )
@@ -373,7 +375,8 @@ def test_recording_input_hash_sensitive_to_saved_intervals():
 
 def test_recording_input_hash_saved_intervals_array_matches_list():
     """A fetched float64 interval array hashes like the same plain floats."""
-    np = pytest.importorskip("numpy")
+    import numpy as np
+
     assert _rih(saved_intervals=np.array([[0.0, 10.0]])) == _rih(
         saved_intervals=[[0, 10.0]]
     )
@@ -384,7 +387,8 @@ def _bypass_message(bypassed):
 
 
 def test_existing_selection_pk_none_when_no_master_matches():
-    np = pytest.importorskip("numpy")
+    import numpy as np
+
     canonical = uuid.UUID(int=1)
     for empty in ([], set(), np.array([], dtype=object)):
         assert (
@@ -399,7 +403,8 @@ def test_existing_selection_pk_none_when_no_master_matches():
 
 
 def test_existing_selection_pk_returns_canonical_master():
-    np = pytest.importorskip("numpy")
+    import numpy as np
+
     canonical = uuid.UUID(int=1)
     for found in ([canonical], {canonical}, np.array([canonical])):
         assert existing_selection_pk(

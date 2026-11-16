@@ -14,6 +14,7 @@ import pytest
 from tests.spikesorting.v2._ingest_helpers import (
     clear_curations_for as _clear_curations_for,
 )
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 
 @pytest.fixture(scope="module")
@@ -338,7 +339,9 @@ def test_v2_merge_ids_warn_on_multi_curation_fanout(
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
     if not unit_ids:
-        pytest.skip("need >=1 unit to build a distinct child curation")
+        skip_unless_fixtures_required(
+            "need >=1 unit to build a distinct child curation"
+        )
 
     # Two curations on ONE sorting: a root + a labeled child.
     CurationV2.insert_curation(sorting_key=populated_sorting)
@@ -416,7 +419,9 @@ def test_assert_decoding_merge_ids_raises_on_fanout(populated_sorting):
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
     if not unit_ids:
-        pytest.skip("need >=1 unit for a distinct child curation")
+        skip_unless_fixtures_required(
+            "need >=1 unit for a distinct child curation"
+        )
 
     _clear_curations_for(populated_sorting)
     CurationV2.insert_curation(sorting_key=populated_sorting)

@@ -284,8 +284,7 @@ def test_plot_metrics_figure_respects_explicit_columns():
 @pytest.mark.unit
 def test_notebook_uses_visualization_facade():
     """The user notebook teaches the discoverable ``ssviz`` facade."""
-    if not _NOTEBOOK.exists():
-        pytest.skip(f"notebook {_NOTEBOOK.name} not found")
+    assert _NOTEBOOK.exists(), f"notebook {_NOTEBOOK} is missing"
     notebook = json.loads(_NOTEBOOK.read_text())
     sources = [
         "".join(cell.get("source", []))

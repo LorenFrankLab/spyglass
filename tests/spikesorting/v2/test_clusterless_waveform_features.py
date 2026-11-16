@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import spikeinterface as si
 from packaging.version import Version
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 # Lives under v2/ for the v2 conftest's no-op ``mini_insert`` and ``safemode``.
 # v2 test helpers are imported lazily: the legacy SI 0.99 job collects this
@@ -528,7 +529,7 @@ def test_unit_waveform_features_v2_sparse_unit_ids(polymer_60s_session):
     run_summary = _run_ms5(polymer_60s_session)
     try:
         if run_summary["n_units"] < 2:
-            pytest.skip(
+            skip_unless_fixtures_required(
                 f"MS5 produced {run_summary['n_units']} unit(s) on the 60s "
                 "polymer fixture; need >=2 to merge into a non-positional "
                 "survivor id."

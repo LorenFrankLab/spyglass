@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 _P60_PATH = (
     Path(__file__).resolve().parent
@@ -85,7 +86,9 @@ def test_multi_region_unit_attribution(populated_sorting):
     )
     nwb, _sgid, sg_elec_pks = _sort_group_electrodes(populated_sorting)
     if len(sg_elec_pks) < 2:
-        pytest.skip("need >=2 channels in the sort group to span two regions")
+        skip_unless_fixtures_required(
+            "need >=2 channels in the sort group to span two regions"
+        )
 
     # Each curated unit maps to exactly one peak electrode (its FK). Key
     # by the (electrode_group_name, electrode_id) pair to match sg PKs.
@@ -173,7 +176,9 @@ def test_get_unit_brain_regions_include_labels(populated_sorting):
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
     if len(unit_ids) < 1:
-        pytest.skip("need >=1 unit to exercise the include_labels branch")
+        skip_unless_fixtures_required(
+            "need >=1 unit to exercise the include_labels branch"
+        )
 
     labeled_unit = unit_ids[0]
     pk = CurationV2.insert_curation(
@@ -213,7 +218,9 @@ def test_get_unit_brain_regions_empty_include_labels_returns_all(
         int(u) for u in (Sorting.Unit & populated_sorting).fetch("unit_id")
     )
     if len(unit_ids) < 1:
-        pytest.skip("need >=1 unit to exercise the include_labels branch")
+        skip_unless_fixtures_required(
+            "need >=1 unit to exercise the include_labels branch"
+        )
 
     pk = CurationV2.insert_curation(
         sorting_key=populated_sorting,
@@ -336,7 +343,7 @@ def test_multi_region_attribution_through_merge_dispatch(region_60s_sort):
     }
     distinct_peaks = sorted(set(unit_peak.values()))
     if len(distinct_peaks) < 2:
-        pytest.skip(
+        skip_unless_fixtures_required(
             "need >=2 distinct peak electrodes for multi-region "
             f"discrimination; got {len(distinct_peaks)}"
         )

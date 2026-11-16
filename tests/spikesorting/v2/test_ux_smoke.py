@@ -434,7 +434,7 @@ def test_describe_sort_groups_empty(dj_conn):
 @pytest.mark.integration
 def test_plot_sort_group_geometry_geometry_view(first_hour):
     """The sort-group geometry view renders one contact collection per group."""
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -459,7 +459,7 @@ def test_plot_sort_group_geometry_geometry_view(first_hour):
 @pytest.mark.database
 def test_plot_sort_group_geometry_empty(dj_conn):
     """A session with no SortGroupV2 rows produces a clear empty axes."""
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -497,7 +497,7 @@ def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
     ``Probe.Electrode`` rel_x/rel_y are per-probe, so probes would overlap
     without an offset. Uses synthetic two-probe rows.
     """
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -599,7 +599,7 @@ def test_plot_sort_group_geometry_legibility(monkeypatch):
     """Dense columns shrink markers and hide electrode-id labels, multiple
     probes get shaded bands, and the specific reference is a star.
     """
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -639,7 +639,7 @@ def test_plot_sort_group_geometry_legibility(monkeypatch):
 
 def test_plot_sort_group_geometry_auto_labels(monkeypatch):
     """Electrode-id labels auto-show for sparse groups; explicit flag overrides."""
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
@@ -687,7 +687,7 @@ def test_plot_sort_group_geometry_auto_label_threshold(
 
     A single-shank column of 8 contacts auto-labels, 9 does not.
     """
-    matplotlib = pytest.importorskip("matplotlib")
+    import matplotlib
 
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt

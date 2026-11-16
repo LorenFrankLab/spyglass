@@ -24,6 +24,7 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
     HIPPOCAMPUS_PREPROC,
     waveform_params_for_preprocessing,
 )
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 
 def _stub_row(table, id_attr, id_value, **fixed):
@@ -482,7 +483,9 @@ def test_sorting_records_display_waveform_params(populated_sorting):
     sid = populated_sorting["sorting_id"]
     row = (Sorting & populated_sorting).fetch1()
     if int(row["n_units"]) == 0:
-        pytest.skip("zero-unit smoke sort: no analyzer to assert")
+        skip_unless_fixtures_required(
+            "zero-unit smoke sort: no analyzer to assert"
+        )
 
     # 'default' is not in the region map -> cortex fallback.
     stored_name = row["display_waveform_params_name"]
@@ -528,7 +531,9 @@ def test_rebuild_reads_stored_window_never_re_resolves(
     sid = populated_sorting["sorting_id"]
     row = (Sorting & populated_sorting).fetch1()
     if int(row["n_units"]) == 0:
-        pytest.skip("zero-unit smoke sort: no analyzer to rebuild")
+        skip_unless_fixtures_required(
+            "zero-unit smoke sort: no analyzer to rebuild"
+        )
     stored_name = row["display_waveform_params_name"]
 
     def _must_not_re_resolve(*args, **kwargs):

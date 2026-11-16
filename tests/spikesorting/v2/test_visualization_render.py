@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pytest  # noqa: E402
 
 from spyglass.spikesorting.v2 import visualization as ssviz  # noqa: E402
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 
 def _recording_key(sort_pk):
@@ -66,7 +67,9 @@ def test_unit_summary_renders_with_compute_missing(populated_sorting):
 
     unit_ids = list(Sorting().get_analyzer(populated_sorting).unit_ids)
     if not unit_ids:
-        pytest.skip("zero-unit smoke sort; no unit summary to render")
+        skip_unless_fixtures_required(
+            "zero-unit smoke sort; no unit summary to render"
+        )
 
     fig = ssviz.plot_unit_summary(
         _root_curation(populated_sorting), unit_ids[0], compute_missing=True
@@ -85,7 +88,7 @@ def test_unit_locations_renders_with_compute_missing(populated_sorting):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
-        pytest.skip("zero-unit smoke sort")
+        skip_unless_fixtures_required("zero-unit smoke sort")
 
     fig = ssviz.plot_unit_locations(
         _root_curation(populated_sorting), compute_missing=True
@@ -101,7 +104,7 @@ def test_local_report_export_writes_folder(populated_sorting, tmp_path):
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
-        pytest.skip("zero-unit smoke sort; nothing to report")
+        skip_unless_fixtures_required("zero-unit smoke sort; nothing to report")
 
     output_folder = tmp_path / "si_report"
     ssviz.export_si_report(
@@ -142,7 +145,7 @@ def test_export_to_phy_writes_folder_off_display_analyzer(
     from spyglass.spikesorting.v2.sorting import Sorting
 
     if not list(Sorting().get_analyzer(populated_sorting).unit_ids):
-        pytest.skip("zero-unit smoke sort; nothing to export")
+        skip_unless_fixtures_required("zero-unit smoke sort; nothing to export")
 
     root = _root_curation(populated_sorting)
     published = Sorting().get_analyzer(populated_sorting)

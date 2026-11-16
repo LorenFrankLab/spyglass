@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 _TEAM = "curation_wrappers_team"
 # The smoke sort yields one unit; merge tests need the nightly 60s fixture
@@ -63,7 +64,9 @@ def _two_unit_ids(sort_pk) -> tuple[int, int]:
     """First two real unit ids, or skip if the sort has fewer than two."""
     ids = _unit_ids(sort_pk)
     if len(ids) < 2:
-        pytest.skip(f"need >=2 sort units for merge tests; got {len(ids)}")
+        skip_unless_fixtures_required(
+            f"need >=2 sort units for merge tests; got {len(ids)}"
+        )
     return ids[0], ids[1]
 
 
@@ -253,7 +256,7 @@ def test_save_manual_curation_labels_child(populated_sorting):
 
     ids = _unit_ids(populated_sorting)
     if not ids:
-        pytest.skip("need >=1 sort unit")
+        skip_unless_fixtures_required("need >=1 sort unit")
     a = ids[0]
     clear_curations_for(populated_sorting)
     root = CurationV2.create_initial_curation(populated_sorting)
@@ -380,7 +383,7 @@ def test_save_manual_curation_rejects_root_reuse(
 
     ids = _unit_ids(populated_sorting)
     if not ids:
-        pytest.skip("need >=1 sort unit")
+        skip_unless_fixtures_required("need >=1 sort unit")
     clear_curations_for(populated_sorting)
     CurationV2.create_initial_curation(populated_sorting)
 
@@ -406,7 +409,7 @@ def test_summarize_curation_fields(populated_sorting):
 
     ids = _unit_ids(populated_sorting)
     if not ids:
-        pytest.skip("need >=1 sort unit")
+        skip_unless_fixtures_required("need >=1 sort unit")
     a = ids[0]
     clear_curations_for(populated_sorting)
     key = CurationV2.create_initial_curation(

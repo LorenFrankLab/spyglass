@@ -8,6 +8,7 @@ import pytest
 
 from tests.spikesorting.v2.single_session._helpers import _clear_curations
 from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
+from tests.spikesorting.v2._required_data import skip_unless_fixtures_required
 
 
 @pytest.mark.slow
@@ -880,7 +881,7 @@ def test_get_analyzer_accepts_non_sorting_id_restriction(populated_sorting):
         "object_id", "n_units"
     )
     if int(n_units) == 0:
-        pytest.skip("zero-unit sort has no analyzer to load")
+        skip_unless_fixtures_required("zero-unit sort has no analyzer to load")
     analyzer = Sorting().get_analyzer({"object_id": object_id})
     assert analyzer is not None
     assert analyzer.get_num_units() == int(n_units)
