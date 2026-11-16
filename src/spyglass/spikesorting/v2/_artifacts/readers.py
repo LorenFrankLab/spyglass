@@ -189,11 +189,55 @@ def collect_artifact_interval_rows_to_remove(rows, detection_cls):
     return interval_rows_to_remove
 
 
+def _interval_referrers(restrictions, owner_part) -> dict[str, int]:
+    """Count rows outside ``owner_part`` that use these ``IntervalList`` rows."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._core.table_integrity import (
+        foreign_key_referrers,
+    )
+
+    return foreign_key_referrers(
+        IntervalList(), list(restrictions), skip={owner_part.full_table_name}
+    )
+
+
+def refuse_used_artifact_intervals(restrictions, owner_part, *, context):
+    """Raise if a table other than the owning part uses these intervals.
+
+    An artifact-removed interval can be chosen as another pipeline's interval
+    (a sort, LFP or decoding interval); deleting it would cascade there.
+
+    Parameters
+    ----------
+    restrictions : list of dict
+        ``{nwb_file_name, interval_list_name}`` keys of the owned rows.
+    owner_part : dj.Part
+        The ``RemovedInterval`` part that owns them; its rows are skipped.
+    context : str
+        Caller name for the message.
+
+    Raises
+    ------
+    ValueError
+        Naming each referencing table and its row count.
+    """
+    referrers = _interval_referrers(restrictions, owner_part)
+    if referrers:
+        names = sorted({row["interval_list_name"] for row in restrictions})
+        raise ValueError(
+            f"{context}: refusing to delete. Other tables use the "
+            f"artifact-removed interval(s) {names}: {referrers} (rows per "
+            "table). Delete those rows first, then delete the detection."
+        )
+
+
 def remove_artifact_interval_rows(restrictions):
     """Delete the artifact-removed ``IntervalList`` rows for ``restrictions``.
 
-    Call after the master delete commits. Uses one delete because each
-    ``SpyglassMixin.delete`` sweeps lab-wide external files.
+    Call after the master delete commits and after
+    ``refuse_used_artifact_intervals``. ``delete_quick`` never cascades: a
+    row another table started using meanwhile raises instead of being
+    deleted with its dependents.
 
     Parameters
     ----------
@@ -203,8 +247,55 @@ def remove_artifact_interval_rows(restrictions):
     """
     from spyglass.common import IntervalList
 
-    # Not ``super_delete``: keep the team-permission check.
-    rows = IntervalList & restrictions
-    if len(rows) == 0:
-        return
-    rows.delete(safemode=False)
+    if restrictions:
+        (IntervalList & restrictions).delete_quick()
+
+
+def insert_artifact_interval_rows(interval_rows, owner_part) -> None:
+    """Insert a detection's ``IntervalList`` rows, replacing stale ones.
+
+    An upstream cascade deletes a detection without its interval rows, and a
+    repopulate reuses the deterministic name. An identical row is adopted; a
+    differing v2 row that nothing else uses is replaced.
+
+    Parameters
+    ----------
+    interval_rows : list of dict
+        ``IntervalList`` rows from ``build_artifact_interval_rows``.
+    owner_part : dj.Part
+        The ``RemovedInterval`` part that will own them.
+
+    Raises
+    ------
+    ValueError
+        If an existing row with a differing ``valid_times`` was not written by
+        v2 artifact detection, or another table uses it.
+    """
+    import numpy as np
+
+    from spyglass.common import IntervalList
+
+    for row in interval_rows:
+        key = {
+            "nwb_file_name": row["nwb_file_name"],
+            "interval_list_name": row["interval_list_name"],
+        }
+        existing = (IntervalList & key).fetch(as_dict=True)
+        if not existing or np.array_equal(
+            existing[0]["valid_times"], row["valid_times"]
+        ):
+            continue
+        if existing[0]["pipeline"] != row["pipeline"]:
+            raise ValueError(
+                f"IntervalList {key} already exists from pipeline "
+                f"{existing[0]['pipeline']!r}, not v2 artifact detection; "
+                "refusing to replace it."
+            )
+        referrers = _interval_referrers([key], owner_part)
+        if referrers:
+            raise ValueError(
+                f"IntervalList {key} holds a stale artifact-removed interval "
+                f"with different times, and other tables use it: {referrers} "
+                "(rows per table). Delete those rows, then repopulate."
+            )
+    IntervalList.insert(interval_rows, update=True)

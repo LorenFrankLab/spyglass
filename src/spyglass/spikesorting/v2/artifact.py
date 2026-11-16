@@ -33,7 +33,9 @@ from spyglass.spikesorting.v2._artifacts.intervals import (
 )
 from spyglass.spikesorting.v2._artifacts.readers import (
     collect_artifact_interval_rows_to_remove,
+    insert_artifact_interval_rows,
     read_owned_artifact_intervals,
+    refuse_used_artifact_intervals,
     remove_artifact_interval_rows,
 )
 from spyglass.spikesorting.v2._params.artifact_detection import (
@@ -610,7 +612,9 @@ class _ArtifactDetectionMixin:
 
         Writes one ``IntervalList`` row per distinct member
         ``nwb_file_name``, the master row, the ``RemovedInterval`` ownership
-        rows, and the ``ArtifactDetectionOutput`` registration.
+        rows, and the ``ArtifactDetectionOutput`` registration. A stale
+        interval row left by an upstream cascade is adopted or replaced
+        (``insert_artifact_interval_rows``).
 
         Parameters
         ----------
@@ -634,7 +638,7 @@ class _ArtifactDetectionMixin:
         part_rows = build_artifact_interval_part_rows(key, interval_rows)
         detection_key = {"artifact_detection_id": key["artifact_detection_id"]}
         with self._safe_context():
-            IntervalList.insert(interval_rows)
+            insert_artifact_interval_rows(interval_rows, self.RemovedInterval)
             self.insert1(key)
             self.RemovedInterval.insert(part_rows)
             # Registered iff materialized, so sorting never inserts the merge.
@@ -682,6 +686,12 @@ class _ArtifactDetectionMixin:
         ``RemovedInterval`` parts record which intervals it owns.
         Positional arguments are restrictions, applied before rows are
         fetched.
+
+        Raises
+        ------
+        ValueError
+            Before deleting anything, if another table (a sort, LFP or
+            decoding selection) uses an owned interval.
         """
         if restrictions:
             return self._restrict_delete_args(restrictions).delete(
@@ -699,6 +709,11 @@ class _ArtifactDetectionMixin:
             )
             for row in rows
         ]
+        refuse_used_artifact_intervals(
+            [r for _, interval_rows in delete_targets for r in interval_rows],
+            self.RemovedInterval,
+            context=f"{detection_cls.__name__}.delete",
+        )
 
         # force_masters cascade removes the merge registration too.
         if safemode is None:

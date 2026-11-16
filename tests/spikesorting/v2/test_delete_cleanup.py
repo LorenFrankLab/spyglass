@@ -331,3 +331,103 @@ def test_unrestricted_sorting_delete_with_positional_restriction_restricts(
         "Sorting().delete({nonexistent}) destroyed the planted analyzer "
         "folder for a row that should not have matched the restriction"
     )
+
+
+def _default_detection(planted_sort):
+    """Populate an unreferenced 'default' detection on the planted recording."""
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    rec_id = SortingSelection.resolve_source(planted_sort).key["recording_id"]
+    rec_row = (RecordingSelection & {"recording_id": rec_id}).fetch1()
+    ArtifactDetectionParameters.insert_default()
+    art_pk = RecordingArtifactSelection.insert_selection(
+        {"recording_id": rec_id, "artifact_detection_params_name": "default"}
+    )
+    if not (RecordingArtifactDetection & art_pk):
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+    interval = {
+        "nwb_file_name": rec_row["nwb_file_name"],
+        "interval_list_name": artifact_detection_interval_list_name(
+            art_pk["artifact_detection_id"]
+        ),
+    }
+    return rec_row, art_pk, interval
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_artifact_delete_refuses_when_another_table_uses_its_interval(
+    planted_sort,
+):
+    """Deleting a detection whose artifact-removed interval another pipeline
+    uses (here a recording sorted over that interval) refuses and deletes
+    nothing, instead of cascading into that pipeline unprompted."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    rec_row, art_pk, interval = _default_detection(planted_sort)
+    user_pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": rec_row["nwb_file_name"],
+            "sort_group_id": rec_row["sort_group_id"],
+            "interval_list_name": interval["interval_list_name"],
+            "preprocessing_params_name": rec_row["preprocessing_params_name"],
+            "team_name": rec_row["team_name"],
+        }
+    )
+    try:
+        with pytest.raises(ValueError, match="recording_selection"):
+            (RecordingArtifactDetection & art_pk).delete(safemode=False)
+        assert RecordingArtifactDetection & art_pk
+        assert IntervalList & interval
+        assert RecordingSelection & user_pk
+    finally:
+        (RecordingSelection & user_pk).delete_quick()
+        (RecordingArtifactDetection & art_pk).delete(safemode=False)
+        (RecordingArtifactSelection & art_pk).delete_quick()
+    assert not (IntervalList & interval)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_repopulated_detection_replaces_its_stale_interval(planted_sort):
+    """An upstream cascade leaves a detection's interval row behind; the same
+    detection repopulated later replaces it with the new valid times."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    _rec_row, art_pk, interval = _default_detection(planted_sort)
+    expected = (IntervalList & interval).fetch1("valid_times")
+    try:
+        # DataJoint's cascade skips the delete override, as upstream does.
+        (RecordingArtifactDetection & art_pk).super_delete(
+            warn=False, safemode=False, force_masters=True
+        )
+        assert IntervalList & interval
+        IntervalList.update1(
+            {**interval, "valid_times": np.array([[0.0, 1.0]])}
+        )
+        RecordingArtifactDetection.populate(art_pk, reserve_jobs=False)
+        assert RecordingArtifactDetection & art_pk
+        np.testing.assert_array_equal(
+            (IntervalList & interval).fetch1("valid_times"), expected
+        )
+    finally:
+        (RecordingArtifactDetection & art_pk).delete(safemode=False)
+        (RecordingArtifactSelection & art_pk).delete_quick()
