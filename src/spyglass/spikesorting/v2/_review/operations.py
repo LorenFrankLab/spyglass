@@ -70,6 +70,37 @@ def _acquire_operation_lock(bundle):
     return lock
 
 
+def remove_inspections(bundle) -> bool:
+    """Remove a review bundle's selected-unit inspection views.
+
+    Inspections are disposable views saved under ``<bundle>/inspection``;
+    they are removed when the review's delivery starts and stops. A bundle
+    whose operation is running (it may be saving one) is left alone.
+
+    Parameters
+    ----------
+    bundle : str or Path
+        The review bundle folder.
+
+    Returns
+    -------
+    bool
+        False if an operation held the bundle, so nothing was removed.
+    """
+    import shutil
+
+    folder = Path(bundle) / "inspection"
+    if not folder.is_dir():
+        return True
+    try:
+        lock = _acquire_operation_lock(bundle)
+    except OSError:
+        return False
+    with lock:
+        shutil.rmtree(folder, ignore_errors=True)
+    return True
+
+
 class ReviewOperationService:
     def __init__(self, review_id, bundle, config):
         self.review_id = str(review_id)

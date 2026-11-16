@@ -447,3 +447,32 @@ def test_unreadable_operation_files_are_reported_as_json(bundle, method):
     assert content_type == "application/json"
     assert str(bundle.resolve()) in body["error"]
 
+
+def test_inspection_views_last_only_while_their_review_is_served(bundle):
+    """Selected-unit inspections are disposable: a connected review starts
+    without earlier sessions' inspections and stopping it removes its own."""
+    from spyglass.spikesorting.v2._review.delivery import (
+        serve_review_bundle,
+        stop_review_servers,
+    )
+
+    class Operations:
+        review_id = "pinned-review"
+
+        def close(self):
+            pass
+
+    stale = bundle / "inspection" / "earlier-session"
+    stale.mkdir(parents=True)
+    serve_review_bundle(bundle, operation_factory=Operations)
+    assert not (bundle / "inspection").exists()
+
+    current = bundle / "inspection" / "this-session"
+    current.mkdir(parents=True)
+    (current / "index.html").write_text("<html></html>")
+    serve_review_bundle(current)
+    serve_review_bundle(bundle, operation_factory=Operations)
+    assert current.is_dir(), "re-serving a live review keeps its inspections"
+    stop_review_servers(bundle)
+    assert not (bundle / "inspection").exists()
+    assert (bundle / "annotations.json").exists()

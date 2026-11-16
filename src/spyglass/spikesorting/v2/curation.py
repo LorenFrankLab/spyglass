@@ -92,6 +92,20 @@ CONCAT_MERGE_GATE_MESSAGE = (
 )
 
 
+def _figpack_module(table):
+    """Return ``figpack_curation`` if its schema exists, else ``None``.
+
+    Importing the module declares its tables, which a delete must not do.
+    """
+    if "spikesorting_v2_figpack_curation" not in dj.list_schemas(
+        connection=table.connection
+    ):
+        return None
+    from spyglass.spikesorting.v2 import figpack_curation
+
+    return figpack_curation
+
+
 @schema
 class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
     """Manual curation labels + merge groups for a sorted Sorting.
@@ -280,6 +294,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         ``super_delete``, ``delete_quick``, and upstream cascades skip this
         guard; :meth:`audit_orphaned_lineage` finds the orphans they leave.
+        Local FigPack review bundles of deleted curations are removed.
         Positional arguments are restrictions, applied first.
         """
         if restrictions:
@@ -355,13 +370,19 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
             )
         if safemode is not None:
             kwargs["safemode"] = safemode
-        return ConcatMemberCurationV2._delete_and_reclaim(
+        figpack = _figpack_module(self)
+        bundles = figpack.collect_figpack_bundles(self) if figpack else []
+        result = ConcatMemberCurationV2._delete_and_reclaim(
             super().delete,
             kwargs,
             member_rows=concat_member_rows,
             merge_ids=merge_ids,
             context=f"{cls.__name__}.delete",
         )
+        if figpack:
+            # The cascade skips the FigPack tables' own bundle cleanup.
+            figpack.remove_figpack_bundles(bundles)
+        return result
 
     @classmethod
     def audit_orphaned_lineage(cls, *, sorting_id=None) -> list[dict]:

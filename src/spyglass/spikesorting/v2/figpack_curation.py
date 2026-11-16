@@ -121,6 +121,19 @@ def figpack_bundle_path(figpack_curation_id) -> Path:
     return figpack_cache_root() / f"{figpack_curation_id}"
 
 
+def _owned_local_bundle(uri: str, figpack_curation_id) -> Path | None:
+    """Return the local bundle at ``uri`` if this machine's cache root owns it.
+
+    ``None`` for a hosted figure, or for a bundle outside the current
+    :func:`figpack_cache_root` (an old root, or another machine's folder).
+    """
+    if _is_hosted(uri):
+        return None
+    path = Path(uri)
+    expected = figpack_bundle_path(figpack_curation_id)
+    return path if path.resolve() == expected.resolve() else None
+
+
 def _figure_base(uri: str) -> str:
     """Return a figure URI without ``file://``, ``index.html`` or a final ``/``."""
     text = str(uri)
@@ -655,6 +668,101 @@ class FigPackCurationComputed(NamedTuple):
         )
 
 
+def remove_figpack_bundles(rows: list[dict]) -> list[str]:
+    """Remove the local bundles of built views whose rows are gone.
+
+    Rows still present (a cancelled delete) keep their bundles. Only a bundle :func:`_owned_local_bundle` accepts is removed; hosted
+    figures and bundles outside the cache root are left with a warning. A
+    bundle whose review operation is running is skipped with a warning.
+
+    Parameters
+    ----------
+    rows : list of dict
+        ``{figpack_curation_id, figpack_uri}`` rows fetched before a delete
+        (:func:`collect_figpack_bundles`).
+
+    Returns
+    -------
+    list of str
+        The bundle folders removed.
+    """
+    from spyglass.spikesorting.v2._review.delivery import (
+        stop_review_servers,
+    )
+    from spyglass.spikesorting.v2._review.operations import (
+        _acquire_operation_lock,
+    )
+
+    surviving = (
+        {
+            str(value)
+            for value in (
+                FigPackCuration
+                & [
+                    {"figpack_curation_id": r["figpack_curation_id"]}
+                    for r in rows
+                ]
+            ).fetch("figpack_curation_id")
+        }
+        if rows
+        else set()
+    )
+    removed = []
+    for row in rows:
+        figpack_id, uri = row["figpack_curation_id"], row["figpack_uri"]
+        if str(figpack_id) in surviving or _is_hosted(uri):
+            continue
+        bundle = _owned_local_bundle(uri, figpack_id)
+        if bundle is None:
+            logger.warning(
+                f"FigPack bundle {uri} is outside this machine's FigPack "
+                f"folder ({figpack_cache_root()}); it was left in place."
+            )
+            continue
+        if not bundle.exists():
+            continue
+        stop_review_servers(bundle)
+        try:
+            lock = _acquire_operation_lock(bundle)
+        except OSError:
+            logger.warning(
+                f"FigPack bundle {bundle} has a review operation running; it "
+                "was left in place. FigPackCuration.find_orphaned_bundles"
+                "(dry_run=False) removes it later."
+            )
+            continue
+        with lock:
+            shutil.rmtree(bundle, ignore_errors=True)
+        if bundle.exists():
+            logger.warning(f"FigPack bundle {bundle} could not be removed.")
+            continue
+        removed.append(str(bundle))
+    return removed
+
+
+def collect_figpack_bundles(relation) -> list[dict]:
+    """Return the built views a delete of ``relation`` would cascade to.
+
+    Call before a ``CurationV2`` or ``Sorting`` delete, whose cascade skips
+    the FigPack tables' delete overrides; pass the result to
+    :func:`remove_figpack_bundles` afterwards.
+
+    Parameters
+    ----------
+    relation : dj.Table
+        A restricted table whose primary key ``FigPackCurationSelection``
+        references (``CurationV2``, ``Sorting``).
+
+    Returns
+    -------
+    list of dict
+        ``{figpack_curation_id, figpack_uri}`` rows.
+    """
+    return (FigPackCuration * FigPackCurationSelection & relation.proj()).fetch(
+        "figpack_curation_id", "figpack_uri", as_dict=True
+    )
+
+
 # ---- tables --------------------------------------------------------------
 
 
@@ -798,6 +906,23 @@ class FigPackCurationSelection(
                 raise
             return existing
         return {"figpack_curation_id": deterministic_figpack_id}
+
+    def delete(self, *restrictions, safemode=None, **kwargs):
+        """Delete selections and remove the local bundles of their views.
+
+        Positional arguments are restrictions, applied first. Keyword
+        arguments go to the usual Spyglass delete.
+        """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
+        rows = collect_figpack_bundles(self)
+        if safemode is not None:
+            kwargs["safemode"] = safemode
+        result = super().delete(**kwargs)
+        remove_figpack_bundles(rows)
+        return result
 
     @classmethod
     def _find_existing_pk(cls, identity, deterministic_figpack_id):
@@ -976,6 +1101,77 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         if staged_bundle is not None:
             install_staged_folder(staged_bundle, row["figpack_uri"])
 
+    def delete(self, *restrictions, safemode=None, **kwargs):
+        """Delete built views and remove their local bundles.
+
+        Hosted figures and bundles outside :func:`figpack_cache_root` are
+        left in place. Upstream cascades skip this override;
+        :meth:`find_orphaned_bundles` finds what they leave. Positional
+        arguments are restrictions, applied first.
+        """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
+        rows = self.fetch("figpack_curation_id", "figpack_uri", as_dict=True)
+        if safemode is not None:
+            kwargs["safemode"] = safemode
+        result = super().delete(**kwargs)
+        remove_figpack_bundles(rows)
+        return result
+
+    @classmethod
+    def find_orphaned_bundles(cls, *, dry_run: bool = True) -> dict:
+        """Report, or remove, bundle folders no built view references.
+
+        Scans only the current :func:`figpack_cache_root`. ``disk_side``
+        folders are named by a ``figpack_curation_id`` with no row (left by
+        an upstream cascade); ``staging`` folders are abandoned build or
+        trash folders, reported only, since a build may still own one.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            When True (default) only report. When False, remove the
+            ``disk_side`` folders, skipping any with a running operation.
+
+        Returns
+        -------
+        dict
+            ``{"disk_side": [path, ...], "staging": [path, ...]}``.
+        """
+        import re
+
+        root = figpack_cache_root()
+        if not root.is_dir():
+            return {"disk_side": [], "staging": []}
+        known = {str(value) for value in cls.fetch("figpack_curation_id")}
+        disk_side, staging = [], []
+        for folder in sorted(path for path in root.iterdir() if path.is_dir()):
+            name = folder.name
+            if re.fullmatch(
+                r"\.[0-9a-f-]{36}\.(build|trash)-[0-9a-f]{32}", name
+            ):
+                staging.append(str(folder))
+                continue
+            try:
+                figpack_id = uuid.UUID(name)
+            except ValueError:
+                continue
+            if str(figpack_id) == name and name not in known:
+                disk_side.append(str(folder))
+        if not dry_run:
+            disk_side = remove_figpack_bundles(
+                [
+                    {
+                        "figpack_curation_id": Path(path).name,
+                        "figpack_uri": path,
+                    }
+                    for path in disk_side
+                ]
+            )
+        return {"disk_side": disk_side, "staging": staging}
+
     @classmethod
     def build_curation_view(
         cls,
@@ -1103,7 +1299,10 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "Rebuilding it. Draft labels saved only in that page are "
                     "lost; committed curations are unaffected."
                 )
-            elif Path(uri).parent != root:
+            elif (
+                _owned_local_bundle(uri, selection["figpack_curation_id"])
+                is None
+            ):
                 message = (
                     f"{page} was built at {uri}, outside this machine's FigPack "
                     f"folder ({root}), and is not readable here. Open it on the "

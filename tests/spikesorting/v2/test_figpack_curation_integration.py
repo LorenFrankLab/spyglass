@@ -927,3 +927,93 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
     with pytest.raises(ValueError, match="preview/draft"):
         FigPackCuration.populate({"figpack_curation_id": figpack_id})
     clear_curations_for(planted_two_unit_sort)
+
+
+def test_deleting_a_view_removes_its_local_bundle(
+    populated_sorting_with_curation,
+):
+    """A deleted view's local bundle is removed with it; the selection's own
+    delete does the same."""
+    from spyglass.spikesorting.v2.figpack_curation import (
+        FigPackCuration,
+        FigPackCurationSelection,
+    )
+
+    built = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    key = {"figpack_curation_id": built.figpack_curation_id}
+    assert Path(built.uri).is_dir()
+    (FigPackCuration & key).delete(safemode=False)
+    assert not Path(built.uri).exists()
+    assert FigPackCurationSelection & key
+
+    rebuilt = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    assert Path(rebuilt.uri).is_dir()
+    (FigPackCurationSelection & key).delete(safemode=False)
+    assert not (FigPackCuration & key)
+    assert not Path(rebuilt.uri).exists()
+
+
+def test_curation_delete_removes_its_review_bundles(
+    populated_sorting_with_curation,
+):
+    """Deleting a curation cascades past the FigPack delete override, so
+    the curation delete itself removes its views' local bundles."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    uri = FigPackCuration.build_curation_view(
+        populated_sorting_with_curation, upload=False
+    )
+    assert Path(uri).is_dir()
+    (CurationV2 & populated_sorting_with_curation).delete(safemode=False)
+    assert not Path(uri).exists()
+
+
+def test_bundle_outside_the_cache_root_or_in_use_is_kept(
+    populated_sorting_with_curation, tmp_path
+):
+    """Only a bundle in this machine's FigPack folder with no running review
+    operation is removed; anything else is left in place."""
+    import shutil
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._review.operations import (
+        _acquire_operation_lock,
+    )
+    from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+
+    built = FigPackCuration.build_curation_view_result(
+        populated_sorting_with_curation, upload=False
+    )
+    key = {"figpack_curation_id": built.figpack_curation_id}
+    try:
+        with _acquire_operation_lock(built.uri):
+            (FigPackCuration & key).delete(safemode=False)
+        assert not (FigPackCuration & key)
+        assert Path(built.uri).is_dir()
+
+        orphans = FigPackCuration.find_orphaned_bundles()
+        assert built.uri in orphans["disk_side"]
+        assert Path(built.uri).is_dir()
+        assert (
+            built.uri
+            in FigPackCuration.find_orphaned_bundles(dry_run=False)["disk_side"]
+        )
+        assert not Path(built.uri).exists()
+
+        moved = FigPackCuration.build_curation_view_result(
+            populated_sorting_with_curation, upload=False
+        )
+        with pytest.MonkeyPatch.context() as patch:
+            custom = dict(dj.config.get("custom") or {})
+            custom["spikesorting_v2_figpack_dir"] = str(tmp_path / "elsewhere")
+            patch.setitem(dj.config, "custom", custom)
+            (FigPackCuration & key).delete(safemode=False)
+        assert Path(moved.uri).is_dir()
+    finally:
+        shutil.rmtree(built.uri, ignore_errors=True)

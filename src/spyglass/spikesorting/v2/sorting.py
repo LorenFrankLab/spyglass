@@ -1605,10 +1605,11 @@ class Sorting(
         )
 
     def delete(self, *restrictions, safemode=None, **kwargs):
-        """Cascade-delete + analyzer-cache cleanup on disk.
+        """Cascade-delete + analyzer-cache and review-bundle cleanup on disk.
 
         The analyzer folder (5-50 GB) is not a tracked column, so this
-        removes it for each deleted row.
+        removes it for each deleted row, along with the local FigPack review
+        bundles of the sort's deleted curations.
 
         Parameters
         ----------
@@ -1631,12 +1632,18 @@ class Sorting(
             remove_analyzer_cache,
         )
 
+        from spyglass.spikesorting.v2.curation import _figpack_module
+
         # Fetch before the cascade removes the rows.
         rows = self.fetch("KEY", as_dict=True)
+        figpack = _figpack_module(self)
+        bundles = figpack.collect_figpack_bundles(self) if figpack else []
         if safemode is None:
             super().delete(**kwargs)
         else:
             super().delete(safemode=safemode, **kwargs)
+        if figpack:
+            figpack.remove_figpack_bundles(bundles)
         # A cancelled prompt returns normally; keep folders of surviving rows.
         surviving = set((Sorting & rows).fetch("sorting_id"))
         for row in rows:

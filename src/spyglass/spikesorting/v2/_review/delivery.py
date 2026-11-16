@@ -93,6 +93,11 @@ def serve_review_bundle(
     ------
     FileNotFoundError
         If the bundle directory or its ``index.html`` is missing.
+
+    Notes
+    -----
+    A connected review (``operation_factory`` given) starts without the
+    inspection views an earlier session left in its bundle.
     """
     global _SERVER
     root = Path(bundle).resolve()
@@ -120,17 +125,32 @@ def serve_review_bundle(
         server, _ = _SERVER
         # A random id keeps other local users who know the path out.
         ids = {served.root: key for key, served in server.bundles.items()}
+        starting = operation_factory is not None and root not in ids
         bundle_id = ids.get(root) or secrets.token_urlsafe(32)
         served = server.bundles.setdefault(bundle_id, _Bundle(root))
         if served.operations is None and operation_factory is not None:
             served.operations = operation_factory()
-        return review_bundle_url(server.server_port, bundle_id)
+        url = review_bundle_url(server.server_port, bundle_id)
+    if starting:
+        _remove_inspections(root)
+    return url
+
+
+def _remove_inspections(root: Path) -> None:
+    """Drop a connected review's inspection views from earlier sessions."""
+    from spyglass.spikesorting.v2._review.operations import remove_inspections
+
+    remove_inspections(root)
 
 
 def stop_review_servers(bundle=None) -> None:
-    """Unregister a bundle; stop delivery when none remain (or stop all)."""
+    """Unregister a bundle; stop delivery when none remain (or stop all).
+
+    A connected review's selected-unit inspection views are removed with it.
+    """
     global _SERVER
     root = Path(bundle).resolve() if bundle is not None else None
+    reviews = []
     with _LOCK:
         if _SERVER is None:
             return
@@ -140,9 +160,12 @@ def stop_review_servers(bundle=None) -> None:
                 del server.bundles[bundle_id]
                 if served.operations is not None:
                     served.operations.close()
+                    reviews.append(served.root)
         stop = not server.bundles
         if stop:
             _SERVER = None
+    for review_root in reviews:
+        _remove_inspections(review_root)
     if stop:
         server.shutdown()
         server.server_close()
