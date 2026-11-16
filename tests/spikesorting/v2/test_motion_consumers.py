@@ -36,6 +36,29 @@ EXCLUDED_S = (20.0, 21.0)
 MIN_CORRECTION_UV = 10.0
 
 
+def _planted_trains(n_samples, spans):
+    """Two units every 9000 frames, 1500 frames apart, both inside ``spans``.
+
+    The sort drops spikes in masked frames, so planted pairs that touch a
+    masked frame are left out up front.
+
+    Returns
+    -------
+    dict
+        ``{0: (n,) int64 frames, 1: (n,) int64 frames}``.
+    """
+    unit0 = np.arange(3000, n_samples - 3000, 9000, dtype=np.int64)
+    spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
+
+    def _inside(frames):
+        return (
+            (frames[:, None] >= spans[:, 0]) & (frames[:, None] < spans[:, 1])
+        ).any(axis=1)
+
+    keep = _inside(unit0) & _inside(unit0 + 1500)
+    return {0: unit0[keep], 1: unit0[keep] + 1500}
+
+
 def _planted_sorter(captured):
     """A ``plant_sorter`` stand-in: records its input and returns two
     units at fixed frames."""
@@ -55,10 +78,11 @@ def _planted_sorter(captured):
             "recording": recording,
             "spans": list(statistics_spans),
         }
-        n = int(recording.get_num_samples())
-        unit0 = np.arange(3000, n - 3000, 9000, dtype=np.int64)
-        samples = np.concatenate([unit0, unit0 + 1500])
-        labels = np.repeat(np.array([0, 1], dtype=np.int32), unit0.size)
+        trains = _planted_trains(
+            int(recording.get_num_samples()), statistics_spans
+        )
+        samples = np.concatenate([trains[0], trains[1]])
+        labels = np.repeat(np.array([0, 1], dtype=np.int32), trains[0].size)
         order = np.argsort(samples, kind="stable")
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples[order]],
@@ -564,8 +588,10 @@ def test_units_readback_of_corrected_and_uncorrected_sorts(
         sort = corrected_sorts[which]
         sorter_input = corrected_sorts["sorter_inputs"][str(sort["sorting_id"])]
         n = int(sorter_input["recording"].get_num_samples())
-        unit0 = np.arange(3000, n - 3000, 9000, dtype=np.int64)
-        expected = {0: unit0.tolist(), 1: (unit0 + 1500).tolist()}
+        planted = _planted_trains(n, sorter_input["spans"])
+        # The fixture's exclusion must actually remove some planted pairs.
+        assert planted[0].size < np.arange(3000, n - 3000, 9000).size
+        expected = {unit: frames.tolist() for unit, frames in planted.items()}
 
         root = CurationV2.insert_curation(sorting_key=sort)
         selection = CurationEvaluationSelection.insert_selection(

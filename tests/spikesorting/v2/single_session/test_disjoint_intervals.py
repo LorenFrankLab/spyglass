@@ -562,7 +562,8 @@ def test_reloaded_two_interval_artifact_exposes_gap(
 
         received["spans"] = statistics_spans
         received["traces"] = recording.get_traces()
-        samples = np.array([100, n_samples - 100], dtype=np.int64)
+        # Both spikes lie outside the leading manual exclusion.
+        samples = np.array([excl_stop + 100, n_samples - 100], dtype=np.int64)
         return si.NumpySorting.from_samples_and_labels(
             samples_list=[samples],
             labels_list=[np.zeros(samples.size, dtype=np.int32)],
@@ -580,6 +581,9 @@ def test_reloaded_two_interval_artifact_exposes_gap(
     assert abs(masked_stop - excl_stop) <= 1, spans
     assert spans == [(masked_stop, join), (join, n_samples)]
     np.testing.assert_array_equal(received["traces"][:masked_stop], 0)
+    assert excl_stop + 100 >= masked_stop
+    assert (Sorting & sort_pk).fetch1("n_units") == 1
+    assert Sorting().get_sorting(sort_pk).count_total_num_spikes() == 2
     assert np.any(received["traces"][masked_stop:join] != 0)
     assert np.any(received["traces"][join:] != 0)
 

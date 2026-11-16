@@ -417,10 +417,30 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     )
     from tests.spikesorting.v2._motion_db_helpers import sorter_key
 
+    def _in_mask(frame, excluded):
+        return any(start <= frame < end for start, end in excluded)
+
+    def _first_unmasked(frame, excluded):
+        while _in_mask(frame, excluded):
+            frame += 1
+        return frame
+
+    # Per member: unit 0 and unit 1 at unmasked frames, plus one unit-0
+    # spike inside the manual exclusion that the sort must drop.
+    planted = []
+    for excluded in ranges:
+        unit0 = _first_unmasked(100, excluded)
+        unit1 = _first_unmasked(unit0 + 100, excluded)
+        assert not _in_mask(unit0, excluded) and not _in_mask(unit1, excluded)
+        assert _in_mask(205, excluded)
+        planted.append((unit0, unit1, 205))
+
     def sort_masked(sorter, sorter_params, recording, sorting_id, **kwargs):
         cursor = 0
         samples, labels = [], []
-        for member, excluded in zip(recordings, ranges):
+        for member, excluded, (unit0, unit1, masked) in zip(
+            recordings, ranges, planted
+        ):
             for start, end in excluded:
                 np.testing.assert_array_equal(
                     recording.get_traces(
@@ -428,12 +448,13 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
                     ),
                     0,
                 )
-            samples.extend([cursor + 100, cursor + 200])
-            labels.extend([0, 1])
+            samples.extend([cursor + unit0, cursor + unit1, cursor + masked])
+            labels.extend([0, 1, 0])
             cursor += member.get_num_samples()
+        order = np.argsort(samples, kind="stable")
         return NumpySorting.from_samples_and_labels(
-            [np.asarray(samples)],
-            [np.asarray(labels)],
+            [np.asarray(samples)[order]],
+            [np.asarray(labels)[order]],
             recording.get_sampling_frequency(),
         )
 
@@ -472,6 +493,15 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             recording.get_traces(), combined.get_traces()
         )
     assert set(canonical_sorting.unit_ids) == {0, 1}
+    # The spike planted inside each member's mask is dropped at sort time.
+    stored_frames = set(
+        canonical_sorting.to_spike_vector()["sample_index"].tolist()
+    )
+    member_starts = np.cumsum([0] + [m.get_num_samples() for m in recordings])
+    for start, (unit0, unit1, masked) in zip(member_starts, planted):
+        assert {start + unit0, start + unit1} <= stored_frames
+        assert start + masked not in stored_frames
+    assert len(stored_frames) == 2 * len(recordings)
     assert _observed_duration_s(sorting_key["sorting_id"]) == pytest.approx(
         sum(
             (
@@ -539,13 +569,13 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             metric_params_name="minimal", auto_curation_rules_name="none"
         )
         metrics = evaluation.metrics
-        # The planted sorter deliberately returned events in the masked interval.
-        # Observed metrics count only available events and use sample exposure;
-        # the original SI firing-rate column keeps its own full-timeline meaning.
+        # Observed metrics count only available events and use sample
+        # exposure; the original SI firing-rate column keeps its own
+        # full-timeline meaning.
         observed_count = sum(
-            not any(start <= frame < stop for start, stop in excluded)
-            for excluded in ranges
-            for frame in (100, 200)
+            not _in_mask(frame, excluded)
+            for excluded, frames in zip(ranges, planted)
+            for frame in frames[:2]
         )
         duration = _observed_duration_s(sorting_key["sorting_id"])
         assert metrics.loc[2, "observed_duration_s"] == pytest.approx(duration)
