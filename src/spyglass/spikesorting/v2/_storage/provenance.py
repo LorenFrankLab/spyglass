@@ -224,7 +224,38 @@ def validate_sorting_provenance(values: Mapping) -> None:
                 f"{context}.statistics_spans requires ordered, nonoverlapping integer frame intervals."
             )
         previous_end = span[1]
+    if "sorter_masked_fill" in values:
+        _validate_sorter_masked_fill(values["sorter_masked_fill"], context)
     validate_runtime_provenance(values)
+
+
+def _validate_sorter_masked_fill(fill, context: str) -> None:
+    """Check the optional record of what the sorter saw in masked frames.
+
+    Absent in headers written before it existed, which means zeros.
+    """
+    if not isinstance(fill, Mapping) or fill.get("mode") not in (
+        "zeros",
+        "noise",
+    ):
+        raise ValueError(
+            f"{context}.sorter_masked_fill must be a mapping with mode "
+            "'zeros' or 'noise'."
+        )
+    if fill["mode"] == "noise":
+        seed = fill.get("seed")
+        levels = fill.get("noise_levels_raw")
+        if (
+            isinstance(seed, bool)
+            or not isinstance(seed, Integral)
+            or not isinstance(levels, (list, tuple, np.ndarray))
+            or not len(levels)
+            or not np.all(np.isfinite(np.asarray(levels, dtype=float)))
+        ):
+            raise ValueError(
+                f"{context}.sorter_masked_fill with mode 'noise' needs an "
+                "integer seed and finite per-channel noise_levels_raw."
+            )
 
 
 def validate_curation_header(values: Mapping) -> None:

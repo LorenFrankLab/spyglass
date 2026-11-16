@@ -310,6 +310,65 @@ def silence_frame_ranges(recording, frame_ranges):
     return masked
 
 
+def fill_masked_frames_with_noise(recording, spans, *, noise_levels, seed):
+    """Fill the frames outside ``spans`` with seeded Gaussian noise.
+
+    For sorters that estimate their own noise and whitening from the traces,
+    where zeros would bias both low. Valid frames are returned unchanged.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        A single-segment recording whose frames outside ``spans`` are zero
+        (the masked sort input).
+    spans : list[tuple[int, int]]
+        Statistics spans: sorted, half-open frames of artifact-free data.
+    noise_levels : numpy.ndarray
+        ``(n_channels,)`` per-channel noise standard deviation in the
+        recording's stored (raw) units.
+    seed : int
+        Seed of the noise; the same seed reloads the same fill.
+
+    Returns
+    -------
+    si.BaseRecording
+        The filled recording (float32 for an integer input), or
+        ``recording`` when ``spans`` cover it.
+    """
+    import spikeinterface.preprocessing as sip
+
+    n_samples = int(recording.get_num_samples())
+    if spans_cover_recording(spans, n_samples):
+        return recording
+    if seed is None:
+        raise ValueError(
+            "fill_masked_frames_with_noise: seed is required; an unseeded "
+            "fill differs when a sorter worker reloads the recording."
+        )
+    # SI sizes its noise generator from get_duration(), which can floor one
+    # frame short; frames past it keep the zeros already there.
+    n_noise = int(recording.get_duration() * recording.get_sampling_frequency())
+    periods = [
+        (start, min(end, n_noise))
+        for start, end in complement_frame_ranges(spans, n_samples)
+        if start < n_noise
+    ]
+    if not periods:
+        return recording
+    if recording.get_dtype().kind in "iu":
+        # SI generates noise only in float dtypes.
+        recording = sip.astype(recording, "float32")
+    filled = sip.silence_periods(
+        recording,
+        list_periods=[periods],
+        mode="noise",
+        noise_levels=np.asarray(noise_levels, dtype=np.float64),
+        seed=int(seed),
+    )
+    use_pickle_recording_serialization(filled)
+    return filled
+
+
 def complement_frame_ranges(
     excluded_ranges: list[tuple[int, int]], n_samples: int
 ) -> list[tuple[int, int]]:

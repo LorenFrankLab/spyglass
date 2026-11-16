@@ -8,6 +8,8 @@ from typing import NamedTuple
 MATLAB_SORTERS = ("kilosort2_5", "kilosort3", "ironclust")
 # Sorters whose whiten=True is routed to pinned_whiten.
 _EXTERNAL_WHITEN_SORTERS = frozenset({"mountainsort4", "mountainsort5"})
+#: Sorting annotation recording what the sorter saw in masked frames.
+MASKED_FILL_ANNOTATION = "spyglass_sorter_masked_fill"
 
 
 def without_random_seed(job_kwargs) -> dict:
@@ -18,6 +20,19 @@ def without_random_seed(job_kwargs) -> dict:
     ``SortingAnalyzer.compute``) rejects it. ``None`` gives ``{}``.
     """
     return {k: v for k, v in (job_kwargs or {}).items() if k != "random_seed"}
+
+
+def _masked_fill_mode(sorter: str) -> str:
+    """``"noise"`` for sorters that estimate noise/whitening from the traces.
+
+    MountainSort's statistics come from :func:`pinned_whiten` and the
+    clusterless path's from :func:`cache_span_noise_levels`; both keep zeros.
+    """
+    if sorter.lower() in _EXTERNAL_WHITEN_SORTERS or (
+        sorter == "clusterless_thresholder"
+    ):
+        return "zeros"
+    return "noise"
 
 
 def _should_external_whiten(sorter: str, sorter_params: dict) -> bool:
@@ -62,6 +77,10 @@ class EffectiveSortConfig(NamedTuple):
     external_whiten
         Whether the runtime whitens the recording itself (float32, seeded) and
         turns the sorter's internal whitening off.
+    masked_fill
+        What the sorter sees in artifact-masked frames: ``"zeros"``, or
+        ``"noise"`` (seeded Gaussian at each channel's artifact-free MAD) for
+        sorters that estimate their own noise and whitening.
     random_seed
         The effective seed consumed by the external whitening / clusterless
         noise sampling (``0`` when unset).
@@ -78,6 +97,7 @@ class EffectiveSortConfig(NamedTuple):
     scientific_params: dict
     si_sorter_params: dict
     external_whiten: bool
+    masked_fill: str
     random_seed: int
     job_kwargs: dict
     execution_backend: str
@@ -90,6 +110,7 @@ class EffectiveSortConfig(NamedTuple):
             "scientific_params": dict(self.scientific_params),
             "si_sorter_params": dict(self.si_sorter_params),
             "external_whiten": bool(self.external_whiten),
+            "masked_fill": self.masked_fill,
             "random_seed": int(self.random_seed),
             "job_kwargs": dict(self.job_kwargs),
             "execution_backend": self.execution_backend,
@@ -151,6 +172,7 @@ def resolve_sort_config(
         scientific_params=scientific,
         si_sorter_params=si_params,
         external_whiten=external_whiten,
+        masked_fill=_masked_fill_mode(sorter),
         random_seed=random_seed,
         job_kwargs=resolved_jobs,
         execution_backend=execution["backend"],
@@ -382,6 +404,43 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None, dtype=None):
     return sip.whiten(recording, dtype=dtype, W=whitening, M=None)
 
 
+def span_noise_levels(
+    recording, spans, *, return_in_uV: bool, seed, method: str = "mad"
+):
+    """Per-channel noise levels pooled from samples inside ``spans``.
+
+    Parameters
+    ----------
+    recording : spikeinterface.BaseRecording
+        The recording to sample; not modified.
+    spans : list[tuple[int, int]]
+        Statistics spans in ``recording``'s frame coordinates.
+    return_in_uV : bool
+        Keyword-only. Estimate on microvolt (``True``) or raw (``False``)
+        traces.
+    seed : int
+        Keyword-only. Seed of the span sampler.
+    method : {"mad", "std"}, optional
+        Keyword-only. Default ``"mad"`` (scaled to a normal std).
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_channels,)`` noise levels.
+    """
+    import numpy as np
+    from scipy.stats import median_abs_deviation
+
+    if method not in ("mad", "std"):
+        raise ValueError(f"method must be 'mad' or 'std', got {method!r}")
+    data = _sample_statistics_spans(
+        recording, spans, seed=seed, return_in_uV=return_in_uV
+    )
+    if method == "mad":
+        return median_abs_deviation(data, axis=0, scale="normal")
+    return np.std(data, axis=0)
+
+
 def cache_span_noise_levels(
     recording, spans, *, return_in_uV: bool, seed, method: str = "mad"
 ):
@@ -416,9 +475,6 @@ def cache_span_noise_levels(
         ``(n_channels,)`` cached noise levels, or ``None`` when nothing was
         cached.
     """
-    import numpy as np
-    from scipy.stats import median_abs_deviation
-
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         spans_cover_recording,
     )
@@ -429,13 +485,9 @@ def cache_span_noise_levels(
         spans, recording.get_num_samples()
     ):
         return None
-    data = _sample_statistics_spans(
-        recording, spans, seed=seed, return_in_uV=return_in_uV
+    noise_levels = span_noise_levels(
+        recording, spans, return_in_uV=return_in_uV, seed=seed, method=method
     )
-    if method == "mad":
-        noise_levels = median_abs_deviation(data, axis=0, scale="normal")
-    else:
-        noise_levels = np.std(data, axis=0)
     suffix = "scaled" if return_in_uV else "raw"
     recording.set_property(f"noise_level_{method}_{suffix}", noise_levels)
     return noise_levels
@@ -600,6 +652,10 @@ def run_si_sorter(
       success or failure.
     - External-whitening sorters are whitened once, at float32, by
       :func:`pinned_whiten`.
+    - Other sorters estimate noise and whitening from the traces, so their
+      masked frames are filled with seeded noise at each channel's
+      artifact-free MAD (:func:`fill_masked_frames_with_noise`). Only the
+      sorter sees the fill; the caller's recording stays zero-masked.
     - ``execution_params`` selects local or container execution; MATLAB
       sorters require a container.
 
@@ -622,14 +678,17 @@ def run_si_sorter(
         The validated ``SorterExecutionParamsSchema`` dump from
         ``Sorting.make_fetch``. ``None`` resolves to default local execution.
     statistics_spans : list[tuple[int, int]] or None, optional
-        Artifact-free frame spans of ``recording`` that the external
-        whitening's covariance is estimated from. ``None`` (default) means
+        Artifact-free frame spans of ``recording``: the external whitening's
+        covariance and the masked-frame noise levels are estimated from
+        them, and frames outside them are masked. ``None`` (default) means
         the whole recording.
 
     Returns
     -------
     spikeinterface.BaseSorting
-        The sorter output as returned by ``run_sorter``.
+        The sorter output as returned by ``run_sorter``, annotated with
+        :data:`MASKED_FILL_ANNOTATION`: ``{"mode": "zeros"}`` or
+        ``{"mode": "noise", "seed": int, "noise_levels_raw": list}``.
     """
     import os
     import tempfile
@@ -640,6 +699,10 @@ def run_si_sorter(
     from spyglass.settings import temp_dir as spyglass_temp_dir
     from spyglass.spikesorting.v2._params.sorter import (
         validate_execution_params,
+    )
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        fill_masked_frames_with_noise,
+        spans_cover_recording,
     )
     from spyglass.utils import logger
 
@@ -675,6 +738,31 @@ def run_si_sorter(
                     spans=statistics_spans,
                     dtype="float32",
                 )
+            masked_fill = {"mode": "zeros"}
+            if (
+                config.masked_fill == "noise"
+                and statistics_spans is not None
+                and not spans_cover_recording(
+                    statistics_spans, recording.get_num_samples()
+                )
+            ):
+                noise_levels = span_noise_levels(
+                    recording,
+                    statistics_spans,
+                    return_in_uV=False,
+                    seed=config.random_seed,
+                )
+                recording = fill_masked_frames_with_noise(
+                    recording,
+                    statistics_spans,
+                    noise_levels=noise_levels,
+                    seed=config.random_seed,
+                )
+                masked_fill = {
+                    "mode": "noise",
+                    "seed": int(config.random_seed),
+                    "noise_levels_raw": [float(v) for v in noise_levels],
+                }
 
             # Job kwargs go through SI's global job settings, not sorter params.
             # A child folder keeps container files out of the shared temp dir.
@@ -704,9 +792,11 @@ def run_si_sorter(
                     }
                 raw_sorting = sis.run_sorter(**run_kwargs, **effective_params)
             # Copy into memory before the finally deletes the temp dir.
-            return si.NumpySorting.from_sorting(
+            sorting = si.NumpySorting.from_sorting(
                 raw_sorting, with_metadata=True, copy_spike_vector=True
             )
+            sorting.annotate(**{MASKED_FILL_ANNOTATION: masked_fill})
+            return sorting
     finally:
         # Logged so a cleanup failure cannot replace the sort's exception.
         try:
@@ -719,8 +809,8 @@ def run_si_sorter(
             )
 
 
-def remove_excess_spikes(sorting, recording):
-    """Drop spikes outside the recording window, then every zero-spike unit.
+def remove_excess_spikes(sorting, recording, *, statistics_spans=None):
+    """Drop spikes outside the recording or in masked frames, then empty units.
 
     Parameters
     ----------
@@ -728,18 +818,26 @@ def remove_excess_spikes(sorting, recording):
         The sorter output to trim.
     recording : si.BaseRecording
         The recording whose sample window bounds valid spike indices.
+    statistics_spans : list[tuple[int, int]] or None, optional
+        Keyword-only. Artifact-free half-open frame spans; spikes at frames
+        outside them (masked frames) are dropped. ``None`` (default) keeps
+        every in-window spike.
 
     Returns
     -------
     spikeinterface.BaseSorting
-        The sorting with out-of-window spikes removed and every
-        zero-spike unit dropped.
+        The sorting with out-of-window and masked-frame spikes removed and
+        every zero-spike unit dropped.
     """
     import numpy as np
     import spikeinterface.curation as sic
 
     from spyglass.utils import logger
 
+    if statistics_spans is not None:
+        sorting = _remove_masked_frame_spikes(
+            sorting, statistics_spans, recording.get_num_samples()
+        )
     trimmed = sic.remove_excess_spikes(sorting, recording)
     before_ids = trimmed.unit_ids
     result = trimmed.remove_empty_units()
@@ -748,6 +846,60 @@ def remove_excess_spikes(sorting, recording):
         logger.info(
             "remove_excess_spikes: dropped unit(s) "
             f"{dropped.tolist()} with zero spikes (empty from the sorter or "
-            "emptied by removing spikes outside the recording window)."
+            "emptied by removing spikes outside the recording window or in "
+            "artifact-masked frames)."
         )
     return result
+
+
+def _remove_masked_frame_spikes(sorting, statistics_spans, n_samples: int):
+    """Drop spikes whose frame lies outside ``statistics_spans``.
+
+    Parameters
+    ----------
+    sorting : spikeinterface.BaseSorting
+        Single-segment sorter output.
+    statistics_spans : list[tuple[int, int]]
+        Artifact-free half-open frame spans.
+    n_samples : int
+        Frame count of the sorted recording.
+
+    Returns
+    -------
+    spikeinterface.BaseSorting
+        ``sorting`` when nothing is masked or dropped, else a NumpySorting
+        with the same unit ids and the masked-frame spikes removed.
+    """
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        complement_frame_ranges,
+    )
+    from spyglass.utils import logger
+
+    masked = np.asarray(
+        complement_frame_ranges(statistics_spans, n_samples), dtype=np.int64
+    ).reshape(-1, 2)
+    if not masked.size:
+        return sorting
+    spikes = sorting.to_spike_vector()
+    frames = spikes["sample_index"]
+    # Ranges are sorted and disjoint: a frame is masked when it falls before
+    # the end of the last range starting at or before it.
+    idx = np.searchsorted(masked[:, 0], frames, side="right") - 1
+    in_mask = (idx >= 0) & (frames < masked[np.maximum(idx, 0), 1])
+    if not in_mask.any():
+        return sorting
+    unit_ids = sorting.unit_ids
+    counts = np.bincount(spikes["unit_index"][in_mask], minlength=len(unit_ids))
+    logger.info(
+        "remove_excess_spikes: dropped spikes in artifact-masked frames per "
+        f"unit: { {unit_ids[i]: int(c) for i, c in enumerate(counts) if c} }."
+    )
+    kept = si.NumpySorting(
+        spikes[~in_mask], sorting.get_sampling_frequency(), unit_ids
+    )
+    # Keep sorter-provided unit properties (e.g. Kilosort labels).
+    sorting.copy_metadata(kept)
+    return kept

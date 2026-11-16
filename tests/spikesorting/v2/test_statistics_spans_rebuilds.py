@@ -405,3 +405,106 @@ def test_observed_duration_counts_only_unmasked_samples(masked_planted_sort):
     assert _observed_duration_s(sort_key["sorting_id"]) == pytest.approx(
         retained / fs
     )
+
+
+@pytest.mark.slow
+def test_noise_fill_reaches_only_the_sorter(masked_planted_sort, monkeypatch):
+    """A self-estimating sorter sees noise in masked frames; nothing else does.
+
+    The analyzer build, the units NWB writer and the spike trim keep the
+    zero-masked recording, spikes the sorter places in masked frames are
+    dropped, and the units NWB records the fill.
+    """
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2 import sorting as sorting_module
+    from spyglass.spikesorting.v2._sorting import analyzer as sa_mod
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        complement_frame_ranges,
+    )
+    from spyglass.spikesorting.v2._storage import units_nwb as units_mod
+    from spyglass.spikesorting.v2._storage.provenance import (
+        SORTING_PROVENANCE,
+        read_provenance_values,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+
+    sort_key = masked_planted_sort["sort_key"]
+    sc2_pk = SortingSelection.insert_selection(
+        {
+            "recording_id": (
+                SortingSelection.RecordingSource & sort_key
+            ).fetch1("recording_id"),
+            "sorter": "spykingcircus2",
+            "sorter_params_name": "default",
+            "artifact_detection_id": (
+                SortingSelection.resolve_artifact_detection(sort_key)
+            ),
+        }
+    )
+    seen = {}
+
+    def _fake_run_sorter(**kwargs):
+        recording = kwargs["recording"]
+        seen["sorter"] = recording
+        n = int(recording.get_num_samples())
+        samples = np.arange(1000, n - 1000, 2000, dtype=np.int64)
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[samples],
+            labels_list=[np.zeros(samples.size, dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    def _spy(name, real, position):
+        def wrapper(*args, **kwargs):
+            seen[name] = (
+                kwargs["recording"] if "recording" in kwargs else args[position]
+            )
+            return real(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(sis, "run_sorter", _fake_run_sorter)
+    monkeypatch.setattr(
+        sa_mod, "build_analyzer", _spy("analyzer", sa_mod.build_analyzer, 1)
+    )
+    monkeypatch.setattr(
+        units_mod,
+        "write_sorting_units_nwb",
+        _spy("units_nwb", units_mod.write_sorting_units_nwb, 1),
+    )
+    monkeypatch.setattr(
+        sorting_module,
+        "remove_excess_spikes",
+        _spy("trim", sorting_module.remove_excess_spikes, 1),
+    )
+    # The module fixture's session cleanup removes this sort too.
+    Sorting.populate(sc2_pk, reserve_jobs=False)
+    spans = Sorting().get_statistics_spans(sc2_pk)
+    n = int(seen["sorter"].get_num_samples())
+    (start, stop), *_ = complement_frame_ranges(spans, n)
+    assert np.all(
+        seen["sorter"].get_traces(start_frame=start, end_frame=stop) != 0
+    )
+    for name in ("analyzer", "units_nwb", "trim"):
+        traces = seen[name].get_traces(start_frame=start, end_frame=stop)
+        assert np.all(traces == 0), name
+
+    stored = Sorting().get_sorting(sc2_pk).to_spike_vector()["sample_index"]
+    planted = np.arange(1000, n - 1000, 2000)
+    in_mask = (planted >= start) & (planted < stop)
+    assert in_mask.any()
+    np.testing.assert_array_equal(np.sort(stored), planted[~in_mask])
+
+    path = AnalysisNwbfile.get_abs_path(
+        (Sorting & sc2_pk).fetch1("analysis_file_name")
+    )
+    fill = read_provenance_values(path, SORTING_PROVENANCE)[
+        "sorter_masked_fill"
+    ]
+    assert fill["mode"] == "noise"
+    assert fill["seed"] == int(
+        (Sorting & sc2_pk).fetch1("effective_random_seed")
+    )

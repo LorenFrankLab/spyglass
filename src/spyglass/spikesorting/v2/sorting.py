@@ -41,6 +41,7 @@ from spyglass.spikesorting.v2._sorting.artifact_mask import (
     sorting_statistics_spans,
 )
 from spyglass.spikesorting.v2._sorting.dispatch import (
+    MASKED_FILL_ANNOTATION,
     remove_excess_spikes,
     run_clusterless_thresholder,
     run_si_sorter,
@@ -1030,7 +1031,8 @@ class Sorting(
         sorter, sorter_params, job_kwargs, effective_random_seed = (
             self._sorter_run_config(sorter_row)
         )
-        # 5. Run the sorter, then drop spikes past the recording's end.
+        # 5. Run the sorter, then drop spikes past the recording's end or
+        # inside masked frames.
         sorting_obj = self._run_sorter(
             sorter=sorter,
             sorter_params=sorter_params,
@@ -1043,7 +1045,12 @@ class Sorting(
         spikeinterface_version, sorter_version = sort_runtime_versions(
             sorting_obj, sorter, execution_params
         )
-        sorting_obj = remove_excess_spikes(sorting_obj, recording)
+        sorter_masked_fill = sorting_obj.get_annotation(
+            MASKED_FILL_ANNOTATION
+        ) or {"mode": "zeros"}
+        sorting_obj = remove_excess_spikes(
+            sorting_obj, recording, statistics_spans=statistics_spans
+        )
 
         # Owned by this attempt until insert, not a concurrent publication.
         staged_analyzer = StagedAnalyzer(
@@ -1092,6 +1099,7 @@ class Sorting(
                         spikeinterface_version=spikeinterface_version,
                         sorter_version=sorter_version,
                         statistics_spans=statistics_spans,
+                        sorter_masked_fill=sorter_masked_fill,
                         motion_correction_provenance=motion_correction_provenance,
                         job_kwargs=job_kwargs,
                     ),
@@ -1164,6 +1172,7 @@ class Sorting(
         statistics_spans,
         motion_correction_provenance,
         job_kwargs: dict,
+        sorter_masked_fill=None,
     ) -> dict:
         """The units NWB's sorting provenance header.
 
@@ -1187,6 +1196,10 @@ class Sorting(
             Producing versions from ``sort_runtime_versions``.
         statistics_spans : sequence of (int, int)
             Artifact-free frame ranges.
+        sorter_masked_fill : dict or None
+            What the sorter saw in masked frames (``{"mode": "zeros"}`` or
+            the noise fill's ``mode``, ``seed`` and ``noise_levels_raw``);
+            ``None`` omits the field.
         motion_correction_provenance : dict or None
             Motion correction ids and recipe names, for a corrected sort.
         job_kwargs : dict
@@ -1223,6 +1236,8 @@ class Sorting(
                 [int(a), int(b)] for a, b in statistics_spans
             ],
         }
+        if sorter_masked_fill is not None:
+            source_provenance["sorter_masked_fill"] = dict(sorter_masked_fill)
         if motion_correction_provenance is not None:
             source_provenance.update(motion_correction_provenance)
         source_provenance.update(

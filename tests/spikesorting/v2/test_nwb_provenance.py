@@ -436,3 +436,47 @@ def test_current_sort_and_curation_headers_round_trip_generation_and_recipe(
     assert read_generation["parent_curation_id"] == 1
     assert read_generation["merges_applied"] is True
     assert read_generation["curation_source"] == "figpack"
+
+
+@pytest.mark.parametrize(
+    "fill",
+    [
+        None,
+        {"mode": "zeros"},
+        {"mode": "noise", "seed": 4, "noise_levels_raw": [10.5, 11.0]},
+    ],
+)
+def test_sorting_provenance_accepts_a_missing_or_well_formed_masked_fill(fill):
+    """Headers written before the masked-fill record still validate."""
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_sorting_provenance,
+    )
+    from tests.spikesorting.v2._provenance_helpers import sorting_provenance
+
+    values = sorting_provenance()
+    values.pop("sorter_masked_fill", None)
+    if fill is not None:
+        values["sorter_masked_fill"] = fill
+    validate_sorting_provenance(values)
+
+
+@pytest.mark.parametrize(
+    "fill",
+    [
+        "noise",
+        {"mode": "random"},
+        {"mode": "noise", "noise_levels_raw": [1.0]},
+        {"mode": "noise", "seed": 1, "noise_levels_raw": []},
+        {"mode": "noise", "seed": 1, "noise_levels_raw": [float("nan")]},
+    ],
+)
+def test_sorting_provenance_rejects_a_malformed_masked_fill(fill):
+    from spyglass.spikesorting.v2._storage.provenance import (
+        validate_sorting_provenance,
+    )
+    from tests.spikesorting.v2._provenance_helpers import sorting_provenance
+
+    with pytest.raises(ValueError, match="sorter_masked_fill"):
+        validate_sorting_provenance(
+            {**sorting_provenance(), "sorter_masked_fill": fill}
+        )

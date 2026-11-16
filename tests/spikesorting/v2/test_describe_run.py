@@ -291,6 +291,7 @@ def test_describe_run_renders_sorter_config_rows():
         "scientific_params": {"whiten": True, "scheme": "2"},
         "si_sorter_params": {"whiten": False, "scheme": "2"},
         "external_whiten": True,
+        "masked_fill": "zeros",
         "random_seed": 0,
         "job_kwargs": {"n_jobs": 4, "chunk_duration": "1s"},
         "execution_backend": "local",
@@ -300,6 +301,7 @@ def test_describe_run_renders_sorter_config_rows():
     config = frame[frame["row_type"] == "config"].set_index("setting")
     assert config.loc["sorter", "value"] == "'mountainsort5'"
     assert config.loc["external_whiten", "value"] == "True"
+    assert config.loc["masked_fill", "value"] == "'zeros'"
     assert config.loc["job_kwargs", "value"] == repr(
         {"n_jobs": 4, "chunk_duration": "1s"}
     )

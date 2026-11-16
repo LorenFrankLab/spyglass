@@ -1233,3 +1233,174 @@ def test_v2_preprocessed_rows_skip_filtering_but_keep_whitening(
             **config.si_sorter_params,
         )
     assert calls == ["whiten"]
+
+
+# ---------------------------------------------------------------------------
+# Masked spans for sorters that estimate their own noise and whitening.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sorter,expected",
+    [
+        ("spykingcircus2", "noise"),
+        ("tridesclous2", "noise"),
+        ("kilosort4", "noise"),
+        ("kilosort2_5", "noise"),
+        ("mountainsort4", "zeros"),
+        ("mountainsort5", "zeros"),
+        ("clusterless_thresholder", "zeros"),
+    ],
+)
+def test_resolve_sort_config_fills_masks_for_self_estimating_sorters(
+    sorter, expected
+):
+    """Only sorters that estimate statistics from the traces get noise."""
+    from spyglass.spikesorting.v2._sorting.dispatch import resolve_sort_config
+
+    execution = (
+        {"backend": "docker", "container_image": "img:1"}
+        if sorter == "kilosort2_5"
+        else None
+    )
+    config = resolve_sort_config(sorter, {}, execution_params=execution)
+    assert config.masked_fill == expected
+    assert config.as_dict()["masked_fill"] == expected
+
+
+@pytest.mark.medium
+@pytest.mark.parametrize("sorter", ["spykingcircus2", "tridesclous2"])
+def test_self_estimating_sorters_see_span_matched_noise_in_masked_frames(
+    clean_ground_truth, monkeypatch, sorter
+):
+    """The sorter's own noise estimate matches the artifact-free MAD.
+
+    Zero-filled masks pull SpikeInterface's per-chunk MAD down (about 0.7 at
+    30% masked); the filled input must keep it within 5% of the span MAD,
+    leave every valid frame unchanged and reload identically.
+    """
+    import pickle
+    import uuid
+
+    import numpy as np
+    import spikeinterface as si
+    import spikeinterface.sorters as sis
+    from spikeinterface.core import get_noise_levels
+
+    from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
+    from tests.spikesorting.v2._masked_statistics_helpers import (
+        exact_mad,
+        masked_twin,
+    )
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, ranges = masked_twin(traces, probe, 0.30)
+    received = {}
+
+    def _record_run_sorter(**kwargs):
+        received["recording"] = kwargs["recording"]
+        return _tiny_numpy_sorting()
+
+    monkeypatch.setattr(sis, "run_sorter", _record_run_sorter)
+    run_si_sorter(
+        sorter,
+        {},
+        masked,
+        uuid.uuid4(),
+        {"random_seed": 5},
+        statistics_spans=spans,
+    )
+    filled = received["recording"]
+    span_mad = exact_mad(
+        np.concatenate([traces[a:b] for a, b in spans], axis=0)
+    )
+    estimate = get_noise_levels(
+        filled, return_in_uV=False, random_slices_kwargs={"seed": 0}
+    )
+    np.testing.assert_allclose(estimate / span_mad, 1.0, atol=0.05)
+    for a, b in spans:
+        np.testing.assert_array_equal(
+            filled.get_traces(start_frame=a, end_frame=b),
+            masked.get_traces(start_frame=a, end_frame=b),
+        )
+    a, b = ranges[0]
+    assert np.all(filled.get_traces(start_frame=a, end_frame=b) != 0)
+    # The caller's recording, which the analyzer reads, stays zero-masked.
+    assert np.all(masked.get_traces(start_frame=a, end_frame=b) == 0)
+    reloaded = si.load(pickle.loads(pickle.dumps(filled.to_dict())))
+    np.testing.assert_array_equal(reloaded.get_traces(), filled.get_traces())
+
+
+@pytest.mark.medium
+def test_masked_noise_fill_is_recorded_on_the_sorter_output(
+    clean_ground_truth, monkeypatch
+):
+    """The fill's seed and per-channel levels travel with the sorting."""
+    import uuid
+
+    import numpy as np
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        MASKED_FILL_ANNOTATION,
+        run_si_sorter,
+        span_noise_levels,
+    )
+    from tests.spikesorting.v2._masked_statistics_helpers import masked_twin
+
+    traces, probe, _ = clean_ground_truth
+    masked, spans, _ = masked_twin(traces, probe, 0.30)
+    monkeypatch.setattr(
+        sis, "run_sorter", lambda **kwargs: _tiny_numpy_sorting()
+    )
+    out = run_si_sorter(
+        "tridesclous2",
+        {},
+        masked,
+        uuid.uuid4(),
+        {"random_seed": 5},
+        statistics_spans=spans,
+    )
+    record = out.get_annotation(MASKED_FILL_ANNOTATION)
+    assert record["mode"] == "noise" and record["seed"] == 5
+    np.testing.assert_allclose(
+        record["noise_levels_raw"],
+        span_noise_levels(masked, spans, return_in_uV=False, seed=5),
+    )
+    whitened = run_si_sorter(
+        "mountainsort5",
+        {"whiten": True},
+        masked,
+        uuid.uuid4(),
+        {"random_seed": 5},
+        statistics_spans=spans,
+    )
+    assert whitened.get_annotation(MASKED_FILL_ANNOTATION) == {"mode": "zeros"}
+
+
+def test_spikes_in_masked_frames_are_dropped_with_their_empty_units():
+    """Spikes inside masked frames are removed; an emptied unit is dropped."""
+    import numpy as np
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting.dispatch import remove_excess_spikes
+
+    fs = 30_000.0
+    rec = si.generate_recording(
+        num_channels=4, durations=[1.0], sampling_frequency=fs
+    )
+    # Masked frames: [1000, 2000) and [29_000, 30_000).
+    spans = [(0, 1000), (2000, 29_000)]
+    samples = np.array([10, 999, 1000, 1500, 1999, 2000, 29_500, 29_999])
+    labels = np.array([3, 3, 3, 7, 7, 3, 12, 12])
+    sorting = si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples], labels_list=[labels], sampling_frequency=fs
+    )
+    sorting.set_property("KSLabel", np.array(["good", "mua", "good"]))
+    out = remove_excess_spikes(sorting, rec, statistics_spans=spans)
+    assert list(out.unit_ids) == [3]
+    assert list(out.get_property("KSLabel")) == ["good"]
+    np.testing.assert_array_equal(out.get_unit_spike_train(3), [10, 999, 2000])
+    # Without spans only the window trim applies.
+    kept = remove_excess_spikes(sorting, rec)
+    assert list(kept.unit_ids) == [3, 7, 12]

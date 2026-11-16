@@ -839,3 +839,75 @@ def test_zero_offset_sources_are_silenced_in_their_stored_units(dtype, gain):
         np.testing.assert_array_equal(masked.get_channel_gains(), gain)
         np.testing.assert_array_equal(masked.get_channel_offsets(), 0.0)
     np.testing.assert_array_equal(masked.get_traces(), reference.get_traces())
+
+
+def _timestamped(dtype, n_samples=60_000, fs=30_000.0):
+    import spikeinterface as si
+
+    rng = np.random.default_rng(0)
+    data = (rng.standard_normal((n_samples, 3)) * 20).astype(dtype)
+    recording = si.NumpyRecording(data, fs)
+    recording.set_times(1000.0 + np.arange(n_samples) / fs)
+    return recording
+
+
+@pytest.mark.parametrize("dtype", ["float32", "int16"])
+def test_noise_fill_reads_a_mask_that_reaches_the_last_frame(dtype):
+    """A masked block ending at the last frame reads back without error.
+
+    SpikeInterface 0.104.3 sizes its noise generator one frame short of a
+    timestamped recording; the fill must still read every frame.
+    """
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        fill_masked_frames_with_noise,
+        silence_frame_ranges,
+    )
+
+    recording = _timestamped(dtype)
+    n = recording.get_num_samples()
+    ranges = [(1000, 4000), (n - 3000, n)]
+    masked = silence_frame_ranges(recording, ranges)
+    spans = [(0, 1000), (4000, n - 3000)]
+    levels = np.array([20.0, 20.0, 20.0])
+    filled = fill_masked_frames_with_noise(
+        masked, spans, noise_levels=levels, seed=3
+    )
+    traces = filled.get_traces()
+    assert traces.shape == (n, 3)
+    assert filled.get_dtype() == np.float32
+    np.testing.assert_array_equal(
+        traces[4000 : n - 3000], recording.get_traces()[4000 : n - 3000]
+    )
+    fill = traces[n - 3000 : n - 2]
+    np.testing.assert_allclose(fill.std(axis=0) / levels, 1.0, atol=0.1)
+    np.testing.assert_array_equal(filled.get_times(), recording.get_times())
+
+
+def test_noise_fill_requires_a_seed():
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        fill_masked_frames_with_noise,
+        silence_frame_ranges,
+    )
+
+    recording = _timestamped("float32")
+    masked = silence_frame_ranges(recording, [(0, 100)])
+    with pytest.raises(ValueError, match="seed"):
+        fill_masked_frames_with_noise(
+            masked, [(100, 60_000)], noise_levels=np.ones(3), seed=None
+        )
+
+
+def test_noise_fill_leaves_an_unmasked_recording_unchanged():
+    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+        fill_masked_frames_with_noise,
+    )
+
+    recording = _timestamped("int16")
+    n = recording.get_num_samples()
+    for spans in ([(0, n)], [(0, 10_000), (10_000, n)]):
+        assert (
+            fill_masked_frames_with_noise(
+                recording, spans, noise_levels=np.ones(3), seed=0
+            )
+            is recording
+        )

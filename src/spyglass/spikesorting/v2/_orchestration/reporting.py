@@ -1026,6 +1026,7 @@ def _describe_run_single_rows(run_summary: dict) -> list[dict[str, Any]]:
         for setting in (
             "sorter",
             "external_whiten",
+            "masked_fill",
             "random_seed",
             "job_kwargs",
             "execution_backend",
