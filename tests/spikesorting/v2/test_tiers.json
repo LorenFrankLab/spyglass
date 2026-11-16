@@ -1161,6 +1161,7 @@
         "test_plot_sort_group_geometry_empty": "db_unit",
         "test_plot_sort_group_geometry_legibility": "unit",
         "test_plot_sort_group_geometry_multi_probe_offset": "unit",
+        "test_plot_sort_group_geometry_rejects_unknown_sort_group_ids": "unit",
         "test_sort_group_electrode_rejects_reference_as_member": "db_unit",
         "test_sort_group_geometry_specific_reference_star_row": "db_unit"
       }

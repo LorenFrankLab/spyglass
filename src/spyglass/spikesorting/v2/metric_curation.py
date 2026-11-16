@@ -1392,13 +1392,20 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             yield analyzer
 
     def plot_units_qc(
-        self, key, *, metric_names=None, color_metric: str = "snr", axes=None
+        self,
+        key,
+        *,
+        metric_names=None,
+        color_metric: "str | None" = None,
+        axes=None,
     ):
         """Static population QC overview: metric histograms + depth scatter.
 
         One histogram per quality metric (NaNs dropped) plus a scatter of unit
-        positions colored by ``color_metric``. Pass ``axes`` to draw into an
-        existing layout; otherwise a figure is created.
+        positions colored by ``color_metric`` (``snr`` when present, else the
+        first histogram metric). Pass ``axes`` to draw into an existing
+        layout; otherwise a figure is created. An unknown metric name raises
+        ``ValueError`` naming the available columns.
 
         Returns
         -------

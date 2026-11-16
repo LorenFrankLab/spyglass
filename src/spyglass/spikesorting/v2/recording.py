@@ -580,7 +580,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
         ------
         ValueError
             If ``electrode_column`` is not a valid Electrode-table column,
-            listing the valid choices; if any ``value_groups`` sublist ends up empty
+            listing the valid choices; if a ``value_groups`` value matches no
+            electrode of the session; if any ``value_groups`` sublist ends up empty
             after filtering and ``omit_unitrode=True`` would still leave the
             group empty; if a group's members carry mixed configured
             references and no override resolves them; if a resolved

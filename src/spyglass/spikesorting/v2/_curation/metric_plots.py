@@ -166,7 +166,7 @@ def plot_units_qc_figure(
     unit_ids: list,
     *,
     metric_names: list[str] | None = None,
-    color_metric: str = "snr",
+    color_metric: str | None = None,
     axes=None,
 ):
     """Render a population QC overview: metric histograms + a depth scatter.
@@ -185,9 +185,10 @@ def plot_units_qc_figure(
     metric_names : list of str, optional
         Metrics to histogram; defaults to the present subset of
         ``_DEFAULT_QC_METRICS`` (or all numeric columns).
-    color_metric : str
+    color_metric : str, optional
         Metric used to color the depth scatter (depth is column 1, y, of
-        ``unit_locations``).
+        ``unit_locations``). Defaults to ``snr`` when present, else the first
+        histogram metric.
     axes : dict, sequence, numpy.ndarray, or matplotlib.axes.Axes, optional
         Axes to draw into. For non-empty sorts, pass either a mapping with one
         axis per metric name plus ``"scatter"``, or a flat/numpy sequence where
@@ -199,16 +200,43 @@ def plot_units_qc_figure(
     -------
     dict[str, matplotlib.axes.Axes]
         Axes keyed by metric name plus ``"scatter"``. A zero-unit sort returns
-        ``{"empty": ax}`` (never raises).
+        ``{"empty": ax}``.
+
+    Raises
+    ------
+    ValueError
+        If ``metric_names`` or ``color_metric`` names a column the metrics
+        table does not have.
     """
     numeric = (
         metrics_df.apply(pd.to_numeric, errors="coerce")
         if len(metrics_df.columns)
         else metrics_df
     )
+    if len(numeric.columns):
+        # A zero-unit table has no columns to check against.
+        available = list(numeric.columns)
+        unknown = [m for m in metric_names or [] if m not in available]
+        if unknown:
+            raise ValueError(
+                f"plot_units_qc: unknown metric_names {unknown}. Pass output "
+                "column names (nn_advanced emits nn_noise_overlap / "
+                f"nn_isolation). Available columns: {available}."
+            )
+        if color_metric is not None and color_metric not in available:
+            raise ValueError(
+                f"plot_units_qc: unknown color_metric {color_metric!r}. "
+                f"Available columns: {available}."
+            )
     if metric_names is None:
         present = [m for m in _DEFAULT_QC_METRICS if m in numeric.columns]
         metric_names = present or list(numeric.columns)
+    if color_metric is None:
+        color_metric = (
+            "snr"
+            if "snr" in numeric.columns or not metric_names
+            else metric_names[0]
+        )
 
     has_units = unit_locations is not None and len(unit_ids) > 0
 
@@ -307,9 +335,21 @@ def _plot_correlogram_grid(ccgs, bins, panels, *, n_cols, panel_size):
 
 
 def plot_autocorrelograms_figure(ccgs, bins, ids, unit_ids=None):
-    """Render an autocorrelogram (ACG) grid, one panel per unit."""
+    """Render an autocorrelogram (ACG) grid, one panel per unit.
+
+    Raises
+    ------
+    ValueError
+        If ``unit_ids`` names a unit absent from ``ids``.
+    """
     show = list(unit_ids) if unit_ids is not None else list(ids)
     index_of = {unit_id: i for i, unit_id in enumerate(ids)}
+    unknown = [u for u in show if u not in index_of]
+    if unknown:
+        raise ValueError(
+            f"plot_correlograms: unit_ids {unknown} are not in this curation. "
+            f"Available unit_ids: {list(ids)}."
+        )
     panels = [(index_of[u], index_of[u], f"unit {u} ACG") for u in show]
     return _plot_correlogram_grid(
         ccgs, bins, panels, n_cols=4, panel_size=(3, 2)

@@ -170,7 +170,7 @@ def suggest_bad_channels(
         Session whose electrodes should be scanned.
     electrode_group_names : list[str], optional
         Restrict the scan to these electrode groups. Default ``None`` scans
-        every group in the session.
+        every group in the session. A name absent from the session raises.
     bandpass : tuple[float, float], optional
         ``(freq_min, freq_max)`` Hz for the pre-detection band-pass filter.
         Default ``(300.0, 6000.0)`` (spike band). ``freq_max`` must be below
@@ -197,7 +197,8 @@ def suggest_bad_channels(
     Raises
     ------
     ValueError
-        If no electrodes are found for the session / requested groups, or if
+        If a requested electrode group is absent, no electrodes are found for
+        the session / requested groups, or if
         ``reviewed_report`` is given without ``persist=True``.
     """
     # Apply mode: persist the reviewed report without re-detecting.
@@ -227,6 +228,14 @@ def suggest_bad_channels(
     # Read probe_shank the same way set_group_by_shank does.
     query = Electrode() & {"nwb_file_name": nwb_file_name}
     if electrode_group_names is not None:
+        available = sorted(set(query.fetch("electrode_group_name")))
+        unknown = [g for g in electrode_group_names if g not in available]
+        if unknown:
+            raise ValueError(
+                f"suggest_bad_channels: electrode_group_names {unknown} not "
+                f"found for {nwb_file_name!r}. Available electrode groups: "
+                f"{available}."
+            )
         query = query & [
             {"electrode_group_name": g} for g in electrode_group_names
         ]

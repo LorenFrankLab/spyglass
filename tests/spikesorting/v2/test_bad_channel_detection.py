@@ -359,10 +359,30 @@ def test_suggest_raises_on_empty_selection(badchan_session):
     from spyglass.spikesorting.v2 import bad_channels
 
     nwb = badchan_session["nwb_file_name"]
-    with pytest.raises(ValueError, match="no electrodes found"):
+    with pytest.raises(ValueError, match="__no_such_group__"):
         bad_channels.suggest_bad_channels(
             nwb, electrode_group_names=["__no_such_group__"]
         )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_suggest_rejects_a_partly_unknown_group_selection(badchan_session):
+    """An unknown electrode group is named with the session's groups, not
+    dropped while the known groups are scanned."""
+    from spyglass.common.common_ephys import Electrode
+    from spyglass.spikesorting.v2 import bad_channels
+
+    nwb = badchan_session["nwb_file_name"]
+    known = sorted(
+        set((Electrode & {"nwb_file_name": nwb}).fetch("electrode_group_name"))
+    )
+    with pytest.raises(ValueError) as raised:
+        bad_channels.suggest_bad_channels(
+            nwb, electrode_group_names=[known[0], "__no_such_group__"]
+        )
+    assert "['__no_such_group__']" in str(raised.value)
+    assert repr(known) in str(raised.value)
 
 
 @pytest.mark.slow

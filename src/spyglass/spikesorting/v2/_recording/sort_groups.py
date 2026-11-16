@@ -215,8 +215,8 @@ def _plan_sort_groups_by_column(
 
     Returns ``(proposed, skipped)`` where each ``proposed`` entry is
     ``(sort_group_id, group_electrodes, reference_mode,
-    reference_electrode_id)``. Raises ``ValueError`` if a group matches no
-    electrodes, if no group survives filtering, or for the
+    reference_electrode_id)``. Raises ``ValueError`` if a group, or any one
+    value of a group, matches no electrodes, if no group survives filtering, or for the
     reference-resolution failures documented on
     ``set_group_by_electrode_table_column``.
     """
@@ -231,6 +231,19 @@ def _plan_sort_groups_by_column(
                 f"set_group_by_electrode_table_column: sort group "
                 f"{sort_group_id} (column={column!r}, values={list(values)}) "
                 f"matched no electrodes for {nwb_file_name!r}."
+            )
+        # Judged on every electrode, so an omitted bad channel is not a typo.
+        unmatched = [
+            v
+            for v in values
+            if not np.isin(v, all_electrodes[resolved_column]).any()
+        ]
+        if unmatched:
+            raise ValueError(
+                f"set_group_by_electrode_table_column: sort group "
+                f"{sort_group_id} (column={column!r}) values {unmatched} "
+                f"match no electrode of {nwb_file_name!r}, so the group "
+                "would be smaller than requested. Fix or remove those values."
             )
         if omit_unitrode and len(group_electrodes) == 1:
             logger.warning(

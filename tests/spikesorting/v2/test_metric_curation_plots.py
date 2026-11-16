@@ -693,6 +693,48 @@ def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(
     np.testing.assert_allclose(frame["xcorrel_asymm"].to_numpy(), 0.0)
 
 
+def _qc_inputs():
+    metrics = pd.DataFrame(
+        {"firing_rate": [1.0, 2.0], "isi_violation": [0.0, 0.1]},
+        index=pd.Index([0, 1], name="unit_id"),
+    )
+    return metrics, np.array([[0.0, 10.0], [5.0, 20.0]]), [0, 1]
+
+
+def test_plot_units_qc_figure_rejects_unknown_metric_names():
+    """An unknown color metric or histogram metric is refused with the
+    available columns, instead of a gray all-NaN scatter or a KeyError."""
+    metrics, locations, unit_ids = _qc_inputs()
+    with pytest.raises(ValueError, match=r"color_metric 'snrr'.*firing_rate"):
+        plot_units_qc_figure(metrics, locations, unit_ids, color_metric="snrr")
+    with pytest.raises(ValueError, match=r"metric_names \['bogus'\]"):
+        plot_units_qc_figure(
+            metrics, locations, unit_ids, metric_names=["firing_rate", "bogus"]
+        )
+    plt.close("all")
+
+
+def test_plot_units_qc_figure_default_color_metric_follows_the_metrics():
+    """Without snr the depth scatter is colored by the first plotted metric."""
+    metrics, locations, unit_ids = _qc_inputs()
+    axes = plot_units_qc_figure(metrics, locations, unit_ids)
+    first = next(name for name in axes if name != "scatter")
+    assert axes["scatter"].get_title() == f"unit depth colored by {first}"
+    plt.close("all")
+
+
+def test_plot_autocorrelograms_figure_rejects_unknown_unit_ids():
+    """Unknown unit ids name themselves and the available ids."""
+    from spyglass.spikesorting.v2._curation.metric_plots import (
+        plot_autocorrelograms_figure,
+    )
+
+    ccgs = np.zeros((2, 2, 5))
+    bins = np.linspace(-1, 1, 6)
+    with pytest.raises(ValueError, match=r"unit_ids \[7\].*\[3, 4\]"):
+        plot_autocorrelograms_figure(ccgs, bins, [3, 4], unit_ids=[3, 7])
+
+
 @pytest.mark.database
 def test_get_waveforms_refuses_fetch_all(dj_conn):
     """Every-spike extraction is not available; the call says so and points

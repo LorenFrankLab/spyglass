@@ -317,6 +317,24 @@ def test_plan_by_column_empty_match_raises():
         )
 
 
+def test_plan_by_column_partial_match_raises():
+    """A value that matches no electrode is named, not dropped from a group
+    that matched other values."""
+    electrodes = _electrodes([_shank("0", 0, eid) for eid in (1, 2)])
+    with pytest.raises(ValueError, match=r"values \[99\] match no electrode"):
+        _plan_sort_groups_by_column(
+            electrodes,
+            electrodes,
+            "s.nwb",
+            "electrode_id",
+            "electrode_id",
+            groups=[[1, 2, 99]],
+            sort_group_ids=[0],
+            omit_unitrode=True,
+            override_pair=None,
+        )
+
+
 def test_plan_by_column_unitrode_skip_leaves_id_gap():
     """A skipped unitrode group leaves a gap in the assigned ids."""
     electrodes = _electrodes(

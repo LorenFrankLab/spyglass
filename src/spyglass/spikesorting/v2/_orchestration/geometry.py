@@ -85,6 +85,11 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
     pandas.DataFrame
         One row per sort group, sorted by ``sort_group_id``. Empty, with
         the documented columns, when the session has no sort groups.
+
+    Raises
+    ------
+    ValueError
+        If the session is not ingested.
         Columns are ``nwb_file_name``, ``sort_group_id``, ``n_electrodes``,
         ``electrode_ids``, ``electrode_group_names``, ``probe_shanks``,
         ``brain_regions``, ``bad_channel_count``, ``reference_mode``, and
@@ -104,6 +109,14 @@ def describe_sort_groups(nwb_file_name: str) -> "pd.DataFrame":
             )
         )
 
+    from spyglass.common import Session
+
+    if not (Session & {"nwb_file_name": nwb_file_name}):
+        raise ValueError(
+            f"describe_sort_groups: session {nwb_file_name!r} is not ingested "
+            "(no Session row). Check the name; ingested copies carry a "
+            "trailing underscore, e.g. 'name_.nwb'."
+        )
     master_rows = (SortGroupV2 & {"nwb_file_name": nwb_file_name}).fetch(
         as_dict=True
     )
@@ -507,7 +520,8 @@ def plot_sort_group_geometry(
         omitted (the default).
     sort_group_ids : list of int or tuple of int or set of int, optional
         Subset of sort-group ids to display. All sort groups are shown
-        when omitted (the default).
+        when omitted (the default). An id absent from the session raises
+        ``ValueError``.
     label_electrodes : bool or None, optional
         Whether to annotate each contact with its ``electrode_id``. ``None``
         (default) labels only groups with at most
@@ -543,6 +557,14 @@ def plot_sort_group_geometry(
     rows = _sort_group_geometry_rows(nwb_file_name)
     if sort_group_ids is not None:
         wanted = {int(sort_group_id) for sort_group_id in sort_group_ids}
+        available = sorted({int(row["sort_group_id"]) for row in rows})
+        unknown = sorted(wanted.difference(available))
+        if unknown:
+            raise ValueError(
+                f"plot_sort_group_geometry: sort_group_ids {unknown} not found "
+                f"for {nwb_file_name!r}. Available sort_group_ids: "
+                f"{available}. describe_sort_groups(nwb_file_name) lists them."
+            )
         rows = [row for row in rows if row["sort_group_id"] in wanted]
 
     if not rows:

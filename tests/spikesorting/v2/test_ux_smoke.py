@@ -413,10 +413,21 @@ def test_describe_units_absent_sorting_id_raises(dj_conn):
 
 @pytest.mark.database
 def test_describe_sort_groups_empty(dj_conn):
-    """A session with no SortGroupV2 rows returns an empty typed table."""
-    sort_groups = describe_sort_groups("not_an_ingested_session_.nwb")
-    assert list(sort_groups.columns) == _SORT_GROUP_COLUMNS
-    assert sort_groups.empty
+    """An ingested session with no SortGroupV2 rows returns an empty typed
+    table; a session that is not ingested is named instead."""
+    from spyglass.common import Session
+
+    session = Session().fetch("nwb_file_name", limit=1)
+    if len(session):
+        from spyglass.spikesorting.v2.recording import SortGroupV2
+
+        name = session[0]
+        if not (SortGroupV2 & {"nwb_file_name": name}):
+            sort_groups = describe_sort_groups(name)
+            assert list(sort_groups.columns) == _SORT_GROUP_COLUMNS
+            assert sort_groups.empty
+    with pytest.raises(ValueError, match="not_an_ingested_session_.nwb"):
+        describe_sort_groups("not_an_ingested_session_.nwb")
 
 
 @pytest.mark.slow
@@ -459,6 +470,25 @@ def test_plot_sort_group_geometry_empty(dj_conn):
     assert ax.texts
     assert "No SortGroupV2 rows" in ax.texts[0].get_text()
     plt.close(fig)
+
+
+def test_plot_sort_group_geometry_rejects_unknown_sort_group_ids(monkeypatch):
+    """Requested ids absent from the session are named, not dropped."""
+    from spyglass.spikesorting.v2 import pipeline as pl
+
+    rows = [
+        {"sort_group_id": sort_group_id, "electrode_id": sort_group_id}
+        for sort_group_id in (0, 1)
+    ]
+    monkeypatch.setattr(
+        "spyglass.spikesorting.v2._orchestration.geometry."
+        "_sort_group_geometry_rows",
+        lambda nwb_file_name: rows,
+    )
+    with pytest.raises(
+        ValueError, match=r"sort_group_ids \[7\] not found.*\[0, 1\]"
+    ):
+        pl.plot_sort_group_geometry("any_.nwb", sort_group_ids=[0, 7])
 
 
 def test_plot_sort_group_geometry_multi_probe_offset(monkeypatch):
