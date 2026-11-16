@@ -1150,3 +1150,50 @@ def test_rule_missing_policy_sets_agree_across_schema_and_table():
     assert set(get_args(MissingMetricPolicy)) == _rule_part_enum(
         "missing_policy"
     )
+
+
+def test_isi_violation_lands_on_each_units_own_row(monkeypatch):
+    """Per-unit ISI fractions follow their unit id, not sorted or row order.
+
+    At 30 kHz a 30-frame gap is a 1 ms violation of the 2 ms window and a
+    600-frame gap is not. Unit 5 has one spike, so its fraction is NaN.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._curation.metrics import compute_metrics
+    from spyglass.spikesorting.v2._sorting import analyzer as builders
+
+    trains = {
+        9: [100, 130, 1000, 1030, 2000],  # 2 violations / 4 intervals
+        2: [200, 800, 1400, 2000],  # 0 / 3
+        17: [300, 330, 900, 1500, 2100, 2700],  # 1 / 5
+        5: [400],  # no interval
+    }
+    expected = {9: 2 / 4, 2: 0.0, 17: 1 / 5, 5: np.nan}
+    recording = si.NumpyRecording(
+        np.zeros((6000, 2), dtype=np.float32), sampling_frequency=30_000.0
+    )
+    recording.set_dummy_probe_from_locations(np.array([[0, 0], [0, 20]]))
+    sorting = si.NumpySorting.from_unit_dict(
+        {u: np.asarray(f, dtype=np.int64) for u, f in trains.items()},
+        30_000.0,
+    )
+    assert [int(u) for u in sorting.unit_ids] == [9, 2, 17, 5]
+    analyzer = si.create_sorting_analyzer(sorting, recording, sparse=False)
+    # ISI has no waveform dependency; leave its real SI compute intact.
+    monkeypatch.setattr(builders, "ensure_extensions", lambda *a, **k: None)
+    metrics = compute_metrics(
+        analyzer,
+        None,
+        ["isi_violation"],
+        {"isi_violation": {"isi_threshold_ms": 2.0}},
+        True,
+        statistics_spans=None,
+        continuity_spans=None,
+        peak_sign="neg",
+        noise_seed=0,
+    )
+    actual = {int(u): v for u, v in metrics["isi_violation"].items()}
+    assert actual.keys() == expected.keys()
+    for unit_id, value in expected.items():
+        np.testing.assert_equal(actual[unit_id], value, err_msg=str(unit_id))

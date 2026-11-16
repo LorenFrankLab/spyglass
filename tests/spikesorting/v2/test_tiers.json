@@ -1092,7 +1092,8 @@
       "tier": "pipeline",
       "overrides": {
         "test_row_producer_uses_off_alignment_extremum_and_configured_sign": "unit",
-        "test_sparse_analyzer_retains_the_sorter_polarity_peak": "unit"
+        "test_sparse_analyzer_retains_the_sorter_polarity_peak": "unit",
+        "test_unit_rows_keep_each_units_channel_amplitude_and_count": "unit"
       }
     },
     "test_unitmatch.py": {

@@ -250,3 +250,98 @@ def test_sparse_analyzer_retains_the_sorter_polarity_peak(
     assert rows[0]["electrode_id"] == 12
     assert rows[0]["peak_amplitude_uv"] == 100.0
     assert waveform_params["sparsity"] == original_params
+
+
+@pytest.mark.unit
+def test_unit_rows_keep_each_units_channel_amplitude_and_count(tmp_path):
+    """Each row's electrode, amplitude and spike count belong to its unit.
+
+    Unit ids are unsorted and each unit peaks alone on its own channel, so
+    uV = counts * that channel's gain is an independent per-unit oracle.
+    """
+    import spikeinterface as si
+
+    from spyglass.spikesorting.v2._sorting.analyzer import build_analyzer
+    from spyglass.spikesorting.v2._sorting.units import (
+        build_unit_rows_from_analyzer,
+    )
+
+    channel_ids = [12, 24, 31]
+    gains = [2.0, 3.0, 5.0]
+    # unit id: (frames, channel index, counts)
+    units = {
+        9: (np.array([500, 1500, 2500]), 1, -10),  # 30 uV on 24
+        2: (np.array([3500, 4500, 5500, 6500]), 2, -8),  # 40 uV on 31
+        17: (np.array([7500, 8500]), 0, -50),  # 100 uV on 12
+    }
+    traces = np.zeros((10_000, 3), dtype=np.float32)
+    for frames, channel, counts in units.values():
+        traces[frames, channel] = counts
+    recording = si.NumpyRecording(
+        traces, sampling_frequency=1000.0, channel_ids=channel_ids
+    )
+    recording.set_dummy_probe_from_locations(
+        np.array([[0, 0], [0, 20], [0, 40]])
+    )
+    recording.set_channel_gains(gains)
+    recording.set_channel_offsets(0.0)
+    recording = recording.save(
+        folder=tmp_path / "recording", n_jobs=1, progress_bar=False
+    )
+    sorting = si.NumpySorting.from_unit_dict(
+        {unit_id: frames for unit_id, (frames, _, _) in units.items()},
+        sampling_frequency=1000.0,
+    )
+    assert [int(u) for u in sorting.unit_ids] == [9, 2, 17]
+    folder = tmp_path / "three_units.analyzer"
+    build_analyzer(
+        sorting,
+        recording,
+        {"sorting_id": "three_units"},
+        sorter_row={"job_kwargs": {}},
+        job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
+        analyzer_folder=folder,
+        waveform_params={
+            "ms_before": 2.0,
+            "ms_after": 3.0,
+            "max_spikes_per_unit": 10,
+            "whiten": False,
+            "purpose": "display",
+            "sparsity": {"method": "dense"},
+        },
+    )
+    electrode_by_id = {
+        electrode_id: {
+            "nwb_file_name": "synthetic.nwb",
+            "electrode_group_name": "probe",
+            "electrode_id": electrode_id,
+        }
+        for electrode_id in channel_ids
+    }
+    rows = build_unit_rows_from_analyzer(
+        sorting=sorting,
+        analyzer_folder=folder,
+        sorter_row={"params": {"peak_sign": "neg"}},
+        electrode_by_id=electrode_by_id,
+        sort_group_id=0,
+        nwb_file_name="synthetic.nwb",
+        key={"sorting_id": "three_units"},
+    )
+    by_unit = {
+        row["unit_id"]: (
+            row["electrode_id"],
+            row["peak_amplitude_uv"],
+            row["n_spikes"],
+        )
+        for row in rows
+    }
+    expected = {
+        unit_id: (
+            channel_ids[channel],
+            pytest.approx(abs(counts) * gains[channel]),
+            len(frames),
+        )
+        for unit_id, (frames, channel, counts) in units.items()
+    }
+    assert len(rows) == 3
+    assert by_unit == expected
