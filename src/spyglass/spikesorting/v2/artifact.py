@@ -844,7 +844,7 @@ class RecordingArtifactDetection(
         -> IntervalList
         """
 
-    def make_fetch(self, key):
+    def make_fetch(self, key) -> RecordingArtifactFetched:
         """Read the params blob, resolved recording, and parent session.
 
         A missing cached artifact is rebuilt through ``Recording``.
@@ -960,7 +960,7 @@ class SharedGroupArtifactDetection(
         -> IntervalList
         """
 
-    def make_fetch(self, key):
+    def make_fetch(self, key) -> SharedGroupArtifactFetched:
         """Read params, resolve members, and reject a member-set drift.
 
         Missing cached artifacts are rebuilt through ``Recording``.

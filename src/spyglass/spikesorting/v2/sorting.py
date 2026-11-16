@@ -928,7 +928,7 @@ class Sorting(
     # Tri-part make keeps the long sort outside the populate transaction.
     _parallel_make = True
 
-    def make_fetch(self, key):
+    def make_fetch(self, key) -> SortingFetched:
         """Read every DB input the compute step needs.
 
         A concat source anchors to its first frozen member. Return values

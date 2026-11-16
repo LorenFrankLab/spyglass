@@ -947,7 +947,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     _parallel_make = True
 
-    def make_fetch(self, key):
+    def make_fetch(self, key) -> RecordingFetched:
         """Read every DB input the compute step needs (no SI / NWB I/O).
 
         Output must hash identically across fetches for DataJoint's

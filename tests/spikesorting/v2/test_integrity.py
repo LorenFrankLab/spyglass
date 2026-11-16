@@ -195,12 +195,61 @@ def test_staging_tables_remove_outputs_of_failed_populates():
 
 def _compute_carrier(cls) -> type | None:
     """Return the class ``cls.make_compute`` is annotated to return."""
+    return _return_carrier(cls, "make_compute")
+
+
+def _return_carrier(cls, method: str) -> type | None:
+    """Return the class ``cls.<method>`` is annotated to return."""
     import sys
 
-    annotation = inspect.signature(cls.make_compute).return_annotation
+    annotation = inspect.signature(getattr(cls, method)).return_annotation
     if isinstance(annotation, str):
         annotation = vars(sys.modules[cls.__module__]).get(annotation)
     return annotation if inspect.isclass(annotation) else None
+
+
+def test_tripart_carriers_match_their_consumers_parameters():
+    """Each tri-part carrier's fields are its consumer's parameters, in order.
+
+    DataJoint unpacks ``make_fetch``'s result into ``make_compute(key, *...)``
+    and ``make_compute``'s into ``make_insert(key, *...)`` by position, so a
+    reordered field would silently feed one value into another's parameter.
+    A consumer taking only ``*args`` rebuilds the carrier itself.
+    """
+    problems = []
+    for name, cls in sorted(_v2_autopopulate_tables().items()):
+        if name in _MONOLITHIC_MAKE_EXCLUSIONS:
+            continue
+        for producer, consumer in (
+            ("make_fetch", "make_compute"),
+            ("make_compute", "make_insert"),
+        ):
+            # Keyword-only parameters are not filled from the carrier.
+            params = [
+                p
+                for p in list(
+                    inspect.signature(
+                        getattr(cls, consumer)
+                    ).parameters.values()
+                )[2:]
+                if p.kind is not inspect.Parameter.KEYWORD_ONLY
+            ]
+            if [p.kind for p in params] == [inspect.Parameter.VAR_POSITIONAL]:
+                continue
+            carrier = _return_carrier(cls, producer)
+            if carrier is None or not hasattr(carrier, "_fields"):
+                problems.append(
+                    f"{name}.{producer}: annotate its return with the "
+                    "NamedTuple carrier"
+                )
+                continue
+            names = tuple(p.name for p in params)
+            if carrier._fields != names:
+                problems.append(
+                    f"{name}.{producer} -> {consumer}: carrier fields "
+                    f"{carrier._fields} != parameters {names}"
+                )
+    assert not problems, "\n".join(problems)
 
 
 def _write_package(root, name: str, files: dict[str, str]):
