@@ -32,6 +32,9 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
 )
 from spyglass.utils import logger
 from spyglass.spikesorting.v2._core.job_config import resolve_search_threads
+from spyglass.spikesorting.v2._core.si_compat import (
+    require_validated_spikeinterface,
+)
 from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 from spyglass.spikesorting.v2._sorting.dispatch import (
     cache_span_noise_levels,
@@ -551,7 +554,14 @@ def expected_missing_units(
         column in ``rule_columns``. ``None`` marks a column with no
         registered eligibility rule, for which no NaN can be classified as
         expected.
+
+    Raises
+    ------
+    RuntimeError
+        If the installed SpikeInterface is not the version these predicates
+        reproduce.
     """
+    require_validated_spikeinterface("expected-NaN metric eligibility")
     unit_ids = list(n_spikes_by_unit)
     n_spikes = np.array([n_spikes_by_unit[u] for u in unit_ids], dtype=float)
     expected: dict[str, set | None] = {}

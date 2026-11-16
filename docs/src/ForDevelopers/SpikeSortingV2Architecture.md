@@ -860,6 +860,11 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
 `_core.si_metric_patches` replaces SpikeInterface 0.104 metric internals. Remove
 each patch once a fixed SpikeInterface is adopted.
 
+These patches, `expected_missing_units`, `estimate_motion_in_spans` and the
+span whitening matrix reproduce SpikeInterface 0.104 internals. Each calls
+`_core.si_compat.require_validated_spikeinterface`, which raises
+`RuntimeError` on any other SpikeInterface version.
+
 - `nn_noise_overlap`: SpikeInterface's `nearest_neighbors_noise_overlap`
     sparsifies the noise cluster to the unit's channels but takes the peak
     channel from the dense median template. On a sparse analyzer that index can

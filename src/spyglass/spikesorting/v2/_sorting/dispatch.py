@@ -344,12 +344,22 @@ def _span_whitening_matrix(recording, spans, *, random_seed: int):
     -------
     numpy.ndarray
         ``(n_channels, n_channels)`` float32 whitening matrix.
+
+    Raises
+    ------
+    RuntimeError
+        If the installed SpikeInterface is not the version this mirrors.
     """
     import numpy as np
     from spikeinterface.preprocessing.whiten import (
         compute_whitening_from_covariance,
     )
 
+    from spyglass.spikesorting.v2._core.si_compat import (
+        require_validated_spikeinterface,
+    )
+
+    require_validated_spikeinterface("span whitening")
     data = _sample_statistics_spans(
         recording, spans, seed=random_seed, return_in_uV=False
     ).astype(np.float32)

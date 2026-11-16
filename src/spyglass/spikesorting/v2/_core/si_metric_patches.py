@@ -23,13 +23,15 @@ import contextvars
 import copy
 import threading
 
-import spikeinterface as si
 import spikeinterface.metrics.quality.misc_metrics as _mm
 import spikeinterface.metrics.quality.pca_metrics as _pm
 import numpy as np
 from spikeinterface.metrics.quality import ComputeQualityMetrics
 
 from spyglass.utils import logger
+from spyglass.spikesorting.v2._core.si_compat import (
+    require_validated_spikeinterface,
+)
 from spyglass.spikesorting.v2._core.signal_math import (
     frames_with_window_in_one_span,
 )
@@ -37,9 +39,6 @@ from spyglass.spikesorting.v2._sorting.artifact_mask import (
     sample_span_snippet_starts,
     spans_cover_recording,
 )
-
-#: SI versions these patches are validated against.
-_VALIDATED_SI_PREFIXES = ("0.104",)
 
 #: ``(id(target), attr) -> [active blocks, SI's original]``.
 _ACTIVE_PATCHES: dict[tuple[int, str], list] = {}
@@ -419,22 +418,14 @@ def _nn_noise_overlap_sparse_fixed(
 def _patched(target, attr: str, replacement, *, description: str):
     """Set ``target.<attr>`` to ``replacement`` while any block is active.
 
-    Outside the validated SI family, logs a warning naming ``description``
-    and still applies, so a future SI change surfaces.
+    Raises ``RuntimeError`` outside the validated SI family, naming
+    ``description``.
     """
+    require_validated_spikeinterface(description)
     key = (id(target), attr)
     with _ACTIVE_PATCHES_LOCK:
         entry = _ACTIVE_PATCHES.get(key)
         if entry is None:
-            if not si.__version__.startswith(_VALIDATED_SI_PREFIXES):
-                logger.warning(
-                    "spikesorting v2: SpikeInterface %s is outside the "
-                    "validated set %s for the %s; applying anyway -- "
-                    "re-verify or remove this shim.",
-                    si.__version__,
-                    _VALIDATED_SI_PREFIXES,
-                    description,
-                )
             entry = _ACTIVE_PATCHES[key] = [0, getattr(target, attr)]
             setattr(target, attr, replacement)
         entry[0] += 1

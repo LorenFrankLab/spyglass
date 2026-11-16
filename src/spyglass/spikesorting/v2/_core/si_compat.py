@@ -18,6 +18,34 @@ from spyglass.utils import logger
 
 _SORTER_RUNTIME_LOCK = threading.RLock()
 
+#: SI versions whose internals v2's copies and patches are validated against.
+VALIDATED_SI_PREFIXES = ("0.104",)
+
+
+def require_validated_spikeinterface(what: str) -> None:
+    """Refuse to run code that reproduces SpikeInterface internals.
+
+    Parameters
+    ----------
+    what : str
+        The reproduction about to run, named in the error.
+
+    Raises
+    ------
+    RuntimeError
+        If the installed SpikeInterface is outside ``VALIDATED_SI_PREFIXES``.
+    """
+    import spikeinterface
+
+    version = spikeinterface.__version__
+    if not version.startswith(VALIDATED_SI_PREFIXES):
+        raise RuntimeError(
+            f"spikesorting v2: {what} reproduces SpikeInterface "
+            f"{VALIDATED_SI_PREFIXES} internals, but SpikeInterface {version} "
+            "is installed. Install the pinned version with the "
+            "'spikesorting-v2' extra (spikeinterface==0.104.3)."
+        )
+
 
 def _reset_sorter_runtime_lock():
     """A forked worker must not inherit another thread's locked mutex."""

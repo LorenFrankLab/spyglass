@@ -859,3 +859,64 @@ def test_sd_ratio_on_masked_sort_matches_clean_twin(sd_ratio_twins):
         assert np.all(
             uncorrected < target * (1 - _SD_RATIO_RTOL)
         ), f"fixture does not discriminate: SI {uncorrected} vs clean {target}"
+
+
+def _enter_nn_noise_overlap_patch():
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        patch_nn_noise_overlap_sparsity,
+    )
+
+    with patch_nn_noise_overlap_sparsity():
+        pass
+
+
+def _expected_missing_units():
+    from spyglass.spikesorting.v2._curation.metrics import (
+        expected_missing_units,
+    )
+
+    expected_missing_units(
+        [],
+        n_spikes_by_unit={},
+        total_samples=1,
+        sampling_frequency=1.0,
+        metric_kwargs={},
+    )
+
+
+def _estimate_motion_in_spans():
+    from spyglass.spikesorting.v2._motion.estimation import (
+        estimate_motion_in_spans,
+    )
+
+    estimate_motion_in_spans(
+        None, statistics_spans=[], clock=None, resolved_params={}
+    )
+
+
+def _span_whitening_matrix():
+    from spyglass.spikesorting.v2._sorting.dispatch import (
+        _span_whitening_matrix,
+    )
+
+    _span_whitening_matrix(None, [], random_seed=0)
+
+
+@pytest.mark.parametrize(
+    "reproduction",
+    [
+        _enter_nn_noise_overlap_patch,
+        _expected_missing_units,
+        _estimate_motion_in_spans,
+        _span_whitening_matrix,
+    ],
+)
+def test_spikeinterface_reproductions_refuse_an_unvalidated_version(
+    monkeypatch, reproduction
+):
+    """Code that copies SpikeInterface 0.104 internals refuses another SI."""
+    import spikeinterface
+
+    monkeypatch.setattr(spikeinterface, "__version__", "0.105.0")
+    with pytest.raises(RuntimeError, match=r"0\.105\.0"):
+        reproduction()

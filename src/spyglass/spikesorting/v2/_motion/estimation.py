@@ -1282,6 +1282,8 @@ def estimate_motion_in_spans(
         (:func:`check_estimation_eligibility`), no continuity span keeps a
         peak, or the displacement is non-finite. A continuity span without
         kept peaks is only logged and counted in the diagnostics.
+    RuntimeError
+        If the installed SpikeInterface is not the version this reproduces.
     """
     from spikeinterface.core.job_tools import fix_job_kwargs
     from spikeinterface.core.node_pipeline import (
@@ -1300,8 +1302,12 @@ def estimate_motion_in_spans(
         complement_frame_ranges,
         silence_frame_ranges,
     )
+    from spyglass.spikesorting.v2._core.si_compat import (
+        require_validated_spikeinterface,
+    )
     from spyglass.utils import logger
 
+    require_validated_spikeinterface("span motion estimation")
     if recording.get_num_segments() != 1:
         raise ValueError(
             "Motion estimation: expected a single-segment recording; got "
