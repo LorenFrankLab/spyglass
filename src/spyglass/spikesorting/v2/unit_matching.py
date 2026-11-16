@@ -822,8 +822,10 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """The frozen matchable-unit universe this match ran over.
 
         ``TrackedUnit.make`` reads this rather than current labels, so a
-        relabel cannot drop an unpaired unit. Not FK'd: a snapshot, not a live
-        reference.
+        relabel cannot drop an unpaired unit. ``compared`` is 0 for a unit the
+        matcher never saw, so an unpaired unit that was not evaluated can be
+        told from one that was evaluated and found unmatched. Not FK'd: a
+        snapshot, not a live reference.
         """
 
         definition = """
@@ -832,6 +834,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sorting_id: uuid
         curation_id: int
         unit_id: int
+        ---
+        compared=1: tinyint   # 0 if the matcher never saw the unit (left out of its input bundle)
         """
 
     class RecordingSpikeCount(SpyglassMixinPart):
@@ -900,7 +904,6 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         anchor_nwb_file_name = input_plan[0]["recordings"][0]["nwb_file_name"]
         # 3. Snapshot the matchable units and per-recording spike counts.
-        matchable_units = _unit_match_compute.matchable_unit_rows(input_plan)
         sortings = _unit_match_compute.read_input_sortings(input_plan)
         recording_spike_counts = _unit_match_compute.recording_spike_counts(
             input_plan, sortings
@@ -919,7 +922,12 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 )
                 oriented_pairs: list[dict] = []
                 runtime_s = 0.0
+                uncompared_by_input = {
+                    int(plan["input_index"]): set(plan["matchable_unit_ids"])
+                    for plan in input_plan
+                }
             else:
+                uncompared_by_input = {}
                 oriented_pairs, runtime_s = (
                     _unit_match_compute.extract_and_match(
                         input_plan,
@@ -927,8 +935,12 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         params,
                         job_kwargs,
                         sortings=sortings,
+                        excluded_by_input=uncompared_by_input,
                     )
                 )
+            matchable_units = _unit_match_compute.matchable_unit_rows(
+                input_plan, uncompared_by_input
+            )
             # 6. Write the canonicalized pairs with provenance, including
             # what the matcher measured in this run.
             if len(input_plan) >= 2:

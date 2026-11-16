@@ -821,6 +821,8 @@ def test_concat_inputs_match_and_track_in_chronological_order(
             (0, str(day1["sorting_id"]), unit_day1),
             (1, str(day2["sorting_id"]), unit_day2),
         }
+        # The pairer compared every unit the preparer kept.
+        assert set((UnitMatch.MatchableUnit & pk).fetch("compared")) == {1}
 
         TrackedUnit.populate(pk, reserve_jobs=False)
         (tracked,) = (TrackedUnit & pk).fetch("KEY")

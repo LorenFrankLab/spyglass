@@ -27,7 +27,13 @@ from spyglass.utils import logger
 
 
 def extract_and_match(
-    input_plan, matcher_name, params, job_kwargs, *, sortings=None
+    input_plan,
+    matcher_name,
+    params,
+    job_kwargs,
+    *,
+    sortings=None,
+    excluded_by_input=None,
 ):
     """Extract per-input bundles, run the matcher, canonicalize the pairs.
 
@@ -41,6 +47,9 @@ def extract_and_match(
       universe as unmatched units; one warning per input names them.
     - ``sortings`` optionally maps ``input_index`` to curated units already
       read from ``plan["units"]``; default reads them here.
+    - ``excluded_by_input``, when given, is filled in place with
+      ``{input_index: set of unit ids the preparer left out}``, the units
+      the matcher never compared.
 
     Raises
     ------
@@ -144,6 +153,8 @@ def extract_and_match(
                 raise ValueError(
                     "Matcher input preparer excluded units outside the frozen matchable universe."
                 )
+            if excluded_by_input is not None:
+                excluded_by_input[int(plan["input_index"])] = set(excluded)
             eligible_unit_ids_by_curation[
                 (str(plan["sorting_id"]), int(plan["curation_id"]))
             ] = set(plan["matchable_unit_ids"]) - set(excluded)
@@ -288,28 +299,39 @@ def matcher_run_provenance(matcher_name: str, params, job_kwargs) -> tuple:
     )
 
 
-def matchable_unit_rows(input_plan) -> list[dict]:
+def matchable_unit_rows(input_plan, uncompared_by_input=None) -> list[dict]:
     """The ``UnitMatch.MatchableUnit`` rows, without the master key.
 
-    Includes units a bundle leaves out; they become unmatched tracked units.
+    Includes units a bundle leaves out; they become unmatched tracked units
+    with ``compared == 0``, so "not evaluated" differs from "evaluated and
+    unmatched".
 
     Parameters
     ----------
     input_plan : list of dict
         ``UnitMatchFetched.input_plan``.
+    uncompared_by_input : dict, optional
+        ``{input_index: set of unit ids the matcher never compared}``;
+        inputs absent from it have every unit compared.
 
     Returns
     -------
     list of dict
-        ``{"input_index", "sorting_id", "curation_id", "unit_id"}`` per
-        matchable unit, in input order.
+        ``{"input_index", "sorting_id", "curation_id", "unit_id",
+        "compared"}`` per matchable unit, in input order; ``compared`` is 1
+        or 0.
     """
+    uncompared_by_input = uncompared_by_input or {}
     return [
         {
             "input_index": int(plan["input_index"]),
             "sorting_id": plan["sorting_id"],
             "curation_id": int(plan["curation_id"]),
             "unit_id": int(unit_id),
+            "compared": int(
+                int(unit_id)
+                not in uncompared_by_input.get(int(plan["input_index"]), ())
+            ),
         }
         for plan in input_plan
         for unit_id in plan["matchable_unit_ids"]

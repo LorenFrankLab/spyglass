@@ -77,8 +77,8 @@ def preparation_contract(tmp_path, monkeypatch):
         protocol, "get_matcher", lambda _: SimpleNamespace(match=match)
     )
     monkeypatch.setattr(protocol, "get_input_preparer", lambda _: Preparer())
-    yield lambda: extract_and_match(
-        plans, "fixture", {}, {"n_jobs": 1}
+    yield lambda **kwargs: extract_and_match(
+        plans, "fixture", {}, {"n_jobs": 1}, **kwargs
     ), emitted, excluded
     assert directories and all(
         not directory.exists() for directory in directories
@@ -100,6 +100,39 @@ def test_matching_retains_prepared_units(preparation_contract):
     (pair,), _ = run()
     assert pair["unit_a_id"] == pair["unit_b_id"] == 17
     assert pair["session_a_sorting_id"] == str(uuid.UUID(int=1))
+
+
+def test_matching_reports_the_units_it_never_compared(preparation_contract):
+    """Units the preparer left out are reported per input, so "not evaluated"
+    can be told from "evaluated and unmatched"."""
+    run, _, _ = preparation_contract
+    excluded_by_input = {}
+    run(excluded_by_input=excluded_by_input)
+    assert excluded_by_input == {0: {29}, 1: {29}}
+
+
+def test_matchable_unit_rows_flag_units_the_matcher_never_saw():
+    from spyglass.spikesorting.v2._matching.compute import matchable_unit_rows
+
+    plan = [
+        {
+            "input_index": i,
+            "sorting_id": uuid.UUID(int=i + 1),
+            "curation_id": 1,
+            "matchable_unit_ids": [1, 17, 29],
+        }
+        for i in range(2)
+    ]
+    rows = matchable_unit_rows(plan, {0: {29}, 1: set()})
+    assert [(r["input_index"], r["unit_id"], r["compared"]) for r in rows] == [
+        (0, 1, 1),
+        (0, 17, 1),
+        (0, 29, 0),
+        (1, 1, 1),
+        (1, 17, 1),
+        (1, 29, 1),
+    ]
+    assert all(r["compared"] == 1 for r in matchable_unit_rows(plan))
 
 
 @pytest.mark.parametrize("unit", [29.0, True])
@@ -174,12 +207,12 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
         settings.temp_dir = sys.argv[1]
         custom_layout = sys.argv[2] == 'True'
         bad_identity = sys.argv[3] == 'True'
-        recording = si.NumpyRecording(np.ones((500, 2), dtype=np.float32), 1000)
+        recording = si.NumpyRecording(np.ones((500, 2), dtype=np.float32), 30000)
         recording.set_channel_locations(np.array([[0, 0], [0, 20]]))
         recording.set_channel_gains(1.0)
         recording.set_channel_offsets(0.0)
         sorting = si.NumpySorting.from_unit_dict(
-            {17: np.array([100, 200, 300]), 29: np.array([120, 220, 320])}, 1000
+            {17: np.array([100, 200, 300]), 29: np.array([120, 220, 320])}, 30000
         )
         plans = [
             dict(input_index=i, sorting_id=uuid.uuid4(), curation_id=1,
@@ -227,7 +260,7 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
                         assert item.layout == 'split_half_waveforms' and item.layout_version == 1
                         assert item.geometry_path.is_file()
                         wave = np.load(item.bundle_dir / 'RawWaveforms/Unit17_RawSpikes.npy')
-                        np.testing.assert_array_equal(wave, np.ones((2, 2, 2)))
+                        np.testing.assert_array_equal(wave, np.ones((90, 2, 2)))
                 # Return reversed sides to exercise canonical orientation too.
                 a, b = inputs[1].curation_key, inputs[0].curation_key
                 return [MatchPair(str(a['sorting_id']), a['curation_id'], 17,

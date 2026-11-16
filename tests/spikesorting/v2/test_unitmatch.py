@@ -1779,6 +1779,8 @@ def test_matcher_provenance_is_required_for_new_runs(two_session_curated_group):
         == 1
     )
     assert not UnitMatch.heading.attributes["matcher_provenance"].nullable
+    # A single input never reaches the matcher, so no unit was compared.
+    assert set((UnitMatch.MatchableUnit & key).fetch("compared")) == {0}
 
 
 @pytest.mark.slow
