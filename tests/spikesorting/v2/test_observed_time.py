@@ -708,3 +708,17 @@ def test_report_rate_denominator_is_the_stored_observed_duration(
     ) == pytest.approx(
         float(metrics["observed_duration_s"].iloc[0]), rel=0, abs=1e-9
     )
+
+
+def test_observed_metrics_count_only_spikes_inside_half_open_intervals():
+    """Spikes in gaps, outside the hull, or on an interval stop are not
+    observed; rate and presence use observed spikes and observed seconds."""
+    intervals = [[1.0, 3.0], [5.0, 7.0]]
+    # Observed: 1.0 (start), 2.0, 6.5. Unobserved: 0.5 and 9.0 (outside),
+    # 3.0 and 7.0 (stops), 4.5 (gap, in a bin that has 1 s of exposure).
+    spikes = [0.5, 1.0, 2.0, 3.0, 4.5, 6.5, 7.0, 9.0]
+    result = observed_metrics(spikes, intervals, bin_duration_s=2.0)
+    assert result["observed_duration_s"] == 4.0
+    assert result["observed_firing_rate_hz"] == 3 / 4.0
+    # Bins [0,2), [2,4), [6,8) are occupied; [4,6) holds only the gap spike.
+    assert result["observed_presence_ratio"] == 3 / 4.0
