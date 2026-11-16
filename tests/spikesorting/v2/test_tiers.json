@@ -283,6 +283,9 @@
     "test_conftest_teardown_and_fetch.py": {
       "tier": "unit"
     },
+    "test_consistency_guards.py": {
+      "tier": "unit"
+    },
     "test_consolidate_intervals.py": {
       "tier": "unit"
     },
