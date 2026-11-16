@@ -651,6 +651,7 @@
         "test_describe_parameter_rows_autocuration_duplicate_name_insensitive": "db_unit",
         "test_describe_parameter_rows_columns_and_usage": "db_unit",
         "test_describe_parameter_rows_covers_all_seeded_tables": "db_unit",
+        "test_describe_parameter_rows_lists_presets_saved_in_the_database": "db_unit",
         "test_describe_parameter_rows_marks_dynamic_default_shipped": "db_unit",
         "test_duplicate_parameter_content_escape_hatch": "db_unit",
         "test_duplicate_parameter_content_rejected": "db_unit",

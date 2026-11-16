@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.spikesorting.v2._orchestration.presets import (
-    _PIPELINE_PRESETS,
+    _all_pipeline_presets,
 )
 from spyglass.spikesorting.v2._artifacts.readers import (
     read_recording_artifact_valid_times,
@@ -72,28 +72,33 @@ def describe_parameter_rows() -> "pd.DataFrame":
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
-    preproc_use, artifact_use, sorter_use = _preset_parameter_use()
+    # Saved presets use rows too; read both registries once.
+    presets = _all_pipeline_presets()
+    preproc_use, artifact_use, sorter_use = _preset_parameter_use(presets)
     records: list[dict] = [
         *_preset_parameter_records(
             PreprocessingParameters,
             "preprocessing_params_name",
             preproc_use,
             lambda row, params: _preproc_summary(params),
+            presets,
         ),
         *_preset_parameter_records(
             ArtifactDetectionParameters,
             "artifact_detection_params_name",
             artifact_use,
             lambda row, params: _artifact_summary(params),
+            presets,
         ),
         *_preset_parameter_records(
             SorterParameters,
             "sorter_params_name",
             sorter_use,
             lambda row, params: _sorter_summary(row["sorter"], params),
+            presets,
             sorter_keyed=True,
         ),
-        *_downstream_parameter_records(),
+        *_downstream_parameter_records(presets),
     ]
     _annotate_duplicate_parameter_records(records)
 
@@ -106,8 +111,13 @@ def describe_parameter_rows() -> "pd.DataFrame":
     )
 
 
-def _preset_parameter_use() -> tuple[dict, dict, dict]:
+def _preset_parameter_use(presets: dict) -> tuple[dict, dict, dict]:
     """Which presets reference each parameter row, per stage.
+
+    Parameters
+    ----------
+    presets : dict[str, _PipelinePreset]
+        Every preset by name (:func:`_all_pipeline_presets`).
 
     Returns
     -------
@@ -121,7 +131,7 @@ def _preset_parameter_use() -> tuple[dict, dict, dict]:
     preproc_use: dict[str, list[str]] = {}
     artifact_use: dict[str, list[str]] = {}
     sorter_use: dict[tuple[str, str], list[str]] = {}
-    for preset_name, preset in _PIPELINE_PRESETS.items():
+    for preset_name, preset in presets.items():
         preproc_use.setdefault(preset.preprocessing_params_name, []).append(
             preset_name
         )
@@ -134,25 +144,25 @@ def _preset_parameter_use() -> tuple[dict, dict, dict]:
     return preproc_use, artifact_use, sorter_use
 
 
-def _presets_using(attr: str) -> dict[str, list[str]]:
+def _presets_using(presets: dict, attr: str) -> dict[str, list[str]]:
     """Preset names keyed by their ``attr`` parameter-row name."""
     use: dict[str, list[str]] = {}
-    for preset_name, preset in _PIPELINE_PRESETS.items():
+    for preset_name, preset in presets.items():
         use.setdefault(getattr(preset, attr), []).append(preset_name)
     return use
 
 
-def _str_axis(used_by: list[str], attr: str) -> str:
+def _str_axis(presets: dict, used_by: list[str], attr: str) -> str:
     """Distinct non-blank preset values for ``attr``, comma-joined."""
-    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals = {getattr(presets[u], attr) for u in used_by}
     vals.discard("")
     vals.discard(None)
     return ", ".join(sorted(vals))
 
 
-def _num_axis(used_by: list[str], attr: str):
+def _num_axis(presets: dict, used_by: list[str], attr: str):
     """Return the single agreed preset value for a numeric ``attr``, else None."""
-    vals = {getattr(_PIPELINE_PRESETS[u], attr) for u in used_by}
+    vals = {getattr(presets[u], attr) for u in used_by}
     vals.discard(None)
     return next(iter(vals)) if len(vals) == 1 else None
 
@@ -212,12 +222,13 @@ def _sorter_summary(sorter: str, params: dict) -> str:
 
 
 def _preset_parameter_records(
-    table, name_attr, preset_use, summarize, *, sorter_keyed=False
+    table, name_attr, preset_use, summarize, presets, *, sorter_keyed=False
 ) -> list[dict]:
     """Catalog records for every row of a preset-referenced param Lookup.
 
     ``preset_use`` maps each row's key (``(sorter, name)`` when
-    ``sorter_keyed``) to the presets that name it. ``sorter_keyed`` also
+    ``sorter_keyed``) to the presets that name it; ``presets`` maps each
+    preset name to its preset. ``sorter_keyed`` also
     folds the sorter and ``execution_params`` into the fingerprint, as the
     duplicate-content guard does.
     """
@@ -239,8 +250,10 @@ def _preset_parameter_records(
                 "table": table_name,
                 "parameter_name": row[name_attr],
                 "sorter": row["sorter"] if sorter_keyed else "",
-                "probe_type": _str_axis(used, "probe_type"),
-                "sampling_rate_hz": _num_axis(used, "sampling_rate_hz"),
+                "probe_type": _str_axis(presets, used, "probe_type"),
+                "sampling_rate_hz": _num_axis(
+                    presets, used, "sampling_rate_hz"
+                ),
                 "adjacency_radius_um": (
                     float(radius) if radius is not None else None
                 ),
@@ -250,7 +263,7 @@ def _preset_parameter_records(
                 ),
                 "is_shipped_default": key in shipped,
                 "recommendation_status": _str_axis(
-                    used, "recommendation_status"
+                    presets, used, "recommendation_status"
                 ),
                 "used_by_pipeline_presets": used,
                 "summary": summarize(row, params),
@@ -259,7 +272,7 @@ def _preset_parameter_records(
     return records
 
 
-def _downstream_parameter_records() -> list[dict]:
+def _downstream_parameter_records(presets: dict) -> list[dict]:
     """Catalog records for the parameter Lookups outside the stage tables.
 
     Preset metadata columns stay blank; metric and auto-curation rows still
@@ -292,7 +305,7 @@ def _downstream_parameter_records() -> list[dict]:
             for r in QualityMetricParameters._default_rows()
         },
         lambda r: f"{len(_jsonable_blob(r.get('metric_names')) or [])} metrics",
-        used_by=_presets_using("metric_params_name"),
+        used_by=_presets_using(presets, "metric_params_name"),
     )
     records += _simple_parameter_records(
         AutoCurationRules,
@@ -303,7 +316,7 @@ def _downstream_parameter_records() -> list[dict]:
         },
         lambda r: f"merge preset {r.get('auto_merge_preset', '')!r}",
         extra_content=_autocuration_rule_content,
-        used_by=_presets_using("auto_curation_rules_name"),
+        used_by=_presets_using(presets, "auto_curation_rules_name"),
     )
     records += _simple_parameter_records(
         MatcherParameters,

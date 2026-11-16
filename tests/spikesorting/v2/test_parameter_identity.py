@@ -824,6 +824,52 @@ def test_describe_parameter_rows_columns_and_usage(dj_conn):
     ]
 
 
+@pytest.mark.database
+def test_describe_parameter_rows_lists_presets_saved_in_the_database(dj_conn):
+    """A preset saved in ``PipelinePreset`` is listed as using its rows."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+        register_pipeline_preset,
+    )
+    from spyglass.spikesorting.v2._orchestration.reporting import (
+        describe_parameter_rows,
+    )
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    initialize_v2_defaults()
+    name = "saved_report_usage_2026_11"
+    preset = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
+    register_pipeline_preset(name, preset)
+    try:
+        df = describe_parameter_rows()
+
+        def _used_by(table, parameter_name, sorter=""):
+            sub = df[
+                (df["table"] == table)
+                & (df["parameter_name"] == parameter_name)
+                & (df["sorter"] == sorter)
+            ]
+            assert len(sub) == 1, f"{table}/{parameter_name}: expected one row"
+            return sub.iloc[0]["used_by_pipeline_presets"]
+
+        assert name in _used_by(
+            "PreprocessingParameters", preset.preprocessing_params_name
+        )
+        assert name in _used_by(
+            "ArtifactDetectionParameters",
+            preset.artifact_detection_params_name,
+        )
+        assert name in _used_by(
+            "SorterParameters", preset.sorter_params_name, preset.sorter
+        )
+        assert name in _used_by(
+            "AutoCurationRules", preset.auto_curation_rules_name
+        )
+    finally:
+        (PipelinePreset & {"pipeline_preset": name}).delete_quick()
+
+
 def test_describe_parameter_rows_covers_all_seeded_tables(dj_conn):
     """The report lists every parameter Lookup ``initialize_v2_defaults`` seeds.
 
