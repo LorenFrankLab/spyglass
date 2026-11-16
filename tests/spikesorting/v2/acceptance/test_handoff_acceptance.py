@@ -225,7 +225,17 @@ json.dump({'curation_id': child.curation_id, 'curation_uuid': str(child.curation
             dj.conn().query(f"DROP USER IF EXISTS '{user}'@'%%'")
 
 
-def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
+@pytest.mark.parametrize(
+    "pipeline_preset",
+    [
+        "franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+        # The preset a user gets without naming one.
+        "franklab_probe_hippocampus_30khz_ms4_2026_06",
+    ],
+)
+def test_ground_truth_population_after_auto_labels(
+    workflow, monkeypatch, pipeline_preset
+):
     import pynwb
     import spikeinterface as si
     from spikeinterface.comparison import compare_sorter_to_ground_truth
@@ -255,7 +265,7 @@ def test_ground_truth_population_after_auto_labels(workflow, monkeypatch):
         sort_group_id=group,
         interval_list_name="raw data valid times",
         team_name="lifecycle_audit",
-        pipeline_preset="franklab_tetrode_hippocampus_30khz_ms5_2026_06",
+        pipeline_preset=pipeline_preset,
     ).root_curation
     evaluation = root.evaluate(
         metric_params_name="franklab_default",
