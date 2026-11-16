@@ -26,11 +26,14 @@ from spyglass.utils.spikesorting import (
 )
 
 
-# v2 is optional: its parts are declared only if v2 imports, since DataJoint
-# needs the FK target. Only an ImportError (missing or incompatible package)
-# is tolerated; anything else is a v2 bug and raises.
+# v2 parts are declared only if v2 imports. NWB ingestion declares this table
+# for v0/v1 users too, so a v2 import failure is logged, never raised.
 def _import_v2_part(module: str, name: str, unavailable: str):
-    """Return ``(class_or_None, import_error_or_None)`` for a v2 part target."""
+    """Return ``(class_or_None, import_error_or_None)`` for a v2 part target.
+
+    An ``ImportError`` (missing or incompatible package) logs a warning; any
+    other error logs its traceback at ERROR level.
+    """
     try:
         return getattr(import_module(module), name), None
     except ImportError as err:
@@ -38,6 +41,15 @@ def _import_v2_part(module: str, name: str, unavailable: str):
             f"{unavailable}; SpikeSortingOutput will be declared without its "
             f"{name} part in this process. Captured cause: "
             f"{type(err).__name__}: {err}"
+        )
+        return None, err
+    except Exception as err:  # noqa: BLE001
+        logger.exception(
+            f"{unavailable}: importing {module} raised "
+            f"{type(err).__name__}: {err}. This is likely a v2 bug or a "
+            "schema declaration/permission problem; v0/v1 are unaffected. "
+            f"SpikeSortingOutput will be declared without its {name} part in "
+            "this process."
         )
         return None, err
 
@@ -54,30 +66,46 @@ def _probe_v2_curation() -> "tuple[Union[type, None], Union[Exception, None]]":
 CurationV2, _v2_import_error = _probe_v2_curation()
 
 
-def _probe_v2_concat_member_curation() -> "Union[type, None]":
+def _probe_v2_concat_member_curation() -> (
+    "tuple[Union[type, None], Union[Exception, None]]"
+):
     """Import the optional per-member concat curation merge target."""
     return _import_v2_part(
         "spyglass.spikesorting.v2.concat_member_curation",
         "ConcatMemberCurationV2",
         "spikesorting v2 concat-member outputs are unavailable",
-    )[0]
+    )
 
 
-ConcatMemberCurationV2 = _probe_v2_concat_member_curation()
+ConcatMemberCurationV2, _v2_member_import_error = (
+    _probe_v2_concat_member_curation()
+)
 
 
 def _raise_v2_unavailable(caller: str) -> None:
-    """Raise ``RuntimeError`` naming the original v2 import error."""
+    """Raise ``RuntimeError`` naming the original v2 import error.
+
+    Reports the caller, the cause's type and message, and a hint for that
+    kind of failure, chained to the cause.
+    """
     cause = _v2_import_error
-    detail = (
-        f" Original import error: {type(cause).__name__}: {cause}"
-        if cause is not None
-        else ""
-    )
+    if cause is None:
+        detail = ""
+    elif isinstance(cause, ImportError):
+        detail = (
+            f" Original import error: {type(cause).__name__}: {cause}. To "
+            "use v2, install the spikesorting extras (spikeinterface 0.104)."
+        )
+    else:
+        detail = (
+            f" Original import error: {type(cause).__name__}: {cause}. This "
+            "is likely a v2 bug or a schema declaration/permission problem; "
+            "run `import spyglass.spikesorting.v2.curation` to see the full "
+            "traceback."
+        )
     raise RuntimeError(
-        f"{caller}: spyglass.spikesorting.v2 is not importable in "
-        "this environment (e.g. a missing optional dependency or a "
-        f"version skew in the v2 stack).{detail}"
+        f"{caller}: spyglass.spikesorting.v2 is not importable in this "
+        f"environment.{detail}"
     ) from cause
 
 
