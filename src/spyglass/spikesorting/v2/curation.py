@@ -473,9 +473,10 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
         reuse_existing : bool, optional
             Root: if a root exists and non-default arguments were passed,
             False (default) raises ``ValueError`` and True returns the
-            existing root. Child: True returns an existing child whose
-            parent, labels, merge groups, ``apply_merge``, description, and
-            source all match.
+            existing root, including one a concurrent insert created first
+            (a root always takes ``curation_id`` 0). Child: True returns an
+            existing child whose parent, labels, merge groups,
+            ``apply_merge``, description, and source all match.
         allow_unknown_unit_ids
             For label keys absent from both ``Sorting.Unit`` and the curated
             units: False (default) raises ``ValueError``, True warns and drops
@@ -557,7 +558,12 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 apply_merge=apply_merge,
                 labels=labels,
                 allow_unknown_unit_ids=allow_unknown_unit_ids,
-                curation_id=cls._next_curation_id(sorting_id),
+                # A root always takes id 0, so concurrent roots collide.
+                curation_id=(
+                    0
+                    if parent_curation_id == -1
+                    else cls._next_curation_id(sorting_id)
+                ),
                 parent_labels=parent_labels,
                 label_policy=label_policy,
             )
@@ -654,7 +660,25 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
                 _unlink_staged_analysis_file(
                     analysis_file_name, context="CurationV2.insert_curation"
                 )
-                # Children only; root reuse is handled above.
+                if parent_curation_id == -1 and isinstance(
+                    exc, dj.errors.DuplicateError
+                ):
+                    # A concurrent insert created the root first; reuse it.
+                    existing_root = (
+                        _curation_insert.validate_parent_or_reuse_root(
+                            cls,
+                            sorting_id=sorting_id,
+                            parent_curation_id=parent_curation_id,
+                            labels=labels,
+                            merge_groups=merge_groups,
+                            description=description,
+                            apply_merge=apply_merge,
+                            curation_source=curation_source,
+                            reuse_existing=reuse_existing,
+                        )
+                    )
+                    if existing_root is not None:
+                        return existing_root
                 if (
                     parent_curation_id != -1
                     and isinstance(exc, dj.errors.DuplicateError)

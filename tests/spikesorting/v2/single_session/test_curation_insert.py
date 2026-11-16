@@ -1143,3 +1143,42 @@ def test_root_reuse_warning_names_only_the_inputs_it_ignores(
         r.message for r in caplog.records if "reusing root" in r.message
     ]
     assert "ignored" not in message
+
+
+@pytest.mark.slow
+def test_root_insert_racing_an_existing_root_returns_that_root(
+    populated_sorting, monkeypatch
+):
+    """A root insert whose existing-root check ran before a concurrent root
+    committed returns that root instead of adding a second one."""
+    from spyglass.spikesorting.v2._curation import insert as _curation_insert
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    _clear_curations(populated_sorting)
+    try:
+        winner = CurationV2.insert_curation(populated_sorting)
+        real_check = _curation_insert.validate_parent_or_reuse_root
+        calls = []
+
+        def _stale_first_check(*args, **kwargs):
+            calls.append(kwargs["parent_curation_id"])
+            if len(calls) == 1:
+                return None  # checked before the winner committed
+            return real_check(*args, **kwargs)
+
+        monkeypatch.setattr(
+            _curation_insert,
+            "validate_parent_or_reuse_root",
+            _stale_first_check,
+        )
+        loser = CurationV2.insert_curation(
+            populated_sorting, reuse_existing=True
+        )
+        roots = CurationV2 & {
+            "sorting_id": populated_sorting["sorting_id"],
+            "parent_curation_id": -1,
+        }
+        assert loser == winner
+        assert len(roots) == 1
+    finally:
+        _clear_curations(populated_sorting)
