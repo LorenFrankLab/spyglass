@@ -231,7 +231,8 @@ def matchable_nodes(key) -> tuple[list[tuple], list[dict]]:
     Raises
     ------
     ValueError
-        If the run has no ``MatchableUnit`` snapshot (a legacy row).
+        If the run has no ``MatchableUnit`` rows (parts deleted outside
+        ``UnitMatch``).
     """
     from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
@@ -244,14 +245,13 @@ def matchable_nodes(key) -> tuple[list[tuple], list[dict]]:
         )
         for row in matchable_rows
     ]
-    # make_fetch rejects empty inputs, so an empty snapshot is a legacy row.
+    # make_fetch rejects empty inputs, so populate always writes this part.
     if not node_universe:
         raise ValueError(
             "TrackedUnit.make: UnitMatch row "
-            f"{key} has no UnitMatch.MatchableUnit snapshot (it was written "
-            "by a Spyglass version that did not record one). Re-populate "
-            "UnitMatch (delete + populate) "
-            "so the matchable set is recorded before deriving tracked units."
+            f"{key} has no UnitMatch.MatchableUnit rows; they were deleted "
+            "outside UnitMatch. Re-populate UnitMatch (delete + populate) so "
+            "the matchable set is recorded before deriving tracked units."
         )
     return node_universe, matchable_rows
 
