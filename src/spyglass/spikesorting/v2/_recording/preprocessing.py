@@ -117,6 +117,55 @@ def apply_temporal_preprocessing(recording, validated):
     return recording, applied_steps
 
 
+def _assert_uniform_calibration(
+    recording, *, operation: str, channels: str, verb: str, step: str
+) -> None:
+    """Raise unless every channel shares one finite gain and offset.
+
+    SpikeInterface's spatial steps combine raw counts across channels, which
+    is correct in microvolts only under a single calibration.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+        The recording about to be combined across channels.
+    operation, channels, verb, step : str
+        Message parts naming the step, the channels it combines, the raw-count
+        operation, and the step to verify the metadata before.
+
+    Raises
+    ------
+    ValueError
+        If gains or offsets are unequal or non-finite, or gains are not
+        positive.
+    """
+    for property_name, label in (
+        ("gain_to_uV", "channel gains"),
+        ("offset_to_uV", "channel offsets"),
+    ):
+        values = recording.get_property(property_name)
+        if values is None:
+            continue
+        values = np.asarray(values)
+        positive_gain = property_name != "gain_to_uV" or np.all(values > 0)
+        if (
+            not np.all(np.isfinite(values))
+            or np.unique(values).size != 1
+            or not positive_gain
+        ):
+            requirement = (
+                "uniform finite positive"
+                if property_name == "gain_to_uV"
+                else "uniform finite"
+            )
+            raise ValueError(
+                f"apply_spatial_preprocessing: {operation} requires "
+                f"{requirement} {label} across {channels}; raw-count {verb} "
+                "cannot preserve this per-channel calibration. Verify the "
+                f"recording's gain/offset metadata before {step}."
+            )
+
+
 def apply_spatial_preprocessing(
     recording,
     reference_mode: str,
@@ -158,9 +207,10 @@ def apply_spatial_preprocessing(
     Raises
     ------
     ValueError
-        If referencing would mix channels with unequal or non-finite current
-        gains/offsets, or non-positive gains. SI references raw counts, so
-        every contributing channel must share its calibration.
+        If referencing or bad-channel interpolation would mix channels with
+        unequal or non-finite current gains/offsets, or non-positive gains.
+        SI combines raw counts, so every contributing channel must share its
+        calibration.
     """
     import spikeinterface.preprocessing as sip
 
@@ -197,38 +247,29 @@ def apply_spatial_preprocessing(
                 "geometry). Use bad_channel_handling='remove', or ensure the "
                 "NWB / probe carries electrode positions."
             )
+        # Kriging mixes raw counts, so the result is in physical units only
+        # when every channel shares one calibration.
+        _assert_uniform_calibration(
+            recording,
+            operation="bad-channel interpolation",
+            channels="every channel of the sort group",
+            verb="interpolation",
+            step="interpolating bad channels",
+        )
         recording = sip.interpolate_bad_channels(recording, to_interpolate)
     applied_steps["bad_channels"] = {"interpolated": to_interpolate}
 
     # SI subtracts raw counts, so every contributing channel must share its
     # calibration. Check before the reference is dropped or offsets zeroed.
     if reference_mode in ("specific", "global_median"):
-        for property_name, label in (
-            ("gain_to_uV", "channel gains"),
-            ("offset_to_uV", "channel offsets"),
-        ):
-            values = recording.get_property(property_name)
-            if values is None:
-                continue
-            values = np.asarray(values)
-            positive_gain = property_name != "gain_to_uV" or np.all(values > 0)
-            if (
-                not np.all(np.isfinite(values))
-                or np.unique(values).size != 1
-                or not positive_gain
-            ):
-                requirement = (
-                    "uniform finite positive"
-                    if property_name == "gain_to_uV"
-                    else "uniform finite"
-                )
-                raise ValueError(
-                    f"apply_spatial_preprocessing: {reference_mode!r} reference "
-                    f"requires {requirement} {label} across every contributing "
-                    "channel, including any specific reference electrode; raw-count "
-                    "subtraction cannot preserve this per-channel calibration. "
-                    "Verify the recording's gain/offset metadata before referencing."
-                )
+        _assert_uniform_calibration(
+            recording,
+            operation=f"{reference_mode!r} reference",
+            channels="every contributing channel, including any specific "
+            "reference electrode",
+            verb="subtraction",
+            step="referencing",
+        )
     if reference_mode == "specific":
         recording = sip.common_reference(
             recording,

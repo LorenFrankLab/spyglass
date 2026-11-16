@@ -122,3 +122,47 @@ def test_no_reference_keeps_heterogeneous_calibration():
     np.testing.assert_array_equal(out.get_traces(), raw)
     np.testing.assert_array_equal(out.get_channel_gains(), gains)
     np.testing.assert_array_equal(out.get_channel_offsets(), offsets)
+
+
+def _interpolate(recording, bad_id):
+    recording.set_channel_locations(
+        np.column_stack((np.zeros(len(_CHANNELS)), 20.0 * np.arange(3)))
+    )
+    return apply_spatial_preprocessing(
+        recording,
+        reference_mode="none",
+        reference_electrode_id=None,
+        validated=None,
+        bad_channel_handling="interpolate",
+        bad_channel_ids=[bad_id],
+    )[0]
+
+
+@pytest.mark.parametrize(
+    "gains,offsets,error",
+    [
+        ([_GAIN, 2 * _GAIN, _GAIN], [0.0] * 3, "channel gains"),
+        ([_GAIN, _GAIN, np.nan], [0.0] * 3, "channel gains"),
+        ([_GAIN] * 3, [0.0, 44.0, 0.0], "channel offsets"),
+    ],
+)
+def test_interpolation_rejects_unsupported_calibration(gains, offsets, error):
+    """Kriging mixes raw counts, so unequal calibrations would mix units."""
+    recording, _ = _recording(gains, offsets)
+    with pytest.raises(
+        ValueError, match=f"interpolation requires uniform finite.* {error}"
+    ):
+        _interpolate(recording, bad_id=5)
+
+
+def test_uniform_calibration_interpolation_is_a_physical_neighbor_average():
+    """With one calibration the filled channel is the neighbors' uV mean."""
+    recording, raw = _recording(_GAIN, 0.0)
+    out = _interpolate(recording, bad_id=5).get_traces(return_in_uV=True)
+    physical = raw.astype(float) * _GAIN
+    # The middle contact is equidistant from both neighbors; int16 traces
+    # round the fill to one raw count.
+    np.testing.assert_allclose(
+        out[:, 1], physical[:, [0, 2]].mean(axis=1), atol=_GAIN
+    )
+    np.testing.assert_allclose(out[:, [0, 2]], physical[:, [0, 2]], atol=1e-3)
