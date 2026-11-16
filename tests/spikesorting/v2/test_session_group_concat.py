@@ -941,6 +941,39 @@ def _member_snapshot(grp):
 
 
 @pytest.mark.slow
+def test_deleting_an_unmasked_member_recording_removes_its_concat(
+    same_day_group,
+):
+    """A concat member's ``Recording`` is a foreign key, masked or not, so
+    deleting it cascades to the concat instead of leaving it registered over
+    a missing member."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecordingSelection,
+    )
+
+    snapshot = _member_snapshot(same_day_group)
+    concat_key = {"concat_recording_id": snapshot[0]["concat_recording_id"]}
+    assert snapshot[0]["artifact_detection_id"] is None
+    assert (
+        Recording.full_table_name
+        in ConcatenatedRecordingSelection.MemberSnapshot.parents()
+    )
+    member = {"recording_id": snapshot[0]["recording_id"]}
+    connection = Recording.connection
+    connection.start_transaction()
+    try:
+        (Recording & member).super_delete(
+            warn=False, safemode=False, transaction=False, force_masters=True
+        )
+        assert not (ConcatenatedRecordingSelection & concat_key)
+    finally:
+        # Roll back so the shared member recordings survive.
+        connection.cancel_transaction()
+    assert ConcatenatedRecordingSelection & concat_key
+
+
+@pytest.mark.slow
 def test_load_member_recordings_returns_aligned_counts_and_indices(
     same_day_group,
 ):

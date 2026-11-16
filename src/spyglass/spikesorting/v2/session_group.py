@@ -37,6 +37,7 @@ from spyglass.spikesorting.v2.artifact import (
 )
 from spyglass.spikesorting.v2.recording import (
     PreprocessingParameters,  # noqa: F401
+    Recording,  # noqa: F401
     SortGroupV2,  # noqa: F401
 )
 from spyglass.spikesorting.v2._core.table_integrity import (
@@ -301,8 +302,8 @@ class ConcatenatedRecordingSelection(
         hashed into ``concat_recording_id``. Concat reads use this, never the
         live ``SessionGroup.Member`` rows, so a group edit does not affect an
         existing concat row. ``recording_content_hash`` detects member drift
-        (``ConcatMemberDriftError``). The artifact detection is a foreign key
-        so it cannot disappear.
+        (``ConcatMemberDriftError``). The member ``Recording`` and artifact
+        detection are foreign keys, so deleting either cascades to the concat.
         """
 
         definition = """
@@ -313,7 +314,7 @@ class ConcatenatedRecordingSelection(
         sort_group_id: int
         interval_list_name: varchar(170)
         team_name: varchar(80)
-        recording_id: uuid
+        -> Recording
         recording_content_hash: char(64)
         -> [nullable] RecordingArtifactDetection
         """
