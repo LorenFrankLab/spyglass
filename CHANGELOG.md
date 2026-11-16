@@ -381,6 +381,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         database; `common_interval` re-exports it #1729
     - Fix `Interval.subtract` applying an interval that spans several base
         intervals to the first one only #1730
+    - Parse pip versions with a PEP 440 local label (e.g. `torch==2.5.1+cpu`)
+        in `UserEnvironment`; one such line disabled recompute for the env #1713
+    - `UserEnvironment.insert_current_env` returns the id it inserted, not the
+        requested id another environment already holds #1713
 
 - Decoding
 
