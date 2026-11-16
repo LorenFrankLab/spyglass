@@ -302,3 +302,53 @@ def test_custom_matcher_uses_its_preparer_without_unitmatch(
         check=False,
     )
     assert result.returncode == 0, result.stderr + result.stdout
+
+
+class _FakeSelection:
+    """Stands in for ``UnitMatchSelection``'s electrode-space hooks."""
+
+    warned = []
+
+    def __init__(self, divergent):
+        self._divergent = divergent
+        _FakeSelection.warned = []
+
+    def _divergent_electrode_space_members(self, choices):
+        return list(self._divergent)
+
+    @staticmethod
+    def _divergent_electrode_space_message(divergent):
+        return f"inputs {divergent} differ"
+
+    def _warn_on_divergent_electrode_space(self, choices):
+        _FakeSelection.warned.append(choices)
+
+
+def test_divergent_electrode_signature_blocks_explicit_inputs():
+    from spyglass.spikesorting.v2._matching.inputs import (
+        enforce_one_electrode_space,
+    )
+
+    with pytest.raises(ValueError, match="different physical sort group"):
+        enforce_one_electrode_space(_FakeSelection([1]), {0: "a", 1: "b"})
+
+
+def test_divergent_electrode_signature_passes_with_explicit_opt_out():
+    from spyglass.spikesorting.v2._matching.inputs import (
+        enforce_one_electrode_space,
+    )
+
+    table = _FakeSelection([1])
+    enforce_one_electrode_space(
+        table, {0: "a", 1: "b"}, allow_divergent_electrodes=True
+    )
+    assert _FakeSelection.warned == [{0: "a", 1: "b"}]
+
+
+def test_matching_electrode_signatures_pass_silently():
+    from spyglass.spikesorting.v2._matching.inputs import (
+        enforce_one_electrode_space,
+    )
+
+    enforce_one_electrode_space(_FakeSelection([]), {0: "a", 1: "b"})
+    assert _FakeSelection.warned == []

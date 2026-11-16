@@ -66,6 +66,42 @@ def _warn_clusterless_match_once(sorting_id: str) -> None:
     )
 
 
+def enforce_one_electrode_space(
+    table_cls, choices_by_input, *, allow_divergent_electrodes: bool = False
+) -> None:
+    """Block inputs whose electrode signature differs from the first input's.
+
+    Parameters
+    ----------
+    table_cls : type
+        ``UnitMatchSelection`` (provides the electrode-space hooks).
+    choices_by_input : dict
+        ``{input_index: (sorting_id, curation_id)}``.
+    allow_divergent_electrodes : bool, optional
+        Warn instead of raising. Default ``False``.
+
+    Raises
+    ------
+    ValueError
+        An input maps to a different electrode group, ids or regions than the
+        first input (a different physical sort group) and
+        ``allow_divergent_electrodes`` is ``False``.
+    """
+    if allow_divergent_electrodes:
+        table_cls._warn_on_divergent_electrode_space(choices_by_input)
+        return
+    divergent = table_cls._divergent_electrode_space_members(choices_by_input)
+    if divergent:
+        raise ValueError(
+            "UnitMatchSelection: "
+            + table_cls._divergent_electrode_space_message(divergent)
+            + " They look like a different physical sort group, so a match "
+            "would pair units of different cells. Pass "
+            "allow_divergent_electrodes=True only if these are the same "
+            "implant under different electrode names."
+        )
+
+
 def insert_inputs(
     table_cls,
     curations,
@@ -75,6 +111,7 @@ def insert_inputs(
     unit_selections=None,
     unit_policy: str = "v2_accepted_single_units",
     expected_input_set_hash: str | None = None,
+    allow_divergent_electrodes: bool = False,
 ) -> dict:
     """Find-existing-or-insert a match over explicit inputs; return its key.
 
@@ -136,7 +173,11 @@ def insert_inputs(
         item["input_index"]: (item["sorting_id"], item["curation_id"])
         for item in ordered
     }
-    table_cls._warn_on_divergent_electrode_space(choices_by_input)
+    enforce_one_electrode_space(
+        table_cls,
+        choices_by_input,
+        allow_divergent_electrodes=allow_divergent_electrodes,
+    )
     matcher_name, params = (
         MatcherParameters & {"matcher_params_name": matcher_params_name}
     ).fetch1("matcher", "params")

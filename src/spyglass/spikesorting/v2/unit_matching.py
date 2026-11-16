@@ -309,6 +309,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         unit_selections=None,
         unit_policy: str = "v2_accepted_single_units",
         expected_input_set_hash: str | None = None,
+        allow_divergent_electrodes: bool = False,
     ) -> dict:
         """Find-existing-or-insert a match over explicit inputs; return its key.
 
@@ -317,7 +318,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         ``curation_id``) and numbered ``input_index`` ``0..n-1``. The
         selection id is deterministic over the matcher params and the frozen
         inputs, so input order does not matter. A new selection also runs the
-        electrode-space warning and the backend's optional geometry preflight
+        electrode-space check and the backend's optional geometry preflight
         (UnitMatch requires identical channel geometry).
 
         Parameters
@@ -343,6 +344,10 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         expected_input_set_hash : str, optional
             Reject source or eligibility drift from a reviewed plan before
             inserting any selection rows.
+        allow_divergent_electrodes : bool, optional
+            A new selection whose inputs map to different electrode groups,
+            ids or regions (a different physical sort group) is refused;
+            ``True`` warns instead. Default ``False``.
 
         Returns
         -------
@@ -358,7 +363,9 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             concatenation froze or is gone (chained from the
             ``ConcatMemberDriftError`` / ``MissingRecordingForConcatError``),
             a multi-day concatenation input, a ``SessionGroup`` that does
-            not exist, or geometry the selected backend does not support.
+            not exist, inputs from different electrode spaces (unless
+            ``allow_divergent_electrodes``), or geometry the selected
+            backend does not support.
         OverlappingMatchInputError
             If inputs reuse samples of the same original raw acquisition.
         DuplicateSelectionError
@@ -376,6 +383,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             unit_selections=unit_selections,
             unit_policy=unit_policy,
             expected_input_set_hash=expected_input_set_hash,
+            allow_divergent_electrodes=allow_divergent_electrodes,
         )
 
     @classmethod
@@ -460,6 +468,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             unit_selections=unit_selections,
             unit_policy=unit_policy,
             expected_input_set_hash=expected_input_set_hash,
+            # The SessionGroup already enforces one sort group.
+            allow_divergent_electrodes=True,
         )
 
     @classmethod

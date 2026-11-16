@@ -1131,7 +1131,8 @@ def test_insert_inputs_geometry_is_backend_owned(
     one channel left out does not share the day-1 concatenation's geometry,
     so UnitMatch refuses the selection. A backend without a geometry validator
     accepts the same real inputs without imposing UnitMatch's geometry policy.
-    No inference runs during either selection."""
+    The electrode-space check is opted out of, since these inputs are different
+    sort groups by construction. No inference runs during either selection."""
     import functools
 
     from spyglass.spikesorting.v2.curation import CurationV2
@@ -1253,6 +1254,7 @@ def test_insert_inputs_geometry_is_backend_owned(
                     [subset, cur["concat_day1"]],
                     matcher_params_name,
                     unit_policy="v2_unflagged_single_units",
+                    allow_divergent_electrodes=True,
                 )
             assert len(UnitMatchSelection()) == n_selections
         else:
@@ -1260,6 +1262,7 @@ def test_insert_inputs_geometry_is_backend_owned(
                 [subset, cur["concat_day1"]],
                 matcher_params_name,
                 unit_policy="v2_unflagged_single_units",
+                allow_divergent_electrodes=True,
             )
             assert len(UnitMatchSelection()) == n_selections + 1
             assert len(UnitMatchSelection.Input & selection) == 2
