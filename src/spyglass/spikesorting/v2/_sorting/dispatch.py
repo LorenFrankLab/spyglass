@@ -21,7 +21,7 @@ def without_random_seed(job_kwargs) -> dict:
 
 
 def _should_external_whiten(sorter: str, sorter_params: dict) -> bool:
-    """Whether to whiten externally at float64 instead of in the sorter."""
+    """Whether to whiten externally (float32) instead of in the sorter."""
     return sorter.lower() in _EXTERNAL_WHITEN_SORTERS and bool(
         sorter_params.get("whiten", False)
     )
@@ -60,7 +60,7 @@ class EffectiveSortConfig(NamedTuple):
         ``whiten`` forced to ``False`` when the runtime whitens externally, and
         the MATLAB-container strip applied when relevant.
     external_whiten
-        Whether the runtime whitens the recording itself (float64, seeded) and
+        Whether the runtime whitens the recording itself (float32, seeded) and
         turns the sorter's internal whitening off.
     random_seed
         The effective seed consumed by the external whitening / clusterless
@@ -598,7 +598,7 @@ def run_si_sorter(
 
     - Scratch lives under ``spyglass.settings.temp_dir`` and is removed on
       success or failure.
-    - External-whitening sorters are whitened once, at float64, by
+    - External-whitening sorters are whitened once, at float32, by
       :func:`pinned_whiten`.
     - ``execution_params`` selects local or container execution; MATLAB
       sorters require a container.
@@ -610,7 +610,7 @@ def run_si_sorter(
         ``"mountainsort4"``).
     sorter_params : dict
         The fetched sorter params row passed to ``run_sorter``; a
-        truthy ``whiten`` is moved to the external float64 path.
+        truthy ``whiten`` is moved to the external float32 path.
     recording : si.BaseRecording
         The artifact-masked recording to sort.
     sorting_id : str

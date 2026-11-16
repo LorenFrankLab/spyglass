@@ -80,7 +80,7 @@ class MountainSort5Schema(BaseModel):
       scratch cleanup.
     - ``filter`` defaults to ``False`` because the recording stage already
       bandpass-filters; ``freq_min`` / ``freq_max`` apply only when it is on.
-    - ``whiten=True`` routes through ``run_si_sorter``'s float64 whitening,
+    - ``whiten=True`` routes through ``run_si_sorter``'s float32 whitening,
       which disables MS5's own so the data is whitened once.
     """
 

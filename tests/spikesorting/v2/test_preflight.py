@@ -838,6 +838,58 @@ def test_preflight_empty_sort_group(preflight_inputs):
         (SortGroupV2 & restr).delete_quick()
 
 
+@pytest.mark.database
+def test_kilosort4_on_a_referenced_group_warns_of_double_reference(
+    preflight_inputs,
+):
+    """Kilosort4's do_CAR on an already referenced group is flagged once."""
+    from spyglass.spikesorting.v2._orchestration.preflight_checks import (
+        kilosort4_double_reference_warning,
+    )
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    nwb_file_name = preflight_inputs["nwb_file_name"]
+    referenced, plain = 987101, 987102
+    restr = [
+        {"nwb_file_name": nwb_file_name, "sort_group_id": referenced},
+        {"nwb_file_name": nwb_file_name, "sort_group_id": plain},
+    ]
+    SortGroupV2.insert(
+        [
+            {**restr[0], "reference_mode": "global_median"},
+            {**restr[1], "reference_mode": "none"},
+        ],
+        skip_duplicates=True,
+    )
+    ks4 = {"sorter": "kilosort4", "params": {"nblocks": 5}}
+    try:
+        message = kilosort4_double_reference_warning(
+            ks4, nwb_file_name, referenced
+        )
+        assert message is not None
+        assert "referenced twice" in message
+        assert "reference_mode='global_median'" in message
+        assert str(referenced) in message
+        assert (
+            kilosort4_double_reference_warning(ks4, nwb_file_name, plain)
+            is None
+        )
+        no_car = {"sorter": "kilosort4", "params": {"do_CAR": False}}
+        assert (
+            kilosort4_double_reference_warning(
+                no_car, nwb_file_name, referenced
+            )
+            is None
+        )
+        ms5 = {"sorter": "mountainsort5", "params": {}}
+        assert (
+            kilosort4_double_reference_warning(ms5, nwb_file_name, referenced)
+            is None
+        )
+    finally:
+        (SortGroupV2 & restr).delete_quick()
+
+
 def _make_sort_group(nwb_file_name: str, sort_group_id: int, n_channels: int):
     """Create a SortGroupV2 with exactly ``n_channels`` real members.
 

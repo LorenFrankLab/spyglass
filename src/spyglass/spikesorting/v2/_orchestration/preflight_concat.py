@@ -13,6 +13,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_checks import (
     _check_sort_group,
     _raising_check,
     assert_preset_compute_rows,
+    kilosort4_double_reference_warning,
 )
 from spyglass.spikesorting.v2._orchestration.preflight_motion import (
     MotionRecipe,
@@ -76,12 +77,23 @@ def assert_concat_preflight(
             manual_excluded_times=manual_excluded_times,
             caller=caller,
         )
+    warnings = []
+    for member in members:
+        double_reference = kilosort4_double_reference_warning(
+            sorter_row, member["nwb_file_name"], member["sort_group_id"]
+        )
+        if double_reference is not None:
+            warnings.append(
+                f"concat member {member['member_index']}: {double_reference}"
+            )
     if (
         bundle.artifact_detection_params_name in (None, "none")
         and not manual_excluded_times
     ):
-        return ["No artifact masking selected for the concatenated members."]
-    return []
+        warnings.append(
+            "No artifact masking selected for the concatenated members."
+        )
+    return warnings
 
 
 def _assert_session_group_members(group_key: dict, caller: str) -> list[dict]:

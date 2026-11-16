@@ -182,6 +182,51 @@ def _check_sort_group(
     return sort_group_exists
 
 
+def kilosort4_double_reference_warning(
+    sorter_row: "dict | None", nwb_file_name: str, sort_group_id: int
+) -> "str | None":
+    """Warn when Kilosort4 would re-reference an already referenced group.
+
+    Kilosort4's ``do_CAR`` (default True) common-references the traces it is
+    given, on top of the sort group's own ``reference_mode``.
+
+    Parameters
+    ----------
+    sorter_row : dict or None
+        The preset's ``SorterParameters`` row; ``None`` skips the check.
+    nwb_file_name : str
+        Session of the sort group.
+    sort_group_id : int
+        The sort group the run references.
+
+    Returns
+    -------
+    str or None
+        The warning, or ``None`` when the traces are referenced once.
+    """
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    if sorter_row is None or sorter_row["sorter"] != "kilosort4":
+        return None
+    if not dict(sorter_row["params"] or {}).get("do_CAR", True):
+        return None
+    modes = (
+        SortGroupV2
+        & {"nwb_file_name": nwb_file_name, "sort_group_id": int(sort_group_id)}
+    ).fetch("reference_mode")
+    if not len(modes) or modes[0] == "none":
+        return None
+    return (
+        "kilosort4 with do_CAR=True common-references internally, but sort "
+        f"group {int(sort_group_id)} for {nwb_file_name!r} is already "
+        f"referenced during preprocessing (reference_mode={modes[0]!r}), so "
+        "the traces are referenced twice. Use a sort group with "
+        "reference_mode='none' (SortGroupV2.set_group_by_shank("
+        "nwb_file_name, reference_mode='none')) or set do_CAR=False in the "
+        "SorterParameters row."
+    )
+
+
 def _check_source_param_rows(
     check: "Callable[[str, Any, str], bool]", bundle
 ) -> bool:

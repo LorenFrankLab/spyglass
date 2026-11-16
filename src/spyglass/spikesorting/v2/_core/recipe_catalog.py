@@ -653,7 +653,7 @@ def pipeline_preset_specs() -> dict[str, dict]:
                 "drift correction (nblocks=5 vs stock 1). KS4 does its own "
                 "high-pass + common-reference + ZCA whitening internally "
                 "(skip_kilosort_preprocessing=False, whitening_range=32); the row "
-                "carries no 'whiten' key, so v2's external float64 whitening stays "
+                "carries no 'whiten' key, so v2's external float32 whitening stays "
                 "off and the signal is whitened EXACTLY ONCE (by KS4). The preproc "
                 "row applies the ADC phase-shift KS4 cannot, plus a bandpass; "
                 "because KS4 also common-references (do_CAR=true), set the sort "

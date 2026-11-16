@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._orchestration.preflight_checks import (
     _check_sorter_param_rows,
     _check_source_param_rows,
     assert_preset_compute_rows,
+    kilosort4_double_reference_warning,
 )
 from spyglass.spikesorting.v2._orchestration.preflight_concat import (
     assert_concat_preflight,
@@ -185,6 +186,12 @@ def preflight_v2_pipeline(
             pipeline_preset,
             sorter_row,
         )
+        if sort_group_exists:
+            double_reference = kilosort4_double_reference_warning(
+                sorter_row, nwb_file_name, sort_group_id
+            )
+            if double_reference is not None:
+                warnings.append(double_reference)
     motion_recipe = None
     if motion_mode != "off":
         motion_recipe = _check_motion_stage(
