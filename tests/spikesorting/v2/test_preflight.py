@@ -1936,3 +1936,35 @@ def test_concat_scientific_setup_reports_explicit_no_mask(
     assert setup["artifact_application"] == "No artifact masking selected."
     assert setup["motion"]["mode"] == "off"
     assert "not yet available" not in str(setup["motion"])
+
+
+def test_preflight_says_a_missing_row_needs_its_sorter_installed(
+    dj_conn, monkeypatch
+):
+    """A preset whose shipped sorter row was skipped because the sorter is
+    not installed is reported as such, not as a row initialize_v2_defaults()
+    would add."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from tests.spikesorting.v2.test_sorter_parameters import (
+        _shipped_row_without_its_sorter,
+    )
+
+    row = _shipped_row_without_its_sorter(monkeypatch)
+    base = presets_mod._PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        {
+            **presets_mod._PIPELINE_PRESETS,
+            "h9_absent_sorter_preset": base.model_copy(
+                update={"sorter_params_name": row[1]}
+            ),
+        },
+    )
+    report = preflight_v2_pipeline(
+        "x.nwb", 0, _INTERVAL, "team", pipeline_preset="h9_absent_sorter_preset"
+    )
+    (fix,) = [c.fix for c in report.checks if c.name == "sorter_params_exist"]
+    assert repr(row[1]) in fix
+    assert "not installed" in fix
+    assert "Install the sorter" in fix

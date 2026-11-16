@@ -329,13 +329,19 @@ def _check_sorter_param_rows(
         "sorter": bundle.sorter,
         "sorter_params_name": bundle.sorter_params_name,
     }
-    sorter_params_exist = sort_checks and check(
-        "sorter_params_exist",
-        sorter_params_query,
-        f"SorterParameters row (sorter={bundle.sorter!r}, "
-        f"sorter_params_name={bundle.sorter_params_name!r})"
-        " is missing. Run initialize_v2_defaults().",
-    )
+    sorter_params_exist = sort_checks and bool(sorter_params_query)
+    if sort_checks:
+        check(
+            "sorter_params_exist",
+            sorter_params_exist,
+            (
+                ""
+                if sorter_params_exist
+                else SorterParameters.missing_row_fix(
+                    bundle.sorter, bundle.sorter_params_name
+                )
+            ),
+        )
     sorter_row = None
     if sorter_params_exist:
         from spyglass.spikesorting.v2._params.sorter import (

@@ -1880,3 +1880,61 @@ def test_clone_with_an_invalid_value_names_the_override_stage_and_base_row(
     assert "sorter" in message
     assert repr(base_row) in message
     assert new_name not in list_pipeline_presets()
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_describe_pipeline_preset_says_a_missing_row_needs_its_sorter(
+    dj_conn, monkeypatch
+):
+    """describe_pipeline_preset gives the same not-installed fix as preflight
+    for a shipped sorter row that was skipped."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+    from tests.spikesorting.v2.test_sorter_parameters import (
+        _shipped_row_without_its_sorter,
+    )
+
+    initialize_v2_defaults()
+    row = _shipped_row_without_its_sorter(monkeypatch)
+    base = presets_mod._PIPELINE_PRESETS["franklab_neuropixels_ks4_2026_06"]
+    monkeypatch.setattr(
+        presets_mod,
+        "_PIPELINE_PRESETS",
+        {
+            **presets_mod._PIPELINE_PRESETS,
+            "h9_absent_sorter_preset": base.model_copy(
+                update={"sorter_params_name": row[1]}
+            ),
+        },
+    )
+    with pytest.raises(PipelineInputError) as error:
+        describe_pipeline_preset("h9_absent_sorter_preset")
+    message = str(error.value)
+    assert "h9_absent_sorter_preset" in message
+    assert repr(row[1]) in message
+    assert "not installed" in message
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_register_with_an_unknown_sorter_row_says_initialize_will_not_add_it(
+    dj_conn, monkeypatch
+):
+    """Registering a preset that names a sorter row nobody inserted says the
+    row is not a shipped default, instead of pointing at
+    initialize_v2_defaults()."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+    initialize_v2_defaults()
+    monkeypatch.setattr(
+        presets_mod, "_PIPELINE_PRESETS", dict(presets_mod._PIPELINE_PRESETS)
+    )
+    spec = {**_custom_spec(), "sorter_params_name": "h9_never_inserted"}
+    with pytest.raises(ValueError) as error:
+        register_pipeline_preset("lab_h9_2026_11", spec)
+    message = str(error.value)
+    assert "'h9_never_inserted'" in message
+    assert "not a shipped default" in message

@@ -595,3 +595,56 @@ def test_is_seed_dependent_sort_flags_only_stochastic_paths():
         )
         is False
     )
+
+
+def _shipped_row_without_its_sorter(monkeypatch, name="h9_absent_ks4_2026_11"):
+    """Ship one more local Kilosort4 row and report Kilosort4 not installed.
+
+    The row is never stored, so its absence is real and needs no delete.
+    """
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    base = next(
+        row
+        for row in SorterParameters._DEFAULT_CONTENTS
+        if row[0] == "kilosort4"
+    )
+    row = (base[0], name, *base[2:])
+    monkeypatch.setattr(
+        SorterParameters,
+        "_DEFAULT_CONTENTS",
+        (*SorterParameters._DEFAULT_CONTENTS, row),
+    )
+    monkeypatch.setattr(sis, "installed_sorters", lambda: ["mountainsort5"])
+    return row
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_missing_sorter_row_fix_says_why_initialize_will_not_help(
+    monkeypatch,
+):
+    """A missing sorter row's fix depends on why it is missing: a shipped
+    row whose sorter is not installed needs the sorter installed, a shipped
+    row otherwise needs initialize_v2_defaults(), and any other row is not
+    something initialize_v2_defaults() creates."""
+    import spikeinterface.sorters as sis
+
+    from spyglass.spikesorting.v2.sorting import SorterParameters
+
+    row = _shipped_row_without_its_sorter(monkeypatch)
+    uninstalled = SorterParameters.missing_row_fix(row[0], row[1])
+    assert repr(row[0]) in uninstalled and repr(row[1]) in uninstalled
+    assert "not installed" in uninstalled
+    assert "Install the sorter" in uninstalled
+    assert "describe_pipeline_presets()" in uninstalled
+
+    monkeypatch.setattr(sis, "installed_sorters", lambda: ["kilosort4"])
+    installed = SorterParameters.missing_row_fix(row[0], row[1])
+    assert "not installed" not in installed
+    assert "initialize_v2_defaults()" in installed
+
+    custom = SorterParameters.missing_row_fix("kilosort4", "lab_own_row")
+    assert "not a shipped default" in custom
+    assert "will not create it" in custom

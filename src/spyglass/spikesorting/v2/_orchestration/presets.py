@@ -119,9 +119,17 @@ def _unknown_pipeline_preset_message(
 def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
     """Return ``table & restriction``; raise ``PipelineInputError`` if empty.
 
-    The message points at ``initialize_v2_defaults()``.
+    The message points at ``initialize_v2_defaults()``, or for a sorter row
+    at :meth:`SorterParameters.missing_row_fix`.
     """
     rel = table & restriction
+    if not rel and table.__name__ == "SorterParameters":
+        raise PipelineInputError(
+            f"{caller}: preset {preset_name!r}: "
+            + table.missing_row_fix(
+                restriction["sorter"], restriction["sorter_params_name"]
+            )
+        )
     if not rel:
         raise PipelineInputError(
             f"{caller}: {table.__name__} row {row!r} referenced by preset "
@@ -577,6 +585,13 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
             )
         )
     for table, restriction, label, row_name in checks:
+        if not (table & restriction) and table is SorterParameters:
+            raise PipelineInputError(
+                f"register_pipeline_preset({name!r}): "
+                + SorterParameters.missing_row_fix(
+                    preset.sorter, preset.sorter_params_name
+                )
+            )
         if not (table & restriction):
             raise PipelineInputError(
                 f"register_pipeline_preset({name!r}): row {row_name!r} not found in "

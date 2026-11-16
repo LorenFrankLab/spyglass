@@ -340,6 +340,52 @@ class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         cls()._insert_missing_defaults(insertable)
 
     @classmethod
+    def missing_row_fix(cls, sorter: str, sorter_params_name: str) -> str:
+        """Say why a sorter row is missing and what creates it.
+
+        ``initialize_v2_defaults()`` inserts only the shipped rows whose
+        sorter is installed (or runs in a container), so its hint depends on
+        which of those the row is.
+
+        Parameters
+        ----------
+        sorter : str
+            The row's ``sorter``.
+        sorter_params_name : str
+            The row's ``sorter_params_name``.
+
+        Returns
+        -------
+        str
+            The fix: install the sorter for a shipped row
+            ``insert_default`` skipped, run ``initialize_v2_defaults()`` for
+            any other shipped row, or insert or clone the row when it is not
+            shipped.
+        """
+        label = (
+            f"SorterParameters row (sorter={sorter!r}, "
+            f"sorter_params_name={sorter_params_name!r})"
+        )
+        key = (sorter, sorter_params_name)
+        if not any(tuple(row[:2]) == key for row in cls._DEFAULT_CONTENTS):
+            return (
+                f"{label} is missing and is not a shipped default, so "
+                "initialize_v2_defaults() will not create it. Insert it with "
+                "SorterParameters.insert1(...) or clone_pipeline_preset(...), "
+                "or pick another preset (describe_pipeline_presets())."
+            )
+        _, skipped = cls._gated_default_rows()
+        if any(tuple(row[:2]) == key for row in skipped):
+            return (
+                f"{label} is missing because sorter {sorter!r} is not "
+                "installed in this environment, so initialize_v2_defaults() "
+                "skips it. Install the sorter and run initialize_v2_defaults() "
+                "again, or pick a preset whose sorter is installed "
+                "(describe_pipeline_presets())."
+            )
+        return f"{label} is missing. Run initialize_v2_defaults()."
+
+    @classmethod
     def _gated_default_rows(cls):
         """Split ``_DEFAULT_CONTENTS`` into (insertable, skipped) by install.
 

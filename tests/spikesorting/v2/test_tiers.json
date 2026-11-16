@@ -712,11 +712,13 @@
         "test_clone_with_an_invalid_value_names_the_override_stage_and_base_row": "db_unit",
         "test_describe_pipeline_preset_artifact_none_skips_artifact": "db_unit",
         "test_describe_pipeline_preset_missing_row_points_to_initialize_defaults": "db_unit",
+        "test_describe_pipeline_preset_says_a_missing_row_needs_its_sorter": "db_unit",
         "test_describe_pipeline_preset_surfaces_curation_names": "db_unit",
         "test_describe_pipeline_preset_unpacks_curation_values": "db_unit",
         "test_register_pipeline_preset_catches_missing_auto_curation_row": "db_unit",
         "test_register_pipeline_preset_catches_missing_lookup_row": "db_unit",
         "test_register_pipeline_preset_catches_missing_metric_row": "db_unit",
+        "test_register_with_an_unknown_sorter_row_says_initialize_will_not_add_it": "db_unit",
         "test_run_v2_concat_pipeline_accepts_single_session_preset": "pipeline",
         "test_run_entry_points_forward_every_option_to_its_stage": "db_unit",
         "test_run_v2_unit_match_unknown_matcher_raises": "db_unit"
