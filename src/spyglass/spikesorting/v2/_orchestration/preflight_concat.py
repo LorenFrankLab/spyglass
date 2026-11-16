@@ -98,7 +98,6 @@ def assert_concat_preflight(
             manual_excluded_times=manual_excluded_times,
             caller=caller,
         )
-    warnings = []
     for member in members:
         double_reference = kilosort4_double_reference_warning(
             sorter_row, member["nwb_file_name"], member["sort_group_id"]
