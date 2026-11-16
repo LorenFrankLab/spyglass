@@ -40,7 +40,9 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
     POLARITY_EXTENSIONS,
     STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
     _AnalyzerSparsityInputsError,
+    _json_params,
     analyzer_sparsity_validator,
+    expected_extension_params,
     polarity_extension_params,
     resolve_display_waveform_params_name,
 )
@@ -373,13 +375,22 @@ def _extension_inventory(
 
 
 def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
-    """Whether ``analyzer`` carries ``name`` with every requested parameter.
+    """Whether ``analyzer`` carries ``name`` computed with ``requested``.
 
-    Keys absent from ``requested`` are unconstrained. Values compare
+    A non-base extension must store exactly the params
+    :func:`expected_extension_params` derives from ``requested`` (``{}``
+    means SpikeInterface defaults), so a stored non-default never satisfies
+    a default request. A base extension carries Spyglass-pinned recipe
+    params: only the requested keys are constrained. Values compare
     JSON-natively (``1 == 1.0``).
     """
     if not analyzer.has_extension(name):
         return False
+    if name not in BASE_ANALYZER_EXTENSIONS:
+        stored = dict(analyzer_extension_params(analyzer, name))
+        return _json_params(stored) == expected_extension_params(
+            analyzer, name, requested=requested
+        )
     if not requested:
         return True
 
@@ -388,6 +399,17 @@ def extension_params_match(analyzer, name: str, requested: Mapping) -> bool:
     return all(
         key in stored and stored[key] == value for key, value in wanted.items()
     )
+
+
+def _requests_default_params(analyzer, name, requested, sorter_params) -> bool:
+    """Whether ``requested`` resolves to the sort's default params for ``name``.
+
+    The defaults are SpikeInterface's plus the sort's polarity.
+    """
+    peak_sign = resolve_peak_sign(sorter_params)
+    return expected_extension_params(
+        analyzer, name, peak_sign=peak_sign, requested=requested
+    ) == expected_extension_params(analyzer, name, peak_sign=peak_sign)
 
 
 def _read_manifest(folder: Path) -> dict:
@@ -738,14 +760,21 @@ def _resolve_curation_analyzer(
             )
         )
     if namespace == "raw":
-        # Absent extensions persist to the shared analyzer. Present ones with
-        # other params go to a derivative so other readers are unaffected.
+        # Only default-param absent extensions persist to the shared analyzer;
+        # anything else goes to a derivative so other readers are unaffected.
         base = Sorting().get_analyzer(
             {"sorting_id": row["sorting_id"]},
             waveform_params_name=waveform_recipe,
             load_extensions=False,
         )
-        absent = [name for name in request if not base.has_extension(name)]
+        absent = [
+            name
+            for name in request
+            if not base.has_extension(name)
+            and _requests_default_params(
+                base, name, request[name], sorter_params()
+            )
+        ]
         if absent:
             Sorting().add_extensions(
                 {"sorting_id": row["sorting_id"]},
@@ -858,7 +887,8 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
 
     SpikeInterface deletes every dependent of a recomputed extension, so each
     required dependent (base set plus request) is recomputed too, at the
-    requested params or else its stored params. Runs inside
+    requested params (``{}`` means defaults) or else its stored params. Runs
+    inside
     ``isolated_si_metric_defaults`` because SI otherwise merges stored
     ``metric_params`` into its class-level defaults.
 
@@ -878,15 +908,13 @@ def _compute_request_on_copy(analyzer, request, needs_compute, *, job_kwargs):
     for name in list(plan):
         for child in _get_children_dependencies(name):
             if child in required and child not in plan:
-                plan[child] = dict(
-                    request.get(child)
-                    or (
-                        analyzer.get_extension(child).params
-                        if analyzer.has_extension(child)
-                        else {}
-                    )
-                    or {}
-                )
+                # A requested ``{}`` means defaults, not the stored params.
+                if child in request:
+                    plan[child] = dict(request[child])
+                elif analyzer.has_extension(child):
+                    plan[child] = dict(analyzer.get_extension(child).params)
+                else:
+                    plan[child] = {}
     compute_kwargs = without_random_seed(job_kwargs)
     for name in plan:
         if analyzer.has_extension(name):

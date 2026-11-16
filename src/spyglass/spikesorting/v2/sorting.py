@@ -1523,8 +1523,10 @@ class Sorting(
             display recipe.
         extension_params : dict, optional
             Per-extension parameter dictionaries forwarded to
-            :func:`ensure_extensions`. Amplitude and location extensions
-            always use the sort's polarity (``resolve_peak_sign``).
+            :func:`ensure_extensions`. They must resolve to SpikeInterface's
+            defaults, since the shared analyzer is read by every consumer;
+            amplitude and location extensions always use the sort's polarity
+            (``resolve_peak_sign``).
         **kwargs
             Job kwargs that override the resolved per-row defaults.
 
@@ -1533,11 +1535,21 @@ class Sorting(
         list of str
             The extensions actually computed (already-present ones are
             skipped); empty when every requested extension already exists.
+
+        Raises
+        ------
+        ValueError
+            If ``extension_params`` requests non-default params. Use
+            ``CurationRef.open_analyzer(extra_extensions=...)``, which
+            computes them into a derivative.
         """
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
-        from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
+        from spyglass.spikesorting.v2._sorting.analyzer import (
+            ensure_extensions,
+            expected_extension_params,
+        )
 
         sorting_id = (self & key).fetch1("sorting_id")
         sorter_params, sorter_job_kwargs = (
@@ -1550,10 +1562,29 @@ class Sorting(
             analyzer = self.get_analyzer(
                 key, waveform_params_name=waveform_params_name
             )
+            peak_sign = resolve_peak_sign(sorter_params)
+            non_default = [
+                name
+                for name, params in (extension_params or {}).items()
+                if expected_extension_params(
+                    analyzer, name, peak_sign=peak_sign, requested=params
+                )
+                != expected_extension_params(
+                    analyzer, name, peak_sign=peak_sign
+                )
+            ]
+            if non_default:
+                raise ValueError(
+                    "Sorting.add_extensions writes the shared sort analyzer, "
+                    "which holds SpikeInterface-default extension params; "
+                    f"{non_default} request others. Use "
+                    "CurationRef.open_analyzer(extra_extensions=...) to "
+                    "compute them into a derivative."
+                )
             return ensure_extensions(
                 analyzer,
                 extensions,
-                peak_sign=resolve_peak_sign(sorter_params),
+                peak_sign=peak_sign,
                 job_kwargs=resolved,
                 extension_params=extension_params,
             )

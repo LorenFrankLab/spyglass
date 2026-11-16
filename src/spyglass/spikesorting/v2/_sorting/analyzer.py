@@ -70,6 +70,102 @@ def polarity_extension_params(names, peak_sign, extension_params=None):
     return params
 
 
+def _json_params(params) -> dict:
+    """Return extension params as JSON-native values for comparison."""
+    import json
+
+    return json.loads(
+        json.dumps(
+            dict(params or {}),
+            default=lambda value: (
+                value.tolist() if hasattr(value, "tolist") else str(value)
+            ),
+        )
+    )
+
+
+def expected_extension_params(
+    analyzer, name, *, peak_sign=None, requested=None
+) -> dict:
+    """The params ``analyzer.compute(name, **requested)`` would store.
+
+    SpikeInterface's defaults for the installed version, overridden by
+    ``requested`` and, when ``peak_sign`` is given, the sort's polarity on a
+    :data:`POLARITY_EXTENSIONS` member. Nothing is computed.
+
+    Parameters
+    ----------
+    analyzer : si.SortingAnalyzer
+        The analyzer the extension belongs to.
+    name : str
+        The extension name.
+    peak_sign : {"neg", "pos", "both"}, optional
+        The sort's polarity; ``None`` leaves ``requested`` as given.
+    requested : dict, optional
+        Caller parameters; ``None`` or ``{}`` means SpikeInterface defaults.
+
+    Returns
+    -------
+    dict
+        JSON-native parameters, comparable with the stored ones.
+    """
+    from spikeinterface.core.sortinganalyzer import get_extension_class
+
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        isolated_si_metric_defaults,
+    )
+
+    params = dict(requested or {})
+    if peak_sign is not None:
+        params = polarity_extension_params([name], peak_sign, {name: params})[
+            name
+        ]
+    # SI private API: _set_params normalizes exactly as compute() stores, and
+    # merges metric_params into SI's class defaults unless isolated.
+    extension = get_extension_class(name)(analyzer)
+    with isolated_si_metric_defaults():
+        return _json_params(extension._set_params(**params))
+
+
+def stored_params_mismatch(
+    analyzer, names, *, peak_sign, extension_params=None
+) -> list[str]:
+    """Present non-base extensions whose stored params differ from expected.
+
+    Base extensions carry Spyglass-pinned recipe params and are skipped.
+
+    Parameters
+    ----------
+    analyzer : si.SortingAnalyzer
+        The analyzer to inspect; payloads are not loaded.
+    names : list of str
+        Extension names to check; absent ones are ignored.
+    peak_sign : {"neg", "pos", "both"}
+        The sort's polarity.
+    extension_params : dict, optional
+        Per-extension requested params; missing names mean defaults.
+
+    Returns
+    -------
+    list of str
+        The mismatched extension names, in ``names`` order.
+    """
+    requested = extension_params or {}
+    return [
+        name
+        for name in names
+        if name not in BASE_ANALYZER_EXTENSIONS
+        and analyzer.has_extension(name)
+        and _json_params(analyzer_extension_params(analyzer, name))
+        != expected_extension_params(
+            analyzer,
+            name,
+            peak_sign=peak_sign,
+            requested=requested.get(name),
+        )
+    ]
+
+
 def ensure_review_template_percentiles(analyzer) -> None:
     """Store the template percentiles the review's waveform view shades with.
 
@@ -120,10 +216,13 @@ _INVALID_CACHE_ERRORS = (
 def ensure_extensions(
     analyzer, names, *, peak_sign, job_kwargs=None, extension_params=None
 ):
-    """Compute only the SortingAnalyzer extensions not already present.
+    """Compute the SortingAnalyzer extensions not present with these params.
 
-    Recomputing a parent would cascade-delete its children. ``random_seed``
-    is stripped from ``job_kwargs``.
+    A present base extension is kept: recomputing a parent would
+    cascade-delete its children. A present non-base extension whose stored
+    params differ from what this call would compute is deleted and
+    recomputed, with a warning. ``random_seed`` is stripped from
+    ``job_kwargs``.
 
     Parameters
     ----------
@@ -143,11 +242,24 @@ def ensure_extensions(
     Returns
     -------
     list of str
-        The extensions actually computed (already-present ones are skipped).
+        The extensions actually computed, including recomputed mismatches.
     """
     from spyglass.spikesorting.v2._sorting.dispatch import without_random_seed
 
     compute_kwargs = without_random_seed(job_kwargs)
+    mismatched = stored_params_mismatch(
+        analyzer, names, peak_sign=peak_sign, extension_params=extension_params
+    )
+    if mismatched:
+        from spyglass.utils import logger
+
+        logger.warning(
+            "ensure_extensions: stored params of %s differ from the requested "
+            "or SpikeInterface-default params; recomputing them.",
+            mismatched,
+        )
+        for name in mismatched:
+            analyzer.delete_extension(name)
     to_add = [name for name in names if not analyzer.has_extension(name)]
     if to_add:
         params = {

@@ -831,21 +831,6 @@ _PCA_EXTENSION_PARAMS = {
 }
 
 
-def _pca_params_match(existing: dict) -> bool:
-    """True if a stored ``principal_components`` matches the pinned params.
-
-    Compares only the pinned keys; ``dtype`` is normalized via ``np.dtype``.
-    """
-    for key, pinned in _PCA_EXTENSION_PARAMS.items():
-        value = existing.get(key)
-        if key == "dtype":
-            if value is None or np.dtype(value) != np.dtype(pinned):
-                return False
-        elif value != pinned:
-            return False
-    return True
-
-
 _AUTO_MERGE_EXTRA_EXTENSIONS = {
     # The ``knn`` step also needs spike_locations.
     "feature_neighbors": ("spike_locations",),
@@ -1222,20 +1207,7 @@ def compute_metrics(
             metric_analyzer.compute(
                 "templates", operators=[*templates_operators, "median"]
             )
-        # ensure_extensions skips a present extension without checking its
-        # params, so drop a mismatched PCA first.
-        if metric_analyzer.has_extension("principal_components"):
-            existing_pca = dict(
-                metric_analyzer.get_extension("principal_components").params
-            )
-            if not _pca_params_match(existing_pca):
-                logger.warning(
-                    "CurationEvaluation: principal_components on the metric "
-                    f"analyzer has params {existing_pca} != pinned "
-                    f"{_PCA_EXTENSION_PARAMS}; deleting and recomputing "
-                    "with the pinned params so PC/NN metrics are consistent."
-                )
-                metric_analyzer.delete_extension("principal_components")
+        # Recomputes a stored PCA whose params differ from the pinned ones.
         ensure_extensions(
             metric_analyzer,
             ["principal_components"],

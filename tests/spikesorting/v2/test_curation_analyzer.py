@@ -862,6 +862,25 @@ def test_merged_unit_waveform_correlogram_and_ssviz_render(
             .get_analyzer(sorting_key)
             .has_extension("template_similarity")
         )
+        # An absent extension with non-default params goes to a derivative,
+        # never to the shared analyzer that evaluation reads.
+        with analyzer_cache_lock(sorting_key["sorting_id"]):
+            shared = Sorting().get_analyzer(sorting_key)
+            if shared.has_extension("spike_locations"):
+                shared.delete_extension("spike_locations")
+        grid = {"spike_locations": {"method": "grid_convolution"}}
+        with curation_analyzer_with_extensions(
+            root, recipe, extra_extensions=grid
+        ) as raw_grid:
+            assert (
+                raw_grid.get_extension("spike_locations").params["method"]
+                == "grid_convolution"
+            )
+        assert (
+            not Sorting()
+            .get_analyzer(sorting_key)
+            .has_extension("spike_locations")
+        )
 
         selection = CurationEvaluationSelection.insert_selection(
             {
@@ -1004,29 +1023,43 @@ def test_preview_curation_requires_commit(
         clear_curations_for(sorting_key)
 
 
-def test_extension_params_match_semantics():
-    """Partial requests constrain only their keys; mismatches are not present."""
+def _small_analyzer(folder, extensions, extension_params=None):
+    """A real binary-folder analyzer over a tiny ground-truth recording."""
+    import spikeinterface as si
+
+    rec, sort = si.generate_ground_truth_recording(
+        durations=[10.0], num_units=4, num_channels=8, seed=0
+    )
+    analyzer = si.create_sorting_analyzer(
+        sort, rec, format="binary_folder", folder=folder
+    )
+    analyzer.compute(
+        ["random_spikes", "noise_levels", "waveforms", "templates"],
+        extension_params={
+            "random_spikes": {"seed": 0},
+            "noise_levels": {"random_slices_kwargs": {"seed": 0}},
+        },
+        n_jobs=1,
+        progress_bar=False,
+    )
+    analyzer.compute(
+        list(extensions),
+        extension_params=extension_params,
+        n_jobs=1,
+        progress_bar=False,
+    )
+    return analyzer
+
+
+def test_extension_params_match_semantics(tmp_path):
+    """A derived extension matches only the full params its request resolves
+    to (``{}`` means SpikeInterface defaults); a stored non-default never
+    satisfies a default request."""
     from spyglass.spikesorting.v2._curation.analyzer import (
         extension_params_match,
     )
 
-    class _Ext:
-        def __init__(self, params):
-            self.params = params
-
-    class _Analyzer:
-        format = "memory"
-
-        def __init__(self, exts):
-            self._exts = exts
-
-        def has_extension(self, name):
-            return name in self._exts
-
-        def get_extension(self, name):
-            return _Ext(self._exts[name])
-
-    analyzer = _Analyzer({"correlograms": {"bin_ms": 1.0, "window_ms": 50.0}})
+    analyzer = _small_analyzer(tmp_path / "a.analyzer", ["correlograms"])
     assert extension_params_match(analyzer, "correlograms", {})
     assert extension_params_match(analyzer, "correlograms", {"bin_ms": 1})
     assert not extension_params_match(analyzer, "correlograms", {"bin_ms": 0.2})
@@ -1034,6 +1067,95 @@ def test_extension_params_match_semantics():
         analyzer, "correlograms", {"window_ms": 50.0, "bin_ms": 0.5}
     )
     assert not extension_params_match(analyzer, "spike_locations", {})
+
+    coarse = _small_analyzer(
+        tmp_path / "b.analyzer",
+        ["correlograms"],
+        {"correlograms": {"bin_ms": 5.0}},
+    )
+    assert not extension_params_match(coarse, "correlograms", {})
+    assert extension_params_match(coarse, "correlograms", {"bin_ms": 5.0})
+
+
+def test_expected_extension_params_match_what_spikeinterface_stores(tmp_path):
+    """The SI-private normalization ``expected_extension_params`` relies on
+    reproduces the params ``compute`` stores, for every consumed extension."""
+    from spyglass.spikesorting.v2._curation.metrics import (
+        _PCA_EXTENSION_PARAMS,
+    )
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        POLARITY_EXTENSIONS,
+        STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+        _json_params,
+        expected_extension_params,
+        stored_params_mismatch,
+    )
+
+    names = [
+        *STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
+        "spike_locations",
+        "principal_components",
+    ]
+    requested = {name: {"peak_sign": "pos"} for name in POLARITY_EXTENSIONS}
+    requested["principal_components"] = dict(_PCA_EXTENSION_PARAMS)
+    analyzer = _small_analyzer(tmp_path / "a.analyzer", names, requested)
+    for name in names:
+        assert _json_params(
+            analyzer.get_extension(name).params
+        ) == expected_extension_params(
+            analyzer, name, peak_sign="pos", requested=requested.get(name)
+        )
+    assert (
+        stored_params_mismatch(
+            analyzer, names, peak_sign="pos", extension_params=requested
+        )
+        == []
+    )
+    # Normalizing a request must not leak into SI's class-level defaults.
+    from spikeinterface.metrics.template.metrics import RecoverySlope
+
+    expected_extension_params(
+        analyzer,
+        "template_metrics",
+        requested={
+            "metric_names": ["recovery_slope"],
+            "metric_params": {"recovery_slope": {"recovery_window_ms": 0.5}},
+        },
+    )
+    assert RecoverySlope.metric_params == {"recovery_window_ms": 0.7}
+
+
+def test_ensure_extensions_recomputes_stored_non_default_params(tmp_path):
+    """Consumers that read stored extensions get SpikeInterface defaults,
+    even when a caller stored other params on the shared analyzer first."""
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        ensure_extensions,
+        expected_extension_params,
+    )
+    from spyglass.spikesorting.v2._curation.analyzer import (
+        extension_params_match,
+    )
+
+    analyzer = _small_analyzer(
+        tmp_path / "a.analyzer",
+        ["correlograms", "spike_amplitudes"],
+        {
+            "correlograms": {"bin_ms": 5.0},
+            "spike_amplitudes": {"peak_sign": "neg"},
+        },
+    )
+    computed = ensure_extensions(
+        analyzer,
+        ["correlograms", "spike_amplitudes"],
+        peak_sign="neg",
+        job_kwargs={"n_jobs": 1, "progress_bar": False},
+    )
+    assert computed == ["correlograms"]
+    assert extension_params_match(analyzer, "correlograms", {})
+    assert (
+        analyzer.get_extension("correlograms").params["bin_ms"]
+        == expected_extension_params(analyzer, "correlograms")["bin_ms"]
+    )
 
 
 def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
@@ -1128,10 +1250,10 @@ def test_compute_request_on_copy_restores_invalidated_dependents(tmp_path):
 
 
 def test_compute_request_on_copy_keeps_si_metric_defaults(tmp_path):
-    """Recomputing stored template metrics leaves SI's defaults alone (real SI).
+    """Recomputing template metrics leaves SI's defaults alone (real SI).
 
     ``templates`` is recomputed, so SI drops the dependent
-    ``template_metrics`` and it is recomputed at its stored params, which
+    ``template_metrics`` and it is recomputed at its requested params, which
     carry a non-default ``recovery_window_ms``. SI merges those params into
     ``RecoverySlope``'s class-level defaults unless the compute is isolated.
     """
@@ -1172,7 +1294,10 @@ def test_compute_request_on_copy_keeps_si_metric_defaults(tmp_path):
 
     request = {
         "templates": {"operators": ["average", "median"]},
-        "template_metrics": {},
+        "template_metrics": {
+            "metric_names": ["recovery_slope"],
+            "metric_params": {"recovery_slope": {"recovery_window_ms": 0.5}},
+        },
     }
     _compute_request_on_copy(
         analyzer, request, {"templates": request["templates"]}, job_kwargs={}

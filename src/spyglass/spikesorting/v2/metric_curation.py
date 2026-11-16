@@ -1376,10 +1376,11 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
     @contextmanager
     def _display_analyzer(self, key, *, extra_extensions=None):
-        """Yield a display analyzer without mutating its published cache.
+        """Yield a display analyzer carrying ``extra_extensions``.
 
-        A missing extension is computed into a disk-backed derivative, never
-        into the published cache.
+        A missing default-param extension of a raw-sort curation persists to
+        the shared sort analyzer; anything else is computed into a disk-backed
+        derivative.
         """
         from spyglass.spikesorting.v2._curation.analyzer import (
             curation_analyzer_with_extensions,

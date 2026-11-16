@@ -34,3 +34,17 @@ def test_add_extensions_idempotent(populated_sorting):
 
     # A base (sort-time) extension is never recomputed by add_extensions.
     assert sorting.add_extensions(populated_sorting, ["waveforms"]) == []
+
+    # Non-default params would leak to every reader of the shared analyzer.
+    with pytest.raises(ValueError, match="open_analyzer"):
+        sorting.add_extensions(
+            populated_sorting,
+            ["correlograms"],
+            extension_params={"correlograms": {"bin_ms": 5.0}},
+        )
+    assert (
+        sorting.get_analyzer(populated_sorting)
+        .get_extension("correlograms")
+        .params["bin_ms"]
+        != 5.0
+    )
