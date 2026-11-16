@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -177,6 +178,134 @@ def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
         restrict_by_artifact=True,
     )
     assert any("artifact-restricted" in msg for msg in captured), captured
+
+
+# ---------- one sorting pipeline per decoding group ---------------------------
+# v0/v1 rows cannot be populated under SI 0.104, so these tests stub only the
+# master-table source lookup and run the real checks.
+
+
+def _stub_sources(monkeypatch, sources: dict) -> list:
+    """Make ``_merge_source_map`` report ``sources``; return their merge ids."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    monkeypatch.setattr(
+        m.SpikeSortingOutput,
+        "_merge_source_map",
+        classmethod(
+            lambda cls, merge_ids: {
+                str(mid): sources[str(mid)]
+                for mid in merge_ids
+                if str(mid) in sources
+            }
+        ),
+    )
+    return [uuid.UUID(mid) for mid in sources]
+
+
+def _capture_warnings(monkeypatch) -> list:
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    captured = []
+    monkeypatch.setattr(
+        m.logger, "warning", lambda msg, *a, **k: captured.append(msg)
+    )
+    return captured
+
+
+@pytest.mark.parametrize("v2_importable", [True, False])
+def test_decoding_group_rejects_v2_mixed_with_v0_v1(
+    dj_conn, monkeypatch, v2_importable
+):
+    """A group mixing v2 and v0/v1 outputs would count one session's units
+    twice, so it raises, also in a process where v2 did not import."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    if not v2_importable:
+        monkeypatch.setattr(m, "CurationV2", None)
+        monkeypatch.setattr(m, "ConcatMemberCurationV2", None)
+    for legacy in ("CurationV1", "CuratedSpikeSorting"):
+        merge_ids = _stub_sources(
+            monkeypatch,
+            {str(uuid.uuid4()): "CurationV2", str(uuid.uuid4()): legacy},
+        )
+        with pytest.raises(ValueError, match="mix spike sorting v2 outputs"):
+            m.SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+
+
+def test_decoding_group_allows_one_pipeline_or_imported(dj_conn, monkeypatch):
+    """v0+v1, v2 single+member, and v2+ImportedSpikeSorting are not a
+    v2/v0-v1 mix."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    for pair in (
+        ("CurationV1", "CuratedSpikeSorting"),
+        ("CurationV2", "ConcatMemberCurationV2"),
+        ("CurationV2", "ImportedSpikeSorting"),
+    ):
+        merge_ids = _stub_sources(
+            monkeypatch, {str(uuid.uuid4()): source for source in pair}
+        )
+        m.SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+
+
+def test_default_sources_warn_when_v2_and_v0_v1_both_match(
+    dj_conn, monkeypatch
+):
+    """Default sources route a v1-style key to v2 too; returning both
+    families warns, an explicit source list or a one-family result does not."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    v1_ids, v2_ids = [uuid.uuid4()], [uuid.uuid4()]
+    monkeypatch.setattr(
+        m.SpikeSortingOutput,
+        "_get_restricted_merge_ids_v1",
+        lambda self, key, **kwargs: list(v1_ids),
+    )
+    monkeypatch.setattr(
+        m.SpikeSortingOutput,
+        "_get_restricted_merge_ids_v2",
+        lambda self, key, **kwargs: list(v2_ids),
+    )
+    key = {"nwb_file_name": "absent_v1_v2_mix_.nwb", "curation_id": 1}
+
+    def mix_warnings(**kwargs):
+        captured = _capture_warnings(monkeypatch)
+        m.SpikeSortingOutput().get_restricted_merge_ids(dict(key), **kwargs)
+        return [msg for msg in captured if "both pipelines" in msg]
+
+    assert len(mix_warnings()) == 1
+    assert mix_warnings(sources=["v0", "v1", "v2"]) == []
+    v2_ids.clear()
+    assert mix_warnings() == []
+
+
+def test_spike_accessor_counts_v2_sources_as_one_pipeline(dj_conn, monkeypatch):
+    """CurationV2 and ConcatMemberCurationV2 are one pipeline; v2 with
+    ImportedSpikeSorting is two."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    v2_only = _stub_sources(
+        monkeypatch,
+        {
+            str(uuid.uuid4()): "CurationV2",
+            str(uuid.uuid4()): "ConcatMemberCurationV2",
+        },
+    )
+    captured = _capture_warnings(monkeypatch)
+    m.SpikeSortingOutput()._warn_multi_source_merge_ids(v2_only)
+    assert not [msg for msg in captured if "sorting pipelines" in msg]
+
+    mixed = _stub_sources(
+        monkeypatch,
+        {
+            str(uuid.uuid4()): "CurationV2",
+            str(uuid.uuid4()): "ImportedSpikeSorting",
+        },
+    )
+    captured = _capture_warnings(monkeypatch)
+    m.SpikeSortingOutput()._warn_multi_source_merge_ids(mixed)
+    assert [msg for msg in captured if "sorting pipelines" in msg]
 
 
 # ---------- v0/v1 and shared SpikeInterface-using modules load under SI 0.104

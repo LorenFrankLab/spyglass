@@ -104,6 +104,11 @@ if CurationV2 is not None:
 if ConcatMemberCurationV2 is not None:
     source_class_dict["ConcatMemberCurationV2"] = ConcatMemberCurationV2
 
+# Part names by pipeline. v2 and v0/v1 sorting the same session yield
+# overlapping units; ImportedSpikeSorting belongs to neither.
+V2_SOURCES = frozenset({"CurationV2", "ConcatMemberCurationV2"})
+LEGACY_SORTED_SOURCES = frozenset({"CurationV1", "CuratedSpikeSorting"})
+
 # Sources whose curated NWB stores per-unit observed spans. Other sources
 # are reported as unknown coverage.
 OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCurationV2"})
@@ -277,8 +282,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             restriction for any stage of the spikesorting pipeline
         sources : list, optional
             list of sources to restrict to. Defaults to every available
-            source (``"v2"`` only when v2 imported). Requesting ``"v2"``
-            when it did not import raises.
+            source (``"v2"`` only when v2 imported), and warns when both
+            v2 and v0/v1 outputs match. Requesting ``"v2"`` when it did not
+            import raises.
         restrict_by_artifact : bool, optional
             whether to restrict by artifact rather than original interval name.
             Relevant to v1 pipeline, by default True
@@ -330,6 +336,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 _raise_v2_unavailable(
                     "SpikeSortingOutput.get_restricted_merge_ids"
                 )
+            n_legacy = len(merge_ids)
             merge_ids.extend(
                 self._get_restricted_merge_ids_v2(
                     key.copy(),
@@ -338,6 +345,15 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                     strict=v2_strict,
                 )
             )
+            n_v2 = len(merge_ids) - n_legacy
+            if not v2_strict and n_legacy and n_v2:
+                logger.warning(
+                    f"get_restricted_merge_ids: {key} matched {n_legacy} "
+                    f"v0/v1 and {n_v2} v2 output(s) under the default "
+                    "sources. If both pipelines sorted the same data their "
+                    "units overlap; pass sources=['v1'] or sources=['v2'] to "
+                    "pick one."
+                )
 
         return merge_ids
 
@@ -444,10 +460,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
     ) -> None:
         """Validate merge_ids destined for a decoding group.
 
-        Raises where query helpers only warn. v0/v1 sources are skipped.
+        Raises where query helpers only warn. Only the pipeline-mix check
+        looks at v0/v1 sources.
 
         - A concat-member output from a session other than
           ``nwb_file_name`` (checked only when it is given).
+        - v2 outputs mixed with v0/v1 outputs: a session sorted by both
+          pipelines has overlapping units. Checked even when v2 did not
+          import; ``ImportedSpikeSorting`` is neither.
         - A v2 preview curation (``apply_merge=False``, merges unapplied)
           would decode oversplit units. Concat members inherit their parent
           curation's state.
@@ -464,6 +484,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         merge_ids = list(merge_ids)
         if nwb_file_name is not None:
             cls._assert_merge_ids_match_session(merge_ids, nwb_file_name)
+        cls._assert_one_sorting_pipeline(merge_ids)
         if CurationV2 is None:
             return
         source_to_merges: dict = {}
@@ -501,6 +522,26 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 "(different curations of one sorting/member), so the same "
                 f"units would be counted more than once: {duplicated}. "
                 "Restrict to one curation per source (pass curation_id)."
+            )
+
+    @classmethod
+    def _assert_one_sorting_pipeline(cls, merge_ids) -> None:
+        """Reject merge_ids that mix v2 outputs with v0/v1 outputs."""
+        sources = cls._merge_source_map(
+            [mid for mid in merge_ids if mid is not None]
+        )
+        v2_ids = sorted(m for m, s in sources.items() if s in V2_SOURCES)
+        legacy_ids = sorted(
+            m for m, s in sources.items() if s in LEGACY_SORTED_SOURCES
+        )
+        if v2_ids and legacy_ids:
+            raise ValueError(
+                "These merge_ids mix spike sorting v2 outputs with v0/v1 "
+                f"outputs: v2 {v2_ids}, v0/v1 {legacy_ids}. A session sorted "
+                "by both pipelines has overlapping units, which a group would "
+                "count twice. Use one pipeline per group, e.g. "
+                "SpikeSortingOutput().get_restricted_merge_ids(key, "
+                "sources=['v1']) or sources=['v2']."
             )
 
     @classmethod
@@ -599,11 +640,14 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """Warn when the consumed merges span more than one pipeline source.
 
         ``get_spike_times`` passes ``multi_source=True``, which bypasses
-        ``fetch_nwb``'s check.
+        ``fetch_nwb``'s check. The two v2 sources count as one pipeline.
         """
         if len(merge_ids) < 2:
             return
-        sources = set(self._merge_source_map(merge_ids).values())
+        sources = {
+            "v2" if source in V2_SOURCES else source
+            for source in self._merge_source_map(merge_ids).values()
+        }
         if len(sources) > 1:
             logger.warning(
                 "get_spike_times is aggregating spike trains across "
