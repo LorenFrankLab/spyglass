@@ -293,6 +293,39 @@ def test_analyzer_waveform_accessor_zero_unit_contract():
         _AnalyzerWaveformAccessor(sorting=_FakeSorting(3))
 
 
+@_skip_if_legacy
+@pytest.mark.usefixtures("dj_conn")
+def test_extracted_mask_matches_the_spikes_spikeinterface_extracts():
+    """``extracted_mask`` is True exactly for the spikes SpikeInterface
+    extracted; the rest (near a segment edge) are left as zero rows."""
+    from probeinterface import generate_linear_probe
+
+    from spyglass.decoding.v1.waveform_features import (
+        _build_clusterless_waveform_accessor,
+    )
+
+    fs, n_samples = 30000.0, 3000
+    traces = np.random.default_rng(0).normal(50.0, 10.0, (n_samples, 4))
+    recording = si.NumpyRecording([traces.astype("float32")], fs)
+    probe = generate_linear_probe(num_elec=4)
+    probe.set_device_channel_indices(np.arange(4))
+    recording = recording.set_probe(probe)
+    # nbefore = nafter = 15 samples at 0.5 ms.
+    frames = np.array([0, 14, 15, 1500, 2984, 2985, 2999])
+    sorting = si.NumpySorting.from_samples_and_labels(
+        [frames], [np.zeros(frames.size, dtype=int)], fs
+    )
+    accessor = _build_clusterless_waveform_accessor(
+        recording, sorting, ms_before=0.5, ms_after=0.5, job_kwargs={}
+    )
+    mask = accessor.extracted_mask(0)
+    extracted = np.any(accessor.get_waveforms(0) != 0, axis=(1, 2))
+    np.testing.assert_array_equal(mask, extracted)
+    np.testing.assert_array_equal(
+        mask, [False, False, True, True, True, False, False]
+    )
+
+
 @pytest.mark.usefixtures("dj_conn")
 @pytest.mark.database
 @pytest.mark.db_unit
@@ -435,14 +468,15 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
             "all-nonnegative suggests a sign/scale error"
         )
 
-        # With estimate_peak_time=False each amplitude is the recording trace
-        # at the spike's frame; recompute it from the recording directly.
+        # With estimate_peak_time=False each amplitude is the trace the sorter
+        # read at the spike's frame; recompute it from that recording.
         from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
         )
 
-        recording = SpikeSortingOutput.get_recording({"merge_id": merge_id})
-        sorting = SpikeSortingOutput.get_sorting({"merge_id": merge_id})
+        merge_key = {"merge_id": merge_id}
+        recording = SpikeSortingOutput.get_sorting_input_recording(merge_key)
+        sorting = SpikeSortingOutput.get_sorting(merge_key)
         # The oracle indexes segment 0 only; make() concatenates segments.
         assert recording.get_num_segments() == 1, (
             "amplitude oracle assumes a single-segment recording; got "
@@ -451,40 +485,31 @@ def test_unit_waveform_features_v2_clusterless_runs_under_si0104(wave_session):
         unit_id = sorting.get_unit_ids()[0]
         frames = np.asarray(sorting.get_unit_spike_train(unit_id))
         traces = recording.get_traces(return_in_uV=True)
-        expected_center = traces[frames, :]
-        assert expected_center.shape == amps.shape, (
-            "recomputed center samples must match the stored amplitude shape: "
-            f"{expected_center.shape} vs {amps.shape}"
-        )
-        # SI zero-pads a window that runs off the recording edge, so edge
-        # spikes have amplitude 0. Compare exact values for interior spikes
-        # only (_AMP_PARAM: ms_before == ms_after == 0.5 ms).
-        n_samples = traces.shape[0]
+        # SpikeInterface extracts only nbefore <= frame < n - nafter
+        # (_AMP_PARAM: ms_before == ms_after == 0.5 ms); make() drops the rest.
         fs = recording.get_sampling_frequency()
-        margin = int(np.ceil(0.5e-3 * fs))
-        interior = (frames >= margin) & (frames < n_samples - margin)
+        nbefore = nafter = int(0.5 * fs / 1000.0)
+        interior = (frames >= nbefore) & (frames < traces.shape[0] - nafter)
         assert interior.sum() >= 0.8 * frames.size, (
             f"too few interior spikes ({int(interior.sum())}/{frames.size}) "
             "to validate the amplitude oracle"
         )
+        np.testing.assert_array_equal(
+            spike_times,
+            recording.get_times()[frames[interior]],
+            err_msg="stored spike_times must be exactly the extracted spikes",
+        )
         np.testing.assert_allclose(
-            amps[interior],
-            expected_center[interior],
+            amps,
+            traces[frames[interior], :],
             rtol=1e-3,
             atol=1e-2,
             err_msg=(
-                "stored clusterless amplitude does not equal the recording "
-                "trace at interior spike frames; make() mis-scales, reorders "
+                "stored clusterless amplitude does not equal the sorting "
+                "input trace at the spike frames; make() mis-scales, reorders "
                 "channels, or misaligns spikes vs amplitudes"
             ),
         )
-        boundary = ~interior
-        if boundary.any():
-            assert np.all(amps[boundary] == 0.0), (
-                "a near-edge spike whose waveform window runs off the "
-                "recording was expected to be zero-padded by SI; got a "
-                f"nonzero amplitude at frames {frames[boundary].tolist()}"
-            )
     finally:
         _reset(wave_session)
 
@@ -674,35 +699,35 @@ def test_unit_waveform_features_v2_full_waveform_and_spike_location(
             f"{fw.shape}"
         )
 
-        # Read the source artifact directly. Every interior row must contain
-        # its complete, asymmetric trace window in time-then-channel order;
+        # Read the sorting input directly. Every row must contain its
+        # complete, asymmetric trace window in time-then-channel order;
         # shape alone also passes for zeros, transposed windows, or reordered
         # spike rows. The location recipe above keeps its original window.
         from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
-        recording = SpikeSortingOutput.get_recording({"merge_id": merge_id})
-        sorting = SpikeSortingOutput.get_sorting({"merge_id": merge_id})
+        merge_key = {"merge_id": merge_id}
+        recording = SpikeSortingOutput.get_sorting_input_recording(merge_key)
+        sorting = SpikeSortingOutput.get_sorting(merge_key)
         assert recording.get_num_segments() == 1
         frames = sorting.get_unit_spike_train(0)
-        np.testing.assert_array_equal(spikes, recording.get_times()[frames])
         fs = recording.get_sampling_frequency()
         before = int(full_extract["ms_before"] * fs / 1000)
         after = int(full_extract["ms_after"] * fs / 1000)
         assert before != after
         traces = recording.get_traces(return_in_uV=True)
+        # Spikes without a full window are dropped, by SpikeInterface's rule.
         interior = (frames >= before) & (frames < len(traces) - after)
         assert interior.sum() >= 0.8 * len(frames)
+        np.testing.assert_array_equal(
+            spikes, recording.get_times()[frames[interior]]
+        )
         expected = np.array(
             [
                 traces[frame - before : frame + after].reshape(-1)
                 for frame in frames[interior]
             ]
         )
-        np.testing.assert_allclose(fw[interior], expected, rtol=1e-3, atol=1e-2)
-        if (~interior).any():
-            np.testing.assert_array_equal(
-                fw[~interior], np.zeros_like(fw[~interior])
-            )
+        np.testing.assert_allclose(fw, expected, rtol=1e-3, atol=1e-2)
 
         # spike_location: supported for v2; writes a (n_spikes, 2 or 3) column
         # per unit aligned 1:1 with spike_times, alongside amplitude.

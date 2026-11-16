@@ -1487,6 +1487,69 @@ def _inside(times, excluded):
     return int(start), int(end)
 
 
+def _assert_marks_read_sorting_input(merge_key, sorting_input, source, frames):
+    """Clusterless marks of ``merge_key`` are the sorting input's traces at
+    ``frames``, which here differ from the uncorrected ``source``."""
+    from spyglass.decoding.v1.waveform_features import (
+        UnitWaveformFeatures,
+        UnitWaveformFeaturesSelection,
+        WaveformFeaturesParams,
+    )
+
+    params_name = "motion_member_amplitude"
+    WaveformFeaturesParams.insert1(
+        {
+            "features_param_name": params_name,
+            "params": {
+                "waveform_extraction_params": {
+                    "ms_before": 0.2,
+                    "ms_after": 0.2,
+                    "max_spikes_per_unit": None,
+                    "n_jobs": 1,
+                    "chunk_duration": "1s",
+                },
+                "waveform_features_params": {
+                    "amplitude": {
+                        "peak_sign": "neg",
+                        "estimate_peak_time": False,
+                    }
+                },
+            },
+        },
+        skip_duplicates=True,
+    )
+    selection = {
+        "spikesorting_merge_id": merge_key["merge_id"],
+        "features_param_name": params_name,
+    }
+    UnitWaveformFeaturesSelection.insert1(selection, skip_duplicates=True)
+    try:
+        UnitWaveformFeatures.populate(selection, reserve_jobs=False)
+        _, features = (UnitWaveformFeatures & selection).fetch_data()
+
+        def at_frames(recording):
+            return np.vstack(
+                [
+                    recording.get_traces(
+                        start_frame=int(f),
+                        end_frame=int(f) + 1,
+                        return_in_uV=True,
+                    )
+                    for f in frames
+                ]
+            )
+
+        expected = at_frames(sorting_input)
+        assert np.max(np.abs(expected - at_frames(source))) > 1.0
+        np.testing.assert_allclose(
+            np.vstack(features), expected, rtol=0, atol=1e-3
+        )
+    finally:
+        (UnitWaveformFeaturesSelection & selection).super_delete(
+            warn=False, safemode=False
+        )
+
+
 def test_trace_accessors_have_one_meaning_each(
     corrected_sorts, fresh_curations, drift_recording
 ):
@@ -1604,7 +1667,8 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
     corrected concatenation's traces when corrected) on the member's own
     timestamps. The parent curation's ``get_recording`` is its sorting input,
     and its ``get_source_recording`` refuses, naming the per-member
-    accessor."""
+    accessor. A corrected member's clusterless marks read its sorting
+    input."""
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCurationV2,
@@ -1755,6 +1819,16 @@ def test_concat_member_trace_accessors_have_one_meaning_each(
                     member_windows,
                     f"{label} merge sorting input",
                 )
+                if parent is corrected:
+                    in_member = (planted >= offsets[index]) & (
+                        planted < offsets[index + 1]
+                    )
+                    _assert_marks_read_sorting_input(
+                        merge_key,
+                        member_input,
+                        member,
+                        planted[in_member] - offsets[index],
+                    )
             member_input = ConcatMemberCurationV2.get_sorting_input_recording(
                 {**curation, "member_index": 0}
             )

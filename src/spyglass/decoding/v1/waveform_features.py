@@ -229,6 +229,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             if units is not None and "spike_times" in units
             else pd.DataFrame()
         )
+        if is_v2:
+            spike_times = _drop_unextracted_spikes(
+                waveform_extractor, spike_times, waveform_features
+            )
 
         (
             key["analysis_file_name"],
@@ -278,13 +282,17 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         - Builds a fresh dense ``SortingAnalyzer`` over every spike, since the
           persisted v2 analyzer subsamples spikes.
         - Amplitudes are in microvolts; v0/v1 marks are not comparable.
+        - Reads the sorting input recording (artifact-masked and
+          motion-corrected when the sort selected them).
         - ``max_spikes_per_unit`` must be None so waveforms align 1:1 with
-          ``spike_times``.
+          ``spike_times``; ``make`` then drops the spikes SpikeInterface
+          does not extract (see ``extracted_mask``).
         - Returns an accessor without an analyzer for a zero-unit sort.
         """
         import spikeinterface as si
 
-        recording = SpikeSortingOutput().get_recording(merge_key)
+        # Marks sample the traces the sorter read (masked, motion-corrected).
+        recording = SpikeSortingOutput().get_sorting_input_recording(merge_key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
         sorting = SpikeSortingOutput().get_sorting(merge_key)
@@ -452,6 +460,27 @@ class _AnalyzerWaveformAccessor:
             )
         return int(self._waveforms.nbefore)
 
+    def extracted_mask(self, unit_id) -> np.ndarray:
+        """Spikes of ``unit_id`` whose waveform SpikeInterface extracted.
+
+        SpikeInterface extracts a spike only if ``nbefore <= frame <
+        n_samples - nafter`` and leaves the rest as zero rows.
+
+        Returns
+        -------
+        np.ndarray of bool, shape (n_spikes,)
+        """
+        if self._waveforms is None:
+            raise RuntimeError(
+                "_AnalyzerWaveformAccessor.extracted_mask called on a "
+                "zero-unit accessor; there are no spikes."
+            )
+        frames = np.asarray(self.sorting.get_unit_spike_train(unit_id))
+        n_samples = self._analyzer.recording.get_num_samples(segment_index=0)
+        return (frames >= self._waveforms.nbefore) & (
+            frames < n_samples - self._waveforms.nafter
+        )
+
     def get_waveforms(self, unit_id) -> np.ndarray:
         """Waveforms for ``unit_id``, shape ``(n_spikes, n_samples, n_ch)``."""
         if self._waveforms is None:
@@ -550,6 +579,52 @@ WAVEFORM_FEATURE_FUNCTIONS = {
     "full_waveform": _get_full_waveform,
     "spike_location": _get_spike_locations,
 }
+
+
+def _drop_unextracted_spikes(
+    waveforms: "_AnalyzerWaveformAccessor",
+    spike_times: pd.Series,
+    waveform_features: dict,
+) -> pd.Series:
+    """Drop spikes too near a recording edge for a full waveform window.
+
+    Their rows hold zeros, not traces; a NaN mark would break the
+    clusterless likelihood. Filters ``waveform_features`` in place.
+
+    Parameters
+    ----------
+    waveforms : _AnalyzerWaveformAccessor
+        The v2 accessor the features were computed from.
+    spike_times : pd.Series
+        Per-unit spike times indexed by unit id.
+    waveform_features : dict
+        feature -> unit id -> per-spike array, ``(n_spikes, ...)``.
+
+    Returns
+    -------
+    pd.Series
+        ``spike_times`` with the same spikes dropped.
+    """
+    if waveforms.sorting.get_num_units() == 0:
+        return spike_times
+    times = {int(uid): np.asarray(t) for uid, t in spike_times.items()}
+    dropped = {}
+    for unit_id in waveforms.sorting.get_unit_ids():
+        keep = waveforms.extracted_mask(unit_id)
+        if keep.all():
+            continue
+        dropped[int(unit_id)] = int((~keep).sum())
+        for per_unit in waveform_features.values():
+            per_unit[unit_id] = np.asarray(per_unit[unit_id])[keep]
+        if int(unit_id) in times:
+            times[int(unit_id)] = times[int(unit_id)][keep]
+    if dropped:
+        logger.warning(
+            f"UnitWaveformFeatures: dropped {sum(dropped.values())} spike(s) "
+            "too near the recording edge for a full waveform window "
+            f"(per unit: {dropped})."
+        )
+    return pd.Series(times, name=spike_times.name, dtype=object)
 
 
 def _write_waveform_features_to_nwb(
