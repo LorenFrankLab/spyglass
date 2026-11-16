@@ -995,6 +995,9 @@
     "test_signal_math.py": {
       "tier": "unit"
     },
+    "test_similarity_merge.py": {
+      "tier": "pipeline"
+    },
     "test_sort_group_planning.py": {
       "tier": "unit"
     },
