@@ -7,6 +7,7 @@ imported by their matcher backends, independently of preparing these files.
 from __future__ import annotations
 
 from spyglass.spikesorting.v2.exceptions import SpikeSortingV2Error
+from spyglass.utils import logger
 
 import gc
 from pathlib import Path
@@ -29,6 +30,9 @@ from spyglass.spikesorting.v2.matcher_protocol import (
 # UnitMatchPy reads 8 samples before the trough for its waveform window and
 # the 20 samples before that as its baseline.
 UNITMATCH_MIN_SAMPLES_BEFORE = 28
+
+# Advisory only: units with fewer sampled spikes per half stay in the bundle.
+UNITMATCH_ADVISORY_SPIKES_PER_HALF = 20
 
 
 def save_waveform_arrays(waveforms, directory, unit_ids):
@@ -166,6 +170,8 @@ def extract_waveform_bundle(
     - Sampled spikes are put in time order; half 0 averages the first
       ``n // 2``, half 1 the rest, as in UnitMatchPy.
     - A unit with fewer than two sampled spikes is left out.
+    - A kept unit with fewer than ``UNITMATCH_ADVISORY_SPIKES_PER_HALF``
+      sampled spikes in a half is named in one warning.
 
     Parameters
     ----------
@@ -305,7 +311,7 @@ def extract_waveform_bundle(
         sampled = analyzer.get_extension("random_spikes").get_random_spikes()
 
         unit_ids = sorting.get_unit_ids()
-        keep, halves = [], []
+        keep, halves, sparse_units = [], [], []
         for unit_index, unit_id in enumerate(unit_ids):
             unit_spikes = sampled[sampled["unit_index"] == unit_index]
             # Rows of get_waveforms_one_unit follow unit_spikes; put them in
@@ -317,6 +323,10 @@ def extract_waveform_bundle(
             if wfs.shape[0] < 2:
                 continue
             n_half = wfs.shape[0] // 2
+            if n_half < UNITMATCH_ADVISORY_SPIKES_PER_HALF:
+                sparse_units.append(
+                    f"{unit_id} ({n_half} and {wfs.shape[0] - n_half})"
+                )
             halves.append(
                 np.stack(
                     [wfs[:n_half].mean(axis=0), wfs[n_half:].mean(axis=0)],
@@ -328,6 +338,14 @@ def extract_waveform_bundle(
         # its extensions form a cycle only gc frees.
         del analyzer, waveforms_ext, sampled
         gc.collect()
+    if sparse_units:
+        logger.warning(
+            "extract_unitmatch_bundle: units with fewer than "
+            f"{UNITMATCH_ADVISORY_SPIKES_PER_HALF} sampled spikes per half "
+            "stay in the bundle but give noisy waveforms and unreliable "
+            f"matches: {', '.join(sparse_units)} (spikes in half 0 and "
+            "half 1)."
+        )
     keep = np.asarray(keep, dtype=np.intp)
     all_unit_ids = np.asarray(unit_ids, dtype=int)
     excluded = [int(u) for u in np.delete(all_unit_ids, keep)]

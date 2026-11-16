@@ -890,6 +890,40 @@ def test_bundle_excludes_units_with_fewer_than_two_sampled_spikes(
             ), (uid, k)
 
 
+def test_bundle_warns_about_units_with_few_spikes_per_half(
+    tmp_path, saved_bundles, caplog
+):
+    """Units under 20 sampled spikes per half stay in the bundle, and one
+    warning names them with their per-half counts.
+    """
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    recording, sorting = _planted_session(
+        20.0,
+        {
+            3: (_train(0.1, 4.1), _planted_template(0), None),  # 8: 4 + 4
+            5: (_train(0.1, 19.6), _planted_template(2), None),  # 39: 19 + 20
+            9: (_train(0.1, 19.9, 0.25), _planted_template(3), None),
+        },
+    )
+    session_dir = tmp_path / "sess"
+    with caplog.at_level("WARNING", logger="spyglass"):
+        excluded = backend.extract_unitmatch_bundle(
+            session_dir, recording, sorting, seed=0
+        )
+
+    assert excluded == []
+    assert saved_bundles[session_dir]["unit_ids"] == [3, 5, 9]
+    warnings = [
+        r.getMessage() for r in caplog.records if "per half" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert "3 (4 and 4)" in warnings[0]
+    assert "5 (19 and 20)" in warnings[0]
+    assert "9 (" not in warnings[0]
+    assert "20" in warnings[0]
+
+
 def test_bundle_all_units_excluded_raises(tmp_path, saved_bundles):
     """A session with no matchable unit raises before writing any file."""
     from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
