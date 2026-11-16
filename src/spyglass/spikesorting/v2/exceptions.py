@@ -172,10 +172,13 @@ class PreflightError(SpikeSortingV2Error, ValueError):
 
 
 class PipelineStageError(SpikeSortingV2Error, RuntimeError):
-    """A run_v2_pipeline stage failed during populate/insert.
+    """A pipeline stage failed during populate/insert.
 
-    Carries the failing ``stage`` and the ``partial_run_summary`` of stages
-    that completed. The original exception is chained as ``__cause__``; its
+    Carries the failing ``stage``, the ``partial_run_summary`` of the stages
+    that finished, the entry point (``caller``) and what it ran on
+    (``target``, e.g. the session and sort group). The message lists the
+    finished stages with their status and says that re-running the same call
+    reuses them. The original exception is chained as ``__cause__``; its
     class name is stored in ``original_type`` and included in the message.
     """
 
@@ -186,16 +189,34 @@ class PipelineStageError(SpikeSortingV2Error, RuntimeError):
         message: str = "",
         *,
         original_type: str | None = None,
+        caller: str = "run_v2_pipeline",
+        target: str | None = None,
     ):
         self.stage = stage
         self.partial_run_summary = partial_run_summary
         # None when constructed without a cause.
         self.original_type = original_type
+        self.caller = caller
+        self.target = target
+        finished = [
+            f"{key.removesuffix('_status')} {value}"
+            for key, value in partial_run_summary.items()
+            if key.endswith("_status")
+        ]
+        cause = ": ".join(part for part in (original_type, message) if part)
         super().__init__(
-            f"run_v2_pipeline: stage {stage!r} failed"
-            + (f" ({original_type})" if original_type else "")
-            + (f": {message}" if message else "")
-            + f". Completed stages: {sorted(partial_run_summary)}."
+            f"{caller} failed at stage {stage!r}"
+            + (f" for {target}" if target else "")
+            + (f" ({cause})" if cause else "")
+            + ". "
+            + (
+                f"Stages finished before it: {', '.join(finished)}. "
+                if finished
+                else "No stage finished before it. "
+            )
+            + "Fix the cause, then re-run the same call: finished stages are "
+            "reused, not recomputed. error.partial_run_summary holds the ids "
+            "recorded so far."
         )
 
 

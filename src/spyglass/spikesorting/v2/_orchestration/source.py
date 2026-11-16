@@ -19,8 +19,10 @@ from spyglass.spikesorting.v2._orchestration.presets import (
     _unknown_pipeline_preset_message,
 )
 from spyglass.spikesorting.v2._orchestration.stages import (
+    StageContext,
     _populate_once,
     _run_stage,
+    _run_target_label,
 )
 from spyglass.spikesorting.v2._orchestration.types import MotionMode
 from spyglass.spikesorting.v2._artifacts.manual import (
@@ -82,6 +84,16 @@ class _RunRequest:
     motion_mode: MotionMode
     motion_correction_params_name: "str | None"
     motion_estimate_id: Any
+
+    @property
+    def target(self) -> "str | None":
+        """What this run reads, as its errors and log lines name it."""
+        return _run_target_label(self.source_inputs)
+
+    @property
+    def stage_context(self) -> StageContext:
+        """The caller and target every stage of this run reports."""
+        return StageContext(self.caller, self.target)
 
 
 def _validate_run_request(
@@ -338,6 +350,7 @@ def _build_single_session_source(
         bool(Recording & recording_key),
         lambda: _populate_once(Recording, recording_key),
         run_summary,
+        request.stage_context,
     )
     run_summary["recording_id"] = recording_key["recording_id"]
 
@@ -364,6 +377,7 @@ def _build_single_session_source(
                 RecordingArtifactDetection, artifact_detection_key
             ),
             run_summary,
+            request.stage_context,
         )
         artifact_detection_id = artifact_detection_key["artifact_detection_id"]
     run_summary["artifact_detection_id"] = artifact_detection_id
@@ -412,7 +426,7 @@ def _build_concat_source(
             f"Manual exclusions name absent concat members: {sorted(unknown_members)}"
         )
     member_recording_keys = _build_member_recordings(
-        members, bundle, run_summary, stage_seconds
+        members, bundle, run_summary, stage_seconds, request.stage_context
     )
     artifact_ids = _build_member_artifacts(
         members,
@@ -421,6 +435,7 @@ def _build_concat_source(
         manual_excluded_times,
         run_summary,
         stage_seconds,
+        request.stage_context,
     )
 
     concat_key = ConcatenatedRecordingSelection.insert_selection(
@@ -440,6 +455,7 @@ def _build_concat_source(
         bool(ConcatenatedRecording & concat_key),
         lambda: _populate_once(ConcatenatedRecording, concat_key),
         run_summary,
+        request.stage_context,
     )
     run_summary["concat_recording_id"] = concat_key["concat_recording_id"]
     concat_row = (ConcatenatedRecording & concat_key).fetch1()
@@ -458,6 +474,7 @@ def _build_member_recordings(
     bundle,
     run_summary: dict,
     stage_seconds: dict,
+    context: StageContext,
 ) -> list[dict]:
     """Select and populate every concat member's ``Recording`` as one stage.
 
@@ -469,6 +486,8 @@ def _build_member_recordings(
         The validated preset.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
+    context : StageContext
+        The run's caller and target.
 
     Returns
     -------
@@ -506,6 +525,7 @@ def _build_member_recordings(
         len(Recording & member_recording_keys) == len(member_recording_keys),
         _populate_member_recordings,
         run_summary,
+        context,
     )
     run_summary["member_recording_ids"] = [
         key["recording_id"] for key in member_recording_keys
@@ -520,6 +540,7 @@ def _build_member_artifacts(
     manual_excluded_times,
     run_summary: dict,
     stage_seconds: dict,
+    context: StageContext,
 ) -> dict:
     """Select and populate every member's artifact detection as one stage.
 
@@ -537,6 +558,8 @@ def _build_member_artifacts(
         ``member_index``).
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
+    context : StageContext
+        The run's caller and target.
 
     Returns
     -------
@@ -615,5 +638,6 @@ def _build_member_artifacts(
             == len(artifact_keys),
             _populate_member_artifacts,
             run_summary,
+            context,
         )
     return artifact_ids

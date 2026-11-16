@@ -19,6 +19,7 @@ from spyglass.spikesorting.v2._orchestration.types import (
     RunV2PipelineSessionResult,
 )
 from spyglass.spikesorting.v2._orchestration.run import run_v2_pipeline
+from spyglass.spikesorting.v2._orchestration.stages import _run_target_label
 from spyglass.spikesorting.v2.curation_api import RunResult
 from spyglass.spikesorting.v2.exceptions import (
     PipelineInputError,
@@ -146,9 +147,14 @@ def run_v2_pipeline_session(
         "motion_mode": motion_mode,
         "motion_correction_params_name": motion_correction_params_name,
     }
-    for sort_group_id in targets:
-        if sort_group_id in failed_preflight_ids:
-            continue
+    runnable = [g for g in targets if g not in failed_preflight_ids]
+    for position, sort_group_id in enumerate(runnable, start=1):
+        target = _run_target_label(
+            {"nwb_file_name": nwb_file_name, "sort_group_id": sort_group_id}
+        )
+        logger.info(
+            f"run_v2_pipeline_session: {target} ({position}/{len(runnable)})"
+        )
         results.append(
             _run_session_group(
                 sort_group_id,

@@ -836,3 +836,45 @@ def test_session_runner_idempotent(session_run, session_inputs):
             "curation_status",
         ):
             assert entry[status_key] == "reused", (sort_group_id, status_key)
+
+
+@pytest.mark.unit
+def test_session_runner_logs_which_group_of_how_many_it_starts(
+    monkeypatch, caplog
+):
+    """Each group start is logged with its position in the batch, so a long
+    session run shows how far it got."""
+    monkeypatch.setattr(
+        plr, "_resolve_session_sort_group_ids", lambda **kw: [0, 4, 7]
+    )
+    monkeypatch.setattr(
+        plr,
+        "preflight_v2_pipeline_session",
+        lambda **kw: _session_report({0: True, 4: True, 7: True}),
+    )
+    monkeypatch.setattr(
+        plr,
+        "run_v2_pipeline",
+        lambda *, sort_group_id, **kw: {"n_units": 1},
+    )
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        run_v2_pipeline_session(
+            nwb_file_name="s.nwb",
+            interval_list_name=_INTERVAL,
+            team_name=_TEAM,
+            pipeline_preset=_PRESET,
+        )
+    starts = [
+        r.getMessage()
+        for r in caplog.records
+        if "run_v2_pipeline_session" in r.getMessage()
+        and "group" in r.getMessage()
+        and "/3)" in r.getMessage()
+    ]
+    assert len(starts) == 3, starts
+    for position, (sort_group_id, line) in enumerate(
+        zip((0, 4, 7), starts), start=1
+    ):
+        assert "'s.nwb'" in line
+        assert f"sort group {sort_group_id} ({position}/3)" in line

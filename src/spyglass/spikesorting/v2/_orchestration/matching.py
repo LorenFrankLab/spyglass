@@ -17,8 +17,10 @@ from spyglass.spikesorting.v2._orchestration.types import (
     UnitMatchStageSeconds,
 )
 from spyglass.spikesorting.v2._orchestration.stages import (
+    StageContext,
     _populate_once,
     _run_stage,
+    _run_target_label,
 )
 from spyglass.spikesorting.v2._matching.planning import (
     build_unit_match_input_plan,
@@ -238,6 +240,15 @@ def run_v2_unit_match(
         "matcher_params_name": matcher_params_name,
     }
     stage_seconds: dict[str, float] = {}
+    context = StageContext(
+        "run_v2_unit_match",
+        _run_target_label(
+            {
+                "concat_session_group_owner": session_group_owner,
+                "concat_session_group_name": session_group_name,
+            }
+        ),
+    )
 
     # Validates inputs and geometry before any populate.
     if input_curations is not None:
@@ -283,6 +294,7 @@ def run_v2_unit_match(
         bool(UnitMatch & selection),
         lambda: _populate_once(UnitMatch, selection),
         run_summary,
+        context,
     )
     run_summary["n_pairs"] = int((UnitMatch & selection).fetch1("n_pairs"))
     run_summary["inputs"] = _unit_match_input_summaries(selection)
@@ -297,6 +309,7 @@ def run_v2_unit_match(
         bool(TrackedUnit & selection),
         lambda: _populate_once(TrackedUnit, selection),
         run_summary,
+        context,
     )
     run_summary["n_tracked_units"] = len(TrackedUnit & selection)
 

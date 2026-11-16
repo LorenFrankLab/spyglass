@@ -21,6 +21,7 @@ from spyglass.spikesorting.v2._orchestration.source import (
     _validate_run_request,
 )
 from spyglass.spikesorting.v2._orchestration.stages import (
+    StageContext,
     _populate_once,
     _run_stage,
 )
@@ -34,6 +35,7 @@ def _run_motion_estimate(
     run_summary: dict,
     stage_seconds: dict,
     warnings_list: list,
+    context: StageContext,
     motion_estimate_id=None,
 ) -> dict:
     """Select and populate the motion estimate of a run's source.
@@ -51,6 +53,8 @@ def _run_motion_estimate(
         The run's accumulating summary and per-stage seconds (mutated).
     warnings_list : list
         The run's warnings (appended to).
+    context : StageContext
+        The run's caller and target.
     motion_estimate_id : uuid.UUID or str, optional
         A populated estimate of ``source`` with the recipe's estimation row
         to reuse; never recomputed.
@@ -115,6 +119,8 @@ def _run_motion_estimate(
                 }
             ),
             run_summary,
+            context,
+            announce=False,
         )
 
         def _estimate() -> str:
@@ -127,7 +133,7 @@ def _run_motion_estimate(
         run_summary["motion_estimation_preset"],
         run_summary["motion_estimate_status"],
         stage_seconds["motion_estimate"],
-    ) = _run_stage("motion_estimate", exists, _estimate, run_summary)
+    ) = _run_stage("motion_estimate", exists, _estimate, run_summary, context)
     run_summary["motion_estimate_id"] = estimate_key["motion_estimate_id"]
     # Warn, not refuse: dropped-frame gaps can leave spans with no peak.
     empty_spans = MotionEstimate().get_spans_without_evidence(estimate_key)
@@ -157,6 +163,7 @@ def _run_motion_correction(
     motion_recipe,
     run_summary: dict,
     stage_seconds: dict,
+    context: StageContext,
 ) -> dict:
     """Select and populate the corrected recording of a saved estimate.
 
@@ -172,6 +179,8 @@ def _run_motion_correction(
         interpolation row is applied.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
+    context : StageContext
+        The run's caller and target.
 
     Returns
     -------
@@ -202,6 +211,8 @@ def _run_motion_correction(
             }
         ),
         run_summary,
+        context,
+        announce=False,
     )
 
     def _correct() -> list:
@@ -221,6 +232,7 @@ def _run_motion_correction(
         bool(MotionCorrectedRecording & corrected_key),
         _correct,
         run_summary,
+        context,
     )
     run_summary["motion_corrected_recording_id"] = corrected_key[
         "motion_corrected_recording_id"
@@ -411,6 +423,7 @@ def _estimate_motion(
         run_summary,
         stage_seconds,
         warnings_list,
+        context=request.stage_context,
     )
     diagnostics = (
         (MotionEstimate & estimate_key)

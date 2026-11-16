@@ -1278,6 +1278,21 @@ def test_run_entry_points_forward_every_option_to_its_stage(
     assert root_kwargs["is_concat"] is concat
     assert seen["auto"][1]["pipeline_preset"] == "franklab_clusterless_2026_11"
     assert ("members" in seen) is concat
+    # Every stage names the run the same way in its errors and log lines.
+    context = (
+        ("run_v2_concat_pipeline", "session group 'owner'/'group'")
+        if concat
+        else ("run_v2_pipeline", "'s.nwb' sort group 3")
+    )
+    for stage in (
+        "motion_estimate",
+        "motion_correction",
+        "sorting",
+        "root",
+        "auto",
+        *(("members",) if concat else ()),
+    ):
+        assert tuple(seen[stage][1]["context"]) == context, stage
     assert result["pipeline_preset"] == "franklab_clusterless_2026_11"
     assert result["motion_estimate_supplied"] is True
 
@@ -1938,3 +1953,4 @@ def test_register_with_an_unknown_sorter_row_says_initialize_will_not_add_it(
     message = str(error.value)
     assert "'h9_never_inserted'" in message
     assert "not a shipped default" in message
+

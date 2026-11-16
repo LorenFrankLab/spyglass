@@ -223,6 +223,12 @@ def test_stage_error_carries_partial_run_summary(first_run, monkeypatch):
     )
     assert "sorting_id" not in err.partial_run_summary
     assert err.__cause__ is sentinel
+    message = str(err)
+    assert message.startswith("run_v2_pipeline")
+    assert repr(inputs["nwb_file_name"]) in message
+    assert f"sort group {inputs['sort_group_id']}" in message
+    assert "recording " in message and "artifact_detection " in message
+    assert "re-run the same call" in message
     # Completed stages keep their timing.
     assert {"recording", "artifact_detection"} <= set(
         err.partial_run_summary["stage_seconds"]
@@ -410,3 +416,152 @@ def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
         TrackedUnit,
     ):
         assert table._populate_key_lock is True, table.__name__
+
+
+@pytest.mark.unit
+def test_stage_error_names_the_run_its_finished_stages_and_the_rerun():
+    """A stage failure names the entry point, the session and sort group,
+    the stages that finished with their status, and says re-running the same
+    call reuses them; summary keys that are not stages are not listed."""
+    error = PipelineStageError(
+        "sorting",
+        {
+            "pipeline_preset": "p",
+            "stage_seconds": {"recording": 1.0},
+            "recording_status": "computed",
+            "recording_id": "r",
+            "artifact_detection_status": "reused",
+        },
+        "boom",
+        original_type="KeyError",
+        caller="run_v2_concat_pipeline",
+        target="session group 'owner'/'group'",
+    )
+    message = str(error)
+    assert message.startswith("run_v2_concat_pipeline")
+    assert "'sorting'" in message
+    assert "session group 'owner'/'group'" in message
+    assert "KeyError: boom" in message
+    assert "recording computed, artifact_detection reused" in message
+    assert "re-run the same call" in message
+    assert "pipeline_preset" not in message
+    assert "stage_seconds" not in message
+    assert error.caller == "run_v2_concat_pipeline"
+    assert error.target == "session group 'owner'/'group'"
+
+    first = PipelineStageError(
+        "recording", {}, "boom", caller="run_v2_pipeline", target=None
+    )
+    assert "No stage finished before it" in str(first)
+
+
+@pytest.mark.unit
+def test_run_request_target_names_the_session_or_the_session_group():
+    """The run's target text comes from the validated request."""
+    from spyglass.spikesorting.v2._orchestration.source import (
+        _validate_run_request,
+    )
+
+    options = dict(
+        pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
+        curation_description="",
+        require_units=False,
+        auto_curate=False,
+        preflight=True,
+        manual_excluded_times=None,
+        motion_mode="off",
+        motion_correction_params_name=None,
+        motion_estimate_id=None,
+    )
+    single = _validate_run_request(
+        "run_v2_pipeline",
+        is_concat=False,
+        source_inputs={
+            "nwb_file_name": "s.nwb",
+            "sort_group_id": 3,
+            "interval_list_name": "i",
+            "team_name": "t",
+        },
+        **options,
+    )
+    assert single.target == "'s.nwb' sort group 3"
+    concat = _validate_run_request(
+        "run_v2_concat_pipeline",
+        is_concat=True,
+        source_inputs={
+            "concat_session_group_owner": "owner",
+            "concat_session_group_name": "group",
+        },
+        **options,
+    )
+    assert concat.target == "session group 'owner'/'group'"
+
+
+@pytest.mark.unit
+def test_run_stage_logs_one_line_when_reused_and_two_when_computed(caplog):
+    """A computed stage logs its start and its finish with seconds; a reused
+    stage logs only its finish; an unannounced step logs nothing; a stage
+    whose status is known only afterwards logs no status."""
+    from spyglass.spikesorting.v2._orchestration.stages import (
+        StageContext,
+        _run_stage,
+    )
+
+    context = StageContext("run_v2_pipeline", "'s.nwb' sort group 3")
+
+    def lines():
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith("run_v2_pipeline [")
+        ]
+
+    with caplog.at_level("INFO", logger="spyglass"):
+        _run_stage("sorting", False, lambda: None, {}, context)
+    computed = lines()
+    assert len(computed) == 2, computed
+    assert all("'s.nwb' sort group 3" in line for line in computed)
+    assert "sorting" in computed[0] and "computing" in computed[0]
+    assert "sorting computed in" in computed[1] and " s" in computed[1]
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="spyglass"):
+        _run_stage("recording", True, lambda: None, {}, context)
+    reused = lines()
+    assert len(reused) == 1 and "recording reused in" in reused[0]
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="spyglass"):
+        _run_stage("curation", False, lambda: None, {}, context, announce=False)
+    assert lines() == []
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="spyglass"):
+        _run_stage("auto_curation", None, lambda: None, {}, context)
+    unknown = lines()
+    assert len(unknown) == 2, unknown
+    assert "auto_curation finished in" in unknown[1]
+
+
+@pytest.mark.database
+def test_recording_stage_failure_keeps_the_preflight_warnings(
+    first_run, monkeypatch
+):
+    """A failure in the first stage still carries the run's warnings list,
+    and the error names the session and sort group."""
+    from spyglass.spikesorting.v2.recording import Recording
+
+    _, inputs = first_run
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("injected recording failure")
+
+    monkeypatch.setattr(Recording, "populate", _boom)
+    with pytest.raises(PipelineStageError) as exc:
+        run_v2_pipeline(**inputs)
+    err = exc.value
+    assert err.stage == "recording"
+    assert "warnings" in err.partial_run_summary
+    assert repr(inputs["nwb_file_name"]) in str(err)
+    assert f"sort group {inputs['sort_group_id']}" in str(err)
+    assert "No stage finished before it" in str(err)

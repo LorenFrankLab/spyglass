@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 import datajoint as dj
 
@@ -16,22 +16,85 @@ from spyglass.spikesorting.v2.exceptions import (
 from spyglass.utils import logger
 
 
+class StageContext(NamedTuple):
+    """Who runs a stage and on what, named in its errors and log lines.
+
+    Attributes
+    ----------
+    caller : str
+        The public entry point, e.g. ``"run_v2_pipeline"``.
+    target : str or None
+        What the run reads, e.g. ``"'s.nwb' sort group 3"``; ``None`` when
+        the entry point has no single target.
+    """
+
+    caller: str
+    target: "str | None"
+
+    @property
+    def label(self) -> str:
+        """``"caller [target]"``, or the caller alone without a target."""
+        return f"{self.caller} [{self.target}]" if self.target else self.caller
+
+
+def _run_target_label(source_inputs: Mapping[str, Any]) -> "str | None":
+    """The session and sort group, or the session group, that a run reads.
+
+    The one place a run's target is worded, so its stage errors, log lines
+    and preflight messages name it the same way.
+
+    Parameters
+    ----------
+    source_inputs : Mapping
+        ``nwb_file_name`` and ``sort_group_id``, or
+        ``concat_session_group_owner`` and ``concat_session_group_name``.
+
+    Returns
+    -------
+    str or None
+        ``"'s.nwb' sort group 3"`` or ``"session group 'owner'/'name'"``;
+        ``None`` when the session group is not named.
+    """
+    if "nwb_file_name" in source_inputs:
+        return (
+            f"{source_inputs['nwb_file_name']!r} sort group "
+            f"{source_inputs['sort_group_id']}"
+        )
+    owner = source_inputs.get("concat_session_group_owner")
+    name = source_inputs.get("concat_session_group_name")
+    if owner is None or name is None:
+        return None
+    return f"session group {owner!r}/{name!r}"
+
+
 def _run_stage(
     stage: str,
-    exists: bool,
+    exists: "bool | None",
     work: Callable[[], Any],
     partial: dict[str, Any],
+    context: StageContext,
+    *,
+    announce: bool = True,
 ) -> tuple[Any, StageStatus, float]:
-    """Time a pipeline stage's ``work()``; classify it; wrap failures.
+    """Time a pipeline stage's ``work()``; classify it; log it; wrap failures.
 
     ``exists`` (checked before ``work``) makes the status ``"reused"``, else
-    ``"computed"``. A failure is re-raised as a chained
-    :class:`PipelineStageError` carrying a snapshot of ``partial``.
+    ``"computed"``; ``None`` means the caller classifies the stage afterwards,
+    so the log line carries no status. A computed stage logs its start and
+    finish at INFO, a reused one only its finish; ``announce=False`` logs
+    nothing (a selection insert wrapped only for its error). A failure is
+    re-raised as a chained :class:`PipelineStageError` carrying a snapshot
+    of ``partial`` and ``context``.
 
     Returns ``(work_result, status, seconds)``; ``seconds`` is wall-clock
     time in ``work`` this call.
     """
     status: StageStatus = "reused" if exists else "computed"
+    if announce and exists is not True:
+        logger.info(
+            f"{context.label}: {stage} "
+            + ("computing..." if exists is False else "started")
+        )
     start = time.perf_counter()
     try:
         result = work()
@@ -42,8 +105,16 @@ def _run_stage(
             dict(partial),
             str(exc),
             original_type=type(exc).__name__,
+            caller=context.caller,
+            target=context.target,
         ) from exc
-    return result, status, time.perf_counter() - start
+    seconds = time.perf_counter() - start
+    if announce:
+        logger.info(
+            f"{context.label}: {stage} "
+            f"{'finished' if exists is None else status} in {seconds:.1f} s"
+        )
+    return result, status, seconds
 
 
 def _populate_once(table, key) -> None:
@@ -151,6 +222,7 @@ def _run_sorting_stage(
     run_summary: dict,
     stage_seconds: dict,
     warnings_list: list,
+    context: StageContext,
 ) -> tuple[dict, int]:
     """Select and populate the sort; return its key and unit count.
 
@@ -169,6 +241,8 @@ def _run_sorting_stage(
         The run's accumulating summary and per-stage seconds (mutated).
     warnings_list : list
         The run's warnings (appended to on a zero-unit sort).
+    context : StageContext
+        The run's caller and target, for the stage's error and log lines.
 
     Returns
     -------
@@ -202,6 +276,7 @@ def _run_sorting_stage(
         bool(Sorting & sorting_key),
         lambda: _populate_once(Sorting, sorting_key),
         run_summary,
+        context,
     )
     run_summary["sorting_id"] = sorting_key["sorting_id"]
 
@@ -236,11 +311,14 @@ def _run_root_curation_stage(
     run_summary: dict,
     stage_seconds: dict,
     warnings_list: list,
+    context: StageContext,
 ) -> dict:
     """Insert (or reuse) the sort's root curation and register its merge row.
 
     Records the root curation id, merge id (``None`` for concat) and
-    generation UUID in ``run_summary``.
+    generation UUID in ``run_summary``. A reused root keeps its description;
+    a different ``curation_description`` adds a run warning (the reuse
+    itself is logged by ``CurationV2.insert_curation``).
 
     Returns
     -------
@@ -274,16 +352,14 @@ def _run_root_curation_stage(
         if curation_description:
             stored = (CurationV2 & curation_key).fetch1("description")
             if stored != curation_description:
-                ignored = (
-                    "run_v2_pipeline: reused root curation_id="
+                warnings_list.append(
+                    f"{context.caller}: reused root curation_id="
                     f"{curation_key['curation_id']} of sorting_id="
-                    f"{sorting_key['sorting_id']}; it keeps its description "
-                    f"{stored!r} and curation_description="
-                    f"{curation_description!r} is ignored. Curate a child "
-                    "to record a new description."
+                    f"{sorting_key['sorting_id']}; ignored: description="
+                    f"{curation_description!r} (root keeps {stored!r}). To "
+                    "apply it, insert a child with parent_curation_id="
+                    f"{curation_key['curation_id']}."
                 )
-                logger.warning(ignored)
-                warnings_list.append(ignored)
         # A concat curation's synthetic timeline gets no merge row.
         merge_id = _curation_merge_id(
             curation_key, is_concat=is_concat, warnings_list=warnings_list
@@ -291,7 +367,11 @@ def _run_root_curation_stage(
         return curation_key, merge_id
 
     (curation_key, merge_id), curation_status, curation_seconds = _run_stage(
-        "curation", curation_exists, _curate_and_register, run_summary
+        "curation",
+        curation_exists,
+        _curate_and_register,
+        run_summary,
+        context,
     )
     run_summary["curation_status"] = curation_status
     stage_seconds["curation"] = curation_seconds
@@ -358,6 +438,7 @@ def _run_auto_curation_stage(
     run_summary: dict,
     stage_seconds: dict,
     warnings_list: list,
+    context: StageContext,
 ) -> None:
     """Evaluate the root curation and accept its labels into a child.
 
@@ -388,7 +469,7 @@ def _run_auto_curation_stage(
         }
     )
     # "reused" only if the evaluation and the child both pre-existed; the
-    # child is known only after the work, so classify afterwards.
+    # child is known only after the work, so classify afterwards (None).
     eval_was_populated = bool(CurationEvaluation & eval_key)
     sorting_restriction = {"sorting_id": sorting_key["sorting_id"]}
 
@@ -419,7 +500,7 @@ def _run_auto_curation_stage(
         (child, auto_merge_id, children_before),
         _,
         stage_seconds["auto_curation"],
-    ) = _run_stage("auto_curation", False, _work, run_summary)
+    ) = _run_stage("auto_curation", None, _work, run_summary, context)
     child_created = child["curation_id"] not in children_before
     run_summary["auto_curation_status"] = (
         "reused" if eval_was_populated and not child_created else "computed"
@@ -438,6 +519,7 @@ def _run_member_curation_stage(
     concat_key: dict,
     run_summary: dict,
     stage_seconds: dict,
+    context: StageContext,
 ) -> None:
     """Register a concat run's final curation once per frozen member.
 
@@ -500,5 +582,6 @@ def _run_member_curation_stage(
         len(ConcatMemberCurationV2 & member_keys) == len(member_keys),
         _populate_member_curations,
         run_summary,
+        context,
     )
     run_summary["member_merge_ids"] = member_merge_ids

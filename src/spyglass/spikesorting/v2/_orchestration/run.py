@@ -35,6 +35,7 @@ from spyglass.spikesorting.v2.curation_api import RunResult
 from spyglass.spikesorting.v2._orchestration.preflight import (
     describe_scientific_setup,
 )
+from spyglass.utils import logger
 
 
 def run_v2_pipeline(
@@ -340,9 +341,12 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
     # Resolved up front so a reused sort still reports its configuration.
     run_summary["sorter_config"] = resolve_preset_sort_config(bundle)
     stage_seconds: dict[str, float] = {}
-    # Shared up front so a failure's shallow-copied partial summary has timings.
+    # Shared up front so a failure's shallow-copied partial summary has
+    # timings and the preflight warnings.
     run_summary["stage_seconds"] = stage_seconds
     warnings_list: list[str] = list(preflight_warnings)
+    run_summary["warnings"] = warnings_list
+    context = request.stage_context
 
     run_summary["scientific_config"] = describe_scientific_setup(
         bundle,
@@ -375,11 +379,16 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
             run_summary,
             stage_seconds,
             warnings_list,
+            context=context,
             motion_estimate_id=request.motion_estimate_id,
         )
         if motion_mode == "apply":
             corrected = _run_motion_correction(
-                estimate_key, motion_recipe, run_summary, stage_seconds
+                estimate_key,
+                motion_recipe,
+                run_summary,
+                stage_seconds,
+                context=context,
             )
     sorting_key, n_units = _run_sorting_stage(
         source.selection_fields,
@@ -389,11 +398,11 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
         run_summary=run_summary,
         stage_seconds=stage_seconds,
         warnings_list=warnings_list,
+        context=context,
     )
 
-    # Set before curation so a curation failure's partial summary has them.
+    # Set before curation so a curation failure's partial summary has it.
     run_summary["n_units"] = n_units
-    run_summary["warnings"] = warnings_list
 
     curation_key = _run_root_curation_stage(
         sorting_key,
@@ -403,6 +412,7 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
         run_summary=run_summary,
         stage_seconds=stage_seconds,
         warnings_list=warnings_list,
+        context=context,
     )
     # None on a root-only run so downstream code cannot mistake the root.
     run_summary["auto_labeled_curation_id"] = None
@@ -419,12 +429,22 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
             run_summary=run_summary,
             stage_seconds=stage_seconds,
             warnings_list=warnings_list,
+            context=context,
         )
 
     # Concat curations reach analysis through one merge row per member.
     if is_concat:
         _run_member_curation_stage(
-            sorting_key, source.concat_key, run_summary, stage_seconds
+            sorting_key,
+            source.concat_key,
+            run_summary,
+            stage_seconds,
+            context=context,
         )
 
+    logger.info(
+        f"{context.label}: done in {sum(stage_seconds.values()):.1f} s, "
+        f"n_units={n_units}, {len(warnings_list)} warning(s). "
+        "result.summary() or describe_run(result) shows the receipt."
+    )
     return RunResult(run_summary)

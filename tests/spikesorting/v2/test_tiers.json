@@ -696,6 +696,9 @@
       "tier": "pipeline",
       "overrides": {
         "test_populate_once": "unit",
+        "test_run_request_target_names_the_session_or_the_session_group": "unit",
+        "test_run_stage_logs_one_line_when_reused_and_two_when_computed": "unit",
+        "test_stage_error_names_the_run_its_finished_stages_and_the_rerun": "unit",
         "test_v2_stage_tables_take_the_populate_key_lock": "db_unit"
       }
     },
