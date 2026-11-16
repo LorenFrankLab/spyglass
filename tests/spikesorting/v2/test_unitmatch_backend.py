@@ -286,6 +286,89 @@ def test_match_returns_empty_when_no_good_units(tmp_path, monkeypatch):
     assert backend.UnitMatchBackend().match(inputs, {}) == []
 
 
+def _write_synthetic_bundle(directory, ids, seed):
+    """Write a split-half bundle of biphasic units on a 12.5 um tetrode.
+
+    Waveforms are ``(90, 4, 2)``: 90 samples, trough at sample 45.
+    """
+    root = directory / "RawWaveforms"
+    root.mkdir(parents=True)
+    positions = np.array([[0, 0], [12.5, 0], [0, 12.5], [12.5, 12.5]])
+    np.save(directory / "channel_positions.npy", positions)
+    rng = np.random.default_rng(seed)
+    t = np.arange(90)
+    spike = -np.exp(-((t - 45) ** 2) / (2 * 1.6**2))
+    for unit_id in ids:
+        template = 100 * spike[:, None] * rng.uniform(0.2, 1.0, 4)[None, :]
+        halves = np.stack(
+            [template + rng.normal(0, 1, template.shape) for _ in range(2)],
+            axis=-1,
+        )
+        np.save(root / f"Unit{unit_id}_RawSpikes.npy", halves)
+    rows = "\n".join(f"{u}\tgood" for u in ids)
+    (directory / "cluster_group.tsv").write_text(f"cluster_id\tgroup\n{rows}\n")
+
+
+def _synthetic_inputs(tmp_path, counts):
+    from spyglass.spikesorting.v2.matcher_protocol import (
+        WAVEFORM_BUNDLE_LAYOUT,
+        WAVEFORM_BUNDLE_VERSION,
+        SessionMatcherInput,
+    )
+
+    inputs = []
+    for i, n_units in enumerate(counts):
+        directory = tmp_path / f"s{i}"
+        directory.mkdir()
+        _write_synthetic_bundle(directory, range(n_units), seed=i)
+        inputs.append(
+            SessionMatcherInput(
+                curation_key={"sorting_id": f"sort{i}", "curation_id": 0},
+                bundle_dir=directory,
+                layout=WAVEFORM_BUNDLE_LAYOUT,
+                layout_version=WAVEFORM_BUNDLE_VERSION,
+                geometry_path=directory / "channel_positions.npy",
+            )
+        )
+    return inputs
+
+
+def test_match_with_one_unit_per_session_raises_a_clear_error(tmp_path):
+    """UnitMatch cannot calibrate on two units, so the error names the counts.
+
+    The bare IndexError from UnitMatchPy's threshold search must not escape.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    inputs = _synthetic_inputs(tmp_path, [1, 1])
+    with pytest.raises(ValueError, match="too few matchable units") as exc:
+        backend.UnitMatchBackend().match(inputs, {})
+    message = str(exc.value)
+    assert "sort0" in message and "sort1" in message
+    assert "1 unit" in message
+
+
+def test_match_converts_unitmatch_threshold_indexerror(tmp_path, monkeypatch):
+    """A degenerate larger population that still trips UnitMatchPy's
+    threshold search raises the same clear error, not a bare IndexError.
+    """
+    pytest.importorskip("UnitMatchPy")
+    from spyglass.spikesorting.v2._matching import unitmatch_backend as backend
+
+    inputs = _synthetic_inputs(tmp_path, [3, 3])
+    backend._require_unitmatch()
+    import UnitMatchPy.metric_functions as metric_functions
+
+    def get_threshold(*args, **kwargs):
+        raise IndexError("index 0 is out of bounds for axis 0 with size 0")
+
+    monkeypatch.setattr(metric_functions, "get_threshold", get_threshold)
+    with pytest.raises(ValueError, match="too few matchable units") as exc:
+        backend.UnitMatchBackend().match(inputs, {})
+    assert "3 units" in str(exc.value)
+
+
 def test_match_rejects_mismatched_probe_geometry(tmp_path, monkeypatch):
     """Sessions with different channel geometry raise before UnitMatch runs.
 

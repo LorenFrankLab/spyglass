@@ -43,6 +43,29 @@ _INSTALL_HINT = (
 )
 
 
+# UnitMatchPy's threshold search finds no candidate below this many units.
+_MIN_UNITS_TO_CALIBRATE = 3
+
+
+def _unit_count_summary(session_inputs, good_units) -> str:
+    """Per-session ``sorting_id: n units`` text for error messages."""
+    return ", ".join(
+        f"{s.curation_key['sorting_id']}: {len(g)} unit"
+        f"{'' if len(g) == 1 else 's'}"
+        for s, g in zip(session_inputs, good_units)
+    )
+
+
+def _raised_in_threshold_search(exc: BaseException) -> bool:
+    """True if ``exc`` came from UnitMatchPy's ``get_threshold``."""
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name == "get_threshold":
+            return True
+        tb = tb.tb_next
+    return False
+
+
 class _ArangeProxy:
     """numpy proxy that coerces 1-element-array ``arange`` endpoints to scalars.
 
@@ -267,6 +290,10 @@ class UnitMatchBackend:
         # The prior below divides by n_units ** 2.
         if param["n_units"] == 0:
             return []
+        if param["n_units"] < _MIN_UNITS_TO_CALIBRATE:
+            raise ValueError(
+                self._too_few_units_message(session_inputs, good_units)
+            )
         clus_info = {
             "good_units": good_units,
             "session_switch": session_switch,
@@ -276,11 +303,18 @@ class UnitMatchBackend:
         extracted = um.overlord.extract_parameters(
             waveform, channel_pos, clus_info, param
         )
-        total_score, candidate_pairs, scores_to_include, predictors = (
-            um.overlord.extract_metric_scores(
-                extracted, session_switch, within_session, param, niter=2
+        try:
+            total_score, candidate_pairs, scores_to_include, predictors = (
+                um.overlord.extract_metric_scores(
+                    extracted, session_switch, within_session, param, niter=2
+                )
             )
-        )
+        except IndexError as exc:
+            if not _raised_in_threshold_search(exc):
+                raise
+            raise ValueError(
+                self._too_few_units_message(session_inputs, good_units)
+            ) from exc
         prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
         priors = np.array((prior_match, 1 - prior_match))
         labels = candidate_pairs.astype(int)
@@ -301,6 +335,15 @@ class UnitMatchBackend:
             clus_info["original_ids"],
             session_inputs,
             match_threshold,
+        )
+
+    @staticmethod
+    def _too_few_units_message(session_inputs, good_units) -> str:
+        return (
+            "UnitMatch has too few matchable units to calibrate its match "
+            "threshold ("
+            + _unit_count_summary(session_inputs, good_units)
+            + "). Match inputs with more units, or add sessions."
         )
 
     @staticmethod
