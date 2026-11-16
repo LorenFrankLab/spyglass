@@ -42,9 +42,9 @@ def fixture_lookup(monkeypatch):
 
 def _source(name):
     sorting = si.NumpySorting.from_unit_dict(
-        {7: np.array([100, 200, 300]), 19: np.array([120])}, 1000
+        {7: np.array([100, 200, 300]), 19: np.array([120])}, 30000
     )
-    recording = si.NumpyRecording(np.ones((500, 2), dtype=np.float32), 1000)
+    recording = si.NumpyRecording(np.ones((500, 2), dtype=np.float32), 30000)
     recording.set_channel_locations([[0, 0], [0, 20]])
     recording.set_channel_gains(1.0)
     recording.set_channel_offsets(0.0)
