@@ -58,6 +58,85 @@ info.connection.query(
 )
 ```
 
+```python
+# Spike sorting v2 (#1609). `dj_user` cannot create tables under the shared
+# `spikesorting` prefix, so an admin declares the 14 `spikesorting_v2_*`
+# schemas once, then installs the default rows.
+from importlib import import_module
+
+for module in (
+    "recording",
+    "artifact",
+    "artifact_output",
+    "sorting",
+    "curation",
+    "metric_curation",
+    "review_profile",
+    "concat_member_curation",
+    "figpack_curation",
+    "session_group",
+    "unit_matching",
+    "recompute",
+    "motion",
+    "pipeline_preset",
+):
+    import_module(f"spyglass.spikesorting.v2.{module}")
+
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+initialize_v2_defaults()
+
+# `UnitAnnotation` rows written with positional unit ids (#1609): list them,
+# then remap them to NWB unit ids. `add_annotation` and `fetch_unit_spikes`
+# refuse a merge with unmigrated rows.
+from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+UnitAnnotation.audit_positional_unit_ids()
+UnitAnnotation.migrate_positional_unit_ids(dry_run=True)  # then dry_run=False
+```
+
+```python
+# Only for a database that declared the spike sorting v2 tables before this
+# release (#1609). Existing `MatchableUnit` rows get `compared = 1`, including
+# units the matcher never saw.
+from uuid import UUID
+
+import datajoint as dj
+
+from spyglass.spikesorting.v2.session_group import (
+    ConcatenatedRecordingSelection,
+)
+
+conn = dj.conn()
+conn.query(
+    "ALTER TABLE spikesorting_v2_unit_matching.__unit_match__matchable_unit "
+    "ADD COLUMN compared tinyint NOT NULL DEFAULT 1 COMMENT '0 if the matcher "
+    "never saw the unit (left out of its input bundle)'"
+)
+
+# `MemberSnapshot` now references `Recording`: delete the concat selections
+# whose member Recording is gone, then add the foreign key.
+orphans = conn.query(
+    "SELECT s.concat_recording_id, s.member_index, s.recording_id "
+    "FROM spikesorting_v2_session_group."
+    "concatenated_recording_selection__member_snapshot AS s "
+    "LEFT JOIN spikesorting_v2_recording.__recording AS r "
+    "USING (recording_id) WHERE r.recording_id IS NULL"
+).fetchall()
+if orphans:
+    (
+        ConcatenatedRecordingSelection
+        & [{"concat_recording_id": UUID(bytes=row[0])} for row in orphans]
+    ).delete()
+conn.query(
+    "ALTER TABLE spikesorting_v2_session_group."
+    "concatenated_recording_selection__member_snapshot "
+    "ADD FOREIGN KEY (recording_id) "
+    "REFERENCES spikesorting_v2_recording.__recording (recording_id) "
+    "ON UPDATE CASCADE ON DELETE RESTRICT"
+)
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -119,11 +198,12 @@ pip install "spyglass-neuro[spikesorting]"
 
 #### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
 
-v0, v1 and v2 recordings now open the raw acquisition `ElectricalSeries` by name
+v0 and v1 recordings now open the raw acquisition `ElectricalSeries` by name
 (`e-series`, `electricalseries`, `ephys` or `electrophysiology`, the names `Raw`
-ingestion uses) rather than letting SpikeInterface pick one. SpikeInterface
-0.104 will not guess when a file also stores LFP. A file with no matching
-series, or more than one, raises `ValueError`.
+ingestion uses) rather than letting SpikeInterface pick one; v2 opens the series
+whose object id is `Raw.raw_object_id`. SpikeInterface 0.104 will not guess when
+a file also stores LFP. A file with no matching series, or more than one, raises
+`ValueError`.
 
 #### Spike-sorting analysis results can change (#1609)
 
@@ -146,6 +226,32 @@ series, or more than one, raises `ValueError`.
 - `MuaEventsV1` smooths, normalizes and detects events within each contiguous
     observed run, and numbers events uniquely in time order. Results change for
     intervals with more than one valid-time segment.
+- The waveform-feature `amplitude` is read at each spike's sample (the
+    extractor's `nbefore`), not the window midpoint. Results change only for
+    windows with unequal `ms_before` and `ms_after`.
+
+#### Deletes take restrictions positionally (#1609)
+
+`delete`, `cautious_delete` and `super_delete` on Spyglass tables and merge
+tables treat positional arguments as restrictions. `force_permission`, `dry_run`
+and `warn` are keyword-only.
+
+```python
+# OLD: positional flag
+Table().cautious_delete(True)
+
+# NEW: name the flag, and pass restrictions positionally if you like
+Table().cautious_delete(force_permission=True)
+Table().delete({"nwb_file_name": nwb_file_name})
+```
+
+#### Merge `fetch_nwb` refuses multi-source restrictions (#1609)
+
+`Merge.fetch_nwb` (for example `SpikeSortingOutput().fetch_nwb(key)`) raises
+`ValueError` when the restriction resolves to more than one source part. Pass
+`multi_source=True` to fetch across sources. `return_merge_ids=True` now pairs
+each file with its own merge id, and a restriction may name parent attributes
+such as `sort_group_id`.
 
 #### `LabMemberInfo` Takes Five Values (#1686)
 
@@ -237,8 +343,18 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     deadlocks #1609
 - `cautious_delete` honors an explicit `force_masters=False` instead of always
     forcing master deletion #1609
-- `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` accepts `object_id=`; add
+- Add `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` (select the raw
+    acquisition series by name or by `object_id=`) and
     `raw_eseries_path_and_timestamp_mode` #1609
+- Rename `spyglass.utils.dj_helper_fn.get_child_tables` to
+    `get_child_references` #1609
+- The `spikesorting-v2` extras require `threadpoolctl>=3` for runtime receipts;
+    drop the `pubnub<6.4` pin #1609
+- Add `dj.config["custom"]` keys for spike sorting v2:
+    `spikesorting_v2_job_kwargs` (SpikeInterface job settings for every stage),
+    `spikesorting_v2_analyzer_dir` and `spikesorting_v2_figpack_dir` (cache
+    roots), and `figpack_api_key` (or `FIGPACK_API_KEY`) for hosted reviews
+    #1609
 - Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
     recompute and file namespace capture #1609
 - Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface
@@ -294,9 +410,14 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 - Decoding
 
-    - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV. v0/v1
-        amplitudes are raw counts, so do not mix v0/v1 and v2 marks in one decoder
-        #1609
+    - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV, read from
+        the recording the sorter saw. Spikes too near a recording edge for a full
+        waveform window are dropped with a warning. v0/v1 marks were scaled to µV
+        only when the recording carried gains and come from different
+        preprocessing, so do not mix v0/v1 and v2 marks in one decoder #1609
+    - `UnitWaveformFeaturesGroup.create_group` raises for merge ids that mix v2
+        and v0/v1 outputs. It and `UnitWaveformFeatures` populate also refuse a v2
+        curation whose proposed merges are not applied #1609
     - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
@@ -347,9 +468,13 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         concatenation joins, preventing acquisition gaps from creating false
         refractory violations #1609
     - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCurationV2` parts,
-        declared when the v2 module imports; if it cannot import, a warning names
-        the cause and the parts are omitted. `get_restricted_merge_ids` now
-        defaults to every available source, including v2 #1609
+        declared when the v2 module imports. If it cannot import, the parts are
+        omitted and the cause is logged (an `ImportError` as a warning, any other
+        error with its traceback); v0/v1 keep working. `get_restricted_merge_ids`
+        now defaults to every available source, including v2, and warns when both
+        v2 and v0/v1 outputs match; pass `sources=["v1"]` or `sources=["v2"]` to
+        pick one. A session key also returns the concat-member outputs recorded in
+        that session #1609
     - `get_spike_indicator` gains keyword-only `return_validity` on
         `SpikeSortingOutput` and `SortedSpikesGroup`, and
         `SpikeSortingOutput.get_spike_indicator` gains `return_unit_ids`
@@ -359,9 +484,47 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         `get_spike_times_by_unit`; `get_spike_times` warns when a restriction
         spans sources #1609
     - Add `SortedSpikesGroup.UnitSelection`, which records each group's selected
-        units at creation, and `create_group(unit_selections=...)` #1609
-    - v1 `show_available_metrics` skips metrics the installed SpikeInterface does
-        not provide #1609
+        units at creation, and `create_group(unit_selections=...)`. `create_group`
+        raises for a v2 member without a unit selection (use
+        `spyglass.spikesorting.v2.select_units_for_analysis`) and for members that
+        mix v2 and v0/v1 outputs #1609
+    - `SpikeSortingOutput.get_sort_group_info` accepts several v2 merge ids #1609
+    - v1 `show_available_metrics` lists metrics the installed SpikeInterface does
+        not provide as unavailable instead of failing #1609
+    - v2 `manual_excluded_times` are absolute session timestamps. An exclusion
+        that overlaps no sorted time fails preflight and raises
+        `IneffectiveManualExclusionError` #1609
+    - v2 parameter rows: inserting a stored name with different content raises
+        `DuplicateParameterContentError`, also with `skip_duplicates=True`. A
+        custom preprocessing row needs a `PreprocessingWaveformParameters` row,
+        else `UnmappedPreprocessingWaveformsError` gives the insert to run #1609
+    - v2 `recording_id` also depends on the saved time cut, so recordings selected
+        before this release are not reused. Editing an `IntervalList` in place
+        raises `RecordingInputDriftError` for the old selection #1609
+    - v2 sorters that estimate their own noise and whitening (all but
+        MountainSort4/5 and the clusterless thresholder) see artifact-masked
+        frames filled with seeded noise at each channel's artifact-free level;
+        preflight and `describe_run` show the `masked_fill` #1609
+    - v2 merges drop a cross-unit double detection by comparing each spike with
+        the last kept spike; merged curation analyzers rebuild once #1609
+    - The shipped v2 clusterless preset is `franklab_clusterless_2026_11` (60 µV,
+        `franklab_clusterless_60uv_2026_11` sorter row);
+        `franklab_clusterless_2026_06` is no longer shipped #1609
+    - v2 reviews are per DataJoint user; deleting a `Sorting`, `CurationV2` or
+        FigPack row removes its local review bundles, and
+        `FigPackCuration.find_orphaned_bundles` reports bundles left by upstream
+        deletes #1609
+    - Add v2 `describe_review_profiles`, `RunResult.summary()` and
+        `SorterParameters.missing_row_fix` #1609
+    - v2 unit matching: add `UnitMatch.MatchableUnit.compared` and
+        `allow_divergent_electrodes`; `TrackedUnit` groups units by greedy
+        complete-linkage; UnitMatch needs 28 samples on each side of the trough
+        and at least 3 units #1609
+    - v2 `ConcatenatedRecordingSelection.MemberSnapshot` references `Recording`,
+        so deleting a member's `Recording` cascades to the concat #1609
+    - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
+        `CurationRef.open_analyzer(extra_extensions=...)`), and
+        `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
