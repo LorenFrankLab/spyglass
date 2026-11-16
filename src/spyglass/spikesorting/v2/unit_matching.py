@@ -17,7 +17,7 @@ Sort each session independently, then match units across sessions.
     pairs table.
 
 ``TrackedUnit`` (+ ``Member`` part)
-    Biological-unit identities from a greedy maximal-clique cover of the
+    Biological-unit identities from greedy complete-linkage over the
     ``Pair`` graph, with per-recording brain regions and spike times.
 """
 
@@ -1085,8 +1085,11 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     One row per inferred biological unit; ``Member`` lists its curated
     units. ``make()`` seeds a graph from all matchable units (unpaired units
     become singletons), keeps edges above ``tracked_unit_threshold``, and
-    partitions units by a greedy maximal-clique cover (strongest clique
-    wins). Exceeding ``max_strict_nodes`` raises
+    partitions units by greedy complete-linkage: pairs are taken from the
+    highest probability down, and two groups merge only if every unit pair
+    across them is an above-threshold pair and they share no input. Each
+    tracked unit is therefore a clique of above-threshold pairs with at most
+    one unit per input. Exceeding ``max_strict_nodes`` raises
     ``TrackedUnitBudgetExceededError``.
 
     ``n_sessions_detected`` counts distinct ``nwb_file_name`` values where a
@@ -1097,7 +1100,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     1. Resolve the tracking threshold and node budget.
     2. Read the graph: matchable units as nodes, pairs as edges.
     3. Find each unit's input and the sessions it has spikes in.
-    4. Keep edges above the threshold; cover the units with cliques.
+    4. Keep edges above the threshold; merge groups by complete-linkage.
     5. Insert one row per tracked unit and its members.
     """
 
@@ -1137,7 +1140,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         input_by_node, detected_sessions_by_node = (
             _unit_match_readers.node_detections(key, matchable_rows)
         )
-        # 4. Keep edges above the threshold; cover the units with cliques.
+        # 4. Keep edges above the threshold; merge groups by complete-linkage.
         tracked = derive_tracked_units(
             node_universe,
             edges,

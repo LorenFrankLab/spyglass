@@ -205,7 +205,7 @@ def chronological_input_order(inputs: list[dict]) -> list[dict]:
     )
 
 
-#: Greedy maximal-clique cover, the only tracked-unit policy.
+#: Greedy complete-linkage, the only tracked-unit policy.
 STRICT_POLICY = "strict"
 
 #: Node identity for the tracked-unit graph: one curated unit.
@@ -509,33 +509,46 @@ def derive_tracked_units(
     input_by_node: "dict | None" = None,
     detected_sessions_by_node: "dict | None" = None,
 ) -> list[dict]:
-    """Group curated units into tracked (biological) units via strict cliques.
+    """Group curated units into tracked (biological) units.
+
+    Greedy complete-linkage over the match edges:
 
     - Every node in ``node_universe`` is seeded, so unpaired units become
       singletons.
     - Edges need probability strictly above ``threshold``.
-    - The result is a partition: maximal cliques are claimed greedily by
-      size, then median edge probability, then sorted members; each clique
-      keeps only unclaimed members, so overlap can leave singletons.
+    - Edges are processed from the highest probability down. Two groups merge
+      only when every unit pair across them is an above-threshold edge and
+      the groups share no input, so each group is a clique of above-threshold
+      edges with at most one unit per input.
+    - Equal probabilities break ties by ``(input rank, unit id)`` of the
+      lower-ranked endpoint, then of the other endpoint; ``sorting_id`` never
+      orders anything.
+
+    This is stricter than UnitMatchPy's own "conservative" assignment, which
+    checks only a pair's two endpoints against the other group and also
+    merges units of one session.
 
     Parameters
     ----------
     node_universe : list of (sorting_id, curation_id, unit_id)
         The full curated-unit universe (one node per matchable curated unit).
+        Without ``input_by_node``, inputs are ranked by first appearance here,
+        so list them in input order.
     edges : list of ((node_a), (node_b), probability)
         Candidate match edges; only those above ``threshold`` join the graph.
+        A repeated edge keeps its highest probability.
     threshold : float
         Pair-probability cutoff for seeding an edge.
     max_strict_nodes : int
-        Hard upper bound on graph size. A larger universe raises
-        :class:`TrackedUnitBudgetExceededError` before the (exponential) clique
-        search runs.
+        Upper bound on the universe size. A larger universe raises
+        :class:`TrackedUnitBudgetExceededError`.
     policy : str, optional
         Persisted on every row. Only ``"strict"`` is supported.
     input_by_node : dict, optional
         ``{node: matching-input key}`` (e.g. the node's ``input_index``);
         ``n_matching_inputs`` counts distinct values among a tracked unit's
-        members. When ``None``, a node's input is its ``(sorting_id,
+        members, and a group never holds two units of one input. Input keys
+        must be sortable. When ``None``, a node's input is its ``(sorting_id,
         curation_id)``, since an input pins one curation per sorting.
     detected_sessions_by_node : dict, optional
         ``{node: iterable of nwb_file_name}`` where the unit has at least
@@ -557,33 +570,43 @@ def derive_tracked_units(
     TrackedUnitBudgetExceededError
         If ``len(node_universe)`` exceeds ``max_strict_nodes``.
     ValueError
-        If ``policy`` is not a shipped policy.
+        If ``policy`` is not a shipped policy, or an edge endpoint is not in
+        ``node_universe``.
     """
-    import networkx as nx
-
     if policy != STRICT_POLICY:
         raise ValueError(
             f"derive_tracked_units: policy {policy!r} is not supported; only "
-            f"{STRICT_POLICY!r} (greedy maximal-clique cover) ships today."
+            f"{STRICT_POLICY!r} (greedy complete-linkage) ships today."
         )
 
     nodes = [tuple(node) for node in node_universe]
-    # Before find_cliques, which is exponential in the worst case.
     if len(nodes) > max_strict_nodes:
         raise TrackedUnitBudgetExceededError(
             f"TrackedUnit.make: the curated-unit graph has {len(nodes)} nodes, "
             f"exceeding max_strict_nodes={max_strict_nodes}. Shrink the session "
             "group or raise MatcherParameters.params['max_strict_nodes'] "
-            "intentionally (the strict maximal-clique search is exponential in "
-            "the worst case)."
+            "intentionally."
         )
 
-    graph = nx.Graph()
-    graph.add_nodes_from(nodes)
+    def _node_input(node):
+        if input_by_node is None:
+            return (node[0], node[1])
+        return input_by_node[node]
+
+    inputs_in_order = (
+        sorted({_node_input(node) for node in nodes})
+        if input_by_node is not None
+        else list(dict.fromkeys(_node_input(node) for node in nodes))
+    )
+    input_rank = {value: rank for rank, value in enumerate(inputs_in_order)}
+
+    def _node_rank(node) -> tuple:
+        return (input_rank[_node_input(node)], node[2])
+
     node_set = set(nodes)
+    probability_of: dict = {}
     for node_a, node_b, probability in edges:
         edge = (tuple(node_a), tuple(node_b))
-        # networkx add_edge silently creates missing endpoints.
         if edge[0] not in node_set or edge[1] not in node_set:
             raise ValueError(
                 f"derive_tracked_units: edge {edge} references a node absent "
@@ -591,41 +614,44 @@ def derive_tracked_units(
                 "universe (seed every matchable unit as a node)."
             )
         if float(probability) > threshold:
-            graph.add_edge(*edge, probability=float(probability))
+            key = frozenset(edge)
+            probability_of[key] = max(
+                probability_of.get(key, 0.0), float(probability)
+            )
+
+    def _edge_order(item):
+        pair, probability = item
+        first, second = sorted(pair, key=_node_rank)
+        return (-probability, _node_rank(first), _node_rank(second))
+
+    group_of = {node: (node,) for node in nodes}
+    for pair, _ in sorted(probability_of.items(), key=_edge_order):
+        node_a, node_b = tuple(pair)
+        group_a, group_b = group_of[node_a], group_of[node_b]
+        if group_a == group_b:
+            continue
+        if {_node_input(n) for n in group_a} & {
+            _node_input(n) for n in group_b
+        }:
+            continue
+        if all(
+            frozenset((u, v)) in probability_of
+            for u in group_a
+            for v in group_b
+        ):
+            merged = group_a + group_b
+            for node in merged:
+                group_of[node] = merged
 
     def _clique_edge_probs(members: list) -> list[float]:
         return [
-            graph[u][v]["probability"]
+            probability_of[frozenset((u, v))]
             for u, v in combinations(members, 2)
-            if graph.has_edge(u, v)
         ]
 
-    # Strongest first mirrors UnitMatch's descending-probability assignment.
-    def _clique_strength(members: list) -> float:
-        probs = _clique_edge_probs(members)
-        return median(probs) if probs else 0.0
-
-    cliques = sorted(
-        (sorted(clique) for clique in nx.find_cliques(graph)),
-        key=lambda members: (
-            -len(members),
-            -_clique_strength(members),
-            members,
-        ),
-    )
-
-    def _node_input(node):
-        if input_by_node is None:
-            return (node[0], node[1])
-        return input_by_node[node]
-
-    claimed: set = set()
     tracked: list[dict] = []
-    for clique_members in cliques:
-        members = [node for node in clique_members if node not in claimed]
-        if not members:
-            continue
-        claimed.update(members)
+    for members in sorted({tuple(sorted(g)) for g in group_of.values()}):
+        members = list(members)
         inputs = {_node_input(node) for node in members}
         if detected_sessions_by_node is None:
             sessions = inputs
@@ -646,5 +672,4 @@ def derive_tracked_units(
                 "policy_used": policy,
             }
         )
-    tracked.sort(key=lambda tu: tu["members"])
     return tracked

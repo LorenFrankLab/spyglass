@@ -187,9 +187,9 @@ def test_derive_tracked_units_open_path_splits():
 
 
 def test_derive_tracked_units_partition_no_unit_in_two_groups():
-    """Overlapping maximal cliques must not assign one unit to two identities.
+    """Overlapping candidate groups must not assign one unit to two identities.
 
-    Edges A1-B1, A1-B2, A2-B1 form three overlapping size-2 cliques; each
+    Edges A1-B1, A1-B2, A2-B1 form three overlapping size-2 groups; each
     unit lands in exactly one tracked unit.
     """
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
@@ -282,11 +282,11 @@ def test_derive_tracked_units_rejects_edge_outside_universe():
         )
 
 
-def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
-    """Equal-size AND equal-strength overlapping cliques resolve by sorted members.
+def test_derive_tracked_units_equal_strength_tie_break_is_lowest_unit():
+    """Equal-probability edges are taken in (input, unit id) order.
 
-    {A1,B1} stays whole and B2 becomes a singleton, keeping
-    ``tracked_unit_id`` assignment deterministic.
+    A1-B1 and A1-B2 tie: {A1,B1} is taken first and B2 stays a singleton,
+    keeping ``tracked_unit_id`` assignment deterministic.
     """
     from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
 
@@ -302,6 +302,118 @@ def test_derive_tracked_units_equal_strength_tie_break_is_member_sorted():
     all_members = [node for tu in tracked for node in tu["members"]]
     assert sorted(all_members) == sorted([a1, b1, b2])
     assert len(all_members) == len(set(all_members))
+
+
+def test_derive_tracked_units_mixed_case_keeps_the_strongest_pair_whole():
+    """A-D (0.99) wins A, so B and C pair up instead of joining A.
+
+    B and D share an input, so A cannot merge with both; A-C is refused
+    because D-C is not an edge. Expected: {A, D} and {B, C}.
+    """
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
+
+    a, b, c, d = ("S", 0, 1), ("S", 1, 1), ("S", 2, 1), ("S", 1, 2)
+    edges = [(a, b, 0.51), (a, c, 0.51), (b, c, 0.51), (a, d, 0.99)]
+    tracked = derive_tracked_units(
+        [a, b, c, d],
+        edges,
+        threshold=0.5,
+        max_strict_nodes=100,
+        input_by_node={a: 0, b: 1, d: 1, c: 2},
+    )
+    assert sorted(sorted(tu["members"]) for tu in tracked) == sorted(
+        [sorted([a, d]), sorted([b, c])]
+    )
+
+
+def test_derive_tracked_units_merge_needs_every_cross_pair_to_be_an_edge():
+    """Two merged pairs missing one cross edge never form a group of four,
+    though UnitMatchPy's endpoint-only check would merge them."""
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
+
+    a1, a2, b1, b2 = ("S", 0, 1), ("S", 1, 1), ("S", 2, 1), ("S", 3, 1)
+    edges = [
+        (a1, a2, 0.99),
+        (b1, b2, 0.98),
+        (a1, b1, 0.9),
+        (a2, b1, 0.9),
+        (a1, b2, 0.9),  # a2-b2 is missing
+    ]
+    tracked = derive_tracked_units(
+        [a1, a2, b1, b2],
+        edges,
+        threshold=0.5,
+        max_strict_nodes=100,
+        input_by_node={a1: 0, a2: 1, b1: 2, b2: 3},
+    )
+    assert sorted(sorted(tu["members"]) for tu in tracked) == sorted(
+        [sorted([a1, a2]), sorted([b1, b2])]
+    )
+
+
+def test_derive_tracked_units_ties_never_order_on_sorting_id():
+    """Of two equal edges from U, the one to the lower input is taken first,
+    whatever the sorting ids sort like."""
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
+
+    u, x, y = ("zz", 0, 1), ("mm", 0, 1), ("aa", 0, 1)
+    edges = [(u, y, 0.9), (u, x, 0.9)]
+    for order in ([u, x, y], [y, x, u]):
+        tracked = derive_tracked_units(
+            order,
+            edges,
+            threshold=0.5,
+            max_strict_nodes=100,
+            input_by_node={u: 0, x: 1, y: 2},
+        )
+        assert sorted(sorted(tu["members"]) for tu in tracked) == sorted(
+            [sorted([u, x]), [y]]
+        )
+
+
+@pytest.mark.parametrize("seed", range(25))
+def test_derive_tracked_units_random_graphs_give_cliques_one_unit_per_input(
+    seed,
+):
+    """Property: on random small graphs the output partitions the universe,
+    every group is a clique of above-threshold edges, and no group holds two
+    units of one input; shuffling the inputs' order changes nothing."""
+    from itertools import combinations
+
+    from spyglass.spikesorting.v2._matching.graph import derive_tracked_units
+
+    rng = np.random.default_rng(seed)
+    n_inputs, per_input = 4, 3
+    nodes = [(f"s{i}", 0, u) for i in range(n_inputs) for u in range(per_input)]
+    input_by_node = {node: int(node[0][1:]) for node in nodes}
+    probabilities = [0.2, 0.5, 0.51, 0.7, 0.7, 0.9]
+    edges = [
+        (a, b, float(rng.choice(probabilities)))
+        for a, b in combinations(nodes, 2)
+        if input_by_node[a] != input_by_node[b] and rng.random() < 0.5
+    ]
+    kwargs = dict(threshold=0.5, max_strict_nodes=100)
+    tracked = derive_tracked_units(
+        nodes, edges, input_by_node=input_by_node, **kwargs
+    )
+
+    members = [node for tu in tracked for node in tu["members"]]
+    assert sorted(members) == sorted(nodes)
+    above = {frozenset((a, b)) for a, b, p in edges if p > kwargs["threshold"]}
+    for tu in tracked:
+        group = tu["members"]
+        assert len({input_by_node[n] for n in group}) == len(group)
+        assert all(frozenset(p) in above for p in combinations(group, 2))
+
+    shuffled_nodes = [nodes[i] for i in rng.permutation(len(nodes))]
+    shuffled_edges = [edges[i] for i in rng.permutation(len(edges))]
+    again = derive_tracked_units(
+        shuffled_nodes,
+        shuffled_edges,
+        input_by_node=input_by_node,
+        **kwargs,
+    )
+    assert [tu["members"] for tu in again] == [tu["members"] for tu in tracked]
 
 
 def test_derive_tracked_units_counts_sessions_by_nwb_not_curation():

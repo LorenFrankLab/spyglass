@@ -54,8 +54,8 @@ class UnitMatchParamsSchema(WaveformBundleParamsSchema, TrackingParamsSchema):
         Pair-probability cutoff used to seed edges in the ``TrackedUnit`` graph.
         Default ``0.5``.
     max_strict_nodes : int
-        Hard upper bound on the graph size submitted to strict
-        ``networkx.find_cliques``. Exceeding it raises
+        Hard upper bound on the number of units in the tracked-unit
+        graph. Exceeding it raises
         ``TrackedUnitBudgetExceededError``. Default ``2000``.
     ms_before, ms_after : float
         Symmetric waveform window (ms) for the per-session UnitMatch bundle.

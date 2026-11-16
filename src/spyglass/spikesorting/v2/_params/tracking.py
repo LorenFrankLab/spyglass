@@ -10,7 +10,7 @@ class TrackingParamsSchema(BaseModel):
 
     Flat fields of the matcher recipe blob; a backend may inherit this schema.
     Recipes without them use these defaults. Grouping is a strict greedy
-    maximal-clique partition, independent of the matcher backend.
+    complete-linkage partition, independent of the matcher backend.
     """
 
     model_config = ConfigDict(extra="forbid")
