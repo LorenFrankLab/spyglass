@@ -1626,7 +1626,7 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
-        """Return ALL electrodes in the sort group joined to BrainRegion.
+        """Return ALL electrodes of each curation's sort group with regions.
 
         For a concat-backed sort, uses the first frozen member's sort group;
         later members' regions may differ. A classmethod because
@@ -1634,23 +1634,28 @@ class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        key : dict
-            Restriction selecting a single ``CurationV2`` row.
+        key : dict or list of dict
+            Restriction on ``CurationV2``; may match several curations.
 
         Returns
         -------
         dj.Table
-            A DataJoint relation (``SortGroupElectrode * Electrode *
-            BrainRegion``) covering every electrode in the sort group (the
-            anchor member's sort group for concat sorts).
+            ``CurationV2`` key (``sorting_id``, ``curation_id``) joined to
+            ``SortGroupElectrode * Electrode * BrainRegion``: one row per
+            electrode of each curation's sort group (the anchor member's
+            sort group for concat sorts).
         """
-        sorting_id = (cls & key).fetch1("sorting_id")
-        anchor = _sorting_fetch.resolve_sort_anchor(
-            SortingSelection.resolve_source({"sorting_id": sorting_id})
-        )
-        return sort_group_electrode_regions(
-            {
-                "nwb_file_name": anchor.nwb_file_name,
-                "sort_group_id": anchor.sort_group_id,
-            }
-        )
+        curations = (cls & key).proj()
+        anchors = []
+        for sorting_id in set(curations.fetch("sorting_id")):
+            anchor = _sorting_fetch.resolve_sort_anchor(
+                SortingSelection.resolve_source({"sorting_id": sorting_id})
+            )
+            anchors.append(
+                {
+                    "sorting_id": sorting_id,
+                    "nwb_file_name": anchor.nwb_file_name,
+                    "sort_group_id": anchor.sort_group_id,
+                }
+            )
+        return curations * sort_group_electrode_regions({}) & anchors

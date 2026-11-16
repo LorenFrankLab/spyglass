@@ -323,6 +323,28 @@ def test_get_sort_group_info_returns_target_electrodes(two_v2_merge_ids):
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_get_sort_group_info_pairs_each_merge_id_with_its_electrodes(
+    two_v2_merge_ids,
+):
+    """One call over several merge_ids returns each merge_id joined to its
+    own sort group's electrodes only, as v1 does."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    ctx = two_v2_merge_ids
+    info = SpikeSortingOutput.get_sort_group_info(
+        [{"merge_id": ctx["merge_id_a"]}, {"merge_id": ctx["merge_id_b"]}]
+    )
+    for merge_key, electrodes in (
+        ("merge_id_a", ctx["elec_a"]),
+        ("merge_id_b", ctx["elec_b"]),
+    ):
+        got = (info & {"merge_id": ctx[merge_key]}).fetch("electrode_id")
+        assert sorted(int(e) for e in got) == sorted(electrodes)
+    assert len(info) == len(ctx["elec_a"]) + len(ctx["elec_b"])
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_get_recording_returns_target_recording(two_v2_merge_ids):
     """``get_recording({"merge_id": A})`` loads A's recording: 32 channels
     whose ids are disjoint from B's."""

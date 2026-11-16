@@ -297,6 +297,38 @@ def test_member_rows_register_and_dispatch_through_merge_table(
 
 
 @pytest.mark.slow
+def test_member_sort_group_info_pairs_each_member_with_its_session(
+    concat_member_curation,
+):
+    """One call over every member's merge_id joins each to its own
+    session's sort group, as v1 does for several merge_ids."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    curation_key = concat_member_curation["curation_key"]
+    merge_rows = (
+        SpikeSortingOutput.ConcatMemberCurationV2 & curation_key
+    ).fetch("merge_id", "member_index", as_dict=True)
+    sessions = {
+        int(row["member_index"]): row["nwb_file_name"]
+        for row in concat_member_curation["rows"]
+    }
+    info = SpikeSortingOutput.get_sort_group_info(
+        [{"merge_id": row["merge_id"]} for row in merge_rows]
+    )
+    for row in merge_rows:
+        member_info = info & {"merge_id": row["merge_id"]}
+        assert set(member_info.fetch("nwb_file_name")) == {
+            sessions[int(row["member_index"])]
+        }
+        single = SpikeSortingOutput.get_sort_group_info(
+            {"merge_id": row["merge_id"]}
+        )
+        assert sorted(member_info.fetch("electrode_id")) == sorted(
+            single.fetch("electrode_id")
+        )
+
+
+@pytest.mark.slow
 def test_decoding_duplicate_guard_is_scoped_to_one_member(
     concat_member_curation,
 ):

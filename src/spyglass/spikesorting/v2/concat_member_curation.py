@@ -720,14 +720,31 @@ class ConcatMemberCurationV2(
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> "dj.Table":
-        """Return all electrodes and regions for this member's sort group."""
-        snapshot = cls._member_snapshot_row(key)
-        return sort_group_electrode_regions(
-            {
-                "nwb_file_name": snapshot["nwb_file_name"],
-                "sort_group_id": int(snapshot["sort_group_id"]),
-            }
+        """Return all electrodes and regions of each member's sort group.
+
+        Parameters
+        ----------
+        key : dict or list of dict
+            Restriction on ``ConcatMemberCurationV2``; may match several
+            members.
+
+        Returns
+        -------
+        dj.Table
+            Member key (``sorting_id``, ``curation_id``, ``member_index``)
+            joined to its frozen ``MemberSnapshot`` session and sort group
+            and to ``SortGroupElectrode * Electrode * BrainRegion``.
+        """
+        members = (
+            (cls & key).proj()
+            * SortingSelection.ConcatenatedRecordingSource.proj(
+                "concat_recording_id"
+            )
+            * ConcatenatedRecordingSelection.MemberSnapshot.proj(
+                "nwb_file_name", "sort_group_id"
+            )
         )
+        return members * sort_group_electrode_regions({})
 
     @classmethod
     def has_unapplied_proposed_merges(cls, key: dict) -> bool:
