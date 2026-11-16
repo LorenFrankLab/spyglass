@@ -1078,3 +1078,65 @@ def test_apply_metric_seed_keeps_a_row_seed():
     out = apply_metric_seed(["nn_advanced", "sd_ratio"], kwargs, 7)
     assert out == kwargs
     assert apply_metric_seed(["snr"], {}, 7) == {}
+
+
+def _rule_part_enum(column: str) -> set[str]:
+    """Values of an enum column of ``AutoCurationRules.Rule``, read from source.
+
+    Parsed from the file so this stays DB-free; importing the table module
+    activates its schema.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    import spyglass.spikesorting.v2 as v2
+
+    path = Path(v2.__file__).with_name("metric_curation.py")
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.ClassDef) and node.name == "AutoCurationRules":
+            rule = next(
+                n
+                for n in node.body
+                if isinstance(n, ast.ClassDef) and n.name == "Rule"
+            )
+            definition = next(
+                n.value.value
+                for n in rule.body
+                if isinstance(n, ast.Assign) and n.targets[0].id == "definition"
+            )
+            match = re.search(
+                rf"^\s*{column}\s*(?:=\s*'[^']*'\s*)?:\s*enum\(([^)]*)\)",
+                definition,
+                re.MULTILINE,
+            )
+            assert match, f"{column} enum not found in Rule.definition"
+            return {v.strip().strip("'") for v in match.group(1).split(",")}
+    raise AssertionError("AutoCurationRules.Rule not found")
+
+
+def test_rule_operator_sets_agree_across_schema_table_and_evaluator():
+    """Every accepted operator is stored by the table and evaluated."""
+    from typing import get_args
+
+    from spyglass.spikesorting.v2._curation.metrics import (
+        _COMPARISON_TO_FUNCTION,
+    )
+    from spyglass.spikesorting.v2._params.metric_curation import RuleOperator
+
+    schema = set(get_args(RuleOperator))
+    assert schema == _rule_part_enum("operator")
+    assert schema == set(_COMPARISON_TO_FUNCTION)
+
+
+def test_rule_missing_policy_sets_agree_across_schema_and_table():
+    """Every accepted missing-metric policy is storable by the table."""
+    from typing import get_args
+
+    from spyglass.spikesorting.v2._params.metric_curation import (
+        MissingMetricPolicy,
+    )
+
+    assert set(get_args(MissingMetricPolicy)) == _rule_part_enum(
+        "missing_policy"
+    )
