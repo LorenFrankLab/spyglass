@@ -695,6 +695,7 @@
     "test_pipeline_observability.py": {
       "tier": "pipeline",
       "overrides": {
+        "test_merge_registration_errors_name_the_calling_entry_point": "unit",
         "test_motion_border_warning_names_removed_or_extrapolated_channels": "unit",
         "test_phase_shift_skip_warning_only_when_requested_and_not_applied": "unit",
         "test_populate_once": "unit",
@@ -702,7 +703,8 @@
         "test_run_request_target_names_the_session_or_the_session_group": "unit",
         "test_run_stage_logs_one_line_when_reused_and_two_when_computed": "unit",
         "test_stage_error_names_the_run_its_finished_stages_and_the_rerun": "unit",
-        "test_v2_stage_tables_take_the_populate_key_lock": "db_unit"
+        "test_v2_stage_tables_take_the_populate_key_lock": "db_unit",
+        "test_zero_unit_messages_name_the_calling_entry_point": "unit"
       }
     },
     "test_pipeline_presets.py": {

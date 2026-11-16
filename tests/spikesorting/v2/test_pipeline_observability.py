@@ -700,3 +700,116 @@ def test_stored_filtering_text_lists_the_steps_the_recording_ran(first_run):
     filtering = _stored_filtering({"recording_id": run_summary["recording_id"]})
     assert "bandpass filter" in filtering
     assert "phase-shift" not in filtering
+
+
+class _FakeRelation:
+    """``Table & key`` stand-in: truthy, with one ``n_units`` value."""
+
+    def __init__(self, n_units):
+        self._n_units = n_units
+
+    def __bool__(self):
+        return True
+
+    def fetch1(self, attr):
+        return self._n_units
+
+
+class _FakeSortingTable:
+    def __init__(self, n_units):
+        self._n_units = n_units
+
+    def __and__(self, key):
+        return _FakeRelation(self._n_units)
+
+    def populate(self, key, reserve_jobs=False):
+        return None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "caller", ["run_v2_concat_pipeline", "estimate_motion"]
+)
+def test_zero_unit_messages_name_the_calling_entry_point(monkeypatch, caller):
+    """A zero-unit sort's error and warning name the entry point that ran it
+    and its target, not always run_v2_pipeline."""
+    import sys
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._orchestration.stages import (
+        StageContext,
+        _run_sorting_stage,
+    )
+    from spyglass.spikesorting.v2.exceptions import ZeroUnitSortError
+
+    fake_sorting = SimpleNamespace(
+        Sorting=_FakeSortingTable(0),
+        SortingSelection=SimpleNamespace(
+            insert_selection=lambda key: {"sorting_id": "sid"}
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules, "spyglass.spikesorting.v2.sorting", fake_sorting
+    )
+    context = StageContext(caller, "session group 'o'/'g'")
+    bundle = SimpleNamespace(sorter="ms5", sorter_params_name="p")
+
+    def run(require_units, warnings_list):
+        return _run_sorting_stage(
+            {"concat_recording_id": "c"},
+            {},
+            bundle,
+            require_units=require_units,
+            run_summary={},
+            stage_seconds={},
+            warnings_list=warnings_list,
+            context=context,
+        )
+
+    with pytest.raises(ZeroUnitSortError) as error:
+        run(True, [])
+    assert str(error.value).startswith(f"{caller}: ")
+    assert "session group 'o'/'g'" in str(error.value)
+
+    warnings_list: list = []
+    run(False, warnings_list)
+    (warning,) = warnings_list
+    assert warning.startswith(f"{caller}: ")
+    assert "session group 'o'/'g'" in warning
+    assert "zero units" in warning
+
+
+@pytest.mark.unit
+def test_merge_registration_errors_name_the_calling_entry_point(monkeypatch):
+    """A curation with several merge rows is reported under the entry point
+    that ran it."""
+    import sys
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._orchestration.stages import (
+        StageContext,
+        _curation_merge_id,
+    )
+
+    class _Rows:
+        def __and__(self, key):
+            return SimpleNamespace(fetch=lambda attr: ["m1", "m2"])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.spikesorting_merge",
+        SimpleNamespace(SpikeSortingOutput=SimpleNamespace(CurationV2=_Rows())),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.v2.curation",
+        SimpleNamespace(CONCAT_MERGE_GATE_MESSAGE="{sorting_id}"),
+    )
+    with pytest.raises(ValueError) as error:
+        _curation_merge_id(
+            {"sorting_id": "s", "curation_id": 0},
+            is_concat=True,
+            warnings_list=[],
+            context=StageContext("run_v2_concat_pipeline", None),
+        )
+    assert str(error.value).startswith("run_v2_concat_pipeline: ")

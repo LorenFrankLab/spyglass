@@ -169,11 +169,17 @@ def _run_sort_group_keys(
     return group_keys
 
 
-def _curation_merge_id(curation_key, *, is_concat: bool, warnings_list: list):
+def _curation_merge_id(
+    curation_key,
+    *,
+    is_concat: bool,
+    warnings_list: list,
+    context: StageContext,
+):
     """Return one merge id, or the intentional concat ``None``.
 
     A concat curation has no merge row by design; its gate advisory is
-    appended to ``warnings_list`` once.
+    appended to ``warnings_list`` once. Errors name ``context.caller``.
     """
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
@@ -183,12 +189,12 @@ def _curation_merge_id(curation_key, *, is_concat: bool, warnings_list: list):
         return merge_ids[0]
     if len(merge_ids) > 1:
         raise ValueError(
-            "run_v2_pipeline: CurationV2 has multiple "
+            f"{context.caller}: CurationV2 has multiple "
             f"SpikeSortingOutput rows for {curation_key}."
         )
     if not is_concat:
         raise ValueError(
-            "run_v2_pipeline: single-session CurationV2 is missing its "
+            f"{context.caller}: single-session CurationV2 is missing its "
             f"SpikeSortingOutput registration for {curation_key}."
         )
     warning = CONCAT_MERGE_GATE_MESSAGE.format(
@@ -284,16 +290,17 @@ def _run_sorting_stage(
     n_units = int((Sorting & sorting_key).fetch1("n_units"))
     if n_units == 0:
         sorting_id = sorting_key["sorting_id"]
+        where = f" for {context.target}" if context.target else ""
         if require_units:
             raise ZeroUnitSortError(
-                "run_v2_pipeline: sort found zero units for "
-                f"sorting_id={sorting_id}; require_units=True. Check "
+                f"{context.caller}: sort found zero units{where} "
+                f"(sorting_id={sorting_id}); require_units=True. Check "
                 "detect_threshold / the artifact mask, or call with "
                 "require_units=False to accept the empty result."
             )
         # An empty but real curation avoids special-casing a None merge_id.
         zero_unit_warning = (
-            f"run_v2_pipeline: zero units for sorting_id={sorting_id}; "
+            f"{context.caller}: zero units{where} (sorting_id={sorting_id}); "
             "writing an EMPTY curation + merge row. Check "
             "detect_threshold / the artifact mask if you expected output."
         )
@@ -362,7 +369,10 @@ def _run_root_curation_stage(
                 )
         # A concat curation's synthetic timeline gets no merge row.
         merge_id = _curation_merge_id(
-            curation_key, is_concat=is_concat, warnings_list=warnings_list
+            curation_key,
+            is_concat=is_concat,
+            warnings_list=warnings_list,
+            context=context,
         )
         return curation_key, merge_id
 
@@ -492,7 +502,10 @@ def _run_auto_curation_stage(
             eval_key, description=description, reuse_existing=True
         )
         auto_merge_id = _curation_merge_id(
-            child, is_concat=is_concat, warnings_list=warnings_list
+            child,
+            is_concat=is_concat,
+            warnings_list=warnings_list,
+            context=context,
         )
         return child, auto_merge_id, children_before
 
