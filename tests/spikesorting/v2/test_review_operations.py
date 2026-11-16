@@ -432,3 +432,31 @@ def test_review_result_refuses_a_draft_edited_after_its_commit(
     (tmp_path / "annotations.json").write_text(json.dumps({"edited": True}))
     with pytest.raises(ValueError, match="changed after"):
         committed_review_result(review)
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_review_result_before_commit_names_the_review_and_next_call(
+    tmp_path, pending
+):
+    """result() before any finished commit says which review is waiting and
+    which call completes it."""
+    from spyglass.spikesorting.v2._review.operations import (
+        RESULT_FILE,
+        committed_review_result,
+    )
+
+    if pending:
+        (tmp_path / RESULT_FILE).write_text(json.dumps({"pending": True}))
+    review = SimpleNamespace(
+        uri=str(tmp_path),
+        review_id="review-9",
+        parent=SimpleNamespace(curation_id=4),
+    )
+    with pytest.raises(ValueError) as error:
+        committed_review_result(review)
+    message = str(error.value)
+    assert "review-9" in message
+    assert "curation 4" in message
+    assert "Preview and commit" in message
+    assert "review.result() again" in message
+    assert ("did not finish" in message) is pending

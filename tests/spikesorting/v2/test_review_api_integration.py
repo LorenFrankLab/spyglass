@@ -671,3 +671,20 @@ def test_each_reviewer_starts_their_own_review(
         )
     finally:
         clear_curations_for(sorting_key)
+
+
+def test_resume_of_an_unknown_review_id_names_the_id_and_the_lookup_call(
+    dj_conn,
+):
+    """A stale or mistyped review ID says it is not in this database and
+    how to list a curation's reviews."""
+    import uuid
+
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+
+    review_id = uuid.uuid4()
+    with pytest.raises(LookupError) as error:
+        FigPackReview.resume(review_id)
+    message = str(error.value)
+    assert str(review_id) in message
+    assert "FigPackReview.find(" in message

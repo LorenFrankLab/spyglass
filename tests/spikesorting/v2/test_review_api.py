@@ -220,7 +220,8 @@ def test_next_step_lines_name_the_state_consistently():
         label_conflicts=(),
     )
     assert "Save draft" in clean.next_step()
-    assert "Record reviewed — no changes" in clean.next_step()
+    assert "Record reviewed" in clean.next_step()
+    assert "—" not in clean.next_step()
     clean.review.is_hosted = True
     assert "Save Annotations" in clean.next_step()
     assert "confirm_no_changes=True" in clean.next_step()
@@ -309,3 +310,17 @@ def test_review_config_hash_is_pinned():
     assert config_hash == (
         "6d09c6c5acb6eda1346c371765640f4d0a24f17f80d64fb5d13b7a4d3135f59f"
     )
+
+
+def test_hosted_review_result_names_the_python_commit_call():
+    """A hosted review has no browser result; the error says how to commit
+    it from Python instead."""
+    from spyglass.spikesorting.v2.review_api import FigPackReview
+
+    hosted = SimpleNamespace(is_hosted=True, review_id="review-7")
+    with pytest.raises(ValueError) as error:
+        FigPackReview.result(hosted)
+    message = str(error.value)
+    assert "review-7" in message
+    assert "upload=True" in message
+    assert "preview_import().commit(" in message

@@ -377,7 +377,10 @@ class FigPackReview:
         """Read the completed browser review's final, explicitly verified curation."""
         if self.is_hosted:
             raise ValueError(
-                "Hosted drafts use the notebook commit receipt; browser results require a connected local review."
+                f"FigPackReview.result: review {self.review_id} is hosted "
+                "(upload=True), so the browser cannot store a result. Commit "
+                "it in Python: receipt = review.preview_import().commit(); "
+                "receipt.curation is the result."
             )
         return committed_review_result(self)
 
@@ -522,10 +525,17 @@ class FigPackReview:
         require_figpack()
         key = {"figpack_curation_id": _uuid(review_id)}
         selections = (FigPackCurationSelection & key).fetch(as_dict=True)
-        if len(selections) != 1 or not (FigPackCuration & key):
+        if len(selections) != 1:
             raise LookupError(
-                f"FigPackReview.resume({review_id}) requires one built "
-                "FigPackCuration selection."
+                f"FigPackReview.resume: no review with review_id={review_id} "
+                "in this database. Use the ID printed by start_review, or "
+                "list a curation's reviews with FigPackReview.find(curation)."
+            )
+        if not (FigPackCuration & key):
+            raise LookupError(
+                f"FigPackReview.resume: review {review_id} was selected but "
+                "its view was never built (the build did not finish). Call "
+                "start_review(...) again on the same curation to rebuild it."
             )
         selection = selections[0]
         _assert_selection_identity(selection, key)
@@ -708,7 +718,7 @@ class CurationChangeSet:
             "commit(confirm_no_changes=True) in Python to record this curation as reviewed."
             if hosted
             else "edit and Save draft in the local browser, or use Preview and commit "
-            "then Record reviewed — no changes."
+            "then the Record reviewed button (no changes)."
         )
         return (
             "No saved browser edits differ from curation "

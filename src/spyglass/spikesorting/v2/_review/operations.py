@@ -490,8 +490,16 @@ def committed_review_result(review):
         visited.add(review.review_id)
         value = read_json(Path(review.uri) / RESULT_FILE)
         if not value or value.get("pending"):
+            started = (
+                " (a commit was started but did not finish)" if value else ""
+            )
             raise ValueError(
-                "This browser review has not completed. Resume its commit or verification action."
+                f"FigPackReview.result: review {review.review_id} of curation "
+                f"{review.parent.curation_id} has not completed: it has no "
+                f"committed result yet{started}. Use Preview and commit in "
+                "the browser "
+                "(review.open()) or review.commit_panel() in the notebook, "
+                "then call review.result() again."
             )
         committed_hash = value.get("annotations_hash")
         draft = read_json(Path(review.uri) / "annotations.json")
