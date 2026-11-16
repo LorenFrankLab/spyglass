@@ -333,6 +333,7 @@ def test_task_epoch_config_cameras_map_by_id(common):
 
     class _NoDevices:
         devices = {}
+        objects = {}  # cameras are also found through the file's videos
 
     table = common.TaskEpoch()
     table._file_config = {

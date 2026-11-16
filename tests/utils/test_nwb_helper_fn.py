@@ -145,3 +145,43 @@ def test_get_pos_dict_with_timestamps():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_get_image_series_timestamps_explicit():
+    from spyglass.utils.nwb_helper_fn import get_image_series_timestamps
+
+    timestamps = np.array([0.5, 0.6, 0.8])
+    video = pynwb.image.ImageSeries(
+        name="video",
+        unit="n.a.",
+        format="external",
+        external_file=["video.mp4"],
+        starting_frame=[0],
+        timestamps=timestamps,
+    )
+    np.testing.assert_array_equal(
+        get_image_series_timestamps(video), timestamps
+    )
+
+
+def test_get_image_series_timestamps_rate_external():
+    """A rate-based external video has no data; frames come from num_samples."""
+    from spyglass.utils.nwb_helper_fn import get_image_series_timestamps
+
+    try:
+        video = pynwb.image.ImageSeries(
+            name="video",
+            unit="n.a.",
+            format="external",
+            external_file=["video.mp4"],
+            starting_frame=[0],
+            rate=10.0,
+            starting_time=2.0,
+            num_samples=4,
+        )
+    except TypeError:
+        pytest.skip("ImageSeries.num_samples needs pynwb >= 4")
+
+    np.testing.assert_allclose(
+        get_image_series_timestamps(video), [2.0, 2.1, 2.2, 2.3]
+    )

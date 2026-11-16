@@ -133,6 +133,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Common
 
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Accept ndx-pose `CalibratedCamera` devices in `CameraDevice`, `TaskEpoch`
+        and `VideoFile`; `DeviceModel` is optional #XXXX
+    - Ingest a plain core `Device` as a camera when an `ImageSeries` records with
+        it, so `TaskEpoch` resolves its camera ID #XXXX
+    - Support rate-based external `ImageSeries` in `VideoFile` #XXXX
 
 - Decoding
 

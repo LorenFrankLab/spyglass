@@ -978,3 +978,28 @@ def is_nwb_obj_type(
         return isinstance(nwb_object, target_type)
 
     return nwb_object.__class__.__name__ == target_type
+
+
+def get_image_series_timestamps(image_series: pynwb.image.ImageSeries):
+    """Frame times of an ImageSeries, explicit or from starting_time and rate.
+
+    ``ImageSeries.get_timestamps()`` can't be used for rate-based series that
+    point to external files: their ``data`` is empty, so it returns no samples.
+    The frame count of such series comes from ``num_samples`` instead.
+
+    Parameters
+    ----------
+    image_series : pynwb.image.ImageSeries
+        The video series.
+
+    Returns
+    -------
+    array-like
+        One timestamp per frame, in seconds.
+    """
+    if image_series.timestamps is not None:
+        return image_series.timestamps
+    n_frames = getattr(image_series, "num_samples", None) or len(
+        image_series.data
+    )
+    return image_series.starting_time + np.arange(n_frames) / image_series.rate

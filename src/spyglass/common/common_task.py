@@ -7,7 +7,7 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
-from spyglass.utils.nwb_helper_fn import get_nwb_file, is_nwb_obj_type
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_task")
 
@@ -214,10 +214,16 @@ class TaskEpoch(SpyglassIngestion, dj.Imported):
         """
         camera_names = dict()
 
-        for device in nwb_file.devices.values():
-            if is_nwb_obj_type(device, "CameraDevice"):
-                camera_id = int(str.split(device.name)[1])
-                camera_names[camera_id] = device.camera_name
+        for device in CameraDevice.get_camera_devices(nwb_file):
+            camera_id = CameraDevice.get_camera_id(device)
+            camera_name = CameraDevice.get_camera_name(device)
+            if camera_id in camera_names:
+                logger.warning(
+                    f"Cameras '{camera_names[camera_id]}' and '{camera_name}' "
+                    f"both have camera id {camera_id}; tasks naming this id "
+                    f"resolve to '{camera_name}'."
+                )
+            camera_names[camera_id] = camera_name
 
         # Config entries are scalar per device: {camera_id: int,
         # camera_name: str}. The previous implementation zipped the two, which

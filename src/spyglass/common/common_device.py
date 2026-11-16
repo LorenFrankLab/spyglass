@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Optional
 
 from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
@@ -289,6 +290,14 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
 @schema
 class CameraDevice(SpyglassIngestion, dj.Manual):
+    """Cameras, shared across sessions and keyed by camera_name.
+
+    camera_name is the device's ``camera_name`` (ndx-franklab-novela) or, for
+    other camera devices, its NWB name. Because the key is global, a name such
+    as ``Camera1`` refers to the same camera in every session of the database,
+    and two different cameras need different names.
+    """
+
     definition = """
     camera_name: varchar(80)
     ---
@@ -301,34 +310,91 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
 
+    # NWB device types ingested as cameras: the ndx-franklab-novela CameraDevice,
+    # and ndx-pose's CalibratedCamera (>=0.4.0, used for multi-camera 3D pose).
+    # CalibratedCamera has no camera_name/meters_per_pixel/lens, so those fall
+    # back to the device name and the table defaults. Cameras written as other
+    # Device types are found through their videos (get_camera_devices).
+    CAMERA_NWB_TYPES = ("CameraDevice", "CalibratedCamera")
+
     @property
     def _source_nwb_object_type(self):
         return "CameraDevice"
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        return self.get_camera_devices(nwb_file)
+
+    @classmethod
+    def get_camera_devices(cls, nwb_file) -> list:
+        """The file's cameras: camera-typed devices and video-recording devices.
+
+        Core NWB has no camera type, so a camera can also be a plain Device
+        that an ImageSeries records with (`ImageSeries.device`). Only
+        ImageSeries itself counts, not its subclasses: a TwoPhotonSeries can
+        link a microscope.
+        """
+        video_device_ids = {
+            obj.device.object_id
+            for obj in nwb_file.objects.values()
+            if is_nwb_obj_type(obj, "ImageSeries")
+            and getattr(obj, "device", None) is not None
+        }
+        return [
+            obj
+            for obj in nwb_file.objects.values()
+            if cls.is_camera_device(obj) or obj.object_id in video_device_ids
+        ]
 
     @property
     def table_key_to_obj_attr(self):
         return {
             "self": {
-                "camera_name": "camera_name",
-                "meters_per_pixel": "meters_per_pixel",
-                "lens": "lens",
+                "camera_name": self.get_camera_name,
+                "meters_per_pixel": ("meters_per_pixel", 0),
+                "lens": ("lens", ""),
                 "camera_id": self.get_camera_id,
-            },
-            "model": {
-                "model": "name",
-                "manufacturer": "manufacturer",
+                # device.model (a DeviceModel) is optional, e.g. a
+                # CalibratedCamera written without one; default to "".
+                "model": lambda obj: self._model_attr(obj, "name"),
+                "manufacturer": lambda obj: self._model_attr(
+                    obj, "manufacturer"
+                ),
             },
         }
 
     @staticmethod
+    def _model_attr(camera_nwb_obj, attr: str) -> str:
+        """An attribute of the device's DeviceModel, or "" if it has none."""
+        model = getattr(camera_nwb_obj, "model", None)
+        return (getattr(model, attr, None) or "") if model is not None else ""
+
+    @classmethod
+    def is_camera_device(cls, nwb_obj) -> bool:
+        """True if the NWB object is a device type ingested as a camera."""
+        return any(is_nwb_obj_type(nwb_obj, t) for t in cls.CAMERA_NWB_TYPES)
+
+    @staticmethod
+    def get_camera_name(camera_nwb_obj) -> str:
+        """The device's camera_name if it has one, else its NWB name."""
+        return (
+            getattr(camera_nwb_obj, "camera_name", None) or camera_nwb_obj.name
+        )
+
+    @staticmethod
     def get_camera_id(camera_nwb_obj: ndx_franklab_novela.CameraDevice) -> int:
-        id_int = [int(i) for i in camera_nwb_obj.name.split() if i.isnumeric()]
-        if not id_int:
-            logger.warning(
-                f"Camera {camera_nwb_obj.name} missing a valid integer ID."
-            )
-            return -1
-        return id_int[0]
+        """Integer camera id from the device name.
+
+        The first whitespace-separated numeric token ("camera_device 1" -> 1),
+        else trailing digits ("Camera1" -> 1), else -1 with a warning.
+        """
+        name = camera_nwb_obj.name
+        id_int = [int(i) for i in name.split() if i.isnumeric()]
+        if id_int:
+            return id_int[0]
+        if trailing := re.search(r"(\d+)\s*$", name):
+            return int(trailing.group(1))
+        logger.warning(f"Camera {name} missing a valid integer ID.")
+        return -1
 
 
 @schema
