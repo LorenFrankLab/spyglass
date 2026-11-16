@@ -372,7 +372,10 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
         motion_recipe=motion_recipe,
     )
     source = _build_run_source(
-        request, run_summary=run_summary, stage_seconds=stage_seconds
+        request,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+        warnings_list=warnings_list,
     )
     # Only ``"apply"`` changes what the sort reads.
     corrected: dict = {}
@@ -392,6 +395,7 @@ def _run_pipeline(request: _RunRequest) -> "RunResult":
                 motion_recipe,
                 run_summary,
                 stage_seconds,
+                warnings_list,
                 context=context,
             )
     sorting_key, n_units = _run_sorting_stage(

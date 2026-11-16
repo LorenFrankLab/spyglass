@@ -695,7 +695,10 @@
     "test_pipeline_observability.py": {
       "tier": "pipeline",
       "overrides": {
+        "test_motion_border_warning_names_removed_or_extrapolated_channels": "unit",
+        "test_phase_shift_skip_warning_only_when_requested_and_not_applied": "unit",
         "test_populate_once": "unit",
+        "test_recording_clip_warning_names_the_interval_and_dropped_seconds": "unit",
         "test_run_request_target_names_the_session_or_the_session_group": "unit",
         "test_run_stage_logs_one_line_when_reused_and_two_when_computed": "unit",
         "test_stage_error_names_the_run_its_finished_stages_and_the_rerun": "unit",

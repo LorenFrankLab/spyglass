@@ -371,6 +371,27 @@ def sorted_valid_times(
         the sort interval, the raw data valid times or the preprocessing row
         is missing (the caller reports those).
     """
+    inputs = _stored_save_inputs(
+        nwb_file_name, interval_list_name, preprocessing_params_name
+    )
+    if inputs is None:
+        return None
+    return intended_save_intervals(*inputs)
+
+
+def _stored_save_inputs(
+    nwb_file_name: str,
+    interval_list_name: str,
+    preprocessing_params_name: str,
+) -> "tuple[np.ndarray, np.ndarray, float] | None":
+    """The sort interval, raw valid times and ``min_segment_length`` rows.
+
+    Returns
+    -------
+    tuple or None
+        ``(sort_valid_times, raw_valid_times, min_segment_length)``, or
+        ``None`` when a row is missing.
+    """
     from spyglass.common import IntervalList
     from spyglass.spikesorting.v2._params.preprocessing import (
         PreprocessingParamsSchema,
@@ -395,8 +416,68 @@ def sorted_valid_times(
     min_segment_length = PreprocessingParamsSchema.model_validate(
         params[0]
     ).min_segment_length
-    return intended_save_intervals(
-        sort_valid_times, raw_valid_times, min_segment_length
+    return sort_valid_times, raw_valid_times, min_segment_length
+
+
+def recording_clip_warning(
+    nwb_file_name: str,
+    interval_list_name: str,
+    expectation: "RecordingSaveExpectation",
+    sampling_frequency: float,
+) -> "str | None":
+    """The advisory for a sort interval that reaches past the raw data.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name : str
+        The session and its sort ``IntervalList``.
+    expectation : RecordingSaveExpectation
+        From :func:`compute_recording_save_expectation`.
+    sampling_frequency : float
+        Hz; a difference within 1.5 samples is not reported.
+
+    Returns
+    -------
+    str or None
+        The advisory, or ``None`` when the request fits the raw coverage.
+    """
+    if expectation.over_request <= 1.5 / sampling_frequency:
+        return None
+    return (
+        f"IntervalList {interval_list_name!r} in {nwb_file_name!r} requests "
+        f"{expectation.requested_saved_total:.6f}s but the raw recording "
+        f"covers only {expectation.expected_saved_total:.6f}s after "
+        "min_segment_length filtering; clipping to raw coverage "
+        f"({expectation.over_request:.6f}s past the recording dropped)."
+    )
+
+
+def stored_recording_clip_warning(
+    nwb_file_name: str,
+    interval_list_name: str,
+    preprocessing_params_name: str,
+    sampling_frequency: float,
+) -> "str | None":
+    """:func:`recording_clip_warning` read from the stored rows.
+
+    Reads the interval rows directly (no input-drift check), so a reused
+    recording reports what its build reported.
+    """
+    inputs = _stored_save_inputs(
+        nwb_file_name, interval_list_name, preprocessing_params_name
+    )
+    if inputs is None:
+        return None
+    sort_valid_times, raw_valid_times, min_segment_length = inputs
+    expectation = compute_recording_save_expectation(
+        intended_save_intervals(
+            sort_valid_times, raw_valid_times, min_segment_length
+        ),
+        sort_valid_times,
+        min_segment_length,
+    )
+    return recording_clip_warning(
+        nwb_file_name, interval_list_name, expectation, sampling_frequency
     )
 
 

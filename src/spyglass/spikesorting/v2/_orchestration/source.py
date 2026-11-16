@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, NamedTuple
 
@@ -305,12 +306,18 @@ class _RunSource(NamedTuple):
 
 
 def _build_run_source(
-    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
+    request: _RunRequest,
+    *,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
 ) -> _RunSource:
     """Select and populate the source stages a sort reads.
 
     Records each stage's id, status and seconds as it goes, so a failure's
-    partial summary carries every completed stage.
+    partial summary carries every completed stage. Each recording's
+    advisories (:func:`_recording_advisories`) are added whether it was
+    computed or reused.
 
     Parameters
     ----------
@@ -318,6 +325,8 @@ def _build_run_source(
         The validated request; its source inputs, preset and exclusions.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
+    warnings_list : list
+        The run's warnings (appended to).
 
     Returns
     -------
@@ -335,11 +344,127 @@ def _build_run_source(
         if request.is_concat
         else _build_single_session_source
     )
-    return build(request, run_summary=run_summary, stage_seconds=stage_seconds)
+    return build(
+        request,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+        warnings_list=warnings_list,
+    )
+
+
+def _stored_filtering(recording_key: dict) -> "str | None":
+    """The stored recording's ``ElectricalSeries.filtering`` text.
+
+    Read from the file without rebuilding it; ``None`` when the file is not
+    on disk.
+    """
+    import h5py
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recording import Recording
+
+    analysis_file_name, series_path = (Recording & recording_key).fetch1(
+        "analysis_file_name", "electrical_series_path"
+    )
+    path = Path(AnalysisNwbfile.get_abs_path(analysis_file_name))
+    if not path.exists():
+        logger.debug(f"No stored file for {recording_key}; skipping advisory")
+        return None
+    with h5py.File(path, "r") as nwb:
+        value = nwb[series_path].attrs.get("filtering")
+    if isinstance(value, bytes):
+        return value.decode()
+    return None if value is None else str(value)
+
+
+def _recording_advisories(recording_key: dict) -> list[str]:
+    """Advisories of a stored ``Recording``, read from its rows and file.
+
+    The clipped sort interval and a skipped phase shift, computed from what
+    was stored so a reused recording reports what its build did. The input
+    drift check is not run here.
+
+    Parameters
+    ----------
+    recording_key : dict
+        ``{"recording_id": ...}`` of a populated ``Recording``.
+
+    Returns
+    -------
+    list of str
+        The advisories, empty when there are none.
+    """
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2._recording.preprocessing import (
+        phase_shift_skip_warning,
+    )
+    from spyglass.spikesorting.v2._recording.restriction import (
+        stored_recording_clip_warning,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+    )
+
+    sel = (RecordingSelection & recording_key).fetch1()
+    advisories = []
+    clip = stored_recording_clip_warning(
+        sel["nwb_file_name"],
+        sel["interval_list_name"],
+        sel["preprocessing_params_name"],
+        float((Recording & recording_key).fetch1("sampling_frequency")),
+    )
+    if clip is not None:
+        advisories.append(clip)
+    params = PreprocessingParamsSchema.model_validate(
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": sel["preprocessing_params_name"]}
+        ).fetch1("params")
+    )
+    if params.phase_shift is not None:
+        skipped = phase_shift_skip_warning(
+            sel["preprocessing_params_name"],
+            True,
+            _stored_filtering(recording_key),
+        )
+        if skipped is not None:
+            target = _run_target_label(
+                {
+                    "nwb_file_name": sel["nwb_file_name"],
+                    "sort_group_id": sel["sort_group_id"],
+                }
+            )
+            advisories.append(f"{target}: {skipped}")
+    return advisories
+
+
+def _add_recording_advisories(
+    recording_key: dict,
+    warnings_list: list,
+    *,
+    reused: bool,
+    prefix: str = "",
+) -> None:
+    """Append a recording's advisories; log them when its build was reused.
+
+    A computed recording's build already logged them.
+    """
+    for advisory in _recording_advisories(recording_key):
+        warnings_list.append(f"{prefix}{advisory}")
+        if reused:
+            logger.warning(f"{prefix}{advisory}")
 
 
 def _build_single_session_source(
-    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
+    request: _RunRequest,
+    *,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
 ) -> _RunSource:
     """Select and populate the ``Recording`` and its artifact detection.
 
@@ -381,6 +506,11 @@ def _build_single_session_source(
         request.stage_context,
     )
     run_summary["recording_id"] = recording_key["recording_id"]
+    _add_recording_advisories(
+        recording_key,
+        warnings_list,
+        reused=run_summary["recording_status"] == "reused",
+    )
 
     if bundle.artifact_detection_params_name is None:
         artifact_detection_id = None
@@ -417,7 +547,11 @@ def _build_single_session_source(
 
 
 def _build_concat_source(
-    request: _RunRequest, *, run_summary: dict, stage_seconds: dict
+    request: _RunRequest,
+    *,
+    run_summary: dict,
+    stage_seconds: dict,
+    warnings_list: list,
 ) -> _RunSource:
     """Build each member's recording and artifact mask, then the concat.
 
@@ -456,6 +590,15 @@ def _build_concat_source(
     member_recording_keys = _build_member_recordings(
         members, bundle, run_summary, stage_seconds, request.stage_context
     )
+    for member, recording_key in zip(
+        members, member_recording_keys, strict=True
+    ):
+        _add_recording_advisories(
+            recording_key,
+            warnings_list,
+            reused=run_summary["member_recording_status"] == "reused",
+            prefix=f"concat member {member['member_index']}: ",
+        )
     artifact_ids = _build_member_artifacts(
         members,
         member_recording_keys,

@@ -164,12 +164,16 @@ def _run_motion_correction(
     motion_recipe,
     run_summary: dict,
     stage_seconds: dict,
+    warnings_list: list,
     context: StageContext,
 ) -> dict:
     """Select and populate the corrected recording of a saved estimate.
 
     Records the corrected recording id, the channels its border mode removed,
-    its status and seconds in ``run_summary`` / ``stage_seconds``.
+    its status and seconds in ``run_summary`` / ``stage_seconds``. Contacts
+    the displacement moves past the probe ends (removed or extrapolated) are
+    a run warning, computed from the stored estimate whether the correction
+    was computed or reused.
 
     Parameters
     ----------
@@ -180,6 +184,8 @@ def _run_motion_correction(
         interpolation row is applied.
     run_summary, stage_seconds : dict
         The run's accumulating summary and per-stage seconds (mutated).
+    warnings_list : list
+        The run's warnings (appended to).
     context : StageContext
         The run's caller and target.
 
@@ -195,9 +201,14 @@ def _run_motion_correction(
         If the selection is refused or the interpolation fails (stage
         ``"motion_corrected_recording"``).
     """
+    from spyglass.spikesorting.v2._motion.report import (
+        border_channel_ids,
+        motion_border_warning,
+    )
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,
         MotionCorrectedRecordingSelection,
+        MotionEstimate,
     )
 
     corrected_key, _, _ = _run_stage(
@@ -238,6 +249,23 @@ def _run_motion_correction(
     run_summary["motion_corrected_recording_id"] = corrected_key[
         "motion_corrected_recording_id"
     ]
+    estimate = (MotionEstimate & estimate_key).fetch1(
+        "channel_ids", "channel_locations"
+    )
+    border = motion_border_warning(
+        corrected_key["motion_corrected_recording_id"],
+        motion_recipe.interpolation_params["border_mode"],
+        border_channel_ids=border_channel_ids(
+            MotionEstimate().get_motion(estimate_key),
+            list(estimate[0]),
+            estimate[1],
+        ),
+        removed_channel_ids=run_summary["motion_removed_channel_ids"],
+        n_source_channels=len(estimate[0]),
+    )
+    if border is not None:
+        logger.warning(border)
+        warnings_list.append(border)
     return dict(corrected_key)
 
 
@@ -419,7 +447,10 @@ def _estimate_motion(
     except ValueError as exc:
         raise PipelineInputError(f"{caller}: {exc}") from exc
     source = _build_run_source(
-        request, run_summary=run_summary, stage_seconds=stage_seconds
+        request,
+        run_summary=run_summary,
+        stage_seconds=stage_seconds,
+        warnings_list=warnings_list,
     )
     estimate_key = _run_motion_estimate(
         source.selection_fields,

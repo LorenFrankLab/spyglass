@@ -184,6 +184,55 @@ def _moved_positions(motion, channel_locations):
     return positions, positions[:, None] + displacement
 
 
+def motion_border_warning(
+    motion_corrected_recording_id,
+    border_mode: str,
+    *,
+    border_channel_ids: list,
+    removed_channel_ids: list,
+    n_source_channels: int,
+) -> "str | None":
+    """The advisory for contacts moved past the probe ends by a correction.
+
+    Parameters
+    ----------
+    motion_corrected_recording_id
+        The corrected recording, named in the advisory.
+    border_mode : {"remove_channels", "force_extrapolate"}
+        The interpolation recipe's border mode.
+    border_channel_ids : list
+        :func:`border_channel_ids` of the applied estimate.
+    removed_channel_ids : list
+        The channels ``remove_channels`` dropped (stored on the row).
+    n_source_channels : int
+        Channels of the source the estimate was computed on.
+
+    Returns
+    -------
+    str or None
+        The advisory, or ``None`` when no contact left the probe.
+    """
+    if border_mode == "remove_channels" and removed_channel_ids:
+        return (
+            f"Motion correction {motion_corrected_recording_id}: "
+            "border_mode='remove_channels' removed channel(s) "
+            f"{list(removed_channel_ids)}; the estimated displacement moves "
+            "them past the probe ends, so the sort reads "
+            f"{n_source_channels - len(removed_channel_ids)} of "
+            f"{n_source_channels} channels."
+        )
+    if border_mode == "force_extrapolate" and border_channel_ids:
+        return (
+            f"Motion correction {motion_corrected_recording_id}: "
+            "border_mode='force_extrapolate' extrapolated channel(s) "
+            f"{list(border_channel_ids)}; the estimated displacement moves "
+            "them past the probe ends, so their corrected traces are "
+            "extrapolated, not measured. Inspect MotionEstimate().report(...) "
+            "before trusting units on them."
+        )
+    return None
+
+
 def border_channel_ids(motion, channel_ids, channel_locations) -> list:
     """Contacts the displacement moves past the probe's ends in some bin.
 

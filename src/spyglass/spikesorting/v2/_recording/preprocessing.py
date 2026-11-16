@@ -319,6 +319,45 @@ def apply_spatial_preprocessing(
     return recording, applied_steps
 
 
+#: The ``ElectricalSeries.filtering`` entry of an applied phase shift.
+PHASE_SHIFT_STEP = "phase-shift (ADC)"
+
+
+def phase_shift_skip_warning(
+    preprocessing_params_name: str,
+    phase_shift_requested: bool,
+    filtering: "str | None",
+) -> "str | None":
+    """The advisory for a requested phase shift the recording did not run.
+
+    Parameters
+    ----------
+    preprocessing_params_name : str
+        The preprocessing recipe.
+    phase_shift_requested : bool
+        Whether the recipe sets ``phase_shift``.
+    filtering : str or None
+        The stored ``ElectricalSeries.filtering`` text; ``None`` when the
+        file is not on disk (nothing is reported then).
+
+    Returns
+    -------
+    str or None
+        The advisory, or ``None`` when no requested step was skipped.
+    """
+    if (
+        not phase_shift_requested
+        or filtering is None
+        or PHASE_SHIFT_STEP in filtering
+    ):
+        return None
+    return (
+        f"preprocessing {preprocessing_params_name!r} requests phase_shift "
+        "but the raw recording has no 'inter_sample_shift' property (not a "
+        "multiplexed-ADC acquisition), so phase shift was skipped."
+    )
+
+
 def filtering_description(
     bandpass_filter, reference_mode: str, applied_steps: dict
 ) -> str:
@@ -331,7 +370,7 @@ def filtering_description(
     """
     steps = []
     if applied_steps.get("phase_shift"):
-        steps.append("phase-shift (ADC)")
+        steps.append(PHASE_SHIFT_STEP)
     if bandpass_filter is not None:
         steps.append(
             f"bandpass filter {bandpass_filter.freq_min:g}-"

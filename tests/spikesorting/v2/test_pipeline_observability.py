@@ -565,3 +565,138 @@ def test_recording_stage_failure_keeps_the_preflight_warnings(
     assert repr(inputs["nwb_file_name"]) in str(err)
     assert f"sort group {inputs['sort_group_id']}" in str(err)
     assert "No stage finished before it" in str(err)
+
+
+@pytest.mark.unit
+def test_recording_clip_warning_names_the_interval_and_dropped_seconds():
+    """The clipped-interval advisory names the interval, the session and how
+    much was dropped; a sub-sample difference is not reported."""
+    from spyglass.spikesorting.v2._recording.restriction import (
+        RecordingSaveExpectation,
+        recording_clip_warning,
+    )
+
+    clipped = RecordingSaveExpectation(
+        expected_saved_total=9.0,
+        n_intended_intervals=1,
+        requested_saved_total=10.0,
+        over_request=1.0,
+    )
+    text = recording_clip_warning("s.nwb", "my interval", clipped, 30_000.0)
+    assert "'my interval'" in text and "'s.nwb'" in text
+    assert "clipping to raw coverage" in text
+    assert "1.000000s past the recording dropped" in text
+    exact = clipped._replace(requested_saved_total=9.0, over_request=1e-6)
+    assert recording_clip_warning("s.nwb", "i", exact, 30_000.0) is None
+
+
+@pytest.mark.unit
+def test_phase_shift_skip_warning_only_when_requested_and_not_applied():
+    """A requested phase shift that the stored filtering text does not list
+    is reported; an applied or unrequested one is not."""
+    from spyglass.spikesorting.v2._recording.preprocessing import (
+        PHASE_SHIFT_STEP,
+        phase_shift_skip_warning,
+    )
+
+    skipped = phase_shift_skip_warning(
+        "neuropixels_recipe", True, "bandpass filter 300-6000 Hz"
+    )
+    assert "'neuropixels_recipe'" in skipped
+    assert "inter_sample_shift" in skipped and "skipped" in skipped
+    applied = f"{PHASE_SHIFT_STEP}; bandpass filter 300-6000 Hz"
+    assert phase_shift_skip_warning("r", True, applied) is None
+    assert phase_shift_skip_warning("r", False, "bandpass") is None
+    assert phase_shift_skip_warning("r", True, None) is None
+
+
+@pytest.mark.unit
+def test_motion_border_warning_names_removed_or_extrapolated_channels():
+    """Border channels are reported as removed or as extrapolated, per the
+    interpolation border mode, naming the corrected recording."""
+    from spyglass.spikesorting.v2._motion.report import motion_border_warning
+
+    removed = motion_border_warning(
+        "corr-1",
+        "remove_channels",
+        border_channel_ids=[1, 2],
+        removed_channel_ids=[1, 2],
+        n_source_channels=8,
+    )
+    assert "corr-1" in removed and "[1, 2]" in removed
+    assert "6 of 8 channels" in removed
+    extrapolated = motion_border_warning(
+        "corr-2",
+        "force_extrapolate",
+        border_channel_ids=[7],
+        removed_channel_ids=[],
+        n_source_channels=8,
+    )
+    assert "corr-2" in extrapolated and "[7]" in extrapolated
+    assert "extrapolated" in extrapolated
+    assert (
+        motion_border_warning(
+            "c",
+            "force_extrapolate",
+            border_channel_ids=[],
+            removed_channel_ids=[],
+            n_source_channels=8,
+        )
+        is None
+    )
+
+
+@pytest.mark.database
+@pytest.mark.slow
+def test_reused_recording_reports_the_same_clip_warning_as_a_fresh_one(
+    first_run,
+):
+    """A sort interval that reaches past the raw data is reported in the run
+    warnings on the run that computes the recording and on a re-run that
+    reuses it."""
+    import numpy as np
+    from spyglass.common import IntervalList
+
+    _, inputs = first_run
+    nwb_file_name = inputs["nwb_file_name"]
+    raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    name = "obs past raw end"
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": name,
+            "valid_times": np.asarray(
+                [[float(raw[0][0]), float(raw[-1][1]) + 1.0]]
+            ),
+            "pipeline": "observability_test",
+        },
+        skip_duplicates=True,
+    )
+    clipped_inputs = {**inputs, "interval_list_name": name}
+    fresh = run_v2_pipeline(**clipped_inputs)
+    reused = run_v2_pipeline(**clipped_inputs)
+    assert reused["recording_status"] == "reused"
+    for summary in (fresh, reused):
+        clip = [w for w in summary["warnings"] if "clipping" in w]
+        assert len(clip) == 1, summary["warnings"]
+        assert repr(name) in clip[0] and repr(nwb_file_name) in clip[0]
+
+
+@pytest.mark.database
+def test_stored_filtering_text_lists_the_steps_the_recording_ran(first_run):
+    """The advisory reads the steps a stored recording actually ran from its
+    file, without rebuilding it."""
+    from spyglass.spikesorting.v2._orchestration.source import (
+        _stored_filtering,
+    )
+
+    run_summary, _ = first_run
+    filtering = _stored_filtering({"recording_id": run_summary["recording_id"]})
+    assert "bandpass filter" in filtering
+    assert "phase-shift" not in filtering

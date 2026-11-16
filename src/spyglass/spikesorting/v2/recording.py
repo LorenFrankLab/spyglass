@@ -53,6 +53,7 @@ from spyglass.spikesorting.v2._recording.types import (
 from spyglass.spikesorting.v2._recording.restriction import (
     compute_recording_save_expectation,
     intended_save_intervals,
+    recording_clip_warning,
     truncation_tolerance,
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -1202,15 +1203,14 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             fetched.sort_valid_times,
             min_segment_length,
         )
-        if expectation.over_request > 1.5 / sampling_frequency:
-            logger.warning(
-                f"Recording.make: IntervalList {sel['interval_list_name']!r} in "
-                f"{sel['nwb_file_name']!r} requests "
-                f"{expectation.requested_saved_total:.6f}s but the raw recording "
-                f"covers only {expectation.expected_saved_total:.6f}s after "
-                f"min_segment_length filtering; clipping to raw coverage "
-                f"({expectation.over_request:.6f}s past the recording dropped)."
-            )
+        clip = recording_clip_warning(
+            sel["nwb_file_name"],
+            sel["interval_list_name"],
+            expectation,
+            sampling_frequency,
+        )
+        if clip is not None:
+            logger.warning(f"Recording.make: {clip}")
         return expectation
 
     def make_insert(
