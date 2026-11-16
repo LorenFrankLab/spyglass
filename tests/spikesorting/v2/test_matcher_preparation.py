@@ -317,7 +317,7 @@ class _FakeSelection:
         return list(self._divergent)
 
     @staticmethod
-    def _divergent_electrode_space_message(divergent):
+    def _divergent_electrode_space_message(divergent, advisory=True):
         return f"inputs {divergent} differ"
 
     def _warn_on_divergent_electrode_space(self, choices):
@@ -352,3 +352,25 @@ def test_matching_electrode_signatures_pass_silently():
 
     enforce_one_electrode_space(_FakeSelection([]), {0: "a", 1: "b"})
     assert _FakeSelection.warned == []
+
+
+def test_divergent_electrode_error_names_the_call_the_user_makes():
+    from spyglass.spikesorting.v2._matching.inputs import (
+        enforce_one_electrode_space,
+    )
+
+    table = _FakeSelection([1])
+    with pytest.raises(ValueError) as direct:
+        enforce_one_electrode_space(table, {0: "a", 1: "b"})
+    with pytest.raises(ValueError) as orchestrated:
+        enforce_one_electrode_space(
+            table, {0: "a", 1: "b"}, caller="run_v2_unit_match"
+        )
+    assert "insert_inputs(..., allow_divergent_electrodes=True)" in str(
+        direct.value
+    )
+    assert "run_v2_unit_match(..., allow_divergent_electrodes=True)" in str(
+        orchestrated.value
+    )
+    assert "run_v2_unit_match" not in str(direct.value)
+    assert "insert_inputs" not in str(orchestrated.value)

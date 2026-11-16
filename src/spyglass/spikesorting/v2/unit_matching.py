@@ -310,6 +310,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         unit_policy: str = "v2_accepted_single_units",
         expected_input_set_hash: str | None = None,
         allow_divergent_electrodes: bool = False,
+        _caller: str = "insert_inputs",
     ) -> dict:
         """Find-existing-or-insert a match over explicit inputs; return its key.
 
@@ -347,7 +348,8 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         allow_divergent_electrodes : bool, optional
             A new selection whose inputs map to different electrode groups,
             ids or regions (a different physical sort group) is refused;
-            ``True`` warns instead. Default ``False``.
+            ``True`` warns instead. Default ``False``. ``_caller`` is internal:
+            it names the public call in that error.
 
         Returns
         -------
@@ -384,6 +386,7 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
             unit_policy=unit_policy,
             expected_input_set_hash=expected_input_set_hash,
             allow_divergent_electrodes=allow_divergent_electrodes,
+            _caller=_caller,
         )
 
     @classmethod
@@ -604,18 +607,31 @@ class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
         return divergent_electrode_space_members(signatures)
 
     @staticmethod
-    def _divergent_electrode_space_message(divergent) -> str:
-        """Advisory text shared by the log warning and the receipt."""
-        return (
+    def _divergent_electrode_space_message(
+        divergent, *, advisory: bool = True
+    ) -> str:
+        """Text shared by the error, the log warning and the receipt.
+
+        ``advisory=True`` appends why the run still proceeds (an existing
+        selection, or one made with ``allow_divergent_electrodes=True``); the
+        blocking error omits it.
+        """
+        text = (
             f"matching input(s) {divergent} map to a different electrode space "
             "(electrode group / ids / regions) than the first input, though "
             "channel geometry still matched. If these are NOT the same chronic "
             "implant the match is meaningless. Electrode-group names / ids come "
             "from each NWB file's ElectrodeGroup and are not guaranteed stable "
-            "across sessions, so this is a warning, not a rejection -- a "
-            "genuine distinct-probe mix-up will also show as poor matcher AUC "
-            "/ few pairs."
+            "across sessions."
         )
+        if advisory:
+            text += (
+                " This selection proceeds because it already exists or was "
+                "made with allow_divergent_electrodes=True; a genuine "
+                "distinct-probe mix-up will also show as poor matcher AUC / few "
+                "pairs."
+            )
+        return text
 
     @classmethod
     def _warn_on_divergent_electrode_space(cls, choices_by_input) -> None:

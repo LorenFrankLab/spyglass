@@ -48,6 +48,7 @@ def run_v2_unit_match(
     matcher_params_name: str = "unitmatch_default",
     curation_choices: "dict | None" = None,
     unit_policy: "str | None" = None,
+    allow_divergent_electrodes: bool = False,
 ) -> RunV2UnitMatchSummary:
     """Match units across matching inputs in one call, then track them.
 
@@ -86,6 +87,11 @@ def run_v2_unit_match(
         ``"v2_accepted_single_units"``; choose
         ``"v2_unflagged_single_units"`` for automatic-only output. A plan
         carries its own policy.
+    allow_divergent_electrodes : bool, optional
+        Plan or curation-list form: match inputs whose electrode group, ids or
+        regions differ from the first input's (normally a different sort
+        group) with a warning instead of an error. No effect on the session
+        group form, which already requires one sort group. Default ``False``.
 
     Returns
     -------
@@ -110,7 +116,10 @@ def run_v2_unit_match(
         its member; or from ``insert_inputs`` (both forms) on an invalid input
         set, e.g. a curation with unapplied merges, inputs reusing original
         raw samples (``OverlappingMatchInputError``), a multi-day concatenation input,
-        or a channel-geometry mismatch across inputs.
+        a channel-geometry mismatch across inputs, or (unless
+        ``allow_divergent_electrodes``) inputs from different electrode
+        spaces. The electrode-space error is raised before any selection row
+        is inserted.
     PreflightError
         A planned input's generation, frozen unit population, coverage,
         geometry, or matcher availability changed. Raised before any write.
@@ -237,6 +246,8 @@ def run_v2_unit_match(
             matcher_params_name,
             unit_selections=input_unit_selections,
             expected_input_set_hash=expected_input_set_hash,
+            allow_divergent_electrodes=allow_divergent_electrodes,
+            _caller="run_v2_unit_match",
         )
     else:
         selection = UnitMatchSelection.insert_selection(
@@ -250,7 +261,8 @@ def run_v2_unit_match(
     # Receipts spell it ``unit_match_id``; the table PK is ``unitmatch_id``.
     run_summary["unit_match_id"] = selection["unitmatch_id"]
 
-    # Recomputed so a reused selection still reports the divergence.
+    # Recomputed so a reused or opted-out selection still reports the
+    # divergence.
     warnings: list[str] = list(preflight_warnings)
     divergent = UnitMatchSelection._divergent_electrode_space_members(
         UnitMatchSelection.pinned_curations(selection)

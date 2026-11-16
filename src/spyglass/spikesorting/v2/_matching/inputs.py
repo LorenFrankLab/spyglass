@@ -67,7 +67,11 @@ def _warn_clusterless_match_once(sorting_id: str) -> None:
 
 
 def enforce_one_electrode_space(
-    table_cls, choices_by_input, *, allow_divergent_electrodes: bool = False
+    table_cls,
+    choices_by_input,
+    *,
+    allow_divergent_electrodes: bool = False,
+    caller: str = "insert_inputs",
 ) -> None:
     """Block inputs whose electrode signature differs from the first input's.
 
@@ -79,6 +83,9 @@ def enforce_one_electrode_space(
         ``{input_index: (sorting_id, curation_id)}``.
     allow_divergent_electrodes : bool, optional
         Warn instead of raising. Default ``False``.
+    caller : str, optional
+        Name of the public call the user made, quoted in the fix sentence of
+        the error. Default ``"insert_inputs"``.
 
     Raises
     ------
@@ -94,11 +101,13 @@ def enforce_one_electrode_space(
     if divergent:
         raise ValueError(
             "UnitMatchSelection: "
-            + table_cls._divergent_electrode_space_message(divergent)
+            + table_cls._divergent_electrode_space_message(
+                divergent, advisory=False
+            )
             + " They look like a different physical sort group, so a match "
             "would pair units of different cells. Pass "
-            "allow_divergent_electrodes=True only if these are the same "
-            "implant under different electrode names."
+            f"{caller}(..., allow_divergent_electrodes=True) only if these "
+            "are the same implant under different electrode names."
         )
 
 
@@ -112,8 +121,11 @@ def insert_inputs(
     unit_policy: str = "v2_accepted_single_units",
     expected_input_set_hash: str | None = None,
     allow_divergent_electrodes: bool = False,
+    _caller: str = "insert_inputs",
 ) -> dict:
     """Find-existing-or-insert a match over explicit inputs; return its key.
+
+    ``_caller`` names the public call in the electrode-space error.
 
     The body of ``UnitMatchSelection.insert_inputs`` (see its docstring).
     ``table_cls`` is ``UnitMatchSelection``.
@@ -177,6 +189,7 @@ def insert_inputs(
         table_cls,
         choices_by_input,
         allow_divergent_electrodes=allow_divergent_electrodes,
+        caller=_caller,
     )
     matcher_name, params = (
         MatcherParameters & {"matcher_params_name": matcher_params_name}

@@ -3823,3 +3823,16 @@ def test_describe_unit_match_choices_unsorted_member_and_multiple_recordings(
             (SortingSelection & second_sort).super_delete(warn=False)
         (Recording & second_rec).super_delete(warn=False)
         (RecordingSelection & second_rec).super_delete(warn=False)
+
+
+def test_divergent_electrode_warning_does_not_contradict_the_error():
+    """The advisory text for opted-out or reused selections must not call
+    the divergence "not a rejection", which the error text contradicts."""
+    from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
+
+    message = UnitMatchSelection._divergent_electrode_space_message
+    advisory = message([1])
+    assert "not a rejection" not in advisory
+    assert "allow_divergent_electrodes=True" in advisory
+    blocking = message([1], advisory=False)
+    assert "proceeds" not in blocking and "not a rejection" not in blocking

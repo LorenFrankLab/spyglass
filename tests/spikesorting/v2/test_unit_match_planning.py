@@ -1167,6 +1167,97 @@ def test_preflight_warns_when_inputs_have_different_motion_treatment(
     )
 
 
+@pytest.mark.parametrize("allow", [False, True])
+def test_run_v2_unit_match_reaches_the_electrode_space_opt_out(
+    explicit_matching_plan, monkeypatch, allow
+):
+    """Divergent explicit inputs raise through ``run_v2_unit_match`` naming
+    that call and keyword, with nothing inserted; the keyword lets the same
+    call proceed."""
+    import sys
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2._matching.inputs import (
+        enforce_one_electrode_space,
+    )
+    from spyglass.spikesorting.v2._orchestration import matching
+
+    state = explicit_matching_plan
+    plan = matching.plan_v2_unit_match_from_curations(state.refs)
+    inserted = []
+
+    class Relation:
+        def __and__(self, key):
+            return self
+
+        def __bool__(self):
+            return True
+
+        def __len__(self):
+            return 2
+
+        def fetch1(self, field):
+            return 3
+
+    class Selections:
+        warned = []
+
+        @staticmethod
+        def _divergent_electrode_space_members(choices):
+            return [1]
+
+        @staticmethod
+        def _divergent_electrode_space_message(divergent, advisory=True):
+            return f"inputs {divergent} differ"
+
+        @classmethod
+        def _warn_on_divergent_electrode_space(cls, choices):
+            cls.warned.append(choices)
+
+        @staticmethod
+        def pinned_curations(key):
+            return {}
+
+        @classmethod
+        def insert_inputs(
+            cls,
+            curations,
+            matcher,
+            *,
+            allow_divergent_electrodes=False,
+            _caller="insert_inputs",
+            **kwargs,
+        ):
+            enforce_one_electrode_space(
+                cls,
+                {0: "a", 1: "b"},
+                allow_divergent_electrodes=allow_divergent_electrodes,
+                caller=_caller,
+            )
+            inserted.append(curations)
+            return {"unitmatch_id": uuid.UUID(int=900)}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "spyglass.spikesorting.v2.unit_matching",
+        SimpleNamespace(
+            MatcherParameters=Relation(),
+            UnitMatch=Relation(),
+            TrackedUnit=Relation(),
+            UnitMatchSelection=Selections,
+        ),
+    )
+    monkeypatch.setattr(matching, "_populate_once", lambda table, key: None)
+    monkeypatch.setattr(matching, "_unit_match_input_summaries", lambda key: ())
+    if allow:
+        matching.run_v2_unit_match(plan, allow_divergent_electrodes=True)
+        assert len(inserted) == 1
+        return
+    with pytest.raises(ValueError, match="run_v2_unit_match"):
+        matching.run_v2_unit_match(plan)
+    assert inserted == []
+
+
 def test_explicit_plan_rejects_empty_duplicate_and_untyped_inputs():
     from spyglass.spikesorting.v2.curation_api import CurationRef
     from spyglass.spikesorting.v2.pipeline import (
@@ -1375,3 +1466,5 @@ def test_match_runner_passes_frozen_population_and_verified_source_hash(
     ]
     assert result["n_pairs"] == 3 and result["n_tracked_units"] == 2
     assert len(populated) == 2
+    assert inserted[0][2]["allow_divergent_electrodes"] is False
+    assert inserted[0][2]["_caller"] == "run_v2_unit_match"

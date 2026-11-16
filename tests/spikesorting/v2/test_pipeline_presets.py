@@ -1155,6 +1155,11 @@ def test_run_v2_unit_match_signature_defaults():
     assert params["session_group_name"].default is None
     assert params["matcher_params_name"].default == "unitmatch_default"
     assert params["curation_choices"].default is None
+    assert params["allow_divergent_electrodes"].default is False
+    assert (
+        params["allow_divergent_electrodes"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
     assert params["session_group_owner"].kind is inspect.Parameter.KEYWORD_ONLY
     assert params["session_group_name"].kind is inspect.Parameter.KEYWORD_ONLY
 
