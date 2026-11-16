@@ -107,8 +107,11 @@ def test_clusterless_waveform_features_use_configured_temp(
     recording, sorting = si.generate_ground_truth_recording(
         durations=[5.0], num_channels=4, num_units=2, seed=0
     )
+    # v2 marks read the traces the sorter saw.
     monkeypatch.setattr(
-        SpikeSortingOutput, "get_recording", lambda self, key: recording
+        SpikeSortingOutput,
+        "get_sorting_input_recording",
+        lambda self, key: recording,
     )
     monkeypatch.setattr(
         SpikeSortingOutput, "get_sorting", lambda self, key: sorting
