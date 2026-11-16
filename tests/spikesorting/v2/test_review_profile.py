@@ -175,6 +175,53 @@ def test_franklab_review_profile_is_shipped(dj_conn):
     assert row["label_import_mode"] == "replace"
 
 
+@pytest.mark.database
+def test_unknown_review_profile_lists_the_available_profiles(dj_conn):
+    """A mistyped profile name says which profiles exist and how to compare
+    or install them."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.review_api import ReviewProfileRef
+    from spyglass.spikesorting.v2.review_profile import (
+        FRANKLAB_REVIEW_PROFILE,
+    )
+
+    initialize_v2_defaults()
+    with pytest.raises(ValueError) as error:
+        ReviewProfileRef.resolve("franklab_hipocampus_typo")
+    message = str(error.value)
+    assert "'franklab_hipocampus_typo'" in message
+    assert FRANKLAB_REVIEW_PROFILE in message
+    assert "describe_review_profiles()" in message
+    assert "initialize_v2_defaults()" in message
+
+
+@pytest.mark.database
+def test_describe_review_profiles_names_the_presets_each_profile_fits(
+    dj_conn,
+):
+    """Each stored profile lists the presets whose metric and rule recipes
+    it scores with, so a reviewer can pick one that matches the run."""
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        DEFAULT_PIPELINE_PRESET,
+    )
+    from spyglass.spikesorting.v2.pipeline import describe_review_profiles
+    from spyglass.spikesorting.v2.review_profile import (
+        FRANKLAB_REVIEW_PROFILE,
+    )
+
+    initialize_v2_defaults()
+    table = describe_review_profiles().set_index("review_profile_name")
+    row = table.loc[FRANKLAB_REVIEW_PROFILE]
+    assert row["metric_params_name"] == "franklab_default"
+    assert DEFAULT_PIPELINE_PRESET in row["matching_pipeline_presets"]
+    assert (
+        "franklab_neuropixels_ks4_2026_06"
+        not in row["matching_pipeline_presets"]
+    )
+    assert list(row["displayed_unit_properties"])
+
+
 def test_review_display_options_are_bounded_and_serializable():
     """Display budget validates, round-trips, and stays display-only."""
     from spyglass.spikesorting.v2._review.profile import (

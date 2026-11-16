@@ -33,6 +33,7 @@ from spyglass.spikesorting.v2._curation.analyzer import (
     open_curation_analyzer,
 )
 from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
+from spyglass.utils import logger
 
 # Whether this call materialized a row ("computed") or found it ("reused").
 MaterializationStatus = Literal["computed", "reused"]
@@ -1574,11 +1575,47 @@ class RunResult(dict):
                 "RunResult.start_review source must be 'auto_labeled' or 'root'; "
                 f"got {source!r}."
             )
+        if source == "auto_labeled":
+            self._warn_on_profile_recipe_mismatch(profile)
         return curation.start_review(
             profile,
             upload=upload,
             ephemeral=ephemeral,
             display_options=display_options,
+        )
+
+    def _warn_on_profile_recipe_mismatch(self, profile) -> None:
+        """Warn when ``profile`` scores with other recipes than the preset.
+
+        The review shows the profile's rule verdicts, so they can disagree
+        with the auto-labels this run's preset wrote.
+        """
+        from spyglass.spikesorting.v2._orchestration.presets import (
+            _find_pipeline_preset,
+        )
+        from spyglass.spikesorting.v2.review_api import ReviewProfileRef
+
+        preset_name = self.get("pipeline_preset")
+        preset = _find_pipeline_preset(preset_name)
+        if preset is None:
+            return
+        resolved = ReviewProfileRef.resolve(profile)
+        spec = resolved.evaluation_spec
+        if (spec.metric_params_name, spec.auto_curation_rules_name) == (
+            preset.metric_params_name,
+            preset.auto_curation_rules_name,
+        ):
+            return
+        logger.warning(
+            f"start_review: review profile {resolved.review_profile_name!r} "
+            f"scores with metric_params_name={spec.metric_params_name!r} and "
+            "auto_curation_rules_name="
+            f"{spec.auto_curation_rules_name!r}, but pipeline_preset "
+            f"{preset_name!r} auto-labeled this run with "
+            f"{preset.metric_params_name!r} and "
+            f"{preset.auto_curation_rules_name!r}. The review shows the "
+            "profile's verdicts, which can differ from the auto-labels. Call "
+            "describe_review_profiles() to pick a matching profile."
         )
 
 

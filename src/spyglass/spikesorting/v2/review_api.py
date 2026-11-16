@@ -104,6 +104,7 @@ class ReviewProfileRef:
     def resolve(cls, profile: str | "ReviewProfileRef") -> "ReviewProfileRef":
         """Resolve and recheck a persisted profile by name."""
         from spyglass.spikesorting.v2.review_profile import (
+            FRANKLAB_REVIEW_PROFILE,
             CurationReviewProfile,
         )
 
@@ -116,9 +117,15 @@ class ReviewProfileRef:
             as_dict=True
         )
         if len(rows) != 1:
+            available = sorted(
+                CurationReviewProfile.fetch("review_profile_name")
+            )
             raise ValueError(
-                f"Review profile {name!r} does not resolve to exactly one "
-                "CurationReviewProfile row."
+                f"Review profile {name!r} is not in CurationReviewProfile. "
+                f"Available profiles: {available}. Call "
+                "describe_review_profiles() to compare them; if none are "
+                "listed, run initialize_v2_defaults() to install "
+                f"{FRANKLAB_REVIEW_PROFILE!r}."
             )
         row = rows[0]
         resolved = cls(
@@ -140,6 +147,68 @@ class ReviewProfileRef:
                 f"profile_hash={profile.profile_hash}."
             )
         return resolved
+
+
+def describe_review_profiles() -> pd.DataFrame:
+    """Return a table of the stored review profiles and the presets they fit.
+
+    A profile scores a curation with its own metric and rule recipes, so its
+    verdicts match a run's auto-labels only when both recipe names match the
+    run's pipeline preset.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per ``CurationReviewProfile``, sorted by name, with columns
+        ``review_profile_name``, ``metric_params_name``,
+        ``auto_curation_rules_name``, ``matching_pipeline_presets`` (sorted
+        preset names whose metric and rule recipes both match),
+        ``displayed_unit_properties``, ``label_options`` and
+        ``label_import_mode``. Empty with these columns when no profile is
+        stored; ``initialize_v2_defaults()`` installs the Frank-lab one.
+    """
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _all_pipeline_presets,
+    )
+    from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+
+    columns = [
+        "review_profile_name",
+        "metric_params_name",
+        "auto_curation_rules_name",
+        "matching_pipeline_presets",
+        "displayed_unit_properties",
+        "label_options",
+        "label_import_mode",
+    ]
+    presets = _all_pipeline_presets()
+    rows = []
+    for row in CurationReviewProfile.fetch(
+        as_dict=True, order_by="review_profile_name"
+    ):
+        recipes = (row["metric_params_name"], row["auto_curation_rules_name"])
+        rows.append(
+            {
+                "review_profile_name": row["review_profile_name"],
+                "metric_params_name": row["metric_params_name"],
+                "auto_curation_rules_name": row["auto_curation_rules_name"],
+                "matching_pipeline_presets": sorted(
+                    name
+                    for name, preset in presets.items()
+                    if (
+                        preset.metric_params_name,
+                        preset.auto_curation_rules_name,
+                    )
+                    == recipes
+                ),
+                "displayed_unit_properties": list(
+                    row["displayed_unit_properties"]
+                ),
+                "label_options": list(row["label_options"]),
+                "label_import_mode": row["label_import_mode"],
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
 
 
 @dataclass(frozen=True)

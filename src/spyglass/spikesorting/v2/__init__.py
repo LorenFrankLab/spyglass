@@ -172,6 +172,7 @@ __all__ = [
     "EvaluationResult",
     "MergeEvaluateReceipt",
     "ReviewProfileRef",
+    "describe_review_profiles",
     "FigPackReview",
     "CurationChangeSet",
     "MergeLabelConflict",

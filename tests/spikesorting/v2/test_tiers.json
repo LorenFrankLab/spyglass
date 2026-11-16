@@ -874,8 +874,10 @@
     "test_review_profile.py": {
       "tier": "unit",
       "overrides": {
+        "test_describe_review_profiles_names_the_presets_each_profile_fits": "db_unit",
         "test_franklab_review_profile_is_shipped": "db_unit",
-        "test_review_profile_persisted_and_immutable": "db_unit"
+        "test_review_profile_persisted_and_immutable": "db_unit",
+        "test_unknown_review_profile_lists_the_available_profiles": "db_unit"
       }
     },
     "test_review_recovery_workflow.py": {

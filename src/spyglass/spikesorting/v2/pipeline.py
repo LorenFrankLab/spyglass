@@ -99,6 +99,7 @@ from spyglass.spikesorting.v2.review_api import (
     ReviewImportReceipt,
     ReviewProfileRef,
     ReviewStageStatus,
+    describe_review_profiles,
 )
 from spyglass.spikesorting.v2._orchestration.types import (
     EstimateMotionReceipt,
@@ -159,6 +160,7 @@ __all__ = [
     "EvaluationResult",
     "MergeEvaluateReceipt",
     "ReviewProfileRef",
+    "describe_review_profiles",
     "FigPackReview",
     "CurationChangeSet",
     "MergeLabelConflict",

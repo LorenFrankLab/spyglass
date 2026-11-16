@@ -120,6 +120,57 @@ def test_run_result_summary_lists_concat_member_merge_ids():
     assert "member merge ids" in text
 
 
+def test_start_review_warns_when_the_profile_scores_other_recipes(
+    monkeypatch, caplog
+):
+    """Reviewing auto-labels with a profile whose metric or rule recipe
+    differs from the run's preset warns and names both recipes."""
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import review_api
+    from spyglass.spikesorting.v2.curation_api import RunResult
+
+    profile = SimpleNamespace(
+        review_profile_name="franklab_hippocampus_2026_09_17",
+        evaluation_spec=SimpleNamespace(
+            metric_params_name="franklab_default",
+            auto_curation_rules_name="franklab_default_auto_curation_2026_09",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api.ReviewProfileRef, "resolve", lambda name: profile
+    )
+    started = []
+    curation = SimpleNamespace(
+        start_review=lambda *args, **kwargs: started.append(args) or "review"
+    )
+    monkeypatch.setattr(RunResult, "_pinned_ref", lambda self, *a: curation)
+
+    def warnings_for(preset):
+        caplog.clear()
+        run = RunResult(
+            {**_single_session_run_summary(), "pipeline_preset": preset}
+        )
+        with caplog.at_level("WARNING", logger="spyglass"):
+            assert run.start_review(profile.review_profile_name) == "review"
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if "start_review" in r.getMessage()
+        ]
+
+    mismatched = warnings_for("franklab_neuropixels_ks4_2026_06")
+    assert len(mismatched) == 1, mismatched
+    message = mismatched[0]
+    assert "franklab_hippocampus_2026_09_17" in message
+    assert "franklab_neuropixels_ks4_2026_06" in message
+    assert "franklab_default_auto_curation_2026_09" in message
+    assert "neuropixels_default" in message
+    assert "describe_review_profiles()" in message
+    assert warnings_for("franklab_probe_hippocampus_30khz_ms4_2026_06") == []
+    assert len(started) == 2
+
+
 def test_non_root_facade_requires_typed_parent():
     """Child facade operations expose no numeric root-sentinel escape hatch."""
     from spyglass.spikesorting.v2.curation_api import save_manual_curation
