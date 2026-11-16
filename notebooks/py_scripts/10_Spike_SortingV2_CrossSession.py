@@ -145,8 +145,8 @@ match_members = [
 ]
 match_group_name = "day1_to_day2"
 single_preset = "franklab_probe_hippocampus_30khz_ms4_2026_06"
-# The matcher backend + its parameters. The default uses UnitMatchPy; see
-# describe_pipeline_presets()'s sibling MatcherParameters for the shipped rows.
+# The matcher backend + its parameters. The default uses UnitMatchPy;
+# describe_parameter_rows() lists the MatcherParameters rows.
 matcher_params_name = "unitmatch_default"
 
 # The two workflows are independent; enable whichever you need.

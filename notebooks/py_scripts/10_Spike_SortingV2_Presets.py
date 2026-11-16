@@ -39,7 +39,6 @@ from spyglass.spikesorting.v2.pipeline import (
     describe_pipeline_presets,
     describe_run,
     describe_sort_groups,
-    list_pipeline_presets,
     plot_sort_group_geometry,
     preflight_v2_pipeline_session,
     register_pipeline_preset,
@@ -179,15 +178,18 @@ describe_pipeline_preset(pipeline_preset)
 # tweak for low-amplitude units). The clone is saved in the `PipelinePreset`
 # table, so it is selectable by name in any session and by anyone in the lab;
 # set `pipeline_preset` to it to use it below. Re-running the same call is a
-# no-op; reusing a name with different content raises.
+# no-op; reusing a name with different content raises. Because saved presets
+# are shared, the names below start with your database user name.
 
-if "my_lab_ms4_lower_threshold" not in list_pipeline_presets():
-    clone_pipeline_preset(
-        pipeline_preset,
-        "my_lab_ms4_lower_threshold",
-        detect_threshold=2.5,
-    )
-describe_pipeline_preset("my_lab_ms4_lower_threshold")
+user = dj.config["database.user"]
+lower_threshold_preset = clone_pipeline_preset(
+    pipeline_preset,
+    f"{user}_ms4_lower_threshold",
+    detect_threshold=2.5,
+    # A lab mate may have saved the same change under their own name.
+    allow_duplicate_params=True,
+)
+describe_pipeline_preset(lower_threshold_preset)
 
 # For a fully custom pipeline (a different sorter, or a stage combination no
 # shipping preset covers), `register_pipeline_preset(name, {...})` adds a preset
@@ -195,18 +197,17 @@ describe_pipeline_preset("my_lab_ms4_lower_threshold")
 # `initialize_v2_defaults` seeded the rows below). It is saved in
 # `PipelinePreset` like a clone. The mapping is the stages a run touches:
 
-if "my_lab_custom" not in list_pipeline_presets():
-    register_pipeline_preset(
-        "my_lab_custom",
-        {
-            "preprocessing_params_name": "franklab_hippocampus_2026_06",
-            "artifact_detection_params_name": "default",
-            "sorter": "mountainsort5",
-            "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            "metric_params_name": "franklab_default",
-            "auto_curation_rules_name": "franklab_default_auto_curation_2026_09",
-        },
-    )
+custom_preset = register_pipeline_preset(
+    f"{user}_custom",
+    {
+        "preprocessing_params_name": "franklab_hippocampus_2026_06",
+        "artifact_detection_params_name": "default",
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
+        "metric_params_name": "franklab_default",
+        "auto_curation_rules_name": "franklab_default_auto_curation_2026_09",
+    },
+)
 
 # ## 3. Sort the whole session at once
 #

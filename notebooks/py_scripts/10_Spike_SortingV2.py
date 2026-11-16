@@ -72,8 +72,9 @@ dj.config["display.limit"] = 12  # cap rows in table reprs
 # extra and runs under the `numpy>=2` baseline. A container execution option is
 # available through `franklab_probe_hippocampus_30khz_ms4_singularity_2026_06`
 # with Singularity/Apptainer.
-# Change `pipeline_preset` to any name from `describe_pipeline_presets()` below
-# (e.g. a cortex or 20 kHz preset).
+# Section 3 explains what each preset does; change `pipeline_preset` to any
+# name from `describe_pipeline_presets()` there (e.g. a cortex or 20 kHz
+# preset).
 #
 # List the valid `interval_list_name` values for this session with
 # `IntervalList & {"nwb_file_name": nwb_file_name}`. Leave `sort_group_id =
@@ -255,7 +256,9 @@ describe_pipeline_presets()
 
 # To **adapt** a preset (tune one knob with `clone_pipeline_preset`, or build a
 # custom one with `register_pipeline_preset`) without hand-editing parameter
-# rows, see the [Presets how-to](./10_Spike_SortingV2_Presets.ipynb).
+# rows, see the [Presets how-to](./10_Spike_SortingV2_Presets.ipynb). Both save
+# the preset in the `PipelinePreset` table, so it resolves by name in a new
+# kernel and for other lab members.
 
 # ## 4. Preflight: a fast, fail-early check
 #
@@ -369,6 +372,7 @@ CurationV2.summarize_curation(root_key)
 preset_rows = describe_pipeline_preset(pipeline_preset)
 preset_rows[preset_rows["stage"].isin(["metric", "auto_curation"])]
 
+# Same inputs as section 5, so this reuses the sort above.
 auto_summary = run_v2_pipeline(
     nwb_file_name=nwb_file_name,
     sort_group_id=sort_group_id,
@@ -461,6 +465,7 @@ else:
 # | `v2_accepted_single_units` (default) | `accept` | `mua`, `noise`, `reject`, `artifact` |
 # | `v2_accepted_neural_units` | `accept` or `mua` | `noise`, `reject`, `artifact` |
 # | `v2_unflagged_units` | everything not denied (MUA and unlabeled included) | `noise`, `reject`, `artifact` |
+# | `v2_unflagged_single_units` | everything not denied (unlabeled included) | `mua`, `noise`, `reject`, `artifact` |
 # | `all_units` | everything (explicit expert choice) | (none) |
 #
 # The shipped rule sets only **flag** bad units; they never write `accept`, so
@@ -765,7 +770,7 @@ if run_motion_example:
 #   optional, experimental motion stage (`motion_mode`; section 10 above), and
 #   same-day blocks
 #   can be concatenated in the Cross-Session notebook; clusterless decoding
-#   features run the `clusterless_thresholder` preset (see Presets) and hand
+#   features run the `franklab_clusterless_2026_11` preset and hand
 #   the root curation's `merge_id` to `UnitWaveformFeatures`; there is no
 #   unit selection step because the thresholder yields one "unit" per channel
 #   group.
