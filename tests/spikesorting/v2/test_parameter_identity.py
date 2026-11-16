@@ -839,7 +839,7 @@ def test_describe_parameter_rows_lists_presets_saved_in_the_database(dj_conn):
 
     initialize_v2_defaults()
     name = "saved_report_usage_2026_11"
-    preset = _PIPELINE_PRESETS["franklab_clusterless_2026_06"]
+    preset = _PIPELINE_PRESETS["franklab_clusterless_2026_11"]
     register_pipeline_preset(name, preset)
     try:
         df = describe_parameter_rows()

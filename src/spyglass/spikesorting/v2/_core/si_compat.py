@@ -41,9 +41,9 @@ def require_validated_spikeinterface(what: str) -> None:
     if not version.startswith(VALIDATED_SI_PREFIXES):
         raise RuntimeError(
             f"spikesorting v2: {what} reproduces SpikeInterface "
-            f"{VALIDATED_SI_PREFIXES} internals, but SpikeInterface {version} "
-            "is installed. Install the pinned version with the "
-            "'spikesorting-v2' extra (spikeinterface==0.104.3)."
+            f"{', '.join(VALIDATED_SI_PREFIXES)} internals, but SpikeInterface "
+            f"{version} is installed. Install the pinned version with the "
+            "'spikesorting' extra (spikeinterface==0.104.3)."
         )
 
 
