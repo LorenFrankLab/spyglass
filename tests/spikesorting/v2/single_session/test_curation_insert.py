@@ -1104,3 +1104,42 @@ def test_curation_label_column_added_only_with_nonempty_labels(
         assert "curation_label" in _units_colnames(labeled_key)
     finally:
         _clear_curations(populated_sorting)
+
+
+def test_root_reuse_warning_names_only_the_inputs_it_ignores(
+    populated_sorting_with_curation, populated_sorting, caplog
+):
+    """``reuse_existing=True`` names each passed input that differs from the
+    reused root; inputs matching the root are not reported."""
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    existing = populated_sorting_with_curation
+    stored = (CurationV2 & existing).fetch1("description")
+    with caplog.at_level("WARNING", logger="spyglass"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            description="a different description",
+            curation_source="figpack",
+            apply_merge=True,
+            reuse_existing=True,
+        )
+    (message,) = [
+        r.message for r in caplog.records if "reusing root" in r.message
+    ]
+    assert "description='a different description'" in message
+    assert f"keeps {stored!r}" in message
+    assert "curation_source='figpack'" in message
+    assert "apply_merge=True" in message
+    assert "labels" not in message
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="spyglass"):
+        CurationV2.insert_curation(
+            sorting_key=populated_sorting,
+            description=stored,
+            reuse_existing=True,
+        )
+    (message,) = [
+        r.message for r in caplog.records if "reusing root" in r.message
+    ]
+    assert "ignored" not in message

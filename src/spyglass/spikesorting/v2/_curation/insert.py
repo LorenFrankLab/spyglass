@@ -108,6 +108,60 @@ def normalize_curation_inputs(
     return labels, curation_source
 
 
+def _inputs_differing_from_root(
+    table_cls,
+    root_key: dict,
+    *,
+    labels: dict,
+    merge_groups,
+    description: str,
+    apply_merge: bool,
+    curation_source: str,
+) -> list[str]:
+    """Describe each passed root input that the reused root does not hold.
+
+    Parameters
+    ----------
+    table_cls : type
+        ``CurationV2``.
+    root_key : dict
+        The reused root's primary key.
+    labels, merge_groups, description, apply_merge, curation_source
+        The normalized ``insert_curation`` inputs.
+
+    Returns
+    -------
+    list of str
+        One phrase per ignored input; empty when every input matches.
+    """
+    root = (table_cls & root_key).fetch1()
+    ignored = []
+    if labels:
+        stored = {}
+        for row in (table_cls.UnitLabel & root_key).fetch(as_dict=True):
+            stored.setdefault(int(row["unit_id"]), set()).add(
+                row["curation_label"]
+            )
+        passed = {int(u): set(v) for u, v in labels.items() if v}
+        if passed != stored:
+            ignored.append(f"labels for {len(passed)} unit(s)")
+    if merge_groups:
+        ignored.append(f"{len(merge_groups)} merge group(s)")
+    if description and description != root["description"]:
+        ignored.append(
+            f"description={description!r} (root keeps "
+            f"{root['description']!r})"
+        )
+    if bool(apply_merge) != bool(root["merges_applied"]):
+        ignored.append(f"apply_merge={bool(apply_merge)}")
+    if curation_source != root["curation_source"]:
+        ignored.append(
+            f"curation_source={curation_source!r} (root is "
+            f"{root['curation_source']!r})"
+        )
+    return ignored
+
+
 def validate_parent_or_reuse_root(
     table_cls,
     sorting_id,
@@ -127,7 +181,8 @@ def validate_parent_or_reuse_root(
 
     Raises ``ValueError`` if the parent is missing or a preview, or if a
     root exists and non-default parameters were passed without
-    ``reuse_existing=True``.
+    ``reuse_existing=True``. With it, the reuse warning names each passed
+    input that differs from the reused root.
     """
     if parent_curation_id != -1:
         parent_key = {
@@ -182,10 +237,26 @@ def validate_parent_or_reuse_root(
                     "existing root, or curate as a child with "
                     "parent_curation_id=<existing root curation_id>."
                 )
+            ignored = _inputs_differing_from_root(
+                table_cls,
+                existing_root[0],
+                labels=labels,
+                merge_groups=merge_groups,
+                description=description,
+                apply_merge=apply_merge,
+                curation_source=curation_source,
+            )
             logger.warning(
-                "CurationV2.insert_curation: root curation already "
-                f"exists for sorting_id={sorting_id}; returning "
-                "existing key without staging a new NWB."
+                "CurationV2.insert_curation: reusing root curation_id="
+                f"{existing_root[0]['curation_id']} of sorting_id={sorting_id}"
+                " without staging a new NWB"
+                + (
+                    f"; ignored: {'; '.join(ignored)}. To apply them, insert "
+                    "a child with parent_curation_id="
+                    f"{existing_root[0]['curation_id']}."
+                    if ignored
+                    else "."
+                )
             )
             return existing_root[0]
     return None
