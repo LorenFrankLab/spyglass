@@ -114,7 +114,7 @@ def test_shipped_policies_and_receipt_policy_are_read_only():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_select_units_for_analysis_round_trip(
-    planted_three_unit_sort, monkeypatch
+    planted_three_unit_sort, monkeypatch, caplog
 ):
     """Receipt verdicts == downstream fetch; rejected units cannot enter."""
     import numpy as np
@@ -156,8 +156,14 @@ def test_select_units_for_analysis_round_trip(
     monkeypatch.setattr(group_module, "test_mode", False)
     created = []
     try:
-        receipt = select_units_for_analysis(ref)
+        with caplog.at_level("WARNING", logger="spyglass"):
+            receipt = select_units_for_analysis(ref)
         created.extend(g.group_key for g in receipt.groups)
+        assert not [
+            r
+            for r in caplog.records
+            if "select_units_for_analysis" in r.getMessage()
+        ]
         assert receipt.curation == ref
         assert receipt.policy_name == "v2_accepted_single_units"
         assert receipt.included_unit_ids == (unit_ids[0],)
@@ -263,13 +269,32 @@ def test_select_units_for_analysis_round_trip(
             assert [row["unit_id"] for row in selected_ids] == unit_ids
         finally:
             UnitSelectionParams.update1({**policy_key, "unit_criteria": None})
-        empty = select_units_for_analysis(
-            ref,
-            policy="all_units",
-            evaluation=evaluation,
-            unit_criteria={"firing_rate": {"<": 0}},
-        )
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="spyglass"):
+            empty = select_units_for_analysis(
+                ref,
+                policy="all_units",
+                evaluation=evaluation,
+                unit_criteria={"firing_rate": {"<": 0}},
+            )
         created.extend(g.group_key for g in empty.groups)
+        # Persisting an empty population is said out loud, with the reason
+        # summary() gives and the curation and policy it came from.
+        empty_warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if "select_units_for_analysis" in r.getMessage()
+        ]
+        assert len(empty_warnings) == 1, empty_warnings
+        assert str(ref.sorting_id) in empty_warnings[0]
+        assert f"curation_id={ref.curation_id}" in empty_warnings[0]
+        assert "'all_units'" in empty_warnings[0]
+        reason = next(
+            line
+            for line in empty.summary().splitlines()
+            if line.startswith("empty selection")
+        )
+        assert reason in empty_warnings[0]
         assert empty.group_key != metric_selection.group_key
         assert empty.included_unit_ids == ()
         assert empty.fetch_spike_data() == []

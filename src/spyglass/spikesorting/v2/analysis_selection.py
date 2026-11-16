@@ -38,6 +38,7 @@ from typing import Any
 
 import pandas as pd
 
+from spyglass.utils import logger
 from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
@@ -211,36 +212,60 @@ class UnitSelectionReceipt:
                 f"{self.selection_provenance['unit_criteria']}; "
                 f"evaluation: {self.selection_provenance.get('evaluation_id')}"
             )
-        if not self.included_unit_ids:
-            if n_total == 0:
-                lines.append(
-                    "empty selection: the curation holds no units (zero-unit "
-                    "sort); there is nothing to select."
-                )
-            elif include and not any(
-                set(labels.get(u, [])) & set(include)
-                for u in self.excluded_units
-            ):
-                lines.append(
-                    "empty selection: no unit carries a required label "
-                    f"(one of {include}). Apply one of those labels in a "
-                    "review and hand over that child, or choose an "
-                    "exclude-only policy such as 'v2_unflagged_units' to "
-                    "keep everything the rules did not flag."
-                )
-            elif self.selection_provenance.get("unit_criteria"):
-                lines.append(
-                    "empty selection: no units satisfy both the label policy "
-                    "and metric criteria. See describe() for failed predicates "
-                    "and unavailable values; review the criteria and evaluation."
-                )
-            else:
-                lines.append(
-                    "empty selection: every unit was excluded by the policy "
-                    "(see describe() for each unit's reason); review the "
-                    "labels or choose a different policy."
-                )
+        reason = self._empty_selection_reason(labels)
+        if reason is not None:
+            lines.append(reason)
         return "\n".join(lines)
+
+    def _empty_selection_reason(self, labels=None) -> str | None:
+        """Why the selection is empty and what to do next, or ``None``.
+
+        Parameters
+        ----------
+        labels : mapping of int to list of str, optional
+            Labels by unit; read from the snapshot or curation when omitted.
+
+        Returns
+        -------
+        str or None
+            One line starting ``"empty selection: "``; ``None`` when any unit
+            is selected.
+        """
+        if self.included_unit_ids:
+            return None
+        if labels is None:
+            labels = (
+                self.selection_snapshot.labels_by_unit
+                if self.selection_snapshot is not None
+                else _labels_by_unit(self.curation)
+            )
+        include = list(self.policy["include_labels"])
+        if not self.excluded_units:
+            return (
+                "empty selection: the curation holds no units (zero-unit "
+                "sort); there is nothing to select."
+            )
+        if include and not any(
+            set(labels.get(u, [])) & set(include) for u in self.excluded_units
+        ):
+            return (
+                "empty selection: no unit carries a required label "
+                f"(one of {include}). Apply one of those labels in a "
+                "review and hand over that child, or choose an "
+                "exclude-only policy such as 'v2_unflagged_units' to "
+                "keep everything the rules did not flag."
+            )
+        if self.selection_provenance.get("unit_criteria"):
+            return (
+                "empty selection: no units satisfy both the label policy "
+                "and metric criteria. See describe() for failed predicates "
+                "and unavailable values; review the criteria and evaluation."
+            )
+        return (
+            "empty selection: every unit was excluded by the policy "
+            "(see describe() for each unit's reason); review the "
+            "labels or choose a different policy."
+        )
 
     def describe(self):
         """One row per unit: verdict, labels, reason."""
@@ -645,7 +670,7 @@ def select_units_for_analysis(
             )
         )
 
-    return UnitSelectionReceipt(
+    receipt = UnitSelectionReceipt(
         curation=ref,
         policy_name=policy,
         policy=resolved_policy,
@@ -656,3 +681,13 @@ def select_units_for_analysis(
         selection_provenance=MappingProxyType(provenance),
         selection_snapshot=selection,
     )
+    reason = receipt._empty_selection_reason()
+    if reason is not None:
+        # Downstream analyses read this group, so a silent empty one surfaces
+        # only later as a zero-unit result.
+        logger.warning(
+            f"select_units_for_analysis: sorting_id={ref.sorting_id} "
+            f"curation_id={ref.curation_id} policy={policy!r} selected 0 "
+            f"units and saved an empty group. {reason}"
+        )
+    return receipt
