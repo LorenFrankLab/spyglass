@@ -1467,6 +1467,23 @@ def test_mountainsort4_ground_truth(
         f"threshold requires >= {threshold} (1/2 of planted).{summary}"
     )
 
+    # Floors from three runs (identical): 22 of 24 at accuracy >= 0.5, their
+    # min precision 0.994 and mean accuracy 0.895. Recall >= accuracy, so no
+    # separate recall floor is needed above the 0.5 accuracy cut.
+    well_detected = accuracies >= 0.5
+    assert n_well_detected >= 18, (
+        f"MS4 on {session_label} detected {n_well_detected} of {n_planted} "
+        f"planted units at accuracy >= 0.5; measured 22.{summary}"
+    )
+    assert (precision[well_detected] >= 0.9).all(), (
+        f"Well-detected GT units have low precision: min="
+        f"{precision[well_detected].min():.3f}; expected >= 0.9.{summary}"
+    )
+    assert accuracies[well_detected].mean() >= 0.8, (
+        f"Mean accuracy of well-detected units is "
+        f"{accuracies[well_detected].mean():.3f}; expected >= 0.8.{summary}"
+    )
+
 
 _CLUSTERLESS_GT_CASES = [
     ("polymer_60s", "smoke_clusterless_5uv"),
