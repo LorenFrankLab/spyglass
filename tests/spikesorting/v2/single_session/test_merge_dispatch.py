@@ -353,36 +353,11 @@ def test_sorted_spikes_group_works_with_v2_merge_id(populated_sorting):
     merge_id = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
     UnitSelectionParams().insert_default()
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
+    from spyglass.spikesorting.v2 import select_units_for_analysis
 
-    recording_id = SortingSelection.resolve_source(populated_sorting).key[
-        "recording_id"
-    ]
-    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
+    group_key = dict(
+        select_units_for_analysis(pk, policy="all_units").group_key
     )
-
-    group_name = "v2_test_sorted_spikes_group"
-    # Drop any group left by an earlier run.
-    existing = SortedSpikesGroup & {
-        "sorted_spikes_group_name": group_name,
-        "nwb_file_name": actual_nwb,
-    }
-    if existing:
-        existing.super_delete(warn=False)
-
-    SortedSpikesGroup().create_group(
-        group_name=group_name,
-        nwb_file_name=actual_nwb,
-        unit_filter_params_name="all_units",
-        keys=[{"spikesorting_merge_id": merge_id}],
-    )
-    group_key = {
-        "sorted_spikes_group_name": group_name,
-        "nwb_file_name": actual_nwb,
-        "unit_filter_params_name": "all_units",
-    }
 
     # 1. fetch_spike_data returns per-unit spike-time arrays.
     spike_times, file_unit_ids = SortedSpikesGroup.fetch_spike_data(

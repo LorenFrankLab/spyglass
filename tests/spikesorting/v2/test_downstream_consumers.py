@@ -33,6 +33,54 @@ def _make_v2_root_curation(populated_sorting):
     return pk, merge_id
 
 
+def _select_group(curation_key, policy="all_units"):
+    """Freeze a selection of ``curation_key``; return its group key."""
+    from spyglass.spikesorting.v2 import select_units_for_analysis
+
+    return dict(
+        select_units_for_analysis(curation_key, policy=policy).group_key
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_create_group_requires_unit_selection_for_v2_outputs(
+    populated_sorting,
+):
+    """A v2 output joins a group only with a frozen unit selection; without
+    one the group would keep reject/artifact units and no observed time."""
+    from spyglass.spikesorting.analysis.v1.group import (
+        SortedSpikesGroup,
+        UnitSelectionParams,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    _, merge_id = _make_v2_root_curation(populated_sorting)
+    UnitSelectionParams().insert_default()
+    recording_id = SortingSelection.resolve_source(populated_sorting).key[
+        "recording_id"
+    ]
+    nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
+        "nwb_file_name"
+    )
+    group_key = {
+        "nwb_file_name": nwb,
+        "sorted_spikes_group_name": "v2_group_without_selection",
+        "unit_filter_params_name": "default_exclusion",
+    }
+    (SortedSpikesGroup & group_key).super_delete(warn=False)
+
+    with pytest.raises(ValueError, match="select_units_for_analysis"):
+        SortedSpikesGroup().create_group(
+            group_key["sorted_spikes_group_name"],
+            nwb,
+            unit_filter_params_name="default_exclusion",
+            keys=[{"spikesorting_merge_id": merge_id}],
+        )
+    assert not (SortedSpikesGroup & group_key)
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_get_recording_returns_filtered_recording(populated_sorting):
@@ -216,7 +264,7 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    _, merge_id = _make_v2_root_curation(populated_sorting)
+    pk, merge_id = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
     # ``contents`` short-circuits on a populated table; use insert_default.
     DecodingParameters.insert_default()
@@ -228,19 +276,9 @@ def test_sorted_spikes_decoding_selection_accepts_v2_merge_id(
         "nwb_file_name"
     )
 
-    sorted_group_name = "v2_decoding_fk_test_sorted_spikes_group"
-    existing_group = SortedSpikesGroup & {
-        "sorted_spikes_group_name": sorted_group_name,
-        "nwb_file_name": actual_nwb,
-    }
-    if existing_group:
-        existing_group.super_delete(warn=False)
-    SortedSpikesGroup().create_group(
-        group_name=sorted_group_name,
-        nwb_file_name=actual_nwb,
-        unit_filter_params_name="all_units",
-        keys=[{"spikesorting_merge_id": merge_id}],
-    )
+    sorted_group_key = _select_group(pk)
+    sorted_group_name = sorted_group_key["sorted_spikes_group_name"]
+    assert SortedSpikesGroup & sorted_group_key
 
     pos_group_name = "v2_decoding_fk_test_position_group"
     existing_pos = PositionGroup & {
@@ -322,38 +360,12 @@ def test_sorted_spikes_group_per_unit_and_mua_firing_rate(populated_sorting):
         SortedSpikesGroup,
         UnitSelectionParams,
     )
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting
 
-    _, merge_id = _make_v2_root_curation(populated_sorting)
+    pk, _ = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
 
-    recording_id = SortingSelection.resolve_source(populated_sorting).key[
-        "recording_id"
-    ]
-    actual_nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
-    )
-
-    group_name = "v2_downstream_consumers_sorted_spikes_group"
-    existing = SortedSpikesGroup & {
-        "sorted_spikes_group_name": group_name,
-        "nwb_file_name": actual_nwb,
-    }
-    if existing:
-        existing.super_delete(warn=False)
-
-    SortedSpikesGroup().create_group(
-        group_name=group_name,
-        nwb_file_name=actual_nwb,
-        unit_filter_params_name="all_units",
-        keys=[{"spikesorting_merge_id": merge_id}],
-    )
-    group_key = {
-        "sorted_spikes_group_name": group_name,
-        "nwb_file_name": actual_nwb,
-        "unit_filter_params_name": "all_units",
-    }
+    group_key = _select_group(pk)
     time_array = np.arange(0.0, 4.0, 0.1)
     n_units = int((Sorting & populated_sorting).fetch1("n_units"))
 
@@ -424,20 +436,18 @@ def test_filter_units():
 @pytest.mark.slow
 @pytest.mark.integration
 def test_all_unlabeled_curation_include_label_filters(populated_sorting):
-    """An include/exclude filter applies even when the curated NWB
-    omits the label column (every unit unlabeled).
+    """An include/exclude policy applies to a curation whose units are all
+    unlabeled.
 
-    ``include_labels=["accept"]`` returns no units;
-    ``exclude_labels=["noise"]`` returns all.
+    ``include_labels=["accept"]`` selects no units;
+    ``exclude_labels=["noise"]`` selects all.
     """
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
         UnitSelectionParams,
     )
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    _pk, merge_id = _make_v2_root_curation(populated_sorting)
+    pk, _ = _make_v2_root_curation(populated_sorting)
     UnitSelectionParams().insert_default()
     UnitSelectionParams().insert1(
         {
@@ -456,31 +466,11 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
         skip_duplicates=True,
     )
 
-    recording_id = SortingSelection.resolve_source(populated_sorting).key[
-        "recording_id"
-    ]
-    nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
-    )
+    groups = []
 
     def _n_units(filter_name):
-        gname = f"cnep2_{filter_name}"
-        existing = SortedSpikesGroup & {
-            "sorted_spikes_group_name": gname,
-            "nwb_file_name": nwb,
-        }
-        if existing:
-            existing.super_delete(warn=False)
-        SortedSpikesGroup().create_group(
-            group_name=gname,
-            nwb_file_name=nwb,
-            unit_filter_params_name=filter_name,
-            keys=[{"spikesorting_merge_id": merge_id}],
-        )
-        spike_times = SortedSpikesGroup.fetch_spike_data(
-            {"sorted_spikes_group_name": gname, "nwb_file_name": nwb}
-        )
-        return len(spike_times)
+        groups.append(_select_group(pk, filter_name))
+        return len(SortedSpikesGroup.fetch_spike_data(groups[-1]))
 
     try:
         n_total = _n_units("all_units")
@@ -488,41 +478,27 @@ def test_all_unlabeled_curation_include_label_filters(populated_sorting):
         assert _n_units("cnep2_include_accept") == 0
         assert _n_units("cnep2_exclude_noise") == n_total
     finally:
-        for filter_name in (
-            "all_units",
-            "cnep2_include_accept",
-            "cnep2_exclude_noise",
-        ):
-            grp = SortedSpikesGroup & {
-                "sorted_spikes_group_name": f"cnep2_{filter_name}",
-                "nwb_file_name": nwb,
-            }
-            if grp:
-                grp.super_delete(warn=False)
+        for group_key in groups:
+            (SortedSpikesGroup & group_key).super_delete(warn=False)
 
 
 @pytest.mark.slow
 @pytest.mark.integration
 def test_labeled_curation_fetch_keeps_accept_drops_noise(
-    planted_two_unit_sort, monkeypatch
+    planted_two_unit_sort,
 ):
-    """The label filter on a labeled curation (one ``accept``, one ``noise``).
+    """A label policy on a labeled curation (one ``accept``, one ``noise``).
 
     ``include_labels=['accept']`` keeps only the accepted unit;
-    ``exclude_labels=['noise']`` drops the noise unit. The test owns its
-    group, so it turns ``test_mode`` off to run the real filter.
+    ``exclude_labels=['noise']`` drops the noise unit.
     """
-    import spyglass.spikesorting.analysis.v1.group as group_mod
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
         UnitSelectionParams,
     )
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
-    from spyglass.spikesorting.v2.recording import RecordingSelection
-    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
-
-    monkeypatch.setattr(group_mod, "test_mode", False)
+    from spyglass.spikesorting.v2.sorting import Sorting
 
     sorting_key = dict(planted_two_unit_sort)
     unit_ids = sorted(
@@ -557,36 +533,17 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
         },
         skip_duplicates=True,
     )
-    recording_id = SortingSelection.resolve_source(sorting_key).key[
-        "recording_id"
-    ]
-    nwb = (RecordingSelection & {"recording_id": recording_id}).fetch1(
-        "nwb_file_name"
-    )
-
     expected_frame = (CurationV2 & child).fetch_nwb()[0]["object_id"]
     expected_times = {
         int(unit_id): np.asarray(row["spike_times"])
         for unit_id, row in expected_frame.iterrows()
     }
+    groups = []
 
     def _fetch_units(filter_name):
-        gname = f"lbl_{filter_name}"
-        existing = SortedSpikesGroup & {
-            "sorted_spikes_group_name": gname,
-            "nwb_file_name": nwb,
-        }
-        if existing:
-            existing.super_delete(warn=False)
-        SortedSpikesGroup().create_group(
-            group_name=gname,
-            nwb_file_name=nwb,
-            unit_filter_params_name=filter_name,
-            keys=[{"spikesorting_merge_id": merge_id}],
-        )
+        groups.append(_select_group(child, filter_name))
         spikes, identities = SortedSpikesGroup.fetch_spike_data(
-            {"sorted_spikes_group_name": gname, "nwb_file_name": nwb},
-            return_unit_ids=True,
+            groups[-1], return_unit_ids=True
         )
         assert len(spikes) == len(identities)
         result = {}
@@ -606,17 +563,8 @@ def test_labeled_curation_fetch_keeps_accept_drops_noise(
             noise_id
         }
     finally:
-        for filter_name in (
-            "all_units",
-            "lbl_include_accept",
-            "lbl_exclude_noise",
-        ):
-            grp = SortedSpikesGroup & {
-                "sorted_spikes_group_name": f"lbl_{filter_name}",
-                "nwb_file_name": nwb,
-            }
-            if grp:
-                grp.super_delete(warn=False)
+        for group_key in groups:
+            (SortedSpikesGroup & group_key).super_delete(warn=False)
 
 
 @pytest.mark.slow

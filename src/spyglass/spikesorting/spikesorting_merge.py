@@ -525,6 +525,18 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             )
 
     @classmethod
+    def _v2_merge_ids(cls, merge_ids) -> list:
+        """Sorted string ids of the v2 outputs among ``merge_ids``.
+
+        Reads the master's source column, so it works where v2 did not
+        import.
+        """
+        sources = cls._merge_source_map(
+            [mid for mid in merge_ids if mid is not None]
+        )
+        return sorted(m for m, s in sources.items() if s in V2_SOURCES)
+
+    @classmethod
     def _assert_one_sorting_pipeline(cls, merge_ids) -> None:
         """Reject merge_ids that mix v2 outputs with v0/v1 outputs."""
         sources = cls._merge_source_map(

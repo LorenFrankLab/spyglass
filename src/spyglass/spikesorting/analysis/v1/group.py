@@ -114,7 +114,31 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         *,
         unit_selections: dict | None = None,
     ):
-        """Create a new group of sorted spikes"""
+        """Create a new group of sorted spikes
+
+        Parameters
+        ----------
+        group_name : str
+            Name of the group.
+        nwb_file_name : str
+            Session the group belongs to.
+        unit_filter_params_name : str, optional
+            ``UnitSelectionParams`` row applied at fetch to members without
+            a unit selection. Default ``"all_units"``.
+        keys : list of dict, optional
+            One ``{"spikesorting_merge_id": ...}`` per member.
+        unit_selections : dict, optional
+            ``merge_id`` -> ``{"selected_unit_ids", "selection_provenance"}``
+            frozen membership. Required for every v2 member; optional for
+            other members.
+
+        Raises
+        ------
+        ValueError
+            If the group exists, ``assert_decoding_merge_ids_ok`` rejects the
+            members, a selection names a non-member, or a v2 member has no
+            selection (use ``select_units_for_analysis``).
+        """
         keys = keys or []
         group_key = {
             "sorted_spikes_group_name": group_name,
@@ -140,11 +164,23 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             str(merge_id): snapshot
             for merge_id, snapshot in (unit_selections or {}).items()
         }
-        if unit_selections is not None and set(selections) != set(
-            map(str, merge_ids)
-        ):
+        if not set(selections) <= set(map(str, merge_ids)):
+            raise ValueError("Every unit selection must name a group member.")
+        # v2 labels such as reject and artifact pass v0/v1 label filters.
+        missing = [
+            merge_id
+            for merge_id in SpikeSortingOutput._v2_merge_ids(merge_ids)
+            if merge_id not in selections
+        ]
+        if missing:
             raise ValueError(
-                "Provide one unit selection for every group member."
+                f"SortedSpikesGroup.create_group: merge_id(s) {missing} are "
+                "spike sorting v2 outputs and need unit_selections. Without "
+                "them the group keeps every unit the curation kept, including "
+                "units labeled 'reject' or 'artifact', and records no "
+                "observed-time intervals. Create the group with "
+                "spyglass.spikesorting.v2.select_units_for_analysis(curation, "
+                "policy=...)."
             )
 
         parts_insert = [{**key, **group_key} for key in keys]

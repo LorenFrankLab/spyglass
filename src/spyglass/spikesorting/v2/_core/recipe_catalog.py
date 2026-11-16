@@ -782,8 +782,8 @@ def auto_curation_default_payloads() -> list[tuple[dict, list[dict]]]:
             [],
         ),
         (
-            # ISI violators are ``reject`` (not ``mua``) so every unit
-            # selection policy denies them. Merges stay manual. Needs a metric
+            # ISI violators are ``reject`` (not ``mua``) so the v2_* unit
+            # selection policies deny them. Merges stay manual. Needs a metric
             # row computing nn_advanced and isi_violation.
             {
                 "auto_curation_rules_name": FRANKLAB_CURATION_RULES,

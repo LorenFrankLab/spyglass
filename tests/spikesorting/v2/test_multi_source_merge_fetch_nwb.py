@@ -240,14 +240,22 @@ def test_sorted_spikes_group_fetch_spike_data_spans_sources(
     two_source_output,
 ):
     """SortedSpikesGroup.fetch_spike_data over a group whose units span
-    CurationV2 + ImportedSpikeSorting returns spikes from both sources."""
+    CurationV2 + ImportedSpikeSorting returns spikes from both sources.
+
+    Only the v2 member needs a frozen unit selection.
+    """
     from spyglass.spikesorting.analysis.v1.group import (
         SortedSpikesGroup,
         UnitSelectionParams,
     )
+    from spyglass.spikesorting.v2 import select_units_for_analysis
 
     ctx = two_source_output
     UnitSelectionParams.insert_default()
+    v2_group = dict(
+        select_units_for_analysis(ctx["cur_v2"], policy="all_units").group_key
+    )
+    stored = (SortedSpikesGroup.UnitSelection & v2_group).fetch1()
     group_name = "two_source_group"
     group_key = {
         "nwb_file_name": ctx["v2_nwb_file_name"],
@@ -262,6 +270,12 @@ def test_sorted_spikes_group_fetch_spike_data_spans_sources(
             {"spikesorting_merge_id": ctx["mid_v2"]},
             {"spikesorting_merge_id": ctx["mid_imported"]},
         ],
+        unit_selections={
+            ctx["mid_v2"]: {
+                "selected_unit_ids": stored["selected_unit_ids"],
+                "selection_provenance": stored["selection_provenance"],
+            }
+        },
     )
 
     try:
@@ -278,7 +292,8 @@ def test_sorted_spikes_group_fetch_spike_data_spans_sources(
         assert len(actual) == len(identities)  # no duplicated unit identities
         assert actual == ctx["expected_spikes"]
     finally:
-        (SortedSpikesGroup & group_key).super_delete(warn=False)
+        for key in (group_key, v2_group):
+            (SortedSpikesGroup & key).super_delete(warn=False)
 
 
 @pytest.mark.slow

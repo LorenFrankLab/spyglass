@@ -344,6 +344,7 @@ def test_session_consumers_read_member_row(concat_member_curation):
     )
     from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
     from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2 import select_units_for_analysis
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCurationV2,
     )
@@ -366,18 +367,25 @@ def test_session_consumers_read_member_row(concat_member_curation):
 
     UnitSelectionParams.insert_default()
     group_name = "concat_member_curation_consumer"
+    group_keys = []
     try:
-        SortedSpikesGroup().create_group(
-            group_name=group_name,
-            nwb_file_name=row["nwb_file_name"],
-            unit_filter_params_name="all_units",
-            keys=[{"spikesorting_merge_id": merge_id}],
+        # A member output is a v2 source: it needs a frozen unit selection.
+        with pytest.raises(ValueError, match="select_units_for_analysis"):
+            SortedSpikesGroup().create_group(
+                group_name=group_name,
+                nwb_file_name=row["nwb_file_name"],
+                unit_filter_params_name="all_units",
+                keys=[{"spikesorting_merge_id": merge_id}],
+            )
+        receipt = select_units_for_analysis(
+            ctx["curation_key"], policy="all_units", group_name=group_name
         )
-        group_key = {
-            "nwb_file_name": row["nwb_file_name"],
-            "unit_filter_params_name": "all_units",
-            "sorted_spikes_group_name": group_name,
-        }
+        group_keys = [dict(group.group_key) for group in receipt.groups]
+        group_key = next(
+            dict(group.group_key)
+            for group in receipt.groups
+            if group.merge_id == merge_id
+        )
         spikes, ids = SortedSpikesGroup.fetch_spike_data(
             group_key, return_unit_ids=True
         )
@@ -410,9 +418,8 @@ def test_session_consumers_read_member_row(concat_member_curation):
     finally:
         # Both rows refer to the shared fixture's member curation, whose
         # delete refuses while they exist.
-        (
-            SortedSpikesGroup & {"sorted_spikes_group_name": group_name}
-        ).super_delete(warn=False, safemode=False)
+        for key in group_keys:
+            (SortedSpikesGroup & key).super_delete(warn=False, safemode=False)
         (UnitAnnotation & {"spikesorting_merge_id": merge_id}).super_delete(
             warn=False, safemode=False
         )
