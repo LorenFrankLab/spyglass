@@ -315,6 +315,7 @@ def test_concat_preflight_keeps_rate_and_kilosort4_warnings_together(
         assert_concat_preflight,
     )
     from spyglass.spikesorting.v2.pipeline import preflight_v2_concat_pipeline
+    from spyglass.spikesorting.v2.session_group import SessionGroup
 
     gk = same_day_group["group_key"]
     rate_agnostic = presets_mod._PIPELINE_PRESETS[_CONCAT_PRESET].model_copy(
@@ -341,11 +342,28 @@ def test_concat_preflight_keeps_rate_and_kilosort4_warnings_together(
     run_warnings = assert_concat_preflight(
         gk["session_group_owner"], gk["session_group_name"], rate_agnostic
     )
+    members = (SessionGroup.Member & gk).fetch(
+        "member_index", "nwb_file_name", as_dict=True, order_by="member_index"
+    )
     for warnings in (list(report.warnings), run_warnings):
-        rate = [w for w in warnings if "sampling_rate_hz=None" in w]
-        double = [w for w in warnings if "planted double reference" in w]
-        assert rate and double, warnings
-        assert all(w.startswith("concat member ") for w in rate + double)
+        for member in members:
+            prefix = f"concat member {member['member_index']}: "
+            nwb = member["nwb_file_name"]
+            # Each kind, by content, once per member.
+            rate = [
+                w
+                for w in warnings
+                if w.startswith(prefix)
+                and "sets sampling_rate_hz=None" in w
+                and repr(nwb) in w
+            ]
+            double = [
+                w
+                for w in warnings
+                if w == f"{prefix}planted double reference for {nwb}"
+            ]
+            assert len(rate) == 1, ("rate advisory missing", warnings)
+            assert len(double) == 1, ("Kilosort4 advisory missing", warnings)
 
 
 @pytest.mark.usefixtures("dj_conn")
