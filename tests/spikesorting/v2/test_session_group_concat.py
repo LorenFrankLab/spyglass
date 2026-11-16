@@ -275,7 +275,7 @@ def test_concat_preflight_report_lists_every_member_problem(
     monkeypatch.setattr(
         checks,
         "sort_group_geometry_problem",
-        lambda nwb_file_name, sort_group_id: (
+        lambda nwb_file_name, sort_group_id, preprocessing_params_name: (
             f"contacts coincide for sort group {sort_group_id}"
         ),
     )
