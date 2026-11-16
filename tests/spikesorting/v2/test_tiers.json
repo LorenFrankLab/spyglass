@@ -162,6 +162,7 @@
     "test_analyzer_waveform_params.py": {
       "tier": "db_unit",
       "overrides": {
+        "test_every_shipped_preprocessing_row_maps_waveform_windows": "unit",
         "test_analyzer_waveform_params_schema_rejects_extra": "unit",
         "test_analyzer_waveform_params_schema_rejects_nonpositive_bounds": "unit",
         "test_analyzer_waveform_params_schema_rejects_purpose_whiten_mismatch": "unit",

@@ -181,7 +181,10 @@ def preflight_v2_pipeline(
         resolve_preset_sort_config(bundle) if sorter_params_exist else None
     )
     display_waveform_params_name = _check_display_waveform_params(
-        _check, bundle, sort_checks=sort_checks
+        _check,
+        bundle,
+        sort_checks=sort_checks,
+        preprocessing_params_exist=preprocessing_params_exist,
     )
     if auto_curate:
         _check_auto_curation_rows(_check, bundle)

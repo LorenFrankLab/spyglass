@@ -355,22 +355,45 @@ def _check_sorter_param_rows(
 
 
 def _check_display_waveform_params(
-    check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
-) -> str:
+    check: "Callable[[str, Any, str], bool]",
+    bundle,
+    *,
+    sort_checks: bool,
+    preprocessing_params_exist: bool = True,
+) -> "str | None":
     """Check the display analyzer recipe's row; return the recipe name.
 
-    The recipe is resolved from the preprocessing recipe. The name is returned
-    even when ``sort_checks`` is False, for the resource notes.
+    The recipe is resolved from the preprocessing recipe. With
+    ``sort_checks``, an unmapped preprocessing row fails
+    ``preprocessing_waveforms_mapped``. The name is returned even when
+    ``sort_checks`` is False, for the resource notes.
+
+    Returns
+    -------
+    str or None
+        The display ``waveform_params_name``, or ``None`` when the
+        preprocessing row is missing or unmapped.
     """
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         waveform_params_for_preprocessing,
     )
+    from spyglass.spikesorting.v2.exceptions import (
+        UnmappedPreprocessingWaveformsError,
+    )
     from spyglass.spikesorting.v2.sorting import AnalyzerWaveformParameters
 
-    display_waveform_params_name = waveform_params_for_preprocessing(
-        bundle.preprocessing_params_name
-    )[0]
+    if not preprocessing_params_exist:
+        return None
+    try:
+        display_waveform_params_name = waveform_params_for_preprocessing(
+            bundle.preprocessing_params_name
+        )[0]
+    except UnmappedPreprocessingWaveformsError as exc:
+        if sort_checks:
+            check("preprocessing_waveforms_mapped", False, str(exc))
+        return None
     if sort_checks:
+        check("preprocessing_waveforms_mapped", True, "")
         check(
             "analyzer_waveform_params_exist",
             AnalyzerWaveformParameters
@@ -392,6 +415,9 @@ def _check_auto_curation_rows(
     """
     from spyglass.spikesorting.v2._core.recipe_catalog import (
         waveform_params_for_preprocessing,
+    )
+    from spyglass.spikesorting.v2.exceptions import (
+        UnmappedPreprocessingWaveformsError,
     )
     from spyglass.spikesorting.v2.metric_curation import (
         AutoCurationRules,
@@ -415,9 +441,12 @@ def _check_auto_curation_rows(
         "auto-curation rule set)"
         " is missing. Run initialize_v2_defaults().",
     )
-    metric_waveform_params_name = waveform_params_for_preprocessing(
-        bundle.preprocessing_params_name
-    )[1]
+    try:
+        metric_waveform_params_name = waveform_params_for_preprocessing(
+            bundle.preprocessing_params_name
+        )[1]
+    except UnmappedPreprocessingWaveformsError:
+        return  # preprocessing_waveforms_mapped reports it.
     check(
         "metric_waveform_params_exist",
         AnalyzerWaveformParameters

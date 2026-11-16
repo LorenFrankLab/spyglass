@@ -451,11 +451,11 @@ class AnalyzerWaveformParameters(
 
 @schema
 class PreprocessingWaveformParameters(SpyglassMixin, dj.Manual):
-    """Analyzer windows for a preprocessing row derived from a region recipe.
+    """Analyzer windows for a preprocessing row not shipped in code.
 
     ``clone_pipeline_preset`` records the base recipe's ``(display,
-    metric)`` pair here for a renamed preprocessing row, which would
-    otherwise get the cortex windows.
+    metric)`` pair here for a renamed preprocessing row. A custom row without
+    one is refused by preflight and by the sort.
     """
 
     definition = """

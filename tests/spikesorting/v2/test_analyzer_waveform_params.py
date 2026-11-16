@@ -172,16 +172,44 @@ def test_waveform_params_for_preprocessing_literal_region_names():
     )
 
 
-def test_waveform_params_for_preprocessing_falls_back_to_cortex(dj_conn):
-    """Recipes with no region mapping or recorded windows use the cortex pair."""
-    assert waveform_params_for_preprocessing("default") == (
+def test_every_shipped_preprocessing_row_maps_waveform_windows():
+    """Each shipped preprocessing row resolves its windows without a DB row."""
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        _PREPROC_WAVEFORM_PARAMS,
+        preprocessing_default_contents,
+    )
+
+    shipped = {row[0] for row in preprocessing_default_contents()}
+    assert shipped <= set(_PREPROC_WAVEFORM_PARAMS), sorted(
+        shipped - set(_PREPROC_WAVEFORM_PARAMS)
+    )
+    # Region-less rows keep the wider window they resolve to today.
+    for name in ("default", "default_neuropixels", "no_filter"):
+        assert waveform_params_for_preprocessing(name) == (
+            "franklab_cortex_actual_waveforms",
+            "franklab_cortex_metric_waveforms",
+        )
+
+
+def test_unmapped_preprocessing_row_raises_with_the_mapping_insert(dj_conn):
+    """A custom row with no mapping is refused with a copy-paste insert and
+    both shipped pairs, never silently given the cortex windows."""
+    from spyglass.spikesorting.v2.exceptions import (
+        UnmappedPreprocessingWaveformsError,
+    )
+
+    with pytest.raises(UnmappedPreprocessingWaveformsError) as raised:
+        waveform_params_for_preprocessing("lab_unmapped_recipe_2026_11")
+    message = str(raised.value)
+    assert "'lab_unmapped_recipe_2026_11'" in message
+    assert "PreprocessingWaveformParameters.insert1(" in message
+    for name in (
+        "franklab_hippocampus_actual_waveforms",
+        "franklab_hippocampus_metric_waveforms",
         "franklab_cortex_actual_waveforms",
         "franklab_cortex_metric_waveforms",
-    )
-    assert waveform_params_for_preprocessing("some_custom_recipe") == (
-        "franklab_cortex_actual_waveforms",
-        "franklab_cortex_metric_waveforms",
-    )
+    ):
+        assert name in message
 
 
 # --------------------------------------------------------------------------- #
@@ -339,7 +367,7 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
             "franklab_hippocampus_actual_waveforms",
         ),
         ("franklab_cortex_2026_06", "franklab_cortex_actual_waveforms"),
-        # custom / unknown recipe -> wide cortex fallback
+        # The region-less generic row maps to the wider cortex window.
         ("default", "franklab_cortex_actual_waveforms"),
     ],
 )
@@ -349,8 +377,8 @@ def test_recording_source_display_recipe_resolved_by_region(
     """A single-recording sort resolves its display recipe from its source
     ``RecordingSelection.preprocessing_params_name`` (region).
 
-    Hippocampus -> 0.5/0.5, cortex -> 1.0/2.0, anything else -> the wide
-    cortex fallback.
+    Hippocampus -> 0.5/0.5, cortex and the region-less generic row ->
+    1.0/2.0.
     """
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,

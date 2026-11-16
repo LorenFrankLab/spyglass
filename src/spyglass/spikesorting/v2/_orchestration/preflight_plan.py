@@ -125,7 +125,7 @@ def _preflight_expected_ids(
 
 
 def _group_resource_notes(
-    display_waveform_params_name: str,
+    display_waveform_params_name: "str | None",
     *,
     nwb_file_name: str,
     sort_group_id: int,
@@ -249,7 +249,7 @@ def _expected_motion_ids(
 
 
 def _resource_notes(
-    display_waveform_params_name: str,
+    display_waveform_params_name: "str | None",
     *,
     n_channels: int,
     sampling_rate_hz: "float | None",
@@ -270,9 +270,13 @@ def _resource_notes(
 
     notes: list[str] = []
     rows = (
-        AnalyzerWaveformParameters
-        & {"waveform_params_name": display_waveform_params_name}
-    ).fetch(as_dict=True)
+        []
+        if display_waveform_params_name is None
+        else (
+            AnalyzerWaveformParameters
+            & {"waveform_params_name": display_waveform_params_name}
+        ).fetch(as_dict=True)
+    )
     if len(rows) == 1 and sampling_rate_hz:
         params = dict(rows[0]["params"])
         sparsity = SparsityParams.model_validate(params["sparsity"])

@@ -515,7 +515,9 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
 def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     """Raise ``ValueError`` if any Lookup row the preset references is absent.
 
-    Fails up front rather than with a foreign-key error mid-populate.
+    Fails up front rather than with a foreign-key error mid-populate. The
+    preprocessing row must also map to analyzer waveform windows
+    (``UnmappedPreprocessingWaveformsError``, a ``ValueError``).
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -574,6 +576,8 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
                 f"{label}. Insert it (e.g. via initialize_v2_defaults() or the "
                 "table's insert) before registering the preset."
             )
+    # Raises UnmappedPreprocessingWaveformsError with the insert to run.
+    waveform_params_for_preprocessing(preset.preprocessing_params_name)
 
 
 def register_pipeline_preset(
@@ -609,7 +613,8 @@ def register_pipeline_preset(
         If ``name`` is not a non-empty string of at most 64 characters, is
         already used with different content, the preset fails Pydantic
         validation, or (when ``validate_rows``) a referenced parameter row is
-        missing.
+        missing or the preprocessing row maps to no analyzer waveform windows
+        (``UnmappedPreprocessingWaveformsError``).
     """
     # list_pipeline_presets sorts keys, so names must be strings.
     if not isinstance(name, str) or not name.strip() or len(name) > 64:
@@ -756,8 +761,11 @@ def clone_pipeline_preset(
         If ``base_name`` is unknown; ``new_name`` is empty or already used with
         different content; no overrides are given; an override key matches no
         stage param (or is ambiguous across stages); an override value fails the stage's
-        Pydantic schema; or a derived row name already exists with different
-        content.
+        Pydantic schema; a derived row name already exists with different
+        content; or ``PreprocessingWaveformParameters`` already maps the new
+        preprocessing name to other windows.
+    UnmappedPreprocessingWaveformsError
+        If the base preset's preprocessing row has no waveform windows.
     DuplicateParameterContentError
         If a derived row's content matches an existing row under a different
         name and ``allow_duplicate_params`` is False.
@@ -849,6 +857,10 @@ def clone_pipeline_preset(
     touched, derived_params = _derive_preset_parameters(
         stages, overrides, base_name
     )
+    # Analyzer windows are keyed by preprocessing row name.
+    base_windows = waveform_params_for_preprocessing(
+        base.preprocessing_params_name
+    )
     derived_preset = base.model_copy(
         update={stages[name]["pk_field"]: new_name for name in touched}
     )
@@ -911,18 +923,33 @@ def clone_pipeline_preset(
                 row, allow_duplicate_params=allow_duplicate_params
             )
         if "preprocessing" in touched:
-            # Analyzer windows are keyed by preprocessing row name.
-            display, metric = waveform_params_for_preprocessing(
-                base.preprocessing_params_name
+            mapping = PreprocessingWaveformParameters & {
+                "preprocessing_params_name": new_name
+            }
+            stored = (
+                mapping.fetch1(
+                    "display_waveform_params_name",
+                    "metric_waveform_params_name",
+                )
+                if mapping
+                else None
             )
-            PreprocessingWaveformParameters.insert1(
-                {
-                    "preprocessing_params_name": new_name,
-                    "display_waveform_params_name": display,
-                    "metric_waveform_params_name": metric,
-                },
-                skip_duplicates=True,
-            )
+            if stored is None:
+                PreprocessingWaveformParameters.insert1(
+                    {
+                        "preprocessing_params_name": new_name,
+                        "display_waveform_params_name": base_windows[0],
+                        "metric_waveform_params_name": base_windows[1],
+                    }
+                )
+            elif tuple(stored) != tuple(base_windows):
+                raise ValueError(
+                    "clone_pipeline_preset: PreprocessingWaveformParameters "
+                    f"already maps {new_name!r} to {tuple(stored)}, but base "
+                    f"preset {base_name!r} uses {tuple(base_windows)}. "
+                    "Choose a different new_name, or delete that mapping row "
+                    "before re-cloning."
+                )
 
     register_pipeline_preset(new_name, derived_preset, validate_rows=True)
     return new_name

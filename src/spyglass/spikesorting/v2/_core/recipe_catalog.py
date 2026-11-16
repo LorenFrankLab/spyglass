@@ -403,13 +403,17 @@ _REGION_PREPROC = {
     "cortex": CORTEX_PREPROC,
 }
 
-# Region preprocessing recipe -> (display, metric) waveform-params rows.
+# Shipped preprocessing recipe -> (display, metric) waveform-params rows.
+# Region-less rows use the wider cortex window.
 _PREPROC_WAVEFORM_PARAMS = {
     HIPPOCAMPUS_PREPROC: (
         HIPPOCAMPUS_DISPLAY_WAVEFORMS,
         HIPPOCAMPUS_METRIC_WAVEFORMS,
     ),
     CORTEX_PREPROC: (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    "default": (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    NEUROPIXELS_PREPROC: (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
+    "no_filter": (CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS),
 }
 
 
@@ -418,9 +422,8 @@ def waveform_params_for_preprocessing(
 ) -> tuple[str, str]:
     """Return the ``(display, metric)`` waveform-params row names for a recipe.
 
-    Recipes other than hippocampus and cortex use the
-    ``PreprocessingWaveformParameters`` row if one exists, else the wider
-    cortex pair.
+    Shipped rows map in code; any other row needs its
+    ``PreprocessingWaveformParameters`` row.
 
     Parameters
     ----------
@@ -431,6 +434,12 @@ def waveform_params_for_preprocessing(
     -------
     tuple of (str, str)
         The ``(display, metric)`` ``waveform_params_name`` pair.
+
+    Raises
+    ------
+    UnmappedPreprocessingWaveformsError
+        If the row is not shipped and has no ``PreprocessingWaveformParameters``
+        row; the message holds the insert to run.
     """
     if preprocessing_params_name in _PREPROC_WAVEFORM_PARAMS:
         return _PREPROC_WAVEFORM_PARAMS[preprocessing_params_name]
@@ -444,13 +453,38 @@ def waveform_params_for_preprocessing(
     ).fetch("display_waveform_params_name", "metric_waveform_params_name")
     if len(rows[0]):
         return rows[0][0], rows[1][0]
-    return CORTEX_DISPLAY_WAVEFORMS, CORTEX_METRIC_WAVEFORMS
+    from spyglass.spikesorting.v2.exceptions import (
+        UnmappedPreprocessingWaveformsError,
+    )
+
+    raise UnmappedPreprocessingWaveformsError(
+        "No analyzer waveform windows are mapped for "
+        f"preprocessing_params_name {preprocessing_params_name!r}. v2 picks "
+        "the display and metric waveform windows by preprocessing row, so a "
+        "custom row needs a PreprocessingWaveformParameters row. Insert the "
+        "pair matching its high-pass:\n"
+        "  from spyglass.spikesorting.v2.sorting import "
+        "PreprocessingWaveformParameters\n"
+        "  PreprocessingWaveformParameters.insert1({"
+        f"'preprocessing_params_name': {preprocessing_params_name!r}, "
+        f"'display_waveform_params_name': {HIPPOCAMPUS_DISPLAY_WAVEFORMS!r}, "
+        f"'metric_waveform_params_name': {HIPPOCAMPUS_METRIC_WAVEFORMS!r}"
+        "})\n"
+        "Shipped pairs: hippocampus 0.5/0.5 ms "
+        f"({HIPPOCAMPUS_DISPLAY_WAVEFORMS} + {HIPPOCAMPUS_METRIC_WAVEFORMS}); "
+        f"cortex 1.0/2.0 ms ({CORTEX_DISPLAY_WAVEFORMS} + "
+        f"{CORTEX_METRIC_WAVEFORMS}). clone_pipeline_preset writes this row "
+        "when it derives a preprocessing row."
+    )
 
 
-# A new region must not silently inherit the cortex fallback.
-assert set(_REGION_PREPROC.values()) <= set(_PREPROC_WAVEFORM_PARAMS), (
-    "every _REGION_PREPROC recipe needs a _PREPROC_WAVEFORM_PARAMS mapping; "
-    f"missing: {set(_REGION_PREPROC.values()) - set(_PREPROC_WAVEFORM_PARAMS)}"
+# A shipped preprocessing row must not reach the unmapped-row error.
+_UNMAPPED_SHIPPED = {row[0] for row in preprocessing_default_contents()} - set(
+    _PREPROC_WAVEFORM_PARAMS
+)
+assert not _UNMAPPED_SHIPPED, (
+    "every shipped preprocessing row needs a _PREPROC_WAVEFORM_PARAMS "
+    f"mapping; missing: {sorted(_UNMAPPED_SHIPPED)}"
 )
 
 

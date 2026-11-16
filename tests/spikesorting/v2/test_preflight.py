@@ -752,6 +752,47 @@ def test_preflight_gates_analyzer_waveform_params_row(
 
 
 @pytest.mark.database
+def test_preflight_fails_an_unmapped_preprocessing_row(
+    preflight_inputs, monkeypatch
+):
+    """A preset whose preprocessing row has no analyzer-window mapping fails
+    preflight with the mapping insert, before any sort runs."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    row = "lab_preflight_unmapped_2026_11"
+    PreprocessingParameters.insert1(
+        {
+            "preprocessing_params_name": row,
+            "params": {
+                "bandpass_filter": {"freq_min": 450.0, "freq_max": 6000.0}
+            },
+        },
+        allow_duplicate_params=True,
+        skip_duplicates=True,
+    )
+    preset = presets_mod._PIPELINE_PRESETS[
+        "franklab_probe_hippocampus_30khz_ms4_2026_06"
+    ].model_copy(update={"preprocessing_params_name": row})
+    monkeypatch.setitem(presets_mod._PIPELINE_PRESETS, row, preset)
+    try:
+        report = preflight_v2_pipeline(
+            **{**preflight_inputs, "pipeline_preset": row}
+        )
+    finally:
+        (
+            PreprocessingParameters & {"preprocessing_params_name": row}
+        ).delete_quick()
+    assert report.ok is False
+    (check,) = [
+        c for c in report.checks if c.name == "preprocessing_waveforms_mapped"
+    ]
+    assert check.ok is False
+    assert f"'preprocessing_params_name': '{row}'" in check.fix
+    assert "PreprocessingWaveformParameters.insert1(" in check.fix
+
+
+@pytest.mark.database
 def test_preflight_missing_raw(preflight_inputs, monkeypatch):
     """A session present but Raw absent fails raw_exists (not a false-negative).
 

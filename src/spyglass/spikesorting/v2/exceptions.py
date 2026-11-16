@@ -81,6 +81,15 @@ class IneffectiveManualExclusionError(SpikeSortingV2Error, ValueError):
     """
 
 
+class UnmappedPreprocessingWaveformsError(SpikeSortingV2Error, ValueError):
+    """Raise when a preprocessing row has no analyzer waveform windows.
+
+    v2 picks the display and metric waveform windows by preprocessing row; a
+    custom row needs a ``PreprocessingWaveformParameters`` row. Message
+    carries the insert to run and the shipped window pairs.
+    """
+
+
 class InsufficientZScoreChannelsError(SpikeSortingV2Error, ValueError):
     """Raise when ``zscore_threshold`` is the only detector on <3 channels.
 

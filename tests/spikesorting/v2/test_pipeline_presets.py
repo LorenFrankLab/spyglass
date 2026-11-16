@@ -1420,3 +1420,89 @@ def test_auto_curation_reuses_a_twin_presets_child_description():
     assert _auto_curation_description(
         "other_rules", {describe("probe_twin")}, presets
     ) == describe("other_rules")
+
+
+def _insert_unmapped_preprocessing_row(name: str) -> None:
+    """A custom preprocessing row with no analyzer-window mapping."""
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert1(
+        {
+            "preprocessing_params_name": name,
+            "params": {
+                "bandpass_filter": {"freq_min": 500.0, "freq_max": 6000.0}
+            },
+        },
+        allow_duplicate_params=True,
+    )
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_register_pipeline_preset_refuses_unmapped_preprocessing_row(
+    dj_conn, clone_env
+):
+    """A preset whose preprocessing row has no analyzer windows is refused at
+    registration, with the mapping insert to run; nothing is saved."""
+    from spyglass.spikesorting.v2.exceptions import (
+        UnmappedPreprocessingWaveformsError,
+    )
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+
+    row, preset = "lab_hp500_unmapped_2026_11", "lab_hp500_preset_2026_11"
+    clone_env.extend([row, preset])
+    _insert_unmapped_preprocessing_row(row)
+    with pytest.raises(
+        UnmappedPreprocessingWaveformsError,
+        match=r"PreprocessingWaveformParameters\.insert1",
+    ):
+        register_pipeline_preset(
+            preset, _spec_with(preprocessing_params_name=row)
+        )
+    assert not (PipelinePreset & {"pipeline_preset": preset})
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_clone_refuses_an_existing_different_waveform_mapping(
+    dj_conn, clone_env
+):
+    """A clone whose new preprocessing name already maps to other windows is
+    refused rather than keeping the stale pair."""
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        CORTEX_DISPLAY_WAVEFORMS,
+        CORTEX_METRIC_WAVEFORMS,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        PreprocessingWaveformParameters,
+    )
+
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        HIPPOCAMPUS_PREPROC,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    new_name = "lab_hp700_stale_windows_2026_11"
+    clone_env.append(new_name)
+    # The row the clone derives, so only the mapping row disagrees.
+    params = (
+        PreprocessingParameters
+        & {"preprocessing_params_name": HIPPOCAMPUS_PREPROC}
+    ).fetch1("params")
+    params["bandpass_filter"]["freq_min"] = 700.0
+    PreprocessingParameters.insert1(
+        {"preprocessing_params_name": new_name, "params": params},
+        allow_duplicate_params=True,
+    )
+    PreprocessingWaveformParameters.insert1(
+        {
+            "preprocessing_params_name": new_name,
+            "display_waveform_params_name": CORTEX_DISPLAY_WAVEFORMS,
+            "metric_waveform_params_name": CORTEX_METRIC_WAVEFORMS,
+        }
+    )
+    # The base is hippocampal; its windows differ from the stale cortex row.
+    with pytest.raises(ValueError, match="already maps"):
+        clone_pipeline_preset(
+            _CLONE_BASE, new_name, **{"bandpass_filter.freq_min": 700.0}
+        )
