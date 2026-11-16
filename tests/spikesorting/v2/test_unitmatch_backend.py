@@ -468,15 +468,44 @@ def test_bundle_rejects_non_2d_positions(tmp_path, monkeypatch):
         )
 
 
+@pytest.mark.parametrize("ms, fails", [(0.5, True), (1.1, True), (1.2, False)])
+def test_bundle_window_needs_baseline_samples_at_the_recording_rate(
+    tmp_path, ms, fails
+):
+    """UnitMatch needs 28 samples before the trough (8 for its waveform
+    window plus its 20-sample baseline); at 25 kHz that is 1.12 ms.
+    """
+    import spikeinterface.full as si
+
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        extract_waveform_bundle,
+    )
+
+    recording, sorting = si.generate_ground_truth_recording(
+        durations=[2.0], num_channels=4, num_units=2, seed=0
+    )
+    assert recording.get_sampling_frequency() == 25000.0
+    call = lambda: extract_waveform_bundle(  # noqa: E731
+        tmp_path / "sess", recording, sorting, ms_before=ms, ms_after=ms
+    )
+    if fails:
+        with pytest.raises(ValueError, match=r"at least 1\.12 ms.*25000"):
+            call()
+        assert not (tmp_path / "sess").exists()
+    else:
+        call()
+
+
 # --------------------------------------------------------------------------- #
 # Bundle construction on planted units                                         #
 # --------------------------------------------------------------------------- #
 
-#: Planted-session sampling rate (Hz) and channel count. At 10 kHz the default
-#: 1.5 ms window is 15 samples on each side of the spike.
-_FS = 10_000.0
+#: Planted-session sampling rate (Hz) and channel count. At 20 kHz the default
+#: 1.5 ms window is 30 samples on each side of the spike, above UnitMatch's
+#: 28-sample minimum.
+_FS = 20_000.0
 _N_CH = 4
-_HALF_WIDTH = 15
+_HALF_WIDTH = 30
 _SPIKE_WIDTH = 2 * _HALF_WIDTH
 
 

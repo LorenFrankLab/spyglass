@@ -26,6 +26,10 @@ from spyglass.spikesorting.v2.matcher_protocol import (
     WAVEFORM_BUNDLE_VERSION,
 )
 
+# UnitMatchPy reads 8 samples before the trough for its waveform window and
+# the 20 samples before that as its baseline.
+UNITMATCH_MIN_SAMPLES_BEFORE = 28
+
 
 def save_waveform_arrays(waveforms, directory, unit_ids):
     """Write the shared per-unit layout without changing the process cwd."""
@@ -204,7 +208,9 @@ def extract_waveform_bundle(
     RuntimeError
         A kept unit's half is exactly all-zero over every sample and channel.
     ValueError
-        The recording's channel positions are not 2D, or ``statistics_spans``
+        The window holds fewer than ``UNITMATCH_MIN_SAMPLES_BEFORE`` samples
+        on a side at the recording's rate, the recording's channel positions
+        are not 2D, or ``statistics_spans``
         are malformed, end past the recording, or are given for a
         multi-segment recording or sorting.
     """
@@ -244,6 +250,16 @@ def extract_waveform_bundle(
     fs = recording.get_sampling_frequency()
     nbefore = int(ms_before * fs / 1000.0)
     nafter = int(ms_after * fs / 1000.0)
+    if min(nbefore, nafter) < UNITMATCH_MIN_SAMPLES_BEFORE:
+        raise ValueError(
+            "extract_unitmatch_bundle: a "
+            f"{ms_before} ms window is {nbefore} samples before the trough "
+            f"at {fs:g} Hz, but UnitMatch needs at least "
+            f"{UNITMATCH_MIN_SAMPLES_BEFORE} (8 for its waveform window plus "
+            "its 20-sample baseline). Use ms_before and ms_after of at least "
+            f"{UNITMATCH_MIN_SAMPLES_BEFORE * 1000.0 / fs:.2f} ms at this "
+            f"rate ({fs:g} Hz)."
+        )
     sampling_sorting = sorting
     if statistics_spans is not None:
         sampling_sorting = _sorting_with_window_in_one_span(
