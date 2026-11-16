@@ -183,6 +183,56 @@ def _fetch_valid_times(nwb_file_name: str, interval_list_name: str):
     return rel.fetch1("valid_times")
 
 
+def assert_recording_inputs_current(
+    sel: dict, resolved: ResolvedRecordingInputs | None = None
+) -> ResolvedRecordingInputs:
+    """Raise if a recording's live inputs no longer hash to its selection.
+
+    The one live-versus-stored comparison: ``Recording.make_fetch``, the
+    recompute delete gate and ``audit_recording_input_hashes`` all use it.
+
+    Parameters
+    ----------
+    sel : dict
+        A ``RecordingSelection`` row.
+    resolved : ResolvedRecordingInputs, optional
+        The live inputs if already read; resolved here otherwise.
+
+    Returns
+    -------
+    ResolvedRecordingInputs
+        The live inputs.
+
+    Raises
+    ------
+    RecordingInputDriftError
+        If the live inputs hash differently from ``recording_input_hash``.
+    ValueError
+        If the sort interval or ``raw data valid times`` IntervalList is gone.
+    """
+    if resolved is None:
+        resolved = resolve_recording_inputs(
+            sel["nwb_file_name"],
+            int(sel["sort_group_id"]),
+            sel["preprocessing_params_name"],
+            sel["interval_list_name"],
+        )
+    stored_input_hash = sel["recording_input_hash"]
+    live_input_hash = resolved.input_hash
+    if live_input_hash != stored_input_hash:
+        raise RecordingInputDriftError(
+            f"Recording {sel['recording_id']} was selected with input "
+            f"fingerprint {stored_input_hash} but the live inputs now hash "
+            f"to {live_input_hash}: the electrode membership, reference, "
+            "interpolate bad-channel set, or the sort interval / raw valid "
+            "times it is cut to changed after insert_selection. Re-run "
+            "insert_selection for the current inputs (it mints a new "
+            "recording_id for the changed set), or restore the sort group "
+            "or IntervalList."
+        )
+    return resolved
+
+
 def fetch_recording_inputs(key: dict) -> RecordingFetched:
     """Read every DB input ``Recording.make_compute`` needs.
 
@@ -239,19 +289,7 @@ def fetch_recording_inputs(key: dict) -> RecordingFetched:
     probe_types, electrode_group_names = fetch_sort_group_probe_info(
         nwb_file_name, channel_ids
     )
-    stored_input_hash = sel["recording_input_hash"]
-    live_input_hash = resolved.input_hash
-    if live_input_hash != stored_input_hash:
-        raise RecordingInputDriftError(
-            f"Recording {sel['recording_id']} was selected with input "
-            f"fingerprint {stored_input_hash} but the live inputs now hash "
-            f"to {live_input_hash}: the electrode membership, reference, "
-            "interpolate bad-channel set, or the sort interval / raw valid "
-            "times it is cut to changed after insert_selection. Re-run "
-            "insert_selection for the current inputs (it mints a new "
-            "recording_id for the changed set), or restore the sort group "
-            "or IntervalList."
-        )
+    assert_recording_inputs_current(sel, resolved)
     return RecordingFetched(
         sel=sel,
         channel_ids=channel_ids,

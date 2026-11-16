@@ -705,28 +705,32 @@ def audit_recording_input_hashes(restriction=None) -> list[dict]:
         One ``{"recording_id", "stored_hash", "live_hash"}`` entry per
         mismatched row; empty when every row matches.
     """
-    from spyglass.spikesorting.v2.recording import (
-        RecordingSelection,
-        resolve_recording_input_hash,
+    from spyglass.spikesorting.v2._recording.fetch import (
+        assert_recording_inputs_current,
+        resolve_recording_inputs,
     )
+    from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
+    from spyglass.spikesorting.v2.recording import RecordingSelection
 
     selections = RecordingSelection()
     if restriction is not None:
         selections = selections & restriction
     stale = []
     for row in selections.fetch(as_dict=True):
-        live = resolve_recording_input_hash(
+        live = resolve_recording_inputs(
             row["nwb_file_name"],
             row["sort_group_id"],
             row["preprocessing_params_name"],
             row["interval_list_name"],
         )
-        if live != row["recording_input_hash"]:
+        try:
+            assert_recording_inputs_current(row, live)
+        except RecordingInputDriftError:
             stale.append(
                 {
                     "recording_id": row["recording_id"],
                     "stored_hash": row["recording_input_hash"],
-                    "live_hash": live,
+                    "live_hash": live.input_hash,
                 }
             )
     return stale

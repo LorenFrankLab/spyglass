@@ -788,9 +788,11 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         """Delete recording artifacts verified in the CURRENT environment.
 
         Refuses ``matched=0`` rows and, by default, rows matched only in a
-        stale ``UserEnvironment``. Removes the preprocessed ``AnalysisNwbfile``
-        and sets ``deleted``; ``Recording.get_recording`` rebuilds it on
-        demand.
+        stale ``UserEnvironment``. Keeps, with a warning, a file whose
+        recording inputs changed or can no longer be read since selection,
+        since it could not be rebuilt. Removes the preprocessed
+        ``AnalysisNwbfile`` and sets ``deleted``; ``Recording.get_recording``
+        rebuilds it on demand.
 
         Parameters
         ----------
@@ -827,6 +829,7 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
             file_attr="analysis_file_name",
             path_fn=AnalysisNwbfile.get_abs_path,
             artifact_pk=Recording.primary_key,
+            rebuild_blocker=_recording_rebuild_blocker,
         )
 
 
@@ -1614,6 +1617,26 @@ def _too_recent_or_unknown(matched_rows, cutoff) -> bool:
     )
 
 
+def _recording_rebuild_blocker(artifact: dict) -> str | None:
+    """Return why a recording's file could not be rebuilt, or ``None``.
+
+    A rebuild reruns ``Recording.make_fetch``, which refuses drifted or
+    unreadable inputs, so such a file must not be reclaimed.
+    """
+    from spyglass.spikesorting.v2._recording.fetch import (
+        assert_recording_inputs_current,
+    )
+    from spyglass.spikesorting.v2.exceptions import RecordingInputDriftError
+
+    try:
+        assert_recording_inputs_current(
+            (RecordingSelection & artifact).fetch1()
+        )
+    except (RecordingInputDriftError, ValueError, dj.DataJointError) as exc:
+        return str(exc)
+    return None
+
+
 def _delete_files(
     recompute_table,
     parent_table,
@@ -1625,11 +1648,14 @@ def _delete_files(
     file_attr,
     path_fn,
     artifact_pk,
+    rebuild_blocker=None,
 ):
     """Unlink each recording artifact that passes the env-match and age gates.
 
     Each unlink and ``deleted=1`` update holds ``recording_artifact_lock`` so
-    it cannot interleave with a ``get_recording`` rebuild.
+    it cannot interleave with a ``get_recording`` rebuild. ``rebuild_blocker``
+    maps an artifact key to a reason it could not be rebuilt (or ``None``);
+    such an artifact is kept, with a warning.
     """
     cutoff = _recent_cutoff(days_since_creation)
     authorized, matched = _authorize_artifacts_for_deletion(
@@ -1645,6 +1671,13 @@ def _delete_files(
             continue
         fname = (parent_table & artifact).fetch1(file_attr)
         abs_path = Path(path_fn(fname))
+        blocker = rebuild_blocker(artifact) if rebuild_blocker else None
+        if blocker is not None:
+            logger.warning(
+                f"delete_files: kept {abs_path}: it could not be rebuilt from "
+                f"its current inputs. {blocker}"
+            )
+            continue
         if dry_run:
             deleted.append(str(abs_path))
             continue

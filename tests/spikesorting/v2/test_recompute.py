@@ -506,6 +506,114 @@ def test_recording_recompute_matches_and_delete_gate(
 
 @pytest.mark.slow
 @pytest.mark.integration
+def test_recording_delete_gate_keeps_a_file_whose_inputs_changed(
+    populated_sorting, clean_recompute
+):
+    """A matched verdict does not authorize reclaiming a recording whose sort
+    interval was edited afterwards: the file could no longer be rebuilt. The
+    same recording with its inputs restored is reclaimed."""
+    from pathlib import Path
+
+    import numpy as np
+
+    from spyglass.common.common_interval import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2.recompute import (
+        RecordingArtifactRecompute,
+        RecordingArtifactRecomputeSelection,
+        RecordingArtifactVersions,
+        _artifact_created_at,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
+    _assert_temp_base_dir()
+    source = (RecordingSelection & _recording_key(populated_sorting)).fetch1()
+    interval = {
+        "nwb_file_name": source["nwb_file_name"],
+        "interval_list_name": "v2_recompute_input_drift_interval",
+    }
+    original = (
+        IntervalList
+        & {
+            "nwb_file_name": source["nwb_file_name"],
+            "interval_list_name": source["interval_list_name"],
+        }
+    ).fetch1("valid_times")
+    team = {"team_name": "v2_recompute_input_drift_team"}
+    LabTeam.insert1(
+        {**team, "team_description": "recompute input drift"},
+        skip_duplicates=True,
+    )
+    (RecordingSelection & interval).delete(safemode=False)
+    (IntervalList & interval).delete_quick()
+    IntervalList.insert1({**interval, "valid_times": original})
+    try:
+        rec_key = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": source["nwb_file_name"],
+                "sort_group_id": source["sort_group_id"],
+                "interval_list_name": interval["interval_list_name"],
+                "preprocessing_params_name": source[
+                    "preprocessing_params_name"
+                ],
+                **team,
+            }
+        )
+        Recording.populate(rec_key, reserve_jobs=False)
+        RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+        RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+        selection = (RecordingArtifactRecomputeSelection & rec_key).fetch1(
+            "KEY"
+        )
+        RecordingArtifactRecompute.insert1(
+            {
+                **selection,
+                "matched": 1,
+                "created_at": _artifact_created_at(rec_key),
+                "deleted": 0,
+            },
+            allow_direct_insert=True,
+        )
+        path = Path(
+            AnalysisNwbfile.get_abs_path(
+                (Recording & rec_key).fetch1("analysis_file_name")
+            )
+        )
+
+        # A lab edit of the sort interval after the verdict.
+        start, end = float(original[0][0]), float(original[-1][1])
+        IntervalList.insert1(
+            {**interval, "valid_times": np.array([[start, (start + end) / 2]])},
+            update=True,
+        )
+        for dry_run in (True, False):
+            assert (
+                RecordingArtifactRecompute().delete_files(
+                    rec_key, dry_run=dry_run, days_since_creation=0
+                )
+                == []
+            )
+        assert path.exists()
+        assert (RecordingArtifactRecompute & rec_key).fetch1("deleted") == 0
+
+        IntervalList.insert1({**interval, "valid_times": original}, update=True)
+        assert RecordingArtifactRecompute().delete_files(
+            rec_key, dry_run=False, days_since_creation=0
+        ) == [str(path)]
+        assert not path.exists()
+        assert (RecordingArtifactRecompute & rec_key).fetch1("deleted") == 1
+    finally:
+        (RecordingSelection & interval).delete(safemode=False)
+        (IntervalList & interval).delete_quick()
+        (LabTeam & team).delete(safemode=False)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
 def test_remove_matched_drops_redundant_failed_cross_env_selection(
     populated_sorting, clean_recompute
 ):
