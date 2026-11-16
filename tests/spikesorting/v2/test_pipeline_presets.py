@@ -1774,3 +1774,109 @@ def test_shipped_clusterless_preset_is_the_hippocampus_60uv_recipe():
         )
         == _DEFAULT_CLUSTERLESS_FINGERPRINT
     )
+
+
+def _broken_preset_spec() -> dict:
+    return {**_custom_spec(), "bogus_field": 1}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "call, caller",
+    [
+        (
+            lambda: describe_pipeline_preset("definitely_not_a_preset"),
+            "describe_pipeline_preset",
+        ),
+        (
+            lambda: register_pipeline_preset(
+                "", _custom_spec(), validate_rows=False
+            ),
+            "register_pipeline_preset",
+        ),
+        (
+            lambda: register_pipeline_preset(
+                "lab_bad_2026_11", _broken_preset_spec(), validate_rows=False
+            ),
+            "register_pipeline_preset",
+        ),
+        (
+            lambda: register_pipeline_preset(
+                next(iter(_PIPELINE_PRESETS)),
+                {**_custom_spec(), "notes": "other content"},
+                validate_rows=False,
+            ),
+            "register_pipeline_preset",
+        ),
+        (
+            lambda: clone_pipeline_preset(
+                "definitely_not_a_preset", "lab_clone_2026_11", x=1
+            ),
+            "clone_pipeline_preset",
+        ),
+        (
+            lambda: clone_pipeline_preset(
+                _CLONE_BASE, "  ", detect_threshold=4.0
+            ),
+            "clone_pipeline_preset",
+        ),
+        (
+            lambda: clone_pipeline_preset(_CLONE_BASE, "lab_clone_2026_11"),
+            "clone_pipeline_preset",
+        ),
+    ],
+)
+def test_preset_api_rejects_bad_input_with_pipeline_input_error(
+    monkeypatch, call, caller
+):
+    """Bad input to the preset API raises the same class as a bad run
+    request, still a ValueError, and the message names the function."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    monkeypatch.setattr(
+        presets_mod, "_PIPELINE_PRESETS", dict(presets_mod._PIPELINE_PRESETS)
+    )
+    monkeypatch.setattr(presets_mod, "_saved_pipeline_presets", _no_saved)
+    with pytest.raises(PipelineInputError) as error:
+        call()
+    assert isinstance(error.value, ValueError)
+    assert str(error.value).startswith(caller)
+
+
+@pytest.mark.unit
+def test_register_pipeline_preset_names_the_invalid_field(monkeypatch):
+    """A preset that fails validation names the offending field."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+
+    monkeypatch.setattr(
+        presets_mod, "_PIPELINE_PRESETS", dict(presets_mod._PIPELINE_PRESETS)
+    )
+    with pytest.raises(ValueError) as error:
+        register_pipeline_preset(
+            "lab_bad_2026_11", _broken_preset_spec(), validate_rows=False
+        )
+    assert "'lab_bad_2026_11'" in str(error.value)
+    assert "bogus_field" in str(error.value)
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_clone_with_an_invalid_value_names_the_override_stage_and_base_row(
+    dj_conn, clone_env
+):
+    """A clone override that fails the stage schema raises PipelineInputError
+    naming the override key, the stage and the base row it was applied to."""
+    from spyglass.spikesorting.v2.exceptions import PipelineInputError
+
+    new_name = "lab_bad_value_2026_11"
+    clone_env.append(new_name)
+    base_row = _PIPELINE_PRESETS[_CLONE_BASE].sorter_params_name
+    with pytest.raises(PipelineInputError) as error:
+        clone_pipeline_preset(_CLONE_BASE, new_name, detect_threshold=-1.0)
+    message = str(error.value)
+    assert message.startswith("clone_pipeline_preset:")
+    assert "detect_threshold" in message
+    assert "sorter" in message
+    assert repr(base_row) in message
+    assert new_name not in list_pipeline_presets()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import copy
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 import pandas as pd
 
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -27,6 +27,7 @@ from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2._params.sorter import _get_sorter_schema
+from spyglass.spikesorting.v2.exceptions import PipelineInputError
 
 
 class _PipelinePreset(BaseModel):
@@ -116,13 +117,13 @@ def _unknown_pipeline_preset_message(
 
 
 def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
-    """Return ``table & restriction``; raise ``ValueError`` if it is empty.
+    """Return ``table & restriction``; raise ``PipelineInputError`` if empty.
 
     The message points at ``initialize_v2_defaults()``.
     """
     rel = table & restriction
     if not rel:
-        raise ValueError(
+        raise PipelineInputError(
             f"{caller}: {table.__name__} row {row!r} referenced by preset "
             f"{preset_name!r} is not in the database. Run "
             "initialize_v2_defaults() to install the shipped parameter "
@@ -275,7 +276,11 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
     """
     preset = _find_pipeline_preset(name)
     if preset is None:
-        raise ValueError(_unknown_pipeline_preset_message(name))
+        raise PipelineInputError(
+            _unknown_pipeline_preset_message(
+                name, caller="describe_pipeline_preset"
+            )
+        )
 
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -515,7 +520,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
 
 
 def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
-    """Raise ``ValueError`` if any Lookup row the preset references is absent.
+    """Raise ``PipelineInputError`` if a Lookup row the preset names is absent.
 
     Fails up front rather than with a foreign-key error mid-populate. The
     preprocessing row must also map to analyzer waveform windows
@@ -573,7 +578,7 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
         )
     for table, restriction, label, row_name in checks:
         if not (table & restriction):
-            raise ValueError(
+            raise PipelineInputError(
                 f"register_pipeline_preset({name!r}): row {row_name!r} not found in "
                 f"{label}. Insert it (e.g. via initialize_v2_defaults() or the "
                 "table's insert) before registering the preset."
@@ -612,30 +617,39 @@ def register_pipeline_preset(
 
     Raises
     ------
-    ValueError
-        If ``name`` is not a non-empty string of at most 64 characters, is
-        already used with different content, the preset fails Pydantic
-        validation, or (when ``validate_rows``) a referenced parameter row is
-        missing or the preprocessing row maps to no analyzer waveform windows
-        (``UnmappedPreprocessingWaveformsError``).
+    PipelineInputError
+        A ``ValueError``. If ``name`` is not a non-empty string of at most 64
+        characters, is already used with different content, the preset fails
+        Pydantic validation (the message names the field), or (when
+        ``validate_rows``) a referenced parameter row is missing.
+    UnmappedPreprocessingWaveformsError
+        A ``ValueError``. When ``validate_rows`` and the preprocessing row
+        maps to no analyzer waveform windows.
     """
     # list_pipeline_presets sorts keys, so names must be strings.
     if not isinstance(name, str) or not name.strip() or len(name) > 64:
-        raise ValueError(
+        raise PipelineInputError(
             "register_pipeline_preset: name must be a non-empty string of at "
             f"most 64 characters, got {name!r}."
         )
     content = (
         preset.model_dump() if isinstance(preset, _PipelinePreset) else preset
     )
-    validated = _PipelinePreset(**content)
+    try:
+        validated = _PipelinePreset(**content)
+    except ValidationError as exc:
+        raise PipelineInputError(
+            f"register_pipeline_preset({name!r}): the preset content is "
+            f"invalid: {exc}"
+        ) from exc
     # A session-only preset must not shadow a saved one of the same name.
     existing = _find_pipeline_preset(name)
     if existing is not None:
         if existing.model_dump() == validated.model_dump():
             return name
-        raise ValueError(
-            f"pipeline preset {name!r} already exists with different content. "
+        raise PipelineInputError(
+            f"register_pipeline_preset: pipeline preset {name!r} already "
+            "exists with different content. "
             "Choose a different name, or delete the saved preset first: "
             f"(PipelinePreset & {{'pipeline_preset': {name!r}}}).delete()."
         )
@@ -687,7 +701,7 @@ def _derive_preset_parameters(stages, overrides, base_name):
             if _path_exists(stage["base_params"], parts)
         ]
         if not matches:
-            raise ValueError(
+            raise PipelineInputError(
                 f"clone_pipeline_preset: override key {dotted_key!r} does not match any "
                 "parameter in the base preset's preprocessing, "
                 "artifact-detection, or sorter params. Call "
@@ -695,7 +709,7 @@ def _derive_preset_parameters(stages, overrides, base_name):
                 "can override."
             )
         if len(matches) > 1:
-            raise ValueError(
+            raise PipelineInputError(
                 f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous -- it "
                 f"matches multiple stages {sorted(matches)}. clone_pipeline_preset "
                 "cannot disambiguate a top-level key shared across stages; "
@@ -712,9 +726,17 @@ def _derive_preset_parameters(stages, overrides, base_name):
         blob = copy.deepcopy(stage["base_params"])
         for dotted_key, value in stage_overrides[name].items():
             _deep_set(blob, dotted_key, value)
-        derived_params[name] = (
-            stage["schema_cls"].model_validate(blob).model_dump()
-        )
+        try:
+            derived_params[name] = (
+                stage["schema_cls"].model_validate(blob).model_dump()
+            )
+        except ValidationError as exc:
+            raise PipelineInputError(
+                f"clone_pipeline_preset: override(s) "
+                f"{sorted(stage_overrides[name])} make the {name} parameters "
+                f"invalid (base row {stage['base_row_name']!r} in "
+                f"{stage['table_name']}): {exc}"
+            ) from exc
 
     return touched, derived_params
 
@@ -757,12 +779,14 @@ def clone_pipeline_preset(
 
     Raises
     ------
-    ValueError
-        If ``base_name`` is unknown; ``new_name`` is empty or already used with
-        different content; no overrides are given; an override key matches no
-        stage param (or is ambiguous across stages); an override value fails the stage's
-        Pydantic schema; a derived row name already exists with different
-        content; or ``PreprocessingWaveformParameters`` already maps the new
+    PipelineInputError
+        A ``ValueError``. If ``base_name`` is unknown; ``new_name`` is empty or
+        already used with different content; no overrides are given; an
+        override key matches no stage param (or is ambiguous across stages);
+        an override value fails the stage's Pydantic schema (the message
+        names the override keys, the stage and the base row); a derived row
+        name already exists with different content; or
+        ``PreprocessingWaveformParameters`` already maps the new
         preprocessing name to other windows.
     UnmappedPreprocessingWaveformsError
         If the base preset's preprocessing row has no waveform windows.
@@ -772,14 +796,18 @@ def clone_pipeline_preset(
     """
     base = _find_pipeline_preset(base_name)
     if base is None:
-        raise ValueError(_unknown_pipeline_preset_message(base_name))
+        raise PipelineInputError(
+            _unknown_pipeline_preset_message(
+                base_name, caller="clone_pipeline_preset"
+            )
+        )
     if not isinstance(new_name, str) or not new_name.strip():
-        raise ValueError(
+        raise PipelineInputError(
             f"clone_pipeline_preset: new_name must be a non-empty string, got "
             f"{new_name!r}."
         )
     if not overrides:
-        raise ValueError(
+        raise PipelineInputError(
             "clone_pipeline_preset requires at least one override (the knob to change); "
             "to register an alias of an existing preset under a new name use "
             "register_pipeline_preset()."
@@ -867,7 +895,7 @@ def clone_pipeline_preset(
     # Refuse a name clash before inserting any rows.
     existing = _find_pipeline_preset(new_name)
     if existing is not None and existing != derived_preset:
-        raise ValueError(
+        raise PipelineInputError(
             f"clone_pipeline_preset: pipeline preset {new_name!r} already "
             "exists with different content. Choose a different new_name."
         )
@@ -904,7 +932,7 @@ def clone_pipeline_preset(
             if existing:
                 if _fingerprint(stage, existing.fetch1()) == derived_fp:
                     continue
-                raise ValueError(
+                raise PipelineInputError(
                     f"clone_pipeline_preset: a {stage['table_name']} row named "
                     f"{new_name!r} already exists with different content. "
                     "Choose a different new_name, or drop the existing row "
@@ -943,7 +971,7 @@ def clone_pipeline_preset(
                     }
                 )
             elif tuple(stored) != tuple(base_windows):
-                raise ValueError(
+                raise PipelineInputError(
                     "clone_pipeline_preset: PreprocessingWaveformParameters "
                     f"already maps {new_name!r} to {tuple(stored)}, but base "
                     f"preset {base_name!r} uses {tuple(base_windows)}. "

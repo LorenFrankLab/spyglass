@@ -709,7 +709,7 @@
         "test_clone_pipeline_preset_name_collision_different_content_raises": "db_unit",
         "test_clone_pipeline_preset_nested_dotted_override_round_trips": "db_unit",
         "test_clone_pipeline_preset_no_artifact_base": "db_unit",
-        "test_clone_pipeline_preset_unknown_override_key_raises": "db_unit",
+        "test_clone_with_an_invalid_value_names_the_override_stage_and_base_row": "db_unit",
         "test_describe_pipeline_preset_artifact_none_skips_artifact": "db_unit",
         "test_describe_pipeline_preset_missing_row_points_to_initialize_defaults": "db_unit",
         "test_describe_pipeline_preset_surfaces_curation_names": "db_unit",

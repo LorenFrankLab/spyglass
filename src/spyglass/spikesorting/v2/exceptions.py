@@ -156,7 +156,10 @@ class PipelineInputError(SpikeSortingV2Error, ValueError):
     ``run_v2_pipeline_session``, ``estimate_motion`` and
     ``estimate_concat_motion`` for, e.g., an unknown ``pipeline_preset`` (see
     ``describe_pipeline_presets()``), a ``None`` source input, or a
-    contradictory motion request. Message names the entry point.
+    contradictory motion request. Also raised by the preset API
+    (``describe_pipeline_preset``, ``register_pipeline_preset``,
+    ``clone_pipeline_preset``) for bad input or a missing parameter row.
+    Message names the entry point.
     """
 
 
