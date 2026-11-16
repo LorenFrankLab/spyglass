@@ -793,6 +793,19 @@ def test_preflight_fails_an_unmapped_preprocessing_row(
 
 
 @pytest.mark.database
+def test_describe_epochs_rejects_an_unknown_sort_group(preflight_inputs):
+    """An absent sort_group_id is named with the session's sort groups."""
+    from spyglass.spikesorting.v2.pipeline import describe_epochs
+
+    nwb_file_name = preflight_inputs["nwb_file_name"]
+    with pytest.raises(ValueError, match=r"sort_group_id 999.*Available"):
+        describe_epochs(nwb_file_name, 999)
+    assert not describe_epochs(
+        nwb_file_name, preflight_inputs["sort_group_id"]
+    ).empty
+
+
+@pytest.mark.database
 def test_preflight_missing_raw(preflight_inputs, monkeypatch):
     """A session present but Raw absent fails raw_exists (not a false-negative).
 

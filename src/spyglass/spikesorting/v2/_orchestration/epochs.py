@@ -211,17 +211,48 @@ def describe_epochs(nwb_file_name: str, sort_group_id: int | None = None):
       ``ready_recording_keys`` also have a computed row and local file.
 
     Read-only: never inserts, downloads, or rebuilds.
+
+    Raises
+    ------
+    ValueError
+        If the session is not ingested, or ``sort_group_id`` is not one of
+        its ``SortGroupV2`` rows.
     """
     selected_sort_group = (
         lossless_int(sort_group_id, "sort_group_id")
         if sort_group_id is not None
         else None
     )
+    import difflib
+
+    from spyglass.common import Session
     from spyglass.common.common_interval import IntervalList
     from spyglass.common.common_task import TaskEpoch
-    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
 
     key = {"nwb_file_name": nwb_file_name}
+    if not (Session & key):
+        close = difflib.get_close_matches(
+            str(nwb_file_name), Session().fetch("nwb_file_name"), n=3
+        )
+        raise ValueError(
+            f"describe_epochs: session {nwb_file_name!r} is not ingested (no "
+            "Session row). Ingested copies carry a trailing underscore, e.g. "
+            f"'name_.nwb'. Close matches: {close}."
+        )
+    if selected_sort_group is not None and not (
+        SortGroupV2 & {**key, "sort_group_id": selected_sort_group}
+    ):
+        available = sorted(
+            int(g) for g in (SortGroupV2 & key).fetch("sort_group_id")
+        )
+        raise ValueError(
+            f"describe_epochs: sort_group_id {selected_sort_group} not found "
+            f"for {nwb_file_name!r}. Available sort_group_ids: {available}."
+        )
     recording_key = dict(key)
     if selected_sort_group is not None:
         recording_key["sort_group_id"] = selected_sort_group

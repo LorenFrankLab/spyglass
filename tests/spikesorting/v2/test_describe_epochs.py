@@ -133,3 +133,13 @@ def test_describe_epochs_rejects_lossy_sort_group_before_database(
 
     with pytest.raises(ValueError, match="sort_group_id"):
         describe_epochs("session.nwb", bad_sort_group)
+
+
+@pytest.mark.db_unit
+def test_describe_epochs_rejects_a_session_that_is_not_ingested(dj_conn):
+    """An unknown session is named with the trailing-underscore hint instead
+    of returning an empty table."""
+    from spyglass.spikesorting.v2.pipeline import describe_epochs
+
+    with pytest.raises(ValueError, match="no_such_session.nwb.*not ingested"):
+        describe_epochs("no_such_session.nwb")
