@@ -1323,14 +1323,28 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """Return a waveform accessor over this curation's display analyzer.
 
         Exposes ``get_waveforms_one_unit(unit_id)`` and v1-style
-        ``get_waveforms(unit_id)``. ``fetch_all`` is accepted for v1 parity
-        but only the sort-time waveform subsample is available.
+        ``get_waveforms(unit_id)`` over the sort-time waveform subsample.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting one ``CurationEvaluation`` row.
+        fetch_all : bool, optional
+            v1's every-spike extraction; only ``False`` is supported.
+
+        Raises
+        ------
+        ValueError
+            If ``fetch_all`` is True.
         """
         if fetch_all:
-            logger.warning(
-                "CurationEvaluation.get_waveforms(fetch_all=True): returning "
-                "the sort-time waveform subsample (full re-extraction is not "
-                "supported)."
+            raise ValueError(
+                "CurationEvaluation.get_waveforms(fetch_all=True) is not "
+                "supported: v2 keeps only the sort-time waveform subsample (up "
+                "to max_spikes_per_unit per unit from the display analyzer "
+                "recipe). Call get_waveforms(key) for that subsample, or "
+                "get_peak_amps(key) for peak amplitudes with their matching "
+                "spike times."
             )
         return _WaveformsAccessor(self._analyzer_for(key))
 

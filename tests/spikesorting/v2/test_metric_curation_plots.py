@@ -691,3 +691,13 @@ def test_burst_pair_asymmetry_is_zero_for_symmetric_correlogram(
     )
 
     np.testing.assert_allclose(frame["xcorrel_asymm"].to_numpy(), 0.0)
+
+
+@pytest.mark.database
+def test_get_waveforms_refuses_fetch_all(dj_conn):
+    """Every-spike extraction is not available; the call says so and points
+    at the subsample and the per-spike peak amplitudes."""
+    from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
+
+    with pytest.raises(ValueError, match=r"fetch_all=True\) is not supported"):
+        CurationEvaluation().get_waveforms({}, fetch_all=True)
