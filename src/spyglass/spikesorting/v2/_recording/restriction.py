@@ -347,6 +347,59 @@ def intended_save_intervals(
     )
 
 
+def sorted_valid_times(
+    nwb_file_name: str,
+    interval_list_name: str,
+    preprocessing_params_name: str,
+) -> "np.ndarray | None":
+    """The time a ``Recording`` of this request keeps, read from the DB.
+
+    The same :func:`intended_save_intervals` the recording build slices with,
+    so checks made before any compute agree with the saved recording.
+
+    Parameters
+    ----------
+    nwb_file_name, interval_list_name : str
+        The session and its sort ``IntervalList``.
+    preprocessing_params_name : str
+        The ``PreprocessingParameters`` row supplying ``min_segment_length``.
+
+    Returns
+    -------
+    np.ndarray or None
+        ``(n_intervals, 2)`` [start, end] session seconds, or ``None`` when
+        the sort interval, the raw data valid times or the preprocessing row
+        is missing (the caller reports those).
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    def _valid_times(name):
+        rows = (
+            IntervalList
+            & {"nwb_file_name": nwb_file_name, "interval_list_name": name}
+        ).fetch("valid_times")
+        return rows[0] if len(rows) == 1 else None
+
+    sort_valid_times = _valid_times(interval_list_name)
+    raw_valid_times = _valid_times("raw data valid times")
+    params = (
+        PreprocessingParameters
+        & {"preprocessing_params_name": preprocessing_params_name}
+    ).fetch("params")
+    if sort_valid_times is None or raw_valid_times is None or len(params) != 1:
+        return None
+    min_segment_length = PreprocessingParamsSchema.model_validate(
+        params[0]
+    ).min_segment_length
+    return intended_save_intervals(
+        sort_valid_times, raw_valid_times, min_segment_length
+    )
+
+
 def compute_recording_save_expectation(
     intended_intervals, sort_valid_times, min_segment_length: float
 ) -> RecordingSaveExpectation:

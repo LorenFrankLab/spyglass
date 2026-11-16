@@ -72,6 +72,15 @@ class ArtifactFractionExceededError(SpikeSortingV2Error, RuntimeError):
     """
 
 
+class IneffectiveManualExclusionError(SpikeSortingV2Error, ValueError):
+    """Raise when a manual exclusion overlaps none of the time a run sorts.
+
+    Exclusions are absolute session timestamps, so seconds counted from the
+    recording start, or an interval inside an acquisition gap, would mask
+    nothing. Message names the intervals and the sorted time range.
+    """
+
+
 class InsufficientZScoreChannelsError(SpikeSortingV2Error, ValueError):
     """Raise when ``zscore_threshold`` is the only detector on <3 channels.
 

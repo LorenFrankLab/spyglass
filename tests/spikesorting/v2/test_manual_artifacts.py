@@ -106,6 +106,51 @@ def test_manual_exclusion_normalization_and_identity():
     )
 
 
+def test_manual_exclusions_outside_sorted_time_are_reported():
+    """An exclusion that would remove no sample is named with the session's
+    sorted time range, so a seconds-from-start mistake is visible."""
+    from spyglass.spikesorting.v2._artifacts.manual import (
+        ineffective_manual_exclusions,
+        manual_exclusion_problem,
+    )
+
+    t0 = 1.65e9
+    valid = [[t0, t0 + 100.0], [t0 + 200.0, t0 + 300.0]]
+    exclusions = [
+        [10.0, 20.0],  # seconds from start
+        [t0 + 50.0, t0 + 60.0],  # inside valid time
+        [t0 + 120.0, t0 + 150.0],  # entirely inside the gap
+        [t0 + 300.0, t0 + 301.0],  # removes the last sample
+        [t0 + 160.0, t0 + 210.0],  # starts in the gap, overlaps valid time
+        [t0 - 1.0, t0],  # half-open: ends where valid time starts
+    ]
+    assert ineffective_manual_exclusions(exclusions, valid) == [
+        [10.0, 20.0],
+        [t0 - 1.0, t0],
+        [t0 + 120.0, t0 + 150.0],
+    ]
+    assert ineffective_manual_exclusions([[t0 + 50, t0 + 60]], valid) == []
+    message = manual_exclusion_problem(
+        exclusions,
+        valid,
+        nwb_file_name="x_.nwb",
+        interval_list_name="raw data valid times",
+    )
+    assert "[10.0, 20.0)" in message
+    assert "1650000000.000 to 1650000300.000 s" in message
+    assert "not seconds from the recording start" in message
+    assert "x_.nwb" in message
+    assert (
+        manual_exclusion_problem(
+            [[t0 + 50, t0 + 60]],
+            valid,
+            nwb_file_name="x_.nwb",
+            interval_list_name="raw data valid times",
+        )
+        is None
+    )
+
+
 def test_manual_exclusions_enable_the_stage_without_mutating_the_preset():
     from spyglass.spikesorting.v2._artifacts.manual import (
         artifact_recipe_with_manual_exclusions,
@@ -315,3 +360,92 @@ def test_pipeline_runner_applies_manual_exclusions(
     assert again["sorting_id"] == result["sorting_id"]
     assert again["sorting_status"] == "reused"
     assert len(received) == 1
+
+
+@pytest.mark.integration
+def test_runners_reject_exclusions_outside_sorted_time(
+    chronic_2_session_minirec,
+):
+    """Seconds counted from the recording start overlap no session time; the
+    runners refuse them before any artifact row is written, naming the
+    interval and the session range."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.artifact import RecordingArtifactSelection
+    from spyglass.spikesorting.v2.exceptions import (
+        IneffectiveManualExclusionError,
+        PreflightError,
+    )
+    from spyglass.spikesorting.v2.pipeline import (
+        preflight_v2_pipeline,
+        run_v2_concat_pipeline,
+        run_v2_pipeline,
+    )
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    initialize_v2_defaults()
+    fixture = chronic_2_session_minirec
+    member = fixture["same_day_members"][0]
+    t0 = float(
+        (
+            IntervalList
+            & {
+                "nwb_file_name": member["nwb_file_name"],
+                "interval_list_name": "raw data valid times",
+            }
+        ).fetch1("valid_times")[0][0]
+    )
+    before_start = [[t0 - 10.0, t0 - 9.0]]
+    inputs = {
+        **member,
+        "team_name": fixture["owner"],
+        "pipeline_preset": "franklab_clusterless_2026_06",
+    }
+    n_selections = len(RecordingArtifactSelection())
+
+    report = preflight_v2_pipeline(**inputs, manual_excluded_times=before_start)
+    (check,) = [
+        c
+        for c in report.checks
+        if c.name == "manual_exclusions_overlap_sorted_time"
+    ]
+    assert check.ok is False
+    assert f"[{t0 - 10.0!r}, {t0 - 9.0!r})" in check.fix
+    assert f"{t0:.3f} to " in check.fix
+    assert member["nwb_file_name"] in check.fix
+
+    with pytest.raises(PreflightError, match="not seconds from the recording"):
+        run_v2_pipeline(**inputs, manual_excluded_times=before_start)
+    with pytest.raises(
+        IneffectiveManualExclusionError, match="insert_selection"
+    ):
+        run_v2_pipeline(
+            **inputs, manual_excluded_times=before_start, preflight=False
+        )
+    assert len(RecordingArtifactSelection()) == n_selections
+
+    group = {
+        "session_group_owner": fixture["owner"],
+        "session_group_name": "manual_exclusion_outside_time",
+    }
+    SessionGroup.create_group(
+        fixture["owner"],
+        group["session_group_name"],
+        fixture["same_day_members"],
+    )
+    try:
+        with pytest.raises(PreflightError, match="concat member 1"):
+            run_v2_concat_pipeline(
+                **group,
+                pipeline_preset="franklab_clusterless_2026_06",
+                manual_excluded_times={1: before_start},
+            )
+        with pytest.raises(PreflightError, match=r"member_index \[5\]"):
+            run_v2_concat_pipeline(
+                **group,
+                pipeline_preset="franklab_clusterless_2026_06",
+                manual_excluded_times={5: [[t0 + 1.0, t0 + 2.0]]},
+            )
+    finally:
+        (SessionGroup & group).super_delete(warn=False)
+    assert len(RecordingArtifactSelection()) == n_selections

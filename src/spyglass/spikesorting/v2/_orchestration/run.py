@@ -105,9 +105,12 @@ def run_v2_pipeline(
         If True (default), run ``preflight_v2_pipeline`` first; a failure
         raises ``PreflightError``.
     manual_excluded_times
-        Immutable half-open [start, stop) exclusions in original session
-        seconds, composed with automatic artifact detection. Manual
-        exclusions also apply when the preset disables automatic detection.
+        Immutable half-open [start, stop) exclusions in absolute session
+        seconds (the ``IntervalList.valid_times`` clock, not seconds from the
+        recording start), composed with automatic artifact detection. Each
+        must overlap the sorted time, else preflight (or the artifact
+        selection) raises. Manual exclusions also apply when the preset
+        disables automatic detection.
     motion_mode
         The motion stage, run on the sort's masked source:
 
@@ -245,8 +248,9 @@ def run_v2_concat_pipeline(
         The primary key of an existing ``SessionGroup``.
     manual_excluded_times
         A mapping of each ``member_index`` to its half-open [start, stop)
-        exclusions in that member's session seconds, composed with automatic
-        artifact detection.
+        exclusions in that member's absolute session seconds, composed with
+        automatic artifact detection. Each must overlap that member's sorted
+        time.
     preflight
         If True (default), first run ``assert_concat_preflight``; a failure
         raises ``PreflightError``.

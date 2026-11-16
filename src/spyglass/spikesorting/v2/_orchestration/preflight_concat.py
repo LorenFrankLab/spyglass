@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 from spyglass.spikesorting.v2._orchestration.types import MotionMode
 from spyglass.spikesorting.v2._orchestration.preflight_checks import (
     _check_auto_curation_rows,
+    _check_manual_exclusions,
     _check_motion_stage,
     _check_sampling_rate,
     _check_session_rows,
@@ -52,11 +53,29 @@ def assert_concat_preflight(
         "session_group_name": concat_session_group_name,
     }
     members = _assert_session_group_members(group_key, caller)
+    exclusions = manual_excluded_times or {}
+    unknown_members = set(exclusions) - {
+        int(m["member_index"]) for m in members
+    }
+    if unknown_members:
+        raise PreflightError(
+            f"{caller}: manual_excluded_times names member_index "
+            f"{sorted(unknown_members)}, absent from SessionGroup {group_key}. "
+            "Its members are "
+            f"{sorted(int(m['member_index']) for m in members)}; key the "
+            "exclusions by those member_index values."
+        )
 
     # Member FKs do not cover Raw, valid times, or sort-group contents.
     for member in members:
         _assert_concat_member_inputs(
-            member, bundle, caller=caller, sort_checks=sort_checks
+            member,
+            bundle,
+            caller=caller,
+            sort_checks=sort_checks,
+            manual_excluded_times=exclusions.get(
+                int(member["member_index"]), []
+            ),
         )
 
     if auto_curate:
@@ -148,12 +167,18 @@ def _member_check(
 
 
 def _assert_concat_member_inputs(
-    member: dict, bundle, *, caller: str, sort_checks: bool
+    member: dict,
+    bundle,
+    *,
+    caller: str,
+    sort_checks: bool,
+    manual_excluded_times=(),
 ) -> None:
     """Raise ``PreflightError`` if a member cannot be built as a recording.
 
-    Runs the single-session session-row, sort-group and (with
-    ``sort_checks``) sampling-rate checks on the member.
+    Runs the single-session session-row, sort-group, manual-exclusion and
+    (with ``sort_checks``) sampling-rate checks on the member.
+    ``manual_excluded_times`` are this member's normalized intervals.
     """
     check = _member_check(member, caller)
     nwb_file_name = member["nwb_file_name"]
@@ -164,6 +189,13 @@ def _assert_concat_member_inputs(
         member["team_name"],
     )
     _check_sort_group(check, nwb_file_name, int(member["sort_group_id"]))
+    _check_manual_exclusions(
+        check,
+        manual_excluded_times,
+        nwb_file_name=nwb_file_name,
+        interval_list_name=member["interval_list_name"],
+        preprocessing_params_name=bundle.preprocessing_params_name,
+    )
     if sort_checks:
         _check_sampling_rate(check, bundle, nwb_file_name, None)
 

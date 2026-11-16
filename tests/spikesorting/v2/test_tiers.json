@@ -481,7 +481,8 @@
     "test_manual_artifacts.py": {
       "tier": "unit",
       "overrides": {
-        "test_pipeline_runner_applies_manual_exclusions": "pipeline"
+        "test_pipeline_runner_applies_manual_exclusions": "pipeline",
+        "test_runners_reject_exclusions_outside_sorted_time": "stage"
       }
     },
     "test_masked_analyzer_reload.py": {

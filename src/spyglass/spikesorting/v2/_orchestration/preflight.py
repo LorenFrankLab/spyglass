@@ -26,6 +26,7 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._orchestration.preflight_checks import (
     _check_auto_curation_rows,
     _check_display_waveform_params,
+    _check_manual_exclusions,
     _check_motion_stage,
     _check_sampling_rate,
     _check_session_rows,
@@ -166,6 +167,13 @@ def preflight_v2_pipeline(
     _check_session_rows(_check, nwb_file_name, interval_list_name, team_name)
     sort_group_exists = _check_sort_group(_check, nwb_file_name, sort_group_id)
     preprocessing_params_exist = _check_source_param_rows(_check, bundle)
+    _check_manual_exclusions(
+        _check,
+        manual_excluded_times,
+        nwb_file_name=nwb_file_name,
+        interval_list_name=interval_list_name,
+        preprocessing_params_name=bundle.preprocessing_params_name,
+    )
     sorter_params_exist, sorter_row = _check_sorter_param_rows(
         _check, bundle, sort_checks=sort_checks
     )

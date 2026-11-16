@@ -261,6 +261,53 @@ def _check_source_param_rows(
     return preprocessing_params_exist
 
 
+def _check_manual_exclusions(
+    check: "Callable[[str, Any, str], bool]",
+    exclusions,
+    *,
+    nwb_file_name: str,
+    interval_list_name: str,
+    preprocessing_params_name: str,
+) -> None:
+    """Check every manual exclusion overlaps time the recording will keep.
+
+    Skipped when there are no exclusions or a row it reads is missing (its
+    own check reports that).
+
+    Parameters
+    ----------
+    check : Callable[[str, Any, str], bool]
+        The report's check-recording closure.
+    exclusions : list
+        Normalized ``(n, 2)`` ``[start, stop)`` session-second intervals.
+    nwb_file_name, interval_list_name, preprocessing_params_name : str
+        The recording request the exclusions mask.
+    """
+    from spyglass.spikesorting.v2._artifacts.manual import (
+        manual_exclusion_problem,
+    )
+    from spyglass.spikesorting.v2._recording.restriction import (
+        sorted_valid_times,
+    )
+
+    if not len(exclusions):
+        return
+    valid_times = sorted_valid_times(
+        nwb_file_name, interval_list_name, preprocessing_params_name
+    )
+    if valid_times is None:
+        return
+    problem = manual_exclusion_problem(
+        exclusions,
+        valid_times,
+        nwb_file_name=nwb_file_name,
+        interval_list_name=interval_list_name,
+    )
+    check(
+        "manual_exclusions_overlap_sorted_time", problem is None, problem or ""
+    )
+
+
 def _check_sorter_param_rows(
     check: "Callable[[str, Any, str], bool]", bundle, *, sort_checks: bool
 ) -> tuple:

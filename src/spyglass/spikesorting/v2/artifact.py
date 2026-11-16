@@ -56,6 +56,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.spikesorting.v2._artifacts.manual import (
     apply_manual_exclusions,
+    manual_exclusion_problem,
     normalize_manual_exclusions,
 )
 from spyglass.spikesorting.v2._artifacts.shared_group import (
@@ -73,6 +74,7 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     shared_group_member_set_hash,
 )
 from spyglass.spikesorting.v2.exceptions import (
+    IneffectiveManualExclusionError,
     SharedArtifactGroupMemberDriftError,
 )
 from spyglass.spikesorting.v2.recording import RecordingSelection
@@ -327,6 +329,66 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             cls.Member.insert(member_rows)
 
 
+def _assert_manual_exclusions_effective(
+    exclusions,
+    caller: str,
+    *,
+    recording_id=None,
+    shared_artifact_group_name=None,
+) -> None:
+    """Raise unless every exclusion overlaps time the source recording keeps.
+
+    The valid time is the sort interval within the raw data valid times
+    (``sorted_valid_times``), the same one preflight checks. A shared group's
+    members are timestamp-identical, so the first member's time is used.
+
+    Parameters
+    ----------
+    exclusions : list
+        Normalized ``(n, 2)`` ``[start, stop)`` session-second intervals.
+    caller : str
+        The selection table name, prefixed to the message.
+    recording_id, shared_artifact_group_name : optional
+        The single-recording or shared-group source (exactly one).
+
+    Raises
+    ------
+    IneffectiveManualExclusionError
+        If an exclusion overlaps none of that time.
+    """
+    from spyglass.spikesorting.v2._recording.restriction import (
+        sorted_valid_times,
+    )
+
+    if recording_id is not None:
+        restriction = RecordingSelection & {"recording_id": recording_id}
+    else:
+        restriction = RecordingSelection & (
+            SharedArtifactGroup.Member
+            & {"shared_artifact_group_name": shared_artifact_group_name}
+        )
+    requests = restriction.fetch(
+        "nwb_file_name",
+        "interval_list_name",
+        "preprocessing_params_name",
+        as_dict=True,
+    )
+    if not requests:
+        return  # The FK insert reports a missing source.
+    valid_times = sorted_valid_times(**requests[0])
+    if valid_times is None:
+        return
+    problem = manual_exclusion_problem(
+        exclusions,
+        valid_times,
+        nwb_file_name=requests[0]["nwb_file_name"],
+        interval_list_name=requests[0]["interval_list_name"],
+        prefix=f"{caller}.insert_selection: ",
+    )
+    if problem is not None:
+        raise IneffectiveManualExclusionError(problem)
+
+
 def _insert_artifact_selection(
     selection_cls,
     *,
@@ -359,8 +421,8 @@ def _insert_artifact_selection(
         A caller-supplied ``artifact_detection_id`` to validate against the
         derived one, or ``None``.
     manual_excluded_times : array-like, optional
-        ``[start, stop)`` session-second intervals to exclude; part of the
-        identity.
+        ``[start, stop)`` absolute session-second intervals to exclude; part
+        of the identity. Each must overlap the source's sorted time.
     extra_row : dict
         Source-specific columns to add to the inserted row (the source FK,
         plus ``member_set_hash`` for the shared-group table).
@@ -369,8 +431,21 @@ def _insert_artifact_selection(
     -------
     dict
         ``{"artifact_detection_id": ...}``, the content-addressed PK.
+
+    Raises
+    ------
+    IneffectiveManualExclusionError
+        If an exclusion overlaps none of the source's sorted time, checked
+        before an existing row is returned.
     """
     exclusions = normalize_manual_exclusions(manual_excluded_times)
+    if exclusions:
+        _assert_manual_exclusions_effective(
+            exclusions,
+            selection_cls.__name__,
+            recording_id=recording_id,
+            shared_artifact_group_name=shared_artifact_group_name,
+        )
     payload = artifact_detection_identity_payload(
         artifact_detection_params_name=artifact_detection_params_name,
         recording_id=recording_id,
