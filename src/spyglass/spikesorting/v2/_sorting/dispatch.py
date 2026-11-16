@@ -400,7 +400,7 @@ def pinned_whiten(recording, *, random_seed: int = 0, spans=None, dtype=None):
 
     dtype = np.float64 if dtype is None else dtype
 
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         spans_cover_recording,
     )
 
@@ -485,7 +485,7 @@ def cache_span_noise_levels(
         ``(n_channels,)`` cached noise levels, or ``None`` when nothing was
         cached.
     """
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         spans_cover_recording,
     )
 
@@ -712,6 +712,8 @@ def run_si_sorter(
     )
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         fill_masked_frames_with_noise,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
         spans_cover_recording,
     )
     from spyglass.utils import logger
@@ -883,7 +885,7 @@ def _remove_masked_frame_spikes(sorting, statistics_spans, n_samples: int):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
     from spyglass.utils import logger

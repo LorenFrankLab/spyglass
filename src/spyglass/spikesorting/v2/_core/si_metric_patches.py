@@ -35,7 +35,7 @@ from spyglass.spikesorting.v2._core.si_compat import (
 from spyglass.spikesorting.v2._core.signal_math import (
     frames_with_window_in_one_span,
 )
-from spyglass.spikesorting.v2._sorting.artifact_mask import (
+from spyglass.spikesorting.v2._core.signal_math import (
     sample_span_snippet_starts,
     spans_cover_recording,
 )

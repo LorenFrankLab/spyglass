@@ -253,6 +253,11 @@ Presentation consumes resolved analyzers and tables of unit properties.
 - Import helpers from their canonical owning module.
 - Domain implementations do not depend on orchestration. The data-only pipeline
     contracts in `_orchestration.types` may be shared with other domains.
+- `_core` and `_params` are the foundation: they import only each other and
+    `exceptions`. Shared timestamp, frame and interval arithmetic (for example
+    `artifact_frame_ranges` and `complement_frame_ranges`) lives in
+    `_core.signal_math`. The one exception is `waveform_params_for_preprocessing`,
+    which reads a table inside the function.
 - Modules that SpikeInterface workers re-import must import without
     activating a schema or importing `spyglass.common`: the recording
     subclasses, chunk-executor kernels, and the helpers they call. A worker
@@ -269,8 +274,8 @@ Presentation consumes resolved analyzers and tables of unit properties.
     duplicating arithmetic or adding forwarding layers.
 
 `test_internal_architecture.py` guards direct domain ownership, shallow paths,
-filenames, lightweight initializers, owner imports, and the outward
-orchestration dependency. `test_service_import_contracts.py` cold-imports the
+filenames, lightweight initializers, owner imports, the outward
+orchestration dependency, and the foundation layer. `test_service_import_contracts.py` cold-imports the
 worker modules and `pipeline` in fresh interpreters and checks that every
 SpikeInterface subclass lives in a worker module.
 

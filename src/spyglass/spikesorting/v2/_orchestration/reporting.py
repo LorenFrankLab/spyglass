@@ -18,6 +18,7 @@ from spyglass.spikesorting.v2._artifacts.readers import (
 )
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
+    json_values_equal,
     parameter_row_fingerprint,
 )
 from spyglass.spikesorting.v2._core.observed_time import observed_intervals
@@ -463,25 +464,6 @@ def _annotate_duplicate_parameter_records(records: list[dict]) -> None:
         rec["name_warnings"] = "; ".join(warnings)
 
 
-def _content_equal(left, right) -> bool:
-    """Deep equality for fetched-vs-shipped default content.
-
-    Fetched bool columns come back as int, so ``False`` equals ``0`` here,
-    unlike the strict ``_curation.metrics._values_match``.
-    """
-    if isinstance(left, bool) or isinstance(right, bool):
-        return left == right
-    if isinstance(left, dict) and isinstance(right, dict):
-        return left.keys() == right.keys() and all(
-            _content_equal(left[key], right[key]) for key in left
-        )
-    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
-        return len(left) == len(right) and all(
-            _content_equal(a, b) for a, b in zip(left, right)
-        )
-    return left == right
-
-
 def _canonical_quality_metric_rows(table) -> list[dict]:
     """Shipped ``QualityMetricParameters`` defaults in their STORED shape.
 
@@ -606,8 +588,11 @@ def _diverged_autocuration_rules(table) -> list[dict]:
                 for field, value in shipped_rule.items()
                 if field not in ("auto_curation_rules_name", "rule_index")
                 and field in stored_rule
-                and not _content_equal(
-                    _jsonable_blob(value), _jsonable_blob(stored_rule[field])
+                # Fetched non-blob bool columns return as int.
+                and not json_values_equal(
+                    _jsonable_blob(value),
+                    _jsonable_blob(stored_rule[field]),
+                    strict_bool=False,
                 )
             ]
             if diverged:
@@ -662,9 +647,10 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
                 for field, shipped_value in shipped.items()
                 if field not in pk_fields
                 and field in stored
-                and not _content_equal(
+                and not json_values_equal(
                     _jsonable_blob(shipped_value),
                     _jsonable_blob(stored[field]),
+                    strict_bool=False,
                 )
             ]
             if diverged:

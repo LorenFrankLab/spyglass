@@ -14,7 +14,7 @@ from collections.abc import Callable, Collection
 
 from spyglass.utils.identity import parse_uuid, sha256_json
 from spyglass.utils.identity import deterministic_id as _deterministic_id
-from spyglass.spikesorting.v2._artifacts.manual import (
+from spyglass.spikesorting.v2._core.signal_math import (
     normalize_manual_exclusions,
 )
 from spyglass.spikesorting.v2.exceptions import DuplicateSelectionError

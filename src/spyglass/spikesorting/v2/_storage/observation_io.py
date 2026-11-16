@@ -17,7 +17,7 @@ from spyglass.spikesorting.v2._core.observed_time import observed_intervals
 from spyglass.spikesorting.v2._core.json_io import read_json, write_json
 from spyglass.spikesorting.v2._core.observed_time import observed_metrics
 from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-from spyglass.spikesorting.v2._sorting.artifact_mask import (
+from spyglass.spikesorting.v2._core.signal_math import (
     artifact_frame_ranges,
     boundary_spans_from_timestamps,
 )

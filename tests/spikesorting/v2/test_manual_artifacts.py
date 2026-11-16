@@ -74,8 +74,10 @@ def test_manual_exclusion_normalization_and_identity():
     import uuid
 
     from spyglass.spikesorting.v2._artifacts.manual import (
-        normalize_manual_exclusions,
         resolve_manual_exclusions,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        normalize_manual_exclusions,
     )
     from spyglass.spikesorting.v2._core.selection_identity import (
         artifact_detection_identity_payload,

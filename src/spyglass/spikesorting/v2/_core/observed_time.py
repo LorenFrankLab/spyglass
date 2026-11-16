@@ -19,7 +19,7 @@ from spyglass.spikesorting._numerical import (
 from spyglass.spikesorting._observed_time import contains_times
 from spyglass.spikesorting._intervals import intersect_intervals
 from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
-from spyglass.spikesorting.v2._sorting.artifact_mask import (
+from spyglass.spikesorting.v2._core.signal_math import (
     artifact_frame_ranges,
     boundary_spans_from_timestamps,
     complement_frame_ranges,

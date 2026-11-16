@@ -37,10 +37,7 @@ from spyglass.spikesorting.v2._curation import (
     evaluation_analyzers as _evaluation_analyzers,
     metric_fetch as _metric_curation_fetch,
 )
-from spyglass.spikesorting.v2._curation.metrics import (
-    _requested_pc_metrics,
-    rules_payloads_match,
-)
+from spyglass.spikesorting.v2._curation.metrics import _requested_pc_metrics
 from spyglass.spikesorting.v2._storage.metrics_nwb import (
     read_analyzer_curation_tables,
     read_merge_suggestions,
@@ -78,6 +75,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
 )
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
+    json_values_equal,
     reject_duplicate_quality_metric_content,
     reject_stale_quality_metric_defaults,
 )
@@ -437,7 +435,9 @@ class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
         existing = cls & {"auto_curation_rules_name": name}
         if existing:
             stored_payload = cls._stored_payload_for_compare(name)
-            if not rules_payloads_match(expected_payload, stored_payload):
+            if not json_values_equal(
+                expected_payload, stored_payload, strict_bool=True
+            ):
                 raise ValueError(
                     f"AutoCurationRules {name!r} already exists with a "
                     "different auto-merge/rule payload. Reuse the stored row, "

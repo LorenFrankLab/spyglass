@@ -6,9 +6,11 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from spyglass.spikesorting._intervals import merge_sorted_intervals
 from spyglass.spikesorting.v2._core.lookup_validation import lossless_int
-from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+from spyglass.spikesorting.v2._core.signal_math import (
+    normalize_manual_exclusions,
+    subtract_intervals,
+)
 
 
 def resolve_manual_exclusions(value, *, concat=False):
@@ -43,26 +45,6 @@ def artifact_recipe_with_manual_exclusions(bundle, exclusions):
             update={"artifact_detection_params_name": "none"}
         )
     return bundle
-
-
-def normalize_manual_exclusions(intervals):
-    """Sorted union of finite [start, stop) intervals in session seconds."""
-    if intervals is None:
-        return []
-    values = np.asarray(intervals, dtype=float)
-    if values.size == 0:
-        return []
-    if (
-        values.ndim != 2
-        or values.shape[1] != 2
-        or not np.isfinite(values).all()
-        or (values[:, 1] <= values[:, 0]).any()
-    ):
-        raise ValueError(
-            "manual_excluded_times must contain finite [start, stop) pairs "
-            "with start < stop, in original session seconds."
-        )
-    return merge_sorted_intervals(sorted(values.tolist()))
 
 
 def ineffective_manual_exclusions(exclusions, valid_times) -> list:

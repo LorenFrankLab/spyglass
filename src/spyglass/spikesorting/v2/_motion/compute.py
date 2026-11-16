@@ -10,9 +10,12 @@ import numpy as np
 
 from spyglass.spikesorting.v2._motion import estimation as _motion
 from spyglass.spikesorting.v2._sorting.artifact_mask import (
-    artifact_frame_ranges,
     continuity_from_timestamps,
     statistics_spans,
+)
+from spyglass.spikesorting.v2._core.signal_math import (
+    artifact_frame_ranges,
+    normalize_spans,
 )
 
 
@@ -260,10 +263,10 @@ def estimation_spans(
             )
         statistics = statistics_spans(n_samples, excluded, continuity)
     else:
-        continuity = _motion.normalize_spans(source_row["continuity_spans"])
+        continuity = normalize_spans(source_row["continuity_spans"])
         continuity_start_s = source_row["continuity_start_s"]
         continuity_end_s = source_row["continuity_end_s"]
-        statistics = _motion.normalize_spans(source_row["statistics_spans"])
+        statistics = normalize_spans(source_row["statistics_spans"])
 
     return continuity, continuity_start_s, continuity_end_s, statistics
 

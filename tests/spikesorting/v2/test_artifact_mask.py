@@ -252,7 +252,7 @@ def _mixture_mad(weights_sigmas, *, lo=0.0, hi=50.0, iterations=200):
 
 
 def test_complement_frame_ranges_basic():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
 
@@ -264,7 +264,7 @@ def test_complement_frame_ranges_basic():
 
 
 def test_complement_frame_ranges_merges_overlapping_and_unsorted():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
 
@@ -279,7 +279,7 @@ def test_complement_frame_ranges_merges_overlapping_and_unsorted():
 
 
 def test_complement_frame_ranges_empty_excluded():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
 
@@ -287,7 +287,7 @@ def test_complement_frame_ranges_empty_excluded():
 
 
 def test_boundary_spans_from_timestamps_splits_at_gaps():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         boundary_spans_from_timestamps,
     )
 
@@ -302,7 +302,7 @@ def test_boundary_spans_from_timestamps_splits_at_gaps():
 def test_boundary_spans_from_timestamps_continuous_is_single_span():
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         boundary_spans_from_timestamps,
     )
 
@@ -361,7 +361,7 @@ def test_statistics_spans_logs_masked_fraction_and_span_count(caplog):
 
 
 def test_spans_cover_recording():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         spans_cover_recording,
     )
 
@@ -522,7 +522,7 @@ def test_sample_span_data_exact_quotas_heterogeneous_noise():
 
 
 def test_snippet_sampler_respects_length_per_snippet():
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         sample_span_snippet_starts,
     )
 
@@ -550,10 +550,12 @@ def test_no_piece_crosses_selection_join_when_unmasked():
     from spikeinterface.core.recording_tools import get_random_recording_slices
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        boundary_spans_from_timestamps,
         sample_span_data,
-        sample_span_snippet_starts,
         statistics_spans,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        boundary_spans_from_timestamps,
+        sample_span_snippet_starts,
     )
 
     fs = 1000.0
@@ -634,6 +636,8 @@ def test_apply_artifact_mask_returns_ranges_matching_silenced_samples():
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
         apply_artifact_mask,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
         artifact_frame_ranges,
     )
 

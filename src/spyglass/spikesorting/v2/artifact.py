@@ -57,6 +57,8 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.spikesorting.v2._artifacts.manual import (
     apply_manual_exclusions,
     manual_exclusion_problem,
+)
+from spyglass.spikesorting.v2._core.signal_math import (
     normalize_manual_exclusions,
 )
 from spyglass.spikesorting.v2._artifacts.shared_group import (

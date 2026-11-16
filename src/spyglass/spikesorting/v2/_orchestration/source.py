@@ -27,9 +27,7 @@ from spyglass.spikesorting.v2._artifacts.manual import (
     artifact_recipe_with_manual_exclusions,
     resolve_manual_exclusions,
 )
-from spyglass.spikesorting.v2._sorting.artifact_mask import (
-    artifact_frame_ranges,
-)
+from spyglass.spikesorting.v2._core.signal_math import artifact_frame_ranges
 from spyglass.spikesorting.v2.exceptions import (
     PipelineInputError,
     PreflightError,

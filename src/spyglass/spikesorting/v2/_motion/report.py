@@ -18,15 +18,13 @@ from spyglass.spikesorting.v2._motion.estimation import (
     EstimationClock,
     displacement_on_source_clock,
     motion_max_abs_displacement_um,
-    normalize_spans,
     span_nominal_durations,
     span_scales,
     span_containing,
     spans_without_evidence,
 )
-from spyglass.spikesorting.v2._sorting.artifact_mask import (
-    complement_frame_ranges,
-)
+from spyglass.spikesorting.v2._core.signal_math import normalize_spans
+from spyglass.spikesorting.v2._core.signal_math import complement_frame_ranges
 
 #: Okabe-Ito colors (colorblind-safe) used by :func:`plot_motion_report`.
 _COLORS = {

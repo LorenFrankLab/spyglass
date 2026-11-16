@@ -805,29 +805,6 @@ def escalate_si_metric_errors(rule_columns: Collection[str]):
         report_si_metric_errors(caught, rule_columns)
 
 
-def rules_payloads_match(expected: dict, stored: dict) -> bool:
-    """Return whether two normalized parameter payloads are equal.
-
-    Numeric columns are ``double``, so stored floats compare exactly.
-    """
-    return _values_match(expected, stored)
-
-
-def _values_match(a, b) -> bool:
-    """Recursively compare JSON-native values exactly; bools stay distinct."""
-    if isinstance(a, bool) or isinstance(b, bool):
-        return type(a) is type(b) and a == b
-    if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(
-            _values_match(a[key], b[key]) for key in a
-        )
-    if isinstance(a, list) and isinstance(b, list):
-        return len(a) == len(b) and all(
-            _values_match(x, y) for x, y in zip(a, b)
-        )
-    return a == b
-
-
 # Added before metrics and auto-merge; ``principal_components`` only for PCA
 # metrics.
 _CURATION_EXTENSIONS = STANDARD_DISPLAY_ANALYZER_EXTENSIONS

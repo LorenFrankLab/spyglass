@@ -242,7 +242,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
 
     from spyglass.common import AnalysisNwbfile
     from spyglass.spikesorting.v2._recording import concat as concat_services
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         artifact_frame_ranges,
     )
     from spyglass.spikesorting.v2.artifact import (

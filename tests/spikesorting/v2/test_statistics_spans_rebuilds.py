@@ -421,7 +421,7 @@ def test_noise_fill_reaches_only_the_sorter(masked_planted_sort, monkeypatch):
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2 import sorting as sorting_module
     from spyglass.spikesorting.v2._sorting import analyzer as sa_mod
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
     from spyglass.spikesorting.v2._storage import units_nwb as units_mod

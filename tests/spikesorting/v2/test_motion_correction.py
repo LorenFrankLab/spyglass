@@ -720,7 +720,7 @@ def test_concat_persists_its_continuity_and_rebuild_verifies_it(
 
 
 def _motion_spans_of(recording_key):
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         boundary_spans_from_timestamps,
     )
     from spyglass.spikesorting.v2.recording import Recording
@@ -1402,8 +1402,10 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
         flatten_planar_geometry,
     )
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        complement_frame_ranges,
         silence_frame_ranges,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        complement_frame_ranges,
     )
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecording,

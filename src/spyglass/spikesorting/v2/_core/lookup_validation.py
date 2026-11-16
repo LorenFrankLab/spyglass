@@ -10,7 +10,6 @@ from collections.abc import Callable, Hashable, Mapping
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting._numerical import integer_scalar
-from spyglass.spikesorting.v2._curation.metrics import rules_payloads_match
 from spyglass.spikesorting.v2._core.parameter_identity import (
     parameter_fingerprint,
 )
@@ -20,6 +19,37 @@ from spyglass.spikesorting.v2.exceptions import (
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
+
+
+def json_values_equal(a, b, *, strict_bool: bool) -> bool:
+    """Recursively compare JSON-native values (dicts, lists, scalars).
+
+    Parameters
+    ----------
+    a, b
+        Values as ``_jsonable_blob`` returns them; tuples compare as lists.
+    strict_bool : bool
+        True keeps ``True`` distinct from ``1``. False treats them as equal,
+        for comparisons against fetched non-blob columns, which return bools
+        as ints.
+
+    Returns
+    -------
+    bool
+    """
+    if isinstance(a, bool) or isinstance(b, bool):
+        return (not strict_bool or type(a) is type(b)) and a == b
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(
+            json_values_equal(a[key], b[key], strict_bool=strict_bool)
+            for key in a
+        )
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(
+            json_values_equal(x, y, strict_bool=strict_bool)
+            for x, y in zip(a, b)
+        )
+    return a == b
 
 
 def lossless_int(value, what: str) -> int:
@@ -443,7 +473,7 @@ def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:
             default["params_schema_version"]
         )
         actual["params_schema_version"] = int(stored["params_schema_version"])
-        if not rules_payloads_match(expected, actual):
+        if not json_values_equal(expected, actual, strict_bool=True):
             raise DuplicateParameterContentError(
                 f"QualityMetricParameters {name!r} already exists with "
                 "content that differs from the shipped default. Insert your "

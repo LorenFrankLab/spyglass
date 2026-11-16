@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from spyglass.spikesorting.v2._core.lookup_validation import json_values_equal
 from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
 from spyglass.spikesorting.v2._curation.metrics import (
     apply_label_rules,
@@ -25,7 +26,6 @@ from spyglass.spikesorting.v2._curation.metrics import (
     expected_missing_units,
     isi_violation_fraction,
     report_si_metric_errors,
-    rules_payloads_match,
     sanitize_for_json,
     si_metric_output_columns,
 )
@@ -460,18 +460,28 @@ def _payload(
     }
 
 
+def _strict_equal(expected, stored):
+    return json_values_equal(expected, stored, strict_bool=True)
+
+
+def test_lax_json_equality_accepts_a_fetched_int_for_a_bool():
+    """The lax mode equates a fetched int column with its shipped bool."""
+    assert json_values_equal({"k": True}, {"k": 1}, strict_bool=False)
+    assert json_values_equal([False], (0,), strict_bool=False)
+    assert not json_values_equal({"k": True}, {"k": 0}, strict_bool=False)
+    assert not json_values_equal({"k": 1}, {"j": 1}, strict_bool=False)
+
+
 def test_rules_payloads_match_compares_thresholds_exactly():
     """``Rule.threshold`` is a double column, so thresholds compare exactly."""
-    assert rules_payloads_match(_payload(0.1), _payload(0.1))
-    assert not rules_payloads_match(
-        _payload(0.1), _payload(float(np.float32(0.1)))
-    )
-    assert not rules_payloads_match(_payload(0.1), _payload(0.2))
+    assert _strict_equal(_payload(0.1), _payload(0.1))
+    assert not _strict_equal(_payload(0.1), _payload(float(np.float32(0.1))))
+    assert not _strict_equal(_payload(0.1), _payload(0.2))
 
 
 def test_rules_payloads_match_includes_missing_policy():
     """Rule sets differing only in missing-value semantics are distinct."""
-    assert not rules_payloads_match(
+    assert not _strict_equal(
         _payload(0.1, missing_policy="error"),
         _payload(0.1, missing_policy="pass"),
     )
@@ -487,7 +497,7 @@ def test_rules_payloads_match_includes_missing_policy():
 )
 def test_rules_payloads_match_rejects_non_numeric_differences(other):
     """Non-numeric field changes are detected by exact comparison."""
-    assert not rules_payloads_match(_payload(0.1), other)
+    assert not _strict_equal(_payload(0.1), other)
 
 
 def test_rules_payloads_match_rejects_differing_rule_count():
@@ -495,13 +505,13 @@ def test_rules_payloads_match_rejects_differing_rule_count():
     one = _payload(0.1)
     two = _payload(0.1)
     two["rules"].append({**two["rules"][0], "rule_index": 1, "label": "reject"})
-    assert not rules_payloads_match(one, two)
+    assert not _strict_equal(one, two)
 
 
 def test_rules_payloads_match_does_not_conflate_bool_and_int():
     """bool is an int subclass; True must not match 1 through the numeric path."""
-    assert not rules_payloads_match({"k": True}, {"k": 1})
-    assert rules_payloads_match({"k": True}, {"k": True})
+    assert not _strict_equal({"k": True}, {"k": 1})
+    assert _strict_equal({"k": True}, {"k": True})
 
 
 # ---------- SNR peak_sign follows the sorter's polarity --------------------

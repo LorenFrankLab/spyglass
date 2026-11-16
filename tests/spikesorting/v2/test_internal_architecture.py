@@ -24,6 +24,7 @@ DOMAIN_PACKAGES = {
     "_matching",
     "_motion",
     "_orchestration",
+    "_params",
 }
 
 
@@ -33,7 +34,7 @@ def test_private_implementations_have_domain_owners():
         path.name
         for path in ROOT.iterdir()
         if path.is_dir() and (path / "__init__.py").exists()
-    } == DOMAIN_PACKAGES | {"_params"}
+    } == DOMAIN_PACKAGES
     for domain in DOMAIN_PACKAGES:
         assert set((ROOT / domain).rglob("__init__.py")) == {
             ROOT / domain / "__init__.py"
@@ -101,6 +102,39 @@ def test_internal_dependencies_use_owners_and_keep_orchestration_outward():
                     violations.append(
                         f"{path.relative_to(ROOT)}:{node.lineno}: {reason}"
                     )
+    assert not violations, "\n".join(violations)
+
+
+#: The one ``_core`` import above the foundation: a table read inside a
+#: function, which breaks an import cycle.
+_FOUNDATION_IMPORT_EXCEPTIONS = {
+    ("_core/recipe_catalog.py", f"{PREFIX}.sorting"),
+}
+
+
+def test_foundation_packages_import_only_the_foundation():
+    """``_core`` and ``_params`` import only each other and ``exceptions``.
+
+    Every other domain builds on them, so an upward import would pull a
+    higher layer (and SpikeInterface or a schema) into everything.
+    """
+    allowed = (f"{PREFIX}._core", f"{PREFIX}._params", f"{PREFIX}.exceptions")
+    violations = []
+    for domain in ("_core", "_params"):
+        for path in sorted((ROOT / domain).glob("*.py")):
+            package = f"{PREFIX}.{domain}"
+            relative = path.relative_to(ROOT).as_posix()
+            for node in ast.walk(ast.parse(path.read_text())):
+                for module in _imported_modules(node, package):
+                    if not module.startswith(f"{PREFIX}."):
+                        continue
+                    if module == allowed[2] or module.startswith(
+                        tuple(f"{name}." for name in allowed)
+                    ):
+                        continue
+                    if (relative, module) in _FOUNDATION_IMPORT_EXCEPTIONS:
+                        continue
+                    violations.append(f"{relative}:{node.lineno}: {module}")
     assert not violations, "\n".join(violations)
 
 

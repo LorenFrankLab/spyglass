@@ -215,8 +215,10 @@ def _masked_frame_indexed_recording():
     from spikeinterface.core import NumpyRecording
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        complement_frame_ranges,
         statistics_spans,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        complement_frame_ranges,
     )
     from tests.spikesorting.v2._masked_statistics_helpers import (
         TRANSIENT_UV,
@@ -401,7 +403,7 @@ def test_span_noise_cluster_reads_nearby_snippets_together():
         _draw_noise_cluster,
         noise_cluster_spans,
     )
-    from spyglass.spikesorting.v2._sorting.artifact_mask import (
+    from spyglass.spikesorting.v2._core.signal_math import (
         sample_span_snippet_starts,
     )
 

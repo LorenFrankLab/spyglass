@@ -11,12 +11,14 @@ from spyglass.spikesorting.v2._core.signal_math import (
 from spyglass.spikesorting.v2._recording.geometry import flatten_planar_geometry
 from spyglass.spikesorting.v2._sorting.artifact_mask import (
     Continuity,
-    artifact_frame_ranges,
-    complement_frame_ranges,
     continuity_from_timestamps,
     has_nonzero_offset,
     silence_frame_ranges,
     statistics_spans,
+)
+from spyglass.spikesorting.v2._core.signal_math import (
+    artifact_frame_ranges,
+    complement_frame_ranges,
 )
 from spyglass.spikesorting.v2._storage.analyzer_cache import artifact_slot_lock
 from spyglass.spikesorting.v2.exceptions import ConcatSplitError

@@ -26,6 +26,7 @@ from spikeinterface.core import BaseRecording, BaseRecordingSegment
 from spyglass.utils.identity import sha256_json
 from spyglass.spikesorting.v2._core.signal_math import (
     frames_with_window_in_one_span,
+    normalize_spans,
 )
 from spyglass.spikesorting.v2._sorting.dispatch import (
     STATISTICS_SAMPLE_CHUNK_MS,
@@ -455,14 +456,6 @@ def spans_without_evidence(
             "source_end_s": float(clock.source_end_s[i]),
         }
         for i in empty
-    ]
-
-
-def normalize_spans(spans) -> list[tuple[int, int]]:
-    """Return ``spans`` as a list of ``(start, end)`` Python-int tuples."""
-    return [
-        (int(a), int(b))
-        for a, b in np.asarray(spans, dtype=np.int64).reshape(-1, 2)
     ]
 
 
@@ -1299,8 +1292,10 @@ def estimate_motion_in_spans(
     )
 
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        complement_frame_ranges,
         silence_frame_ranges,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        complement_frame_ranges,
     )
     from spyglass.spikesorting.v2._core.si_compat import (
         require_validated_spikeinterface,
@@ -1565,8 +1560,10 @@ def apply_motion_on_estimation_clock(
         flatten_planar_geometry,
     )
     from spyglass.spikesorting.v2._sorting.artifact_mask import (
-        complement_frame_ranges,
         silence_frame_ranges,
+    )
+    from spyglass.spikesorting.v2._core.signal_math import (
+        complement_frame_ranges,
     )
 
     if recording.get_num_segments() != 1 or motion.num_segments != 1:
