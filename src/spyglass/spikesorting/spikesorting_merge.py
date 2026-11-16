@@ -205,7 +205,7 @@ LEGACY_SORTED_SOURCES = frozenset({"CurationV1", "CuratedSpikeSorting"})
 
 # Sources whose curated NWB stores per-unit observed spans. Other sources
 # are reported as unknown coverage.
-OBSERVED_INTERVAL_SOURCES = frozenset({"CurationV2", "ConcatMemberCurationV2"})
+OBSERVED_INTERVAL_SOURCES = V2_SOURCES
 
 
 @schema

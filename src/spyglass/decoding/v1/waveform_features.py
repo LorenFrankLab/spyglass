@@ -15,6 +15,7 @@ from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
 from spyglass.spikesorting.spikesorting_merge import (
+    V2_SOURCES,
     SpikeSortingOutput,
     source_class_dict,
 )
@@ -165,7 +166,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         from datajoint.utils import to_camel_case
 
         source_name = to_camel_case(source_parent.table_name)
-        is_v2 = source_name in {"CurationV2", "ConcatMemberCurationV2"}
+        is_v2 = source_name in V2_SOURCES
 
         if is_v2:
             # v2 unit_ids can be sparse: index by NWB ``.id``, not position
