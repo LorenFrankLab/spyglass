@@ -1,9 +1,8 @@
 """Hermetic tests for membership-aware merge duplicate-spike removal.
 
-A sub-0.4 ms pair from different contributors is one spike detected twice
-and is removed; a close pair from one contributor is kept. The stored path
-must agree with SpikeInterface's ``get_non_duplicated_events``, which backs
-the lazy ``get_merged_sorting``.
+A spike within 0.4 ms after the last KEPT spike of a different contributor
+is one spike detected twice and is removed; a close pair from one contributor
+is kept. The stored and lazy merge paths share this rule.
 """
 
 from __future__ import annotations
@@ -63,15 +62,57 @@ def test_dedup_empty():
     assert out.size == 0
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_dedup_matches_spikeinterface(seed):
-    """The stored-path dedup equals SpikeInterface's on random trains."""
-    from spikeinterface.curation.mergeunitssorting import (
-        get_non_duplicated_events,
+def _last_kept_reference(times_list, delta_s):
+    """Naive loop: drop a spike only against the last kept spike."""
+    kept: list[tuple[float, int]] = []
+    events = sorted(
+        (float(t), unit) for unit, train in enumerate(times_list) for t in train
+    )
+    for t, unit in events:
+        if kept and unit != kept[-1][1] and t - kept[-1][0] <= delta_s:
+            continue
+        kept.append((t, unit))
+    return np.array([t for t, _ in kept])
+
+
+def test_dedup_compares_to_the_last_kept_spike():
+    """A dropped duplicate does not shadow the next genuine spike."""
+    delta_s = 0.4e-3
+    unit_a = np.array([1.0, 1.0006])
+    unit_b = np.array([1.0003])
+    out = _dedup([unit_a, unit_b], delta_s)
+    np.testing.assert_allclose(out, [1.0, 1.0006])
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+@pytest.mark.parametrize("n_units", [2, 3])
+def test_dedup_matches_last_kept_reference(seed, n_units):
+    """Random dense trains equal the naive last-kept loop."""
+    rng = np.random.default_rng(seed)
+    trains = [np.sort(rng.uniform(0.0, 0.5, size=400)) for _ in range(n_units)]
+    np.testing.assert_array_equal(
+        _dedup(trains, 0.4e-3), _last_kept_reference(trains, 0.4e-3)
     )
 
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_dedup_matches_si_keep_first_iterative_for_refractory_units(seed):
+    """Without within-unit close pairs the rule is SI's keep_first_iterative."""
+    from spikeinterface.curation.curation_tools import find_duplicated_spikes
+
     rng = np.random.default_rng(seed)
-    trains = [np.sort(rng.uniform(0.0, 1.0, size=200)) for _ in range(3)]
-    np.testing.assert_array_equal(
-        _dedup(trains, 0.4e-3), get_non_duplicated_events(trains, 0.4e-3)
+    fs = 1e5
+    censor = 40  # samples; delta sits between grid points to avoid ties
+    delta_s = 40.5 / fs
+    trains = []
+    for _ in range(3):
+        isi = rng.integers(censor + 1, 400, size=300)
+        trains.append(np.cumsum(isi) / fs)
+    frames = np.sort(
+        np.concatenate([np.round(t * fs).astype(np.int64) for t in trains])
     )
+    duplicates = find_duplicated_spikes(
+        frames, censor, method="keep_first_iterative"
+    )
+    expected = np.delete(frames, duplicates) / fs
+    np.testing.assert_allclose(_dedup(trains, delta_s), expected)

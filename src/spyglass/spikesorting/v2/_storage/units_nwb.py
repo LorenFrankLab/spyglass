@@ -288,7 +288,29 @@ def build_lazy_merged_sorting_from_samples(
 
 
 def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
-    """Return deduplicated ``(times, frames)`` with both arrays aligned."""
+    """Merge contributor trains, dropping cross-contributor double detections.
+
+    A spike is dropped when it comes from a different contributor than the
+    last kept spike and lies within ``delta_s`` of it. Close pairs from one
+    contributor are kept.
+
+    Parameters
+    ----------
+    times_list : sequence of numpy.ndarray
+        Per-contributor spike times, each ``(n_spikes_i,)`` seconds.
+    frames_list : sequence of numpy.ndarray
+        Per-contributor sample indices, each ``(n_spikes_i,)``, aligned with
+        ``times_list``.
+    delta_s : float
+        Duplicate window in seconds.
+
+    Returns
+    -------
+    times : numpy.ndarray
+        ``(n_kept,)`` sorted kept spike times.
+    frames : numpy.ndarray
+        ``(n_kept,)`` sample indices of the kept spikes.
+    """
     times_list, frames_list = list(times_list), list(frames_list)
     if len(times_list) != len(frames_list):
         raise ValueError(
@@ -324,10 +346,21 @@ def _dedup_merged_spike_times_and_frames(times_list, frames_list, delta_s):
     membership = np.concatenate(
         [np.full(arr.shape, i) for i, arr in enumerate(time_arrays)]
     )[order]
-    keep = np.nonzero(
-        (np.diff(times_sorted) > delta_s) | (np.diff(membership) == 0)
-    )[0]
-    keep = np.concatenate([[0], keep + 1])
+    keep = np.ones(times_sorted.size, dtype=bool)
+    # A spike more than delta after its predecessor is past every kept spike,
+    # so only runs of close spikes need the sequential last-kept comparison.
+    close = np.diff(times_sorted) <= delta_s
+    run_edges = np.flatnonzero(np.diff(np.r_[0, close.astype(np.int8), 0]))
+    for run_start, run_stop in zip(run_edges[::2], run_edges[1::2]):
+        last_kept = run_start
+        for i in range(run_start + 1, run_stop + 1):
+            if (
+                membership[i] != membership[last_kept]
+                and times_sorted[i] - times_sorted[last_kept] <= delta_s
+            ):
+                keep[i] = False
+            else:
+                last_kept = i
     return times_sorted[keep], frames_sorted[keep]
 
 

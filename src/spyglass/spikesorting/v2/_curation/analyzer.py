@@ -55,7 +55,7 @@ from spyglass.utils import logger
 from spyglass.utils.progress import report_progress
 
 CURATION_ANALYZER_MANIFEST = "spyglass_curation_analyzer_manifest.json"
-MERGE_POLICY_VERSION = "absolute_time_cross_unit_dedup_0_4ms_v1"
+MERGE_POLICY_VERSION = "absolute_time_cross_unit_last_kept_dedup_0_4ms_v2"
 
 
 @dataclass(frozen=True)
