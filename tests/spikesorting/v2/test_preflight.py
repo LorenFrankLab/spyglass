@@ -806,6 +806,41 @@ def test_describe_epochs_rejects_an_unknown_sort_group(preflight_inputs):
 
 
 @pytest.mark.database
+def test_preflight_warns_a_custom_preset_without_a_sampling_rate(
+    preflight_inputs, monkeypatch
+):
+    """A custom preset with sampling_rate_hz=None skips the rate check; the
+    report says so. A shipped rate-agnostic preset does not warn."""
+    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        pipeline_preset_specs,
+    )
+
+    name = "lab_no_rate_2026_11"
+    preset = presets_mod._PIPELINE_PRESETS[
+        "franklab_probe_hippocampus_30khz_ms4_2026_06"
+    ].model_copy(update={"sampling_rate_hz": None})
+    monkeypatch.setitem(presets_mod._PIPELINE_PRESETS, name, preset)
+    report = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": name}
+    )
+    (warning,) = [w for w in report.warnings if "sampling_rate_hz=None" in w]
+    assert name in warning
+    assert preset.sorter_params_name in warning
+    assert "sampling_rate_hz=" in warning
+
+    (agnostic,) = [
+        n
+        for n, spec in pipeline_preset_specs().items()
+        if spec.get("sampling_rate_hz") is None
+    ]
+    shipped = preflight_v2_pipeline(
+        **{**preflight_inputs, "pipeline_preset": agnostic}
+    )
+    assert not [w for w in shipped.warnings if "sampling_rate_hz=None" in w]
+
+
+@pytest.mark.database
 def test_preflight_missing_raw(preflight_inputs, monkeypatch):
     """A session present but Raw absent fails raw_exists (not a false-negative).
 

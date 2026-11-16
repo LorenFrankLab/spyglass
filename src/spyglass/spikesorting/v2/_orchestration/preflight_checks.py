@@ -457,21 +457,53 @@ def _check_auto_curation_rows(
     )
 
 
+def _is_shipped_preset(bundle) -> bool:
+    """Whether ``bundle`` is one of the code-defined shipped presets."""
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        pipeline_preset_specs,
+    )
+
+    content = bundle.model_dump()
+    return any(
+        type(bundle)(**spec).model_dump() == content
+        for spec in pipeline_preset_specs().values()
+    )
+
+
 def _check_sampling_rate(
     check: "Callable[[str, Any, str], bool]",
     bundle,
     nwb_file_name: str,
     pipeline_preset: "str | None",
+    warnings: "list[str] | None" = None,
 ) -> None:
     """Check the recording samples at the rate the preset is tuned for.
 
     The sorter row's snippet window is in samples, so a rate mismatch
-    silently mistunes it. Skipped for rate-agnostic presets and when ``Raw``
-    is missing.
+    silently mistunes it. Skipped when ``Raw`` is missing and for a preset
+    with ``sampling_rate_hz=None``; a custom such preset adds a warning to
+    ``warnings`` (shipped rate-agnostic presets do not).
     """
     from spyglass.common import Raw
 
-    if bundle.sampling_rate_hz is not None:
+    if bundle.sampling_rate_hz is None:
+        raw = Raw & {"nwb_file_name": nwb_file_name}
+        if warnings is not None and raw and not _is_shipped_preset(bundle):
+            label = (
+                "the preset"
+                if pipeline_preset is None
+                else f"pipeline preset {pipeline_preset!r}"
+            )
+            actual_rate = float(raw.fetch1("sampling_rate"))
+            warnings.append(
+                f"{label} sets sampling_rate_hz=None, so preflight does not "
+                f"compare {nwb_file_name!r}'s {actual_rate:g} Hz with the rate "
+                f"sorter row {bundle.sorter_params_name!r} was tuned for. If "
+                "that row holds sample-count windows (e.g. MS4 clip_size / "
+                "detect_interval), register the preset with "
+                f"sampling_rate_hz={actual_rate:g}."
+            )
+    else:
         raw = Raw & {"nwb_file_name": nwb_file_name}
         if raw:
             actual_rate = float(raw.fetch1("sampling_rate"))

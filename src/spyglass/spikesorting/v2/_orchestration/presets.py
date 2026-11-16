@@ -34,8 +34,10 @@ class _PipelinePreset(BaseModel):
 
     The named rows must exist before ``run_v2_pipeline``; the preset inserts
     none. Discovery fields (``probe_type`` through ``notes``) have no runtime
-    behavior. The sorter execution backend lives on the ``SorterParameters``
-    row, not here.
+    behavior, except ``sampling_rate_hz``: preflight compares it with the
+    recording's ``Raw`` sampling rate, and ``None`` skips that check (with a
+    warning for a custom preset). The sorter execution backend lives on the
+    ``SorterParameters`` row, not here.
     """
 
     model_config = ConfigDict(extra="forbid")

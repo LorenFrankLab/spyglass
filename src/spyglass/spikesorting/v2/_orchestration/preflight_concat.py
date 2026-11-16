@@ -66,6 +66,7 @@ def assert_concat_preflight(
             "exclusions by those member_index values."
         )
 
+    warnings: list[str] = []
     # Member FKs do not cover Raw, valid times, or sort-group contents.
     for member in members:
         _assert_concat_member_inputs(
@@ -73,6 +74,7 @@ def assert_concat_preflight(
             bundle,
             caller=caller,
             sort_checks=sort_checks,
+            warnings=warnings,
             manual_excluded_times=exclusions.get(
                 int(member["member_index"]), []
             ),
@@ -173,12 +175,14 @@ def _assert_concat_member_inputs(
     caller: str,
     sort_checks: bool,
     manual_excluded_times=(),
+    warnings: "list[str] | None" = None,
 ) -> None:
     """Raise ``PreflightError`` if a member cannot be built as a recording.
 
     Runs the single-session session-row, sort-group, manual-exclusion and
     (with ``sort_checks``) sampling-rate checks on the member.
-    ``manual_excluded_times`` are this member's normalized intervals.
+    ``manual_excluded_times`` are this member's normalized intervals;
+    sampling-rate advisories are appended to ``warnings``.
     """
     check = _member_check(member, caller)
     nwb_file_name = member["nwb_file_name"]
@@ -197,7 +201,7 @@ def _assert_concat_member_inputs(
         preprocessing_params_name=bundle.preprocessing_params_name,
     )
     if sort_checks:
-        _check_sampling_rate(check, bundle, nwb_file_name, None)
+        _check_sampling_rate(check, bundle, nwb_file_name, None, warnings)
 
 
 def _assert_concat_motion_stage(

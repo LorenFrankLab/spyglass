@@ -189,7 +189,9 @@ def preflight_v2_pipeline(
     if auto_curate:
         _check_auto_curation_rows(_check, bundle)
     if sort_checks:
-        _check_sampling_rate(_check, bundle, nwb_file_name, pipeline_preset)
+        _check_sampling_rate(
+            _check, bundle, nwb_file_name, pipeline_preset, warnings
+        )
         _check_sorter_execution(
             _check,
             warnings,
