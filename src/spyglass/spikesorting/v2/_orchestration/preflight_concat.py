@@ -191,7 +191,12 @@ def _assert_concat_member_inputs(
         member["interval_list_name"],
         member["team_name"],
     )
-    _check_sort_group(check, nwb_file_name, int(member["sort_group_id"]))
+    _check_sort_group(
+        check,
+        nwb_file_name,
+        int(member["sort_group_id"]),
+        bundle.preprocessing_params_name,
+    )
     _check_manual_exclusions(
         check,
         manual_excluded_times,

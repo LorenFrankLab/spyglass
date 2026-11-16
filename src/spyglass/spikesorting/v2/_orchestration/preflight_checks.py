@@ -138,8 +138,11 @@ def _check_sort_group(
     check: "Callable[[str, Any, str], bool]",
     nwb_file_name: str,
     sort_group_id: int,
+    preprocessing_params_name: str,
 ) -> bool:
     """Check the sort group exists, has electrodes and has distinct contacts.
+
+    ``preprocessing_params_name`` decides which contacts the recording keeps.
 
     Returns
     -------
@@ -172,7 +175,7 @@ def _check_sort_group(
         )
         # Coincident contacts cannot produce a probe.
         geometry_problem = sort_group_geometry_problem(
-            nwb_file_name, sort_group_id
+            nwb_file_name, sort_group_id, preprocessing_params_name
         )
         check(
             "sort_group_geometry_distinct",
@@ -596,6 +599,7 @@ def _check_motion_stage(
                 nwb_file_name,
                 sort_group_id,
                 motion_recipe.resolved_estimation,
+                bundle.preprocessing_params_name,
             )
             group_check(
                 "motion_geometry_supported",

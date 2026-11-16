@@ -14,7 +14,9 @@ from spyglass.spikesorting.v2._params.preprocessing import (
 )
 from spyglass.spikesorting.v2._recording.geometry import (
     fetch_interior_bad_channel_ids,
+    fetch_sort_group_contact_positions,
     fetch_sort_group_probe_info,
+    retained_channel_ids,
 )
 from spyglass.spikesorting.v2._core.selection_identity import (
     recording_input_hash,
@@ -70,6 +72,164 @@ class ResolvedRecordingInputs(NamedTuple):
     input_hash: str
 
 
+class SortGroupChannels(NamedTuple):
+    """A sort group's channels as the recording stage reads them.
+
+    Attributes
+    ----------
+    channel_ids : list[int]
+        Sort-group electrode ids, sorted.
+    reference_mode : str
+        ``SortGroupV2.reference_mode``.
+    reference_electrode_id : int or None
+        ``SortGroupV2.reference_electrode_id``.
+    preprocessing_params : PreprocessingParamsSchema
+        The validated ``PreprocessingParameters.params`` blob.
+    bad_channel_ids : tuple
+        Interior curated-bad electrode ids the ``interpolate`` path fills;
+        empty for ``remove``.
+    """
+
+    channel_ids: list
+    reference_mode: str
+    reference_electrode_id: int | None
+    preprocessing_params: PreprocessingParamsSchema
+    bad_channel_ids: tuple
+
+
+def resolve_sort_group_channels(
+    nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
+) -> SortGroupChannels:
+    """Read a sort group's members, reference and interpolated bad channels.
+
+    The one read of the channel set, shared by recording inputs and the
+    preflight geometry checks.
+
+    Raises
+    ------
+    ValueError
+        On the ``interpolate`` path, if a needed position or probe link is
+        missing (:func:`fetch_interior_bad_channel_ids`).
+    """
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        SortGroupV2,
+    )
+
+    sort_group_key = {
+        "nwb_file_name": nwb_file_name,
+        "sort_group_id": int(sort_group_id),
+    }
+    channel_ids = sorted(
+        (SortGroupV2.SortGroupElectrode & sort_group_key).fetch("electrode_id"),
+        key=int,
+    )
+    reference_mode, reference_electrode_id = (
+        SortGroupV2 & sort_group_key
+    ).fetch1("reference_mode", "reference_electrode_id")
+    reference_mode = str(reference_mode)
+    reference_electrode_id = (
+        None if reference_electrode_id is None else int(reference_electrode_id)
+    )
+    # DeepHash-stable: its __dict__ is primitives.
+    preprocessing_params = PreprocessingParamsSchema.model_validate(
+        (
+            PreprocessingParameters
+            & {"preprocessing_params_name": preprocessing_params_name}
+        ).fetch1("params")
+    )
+    bad_channel_ids: tuple = ()
+    if preprocessing_params.bad_channel_handling == "interpolate":
+        bad_channel_ids = fetch_interior_bad_channel_ids(
+            nwb_file_name, channel_ids
+        )
+    return SortGroupChannels(
+        channel_ids=channel_ids,
+        reference_mode=reference_mode,
+        reference_electrode_id=reference_electrode_id,
+        preprocessing_params=preprocessing_params,
+        bad_channel_ids=bad_channel_ids,
+    )
+
+
+class SortGroupContacts(NamedTuple):
+    """The registered contacts a sort group's recording keeps.
+
+    Attributes
+    ----------
+    n_members : int
+        Number of sort-group members (the tetrode repair needs four).
+    channel_ids : list[int]
+        The retained electrode ids (:func:`retained_channel_ids`), sorted.
+    positions : numpy.ndarray
+        ``(n_channels, 3)`` ``Probe.Electrode`` positions, NaN where missing.
+    probe_types, electrode_group_names, probe_shanks : tuple
+        Per-channel metadata, aligned with ``channel_ids``.
+    """
+
+    n_members: int
+    channel_ids: list
+    positions: object
+    probe_types: tuple
+    electrode_group_names: tuple
+    probe_shanks: tuple
+
+
+def fetch_sort_group_contacts(
+    nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
+) -> "SortGroupContacts | None":
+    """Fetch the registered geometry of the contacts a recording keeps.
+
+    Preflight and plotting read ``Probe.Electrode``; the recording stage
+    reads the session's electrodes table, so a session that disagrees with
+    its probe can still fail at ``Recording.make``.
+
+    Returns
+    -------
+    SortGroupContacts or None
+        ``None`` for a sort group without members.
+
+    Raises
+    ------
+    ValueError
+        As :func:`resolve_sort_group_channels`.
+    """
+    from spyglass.common.common_ephys import Electrode
+
+    channels = resolve_sort_group_channels(
+        nwb_file_name, sort_group_id, preprocessing_params_name
+    )
+    if not channels.channel_ids:
+        return None
+    channel_ids = retained_channel_ids(
+        channels.channel_ids,
+        reference_mode=channels.reference_mode,
+        reference_electrode_id=channels.reference_electrode_id,
+        bad_channel_handling=channels.preprocessing_params.bad_channel_handling,
+        bad_channel_ids=channels.bad_channel_ids,
+    )
+    probe_types, electrode_group_names = fetch_sort_group_probe_info(
+        nwb_file_name, channel_ids
+    )
+    probe_shanks = tuple(
+        (
+            Electrode
+            & {"nwb_file_name": nwb_file_name}
+            & [{"electrode_id": c} for c in channel_ids]
+        ).fetch("probe_shank", order_by="electrode_id")
+    )
+    return SortGroupContacts(
+        n_members=len(channels.channel_ids),
+        channel_ids=channel_ids,
+        positions=fetch_sort_group_contact_positions(
+            nwb_file_name, channel_ids
+        ),
+        probe_types=probe_types,
+        electrode_group_names=electrode_group_names,
+        probe_shanks=probe_shanks,
+    )
+
+
 def resolve_recording_inputs(
     nwb_file_name: str,
     sort_group_id: int,
@@ -105,38 +265,14 @@ def resolve_recording_inputs(
         If the sort interval or the ``raw data valid times`` IntervalList is
         missing for ``nwb_file_name``.
     """
-    from spyglass.spikesorting.v2.recording import (
-        PreprocessingParameters,
-        SortGroupV2,
+    channels = resolve_sort_group_channels(
+        nwb_file_name, sort_group_id, preprocessing_params_name
     )
-
-    sort_group_key = {
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": int(sort_group_id),
-    }
-    channel_ids = sorted(
-        (SortGroupV2.SortGroupElectrode & sort_group_key).fetch("electrode_id"),
-        key=int,
-    )
-    reference_mode, reference_electrode_id = (
-        SortGroupV2 & sort_group_key
-    ).fetch1("reference_mode", "reference_electrode_id")
-    reference_mode = str(reference_mode)
-    reference_electrode_id = (
-        None if reference_electrode_id is None else int(reference_electrode_id)
-    )
-    # DeepHash-stable: its __dict__ is primitives.
-    preprocessing_params = PreprocessingParamsSchema.model_validate(
-        (
-            PreprocessingParameters
-            & {"preprocessing_params_name": preprocessing_params_name}
-        ).fetch1("params")
-    )
-    bad_channel_ids: tuple = ()
-    if preprocessing_params.bad_channel_handling == "interpolate":
-        bad_channel_ids = fetch_interior_bad_channel_ids(
-            nwb_file_name, channel_ids
-        )
+    channel_ids = channels.channel_ids
+    reference_mode = channels.reference_mode
+    reference_electrode_id = channels.reference_electrode_id
+    preprocessing_params = channels.preprocessing_params
+    bad_channel_ids = channels.bad_channel_ids
     sort_valid_times = _fetch_valid_times(nwb_file_name, interval_list_name)
     raw_valid_times = _fetch_valid_times(nwb_file_name, "raw data valid times")
     saved_intervals = intended_save_intervals(

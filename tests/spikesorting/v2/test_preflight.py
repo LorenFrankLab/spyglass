@@ -1010,13 +1010,14 @@ def test_preflight_rejects_coincident_contacts_after_repair(
 ):
     """Preflight reports geometry that collapses AFTER the tetrode repair.
 
-    Preflight repeats the recording stage: pick the plane that keeps contacts
-    distinct, then apply the ``tetrode_12.5`` repair. Contacts collapse only if
-    both fail.
+    Preflight repeats the recording stage: refuse partly missing positions,
+    apply the ``tetrode_12.5`` repair, else pick the plane that keeps
+    contacts distinct. Contacts collapse only if neither rescues them.
     """
     import numpy as np
 
-    import spyglass.spikesorting.v2._recording.geometry as geometry
+    # The kept-contact reader looks the registered geometry up here.
+    import spyglass.spikesorting.v2._recording.fetch as geometry
 
     from spyglass.spikesorting.v2.recording import SortGroupV2
 

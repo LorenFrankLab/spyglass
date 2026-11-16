@@ -165,7 +165,9 @@ def preflight_v2_pipeline(
     sort_group_id = int(sort_group_id)
 
     _check_session_rows(_check, nwb_file_name, interval_list_name, team_name)
-    sort_group_exists = _check_sort_group(_check, nwb_file_name, sort_group_id)
+    sort_group_exists = _check_sort_group(
+        _check, nwb_file_name, sort_group_id, bundle.preprocessing_params_name
+    )
     preprocessing_params_exist = _check_source_param_rows(_check, bundle)
     _check_manual_exclusions(
         _check,

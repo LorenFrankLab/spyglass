@@ -477,13 +477,19 @@ their lifecycle and serialization checks when changing supported versions.
     probe definition filled both, but nothing enforces it. A v2 test fixture
     zeroes a tetrode's electrodes table while its device metadata keeps the
     square.
-- `_orchestration.preflight_geometry.sort_group_geometry_problem` reproduces the
-    recording stage's geometry (`select_distinct_plane`, then the `tetrode_12.5`
-    repair) on `Probe.Electrode`. Coincident contacts are reported up front, not
-    minutes into `Recording.populate`. A session that disagrees with its probe
-    can still pass preflight and fail at `assert_unique_contact_positions`.
-- Preflight checks the full group membership. `bad_channel_handling='remove'`
-    can only remove a collision, so the check is conservative.
+- `_recording.geometry.effective_sort_group_geometry` is the recording
+    stage's verdict in its order: partly missing positions are refused, the
+    `tetrode_12.5` repair replaces any positions, else `select_distinct_plane`.
+    The geometry preflight, the motion geometry preflight and
+    `plot_sort_group_geometry` all use it, on `Probe.Electrode` positions.
+    Coincident contacts are reported up front, not minutes into
+    `Recording.populate`. A session that disagrees with its probe can still
+    pass preflight and fail at `assert_unique_contact_positions`.
+- Both preflights read the kept contacts through
+    `_recording.fetch.fetch_sort_group_contacts`, which shares
+    `resolve_sort_group_channels` with the recording inputs: the members,
+    plus interior bad channels an `interpolate` recipe fills, minus a
+    `specific` reference. The plot shows the members.
 - Preflight and `normalize_channel_locations` share `classify_missing_geometry`,
     so preflight cannot clear a group that make rejects. A group with no
     positions at all is the legacy all-zero case and takes the tetrode repair. A

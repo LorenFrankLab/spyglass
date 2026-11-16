@@ -16,8 +16,8 @@ from spyglass.spikesorting.v2._core.selection_plan import (
     build_recording_selection_plan,
 )
 from spyglass.spikesorting.v2._recording.geometry import (
+    effective_sort_group_geometry,
     maybe_apply_tetrode_geometry,
-    sort_group_planar_positions,
 )
 from spyglass.spikesorting.v2._recording.source import (
     correction_lineage_mismatch,
@@ -435,6 +435,8 @@ def motion_geometry_problem_from_contacts(
     electrode_group_names,
     probe_shanks,
     resolved_estimation: dict,
+    *,
+    n_members: "int | None" = None,
 ) -> "str | None":
     """Say why a sort group's effective geometry cannot be motion-estimated.
 
@@ -454,6 +456,9 @@ def motion_geometry_problem_from_contacts(
     resolved_estimation : dict
         A resolved estimation recipe
         (``_motion.estimation.resolve_estimation_params``).
+    n_members : int, optional
+        The sort group's member count for the tetrode repair; defaults to
+        ``len(channel_ids)``.
 
     Returns
     -------
@@ -467,17 +472,20 @@ def motion_geometry_problem_from_contacts(
     )
 
     channel_ids = [int(c) for c in channel_ids]
-    source, planar = sort_group_planar_positions(
-        positions, probe_types, electrode_group_names
+    geometry = effective_sort_group_geometry(
+        positions,
+        probe_types=probe_types,
+        electrode_group_names=electrode_group_names,
+        n_members=len(channel_ids) if n_members is None else n_members,
     )
-    if source is None:
+    if geometry.source is None:
         return None
     recording = NumpyRecording(
         np.zeros((1, len(channel_ids)), dtype="float32"),
         sampling_frequency=30000.0,
         channel_ids=channel_ids,
     )
-    if source == "tetrode_12.5":
+    if geometry.source == "tetrode_12.5":
         maybe_apply_tetrode_geometry(
             recording,
             tuple(probe_types),
@@ -485,7 +493,7 @@ def motion_geometry_problem_from_contacts(
             channel_ids,
         )
     else:
-        recording.set_channel_locations(planar)
+        recording.set_channel_locations(geometry.planar)
     recording.set_property("group", [str(g) for g in electrode_group_names])
     recording.set_property("probe_shank", [str(s) for s in probe_shanks])
     try:
@@ -496,12 +504,16 @@ def motion_geometry_problem_from_contacts(
 
 
 def motion_geometry_problem(
-    nwb_file_name: str, sort_group_id: int, resolved_estimation: dict
+    nwb_file_name: str,
+    sort_group_id: int,
+    resolved_estimation: dict,
+    preprocessing_params_name: str,
 ) -> "str | None":
     """Say why a sort group cannot be motion-estimated with a recipe.
 
-    Applies :func:`motion_geometry_problem_from_contacts` to the group's
-    registered contacts; the estimator re-checks the actual recording.
+    Applies :func:`motion_geometry_problem_from_contacts` to the registered
+    contacts the group's recording keeps; the estimator re-checks the actual
+    recording.
 
     Parameters
     ----------
@@ -509,47 +521,43 @@ def motion_geometry_problem(
     sort_group_id : int
     resolved_estimation : dict
         A resolved estimation recipe.
+    preprocessing_params_name : str
+        The run's ``PreprocessingParameters`` row, which decides the kept
+        contacts.
 
     Returns
     -------
     str or None
         The operator-facing problem, or ``None``.
     """
-    from spyglass.common.common_ephys import Electrode
-    from spyglass.spikesorting.v2._recording.geometry import (
-        fetch_sort_group_contact_positions,
-        fetch_sort_group_probe_info,
+    from spyglass.spikesorting.v2._recording.fetch import (
+        fetch_sort_group_contacts,
     )
-    from spyglass.spikesorting.v2.recording import SortGroupV2
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
-    channel_ids = sorted(
-        int(c)
-        for c in (
-            SortGroupV2.SortGroupElectrode
-            & {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": int(sort_group_id),
-            }
-        ).fetch("electrode_id")
-    )
-    if not channel_ids:
+    if not (
+        PreprocessingParameters
+        & {"preprocessing_params_name": preprocessing_params_name}
+    ):
+        # ``_check_source_param_rows`` reports the missing row.
         return None
-    positions = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
-    probe_types, group_names = fetch_sort_group_probe_info(
-        nwb_file_name, channel_ids
-    )
-    shanks = (
-        Electrode
-        & {"nwb_file_name": nwb_file_name}
-        & [{"electrode_id": c} for c in channel_ids]
-    ).fetch("probe_shank", order_by="electrode_id")
+    try:
+        contacts = fetch_sort_group_contacts(
+            nwb_file_name, sort_group_id, preprocessing_params_name
+        )
+    except ValueError:
+        # ``sort_group_geometry_problem`` reports unreadable geometry.
+        return None
+    if contacts is None:
+        return None
     problem = motion_geometry_problem_from_contacts(
-        channel_ids,
-        positions,
-        probe_types,
-        group_names,
-        shanks,
+        contacts.channel_ids,
+        contacts.positions,
+        contacts.probe_types,
+        contacts.electrode_group_names,
+        contacts.probe_shanks,
         resolved_estimation,
+        n_members=contacts.n_members,
     )
     if problem is None:
         return None

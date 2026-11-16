@@ -199,7 +199,7 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     """Return DB-backed electrode geometry rows for sort-group plotting.
 
     ``plot_x``/``plot_y`` are the positions the recording stage gives each
-    contact (see ``sort_group_planar_positions``), read from the registered
+    contact (see ``effective_sort_group_geometry``), read from the registered
     ``Probe.Electrode`` geometry as preflight does.
     """
     from probeinterface import select_axes
@@ -207,8 +207,8 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
     from spyglass.common.common_device import Probe
     from spyglass.common.common_ephys import Electrode
     from spyglass.spikesorting.v2._recording.geometry import (
+        effective_sort_group_geometry,
         fetch_sort_group_probe_info,
-        sort_group_planar_positions,
     )
     from spyglass.common.common_region import BrainRegion
     from spyglass.spikesorting.v2.recording import SortGroupV2
@@ -292,19 +292,23 @@ def _sort_group_geometry_rows(nwb_file_name: str) -> list[dict[str, Any]]:
         )
         # Plot contacts where the recording stage places them.
         member_ids = [int(row["electrode_id"]) for row in group_electrodes]
-        planar_source, planar = (
-            sort_group_planar_positions(
+        planar_source = planar = None
+        if group_electrodes:
+            probe_types, group_names = fetch_sort_group_probe_info(
+                nwb_file_name, member_ids
+            )
+            geometry = effective_sort_group_geometry(
                 np.array(
                     [
                         _registered_position(probe_geometry, row)
                         for row in group_electrodes
                     ]
                 ),
-                *fetch_sort_group_probe_info(nwb_file_name, member_ids),
+                probe_types=probe_types,
+                electrode_group_names=group_names,
+                n_members=len(member_ids),
             )
-            if group_electrodes
-            else (None, None)
-        )
+            planar_source, planar = geometry.source, geometry.planar
         planar_by_id = (
             dict(zip(member_ids, map(tuple, planar)))
             if planar is not None

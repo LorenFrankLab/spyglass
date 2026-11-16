@@ -228,7 +228,7 @@ def test_assert_concat_preflight_rejects_member_with_coincident_contacts(
     monkeypatch.setattr(
         checks,
         "sort_group_geometry_problem",
-        lambda nwb_file_name, sort_group_id: (
+        lambda nwb_file_name, sort_group_id, preprocessing_params_name: (
             problem
             if (nwb_file_name, int(sort_group_id))
             == (last["nwb_file_name"], int(last["sort_group_id"]))

@@ -482,35 +482,55 @@ def test_effective_contact_plane(case, verdict):
         np.testing.assert_array_equal(positions, locations)
 
 
-def test_sort_group_planar_positions_matches_the_recording_stage():
-    """The plotted positions are the ones the recording stage installs.
+def test_effective_sort_group_geometry_matches_the_recording_stage():
+    """The geometry verdict follows the recording stage's order.
 
-    A single-group ``tetrode_12.5`` tetrode always gets the 12.5 um square,
-    whatever is registered; other groups use the plane that separates every
-    contact (a Frank-lab tetrode lies in x-z); a group no plane separates
-    and no repair rescues has none.
+    Partly missing positions are refused first, as ``Recording.make``
+    refuses them even for a tetrode. A single-group ``tetrode_12.5``
+    tetrode then gets the 12.5 um square, whatever is registered; other
+    groups use the plane that separates every contact (a Frank-lab tetrode
+    lies in x-z); a group no plane separates and no repair rescues
+    collapses.
     """
     from spyglass.spikesorting.v2._recording.geometry import (
-        sort_group_planar_positions,
+        effective_sort_group_geometry,
     )
+
+    def geometry(positions, probe_type):
+        return effective_sort_group_geometry(
+            positions,
+            probe_types=(probe_type,) * 4,
+            electrode_group_names=("0",) * 4,
+            n_members=4,
+        )
 
     xz_tetrode = np.array(
         [[0.0, 5.0, 0.0], [0.0, 5.0, 20.0], [20.0, 5.0, 0.0], [20.0, 5.0, 20.0]]
     )
-    source, planar = sort_group_planar_positions(
-        xz_tetrode, ("tetrode_12.5",) * 4, ("0",) * 4
-    )
-    assert source == "tetrode_12.5"
+    square = geometry(xz_tetrode, "tetrode_12.5")
+    assert (square.verdict, square.source) == ("tetrode", "tetrode_12.5")
     np.testing.assert_array_equal(
-        planar, [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
+        square.planar, [[0, 0], [0, 12.5], [12.5, 0], [12.5, 12.5]]
+    )
+    legacy = geometry(np.full((4, 3), np.nan), "tetrode_12.5")
+    assert legacy.verdict == "tetrode"
+
+    plane = geometry(xz_tetrode, "other_probe")
+    assert (plane.verdict, plane.source) == ("plane", "xz")
+    np.testing.assert_array_equal(plane.planar, xz_tetrode[:, [0, 2]])
+
+    collapsed = geometry(np.zeros((4, 3)), "other_probe")
+    assert (collapsed.verdict, collapsed.source, collapsed.planar) == (
+        "collapsed",
+        None,
+        None,
     )
 
-    source, planar = sort_group_planar_positions(
-        xz_tetrode, ("other_probe",) * 4, ("0",) * 4
+    partial_tetrode = xz_tetrode.copy()
+    partial_tetrode[2, 1] = np.nan
+    partial = geometry(partial_tetrode, "tetrode_12.5")
+    assert (partial.verdict, partial.source, partial.planar) == (
+        "partial",
+        None,
+        None,
     )
-    assert source == "xz"
-    np.testing.assert_array_equal(planar, xz_tetrode[:, [0, 2]])
-
-    assert sort_group_planar_positions(
-        np.zeros((4, 3)), ("other_probe",) * 4, ("0",) * 4
-    ) == (None, None)

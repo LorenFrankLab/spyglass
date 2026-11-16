@@ -6,6 +6,7 @@ Only the ``fetch_*`` functions read the database.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pynwb
@@ -283,37 +284,73 @@ def maybe_apply_tetrode_geometry(
 TETRODE_12_5_POSITIONS = ((0.0, 0.0), (0.0, 12.5), (12.5, 0.0), (12.5, 12.5))
 
 
-def sort_group_planar_positions(positions, probe_types, electrode_group_names):
-    """Return the 2D contact positions the recording stage gives a sort group.
+class SortGroupGeometry(NamedTuple):
+    """The contact geometry the recording stage gives a sort group.
 
-    The ``tetrode_12.5`` square when the repair applies, else the plane that
-    separates every contact.
+    Attributes
+    ----------
+    verdict : {"partial", "tetrode", "plane", "collapsed"}
+        ``"partial"``: some but not all coordinates are missing, which
+        ``Recording.make`` refuses. ``"tetrode"``: the ``tetrode_12.5`` repair
+        installs the square. ``"plane"``: an axis pair separates every
+        contact. ``"collapsed"``: neither.
+    source : {"tetrode_12.5", "xy", "xz", "yz"} or None
+        The repair or the chosen axis pair; ``None`` unless the group is
+        usable.
+    planar : numpy.ndarray or None
+        ``(n_contacts, 2)`` positions with ``source``, else ``None``.
+    positions : numpy.ndarray
+        ``(n_contacts, 3)`` registered positions; all zero when none was
+        registered and the repair does not apply.
+    """
+
+    verdict: str
+    source: "str | None"
+    planar: "np.ndarray | None"
+    positions: np.ndarray
+
+
+def effective_sort_group_geometry(
+    positions, *, probe_types, electrode_group_names, n_members: int
+) -> SortGroupGeometry:
+    """Classify a sort group's registered positions as the recording stage does.
+
+    Same order as ``Recording.make``: partly missing positions are refused
+    (:func:`normalize_channel_locations`), the ``tetrode_12.5`` repair then
+    replaces any positions, else the plane that separates every contact.
 
     Parameters
     ----------
     positions : array_like
         ``(n_contacts, 3)`` ``(rel_x, rel_y, rel_z)`` positions in sorted
-        electrode-id order, NaN where missing.
-    probe_types, electrode_group_names : tuple
-        Per-channel metadata, as :func:`fetch_sort_group_probe_info` returns.
+        electrode-id order, NaN where missing, with at least one contact.
+    probe_types, electrode_group_names : sequence of str
+        Per-contact metadata, as :func:`fetch_sort_group_probe_info` returns.
+    n_members : int
+        The sort group's member count, which the tetrode repair requires to
+        be four.
 
     Returns
     -------
-    source : {"tetrode_12.5", "xy", "xz", "yz"} or None
-        The repair, or the chosen axis pair; ``None`` when no plane
-        separates every contact or a position is missing (preflight refuses
-        such a group).
-    planar : numpy.ndarray or None
-        ``(n_contacts, 2)`` positions, or ``None`` with ``source``.
+    SortGroupGeometry
     """
+    positions = np.asarray(positions, dtype=float)
+    if classify_missing_geometry(positions) == "partial":
+        return SortGroupGeometry("partial", None, None, positions)
     if tetrode_repair_applies(
-        tuple(probe_types), tuple(electrode_group_names), len(positions)
+        tuple(probe_types), tuple(electrode_group_names), n_members
     ):
-        return "tetrode_12.5", np.asarray(TETRODE_12_5_POSITIONS)
-    verdict, registered, _ = effective_contact_plane(positions)
+        return SortGroupGeometry(
+            "tetrode",
+            "tetrode_12.5",
+            np.asarray(TETRODE_12_5_POSITIONS),
+            positions,
+        )
+    verdict, registered, planar = effective_contact_plane(positions)
     if verdict != "plane":
-        return None, None
-    return select_distinct_plane(registered)
+        return SortGroupGeometry("collapsed", None, None, registered)
+    source, planar = select_distinct_plane(registered)
+    return SortGroupGeometry("plane", source, planar, registered)
 
 
 # x-y first: probeinterface's select_axes default.

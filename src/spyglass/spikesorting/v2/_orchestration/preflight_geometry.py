@@ -89,15 +89,17 @@ def _coincident_contact_report(channel_ids, positions) -> str:
 
 
 def sort_group_geometry_problem(
-    nwb_file_name: str, sort_group_id: int
+    nwb_file_name: str, sort_group_id: int, preprocessing_params_name: str
 ) -> "str | None":
     """Report a sort group whose effective 2D contact geometry collapses.
 
-    SpikeInterface rejects coincident contacts. Reproduces the recording
-    stage's effective geometry (distinct plane, then the ``tetrode_12.5``
-    repair) on the registered ``Probe.Electrode`` positions of every member.
-    A group with no positions at all takes the tetrode repair; a partially
-    positioned group is reported with its missing columns.
+    SpikeInterface rejects coincident contacts. Applies the recording
+    stage's verdict (:func:`effective_sort_group_geometry`) to the
+    registered ``Probe.Electrode`` positions of the contacts the recording
+    keeps: the members, plus interior bad channels the recipe interpolates,
+    minus a ``specific`` reference. A group with no positions at all takes
+    the tetrode repair; a partially positioned group is reported with its
+    missing columns.
 
     Parameters
     ----------
@@ -105,6 +107,9 @@ def sort_group_geometry_problem(
         The raw NWB file.
     sort_group_id : int
         The sort group to check.
+    preprocessing_params_name : str
+        The run's ``PreprocessingParameters`` row, whose
+        ``bad_channel_handling`` decides the kept contacts.
 
     Returns
     -------
@@ -112,33 +117,39 @@ def sort_group_geometry_problem(
         ``None`` when the group's contacts are distinct (or will be made so
         by the tetrode repair); otherwise the operator-facing fix text.
     """
+    from spyglass.spikesorting.v2._recording.fetch import (
+        fetch_sort_group_contacts,
+    )
     from spyglass.spikesorting.v2._recording.geometry import (
-        effective_contact_plane,
-        fetch_sort_group_contact_positions,
-        fetch_sort_group_probe_info,
-        tetrode_repair_applies,
+        effective_sort_group_geometry,
     )
-    from spyglass.spikesorting.v2.recording import SortGroupV2
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
-    channel_ids = sorted(
-        (
-            SortGroupV2.SortGroupElectrode
-            & {
-                "nwb_file_name": nwb_file_name,
-                "sort_group_id": int(sort_group_id),
-            }
-        ).fetch("electrode_id"),
-        key=int,
-    )
-    if not channel_ids:
+    if not (
+        PreprocessingParameters
+        & {"preprocessing_params_name": preprocessing_params_name}
+    ):
+        # ``_check_source_param_rows`` reports the missing row.
+        return None
+    try:
+        contacts = fetch_sort_group_contacts(
+            nwb_file_name, sort_group_id, preprocessing_params_name
+        )
+    except ValueError as exc:
+        return f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r}: {exc}"
+    if contacts is None:
         # ``sort_group_has_electrodes`` reports this.
         return None
-
-    registered = fetch_sort_group_contact_positions(nwb_file_name, channel_ids)
-    # Same verdict as ``normalize_channel_locations`` at make.
-    verdict, positions, _ = effective_contact_plane(registered)
-    if verdict == "partial":
-        report = _missing_coordinate_report(channel_ids, positions)
+    geometry = effective_sort_group_geometry(
+        contacts.positions,
+        probe_types=contacts.probe_types,
+        electrode_group_names=contacts.electrode_group_names,
+        n_members=contacts.n_members,
+    )
+    if geometry.verdict == "partial":
+        report = _missing_coordinate_report(
+            contacts.channel_ids, geometry.positions
+        )
         return (
             f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
             "electrode(s) with an incomplete Probe.Electrode position "
@@ -147,23 +158,16 @@ def sort_group_geometry_problem(
             "to a group with NO positions at all. Populate Probe.Electrode "
             "rel_x/rel_y/rel_z for every electrode in the sort group."
         )
-
-    if verdict == "plane":
+    if geometry.verdict != "collapsed":
         return None
-
-    probe_types, electrode_group_names = fetch_sort_group_probe_info(
-        nwb_file_name, channel_ids
+    coincident = _coincident_contact_report(
+        contacts.channel_ids, geometry.positions
     )
-    if tetrode_repair_applies(
-        probe_types, electrode_group_names, len(channel_ids)
-    ):
-        # The recording stage spreads these onto the 12.5 um square.
-        return None
     return (
         f"sort_group_id={int(sort_group_id)} of {nwb_file_name!r} has "
         "contacts that share a position: no coordinate plane separates them. "
         f"Coincident in x-y (the projection SpikeInterface builds its probe "
-        f"from): {_coincident_contact_report(channel_ids, positions)}. Fix "
+        f"from): {coincident}. Fix "
         "Probe.Electrode rel_x/rel_y/rel_z for this sort group's electrodes; "
         "the tetrode_12.5 repair covers only 4-channel single-group tetrodes."
     )
