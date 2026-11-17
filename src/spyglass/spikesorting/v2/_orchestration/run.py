@@ -155,6 +155,8 @@ def run_v2_pipeline(
             ``root_curation_uuid`` / ``auto_labeled_curation_uuid`` : the
                 accessors' generation UUIDs
             ``sorter_config``            : ``EffectiveSortConfig.as_dict()``
+            ``scientific_config``        : setting to value for the resolved
+                preprocessing, artifact, motion and geometry settings
             ``n_units``                  : unit count (0 on a zero-unit sort)
         Single-session mode adds:
             ``recording_id``             : RecordingSelection PK
@@ -166,6 +168,10 @@ def run_v2_pipeline(
             ``member_merge_ids``         : frozen ``member_index`` to
                 wall-clock-aligned SpikeSortingOutput PK; points to the
                 auto-curated child when ``auto_curate=True``, otherwise the root
+            ``member_artifacts``         : per member, ``member_index``,
+                ``artifact_detection_id``, ``status`` and
+                ``masked_duration_s``
+            ``artifact_masked_duration_s`` : masked seconds over all members
         Motion keys (always present; ``None`` where they do not apply):
             ``motion_mode`` / ``motion_correction_params_name`` : the request
             ``motion_estimate_id``       : MotionEstimateSelection PK
@@ -181,7 +187,10 @@ def run_v2_pipeline(
                 peak; a non-empty list also adds a warning
         Per-stage keys:
             ``*_status``          : ``"computed"``, ``"reused"``, or
-                ``"skipped"`` (see ``StageStatus``)
+                ``"skipped"`` (see ``StageStatus``) for each stage, such as
+                ``sorting_status`` and ``curation_status``;
+                ``auto_curation_status`` and ``curation_evaluation_id`` only
+                with ``auto_curate=True``
             ``stage_seconds``     : wall-clock seconds per stage this call
             ``warnings``          : advisories raised during the run
 
@@ -192,7 +201,12 @@ def run_v2_pipeline(
     ------
     PipelineInputError
         Before any insert or compute: a source input is ``None``, the preset
-        is unknown, or the motion request is contradictory.
+        is unknown, a manual exclusion is malformed, the motion request is
+        contradictory, or (with ``preflight=False``) the motion recipe is
+        missing. The message starts with the entry point.
+    TypeError
+        If ``manual_excluded_times`` has the wrong container type (a
+        member-index mapping for a single session, a list for a concat).
     PreflightError
         If ``preflight=True`` and a prerequisite is missing.
     PipelineStageError
@@ -259,8 +273,9 @@ def run_v2_concat_pipeline(
         automatic artifact detection. Each must overlap that member's sorted
         time.
     preflight
-        If True (default), first run ``assert_concat_preflight``; a failure
-        raises ``PreflightError``.
+        If True (default), first run the checks of
+        :func:`preflight_v2_concat_pipeline`; a failure raises
+        ``PreflightError``.
     motion_estimate_id
         As in :func:`run_v2_pipeline`; the estimate must match this group's
         preprocessing recipe, members and member masks.
@@ -277,7 +292,7 @@ motion_mode, motion_correction_params_name
     Raises
     ------
     PipelineInputError, PreflightError, PipelineStageError, ZeroUnitSortError, \
-ValueError
+TypeError, ValueError
         As in :func:`run_v2_pipeline`.
     """
     # A bad request fails before any schema activates.

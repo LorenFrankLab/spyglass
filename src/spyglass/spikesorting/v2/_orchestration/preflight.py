@@ -115,6 +115,10 @@ def preflight_v2_pipeline(
     auto_curate
         Match ``run_v2_pipeline(auto_curate=...)``. When True, also verify the
         auto-curation rows and the metric analyzer recipe.
+    manual_excluded_times : list of [start, stop], optional
+        Match ``run_v2_pipeline``: half-open exclusions in absolute session
+        timestamps (the ``IntervalList.valid_times`` clock). Each must overlap
+        the sorted time, else ``manual_exclusions_overlap_sorted_time`` fails.
     motion_mode, motion_correction_params_name
         Match ``run_v2_pipeline``. A contradictory pair fails
         ``motion_request_valid``; an unfiltered preprocessing recipe fails
@@ -515,6 +519,8 @@ def preflight_v2_pipeline_session(
     auto_curate
         Match ``run_v2_pipeline_session(auto_curate=...)``; when True, each
         group's check also verifies the auto-curation prerequisite rows.
+    manual_excluded_times : list of [start, stop], optional
+        Match ``run_v2_pipeline_session``; checked against every group.
     motion_mode, motion_correction_params_name
         Match ``run_v2_pipeline_session``; checked for every group.
 

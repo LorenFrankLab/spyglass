@@ -506,9 +506,10 @@ def _shipped_default_rows(table) -> list[dict]:
 
 
 def _v2_default_catalog_tables():
-    """The default-bearing v2 parameter Lookups + their name attribute.
+    """The default-bearing v2 tables compared, with their name attribute.
 
-    Every table ``initialize_v2_defaults`` seeds.
+    Every table ``initialize_v2_defaults`` seeds except
+    ``CurationReviewProfile``.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (

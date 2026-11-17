@@ -250,6 +250,21 @@ def preflight_v2_unit_match(
     preflight never heals them. Resolver errors are collected per input. The
     shared source/geometry/backend validator stops at its first error, and
     subsequent checks are explicitly marked ``not_run``.
+
+    Parameters
+    ----------
+    plan : UnitMatchPlan or UnitMatchInputPlan
+        A plan from one of the ``plan_v2_unit_match*`` functions.
+
+    Returns
+    -------
+    UnitMatchPreflightReport
+        One check per requirement, with its status and recovery text.
+
+    Raises
+    ------
+    TypeError
+        If ``plan`` is not a unit-match plan.
     """
     if not isinstance(plan, (UnitMatchPlan, UnitMatchInputPlan)):
         raise TypeError(

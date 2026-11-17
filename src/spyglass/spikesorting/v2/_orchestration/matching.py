@@ -505,16 +505,36 @@ def plan_v2_unit_match_from_curations(
     """Plan matching directly from the exact curations a reviewer selected.
 
     Each curation pins its immutable generation, and a named eligibility
-    policy freezes the included units.
+    policy freezes the included units. The preflight is read-only;
+    ``run_v2_unit_match(plan)`` revalidates before any write.
 
-    - ``unit_policy``: default ``'v2_accepted_single_units'``; auto-only
-      workflows choose ``'v2_unflagged_single_units'``. Must exclude ``mua``.
-    - ``unit_selections``: optional, one :class:`UnitSelectionSnapshot` per
-      curation, each pinning that curation. Their policies apply when
-      ``unit_policy`` is omitted; an explicit ``unit_policy`` must match.
+    Parameters
+    ----------
+    curations : list of CurationRef
+        One curation per sorting, in input order.
+    unit_policy : str, optional
+        Unit-selection policy. Default ``'v2_accepted_single_units'``;
+        auto-only workflows choose ``'v2_unflagged_single_units'``. Must
+        exclude ``mua``.
+    matcher_params_name : str, optional
+        ``MatcherParameters`` row. Default ``"unitmatch_default"``.
+    unit_selections : list of UnitSelectionSnapshot, optional
+        One snapshot per curation, each pinning that curation. Their policies
+        apply when ``unit_policy`` is omitted; an explicit ``unit_policy``
+        must match.
 
-    The preflight is read-only; ``run_v2_unit_match(plan)`` revalidates before
-    any write.
+    Returns
+    -------
+    UnitMatchInputPlan
+        The plan with its preflight findings.
+
+    Raises
+    ------
+    ValueError
+        If ``curations`` is empty, names a sorting twice, or a snapshot pins
+        another curation or conflicts with ``unit_policy``.
+    TypeError
+        If an entry is not a ``CurationRef`` or ``UnitSelectionSnapshot``.
     """
     refs = list(curations)
     if not refs:
@@ -827,6 +847,16 @@ def describe_unit_match_choices(
     A member with no sort yet appears with null curation columns. Pass one
     ``{sorting_id, curation_id}`` per member as ``curation_choices``, or use
     :func:`plan_v2_unit_match`. Read-only.
+
+    Parameters
+    ----------
+    session_group_owner, session_group_name : str
+        The primary key of the ``SessionGroup``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per (member, curation).
 
     Raises
     ------

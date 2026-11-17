@@ -212,6 +212,19 @@ def describe_epochs(nwb_file_name: str, sort_group_id: int | None = None):
 
     Read-only: never inserts, downloads, or rebuilds.
 
+    Parameters
+    ----------
+    nwb_file_name : str
+        The ingested session.
+    sort_group_id : int, optional
+        Limit ``recording_keys`` to this ``SortGroupV2`` row. Default
+        ``None``: every sort group.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per interval list.
+
     Raises
     ------
     ValueError

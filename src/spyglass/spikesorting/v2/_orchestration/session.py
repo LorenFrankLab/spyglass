@@ -66,6 +66,9 @@ def run_v2_pipeline_session(
     ----------
     nwb_file_name, interval_list_name, team_name, curation_description, require_units, auto_curate
         As in :func:`run_v2_pipeline`; applied to every group.
+    manual_excluded_times : list of [start, stop], optional
+        As in :func:`run_v2_pipeline` (absolute session timestamps); applied
+        to every group.
     motion_mode, motion_correction_params_name
         As in :func:`run_v2_pipeline`; applied to every group.
     pipeline_preset
