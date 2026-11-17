@@ -987,6 +987,9 @@ def build_analyzer(
         Keyword-only. Resolved cache folder to write. Required.
     waveform_params : dict, optional
         Keyword-only. Resolved analyzer-waveform params blob. Required.
+    extensions : list of str, optional
+        Keyword-only. Extensions to compute. ``None`` (default) computes
+        ``BASE_ANALYZER_EXTENSIONS``.
     statistics_spans : list[tuple[int, int]], optional
         Keyword-only. Artifact-free frame spans of ``recording``; whitening
         and ``noise_levels`` sample only inside them. ``None`` (default)

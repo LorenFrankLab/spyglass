@@ -1340,6 +1340,11 @@ class MotionCorrectedRecording(
 
         Parameters
         ----------
+        key, selection, interpolation_params, estimate, source_content_hash, \
+source_path, source_electrical_series_path, nwb_file_name, source_kind, \
+source_key
+            The populate ``key``, then the :class:`MotionCorrectedFetched`
+            fields from ``make_fetch``.
         allow_spikeinterface_version_change : bool, optional
             Skip the SpikeInterface-version staleness check. Used by
             :meth:`_rebuild_nwb_artifact`, which verifies the content hash.

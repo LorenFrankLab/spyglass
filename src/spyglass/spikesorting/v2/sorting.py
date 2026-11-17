@@ -907,7 +907,8 @@ class Sorting(
     """
     # display_waveform_params_name is resolved once at sort time and read
     # back on rebuilds, so the analyzer is deterministic per sorting_id.
-    # The analyzer folder is not stored: its path depends on temp_dir.
+    # The analyzer folder is not stored: its path derives from sorting_id,
+    # the recipe and the cache root (analyzer_cache_root).
 
     class Unit(SpyglassMixinPart):
         """Per-unit metadata persisted at sort time.

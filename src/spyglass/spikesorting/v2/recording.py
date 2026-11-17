@@ -551,6 +551,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
+        nwb_file_name
+            The ingested session whose electrodes are grouped.
         electrode_column
             Name of the column in the Electrode table to group by.
             Special aliases ``"index"`` / ``"id"`` / ``"idx"`` /
@@ -926,7 +928,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     2. Reduce contact positions to a distinct plane.
     3. Phase shift and bandpass the continuous recording.
     4. Restrict to the sort interval.
-    5. Interpolate or remove bad channels, then reference.
+    5. Interpolate an ``interpolate`` recipe's bad channels, then reference.
     6. Fix tetrode geometry and check contact positions are distinct.
     7. Stream to a staged AnalysisNwbfile and fingerprint its content.
     8. Check the saved duration for truncation, then register the file.
@@ -1138,7 +1140,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 min_segment_length=params.min_segment_length,
             )
         )
-        # 5. Interpolate or remove bad channels, then reference.
+        # 5. Interpolate bad channels (``remove`` dropped them at step 1),
+        # then reference.
         recording, spatial_steps = apply_spatial_preprocessing(
             recording,
             reference_mode=fetched.reference_mode,

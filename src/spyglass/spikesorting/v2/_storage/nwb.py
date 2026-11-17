@@ -1,4 +1,6 @@
-"""NWB trace reading, preprocessing, streaming writes and geometry persistence.
+"""NWB trace reading, streaming writes and geometry persistence.
+
+Preprocessing lives in ``_recording.preprocessing``.
 
 Writers receive resolved inputs and never import their table module.
 Allocating a file with ``AnalysisNwbfile().create`` reads DataJoint metadata,
