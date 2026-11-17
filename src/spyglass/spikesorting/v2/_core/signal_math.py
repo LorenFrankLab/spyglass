@@ -1009,6 +1009,7 @@ def normalize_manual_exclusions(intervals):
     ):
         raise ValueError(
             "manual_excluded_times must contain finite [start, stop) pairs "
-            "with start < stop, in original session seconds."
+            "with start < stop, in absolute session timestamps (the "
+            "IntervalList valid_times clock, in seconds)."
         )
     return merge_sorted_intervals(sorted(values.tolist()))

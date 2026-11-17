@@ -38,7 +38,7 @@ def timeline_context(timeline, time_range=None):
         else "recording-relative"
     )
     lines = [
-        f"Times are **{basis} seconds**. Red bands mark excluded time, not observed silence. Manual exclusions use **original session seconds**.",
+        f"Times are **{basis} seconds**. Red bands mark excluded time, not observed silence. Manual exclusions use the **original session timestamps** (last column), not display seconds.",
         "",
         "| Session | Display seconds [start, stop) | Original seconds [start, stop) |",
         "| --- | --- | --- |",
