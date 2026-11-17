@@ -1360,6 +1360,9 @@ source_key
             read_recording_nwb,
             write_nwb_artifact,
         )
+        from spyglass.spikesorting.v2._storage.span_intervals import (
+            span_interval_tables,
+        )
 
         # 2. Resolve the interpolation recipe and refuse a stale selection.
         resolved = _motion_compute.resolve_interpolation_recipe(
@@ -1419,6 +1422,15 @@ source_key
                 f"{nwb_file_name} for spike sorting"
             ),
             provenance_tables=provenance_tables,
+            # ``source`` carries the timestamps the series stores.
+            interval_tables=span_interval_tables(
+                source,
+                statistics_spans=statistics,
+                continuity_spans=clock.spans,
+                continuity_start_s=clock.source_start_s,
+                continuity_end_s=clock.source_end_s,
+                is_concat=source_kind == "concatenated_recording",
+            ),
         )
         return MotionCorrectedComputed(
             analysis_file_name=analysis_file_name,

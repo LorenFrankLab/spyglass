@@ -123,6 +123,42 @@ def _reject_irreproducible_rebuild(
     )
 
 
+def _reject_span_tables_unlike_row(
+    computed, row: dict, *, context: str, member_end_samples=None
+) -> None:
+    """Discard a staged rebuild whose span tables differ from the row.
+
+    The file's span tables copy the row's span columns; a file without them
+    passes (:func:`._storage.span_intervals.span_interval_mismatches`).
+
+    Raises
+    ------
+    RecordingContentDriftError
+        If a span table differs. The staged file is removed first.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._storage.span_intervals import (
+        span_interval_mismatches,
+    )
+
+    mismatched = span_interval_mismatches(
+        AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+        continuity_start_s=row.get("continuity_start_s"),
+        continuity_end_s=row.get("continuity_end_s"),
+        member_end_samples=member_end_samples,
+    )
+    if not mismatched:
+        return
+    _unlink_staged_analysis_file(computed.analysis_file_name, context=context)
+    raise RecordingContentDriftError(
+        f"{context}: the rebuilt file's span tables {mismatched} do not match "
+        f"the stored row for {row['analysis_file_name']!r}. The canonical "
+        "artifact was NOT modified."
+    )
+
+
 def _file_identity(abs_path: str) -> tuple[int, int, int] | None:
     """``(inode, size, mtime_ns)`` of a file, or ``None`` if it is absent."""
     try:
@@ -367,6 +403,11 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
                 "deleting and repopulating the MotionCorrectedRecording row."
             ),
         )
+        _reject_span_tables_unlike_row(
+            computed,
+            row,
+            context="MotionCorrectedRecording._rebuild_nwb_artifact",
+        )
         install_rebuilt_recording(
             AnalysisNwbfile.get_abs_path(computed.analysis_file_name),
             canonical_abs,
@@ -477,6 +518,15 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
                 "modified. Delete and repopulate the "
                 "ConcatenatedRecording row (and its downstream)."
             )
+        _reject_span_tables_unlike_row(
+            computed,
+            row,
+            context="ConcatenatedRecording._rebuild_nwb_artifact",
+            member_end_samples=(
+                table.MemberBoundary
+                & {"concat_recording_id": concat_recording_id}
+            ).fetch("end_sample", order_by="member_index"),
+        )
 
         install_rebuilt_recording(
             AnalysisNwbfile.get_abs_path(computed.analysis_file_name),

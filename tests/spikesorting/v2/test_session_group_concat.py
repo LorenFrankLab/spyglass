@@ -1481,6 +1481,55 @@ def test_concat_rebuild_refuses_on_content_drift(same_day_group, monkeypatch):
 
 
 @pytest.mark.slow
+def test_concat_rebuild_refuses_span_tables_unlike_row(
+    same_day_group, monkeypatch
+):
+    """A rebuild whose file span tables differ from the row's span columns
+    raises ``RecordingContentDriftError`` and installs nothing."""
+    import shutil
+
+    import numpy as np
+
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+    from spyglass.spikesorting.v2._storage import span_intervals
+    from spyglass.spikesorting.v2.exceptions import (
+        RecordingContentDriftError,
+    )
+    from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
+
+    grp = same_day_group
+    concat_pk = _populate_concat(
+        grp["group_key"], grp["preprocessing_params_name"]
+    )
+    row = (ConcatenatedRecording & concat_pk).fetch1()
+    abs_path = AnalysisNwbfile.get_abs_path(
+        row["analysis_file_name"], from_schema=True
+    )
+    backup = str(abs_path) + ".spans.bak"
+    shutil.copy2(abs_path, backup)
+
+    real_tables = span_intervals.span_interval_tables
+
+    def _shifted_statistics(*args, statistics_spans, **kwargs):
+        shifted = np.asarray(statistics_spans).copy()
+        shifted[0, 0] += 1
+        return real_tables(*args, statistics_spans=shifted, **kwargs)
+
+    monkeypatch.setattr(
+        span_intervals, "span_interval_tables", _shifted_statistics
+    )
+    try:
+        Path(abs_path).unlink()
+        with pytest.raises(
+            RecordingContentDriftError, match="spyglass_v2_statistics_spans"
+        ):
+            ConcatenatedRecording()._rebuild_nwb_artifact(concat_pk)
+        assert not Path(abs_path).exists()
+    finally:
+        shutil.move(backup, abs_path)
+
+
+@pytest.mark.slow
 def test_concat_split_conserves_all_spikes(same_day_group):
     """``split_sorting_by_session`` maps every (unit, frame) to exactly one
     member and back. Boundaries not covering the frozen member set raise

@@ -255,6 +255,7 @@ def write_nwb_artifact(
     *,
     filtering_description: str,
     provenance_tables=None,
+    interval_tables=None,
     description: str | None = None,
 ) -> tuple[str, str, str]:
     """Write the preprocessed recording into an ``AnalysisNwbfile``.
@@ -289,6 +290,9 @@ def write_nwb_artifact(
         that ran.
     provenance_tables : list of hdmf.common.DynamicTable, optional
         Keyword-only. Provenance tables added as NWB scratch; not part of
+        ``content_hash``.
+    interval_tables : list of pynwb.epoch.TimeIntervals, optional
+        Keyword-only. Tables added to ``nwbfile.intervals``; not part of
         ``content_hash``.
     description : str, optional
         Keyword-only. ``ElectricalSeries.description``; ``None`` (default)
@@ -396,6 +400,8 @@ def write_nwb_artifact(
             nwbfile.add_acquisition(series)
             for table in provenance_tables or ():
                 nwbfile.add_scratch(table)
+            for table in interval_tables or ():
+                nwbfile.add_time_intervals(table)
             object_id = nwbfile.acquisition[_ELECTRICAL_SERIES_NAME].object_id
             io.write(nwbfile)
 

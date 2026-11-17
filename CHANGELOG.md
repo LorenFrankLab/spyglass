@@ -615,6 +615,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Remove v2 `DriftEstimate`. To flag high-drift sessions, use
         `estimate_motion` and its `motion_diagnostics["max_abs_displacement_um"]`
         or `MotionEstimate.max_abs_displacement_um` #1609
+    - v2 concatenated and motion-corrected recording NWB files also store their
+        statistics and continuity spans (and a concat's member boundaries) as
+        `TimeIntervals`, so a reader without the database can tell masked
+        samples and session joins apart #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

@@ -1178,7 +1178,7 @@ def test_stale_corrected_selection_is_refused_at_compute(
 
 @pytest.mark.parametrize("source", ["gapped_recording", "concat"])
 def test_estimate_and_corrected_recording_round_trip(
-    discontinuous_sources, monkeypatch, source
+    discontinuous_sources, monkeypatch, source, tmp_path
 ):
     """The reloaded corrected traces are the in-memory corrected traces,
     written with the source artifact's own timestamps (a recording with an
@@ -1369,8 +1369,40 @@ def test_estimate_and_corrected_recording_round_trip(
         with pytest.raises(KeyError):
             read_long_provenance(abs_path, CONCAT_MEMBERS)
 
+    # The row's spans are also standard TimeIntervals that plain pynwb reads,
+    # on the series' timestamps; the content hash ignores them.
+    from spyglass.spikesorting.v2._storage.span_intervals import (
+        read_span_intervals,
+        span_interval_mismatches,
+    )
+    from tests.spikesorting.v2._span_interval_checks import (
+        assert_span_tables_match,
+        read_span_tables_without_spyglass,
+        write_copy_without_span_tables,
+    )
+
+    assert len(row["continuity_spans"]) > 1
+    assert_span_tables_match(
+        read_span_tables_without_spyglass(abs_path),
+        times=corrected.get_times(),
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+        continuity_start_s=estimate_row["continuity_start_s"],
+        continuity_end_s=estimate_row["continuity_end_s"],
+    )
+    check = dict(
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+    )
+    assert span_interval_mismatches(abs_path, **check) == []
+    old_style = tmp_path / "old_style.nwb"
+    write_copy_without_span_tables(abs_path, old_style)
+    assert read_span_intervals(str(old_style)) == {}
+    assert span_interval_mismatches(str(old_style), **check) == []
+    assert _file_hash(old_style) == row["content_hash"]
+
     # Rebuilt from the saved motion (the estimator must not run): same hash,
-    # same traces.
+    # same traces, and the span tables.
     from pathlib import Path
 
     Path(abs_path).unlink()
@@ -1378,6 +1410,8 @@ def test_estimate_and_corrected_recording_round_trip(
     rebuilt = MotionCorrectedRecording().get_recording(key)
     assert _file_hash(abs_path) == row["content_hash"]
     np.testing.assert_array_equal(rebuilt.get_traces(), reloaded)
+    assert len(read_span_intervals(abs_path)) == 2
+    assert span_interval_mismatches(abs_path, **check) == []
 
 
 def test_persisted_corrected_traces_match_the_interpolation_oracle(

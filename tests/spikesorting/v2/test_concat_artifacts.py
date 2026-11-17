@@ -237,6 +237,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     chronic_2_session_minirec,
     monkeypatch,
     curation_evaluation_defaults,
+    tmp_path,
 ):
     from pathlib import Path
 
@@ -391,11 +392,75 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
             recording.get_channel_ids()
         )
 
+    # The file carries the row's spans and member boundaries as standard
+    # TimeIntervals that plain pynwb reads; the content hash ignores them.
+    from spyglass.spikesorting.v2._recording.fingerprint import (
+        recording_content_fingerprint,
+    )
+    from spyglass.spikesorting.v2._storage.recompute import combined_hash
+    from spyglass.spikesorting.v2._storage.span_intervals import (
+        read_span_intervals,
+        span_interval_mismatches,
+    )
+    from tests.spikesorting.v2._span_interval_checks import (
+        assert_span_tables_match,
+        read_span_tables_without_spyglass,
+        write_copy_without_span_tables,
+    )
+
+    abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+    ends = (ConcatenatedRecording.MemberBoundary & key).fetch(
+        "end_sample", order_by="member_index"
+    )
+    assert len(row["statistics_spans"]) > len(row["continuity_spans"]) > 1
+    assert_span_tables_match(
+        read_span_tables_without_spyglass(abs_path),
+        times=combined.get_times(),
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+        continuity_start_s=row["continuity_start_s"],
+        continuity_end_s=row["continuity_end_s"],
+        members=[
+            (i, member["nwb_file_name"], start, end)
+            for i, (member, start, end) in enumerate(
+                zip(fixture["same_day_members"], [0, *ends[:-1]], ends)
+            )
+        ],
+    )
+    check = dict(
+        member_end_samples=ends,
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+        continuity_start_s=row["continuity_start_s"],
+        continuity_end_s=row["continuity_end_s"],
+    )
+    assert span_interval_mismatches(abs_path, **check) == []
+    assert span_interval_mismatches(
+        abs_path, **{**check, "statistics_spans": row["statistics_spans"][1:]}
+    ) == ["spyglass_v2_statistics_spans.spans"]
+    # A file written before the tables existed hashes the same and passes.
+    old_style = tmp_path / "old_style.nwb"
+    write_copy_without_span_tables(abs_path, old_style)
+    assert read_span_intervals(str(old_style)) == {}
+    assert span_interval_mismatches(str(old_style), **check) == []
+    for path in (abs_path, old_style):
+        assert (
+            combined_hash(
+                recording_content_fingerprint(
+                    path, electrical_series_path=row["electrical_series_path"]
+                )
+            )
+            == row["content_hash"]
+        )
+
     before = combined.get_traces()
-    Path(AnalysisNwbfile.get_abs_path(row["analysis_file_name"])).unlink()
+    Path(abs_path).unlink()
     after = ConcatenatedRecording().get_recording(key)
     np.testing.assert_array_equal(after.get_traces(), before)
     assert len(observed) == 2
+    # The rebuild writes the tables, matching the row.
+    assert len(read_span_intervals(abs_path)) == 3
+    assert span_interval_mismatches(abs_path, **check) == []
 
     # Inspect the actual sorter input, then plant two deterministic units so
     # the test covers interval propagation even if a detector finds no units.

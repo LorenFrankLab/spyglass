@@ -585,6 +585,16 @@ helper must import without a database.
 - A single recording's trace artifact is stored unmasked; the sort's artifact
     valid times are applied at load (`_recording.source`). Concatenated and
     motion-corrected artifacts are stored masked.
+- Concatenated and motion-corrected files also hold their row's statistics and
+    continuity spans as `TimeIntervals` in `nwbfile.intervals`
+    (`spyglass_v2_statistics_spans`, `spyglass_v2_continuity_spans`; a concat
+    adds `spyglass_v2_concat_member_spans`), from `_storage.span_intervals`.
+    Each row has its sample range (`start_sample`, exclusive `end_sample`), the
+    series timestamps of its first and last sample, and for continuity spans the
+    same samples' times on the acquisition clock. A reader without the database
+    can then see which samples are zero from a mask and where sessions join.
+    The row's columns stay the copy the code reads; files written before these
+    tables lack them.
 
 ### Contact geometry
 
@@ -689,9 +699,11 @@ helper must import without a database.
     `~external` checksum. If the refresh fails, the installed file is removed so
     the next locked read retries.
 - Concat rebuilds also require the stored statistics and continuity spans to
-    match, because the content hash omits them and noise and motion estimation
-    read them. Motion-corrected rebuilds refuse a stale selection before
-    computing.
+    match, because the content hash omits them (and the file's span tables) and
+    noise and motion estimation read them. Concat and motion-corrected rebuilds
+    also require the rebuilt file's span tables to equal the row's columns; a
+    rebuild writes the tables even when the original file predates them.
+    Motion-corrected rebuilds refuse a stale selection before computing.
 - Drift causes include a SpikeInterface or BLAS upgrade, an edited raw NWB, or
     changed upstream inputs. The error names the file and the recovery options.
     There is no hash-mutating `repair()`.
@@ -730,7 +742,9 @@ the ordered member recordings) has the same fail-closed lifecycle as
     dependent concat and sorts. Masks apply before concatenation and masked
     samples stay masked. `obs_intervals` stores valid time on the concat
     timeline; `MemberBoundary.member_valid_times` stores it in original session
-    timestamps for member exports.
+    timestamps for member exports. The file's span tables (see
+    [Storage](#storage)) repeat the statistics and continuity spans and each
+    member's sample range and `nwb_file_name`.
 - **Reads and rebuilds mirror `Recording`.** A present file is read through the
     `~external` checksum. A missing file is rebuilt under
     `concat_recording_artifact_lock`, verified against `content_hash`, and
@@ -1374,7 +1388,9 @@ Every v2 analysis NWB carries the lineage needed to read it without the
 database. `nwbfile.get_scratch(name)` returns a DataFrame: a scalar header is a
 `key` / `value_json` table, a relational table has one row per member, unit, or
 pair. Large arrays (fingerprints, displacement, templates) are not duplicated;
-only the producing params are written.
+only the producing params are written. Concatenated and motion-corrected
+recordings also carry span tables in `nwbfile.intervals` (see
+[Storage](#storage)); `nwbfile.intervals[name].to_dataframe()` reads one.
 
 | Artifact                    | Container(s)                                                                                                                            | Carries                                                                                                                                                                                                                                                                                                                          |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

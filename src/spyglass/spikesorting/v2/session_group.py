@@ -641,6 +641,9 @@ class ConcatenatedRecording(
             member_kept_intervals,
             observation_intervals,
         )
+        from spyglass.spikesorting.v2._storage.span_intervals import (
+            span_interval_tables,
+        )
 
         # 2. Load each member's cached recording.
         recordings, member_sample_counts, member_indices = (
@@ -691,6 +694,29 @@ class ConcatenatedRecording(
                 "correction; unwhitened"
             ),
             provenance_tables=provenance_tables,
+            interval_tables=span_interval_tables(
+                concatenated,
+                statistics_spans=statistics,
+                continuity_spans=continuity_spans,
+                continuity_start_s=continuity_start_s,
+                continuity_end_s=continuity_end_s,
+                concat_members=[
+                    {
+                        "member_index": int(plan["member_index"]),
+                        "nwb_file_name": plan["nwb_file_name"],
+                        "interval_list_name": plan["interval_list_name"],
+                        "start_sample": start,
+                        "end_sample": end,
+                    }
+                    for plan, start, end in zip(
+                        member_plan,
+                        [0, *boundaries[:-1]],
+                        boundaries,
+                        strict=True,
+                    )
+                ],
+                is_concat=True,
+            ),
         )
         return ConcatRecordingComputed(
             analysis_file_name=analysis_file_name,
