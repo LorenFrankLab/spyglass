@@ -433,16 +433,14 @@ def motion_correction_provenance_tables(
     applied,
     source_kind: str,
     source_key: dict,
-    statistics: np.ndarray,
     clock,
     source_path: str,
 ) -> list:
     """The provenance tables a corrected recording's NWB carries.
 
-    The correction's ids, recipe and source, the statistics spans, each
-    continuity span with its real start and end times and its start on the
-    estimation clock, and, for a concatenation, the concatenation's member
-    back-map copied from the source artifact.
+    The correction's ids, recipe and source, and, for a concatenation, the
+    concatenation's member back-map copied from the source artifact. The
+    spans are in the file's span tables (``_storage.span_intervals``).
 
     Parameters
     ----------
@@ -460,8 +458,6 @@ def motion_correction_provenance_tables(
         ``"recording"`` or ``"concatenated_recording"``.
     source_key : dict
         The source row's primary key.
-    statistics : numpy.ndarray
-        ``(n, 2)`` int64 statistics spans.
     clock : _motion.EstimationClock
         The estimate's estimation clock.
     source_path : str
@@ -478,8 +474,6 @@ def motion_correction_provenance_tables(
     from spyglass.spikesorting.v2._storage.provenance import (
         CONCAT_MEMBER_COLUMNS,
         CONCAT_MEMBERS,
-        MOTION_CONTINUITY_SPAN_COLUMNS,
-        MOTION_CONTINUITY_SPANS,
         MOTION_CORRECTION_PROVENANCE,
         build_long_provenance_table,
         build_provenance_table,
@@ -508,39 +502,10 @@ def motion_correction_provenance_tables(
                 "source_key": {
                     name: str(value) for name, value in source_key.items()
                 },
-                "statistics_spans": statistics.tolist(),
                 "estimation_clock_sampling_frequency": (
                     clock.sampling_frequency
                 ),
             },
-        ),
-        build_long_provenance_table(
-            MOTION_CONTINUITY_SPANS,
-            [
-                {
-                    "span_index": index,
-                    "start_sample": int(start),
-                    "end_sample": int(end),
-                    "source_start_s": float(source_start),
-                    "source_end_s": float(source_end),
-                    "estimation_start_s": float(estimation_start),
-                }
-                for index, (
-                    (start, end),
-                    source_start,
-                    source_end,
-                    estimation_start,
-                ) in enumerate(
-                    zip(
-                        clock.spans,
-                        clock.source_start_s,
-                        clock.source_end_s,
-                        clock.estimation_start_s,
-                        strict=True,
-                    )
-                )
-            ],
-            MOTION_CONTINUITY_SPAN_COLUMNS,
         ),
     ]
     if source_kind == "concatenated_recording":

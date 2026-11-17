@@ -644,10 +644,21 @@ helper must import without a database.
     adds `spyglass_v2_concat_member_spans`), from `_storage.span_intervals`.
     Each row has its sample range (`start_sample`, exclusive `end_sample`), the
     series timestamps of its first and last sample, and for continuity spans the
-    same samples' times on the acquisition clock. A reader without the database
-    can then see which samples are zero from a mask and where sessions join.
-    The row's columns stay the copy the code reads; files written before these
-    tables lack them.
+    same samples' times on the acquisition clock (plus `estimation_start_time`
+    in a motion-corrected file). A concat member row also lists the member's
+    kept intervals on its own clock (`valid_times`, `MemberBoundary.
+    member_valid_times`). A reader without the database can then see which
+    samples are zero from a mask and where sessions join. A concat's observed
+    time (`obs_intervals`) is the statistics spans with touching rows merged,
+    so it is not written separately.
+- The file holds each span fact once. Files exist in three generations: the
+    first has none of these tables (a motion file holds its spans in the
+    scratch objects `spyglass_v2_motion_continuity_spans` and the
+    `statistics_spans` entry of its provenance header; a concat header holds
+    `obs_intervals`); the second has the tables and those scratch copies; the
+    current one has only the tables. `_storage.span_intervals.
+    read_trace_file_spans` reads any generation, preferring the tables. The
+    row's columns stay the copy the code reads.
 - `Recording.make_insert` writes the times the recording was cut to
     (`intended_save_intervals`, v1's rule) to `IntervalList` as
     `recording_{recording_id}` with pipeline `spikesorting_recording_v2`, owned
@@ -763,8 +774,10 @@ helper must import without a database.
 - Concat rebuilds also require the stored statistics and continuity spans to
     match, because the content hash omits them (and the file's span tables) and
     noise and motion estimation read them. Concat and motion-corrected rebuilds
-    also require the rebuilt file's span tables to equal the row's columns; a
-    rebuild writes the tables even when the original file predates them.
+    also require the rebuilt file's span facts (read with
+    `read_trace_file_spans`) to equal the row's columns and, for a concat,
+    `MemberBoundary`; a rebuild writes the current tables whatever generation
+    the original file was.
     Motion-corrected rebuilds refuse a stale selection before computing.
 - Drift causes include a SpikeInterface or BLAS upgrade, an edited raw NWB, or
     changed upstream inputs. The error names the file and the recovery options.
@@ -805,7 +818,7 @@ the ordered member recordings) has the same fail-closed lifecycle as
     timeline; `MemberBoundary.member_valid_times` stores it in original session
     timestamps for member exports. The file's span tables (see
     [Storage](#storage)) repeat the statistics and continuity spans and each
-    member's sample range and `nwb_file_name`.
+    member's sample range, `nwb_file_name` and kept intervals.
 - **Reads and rebuilds mirror `Recording`.** A present file is read through the
     `~external` checksum. A missing file is rebuilt under
     `concat_recording_artifact_lock`, verified against `content_hash`, and
@@ -1488,8 +1501,8 @@ recordings also carry span tables in `nwbfile.intervals` (see
 | Concat member curated units | `spyglass_v2_curation_provenance` + `spyglass_v2_curation_merge_lineage`                                                                | the concat curation provenance plus `member_index` / member `nwb_file_name`; wall-clock times and local sample frames, unit ids preserved across members                                                                                                                                                                         |
 | UnitMatch                   | `spyglass_v2_unitmatch_provenance` + `spyglass_v2_unitmatch_inputs` + `spyglass_v2_unitmatch_input_recordings`                          | run and matcher header (backend, versions); per input `(sorting_id, curation_id, curation_uuid, source_kind, source_id, input_start_time, waveform_traces, motion_corrected_recording_id)`; per recording `(nwb_file_name, interval_list_name, recording_id, session_start_time, start_sample, end_sample)`                      |
 | CurationEvaluation          | `spyglass_v2_curation_evaluation_provenance`                                                                                            | metric set and recipe names, auto-merge preset and rules, evaluated curation, `source_analyzer_hashes`, SI version, upstream recording or concat `content_hash`                                                                                                                                                                  |
-| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`                                                                          | member artifact detection ids, excluded frame ranges, valid observation intervals, ordered member frame boundaries                                                                                                                                                                                                               |
-| MotionCorrectedRecording    | `spyglass_v2_motion_correction_provenance` + `spyglass_v2_motion_continuity_spans` (+ `spyglass_v2_concat_members` for a concat source) | interpolation recipe and resolved config, SI version, estimate and corrected-recording ids, algorithm version, source (kind, key, `content_hash`), removed channels, statistics spans, each continuity span's frames, first/last timestamp and estimation-clock start, and a concat's member back-map                            |
+| ConcatenatedRecording       | `spyglass_v2_concat_provenance` + `spyglass_v2_concat_members`                                                                          | member artifact detection ids, excluded frame ranges, ordered member frame boundaries                                                                                                                                                                                                                                            |
+| MotionCorrectedRecording    | `spyglass_v2_motion_correction_provenance` (+ `spyglass_v2_concat_members` for a concat source)                                         | interpolation recipe and resolved config, SI version, estimate and corrected-recording ids, algorithm version, source (kind, key, `content_hash`), removed channels, estimation-clock rate, and a concat's member back-map; the spans are in the span tables                                                                     |
 
 ```python
 import pynwb

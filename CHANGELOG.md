@@ -528,10 +528,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Remove v2 `DriftEstimate`. To flag high-drift sessions, use
         `estimate_motion` and its `motion_diagnostics["max_abs_displacement_um"]`
         or `MotionEstimate.max_abs_displacement_um` #1609
-    - v2 concatenated and motion-corrected recording NWB files also store their
-        statistics and continuity spans (and a concat's member boundaries) as
-        `TimeIntervals`, so a reader without the database can tell masked
-        samples and session joins apart #1609
+    - v2 concatenated and motion-corrected recording NWB files store their
+        statistics and continuity spans (and a concat's member boundaries and
+        member kept intervals) once, as `TimeIntervals`, so a reader without the
+        database can tell masked samples and session joins apart; the scratch
+        span copies and the concat header's `obs_intervals` are no longer
+        written #1609
     - v2 `PreprocessingParameters` drops its `job_kwargs` column, which the
         recording stage never read; an insert with that key raises #1609
     - v2 `Sorting.time_of_sort` is a `timestamp` the database server fills in, so

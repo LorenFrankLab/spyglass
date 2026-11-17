@@ -682,7 +682,6 @@ class ConcatenatedRecording(
             member_sample_counts=member_sample_counts,
             boundaries=boundaries,
             artifact_ranges=artifact_ranges,
-            obs_intervals=obs_intervals,
         )
         analysis_file_name, object_id, content_hash = write_nwb_artifact(
             concatenated,
@@ -707,11 +706,13 @@ class ConcatenatedRecording(
                         "interval_list_name": plan["interval_list_name"],
                         "start_sample": start,
                         "end_sample": end,
+                        "valid_times": valid_times,
                     }
-                    for plan, start, end in zip(
+                    for plan, start, end, valid_times in zip(
                         member_plan,
                         [0, *boundaries[:-1]],
                         boundaries,
+                        member_valid_times,
                         strict=True,
                     )
                 ],

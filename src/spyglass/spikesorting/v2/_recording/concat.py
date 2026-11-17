@@ -746,7 +746,6 @@ def concat_provenance_tables(
     member_sample_counts: list[int],
     boundaries: list[int],
     artifact_ranges,
-    obs_intervals,
 ) -> list:
     """Provenance tables embedded in the concatenated recording's NWB file.
 
@@ -771,8 +770,6 @@ def concat_provenance_tables(
         Cumulative member end samples (:func:`cumulative_member_boundaries`).
     artifact_ranges : list[tuple[int, int]]
         Half-open concat frame ranges masked as artifact.
-    obs_intervals : np.ndarray
-        ``(n, 2)`` kept intervals on the concat timeline, in seconds.
 
     Returns
     -------
@@ -816,7 +813,6 @@ def concat_provenance_tables(
                 "anchor_nwb_file_name": anchor_nwb_file_name,
                 "n_members": len(member_plan),
                 "artifact_frame_ranges": artifact_ranges,
-                "obs_intervals": obs_intervals.tolist(),
             },
         ),
         build_long_provenance_table(

@@ -1376,7 +1376,6 @@ source_key
             applied,
             source_kind,
             source_key,
-            statistics,
             clock,
             source_path,
         )
@@ -1399,6 +1398,7 @@ source_key
                 continuity_spans=clock.spans,
                 continuity_start_s=clock.source_start_s,
                 continuity_end_s=clock.source_end_s,
+                estimation_start_s=clock.estimation_start_s,
                 is_concat=source_kind == "concatenated_recording",
             ),
         )

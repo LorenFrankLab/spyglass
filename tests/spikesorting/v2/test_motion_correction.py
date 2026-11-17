@@ -1324,9 +1324,8 @@ def test_estimate_and_corrected_recording_round_trip(
     assert provenance["source_key"] == {
         name: str(value) for name, value in lineage.key.items()
     }
-    assert provenance["statistics_spans"] == (
-        estimate_row["statistics_spans"].tolist()
-    )
+    # The spans are held once, in the standard tables checked below.
+    assert "statistics_spans" not in provenance
     assert provenance["estimation_clock_sampling_frequency"] == (
         estimate_row["sampling_frequency"]
     )
@@ -1336,20 +1335,8 @@ def test_estimate_and_corrected_recording_round_trip(
         read_long_provenance,
     )
 
-    spans = read_long_provenance(abs_path, MOTION_CONTINUITY_SPANS)
-    assert [s["span_index"] for s in spans] == list(range(len(spans)))
-    np.testing.assert_array_equal(
-        [[s["start_sample"], s["end_sample"]] for s in spans],
-        estimate_row["continuity_spans"],
-    )
-    for field, column in (
-        ("source_start_s", "continuity_start_s"),
-        ("source_end_s", "continuity_end_s"),
-        ("estimation_start_s", "estimation_start_s"),
-    ):
-        np.testing.assert_array_equal(
-            [s[field] for s in spans], estimate_row[column]
-        )
+    with pytest.raises(KeyError):
+        read_long_provenance(abs_path, MOTION_CONTINUITY_SPANS)
     if source == "concat":
         concat_path = AnalysisNwbfile.get_abs_path(
             (ConcatenatedRecording & source_key).fetch1("analysis_file_name")
@@ -1371,42 +1358,66 @@ def test_estimate_and_corrected_recording_round_trip(
         with pytest.raises(KeyError):
             read_long_provenance(abs_path, CONCAT_MEMBERS)
 
+    from pathlib import Path
+
     # The row's spans are also standard TimeIntervals that plain pynwb reads,
     # on the series' timestamps; the content hash ignores them.
     from spyglass.spikesorting.v2._storage.span_intervals import (
         read_span_intervals,
+        read_trace_file_spans,
         span_interval_mismatches,
     )
     from tests.spikesorting.v2._span_interval_checks import (
+        MOTION_CONTINUITY,
+        add_motion_scratch_spans,
         assert_span_tables_match,
         read_span_tables_without_spyglass,
         write_copy_without_span_tables,
     )
 
     assert len(row["continuity_spans"]) > 1
+    tables = read_span_tables_without_spyglass(abs_path)
+    assert MOTION_CONTINUITY not in tables["scratch"]
     assert_span_tables_match(
-        read_span_tables_without_spyglass(abs_path),
+        tables,
         times=corrected.get_times(),
         statistics_spans=row["statistics_spans"],
         continuity_spans=row["continuity_spans"],
         continuity_start_s=estimate_row["continuity_start_s"],
         continuity_end_s=estimate_row["continuity_end_s"],
+        estimation_start_s=estimate_row["estimation_start_s"],
     )
     check = dict(
         statistics_spans=row["statistics_spans"],
         continuity_spans=row["continuity_spans"],
     )
-    assert span_interval_mismatches(abs_path, **check) == []
-    old_style = tmp_path / "old_style.nwb"
-    write_copy_without_span_tables(abs_path, old_style)
-    assert read_span_intervals(str(old_style)) == {}
-    assert span_interval_mismatches(str(old_style), **check) == []
-    assert _file_hash(old_style) == row["content_hash"]
+    # The three file generations (scratch copies only, both copies, standard
+    # tables only) give the same spans, pass the check and hash the same.
+    scratch_spans = dict(
+        statistics_spans=row["statistics_spans"],
+        continuity_spans=row["continuity_spans"],
+        continuity_start_s=estimate_row["continuity_start_s"],
+        continuity_end_s=estimate_row["continuity_end_s"],
+        estimation_start_s=estimate_row["estimation_start_s"],
+    )
+    both = tmp_path / "both.nwb"
+    both.write_bytes(Path(abs_path).read_bytes())
+    add_motion_scratch_spans(both, **scratch_spans)
+    scratch_only = tmp_path / "scratch_only.nwb"
+    write_copy_without_span_tables(both, scratch_only)
+    assert read_span_intervals(str(scratch_only)) == {}
+    for path in (abs_path, both, scratch_only):
+        spans = read_trace_file_spans(str(path))
+        for field, expected in scratch_spans.items():
+            np.testing.assert_array_equal(
+                getattr(spans, field),
+                np.asarray(expected).reshape(getattr(spans, field).shape),
+            )
+        assert span_interval_mismatches(str(path), **check) == []
+        assert _file_hash(path) == row["content_hash"]
 
     # Rebuilt from the saved motion (the estimator must not run): same hash,
     # same traces, and the span tables.
-    from pathlib import Path
-
     Path(abs_path).unlink()
     monkeypatch.setattr(_motion, "estimate_motion_in_spans", _no_estimation)
     rebuilt = MotionCorrectedRecording().get_recording(key)

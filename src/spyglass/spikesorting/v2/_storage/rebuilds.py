@@ -124,7 +124,12 @@ def _reject_irreproducible_rebuild(
 
 
 def _reject_span_tables_unlike_row(
-    computed, row: dict, *, context: str, member_end_samples=None
+    computed,
+    row: dict,
+    *,
+    context: str,
+    member_end_samples=None,
+    member_valid_times=None,
 ) -> None:
     """Discard a staged rebuild whose span tables differ from the row.
 
@@ -148,6 +153,7 @@ def _reject_span_tables_unlike_row(
         continuity_start_s=row.get("continuity_start_s"),
         continuity_end_s=row.get("continuity_end_s"),
         member_end_samples=member_end_samples,
+        member_valid_times=member_valid_times,
     )
     if not mismatched:
         return
@@ -518,14 +524,15 @@ def rebuild_concat_nwb_artifact(table, key) -> None:
                 "modified. Delete and repopulate the "
                 "ConcatenatedRecording row (and its downstream)."
             )
+        member_end_samples, member_valid_times = (
+            table.MemberBoundary & {"concat_recording_id": concat_recording_id}
+        ).fetch("end_sample", "member_valid_times", order_by="member_index")
         _reject_span_tables_unlike_row(
             computed,
             row,
             context="ConcatenatedRecording._rebuild_nwb_artifact",
-            member_end_samples=(
-                table.MemberBoundary
-                & {"concat_recording_id": concat_recording_id}
-            ).fetch("end_sample", order_by="member_index"),
+            member_end_samples=member_end_samples,
+            member_valid_times=member_valid_times,
         )
 
         install_rebuilt_recording(

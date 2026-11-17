@@ -37,6 +37,8 @@ CURATION_EVALUATION_PROVENANCE = "spyglass_v2_curation_evaluation_provenance"
 CONCAT_PROVENANCE = "spyglass_v2_concat_provenance"
 CONCAT_MEMBERS = "spyglass_v2_concat_members"
 MOTION_CORRECTION_PROVENANCE = "spyglass_v2_motion_correction_provenance"
+#: Read only from files that predate the span tables
+#: (``_storage.span_intervals.read_trace_file_spans``).
 MOTION_CONTINUITY_SPANS = "spyglass_v2_motion_continuity_spans"
 
 #: Columns of the ``CONCAT_MEMBERS`` member back-map: each member's frames
@@ -85,17 +87,6 @@ UNITMATCH_INPUT_RECORDING_COLUMNS = [
     ("source_coverage_json", str),
 ]
 
-#: Columns of ``MOTION_CONTINUITY_SPANS``: each continuity span's frames
-#: ``[start_sample, end_sample)``, its first and last timestamp on the
-#: source's own clock and its start on the motion-estimation clock (s).
-MOTION_CONTINUITY_SPAN_COLUMNS = [
-    ("span_index", int),
-    ("start_sample", int),
-    ("end_sample", int),
-    ("source_start_s", float),
-    ("source_end_s", float),
-    ("estimation_start_s", float),
-]
 
 _KEY_COLUMN = "key"
 _VALUE_COLUMN = "value_json"

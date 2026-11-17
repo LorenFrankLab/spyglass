@@ -1510,7 +1510,7 @@ def test_concat_rebuild_refuses_span_tables_unlike_row(
     try:
         Path(abs_path).unlink()
         with pytest.raises(
-            RecordingContentDriftError, match="spyglass_v2_statistics_spans"
+            RecordingContentDriftError, match="statistics_spans"
         ):
             ConcatenatedRecording()._rebuild_nwb_artifact(concat_pk)
         assert not Path(abs_path).exists()
@@ -1620,6 +1620,8 @@ def test_concat_nwb_reconstructs_member_boundaries(same_day_group):
         concat_pk["concat_recording_id"]
     )
     assert not any("motion" in field for field in header)
+    # Observed time is held once, in the statistics span table.
+    assert "obs_intervals" not in header
 
     members = sorted(
         read_long_provenance(abs_path, CONCAT_MEMBERS),

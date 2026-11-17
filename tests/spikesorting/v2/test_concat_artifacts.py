@@ -400,18 +400,20 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2._storage.span_intervals import (
         read_span_intervals,
+        read_trace_file_spans,
         span_interval_mismatches,
     )
     from tests.spikesorting.v2._span_interval_checks import (
         assert_span_tables_match,
         read_span_tables_without_spyglass,
+        write_concat_copy_without_valid_times,
         write_copy_without_span_tables,
     )
 
     abs_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
-    ends = (ConcatenatedRecording.MemberBoundary & key).fetch(
-        "end_sample", order_by="member_index"
-    )
+    ends, member_valid_times = (
+        ConcatenatedRecording.MemberBoundary & key
+    ).fetch("end_sample", "member_valid_times", order_by="member_index")
     assert len(row["statistics_spans"]) > len(row["continuity_spans"]) > 1
     assert_span_tables_match(
         read_span_tables_without_spyglass(abs_path),
@@ -421,14 +423,20 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         continuity_start_s=row["continuity_start_s"],
         continuity_end_s=row["continuity_end_s"],
         members=[
-            (i, member["nwb_file_name"], start, end)
-            for i, (member, start, end) in enumerate(
-                zip(fixture["same_day_members"], [0, *ends[:-1]], ends)
+            (i, member["nwb_file_name"], start, end, valid)
+            for i, (member, start, end, valid) in enumerate(
+                zip(
+                    fixture["same_day_members"],
+                    [0, *ends[:-1]],
+                    ends,
+                    member_valid_times,
+                )
             )
         ],
     )
     check = dict(
         member_end_samples=ends,
+        member_valid_times=member_valid_times,
         statistics_spans=row["statistics_spans"],
         continuity_spans=row["continuity_spans"],
         continuity_start_s=row["continuity_start_s"],
@@ -437,13 +445,28 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
     assert span_interval_mismatches(abs_path, **check) == []
     assert span_interval_mismatches(
         abs_path, **{**check, "statistics_spans": row["statistics_spans"][1:]}
-    ) == ["spyglass_v2_statistics_spans.spans"]
-    # A file written before the tables existed hashes the same and passes.
-    old_style = tmp_path / "old_style.nwb"
-    write_copy_without_span_tables(abs_path, old_style)
-    assert read_span_intervals(str(old_style)) == {}
-    assert span_interval_mismatches(str(old_style), **check) == []
-    for path in (abs_path, old_style):
+    ) == ["statistics_spans"]
+    assert span_interval_mismatches(
+        abs_path, **{**check, "member_valid_times": member_valid_times[::-1]}
+    ) == ["member_valid_times"]
+    # Files of the earlier generations (no tables; tables without member
+    # valid times) hash the same, pass, and give the same observed time.
+    no_tables = tmp_path / "no_tables.nwb"
+    write_copy_without_span_tables(abs_path, no_tables)
+    no_valid_times = tmp_path / "no_valid_times.nwb"
+    write_concat_copy_without_valid_times(abs_path, no_valid_times)
+    assert read_span_intervals(str(no_tables)) == {}
+    sampling_frequency = combined.get_sampling_frequency()
+    for path in (abs_path, no_tables, no_valid_times):
+        assert span_interval_mismatches(str(path), **check) == []
+        np.testing.assert_allclose(
+            read_trace_file_spans(str(path)).observed_spans
+            / sampling_frequency,
+            row["obs_intervals"],
+            rtol=0,
+            atol=1e-9,
+        )
+    for path in (abs_path, no_tables, no_valid_times):
         assert (
             combined_hash(
                 recording_content_fingerprint(
