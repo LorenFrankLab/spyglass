@@ -1132,7 +1132,6 @@ def test_phase_shift_field_does_not_change_default_recording(
             "preprocessing_params_name": "_pytest_legacy_no_phase_shift",
             "params": legacy_blob,
             "params_schema_version": 4,
-            "job_kwargs": None,
         },
         skip_duplicates=True,
         allow_duplicate_params=True,

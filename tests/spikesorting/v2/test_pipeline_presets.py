@@ -1527,6 +1527,18 @@ def test_describe_pipeline_preset_unpacks_curation_values(dj_conn, clone_env):
 
 @pytest.mark.database
 @pytest.mark.db_unit
+def test_describe_pipeline_preset_leaves_preprocessing_job_kwargs_blank(
+    dj_conn, clone_env
+):
+    """Preprocessing has no job settings, so its ``job_kwargs`` is blank."""
+    detail = describe_pipeline_preset(_CLONE_BASE)
+    preprocessing = detail[detail["stage"] == "preprocessing"]
+    assert not preprocessing.empty
+    assert preprocessing["job_kwargs"].isna().all()
+
+
+@pytest.mark.database
+@pytest.mark.db_unit
 def test_describe_pipeline_preset_artifact_none_skips_artifact(
     dj_conn, clone_env
 ):

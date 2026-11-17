@@ -693,7 +693,8 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Phase-shift + bandpass + bad-channel + reference parameters.
 
     Validated by :class:`PreprocessingParamsSchema`. Whitening is set in
-    ``SorterParameters`` and ``AnalyzerWaveformParameters`` instead.
+    ``SorterParameters`` and ``AnalyzerWaveformParameters`` instead. There is
+    no ``job_kwargs`` column: ``Recording`` streams its output in one process.
     """
 
     definition = """
@@ -701,7 +702,6 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     ---
     params: blob
     params_schema_version=4: int
-    job_kwargs=null: blob
     """
 
     # params_schema_version must equal PreprocessingParamsSchema.schema_version.
@@ -713,7 +713,21 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
         ``allow_duplicate_params=True`` opts out of the duplicate-content
         guard (a second name for an existing blob); see
         ``reject_duplicate_parameter_content``.
+
+        Raises
+        ------
+        ValueError
+            If a row carries a ``job_kwargs`` key.
         """
+
+        def _reject_job_kwargs(row, _schema_cls):
+            if "job_kwargs" in row:
+                raise ValueError(
+                    "PreprocessingParameters has no job_kwargs: the recording "
+                    "stage writes in one process and takes no job settings. "
+                    "Drop the job_kwargs key."
+                )
+
         _insert_parameter_rows(
             self,
             rows,
@@ -721,6 +735,7 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
             schema_for=lambda _row: PreprocessingParamsSchema,
             table_name="PreprocessingParameters",
             name_attr="preprocessing_params_name",
+            per_row_hook=_reject_job_kwargs,
             allow_duplicate_params=allow_duplicate_params,
             **kwargs,
         )

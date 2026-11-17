@@ -849,7 +849,7 @@ def test_recipe_catalog_rows_copy_inner_schema_version():
         sorter_default_contents,
     )
 
-    for name, params, version, _job_kwargs in preprocessing_default_contents():
+    for name, params, version in preprocessing_default_contents():
         assert version == params["schema_version"], name
 
     for name, params, version, _job_kwargs in artifact_default_contents():

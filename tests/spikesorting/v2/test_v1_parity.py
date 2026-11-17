@@ -66,12 +66,7 @@ def test_default_has_no_recording_stage_whiten():
 
     contents = {
         name: params
-        for (
-            name,
-            params,
-            _ver,
-            _job,
-        ) in PreprocessingParameters._DEFAULT_CONTENTS
+        for name, params, _ver in PreprocessingParameters._DEFAULT_CONTENTS
     }
     assert "default" in contents
     assert "whiten" not in contents["default"]
@@ -88,12 +83,7 @@ def test_phase_shift_preset_neuropixels_on_franklab_off():
 
     contents = {
         name: params
-        for (
-            name,
-            params,
-            _ver,
-            _job,
-        ) in PreprocessingParameters._DEFAULT_CONTENTS
+        for name, params, _ver in PreprocessingParameters._DEFAULT_CONTENTS
     }
 
     assert contents["default"]["phase_shift"] is None

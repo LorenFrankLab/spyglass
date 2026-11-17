@@ -54,7 +54,8 @@ def parameter_fingerprint(
     params_schema_version : int
         The row's ``params_schema_version``.
     job_kwargs : dict or None, optional
-        The per-row ``job_kwargs`` blob.
+        The per-row ``job_kwargs`` blob. ``None`` covers both a NULL value and
+        a table without the column, so the two fingerprint alike.
     sorter : str or None, optional
         For ``SorterParameters`` rows, the ``sorter``; ``None`` elsewhere.
     matcher : str or None, optional

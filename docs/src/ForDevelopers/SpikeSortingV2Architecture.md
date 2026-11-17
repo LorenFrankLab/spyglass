@@ -1450,6 +1450,9 @@ v2 assumes a trusted compute operator; the user-facing rules are in the
     8.9, 2.7 and 0.74 s on 11 real searches.
 - `n_jobs` stays at SpikeInterface's single worker unless a layer sets it. On a
     real 20 min epoch, four worker processes saved ~6 s.
+- `Recording` streams its NWB write in one process, so `PreprocessingParameters`
+    has no `job_kwargs` column. The other stage parameter tables that have one
+    resolve it through `_core/job_config.py`.
 
 ## Shared code outside v2
 

@@ -274,6 +274,30 @@ for part, parent, columns in changes:
     )
 ```
 
+```python
+# Only for a database that declared the spike sorting v2 tables before this
+# release (#1609). Run once.
+from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+# `PreprocessingParameters` drops `job_kwargs`: the recording stage never read
+# it. Stop if a row set it, so you clear the unused value yourself. Rows that
+# differed only in `job_kwargs` then share content, which
+# `describe_parameter_rows()` marks as `duplicate_of`. Restart Python afterward.
+preprocessing = PreprocessingParameters()
+if "job_kwargs" in preprocessing.heading.names:
+    set_rows = (preprocessing & "job_kwargs IS NOT NULL").fetch(
+        "preprocessing_params_name"
+    )
+    if len(set_rows):
+        raise ValueError(
+            f"PreprocessingParameters rows with job_kwargs set: {list(set_rows)}"
+            ". The value was never used. Clear it with PreprocessingParameters()"
+            ".update1({'preprocessing_params_name': name, 'job_kwargs': None}, "
+            "allow_param_mutation=True), then run this block again."
+        )
+    preprocessing.alter()
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -702,6 +726,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         statistics and continuity spans (and a concat's member boundaries) as
         `TimeIntervals`, so a reader without the database can tell masked
         samples and session joins apart #1609
+    - v2 `PreprocessingParameters` drops its `job_kwargs` column, which the
+        recording stage never read; an insert with that key raises #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

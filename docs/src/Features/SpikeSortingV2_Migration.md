@@ -294,10 +294,10 @@ Name and content rules:
     changes, so a `recording_id` / `sorting_id` derived from a name stays
     reproducible.
 - **Content fingerprints.** Each row's fingerprint covers its validated
-    `params`, schema version, and job kwargs (not the name; `SorterParameters`
-    is scoped per sorter). `describe_parameter_rows()` lists every row with its
-    fingerprint, whether it is a shipped default, the presets that use it, and
-    the name it duplicates.
+    `params`, schema version, and job kwargs where the table has them (not the
+    name; `SorterParameters` is scoped per sorter). `describe_parameter_rows()`
+    lists every row with its fingerprint, whether it is a shipped default, the
+    presets that use it, and the name it duplicates.
 - **Duplicate content is refused.** A second name for existing content raises
     `DuplicateParameterContentError`. `allow_duplicate_params=True` opts in; the
     row then shows `duplicate_of`.

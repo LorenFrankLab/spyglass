@@ -613,7 +613,6 @@ def test_duplicate_parameter_content_rejected(dj_conn):
                 "preprocessing_params_name": "my_copy_of_default",
                 "params": shipped["params"],
                 "params_schema_version": shipped["params_schema_version"],
-                "job_kwargs": shipped["job_kwargs"],
             }
         )
 
@@ -635,7 +634,6 @@ def test_duplicate_parameter_content_escape_hatch(dj_conn):
                 "preprocessing_params_name": dup_name,
                 "params": shipped["params"],
                 "params_schema_version": shipped["params_schema_version"],
-                "job_kwargs": shipped["job_kwargs"],
             },
             allow_duplicate_params=True,
         )
@@ -648,6 +646,89 @@ def test_duplicate_parameter_content_escape_hatch(dj_conn):
         (
             PreprocessingParameters & {"preprocessing_params_name": dup_name}
         ).delete(safemode=False)
+
+
+#: Fingerprints of the shipped preprocessing rows, computed at f26ebc382 when
+#: the table still had a NULL ``job_kwargs`` column. Stored rows keep them.
+_SHIPPED_PREPROCESSING_FINGERPRINTS = {
+    "default": (
+        "cf3eb959ae3cec0a46d3dffc6198db656ce95e7352c9e5eb8065624a8cec27f1"
+    ),
+    "franklab_hippocampus_2026_06": (
+        "a23acc3c06a9eb001ba0126dda55b41a58630a086960da61e38a5256f039415a"
+    ),
+    "franklab_cortex_2026_06": (
+        "2872d9dcb49760ed18e372246dd340a71858dc3ae3344d08bf0192b00fa832b5"
+    ),
+    "default_neuropixels": (
+        "fa3649076b324c9f375f75a489db82d2f6ac36cbbeef48825c6f2868a9b5f3ca"
+    ),
+    "no_filter": (
+        "607134848039c754a84903b990af2d0207abf33735d62c2b4e6fb47ade0daf68"
+    ),
+}
+
+
+def test_shipped_preprocessing_fingerprints_unchanged():
+    """Shipped preprocessing rows fingerprint as they did with the column."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        preprocessing_default_contents,
+    )
+
+    names = ("preprocessing_params_name", "params", "params_schema_version")
+    fingerprints = {
+        row[0]: parameter_row_fingerprint(
+            "PreprocessingParameters", dict(zip(names, row, strict=True))
+        )
+        for row in preprocessing_default_contents()
+    }
+    assert fingerprints == _SHIPPED_PREPROCESSING_FINGERPRINTS
+
+
+@pytest.mark.database
+def test_stored_preprocessing_fingerprints_unchanged(dj_conn):
+    """Stored shipped rows fingerprint as they did with the column."""
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        parameter_row_fingerprint,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    PreprocessingParameters.insert_default()
+    stored = {
+        row["preprocessing_params_name"]: parameter_row_fingerprint(
+            "PreprocessingParameters", row
+        )
+        for row in PreprocessingParameters.fetch(as_dict=True)
+        if row["preprocessing_params_name"]
+        in _SHIPPED_PREPROCESSING_FINGERPRINTS
+    }
+    assert stored == _SHIPPED_PREPROCESSING_FINGERPRINTS
+
+
+@pytest.mark.database
+def test_preprocessing_insert_rejects_job_kwargs(dj_conn):
+    """A ``job_kwargs`` key is refused with a message naming it."""
+    from spyglass.spikesorting.v2._params.preprocessing import (
+        PreprocessingParamsSchema,
+    )
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+
+    name = "job_kwargs_probe"
+    with pytest.raises(ValueError, match="no job_kwargs"):
+        PreprocessingParameters.insert1(
+            {
+                "preprocessing_params_name": name,
+                "params": PreprocessingParamsSchema.model_validate(
+                    {"bandpass_filter": {"freq_min": 555.0}}
+                ).model_dump(),
+                "job_kwargs": {"n_jobs": 4},
+            },
+            ignore_extra_fields=True,
+        )
+    assert not PreprocessingParameters & {"preprocessing_params_name": name}
 
 
 @pytest.mark.database
@@ -1049,13 +1130,11 @@ def test_within_batch_duplicate_content_rejected(dj_conn):
             "preprocessing_params_name": "batch_dup_a",
             "params": blob,
             "params_schema_version": 4,
-            "job_kwargs": None,
         },
         {
             "preprocessing_params_name": "batch_dup_b",
             "params": blob,
             "params_schema_version": 4,
-            "job_kwargs": None,
         },
     ]
     # Raises before super().insert, so neither row lands (no cleanup needed).
@@ -1084,7 +1163,6 @@ def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
                 "preprocessing_params_name": "omit_version_copy",
                 "params": shipped["params"],
                 # params_schema_version deliberately omitted
-                "job_kwargs": shipped["job_kwargs"],
             }
         )
 

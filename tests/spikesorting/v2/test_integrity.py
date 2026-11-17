@@ -491,7 +491,6 @@ def test_v2_lookup_tables_validate_via_pydantic():
         "preprocessing_params_name": "v2_integrity_test_bogus",
         "params": {"bandpass_filter": {"freq_min": "not_a_float"}},
         "params_schema_version": 2,
-        "job_kwargs": None,
     }
     with pytest.raises((ValueError, TypeError), match="freq_min"):
         PreprocessingParameters.insert1(bogus_pydantic_row)

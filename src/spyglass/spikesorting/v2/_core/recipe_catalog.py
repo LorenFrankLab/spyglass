@@ -78,7 +78,7 @@ def _params_schema_version(params: dict) -> int:
 
 
 def _lookup_row(name: str, params: dict) -> tuple:
-    """Build a parameter-lookup row (no ``job_kwargs``)."""
+    """Build a parameter-lookup row with a NULL ``job_kwargs``."""
     return (name, params, _params_schema_version(params), None)
 
 
@@ -110,8 +110,8 @@ def _sorter_row(
     )
 
 
-def _waveform_row(name: str, params: dict) -> tuple:
-    """Build an analyzer-waveform lookup row (no ``job_kwargs`` column)."""
+def _row_without_job_kwargs(name: str, params: dict) -> tuple:
+    """Build a lookup row for a table with no ``job_kwargs`` column."""
     return (name, params, _params_schema_version(params))
 
 
@@ -119,15 +119,15 @@ def preprocessing_default_contents() -> tuple:
     """Return ``PreprocessingParameters._DEFAULT_CONTENTS``.
 
     Each row is ``(preprocessing_params_name, params_blob,
-    params_schema_version, job_kwargs)``.
+    params_schema_version)``.
     """
     return (
-        _lookup_row(
+        _row_without_job_kwargs(
             "default",
             # Generic schema default, used by the clusterless preset.
             PreprocessingParamsSchema().model_dump(),
         ),
-        _lookup_row(
+        _row_without_job_kwargs(
             # 600 Hz high-pass for narrower hippocampal spikes; 1.5 ms
             # min-segment keeps short interval slivers.
             HIPPOCAMPUS_PREPROC,
@@ -138,7 +138,7 @@ def preprocessing_default_contents() -> tuple:
                 }
             ).model_dump(),
         ),
-        _lookup_row(
+        _row_without_job_kwargs(
             # Hippocampus recipe with a 300 Hz high-pass (wider waveforms).
             CORTEX_PREPROC,
             PreprocessingParamsSchema.model_validate(
@@ -148,7 +148,7 @@ def preprocessing_default_contents() -> tuple:
                 }
             ).model_dump(),
         ),
-        _lookup_row(
+        _row_without_job_kwargs(
             NEUROPIXELS_PREPROC,
             # Phase shift is skipped without ``inter_sample_shift``.
             PreprocessingParamsSchema.model_validate(
@@ -158,7 +158,7 @@ def preprocessing_default_contents() -> tuple:
                 }
             ).model_dump(),
         ),
-        _lookup_row(
+        _row_without_job_kwargs(
             "no_filter",
             PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": None}
@@ -280,25 +280,25 @@ def _waveform_params(
 def waveform_params_default_contents() -> tuple:
     """Return ``AnalyzerWaveformParameters._DEFAULT_CONTENTS``."""
     return (
-        _waveform_row(
+        _row_without_job_kwargs(
             HIPPOCAMPUS_DISPLAY_WAVEFORMS,
             _waveform_params(
                 ms_before=0.5, ms_after=0.5, whiten=False, purpose="display"
             ),
         ),
-        _waveform_row(
+        _row_without_job_kwargs(
             HIPPOCAMPUS_METRIC_WAVEFORMS,
             _waveform_params(
                 ms_before=0.5, ms_after=0.5, whiten=True, purpose="metric"
             ),
         ),
-        _waveform_row(
+        _row_without_job_kwargs(
             CORTEX_DISPLAY_WAVEFORMS,
             _waveform_params(
                 ms_before=1.0, ms_after=2.0, whiten=False, purpose="display"
             ),
         ),
-        _waveform_row(
+        _row_without_job_kwargs(
             CORTEX_METRIC_WAVEFORMS,
             _waveform_params(
                 ms_before=1.0, ms_after=2.0, whiten=True, purpose="metric"

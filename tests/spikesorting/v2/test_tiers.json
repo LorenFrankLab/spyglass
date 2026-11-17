@@ -669,10 +669,12 @@
         "test_insert_default_rejects_other_schema_version_row": "db_unit",
         "test_params_lookup_rejects_positional_replace": "db_unit",
         "test_params_lookup_rejects_replace": "db_unit",
+        "test_preprocessing_insert_rejects_job_kwargs": "db_unit",
         "test_qmp_duplicate_content_detected_after_double_column": "db_unit",
         "test_quality_metric_insert_rejects_duplicate_content": "db_unit",
         "test_rule_missing_policy_persists_and_changes_identity": "db_unit",
         "test_sorter_duplicate_rejected_scoped_by_sorter": "db_unit",
+        "test_stored_preprocessing_fingerprints_unchanged": "db_unit",
         "test_within_batch_duplicate_content_rejected": "db_unit"
       }
     },
@@ -728,6 +730,7 @@
         "test_clone_pipeline_preset_no_artifact_base": "db_unit",
         "test_clone_with_an_invalid_value_names_the_override_stage_and_base_row": "db_unit",
         "test_describe_pipeline_preset_artifact_none_skips_artifact": "db_unit",
+        "test_describe_pipeline_preset_leaves_preprocessing_job_kwargs_blank": "db_unit",
         "test_describe_pipeline_preset_missing_row_points_to_initialize_defaults": "db_unit",
         "test_describe_pipeline_preset_says_a_missing_row_needs_its_sorter": "db_unit",
         "test_describe_pipeline_preset_surfaces_curation_names": "db_unit",

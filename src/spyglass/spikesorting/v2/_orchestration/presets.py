@@ -140,6 +140,13 @@ def _require_preset_row(table, restriction: dict, *, caller, row, preset_name):
     return rel
 
 
+def _fetch_job_kwargs(rel):
+    """Fetch the row's ``job_kwargs``, or ``None`` for a table without one."""
+    if "job_kwargs" not in rel.heading.names:
+        return None
+    return _jsonable_blob(rel.fetch1("job_kwargs"))
+
+
 RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
     "production": (
         "Frank-lab validated and recommended for real science -- the default "
@@ -278,7 +285,8 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
         ``"preprocessing"`` / ``"artifact_detection"`` / ``"sorter"`` /
         ``"sorter_execution"`` / ``"metric"`` / ``"auto_curation"``),
         ``params_row_name``, ``key`` (dotted path), ``value``,
-        ``params_schema_version`` and ``job_kwargs``. Each auto-curation rule
+        ``params_schema_version`` and ``job_kwargs`` (blank for
+        ``"preprocessing"``, which has no job settings). Each auto-curation rule
         is a ``rule.<index>`` entry. ``"sorter_execution"`` rows leave
         ``params_schema_version`` blank; their ``schema_version`` is a key.
     """
@@ -314,13 +322,13 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             row=restriction,
             preset_name=name,
         )
-        params, params_schema_version, job_kwargs = rel.fetch1(
-            "params", "params_schema_version", "job_kwargs"
+        params, params_schema_version = rel.fetch1(
+            "params", "params_schema_version"
         )
         return {
             "params": _jsonable_blob(params),
             "params_schema_version": int(params_schema_version),
-            "job_kwargs": _jsonable_blob(job_kwargs),
+            "job_kwargs": _fetch_job_kwargs(rel),
         }
 
     def _detail_row(
@@ -880,22 +888,19 @@ def clone_pipeline_preset(
             preset_name=base_name,
         )
         if stage["sorter"] is not None:
-            params, psv, job_kwargs, exec_params, exec_psv = rel.fetch1(
+            params, psv, exec_params, exec_psv = rel.fetch1(
                 "params",
                 "params_schema_version",
-                "job_kwargs",
                 "execution_params",
                 "execution_params_schema_version",
             )
             stage["base_execution_params"] = _jsonable_blob(exec_params)
             stage["base_execution_params_schema_version"] = int(exec_psv)
         else:
-            params, psv, job_kwargs = rel.fetch1(
-                "params", "params_schema_version", "job_kwargs"
-            )
+            params, psv = rel.fetch1("params", "params_schema_version")
         stage["base_params"] = _jsonable_blob(params)
         stage["base_params_schema_version"] = int(psv)
-        stage["base_job_kwargs"] = _jsonable_blob(job_kwargs)
+        stage["base_job_kwargs"] = _fetch_job_kwargs(rel)
 
     touched, derived_params = _derive_preset_parameters(
         stages, overrides, base_name
@@ -957,8 +962,9 @@ def clone_pipeline_preset(
             row = {
                 stage["pk_field"]: new_name,
                 "params": derived_params[name],
-                "job_kwargs": stage["base_job_kwargs"],
             }
+            if "job_kwargs" in stage["table"].heading.names:
+                row["job_kwargs"] = stage["base_job_kwargs"]
             if stage["sorter"] is not None:
                 row["sorter"] = stage["sorter"]
                 row["execution_params"] = stage["base_execution_params"]
