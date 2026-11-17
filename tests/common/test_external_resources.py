@@ -17,6 +17,15 @@ import pytest
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.file import Subject
 
+# The fixture writes the HERD into the NWB file with pynwb 4's
+# NWBFile.get_external_resources(); with pynwb 3 / hdmf 4, HERD.add_ref on a
+# file's objects fails (#1694).
+if not hasattr(NWBFile, "get_external_resources"):
+    pytest.skip(
+        "writing HERD into an NWB file needs pynwb >= 4",
+        allow_module_level=True,
+    )
+
 SPECIES_ID = "NCBITaxon:10116"
 SPECIES_URI = "http://purl.obolibrary.org/obo/NCBITaxon_10116"
 ORCID_ID = "orcid:0000-0000-0000-0001"
