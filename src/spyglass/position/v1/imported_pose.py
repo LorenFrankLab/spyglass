@@ -22,6 +22,10 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
     PoseEstimation objects should be stored in nwb.processing.behavior
     Assumptions:
     - Single skeleton object per PoseEstimation object
+    - PoseEstimation objects without series are skipped: these are the
+      per-camera children of an ndx-pose MultiCameraPoseEstimation, which
+      only link a camera and its video. Multi-camera pose is ingested by
+      ImportedMultiCameraPose.
     """
 
     _nwb_table = Nwbfile
@@ -49,6 +53,14 @@ class ImportedPose(SpyglassIngestion, dj.Manual):
         "self": {"pose_object_id": "object_id"},
         "skeleton": {"skeleton_object_id": "object_id"},
     }
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """PoseEstimation objects holding at least one PoseEstimationSeries."""
+        return [
+            obj
+            for obj in super().get_nwb_objects(nwb_file, nwb_file_name)
+            if len(obj.pose_estimation_series)
+        ]
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
         """Generate the interval, the pose entry, and one entry per body part.
