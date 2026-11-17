@@ -514,10 +514,30 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         FigPack row removes its local review bundles, and
         `FigPackCuration.find_orphaned_bundles` reports bundles left by upstream
         deletes #1609
-    - Add v2 `describe_review_profiles`, `RunResult.summary()` and
-        `SorterParameters.missing_row_fix` #1609
+    - Add v2 `describe_review_profiles`, `RunResult.summary()`,
+        `SorterParameters.missing_row_fix` and `preflight_v2_concat_pipeline`,
+        which returns a `PreflightReport` listing every concat problem, each
+        member's prefixed `concat member {i}: ` #1609
+    - v2 runs log each stage at INFO and end with a `done in N s` line. A
+        `PipelineStageError` names the entry point, its target and the stages that
+        finished, and says to re-run the same call. A passing preflight logs one
+        line with its plan; a blocked one raises `PreflightError` naming the run,
+        one bullet per problem #1609
+    - v2 run warnings also appear on reused runs: a sort interval clipped to the
+        raw data, a requested phase shift that was skipped, and channels a motion
+        correction removed or extrapolated. The scientific setup has a `geometry`
+        row saying whether contact positions are registered or the `tetrode_12.5`
+        square is assumed #1609
+    - v2 run entry points raise `PipelineInputError` naming the entry point for a
+        malformed manual exclusion or, with `preflight=False`, a missing motion
+        recipe; `ZeroUnitSortError` names the entry point and target #1609
+    - v2 quality metrics and `template_metrics` are computed at the sort's
+        `peak_sign`. Template metrics of the shipped negative sorts can change,
+        since SpikeInterface's default is `"both"`; a stored `template_metrics` at
+        other params is recomputed once, with a warning #1609
     - v2 unit matching: add `UnitMatch.MatchableUnit.compared` and
-        `allow_divergent_electrodes`; `TrackedUnit` groups units by greedy
+        `allow_divergent_electrodes` (on `UnitMatchSelection.insert_inputs` and
+        `run_v2_unit_match`); `TrackedUnit` groups units by greedy
         complete-linkage; UnitMatch needs 28 samples on each side of the trough
         and at least 3 units #1609
     - v2 `ConcatenatedRecordingSelection.MemberSnapshot` references `Recording`,
