@@ -509,7 +509,8 @@ def _v2_default_catalog_tables():
     """The default-bearing v2 tables compared, with their name attribute.
 
     Every table ``initialize_v2_defaults`` seeds except
-    ``CurationReviewProfile``.
+    ``CurationReviewProfile``, whose ``insert_default`` raises on a stored
+    row with different content.
     """
     from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
     from spyglass.spikesorting.v2.metric_curation import (
@@ -610,7 +611,8 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
     ``initialize_v2_defaults`` skips existing names without comparing content,
     so a hand-edited or older-default row keeps its stale content. Compares
     each seeded default per primary key, including ``AutoCurationRules.Rule``
-    parts.
+    parts. ``CurationReviewProfile`` is not compared: its ``insert_default``
+    raises on a stored row with different content.
 
     Parameters
     ----------

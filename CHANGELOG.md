@@ -97,43 +97,29 @@ UnitAnnotation.migrate_positional_unit_ids(dry_run=True)  # then dry_run=False
 
 ```python
 # Only for a database that declared the spike sorting v2 tables before this
-# release (#1609). Existing `MatchableUnit` rows get `compared = 1`, including
-# units the matcher never saw.
-from uuid import UUID
-
-import datajoint as dj
-
+# release (#1609). Run once.
+from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecordingSelection,
 )
+from spyglass.spikesorting.v2.unit_matching import UnitMatch
 
-conn = dj.conn()
-conn.query(
-    "ALTER TABLE spikesorting_v2_unit_matching.__unit_match__matchable_unit "
-    "ADD COLUMN compared tinyint NOT NULL DEFAULT 1 COMMENT '0 if the matcher "
-    "never saw the unit (left out of its input bundle)'"
-)
+# Existing rows get `compared = 1`, including units the matcher never saw.
+UnitMatch.MatchableUnit().alter()
 
-# `MemberSnapshot` now references `Recording`: delete the concat selections
-# whose member Recording is gone, then add the foreign key.
-orphans = conn.query(
-    "SELECT s.concat_recording_id, s.member_index, s.recording_id "
-    "FROM spikesorting_v2_session_group."
-    "concatenated_recording_selection__member_snapshot AS s "
-    "LEFT JOIN spikesorting_v2_recording.__recording AS r "
-    "USING (recording_id) WHERE r.recording_id IS NULL"
-).fetchall()
+# `MemberSnapshot` now references `Recording`. `alter()` cannot add a foreign
+# key, so run the DDL directly. A member whose `Recording` is gone blocks it:
+# delete that member's `ConcatenatedRecordingSelection` row first. Restart
+# Python afterward.
+snapshot = ConcatenatedRecordingSelection.MemberSnapshot()
+orphans = (snapshot - Recording.proj()).fetch("KEY")
 if orphans:
-    (
-        ConcatenatedRecordingSelection
-        & [{"concat_recording_id": UUID(bytes=row[0])} for row in orphans]
-    ).delete()
-conn.query(
-    "ALTER TABLE spikesorting_v2_session_group."
-    "concatenated_recording_selection__member_snapshot "
-    "ADD FOREIGN KEY (recording_id) "
-    "REFERENCES spikesorting_v2_recording.__recording (recording_id) "
-    "ON UPDATE CASCADE ON DELETE RESTRICT"
+    raise ValueError(f"MemberSnapshot rows without a Recording: {orphans}")
+snapshot.connection.query(
+    f"ALTER TABLE {snapshot.full_table_name} "
+    + "ADD FOREIGN KEY (`recording_id`) "
+    + f"REFERENCES {Recording.full_table_name} (`recording_id`) "
+    + "ON UPDATE CASCADE ON DELETE RESTRICT"
 )
 ```
 
