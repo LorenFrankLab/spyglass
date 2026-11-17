@@ -161,9 +161,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - `VideoMaker` raises on a failed partial render #1679
     - Add `CameraCalibration` and `ImportedMultiCameraPose` for multi-camera 3D
         pose (ndx-pose >= 0.4.0 `MultiCameraPoseEstimation`, e.g. DANNCE);
-        uncalibrated cameras keep their video link #XXXX
+        uncalibrated cameras keep their video link #1724
     - `ImportedPose` skips the series-less per-camera children of a
-        `MultiCameraPoseEstimation` #XXXX
+        `MultiCameraPoseEstimation` #1724
 
 - Spike Sorting
 
