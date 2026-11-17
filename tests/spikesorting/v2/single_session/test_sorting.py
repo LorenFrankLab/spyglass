@@ -1385,3 +1385,17 @@ def test_sorting_delete_removes_analyzer_folder(populated_sorting):
         f"analyzer_folder {folder} still exists after "
         "Sorting.delete(); cleanup regression."
     )
+
+
+def test_time_of_sort_is_filled_by_the_database_server(populated_sorting):
+    """``time_of_sort`` is a server ``timestamp``, not the client's clock."""
+    import datetime as dt
+
+    from spyglass.spikesorting.v2.sorting import Sorting
+
+    assert Sorting().heading.attributes["time_of_sort"].type == "timestamp"
+    value = (Sorting & populated_sorting).fetch1("time_of_sort")
+    now = Sorting.connection.query("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+    assert isinstance(value, dt.datetime)
+    # The package fixture sorted within this test session.
+    assert dt.timedelta(0) <= now - value < dt.timedelta(hours=6)

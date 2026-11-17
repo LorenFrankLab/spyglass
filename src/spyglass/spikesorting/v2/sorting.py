@@ -17,7 +17,6 @@ the first frozen ``ConcatenatedRecordingSelection.MemberSnapshot`` member.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
-import datetime as dt
 
 import datajoint as dj
 import numpy as np
@@ -898,7 +897,7 @@ class Sorting(
     -> AnalysisNwbfile
     object_id: varchar(72)
     n_units: int
-    time_of_sort: datetime    # wall-clock time the sort was populated
+    time_of_sort=CURRENT_TIMESTAMP: timestamp  # database server time the row was inserted
     -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")
     effective_random_seed=null: int     # seed actually used (resolve_effective_seed); provenance, NOT identity
     spikeinterface_version: varchar(32) # producing runtime's spikeinterface.__version__
@@ -1396,7 +1395,6 @@ class Sorting(
                     "analysis_file_name": analysis_file_name,
                     "object_id": units_object_id,
                     "n_units": len(sorting_obj.unit_ids),
-                    "time_of_sort": dt.datetime.now(),
                     "display_waveform_params_name": (
                         display_waveform_params_name
                     ),

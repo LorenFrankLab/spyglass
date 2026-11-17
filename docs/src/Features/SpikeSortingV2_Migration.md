@@ -504,8 +504,9 @@ freezes the checked groups as `sort_group_ids=`, and describes
     )
     ```
 
-- **`Sorting.time_of_sort` is a `datetime`**, not a Unix-epoch int. Cast before
-    comparing against `int(time.time())`.
+- **`Sorting.time_of_sort` is a `timestamp`** that the database server fills
+    in when the row is inserted, not a Unix-epoch int. Cast before comparing
+    against `int(time.time())`.
 
 - **Restrictions on corrected sorts.** `motion_corrected_recording_id` follows
     the `artifact_detection_id` convention: `None` matches only uncorrected

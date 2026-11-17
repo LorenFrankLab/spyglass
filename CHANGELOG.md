@@ -803,6 +803,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         samples and session joins apart #1609
     - v2 `PreprocessingParameters` drops its `job_kwargs` column, which the
         recording stage never read; an insert with that key raises #1609
+    - v2 `Sorting.time_of_sort` is a `timestamp` the database server fills in, so
+        sorts run on machines in different time zones compare #1609
     - v2 `describe_epochs` lists only intervals a user would sort: task epochs,
         intervals no pipeline wrote, and intervals already selected for a
         recording #1609

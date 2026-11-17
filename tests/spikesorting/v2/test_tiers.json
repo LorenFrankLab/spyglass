@@ -92,6 +92,7 @@
     "single_session/test_sorting.py": {
       "tier": "stage",
       "overrides": {
+        "test_time_of_sort_is_filled_by_the_database_server": "pipeline",
         "test_analyzer_random_seed_override_is_honored": "db_unit",
         "test_analyzer_rebuild_is_seeded_reproducible": "db_unit",
         "test_build_analyzer_compute_args": "db_unit",
