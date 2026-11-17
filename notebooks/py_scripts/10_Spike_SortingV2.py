@@ -530,20 +530,10 @@ receipt.group_key
 #
 # ### Drift QC
 #
-# `DriftEstimate` estimates probe motion on a `Recording` to **flag** high-drift
-# sessions. Nothing applies it: the `Recording` is unchanged. It always uses
-# `dredge_fast` (needs `torch`, in the `spikesorting-v2` extra) and applies
-# **no artifact mask**, so its numbers are not comparable to the motion stage's
-# `MotionEstimate`.
-
-recording_key = {"recording_id": run_summary["recording_id"]}
-if run_motion_example:
-    from spyglass.spikesorting.v2.recording import DriftEstimate
-
-    DriftEstimate.populate(recording_key)  # on demand only
-    high_drift = DriftEstimate & "max_abs_displacement_um > 20"
-    display(high_drift.fetch("recording_id"))
-    motion = DriftEstimate().get_motion(recording_key)  # SI Motion object
+# To flag a high-drift session, run `estimate_motion` (below) and read
+# `motion_receipt["motion_diagnostics"]["max_abs_displacement_um"]`; across
+# sessions, query `MotionEstimate & "max_abs_displacement_um > 20"`. Estimating
+# changes nothing: the `Recording` and the sort are untouched until you apply it.
 
 # ### Motion correction
 #

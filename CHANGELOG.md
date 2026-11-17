@@ -167,6 +167,37 @@ output.connection.query(
 )
 ```
 
+```python
+# Only for a database that declared the v2 `DriftEstimate` table (#1609). Run
+# once. The class is removed, so drop its table by name. Rows block the drop:
+# keep them with `drift.fetch(as_dict=True)` or discard them with
+# `drift.delete_quick()`, then run this again.
+import datajoint as dj
+
+from spyglass.spikesorting.v2.recording import Recording
+
+conn = Recording.connection
+drift_name = f"`{Recording.database}`.`__drift_estimate`"
+declared = conn.query(
+    "SELECT COUNT(*) FROM information_schema.tables "
+    + "WHERE table_schema = %s AND table_name = '__drift_estimate'",
+    args=(Recording.database,),
+).fetchone()[0]
+if not declared:
+    print(f"{drift_name} is not declared; nothing to do.")
+else:
+    drift = dj.FreeTable(conn, drift_name)
+    n_rows = len(drift)
+    print(f"{drift_name} holds {n_rows} row(s).")
+    if n_rows:
+        raise ValueError(
+            f"{drift_name} holds {n_rows} row(s). Save them with "
+            "`drift.fetch(as_dict=True)` if you want them, discard them with "
+            "`drift.delete_quick()`, then run this block again."
+        )
+    conn.query(f"DROP TABLE {drift_name}")
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -581,6 +612,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
         `CurationRef.open_analyzer(extra_extensions=...)`), and
         `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609
+    - Remove v2 `DriftEstimate`. To flag high-drift sessions, use
+        `estimate_motion` and its `motion_diagnostics["max_abs_displacement_um"]`
+        or `MotionEstimate.max_abs_displacement_um` #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

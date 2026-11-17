@@ -38,8 +38,8 @@ non-sorting pipelines import without it.
     alias for the duration of an MS4 sort (`_core/si_compat.py`);
     spikeextractors 0.9.11 still references it.
 - `numpy>=2,<3`: torch 2 and SI 0.104 resolve on numpy 2.
-- `torch>=2`: the `DriftEstimate` default preset `dredge_fast` needs torch; 2.x
-    supports numpy 2.
+- `torch>=2`: `MotionEstimate` estimates with SpikeInterface's `dredge_ap`,
+    which needs torch; 2.x supports numpy 2.
 
 ## `spikesorting-v2-matching` extra
 

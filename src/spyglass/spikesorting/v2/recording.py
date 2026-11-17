@@ -5,8 +5,6 @@ Tables:
     PreprocessingParameters: Pydantic-validated preprocessing blob.
     RecordingSelection: one row per (raw, sort group, interval, params).
     Recording: materialized preprocessed recording (NWB-resident).
-    DriftEstimate: per-Recording probe-motion QC estimate (never applied to
-        the traces; populated on demand).
 
 The recording applies bandpass filtering and referencing. Whitening happens
 at the sort stage so motion correction never sees whitened data.
@@ -24,12 +22,6 @@ from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
 )  # noqa: F401
-from spyglass.spikesorting.v2._motion.estimation import (
-    motion_from_storage_dict,
-    motion_max_abs_displacement_um,
-    motion_n_temporal_bins,
-    motion_to_storage_dict,
-)
 from spyglass.spikesorting.v2._params.preprocessing import (
     PreprocessingParamsSchema,
 )
@@ -87,9 +79,6 @@ from spyglass.spikesorting.v2._core.selection_identity import (
 )
 from spyglass.spikesorting.v2._core.selection_plan import (
     build_recording_selection_plan,
-)
-from spyglass.spikesorting.v2._recording.acquisition_spans import (
-    AcquisitionSpanRecording,
 )
 from spyglass.spikesorting.v2._recording.geometry import (
     assert_unique_contact_positions,
@@ -1411,172 +1400,3 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             filtering_description=filtering_description,
             provenance_tables=provenance_tables,
         )
-
-
-# --------------------------------------------------------------------------- #
-# Drift / motion QC: estimate probe motion and store it, never apply it.
-# --------------------------------------------------------------------------- #
-
-
-class DriftFetched(NamedTuple):
-    """``make_fetch`` output for :class:`DriftEstimate`.
-
-    Gathered with no trace/SI I/O except the self-heal rebuild of a missing
-    recording file.
-
-    Attributes
-    ----------
-    preset : str
-        The ``compute_motion`` preset.
-    traces : StoredTraces
-        The recording's cached artifact, resolved (and rebuilt if missing).
-        Its ``content_hash`` puts the recording row under DataJoint's
-        fetch-integrity check.
-    """
-
-    preset: str
-    traces: StoredTraces
-
-
-class DriftComputed(NamedTuple):
-    """``make_compute`` output for :class:`DriftEstimate`."""
-
-    preset: str
-    max_abs_displacement_um: float
-    n_temporal_bins: int
-    motion: dict
-
-
-@schema
-class DriftEstimate(SpyglassMixin, dj.Computed):
-    """Probe-motion estimate for a ``Recording``; QC only, never applied.
-
-    Runs SpikeInterface's ``compute_motion`` on the cached preprocessed
-    recording so high-drift sessions can be queried by
-    ``max_abs_displacement_um``. To correct motion, use ``motion_mode`` on
-    ``run_v2_pipeline`` (:mod:`.motion`). Populated on demand only.
-
-    Its numbers differ from ``MotionEstimate``'s by construction: this runs
-    ``compute_motion`` with ``dredge_fast`` on the whole unmasked recording,
-    while ``MotionEstimate`` estimates over the artifact-free statistics
-    spans with its own recipe. Do not compare the two displacements.
-
-    Steps
-    -----
-    1. Resolve the cached recording, rebuilding a missing file.
-    2. Open it, as a span view when it has explicit timestamps.
-    3. Run ``compute_motion`` with the preset.
-    4. Summarize the largest displacement, refusing a non-finite one.
-    5. Insert the serialized motion.
-
-    Columns
-    -------
-    motion_preset : varchar
-        The ``compute_motion`` preset used (``_DEFAULT_PRESET``; there is no
-        parameters Lookup).
-    max_abs_displacement_um : float
-        ``max(|displacement|)`` over all segments, temporal bins and spatial
-        windows. Always finite; a non-finite estimate raises at populate.
-    n_temporal_bins : int
-        Total number of temporal bins in the estimate.
-    motion : longblob
-        The serialized ``Motion``; rehydrate with :meth:`get_motion`.
-
-    Notes
-    -----
-    The default preset (``dredge_fast``) requires ``torch`` (installed by the
-    ``spikesorting-v2`` extra).
-    """
-
-    definition = """
-    -> Recording
-    ---
-    motion_preset: varchar(64)
-    max_abs_displacement_um: float
-    n_temporal_bins: int
-    motion: longblob
-    """
-
-    _parallel_make = True
-    _DEFAULT_PRESET = "dredge_fast"
-
-    def make_fetch(self, key) -> DriftFetched:
-        """Return the preset and the resolved recording artifact.
-
-        No SpikeInterface or NWB I/O except rebuilding a missing recording
-        file. Holds strings only so both tri-part fetches hash identically.
-        """
-        return DriftFetched(
-            preset=self._DEFAULT_PRESET,
-            traces=Recording().resolve_stored_traces(key),
-        )
-
-    def make_compute(self, key, preset, traces) -> DriftComputed:
-        """Run ``compute_motion`` outside any DB transaction; no DB access.
-
-        Raises
-        ------
-        ValueError
-            If the estimate's max displacement is non-finite.
-        """
-        import spikeinterface.preprocessing as sip
-
-        from spyglass.spikesorting.v2._storage.nwb import read_stored_traces
-
-        # 2. Open the recording. DREDge fancy-indexes lazy h5py timestamps
-        # by peak frame, which h5py refuses for repeats; a span view avoids it.
-        recording = read_stored_traces(traces)
-        if recording.has_time_vector():
-            recording = AcquisitionSpanRecording(
-                recording, 0, recording.get_num_samples()
-            )
-        # 3. Estimate motion.
-        motion = sip.compute_motion(recording, preset=preset)
-        # 4. Summarize the largest displacement.
-        max_abs_displacement_um = motion_max_abs_displacement_um(motion)
-        if not np.isfinite(max_abs_displacement_um):
-            # A NaN summary would slip past a `max_abs_displacement_um > x`
-            # filter.
-            raise ValueError(
-                f"DriftEstimate: compute_motion(preset={preset!r}) produced a "
-                f"non-finite max displacement ({max_abs_displacement_um}) for "
-                f"{key}; refusing to store an unusable drift-QC metric."
-            )
-        return DriftComputed(
-            preset=preset,
-            max_abs_displacement_um=max_abs_displacement_um,
-            n_temporal_bins=motion_n_temporal_bins(motion),
-            motion=motion_to_storage_dict(motion),
-        )
-
-    def make_insert(
-        self, key, preset, max_abs_displacement_um, n_temporal_bins, motion
-    ) -> None:
-        """Insert the single QC row inside the framework transaction."""
-        self.insert1(
-            {
-                **key,
-                "motion_preset": preset,
-                "max_abs_displacement_um": max_abs_displacement_um,
-                "n_temporal_bins": n_temporal_bins,
-                "motion": motion,
-            }
-        )
-
-    # ---- Public accessors ------------------------------------------------
-
-    def get_motion(self, key: dict):
-        """Rehydrate the stored estimate into a SpikeInterface ``Motion``.
-
-        Parameters
-        ----------
-        key : dict
-            Restriction selecting a single ``DriftEstimate`` row.
-
-        Returns
-        -------
-        spikeinterface.core.motion.Motion
-            The motion object as ``compute_motion`` produced it.
-        """
-        blob = (self & key).fetch1("motion")
-        return motion_from_storage_dict(blob)

@@ -129,7 +129,7 @@ optional-dependencies.spikesorting-v2 = [
   "mountainsort4==1.0.7", # version exercised by the real-sort test
   "mountainsort5>=0.5", # v2 alternative; pulls isosplit6 + scikit-learn
   "numpy>=2,<3", # torch>=2 + SI 0.104 resolve on numpy 2
-  "torch>=2", # DriftEstimate dredge_fast preset; 2.x supports numpy 2
+  "torch>=2", # MotionEstimate dredge_ap estimator; 2.x supports numpy 2
 ]
 optional-dependencies.spikesorting-v2-matching = [
   "spyglass-neuro[spikesorting]",

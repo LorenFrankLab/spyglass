@@ -47,7 +47,7 @@ def _describe_motion(
             "mode": "off",
             "description": (
                 "No motion stage: the sort reads the masked, uncorrected "
-                "source. DriftEstimate is diagnostic only."
+                "source."
             ),
         }
     source = "the concatenation" if concat else "the recording under its mask"

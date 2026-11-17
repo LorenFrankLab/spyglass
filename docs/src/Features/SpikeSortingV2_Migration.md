@@ -1008,10 +1008,11 @@ identity, results, and evidence.
 
 ### Drift QC
 
-v1 has no equivalent. `DriftEstimate` estimates probe motion on a `Recording` to
-**flag** high-drift sessions. Nothing applies it: the `Recording` is unchanged.
-Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)
-runs it.
+v1 has no equivalent. To flag a high-drift session, run `estimate_motion` and
+read `receipt["motion_diagnostics"]["max_abs_displacement_um"]`, or query
+`MotionEstimate & "max_abs_displacement_um > 20"`. Estimating applies nothing:
+the `Recording` and the sort are unchanged. Section 10 of the
+[first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb) runs it.
 
 ### Motion correction (experimental)
 

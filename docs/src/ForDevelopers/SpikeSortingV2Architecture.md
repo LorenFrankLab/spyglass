@@ -151,7 +151,7 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 
 | Module (`spyglass.spikesorting.v2.`) | Tables                                                                                                                                                                                                    |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`, `DriftEstimate` (QC only)                                                                                                    |
+| `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`                                                                                                                               |
 | `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedArtifactSelection`, `SharedArtifactDetection`                                    |
 | `sorting`                            | `SorterParameters`, `AnalyzerWaveformParameters`, `PreprocessingWaveformParameters`, `SortingSelection`, `Sorting`                                                                                        |
 | `curation`                           | `CurationV2`                                                                                                                                                                                              |
@@ -491,8 +491,8 @@ helper must import without a database.
     `MotionEstimate`, `MotionCorrectedRecording`, `UnitMatch` and `TrackedUnit`.
     `PopulateMixin` serializes their same-key populates with a MySQL named lock,
     from the conductor or a direct `populate`. A long sort runs once when runs
-    overlap: the second job waits, then skips the key. `DriftEstimate` and the
-    recompute tables take no lock.
+    overlap: the second job waits, then skips the key. The recompute tables take
+    no lock.
 - The lock is best effort. It is bound to the DB session, and a timeout or error
     proceeds unlocked. Correctness relies on each stage's insert contract.
 - `_orchestration.stages._populate_once` adopts a row that another run

@@ -51,7 +51,6 @@ _TABLE_MODULES = {
     "PreprocessingParameters": "recording",
     "RecordingSelection": "recording",
     "Recording": "recording",
-    "DriftEstimate": "recording",
     "CurationReviewProfile": "review_profile",
     "SessionGroup": "session_group",
     "ConcatenatedRecordingSelection": "session_group",
