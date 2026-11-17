@@ -20,8 +20,8 @@ def isolated_interval_owners(dj_conn):
         RecordingArtifactDetection,
         RecordingArtifactSelection,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
 
@@ -104,7 +104,7 @@ def isolated_interval_owners(dj_conn):
                 SharedArtifactGroup.Member.insert1(
                     {**group_keys[index], **recording_keys[index]}
                 )
-                SharedGroupArtifactSelection.insert1(
+                SharedArtifactSelection.insert1(
                     {
                         "artifact_detection_id": shared_ids[index],
                         **group_keys[index],
@@ -113,7 +113,7 @@ def isolated_interval_owners(dj_conn):
                     },
                     allow_direct_insert=True,
                 )
-                SharedGroupArtifactDetection.insert1(
+                SharedArtifactDetection.insert1(
                     {"artifact_detection_id": shared_ids[index]},
                     allow_direct_insert=True,
                 )
@@ -131,7 +131,7 @@ def isolated_interval_owners(dj_conn):
                     {"artifact_detection_id": split_ids[1], **interval_keys[5]},
                 ]
             )
-            SharedGroupArtifactDetection.RemovedInterval.insert(
+            SharedArtifactDetection.RemovedInterval.insert(
                 [
                     {
                         "artifact_detection_id": shared_ids[0],
@@ -165,11 +165,11 @@ def isolated_interval_owners(dj_conn):
         try:
             for table in (
                 RecordingArtifactDetection.RemovedInterval,
-                SharedGroupArtifactDetection.RemovedInterval,
+                SharedArtifactDetection.RemovedInterval,
                 RecordingArtifactDetection,
-                SharedGroupArtifactDetection,
+                SharedArtifactDetection,
                 RecordingArtifactSelection,
-                SharedGroupArtifactSelection,
+                SharedArtifactSelection,
             ):
                 (table & detection_keys).delete_quick()
             (SharedArtifactGroup.Member & group_keys).delete_quick()
@@ -190,7 +190,7 @@ def test_clean_session_removes_only_abandoned_owned_intervals(
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
+        SharedArtifactDetection,
     )
     from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
 
@@ -207,7 +207,7 @@ def test_clean_session_removes_only_abandoned_owned_intervals(
             & {"artifact_detection_id": graph["split_ids"][0]}
         )
         assert not (
-            SharedGroupArtifactDetection
+            SharedArtifactDetection
             & {"artifact_detection_id": graph["shared_ids"][0]}
         )
         for key in interval_keys[:2]:
@@ -221,7 +221,7 @@ def test_clean_session_removes_only_abandoned_owned_intervals(
         assert Recording & graph["recordings"][1]
         assert SharedArtifactGroup & graph["groups"][1]
         assert (
-            SharedGroupArtifactDetection.RemovedInterval
+            SharedArtifactDetection.RemovedInterval
             & {"artifact_detection_id": graph["shared_ids"][1]}
             & interval_keys[2]
         )

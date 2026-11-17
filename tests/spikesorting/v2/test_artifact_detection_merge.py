@@ -486,7 +486,7 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
             {"artifact_detection_id": uuid.uuid4()}
         )
 
-    # Corrupt: two RecordingSource rows for one artifact_detection_id (only
+    # Corrupt: two RecordingArtifactDetection rows for one id (only
     # reachable via a raw insert bypassing insert_detection).
     art_id = uuid.uuid4()
     planted_merge_ids = []
@@ -498,10 +498,10 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
             planted_merge_ids.append(mid)
             dj.Table.insert(
                 ArtifactDetectionOutput(),
-                [{"merge_id": mid, "source": "RecordingSource"}],
+                [{"merge_id": mid, "source": "RecordingArtifactDetection"}],
             )
             dj.Table.insert(
-                ArtifactDetectionOutput.RecordingSource(),
+                ArtifactDetectionOutput.RecordingArtifactDetection(),
                 [{"merge_id": mid, "artifact_detection_id": art_id}],
             )
     finally:
@@ -515,7 +515,7 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             (
-                ArtifactDetectionOutput.RecordingSource
+                ArtifactDetectionOutput.RecordingArtifactDetection
                 & {"artifact_detection_id": art_id}
             ).delete_quick()
             for mid in planted_merge_ids:
@@ -526,7 +526,7 @@ def test_get_merge_id_distinguishes_unregistered_from_corrupt(dj_conn):
 
 def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
     """``get_merge_id`` raises ``SchemaBypassError`` when one id is registered
-    in both ``RecordingSource`` and ``SharedGroupSource``."""
+    in both ``RecordingArtifactDetection`` and ``SharedArtifactDetection``."""
     import uuid
 
     import datajoint as dj
@@ -547,16 +547,16 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
         dj.Table.insert(
             ArtifactDetectionOutput(),
             [
-                {"merge_id": rec_mid, "source": "RecordingSource"},
-                {"merge_id": shared_mid, "source": "SharedGroupSource"},
+                {"merge_id": rec_mid, "source": "RecordingArtifactDetection"},
+                {"merge_id": shared_mid, "source": "SharedArtifactDetection"},
             ],
         )
         dj.Table.insert(
-            ArtifactDetectionOutput.RecordingSource(),
+            ArtifactDetectionOutput.RecordingArtifactDetection(),
             [{"merge_id": rec_mid, "artifact_detection_id": art_id}],
         )
         dj.Table.insert(
-            ArtifactDetectionOutput.SharedGroupSource(),
+            ArtifactDetectionOutput.SharedArtifactDetection(),
             [{"merge_id": shared_mid, "artifact_detection_id": art_id}],
         )
     finally:
@@ -570,12 +570,70 @@ def test_get_merge_id_cross_part_duplicate_raises(dj_conn):
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             for part in (
-                ArtifactDetectionOutput.RecordingSource,
-                ArtifactDetectionOutput.SharedGroupSource,
+                ArtifactDetectionOutput.RecordingArtifactDetection,
+                ArtifactDetectionOutput.SharedArtifactDetection,
             ):
                 (part & {"artifact_detection_id": art_id}).delete_quick()
             for mid in (rec_mid, shared_mid):
                 (ArtifactDetectionOutput & {"merge_id": mid}).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+
+@pytest.mark.parametrize(
+    "part_name", ["RecordingArtifactDetection", "SharedArtifactDetection"]
+)
+def test_generic_merge_methods_resolve_each_part(dj_conn, part_name):
+    """The standard ``_Merge`` lookups resolve each part by its source name.
+
+    A raw detection row is registered through ``insert_detection``, so the
+    stored ``source`` comes from the real registration path.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2 import artifact
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+
+    source_cls = getattr(artifact, part_name)
+    part = getattr(ArtifactDetectionOutput, part_name)
+    key = {"artifact_detection_id": uuid.uuid4()}
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        dj.Table.insert(source_cls(), [key], allow_direct_insert=True)
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+    output = ArtifactDetectionOutput()
+    try:
+        ArtifactDetectionOutput.insert_detection(key)
+        merge_key = {"merge_id": ArtifactDetectionOutput.get_merge_id(key)}
+
+        assert (output & merge_key).fetch1("source") == source_cls.__name__
+        assert output.merge_get_parent_class(part_name) is source_cls
+        assert output.merge_get_part(merge_key).full_table_name == (
+            part.full_table_name
+        )
+        assert output.merge_get_parent(merge_key).full_table_name == (
+            source_cls.full_table_name
+        )
+        restricted = output.merge_restrict_class(merge_key)
+        assert isinstance(restricted, source_cls)
+        assert restricted.fetch1("KEY") == key
+        assert ArtifactDetectionOutput.resolve_artifact_detection_id(
+            merge_key
+        ) == (key["artifact_detection_id"])
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            merge_ids = (part & key).fetch("merge_id")
+            (part & key).delete_quick()
+            for mid in merge_ids:
+                (output & {"merge_id": mid}).delete_quick()
+            (source_cls & key).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
 

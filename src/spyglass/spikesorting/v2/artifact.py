@@ -6,8 +6,8 @@ Tables (one result table per source kind, unified by the
 - ``ArtifactDetectionParameters``: threshold detection parameters
 - ``SharedArtifactGroup`` (+ ``Member``): opt-in cross-recording detection
 - ``RecordingArtifactSelection``: single-recording request
-- ``SharedGroupArtifactSelection``: cross-recording request
-- ``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``: results;
+- ``SharedArtifactSelection``: cross-recording request
+- ``RecordingArtifactDetection`` / ``SharedArtifactDetection``: results;
   each ``RemovedInterval`` part owns the ``IntervalList`` rows it writes
 
 Each selection master has a required source FK, so a selection has exactly
@@ -533,13 +533,13 @@ class RecordingArtifactSelection(
 
 
 @schema
-class SharedGroupArtifactSelection(
+class SharedArtifactSelection(
     SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
 ):
     """Cross-recording (shared-group) artifact-detection request.
 
     ``member_set_hash`` snapshots the member ``recording_id`` set, which is
-    not part of the identity. ``SharedGroupArtifactDetection.make_fetch``
+    not part of the identity. ``SharedArtifactDetection.make_fetch``
     rejects a changed member set.
     """
 
@@ -605,8 +605,8 @@ class RecordingArtifactFetched(NamedTuple):
     manual_excluded_times: object = None
 
 
-class SharedGroupArtifactFetched(NamedTuple):
-    """DB-side inputs for :meth:`SharedGroupArtifactDetection.make_fetch`.
+class SharedArtifactFetched(NamedTuple):
+    """DB-side inputs for :meth:`SharedArtifactDetection.make_fetch`.
 
     Per-member fields are tuples of length n_members. ``member_traces``
     holds each member's cached artifact, rebuilt if missing.
@@ -928,7 +928,7 @@ class RecordingArtifactDetection(
 
 
 @schema
-class SharedGroupArtifactDetection(
+class SharedArtifactDetection(
     _ArtifactDetectionMixin, SpyglassMixin, dj.Computed
 ):
     """Artifact-removed valid times for a ``SharedArtifactGroup``.
@@ -947,7 +947,7 @@ class SharedGroupArtifactDetection(
     _populate_key_lock = True
 
     definition = """
-    -> SharedGroupArtifactSelection
+    -> SharedArtifactSelection
     """
 
     _single_source = False
@@ -963,14 +963,14 @@ class SharedGroupArtifactDetection(
         -> IntervalList
         """
 
-    def make_fetch(self, key) -> SharedGroupArtifactFetched:
+    def make_fetch(self, key) -> SharedArtifactFetched:
         """Read params, resolve members, and reject a member-set drift.
 
         Missing cached artifacts are rebuilt through ``Recording``.
 
         Returns
         -------
-        SharedGroupArtifactFetched
+        SharedArtifactFetched
             Validated params, the group name, the ordered member
             ``recording_id`` / ``nwb_file_name`` tuples, the canonical parent
             ``nwb_file_name``, the per-row job kwargs and the resolved member
@@ -988,7 +988,7 @@ class SharedGroupArtifactDetection(
             params_blob,
             artifact_job_kwargs,
         ) = (
-            ArtifactDetectionParameters * (SharedGroupArtifactSelection & key)
+            ArtifactDetectionParameters * (SharedArtifactSelection & key)
         ).fetch1(
             "shared_artifact_group_name",
             "member_set_hash",
@@ -1010,7 +1010,7 @@ class SharedGroupArtifactDetection(
         )
         if not members:
             raise RuntimeError(
-                "SharedGroupArtifactDetection.make: SharedArtifactGroup "
+                "SharedArtifactDetection.make: SharedArtifactGroup "
                 f"{group_name!r} has zero members; insert_group should have "
                 "rejected the empty case."
             )
@@ -1018,7 +1018,7 @@ class SharedGroupArtifactDetection(
         current_hash = shared_group_member_set_hash(member_recording_ids)
         if current_hash != frozen_hash:
             raise SharedArtifactGroupMemberDriftError(
-                "SharedGroupArtifactDetection.make: SharedArtifactGroup "
+                "SharedArtifactDetection.make: SharedArtifactGroup "
                 f"{group_name!r} member set changed since "
                 f"artifact_detection_id={key['artifact_detection_id']} was "
                 f"created (frozen member_set_hash {frozen_hash[:12]} != "
@@ -1030,7 +1030,7 @@ class SharedGroupArtifactDetection(
                 "or restore the group's members."
             )
         member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
-        return SharedGroupArtifactFetched(
+        return SharedArtifactFetched(
             validated=validated,
             shared_artifact_group_name=group_name,
             member_recording_ids=member_recording_ids,
@@ -1068,7 +1068,7 @@ class SharedGroupArtifactDetection(
 
         if not member_recording_ids:
             raise RuntimeError(
-                "SharedGroupArtifactDetection.make_compute: shared-group "
+                "SharedArtifactDetection.make_compute: shared-group "
                 "source has no member_recording_ids; make_fetch contract "
                 "violated."
             )
@@ -1149,10 +1149,10 @@ def assert_artifact_detection_covers_recording(
             )
         return
 
-    if SharedGroupArtifactDetection & artifact_detection_key:
-        group_name = (
-            SharedGroupArtifactSelection & artifact_detection_key
-        ).fetch1("shared_artifact_group_name")
+    if SharedArtifactDetection & artifact_detection_key:
+        group_name = (SharedArtifactSelection & artifact_detection_key).fetch1(
+            "shared_artifact_group_name"
+        )
         if not (
             SharedArtifactGroup.Member
             & {
@@ -1171,7 +1171,7 @@ def assert_artifact_detection_covers_recording(
     raise ValueError(
         f"{caller}: artifact_detection_id "
         f"{artifact_detection_id!r} is not in RecordingArtifactDetection or "
-        "SharedGroupArtifactDetection. Populate the artifact detection "
+        "SharedArtifactDetection. Populate the artifact detection "
         "before linking it."
     )
 

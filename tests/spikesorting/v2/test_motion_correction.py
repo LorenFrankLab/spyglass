@@ -3373,9 +3373,9 @@ def _drop_artifact_detections(artifact_ids) -> None:
     keys = [{"artifact_detection_id": a} for a in set(artifact_ids) if a]
     if not keys:
         return
-    merge_ids = (ArtifactDetectionOutput.RecordingSource & keys).fetch(
-        "merge_id"
-    )
+    merge_ids = (
+        ArtifactDetectionOutput.RecordingArtifactDetection & keys
+    ).fetch("merge_id")
     merges = [{"merge_id": m} for m in merge_ids]
     if merges:
         estimates = (

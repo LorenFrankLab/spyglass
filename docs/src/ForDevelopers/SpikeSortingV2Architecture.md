@@ -152,7 +152,7 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 | Module (`spyglass.spikesorting.v2.`) | Tables                                                                                                                                                                                                    |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`, `DriftEstimate` (QC only)                                                                                                    |
-| `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedGroupArtifactSelection`, `SharedGroupArtifactDetection`                          |
+| `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedArtifactSelection`, `SharedArtifactDetection`                                    |
 | `sorting`                            | `SorterParameters`, `AnalyzerWaveformParameters`, `PreprocessingWaveformParameters`, `SortingSelection`, `Sorting`                                                                                        |
 | `curation`                           | `CurationV2`                                                                                                                                                                                              |
 | `metric_curation`                    | `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`, `CurationEvaluation`                                                                                                       |
@@ -166,7 +166,8 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 | `pipeline_preset`                    | `PipelinePreset`                                                                                                                                                                                          |
 
 - `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
-    two artifact-detection tables. `SortingSelection.ArtifactDetectionSource`
+    two artifact-detection tables. Its parts are named after them, so the
+    generic merge methods apply. `SortingSelection.ArtifactDetectionSource`
     holds one optional foreign key to it; user code does not import it. Deleting
     a result also deletes the sorts and concat members that reference it.
     Concat members reference `RecordingArtifactDetection` directly.
@@ -192,7 +193,7 @@ Recording preparation:
 
 Artifact choices for single-recording sorting:
   Recording -> RecordingArtifactSelection -> RecordingArtifactDetection
-  SharedArtifactGroup -> SharedGroupArtifactSelection -> SharedGroupArtifactDetection
+  SharedArtifactGroup -> SharedArtifactSelection -> SharedArtifactDetection
   Both detection types register in ArtifactDetectionOutput.
 
 Single-recording path:
@@ -715,7 +716,7 @@ the ordered member recordings) has the same fail-closed lifecycle as
 - Equal lengths are not enough: two intervals of one session can match in
     length, fs and dtype but start at different times. Timestamp vectors are
     compared by a streamed SHA-256 (`_core.signal_math.timestamp_fingerprint`).
-    `SharedGroupArtifactDetection.make_compute` re-checks, because a direct
+    `SharedArtifactDetection.make_compute` re-checks, because a direct
     selection insert bypasses `insert_group`.
 - Manual exclusions are absolute session timestamps, on the
     `IntervalList.valid_times` clock. Each one must overlap sorted time.

@@ -178,6 +178,7 @@
     "test_artifact_detection_merge.py": {
       "tier": "stage",
       "overrides": {
+        "test_generic_merge_methods_resolve_each_part": "db_unit",
         "test_get_merge_id_cross_part_duplicate_raises": "db_unit",
         "test_get_merge_id_distinguishes_unregistered_from_corrupt": "db_unit",
         "test_insert_detection_maps_only_missing_parent_to_key_error": "db_unit"

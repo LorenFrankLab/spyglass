@@ -1,7 +1,7 @@
 """The union of artifact-detection sources a sort can mask against.
 
 ``ArtifactDetectionOutput`` is a merge table over ``RecordingArtifactDetection``
-(one recording) and ``SharedGroupArtifactDetection`` (a group of recordings),
+(one recording) and ``SharedArtifactDetection`` (a group of recordings),
 so a selection carries one foreign key instead of two exclusive part tables.
 Like ``LFPOutput``, it is an input-union merge: each result table registers
 itself here when populated, and the sorting stage reads it back.
@@ -19,15 +19,15 @@ import datajoint as dj
 
 from spyglass.spikesorting.v2.artifact import (  # noqa: F401 (part FKs)
     RecordingArtifactDetection,
-    SharedGroupArtifactDetection,
+    SharedArtifactDetection,
 )
 from spyglass.utils import SpyglassMixin, _Merge
 from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 
 schema = dj.schema("spikesorting_v2_artifact_output")
 
-# Short part names keep the part-table FK identifier under MySQL's 64-char
-# limit and stay unambiguous for _Merge's source-name-to-part matching.
+# Each part is named after its source table, which _Merge resolves by name
+# from this module; both FK identifiers stay under MySQL's 64-char limit.
 
 
 @schema
@@ -37,9 +37,8 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
     Each master row is one registered detection. ``source`` names the part
     that holds its ``artifact_detection_id``:
 
-    - ``RecordingSource``: ``RecordingArtifactDetection`` (one recording).
-    - ``SharedGroupSource``: ``SharedGroupArtifactDetection`` (a group of
-      recordings).
+    - ``RecordingArtifactDetection``: one recording.
+    - ``SharedArtifactDetection``: a group of recordings.
 
     Detections register via :meth:`insert_detection` when populated.
     ``SortingSelection`` and ``MotionEstimateSelection`` reference ``merge_id``
@@ -53,7 +52,7 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
     source: varchar(32)
     """
 
-    class RecordingSource(SpyglassMixin, dj.Part):  # noqa: F811
+    class RecordingArtifactDetection(SpyglassMixin, dj.Part):  # noqa: F811
         """Merge part for a single-recording ``RecordingArtifactDetection``."""
 
         definition = """
@@ -62,13 +61,13 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         -> RecordingArtifactDetection
         """
 
-    class SharedGroupSource(SpyglassMixin, dj.Part):  # noqa: F811
-        """Merge part for a cross-recording ``SharedGroupArtifactDetection``."""
+    class SharedArtifactDetection(SpyglassMixin, dj.Part):  # noqa: F811
+        """Merge part for a cross-recording ``SharedArtifactDetection``."""
 
         definition = """
         -> master
         ---
-        -> SharedGroupArtifactDetection
+        -> SharedArtifactDetection
         """
 
     @classmethod
@@ -79,13 +78,13 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         ----------
         detection_key : dict
             A ``{artifact_detection_id: ...}`` key of a populated
-            ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``.
+            ``RecordingArtifactDetection`` or ``SharedArtifactDetection``.
 
         Raises
         ------
         KeyError
             If ``detection_key`` is not a populated
-            ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``.
+            ``RecordingArtifactDetection`` or ``SharedArtifactDetection``.
         """
         try:
             cls()._merge_insert([detection_key], skip_duplicates=True)
@@ -97,7 +96,7 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
                 raise
             raise KeyError(
                 f"{detection_key} is not a populated RecordingArtifactDetection "
-                "or SharedGroupArtifactDetection; populate the detection "
+                "or SharedArtifactDetection; populate the detection "
                 "before registering it into ArtifactDetectionOutput."
             ) from exc
 
@@ -126,7 +125,10 @@ class ArtifactDetectionOutput(_Merge, SpyglassMixin):
         """
         # Scan both parts so a cross-part duplicate raises.
         matches: list = []
-        for part_name in ("RecordingSource", "SharedGroupSource"):
+        for part_name in (
+            "RecordingArtifactDetection",
+            "SharedArtifactDetection",
+        ):
             part = getattr(cls, part_name)
             rows = (part & detection_key).fetch("merge_id")
             if len(rows) > 1:

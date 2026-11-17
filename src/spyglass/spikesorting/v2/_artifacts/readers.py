@@ -17,7 +17,7 @@ def read_artifact_removed_intervals(key, as_dict=False):
     ----------
     key : dict
         Restriction selecting a single artifact-detection row (either
-        ``RecordingArtifactDetection`` or ``SharedGroupArtifactDetection``);
+        ``RecordingArtifactDetection`` or ``SharedArtifactDetection``);
         must include ``artifact_detection_id``.
     as_dict : bool, optional
         If ``True``, a single-recording result is also returned as a
@@ -34,7 +34,7 @@ def read_artifact_removed_intervals(key, as_dict=False):
     """
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
-        SharedGroupArtifactDetection,
+        SharedArtifactDetection,
     )
 
     if "artifact_detection_id" not in key:
@@ -47,14 +47,14 @@ def read_artifact_removed_intervals(key, as_dict=False):
         return RecordingArtifactDetection().get_artifact_removed_intervals(
             key, as_dict=as_dict
         )
-    if SharedGroupArtifactDetection & key:
-        return SharedGroupArtifactDetection().get_artifact_removed_intervals(
+    if SharedArtifactDetection & key:
+        return SharedArtifactDetection().get_artifact_removed_intervals(
             key, as_dict=as_dict
         )
     raise ValueError(
         "get_artifact_removed_intervals: artifact_detection_id "
         f"{key['artifact_detection_id']!r} is not in RecordingArtifactDetection "
-        "or SharedGroupArtifactDetection. Populate the artifact detection "
+        "or SharedArtifactDetection. Populate the artifact detection "
         "before reading its removed intervals."
     )
 
@@ -111,7 +111,7 @@ def read_owned_artifact_intervals(detection_cls, key):
     ----------
     detection_cls : dj.Computed
         The split result table whose ownership part rows to read
-        (``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``).
+        (``RecordingArtifactDetection`` / ``SharedArtifactDetection``).
     key : dict
         Restriction selecting a single detection row; must include
         ``artifact_detection_id``.
@@ -164,7 +164,7 @@ def collect_artifact_interval_rows_to_remove(rows, detection_cls):
         the ownership part rows still exist.
     detection_cls : dj.Computed
         The split result table owning the part rows
-        (``RecordingArtifactDetection`` / ``SharedGroupArtifactDetection``).
+        (``RecordingArtifactDetection`` / ``SharedArtifactDetection``).
 
     Returns
     -------

@@ -385,7 +385,7 @@ def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
     """Each v2 stage table waits on a concurrent same-key populate."""
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
-        SharedGroupArtifactDetection,
+        SharedArtifactDetection,
     )
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCurationV2,
@@ -404,7 +404,7 @@ def test_v2_stage_tables_take_the_populate_key_lock(dj_conn):
     for table in (
         Recording,
         RecordingArtifactDetection,
-        SharedGroupArtifactDetection,
+        SharedArtifactDetection,
         MotionEstimate,
         MotionCorrectedRecording,
         ConcatenatedRecording,

@@ -195,8 +195,8 @@ def _clean_session_v2(session_key):
         RecordingArtifactDetection,
         RecordingArtifactSelection,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.artifact_output import (
         ArtifactDetectionOutput,
@@ -224,9 +224,7 @@ def _clean_session_v2(session_key):
         "KEY", as_dict=True
     )
     shared_artifact_keys = (
-        (SharedGroupArtifactSelection & shared_groups).fetch(
-            "KEY", as_dict=True
-        )
+        (SharedArtifactSelection & shared_groups).fetch("KEY", as_dict=True)
         if shared_groups
         else []
     )
@@ -235,7 +233,7 @@ def _clean_session_v2(session_key):
     owned_intervals = []
     for owner, keys in (
         (RecordingArtifactDetection.RemovedInterval, split_artifact_keys),
-        (SharedGroupArtifactDetection.RemovedInterval, shared_artifact_keys),
+        (SharedArtifactDetection.RemovedInterval, shared_artifact_keys),
     ):
         if keys:
             owned_intervals.extend(
@@ -262,10 +260,11 @@ def _clean_session_v2(session_key):
             (SortingSelection & sorting_keys).super_delete(warn=False)
 
         # Step 3: artifact merge master first, so the Recording cascade
-        # never reaches its RecordingSource part.
+        # never reaches its RecordingArtifactDetection part.
         if split_artifact_keys:
             art_merge_ids = (
-                ArtifactDetectionOutput.RecordingSource & split_artifact_keys
+                ArtifactDetectionOutput.RecordingArtifactDetection
+                & split_artifact_keys
             ).fetch("merge_id")
             if len(art_merge_ids):
                 (
@@ -296,7 +295,7 @@ def _clean_session_v2(session_key):
     # cascades into surviving rows.
     for interval_key in owned_intervals:
         if (RecordingArtifactDetection.RemovedInterval & interval_key) or (
-            SharedGroupArtifactDetection.RemovedInterval & interval_key
+            SharedArtifactDetection.RemovedInterval & interval_key
         ):
             continue
         (IntervalList & interval_key).delete_quick()

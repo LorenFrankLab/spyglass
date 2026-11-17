@@ -993,8 +993,8 @@ def test_shared_group_make_compute_reads_fetched_members_without_db(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import Recording
     from tests.spikesorting.v2._tripart_helpers import (
@@ -1009,19 +1009,19 @@ def test_shared_group_make_compute_reads_fetched_members_without_db(
     rec_key = {"recording_id": populated_recording["recording_id"]}
     try:
         SharedArtifactGroup.insert_group(group_name, [rec_key])
-        art_pk = SharedGroupArtifactSelection.insert_selection(
+        art_pk = SharedArtifactSelection.insert_selection(
             {
                 "shared_artifact_group_name": group_name,
                 "artifact_detection_params_name": "default",
             }
         )
-        table = SharedGroupArtifactDetection()
+        table = SharedArtifactDetection()
         fetched = table.make_fetch(art_pk)
         assert fetched.member_traces == (
             Recording().resolve_stored_traces(rec_key),
         )
         assert fetch_hash(table.make_fetch(art_pk)) == fetch_hash(fetched)
-        with forbid_db_queries(monkeypatch, "SharedGroupArtifactDetection"):
+        with forbid_db_queries(monkeypatch, "SharedArtifactDetection"):
             computed = table.make_compute(art_pk, *fetched)
 
         expected = table._run_artifact_scan(
@@ -1050,8 +1050,8 @@ def test_shared_artifact_group_populate_end_to_end(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2._artifacts.naming import (
         artifact_detection_interval_list_name,
@@ -1069,14 +1069,14 @@ def test_shared_artifact_group_populate_end_to_end(
         [{"recording_id": populated_recording["recording_id"]}],
     )
 
-    art_pk = SharedGroupArtifactSelection.insert_selection(
+    art_pk = SharedArtifactSelection.insert_selection(
         {
             "shared_artifact_group_name": group_name,
             "artifact_detection_params_name": "none",
         }
     )
     # ``none`` preset: full-window valid interval, independent of amplitude.
-    SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
+    SharedArtifactDetection.populate(art_pk, reserve_jobs=False)
 
     interval_name = artifact_detection_interval_list_name(
         art_pk["artifact_detection_id"]
@@ -1091,17 +1091,17 @@ def test_shared_artifact_group_populate_end_to_end(
     ).fetch(as_dict=True)
     assert len(rows) == 1
     assert rows[0]["pipeline"] == "spikesorting_artifact_detection_v2"
-    assert SharedGroupArtifactDetection.RemovedInterval & {
+    assert SharedArtifactDetection.RemovedInterval & {
         "artifact_detection_id": art_pk["artifact_detection_id"],
         "nwb_file_name": nwb_file_name,
         "interval_list_name": interval_name,
-    }, "SharedGroupArtifactDetection.populate did not insert the ownership part row"
+    }, "SharedArtifactDetection.populate did not insert the ownership part row"
 
     # Shared-group sources return {member nwb_file_name: valid_times}.
     import numpy as np
 
-    shared_intervals = (
-        SharedGroupArtifactDetection().get_artifact_removed_intervals(art_pk)
+    shared_intervals = SharedArtifactDetection().get_artifact_removed_intervals(
+        art_pk
     )
     assert isinstance(shared_intervals, dict), (
         f"get_artifact_removed_intervals returned {type(shared_intervals)}; "
@@ -1113,7 +1113,7 @@ def test_shared_artifact_group_populate_end_to_end(
     )
 
     # delete() removes the IntervalList rows of every member.
-    (SharedGroupArtifactDetection & art_pk).delete(safemode=False)
+    (SharedArtifactDetection & art_pk).delete(safemode=False)
     remaining = (
         IntervalList
         & {
@@ -1122,7 +1122,7 @@ def test_shared_artifact_group_populate_end_to_end(
         }
     ).fetch(as_dict=True)
     assert len(remaining) == 0, (
-        "SharedGroupArtifactDetection.delete() left an orphan IntervalList "
+        "SharedArtifactDetection.delete() left an orphan IntervalList "
         "row for a shared-group artifact; the delete-cleanup "
         "branch for shared sources is broken."
     )
@@ -1185,8 +1185,8 @@ def test_shared_artifact_group_multi_member_union(
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -1296,15 +1296,14 @@ def test_shared_artifact_group_multi_member_union(
     def _clear_shared_group():
         # Delete detections and selections before the group they reference.
         stale_art_ids = (
-            SharedGroupArtifactSelection
-            & {"shared_artifact_group_name": group_name}
+            SharedArtifactSelection & {"shared_artifact_group_name": group_name}
         ).fetch("artifact_detection_id")
         for aid in stale_art_ids:
+            (SharedArtifactDetection & {"artifact_detection_id": aid}).delete(
+                safemode=False
+            )
             (
-                SharedGroupArtifactDetection & {"artifact_detection_id": aid}
-            ).delete(safemode=False)
-            (
-                SharedGroupArtifactSelection & {"artifact_detection_id": aid}
+                SharedArtifactSelection & {"artifact_detection_id": aid}
             ).super_delete(warn=False)
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
@@ -1324,13 +1323,13 @@ def test_shared_artifact_group_multi_member_union(
             == 2
         )
 
-        art_pk = SharedGroupArtifactSelection.insert_selection(
+        art_pk = SharedArtifactSelection.insert_selection(
             {
                 "shared_artifact_group_name": group_name,
                 "artifact_detection_params_name": params_name,
             }
         )
-        SharedGroupArtifactDetection.populate(art_pk, reserve_jobs=False)
+        SharedArtifactDetection.populate(art_pk, reserve_jobs=False)
 
         interval_name = artifact_detection_interval_list_name(
             art_pk["artifact_detection_id"]
@@ -1372,7 +1371,7 @@ def test_shared_artifact_group_multi_member_union(
         ), "three channels must remain valid under the four-of-eight quorum"
 
         # Every member resolves to the same artifact-removed times.
-        shared = SharedGroupArtifactDetection().get_artifact_removed_intervals(
+        shared = SharedArtifactDetection().get_artifact_removed_intervals(
             art_pk
         )
         assert isinstance(shared, dict) and nwb_file_name in shared

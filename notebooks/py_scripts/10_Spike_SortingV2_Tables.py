@@ -110,8 +110,8 @@ Recording().plot_traces(recording_key)
 #
 # Detection on one recording. `SharedArtifactGroup` lets several recordings of
 # one session share one artifact result (e.g. chewing artifacts on every
-# probe), through `SharedGroupArtifactSelection` /
-# `SharedGroupArtifactDetection` instead. Masked samples read 0 µV. If a
+# probe), through `SharedArtifactSelection` /
+# `SharedArtifactDetection` instead. Masked samples read 0 µV. If a
 # masked source has a nonzero channel offset (only with the `no_filter` recipe
 # and `reference_mode="none"`), it is first converted to float32 µV.
 

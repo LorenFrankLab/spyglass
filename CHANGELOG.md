@@ -98,6 +98,11 @@ UnitAnnotation.migrate_positional_unit_ids(dry_run=True)  # then dry_run=False
 ```python
 # Only for a database that declared the spike sorting v2 tables before this
 # release (#1609). Run once.
+from spyglass.spikesorting.v2.artifact import (
+    SharedArtifactDetection,
+    SharedArtifactSelection,
+)
+from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2.session_group import (
     ConcatenatedRecordingSelection,
@@ -120,6 +125,45 @@ snapshot.connection.query(
     + "ADD FOREIGN KEY (`recording_id`) "
     + f"REFERENCES {Recording.full_table_name} (`recording_id`) "
     + "ON UPDATE CASCADE ON DELETE RESTRICT"
+)
+
+# The shared artifact tables and the `ArtifactDetectionOutput` parts are
+# renamed after their source tables. `alter()` cannot rename a table, so run
+# the DDL directly. Importing v2 declared the new names empty: stop if they
+# hold rows, update `source`, drop the empty tables, then rename the old ones
+# in one atomic statement. Restart Python afterward.
+output = ArtifactDetectionOutput()
+art, out = SharedArtifactSelection.database, output.database
+renames = {  # old name: new table, children first
+    f"`{out}`.`artifact_detection_output__shared_group_source`": (
+        output.SharedArtifactDetection
+    ),
+    f"`{out}`.`artifact_detection_output__recording_source`": (
+        output.RecordingArtifactDetection
+    ),
+    f"`{art}`.`__shared_group_artifact_detection__removed_interval`": (
+        SharedArtifactDetection.RemovedInterval
+    ),
+    f"`{art}`.`__shared_group_artifact_detection`": SharedArtifactDetection,
+    f"`{art}`.`shared_group_artifact_selection`": SharedArtifactSelection,
+}
+if any(len(table()) for table in renames.values()):
+    raise ValueError("The renamed artifact tables hold rows: already run?")
+for old_source, table in [
+    ("RecordingSource", output.RecordingArtifactDetection),
+    ("SharedGroupSource", output.SharedArtifactDetection),
+]:
+    output.connection.query(
+        f"UPDATE {output.full_table_name} SET `source` = %s "
+        + "WHERE `source` = %s",
+        args=(table.__name__, old_source),
+    )
+output.connection.query(
+    "DROP TABLE " + ", ".join(t.full_table_name for t in renames.values())
+)
+output.connection.query(
+    "RENAME TABLE "
+    + ", ".join(f"{old} TO {t.full_table_name}" for old, t in renames.items())
 )
 ```
 
@@ -530,6 +574,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         and at least 3 units #1609
     - v2 `ConcatenatedRecordingSelection.MemberSnapshot` references `Recording`,
         so deleting a member's `Recording` cascades to the concat #1609
+    - v2 `SharedGroupArtifactSelection` and `SharedGroupArtifactDetection` are
+        renamed `SharedArtifactSelection` and `SharedArtifactDetection`, and the
+        `ArtifactDetectionOutput` parts are named after their source tables, so
+        the generic merge methods work on it #1609
     - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
         `CurationRef.open_analyzer(extra_extensions=...)`), and
         `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609

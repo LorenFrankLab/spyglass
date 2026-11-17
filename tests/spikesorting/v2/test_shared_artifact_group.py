@@ -418,8 +418,8 @@ def test_shared_group_member_set_frozen(monkeypatch):
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
         SharedArtifactGroup,
-        SharedGroupArtifactDetection,
-        SharedGroupArtifactSelection,
+        SharedArtifactDetection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.exceptions import (
         SharedArtifactGroupMemberDriftError,
@@ -471,14 +471,14 @@ def test_shared_group_member_set_frozen(monkeypatch):
         conn.query("SET FOREIGN_KEY_CHECKS=1")
 
     try:
-        art_pk = SharedGroupArtifactSelection.insert_selection(
+        art_pk = SharedArtifactSelection.insert_selection(
             {
                 "shared_artifact_group_name": group_name,
                 "artifact_detection_params_name": "default",
             }
         )
         # Unedited: the live member set matches the snapshot.
-        fetched = SharedGroupArtifactDetection().make_fetch(art_pk)
+        fetched = SharedArtifactDetection().make_fetch(art_pk)
         assert [t.abs_path for t in fetched.member_traces] == [
             f"/fake/{rid}.nwb" for rid in fetched.member_recording_ids
         ]
@@ -490,12 +490,12 @@ def test_shared_group_member_set_frozen(monkeypatch):
         with pytest.raises(
             SharedArtifactGroupMemberDriftError, match="member set"
         ):
-            SharedGroupArtifactDetection().make_fetch(art_pk)
+            SharedArtifactDetection().make_fetch(art_pk)
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             if art_pk is not None:
-                (SharedGroupArtifactSelection & art_pk).delete_quick()
+                (SharedArtifactSelection & art_pk).delete_quick()
             (
                 SharedArtifactGroup.Member
                 & {"shared_artifact_group_name": group_name}

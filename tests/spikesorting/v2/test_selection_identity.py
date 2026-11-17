@@ -855,7 +855,7 @@ def test_direct_master_insert_rejected_without_flag(fresh_recording_identity):
         ),
         (
             "spyglass.spikesorting.v2.artifact",
-            "SharedGroupArtifactSelection",
+            "SharedArtifactSelection",
             {"artifact_detection_params_name": "none"},
         ),
         (
@@ -984,12 +984,12 @@ def test_sorting_selection_orphan_master_raises_schema_bypass(
 def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
     populated_sorting,
 ):
-    """``SharedGroupArtifactSelection.insert_selection`` writes the
+    """``SharedArtifactSelection.insert_selection`` writes the
     deterministic PK, is idempotent, and differs from the recording-source id
     for the same params and recording."""
     from spyglass.spikesorting.v2.artifact import (
         SharedArtifactGroup,
-        SharedGroupArtifactSelection,
+        SharedArtifactSelection,
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
@@ -1016,13 +1016,10 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         "artifact_detection_params_name": "default",
     }
     try:
-        pk = SharedGroupArtifactSelection.insert_selection(dict(select_key))
+        pk = SharedArtifactSelection.insert_selection(dict(select_key))
         assert pk == {"artifact_detection_id": expected}
         # Idempotent re-call returns the same id.
-        assert (
-            SharedGroupArtifactSelection.insert_selection(dict(select_key))
-            == pk
-        )
+        assert SharedArtifactSelection.insert_selection(dict(select_key)) == pk
         rec_source_id = deterministic_id(
             "artifact_detection",
             {
@@ -1033,9 +1030,9 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         )
         assert expected != rec_source_id
     finally:
-        (
-            SharedGroupArtifactSelection & {"artifact_detection_id": expected}
-        ).delete(safemode=False)
+        (SharedArtifactSelection & {"artifact_detection_id": expected}).delete(
+            safemode=False
+        )
         (
             SharedArtifactGroup & {"shared_artifact_group_name": group_name}
         ).delete(safemode=False)
@@ -1049,7 +1046,7 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
 _MASTER_UPDATE1_CASES = [
     ("spyglass.spikesorting.v2.recording", "RecordingSelection"),
     ("spyglass.spikesorting.v2.artifact", "RecordingArtifactSelection"),
-    ("spyglass.spikesorting.v2.artifact", "SharedGroupArtifactSelection"),
+    ("spyglass.spikesorting.v2.artifact", "SharedArtifactSelection"),
     ("spyglass.spikesorting.v2.sorting", "SortingSelection"),
     ("spyglass.spikesorting.v2.unit_matching", "UnitMatchSelection"),
     (

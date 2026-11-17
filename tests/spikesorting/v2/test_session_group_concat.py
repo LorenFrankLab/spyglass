@@ -953,10 +953,15 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
         )
         dj.Table.insert(
             ArtifactDetectionOutput(),
-            [{"merge_id": art_merge_id, "source": "RecordingSource"}],
+            [
+                {
+                    "merge_id": art_merge_id,
+                    "source": "RecordingArtifactDetection",
+                }
+            ],
         )
         dj.Table.insert(
-            ArtifactDetectionOutput.RecordingSource(),
+            ArtifactDetectionOutput.RecordingArtifactDetection(),
             [{"merge_id": art_merge_id, "artifact_detection_id": art_id}],
         )
         SortingSelection.ArtifactDetectionSource.insert1(
@@ -980,7 +985,7 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
             ).delete_quick()
             (SortingSelection & {"sorting_id": sid}).delete_quick()
             (
-                ArtifactDetectionOutput.RecordingSource
+                ArtifactDetectionOutput.RecordingArtifactDetection
                 & {"merge_id": art_merge_id}
             ).delete_quick()
             (

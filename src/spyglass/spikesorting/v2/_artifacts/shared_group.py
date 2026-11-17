@@ -62,7 +62,7 @@ def assert_shared_group_recordings_aggregatable(
 ) -> None:
     """Re-assert at compute that shared-group members can be channel-aggregated.
 
-    A direct ``SharedGroupArtifactSelection`` insert can bypass
+    A direct ``SharedArtifactSelection`` insert can bypass
     ``SharedArtifactGroup.insert_group``'s checks and yield a silently wrong
     ``si.aggregate_channels`` union.
 
@@ -84,7 +84,7 @@ def assert_shared_group_recordings_aggregatable(
     sessions = set(nwb_file_names)
     if len(sessions) > 1:
         raise SchemaBypassError(
-            "SharedGroupArtifactDetection.make_compute: shared-group members "
+            "SharedArtifactDetection.make_compute: shared-group members "
             "span "
             f"sessions {sorted(sessions)}; a shared artifact pass aggregates "
             "channels within ONE session. The member set was inserted without "
@@ -102,7 +102,7 @@ def assert_shared_group_recordings_aggregatable(
 
     def _bypass(rid, detail):
         raise SchemaBypassError(
-            "SharedGroupArtifactDetection.make_compute: shared-group members "
+            "SharedArtifactDetection.make_compute: shared-group members "
             "are not "
             f"channel-aggregatable -- recording_id={rid!r} {detail} differs "
             f"from anchor recording_id={reference_id!r}. The member set was "

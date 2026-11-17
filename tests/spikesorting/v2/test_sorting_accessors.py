@@ -277,7 +277,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
 
         assert (
             len(
-                ArtifactDetectionOutput.RecordingSource
+                ArtifactDetectionOutput.RecordingArtifactDetection
                 & {"artifact_detection_id": artifact_detection_id}
             )
             == 0
