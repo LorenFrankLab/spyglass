@@ -39,7 +39,7 @@ def _restore_pipeline_preset_registry():
     """Undo any in-session pipeline-preset registration a notebook makes.
 
     In-process cells mutate the module-level ``_PIPELINE_PRESETS``, which
-    would leak ``my_lab_*`` presets into later registry tests.
+    would leak the notebook's presets into later registry tests.
     """
     from spyglass.spikesorting.v2._orchestration import presets as _pp
 
@@ -252,7 +252,11 @@ def test_presets_notebook_runs(dj_conn, subset, monkeypatch, smoke_nwb):
         parameters,
     )
     # The clone is registered, and the whole-session sweep returns per-group rows.
-    assert "my_lab_ms4_lower_threshold" in namespace["list_pipeline_presets"]()
+    from spyglass.spikesorting.v2 import list_pipeline_presets
+
+    cloned = namespace["lower_threshold_preset"]
+    assert cloned.endswith("_ms4_lower_threshold")
+    assert cloned in list_pipeline_presets()
     assert isinstance(namespace["session_results"], list)
     assert namespace["session_results"]
     expected_ids = (
