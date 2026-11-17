@@ -166,6 +166,7 @@ temp_nwb/*s
 !tests/spikesorting/v2/fixtures/fixtures_manifest.json
 !tests/spikesorting/v2/motion_acceptance_development.json
 !tests/spikesorting/v2/motion_acceptance_held_out.json
+!tests/spikesorting/v2/test_tiers.json
 *.gz
 *.pdf
 *.lock
