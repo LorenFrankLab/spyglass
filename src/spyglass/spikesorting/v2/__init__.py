@@ -1,7 +1,7 @@
 """SpikeInterface ``SortingAnalyzer``-based spike sorting pipeline for Spyglass.
 
 Submodules load lazily, so ``import spyglass.spikesorting.v2`` does not import
-Pydantic or SpikeInterface. Tables (``from spyglass.spikesorting.v2 import
+SpikeInterface or the table modules. Tables (``from spyglass.spikesorting.v2 import
 Recording``) and the pipeline functions load on first use. Eager names:
 
 - ``initialize_v2_defaults``: installs every default Lookup row in one call.

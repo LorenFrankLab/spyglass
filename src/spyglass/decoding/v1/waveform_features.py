@@ -282,7 +282,9 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
         - Builds a fresh dense ``SortingAnalyzer`` over every spike, since the
           persisted v2 analyzer subsamples spikes.
-        - Amplitudes are in microvolts; v0/v1 marks are not comparable.
+        - Amplitudes are always in microvolts. v0/v1 marks are microvolts only
+          when their recording carried gains, and come from other
+          preprocessing, so do not mix them with v2 marks in one decoder.
         - Reads the sorting input recording (artifact-masked and
           motion-corrected when the sort selected them).
         - ``max_spikes_per_unit`` must be None so waveforms align 1:1 with
