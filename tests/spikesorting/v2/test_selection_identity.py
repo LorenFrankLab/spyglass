@@ -127,6 +127,66 @@ def test_source_kind_participates_in_identity():
     )
 
 
+def test_sort_and_motion_estimate_ids_match_pinned_values():
+    """Sort and motion-estimate ids hash the source ids, not the table layout.
+
+    Values computed at 9a50238fd, when the source was stored on part tables.
+    """
+    from spyglass.spikesorting.v2._core.selection_plan import (
+        build_sorting_selection_plan,
+    )
+    from spyglass.spikesorting.v2._motion.estimation import (
+        motion_estimate_identity_payload,
+    )
+
+    rec, concat, art, corrected = (uuid.UUID(int=n) for n in (1, 2, 3, 4))
+    sorter = {
+        "sorter": "mountainsort5",
+        "sorter_params_name": "franklab_30khz_ms5_2026_06",
+    }
+    sorts = {
+        "e93d48e1-17ea-5d68-9640-d344d4838ef4": {"recording_id": rec},
+        "7acb21bd-4a24-535c-b998-469002d00ff1": {
+            "recording_id": rec,
+            "artifact_detection_id": art,
+        },
+        "91392c24-04b4-586c-b293-e40fcf514b5d": {"concat_recording_id": concat},
+        "4b4d75d8-2e33-5032-b627-c40a4bf6fe75": {
+            "recording_id": rec,
+            "motion_corrected_recording_id": corrected,
+        },
+    }
+    for pinned, source in sorts.items():
+        plan = build_sorting_selection_plan({**source, **sorter})
+        assert plan.sorting_id == uuid.UUID(pinned), source
+
+    master = {
+        "source_content_hash": "a" * 64,
+        "motion_estimation_params_name": "dredge_fast_v1",
+        "resolved_params_hash": "b" * 64,
+        "spikeinterface_version": "0.104.3",
+        "motion_algorithm_version": 1,
+    }
+    estimates = {
+        "082670db-d747-5484-84a9-d05d98b8e9c1": ("recording", rec, art),
+        "d7b5ae9d-a6ea-5d59-8d31-2fa4108244cd": (
+            "concatenated_recording",
+            concat,
+            None,
+        ),
+    }
+    for pinned, (kind, source_id, detection) in estimates.items():
+        payload = motion_estimate_identity_payload(
+            source_kind=kind,
+            source_id=source_id,
+            artifact_detection_id=detection,
+            **master,
+        )
+        assert deterministic_id("motion_estimate", payload) == uuid.UUID(
+            pinned
+        ), kind
+
+
 def test_canonical_json_is_sorted_compact_json():
     out = canonical_json({"b": 2, "a": 1})
     assert out == '{"a":1,"b":2}'

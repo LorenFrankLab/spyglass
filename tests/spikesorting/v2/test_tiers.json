@@ -950,6 +950,9 @@
     "test_selection_plan.py": {
       "tier": "unit"
     },
+    "test_selection_source_cascade.py": {
+      "tier": "stage"
+    },
     "test_service_import_contracts.py": {
       "tier": "unit",
       "overrides": {
