@@ -110,7 +110,7 @@ class TestSchemaConsistency:
     @pytest.mark.parametrize(
         "prefix,expected_count",
         [
-            ("spyglass", 8),
+            ("spyglass", 10),
             ("kachery", 3),
             ("dlc", 3),
             ("moseq", 2),
@@ -135,6 +135,8 @@ class TestSchemaConsistency:
                     "temp",
                     "video",
                     "export",
+                    "analyzer",
+                    "figpack",
                 },
             ),
             ("kachery", {"cloud", "temp", "storage"}),
@@ -152,7 +154,7 @@ class TestInstallerConfig:
     """Tests for installer config generation."""
 
     def test_build_directory_structure_creates_all_dirs(self):
-        """Test that build_directory_structure creates all 16 directories."""
+        """Test that build_directory_structure creates all 18 directories."""
         with TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir) / "spyglass_data"
 
@@ -161,7 +163,7 @@ class TestInstallerConfig:
             )
 
             # Should return dict with all directories
-            assert len(dirs) == 16, f"Expected 16 directories, got {len(dirs)}"
+            assert len(dirs) == 18, f"Expected 18 directories, got {len(dirs)}"
 
             # All directories should exist
             for name, path in dirs.items():
@@ -177,7 +179,7 @@ class TestInstallerConfig:
             )
 
             # Should return dict but not create dirs
-            assert len(dirs) == 16
+            assert len(dirs) == 18
             assert not (base_dir / "raw").exists()
 
     def test_installer_config_has_all_directory_groups(self):
@@ -202,6 +204,8 @@ class TestInstallerConfig:
                         "temp": str(dirs["spyglass_temp"]),
                         "video": str(dirs["spyglass_video"]),
                         "export": str(dirs["spyglass_export"]),
+                        "analyzer": str(dirs["spyglass_analyzer"]),
+                        "figpack": str(dirs["spyglass_figpack"]),
                     },
                     "kachery_dirs": {
                         "cloud": str(dirs["kachery_cloud"]),
@@ -299,6 +303,8 @@ class TestBackwardsCompatibility:
                 "temp": "tmp",
                 "video": "video",
                 "export": "export",
+                "analyzer": "spikesorting_v2/analyzers",
+                "figpack": "spikesorting_v2/figpack",
             },
             "kachery": {
                 "cloud": ".kachery-cloud",
@@ -340,6 +346,8 @@ class TestBackwardsCompatibility:
                 "temp": "tmp",
                 "video": "video",
                 "export": "export",
+                "analyzer": "spikesorting_v2/analyzers",
+                "figpack": "spikesorting_v2/figpack",
             },
             "kachery": {
                 "cloud": ".kachery-cloud",
@@ -475,6 +483,8 @@ class TestConfigCompatibility:
                         "temp": str(dirs["spyglass_temp"]),
                         "video": str(dirs["spyglass_video"]),
                         "export": str(dirs["spyglass_export"]),
+                        "analyzer": str(dirs["spyglass_analyzer"]),
+                        "figpack": str(dirs["spyglass_figpack"]),
                     },
                     "kachery_dirs": {
                         "cloud": str(dirs["kachery_cloud"]),
@@ -616,6 +626,8 @@ class TestExampleConfigSync:
                         "temp": str(dirs["spyglass_temp"]),
                         "video": str(dirs["spyglass_video"]),
                         "export": str(dirs["spyglass_export"]),
+                        "analyzer": str(dirs["spyglass_analyzer"]),
+                        "figpack": str(dirs["spyglass_figpack"]),
                     },
                     "kachery_dirs": {
                         "cloud": str(dirs["kachery_cloud"]),
@@ -1225,20 +1237,21 @@ class TestTestModeSandboxContainment:
                 base_dir=str(base), test_mode=True, force_reload=True
             )
 
+    @pytest.mark.parametrize("dir_key", ["analysis", "analyzer", "figpack"])
     def test_dj_config_dir_outside_base_is_refused(
-        self, tmp_path, monkeypatch, no_dj_dirs
+        self, tmp_path, monkeypatch, no_dj_dirs, dir_key
     ):
-        """dj.config may point analysis elsewhere; test_mode must refuse."""
+        """dj.config may point a dir elsewhere; test_mode must refuse."""
         import datajoint as dj
 
         from spyglass.settings import SpyglassConfig
 
         base = tmp_path / "tests" / "_data"
         base.mkdir(parents=True)
-        outside = tmp_path / "production" / "analysis"
+        outside = tmp_path / "production" / dir_key
 
         monkeypatch.setitem(
-            dj.config["custom"], "spyglass_dirs", {"analysis": str(outside)}
+            dj.config["custom"], "spyglass_dirs", {dir_key: str(outside)}
         )
 
         cfg = SpyglassConfig()
@@ -1246,6 +1259,28 @@ class TestTestModeSandboxContainment:
             cfg.load_config(
                 base_dir=str(base), test_mode=True, force_reload=True
             )
+
+    def test_v2_dirs_resolve_under_test_base(self, tmp_path, no_dj_dirs):
+        """The spike sorting v2 folders default under base, not temp_dir.
+
+        The scheduled cleanup deletes week-old files in temp_dir.
+        """
+        from spyglass.settings import SpyglassConfig
+
+        base = tmp_path / "tests" / "_data"
+        cfg = SpyglassConfig()
+        cfg.load_config(base_dir=str(base), test_mode=True, force_reload=True)
+
+        v2_dirs = {"analyzer": cfg.analyzer_dir, "figpack": cfg.figpack_dir}
+        assert v2_dirs == {
+            "analyzer": str(base / "spikesorting_v2" / "analyzers"),
+            "figpack": str(base / "spikesorting_v2" / "figpack"),
+        }
+        for path in v2_dirs.values():
+            assert Path(path).is_dir()
+            assert not Path(path).is_relative_to(cfg.temp_dir)
+        saved = cfg._dj_custom["custom"]["spyglass_dirs"]
+        assert {key: saved[key] for key in v2_dirs} == v2_dirs
 
     def test_refusal_has_no_side_effects(self, tmp_path, no_dj_dirs):
         """A rejected config must create nothing and mutate nothing."""

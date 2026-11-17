@@ -863,13 +863,15 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     folder in place. `remove_analyzer_cache` renames each folder to a trash
     sibling before removing it.
 - `_storage.analyzer_cache` derives the path from `sorting_id`, the recipe name
-    and one root, so no absolute path is stored. The root is
-    `dj.config["custom"]["spikesorting_v2_analyzer_dir"]`, else
+    and one root, so no absolute path is stored. The root is the Spyglass
+    directory `analyzer_dir` (`dj.config["custom"]["spyglass_dirs"]["analyzer"]`
+    or `SPYGLASS_ANALYZER_DIR`), by default
     `{base_dir}/spikesorting_v2/analyzers`. Not `temp_dir`: the lab cleanup
-    script deletes its week-old files. FigPack review bundles use
-    `spikesorting_v2_figpack_dir`, else `{base_dir}/spikesorting_v2/figpack`.
-    Changing a root turns old folders into cache misses for the operator to
-    clean up; saved reviews keep their stored path.
+    script deletes its week-old files. FigPack review bundles use `figpack_dir`
+    (`spyglass_dirs.figpack`, `SPYGLASS_FIGPACK_DIR`), by default
+    `{base_dir}/spikesorting_v2/figpack`. Changing a root turns old folders
+    into cache misses for the operator to clean up; saved reviews keep their
+    stored path.
 - Folders are `binary_folder` analyzers named
     `{sorting_id}__{waveform_params_name}.analyzer`. In SpikeInterface 0.104.3
     it is the only format that extracts waveforms straight into a memmap; `zarr`

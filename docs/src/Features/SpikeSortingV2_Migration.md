@@ -126,8 +126,8 @@ python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"
 
 - Single-machine and multi-node workers use the same storage ownership rules.
 - For multiple nodes, point every worker at the same MySQL database, the same
-    durable recording/analysis paths, and the same
-    `dj.config["custom"]["spikesorting_v2_analyzer_dir"]`.
+    durable recording/analysis paths, and the same analyzer folder,
+    `dj.config["custom"]["spyglass_dirs"]["analyzer"]`.
 - The shared mount must support cross-host POSIX file locking and directory
     renames. Review bundles shared between hosts need the same.
 - Keep lock files with the analyzers. Do not put a worker's lock directory on

@@ -632,14 +632,13 @@ def test_rebuild_reconstruction_validates_artifact_interval_ownership(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_changed_analyzer_root_causes_miss_and_rebuild(
-    populated_sorting, restore_custom_config, tmp_path
+    populated_sorting, monkeypatch, tmp_path
 ):
-    """Relocating ``spikesorting_v2_analyzer_dir`` is a cache miss, and
+    """Relocating ``spyglass.settings.analyzer_dir`` is a cache miss, and
     ``get_analyzer`` rebuilds into the new root.
     """
     import shutil
 
-    import datajoint as dj
     import spikeinterface as si
 
     from spyglass.spikesorting.v2._storage.analyzer_cache import analyzer_path
@@ -650,7 +649,7 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
     assert original.exists(), "populated sort should have an analyzer folder"
 
     new_root = tmp_path / "relocated_analyzers"
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(new_root)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(new_root))
     relocated = analyzer_path(sid, _DISPLAY)
     assert relocated != original, "root override must change the resolved path"
     assert not relocated.exists(), "fresh root -> cache miss, not a stale row"
@@ -661,8 +660,8 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
         assert original.exists()
     finally:
         shutil.rmtree(new_root, ignore_errors=True)
-    # restore_custom_config resets spikesorting_v2_analyzer_dir on teardown so
-    # the package-scoped populated_sorting fixture resolves to `original` again.
+    # monkeypatch restores analyzer_dir on teardown, so the package-scoped
+    # populated_sorting fixture resolves to `original` again.
 
 
 # --------------------------------------------------------------------------- #

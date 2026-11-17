@@ -143,7 +143,7 @@ def test_resort_does_not_reuse_previous_sorts_metric_analyzer(
 
 @pytest.mark.parametrize("kill_point", ["build", "swap"])
 def test_killed_publisher_staging_is_reclaimable(
-    tmp_path, restore_custom_config, kill_point
+    tmp_path, monkeypatch, kill_point
 ):
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         analyzer_path,
@@ -152,7 +152,7 @@ def test_killed_publisher_staging_is_reclaimable(
         remove_analyzer_cache,
     )
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sorting_id = str(uuid.uuid4())
     canonical = analyzer_path(sorting_id, "test")
 
@@ -164,9 +164,9 @@ def test_killed_publisher_staging_is_reclaimable(
     child = """
 import os, signal, sys
 from pathlib import Path
-import datajoint as dj
+import spyglass.settings as settings
 from spyglass.spikesorting.v2._storage import analyzer_cache as cache
-dj.config.setdefault('custom', {})['spikesorting_v2_analyzer_dir'] = sys.argv[1]
+settings.analyzer_dir = sys.argv[1]
 canonical = cache.analyzer_path(sys.argv[2], 'test')
 replace = os.replace
 def interrupted_replace(src, dst):
@@ -200,7 +200,7 @@ cache.publish_analyzer_atomically(canonical, build)
     assert not list(tmp_path.glob(".*.analyzer.lock"))
 
 
-def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
+def test_cleanup_keeps_active_attempt(tmp_path, monkeypatch):
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         StagedAnalyzer,
         analyzer_path,
@@ -208,7 +208,7 @@ def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
         remove_analyzer_cache,
     )
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sorting_id = uuid.uuid4()
     with StagedAnalyzer(analyzer_path(sorting_id, "test")) as staged:
         staged.folder.mkdir()
@@ -220,9 +220,7 @@ def test_cleanup_keeps_active_attempt(tmp_path, restore_custom_config):
     assert not staged.folder.exists()
 
 
-def test_cleanup_skips_staging_still_in_use(
-    tmp_path, restore_custom_config, monkeypatch
-):
+def test_cleanup_skips_staging_still_in_use(tmp_path, monkeypatch):
     """A staging folder whose files are still open is left for later.
 
     On NFS, removing a file another handle still maps leaves a ``.nfs``
@@ -234,7 +232,7 @@ def test_cleanup_skips_staging_still_in_use(
 
     from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sorting_id = str(uuid.uuid4())
     canonical = cache.analyzer_path(sorting_id, "test")
     busy = cache._publish_sibling(canonical, "trash")
@@ -260,7 +258,7 @@ def test_cleanup_skips_staging_still_in_use(
 
 
 def test_orphan_audit_skips_orphan_folder_still_in_use(
-    dj_conn, tmp_path, restore_custom_config, monkeypatch
+    dj_conn, tmp_path, monkeypatch
 ):
     """A disk-side orphan whose files are still open is left for later.
 
@@ -273,7 +271,7 @@ def test_orphan_audit_skips_orphan_folder_still_in_use(
     from spyglass.spikesorting.v2._storage import analyzer_cache as cache
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sorting_id = uuid.uuid4()
     busy = cache.analyzer_path(sorting_id, "busy")
     free = cache.analyzer_path(sorting_id, "free")
@@ -296,7 +294,7 @@ def test_orphan_audit_skips_orphan_folder_still_in_use(
 
 
 def test_orphan_audit_reclaims_only_abandoned_staging(
-    dj_conn, tmp_path, restore_custom_config, monkeypatch
+    dj_conn, tmp_path, monkeypatch
 ):
     from spyglass.spikesorting.v2._storage.analyzer_cache import (
         StagedAnalyzer,
@@ -304,7 +302,7 @@ def test_orphan_audit_reclaims_only_abandoned_staging(
     )
     from spyglass.spikesorting.v2.sorting import Sorting
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sorting_id = uuid.uuid4()
     canonical = analyzer_path(sorting_id, "test")
     # A build whose worker died has no surviving ownership lock.

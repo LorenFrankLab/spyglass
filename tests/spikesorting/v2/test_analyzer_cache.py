@@ -1,7 +1,7 @@
 """Analyzer-cache path policy.
 
 The folder location depends only on ``sorting_id`` and one configured root
-(``spikesorting_v2_analyzer_dir``, else under ``base_dir``). DB-free.
+(``spyglass.settings.analyzer_dir``). DB-free.
 """
 
 from __future__ import annotations
@@ -31,35 +31,28 @@ _DISPLAY_PARAMS = {
 }
 
 
-def test_analyzer_cache_root_honors_config(restore_custom_config):
-    import datajoint as dj
-
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
+def test_analyzer_cache_root_honors_config(monkeypatch):
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", "/tmp/v2_custom_an")
     assert analyzer_cache_root() == Path("/tmp/v2_custom_an")
     assert analyzer_path("abc", "rec") == Path(
         "/tmp/v2_custom_an/abc__rec.analyzer"
     )
 
 
-def test_analyzer_cache_root_falls_back_to_base_dir(restore_custom_config):
-    import datajoint as dj
-
+def test_analyzer_cache_root_defaults_under_base_dir():
     from spyglass.settings import base_dir
 
-    dj.config["custom"].pop("spikesorting_v2_analyzer_dir", None)
     expected = Path(base_dir) / "spikesorting_v2" / "analyzers"
     assert analyzer_cache_root() == expected
     assert analyzer_path("s1", "rec") == expected / "s1__rec.analyzer"
 
 
-def test_analyzer_path_includes_params_name(restore_custom_config):
+def test_analyzer_path_includes_params_name(monkeypatch):
     """The cache folder is keyed by ``(sorting_id, waveform_params_name)``.
 
     The whitened metric analyzer never overwrites the display one.
     """
-    import datajoint as dj
-
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = "/tmp/v2_custom_an"
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", "/tmp/v2_custom_an")
     root = Path("/tmp/v2_custom_an")
     display = analyzer_path("sid1", "franklab_hippocampus_actual_waveforms")
     metric = analyzer_path("sid1", "franklab_hippocampus_metric_waveforms")
@@ -70,29 +63,12 @@ def test_analyzer_path_includes_params_name(restore_custom_config):
     )
 
 
-def test_empty_config_value_falls_back(restore_custom_config):
-    """An empty-string override is falsy -> fall back to base_dir."""
-    import datajoint as dj
-
-    from spyglass.settings import base_dir
-
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = ""
-    assert (
-        analyzer_cache_root()
-        == Path(base_dir) / "spikesorting_v2" / "analyzers"
-    )
-
-
-def test_remove_analyzer_cache_removes_all_recipes(
-    tmp_path, restore_custom_config
-):
+def test_remove_analyzer_cache_removes_all_recipes(tmp_path, monkeypatch):
     """``remove_analyzer_cache`` globs every ``{sid}__*.analyzer`` recipe folder.
 
     A different sort's folder is untouched.
     """
-    import datajoint as dj
-
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sid = "deadbeef"
 
     # Absent folder: no-op with missing_ok (default), raises otherwise.
@@ -115,7 +91,7 @@ def test_remove_analyzer_cache_removes_all_recipes(
 
 
 def test_remove_analyzer_cache_skips_a_still_mapped_folder(
-    tmp_path, restore_custom_config, monkeypatch
+    tmp_path, monkeypatch
 ):
     """A folder still mapped by another process (NFS ``EBUSY``) does not abort
     removal of the sort's other folders; it is left as a trash sibling that
@@ -123,11 +99,9 @@ def test_remove_analyzer_cache_skips_a_still_mapped_folder(
     import errno
     import shutil
 
-    import datajoint as dj
-
     from spyglass.spikesorting.v2._storage import analyzer_cache as cache
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
     sid = "deadbeef"
     busy = analyzer_path(sid, "franklab_hippocampus_actual_waveforms")
     free = analyzer_path(sid, "franklab_hippocampus_metric_waveforms")
@@ -192,39 +166,34 @@ class TestAnalyzerCacheLock:
     across threads and processes, independent across sorts.
     """
 
-    def test_lock_is_memoized_per_sort(self, tmp_path, restore_custom_config):
-        import datajoint as dj
-
+    def test_lock_is_memoized_per_sort(self, tmp_path, monkeypatch):
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         # Same instance per sort makes nested acquisition reentrant.
         assert analyzer_cache_lock("sid-A") is analyzer_cache_lock("sid-A")
         assert analyzer_cache_lock("sid-A") is not analyzer_cache_lock("sid-B")
 
-    def test_nested_acquisition_does_not_deadlock(
-        self, tmp_path, restore_custom_config
-    ):
+    def test_nested_acquisition_does_not_deadlock(self, tmp_path, monkeypatch):
         """A nested acquisition of the same sort's lock must not block.
 
         The finite inner timeout turns a non-reentrant lock into a
         ``Timeout`` instead of a hang.
         """
-        import datajoint as dj
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         with analyzer_cache_lock("sid-A"):
             with analyzer_cache_lock("sid-A").acquire(timeout=5):
                 pass
 
     def test_concurrent_thread_cannot_acquire_held_lock(
-        self, tmp_path, restore_custom_config
+        self, tmp_path, monkeypatch
     ):
         """A different concurrent job (thread) of the same sort is excluded.
 
@@ -232,14 +201,13 @@ class TestAnalyzerCacheLock:
         """
         import threading
 
-        import datajoint as dj
         from filelock import Timeout
 
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         contender_result = {}
 
         def contend():
@@ -255,31 +223,23 @@ class TestAnalyzerCacheLock:
             thread.join()
         assert contender_result["acquired"] is False
 
-    def test_different_sorts_do_not_block(
-        self, tmp_path, restore_custom_config
-    ):
-        import datajoint as dj
-
+    def test_different_sorts_do_not_block(self, tmp_path, monkeypatch):
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         with analyzer_cache_lock("sid-A"):
             with analyzer_cache_lock("sid-B").acquire(timeout=0):
                 pass
 
-    def test_lock_file_lives_under_cache_root(
-        self, tmp_path, restore_custom_config
-    ):
-        import datajoint as dj
-
+    def test_lock_file_lives_under_cache_root(self, tmp_path, monkeypatch):
         from spyglass.spikesorting.v2._storage.analyzer_cache import (
             analyzer_cache_lock,
             analyzer_cache_root,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         lock = analyzer_cache_lock("sid-A")
         assert Path(lock.lock_file).parent == analyzer_cache_root()
 
@@ -292,11 +252,9 @@ class TestPublishAnalyzerAtomically:
     aside first and restored if the swap fails.
     """
 
-    @staticmethod
-    def _configure_root(tmp_path):
-        import datajoint as dj
-
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+    @pytest.fixture(autouse=True)
+    def _configure_root(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
 
     @staticmethod
     def _writer(content):
@@ -310,25 +268,19 @@ class TestPublishAnalyzerAtomically:
         # Hidden ``.{stem}.build|trash-*.analyzer`` siblings.
         return not any(canonical.parent.glob(f".{canonical.stem}.*"))
 
-    def test_absent_canonical_publishes_into_slot(
-        self, tmp_path, restore_custom_config
-    ):
-        self._configure_root(tmp_path)
+    def test_absent_canonical_publishes_into_slot(self, tmp_path):
         canonical = analyzer_path("sidP", "rec")
         result = publish_analyzer_atomically(canonical, self._writer("v1"))
         assert result == canonical
         assert (canonical / "data.bin").read_text() == "v1"
         assert self._staging_is_empty(canonical)
 
-    def test_publish_holds_per_sort_lock(
-        self, tmp_path, monkeypatch, restore_custom_config
-    ):
+    def test_publish_holds_per_sort_lock(self, tmp_path, monkeypatch):
         """The publisher acquires the sort-level lock around build + swap."""
         from spyglass.spikesorting.v2._storage import (
             analyzer_cache as cache_mod,
         )
 
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         seen = []
 
@@ -359,10 +311,7 @@ class TestPublishAnalyzerAtomically:
         assert lock.held is False
         assert (canonical / "data.bin").read_text() == "v1"
 
-    def test_existing_canonical_is_replaced(
-        self, tmp_path, restore_custom_config
-    ):
-        self._configure_root(tmp_path)
+    def test_existing_canonical_is_replaced(self, tmp_path):
         canonical = analyzer_path("sidP", "rec")
         publish_analyzer_atomically(canonical, self._writer("v1"))
         publish_analyzer_atomically(canonical, self._writer("v2"))
@@ -370,12 +319,11 @@ class TestPublishAnalyzerAtomically:
         assert self._staging_is_empty(canonical)
 
     def test_publish_uses_os_replace_and_clears_temp(
-        self, tmp_path, monkeypatch, restore_custom_config
+        self, tmp_path, monkeypatch
     ):
         """The publish moves via ``os.replace`` and leaves no temp behind."""
         import os as os_mod
 
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         calls = []
         real_replace = os_mod.replace
@@ -389,10 +337,7 @@ class TestPublishAnalyzerAtomically:
         assert any(dst == str(canonical) for _, dst in calls)
         assert self._staging_is_empty(canonical)
 
-    def test_build_failure_leaves_existing_canonical_untouched(
-        self, tmp_path, restore_custom_config
-    ):
-        self._configure_root(tmp_path)
+    def test_build_failure_leaves_existing_canonical_untouched(self, tmp_path):
         canonical = analyzer_path("sidP", "rec")
         publish_analyzer_atomically(canonical, self._writer("v1"))
 
@@ -406,12 +351,9 @@ class TestPublishAnalyzerAtomically:
         assert (canonical / "data.bin").read_text() == "v1"
         assert self._staging_is_empty(canonical)
 
-    def test_zero_unit_build_leaves_slot_absent(
-        self, tmp_path, restore_custom_config
-    ):
+    def test_zero_unit_build_leaves_slot_absent(self, tmp_path):
         """When ``build_into`` creates no folder (zero-unit sort), the canonical
         slot stays absent and no error is raised."""
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
 
         def _build_nothing(folder):
@@ -422,14 +364,11 @@ class TestPublishAnalyzerAtomically:
         assert not canonical.exists()
         assert self._staging_is_empty(canonical)
 
-    def test_failed_swap_rolls_back_canonical(
-        self, tmp_path, monkeypatch, restore_custom_config
-    ):
+    def test_failed_swap_rolls_back_canonical(self, tmp_path, monkeypatch):
         """If the temp -> canonical move fails mid-publish over an existing
         folder, the original is restored (the slot is never left empty)."""
         import os as os_mod
 
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         publish_analyzer_atomically(canonical, self._writer("v1"))
 
@@ -449,13 +388,12 @@ class TestPublishAnalyzerAtomically:
         assert self._staging_is_empty(canonical)
 
     def test_failed_swap_and_failed_rollback_preserve_trash(
-        self, tmp_path, monkeypatch, restore_custom_config
+        self, tmp_path, monkeypatch
     ):
         """If both the install and the rollback fail, the moved-aside original
         (the only surviving copy) stays on disk."""
         import os as os_mod
 
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         publish_analyzer_atomically(canonical, self._writer("v1"))
 
@@ -475,13 +413,10 @@ class TestPublishAnalyzerAtomically:
         assert trash, "the moved-aside original must be preserved for recovery"
         assert (trash[0] / "data.bin").read_text() == "v1"
 
-    def test_temp_build_is_a_hidden_sibling_of_canonical(
-        self, tmp_path, restore_custom_config
-    ):
+    def test_temp_build_is_a_hidden_sibling_of_canonical(self, tmp_path):
         """The temp build is a hidden sibling of the canonical slot, so the
         relative recording path survives the move and the orphan scan skips
         in-flight builds."""
-        self._configure_root(tmp_path)
         canonical = analyzer_path("sidP", "rec")
         seen = {}
 
@@ -497,15 +432,12 @@ class TestPublishAnalyzerAtomically:
         assert temp.suffix == ".analyzer"
         assert temp.name != canonical.name
 
-    def test_published_real_analyzer_keeps_its_recording(
-        self, tmp_path, restore_custom_config
-    ):
+    def test_published_real_analyzer_keeps_its_recording(self, tmp_path):
         """A real SI binary_folder analyzer published via the move keeps its recording.
 
         SI stores the recording path relative to the analyzer folder, so a
         non-sibling build would detach it.
         """
-        self._configure_root(tmp_path)
         recording, sorting = si.generate_ground_truth_recording(
             durations=[2.0], num_channels=8, num_units=3, seed=0
         )
@@ -742,28 +674,9 @@ class TestBuildAnalyzerWaveformParams:
         assert noise.max() < 2.0 and noise.min() > 0.4, noise
 
 
-def test_default_storage_roots_are_outside_temp_dir(tmp_path, monkeypatch):
+def test_default_storage_root_is_outside_temp_dir():
     """Durable v2 folders default under ``base_dir``: lab cleanup deletes
     week-old files in ``temp_dir``."""
-    import datajoint as dj
+    from spyglass.settings import temp_dir
 
-    import spyglass.settings as settings
-    from spyglass.spikesorting.v2._storage.analyzer_cache import (
-        v2_storage_root,
-    )
-
-    monkeypatch.setattr(settings, "base_dir", str(tmp_path / "base"))
-    monkeypatch.setattr(settings, "temp_dir", str(tmp_path / "base" / "tmp"))
-    monkeypatch.setitem(dj.config, "custom", {})
-
-    root = analyzer_cache_root()
-    assert root == tmp_path / "base" / "spikesorting_v2" / "analyzers"
-    assert not root.is_relative_to(tmp_path / "base" / "tmp")
-    assert v2_storage_root("unused_key", "figpack") == (
-        tmp_path / "base" / "spikesorting_v2" / "figpack"
-    )
-
-    monkeypatch.setitem(
-        dj.config, "custom", {"spikesorting_v2_analyzer_dir": str(tmp_path)}
-    )
-    assert analyzer_cache_root() == tmp_path
+    assert not analyzer_cache_root().is_relative_to(temp_dir)

@@ -1370,6 +1370,8 @@ def create_database_config(
                 "temp": str(dirs["spyglass_temp"]),
                 "video": str(dirs["spyglass_video"]),
                 "export": str(dirs["spyglass_export"]),
+                "analyzer": str(dirs["spyglass_analyzer"]),
+                "figpack": str(dirs["spyglass_figpack"]),
             },
             "kachery_dirs": {
                 "cloud": str(dirs["kachery_cloud"]),

@@ -41,6 +41,44 @@ def cleanup_external_files():
     clusterless_schema.external["analysis"].delete(delete_external_files=True)
 
 
+def report_v2_orphans():
+    """Print count and size of spike sorting v2 folders no row references.
+
+    Report only: the audits delete after an interactive confirmation, so an
+    admin runs them with dry_run=False. Skipped when v2 is not installed.
+    """
+    try:
+        from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
+        from spyglass.spikesorting.v2.sorting import Sorting
+    except ImportError as err:
+        print(f"Skipping spike sorting v2 orphan report: {err}")
+        return
+
+    reports = {
+        "analyzer": Sorting.find_orphaned_analyzer_folders(dry_run=True),
+        "FigPack bundle": FigPackCuration.find_orphaned_bundles(dry_run=True),
+    }
+    for name, report in reports.items():
+        disk, staging = report["disk_side"], report["staging"]
+        size = sum(_folder_bytes(folder) for folder in disk + staging)
+        print(
+            f"Orphaned v2 {name} folders: {len(disk)} unreferenced, "
+            f"{len(staging)} staging ({size:,} bytes)"
+        )
+
+
+def _folder_bytes(folder) -> int:
+    """Total size of the files under folder; a file removed meanwhile is 0."""
+    total = 0
+    for root, _, files in os.walk(folder):
+        for file in files:
+            try:
+                total += os.lstat(os.path.join(root, file)).st_size
+            except FileNotFoundError:
+                continue
+    return total
+
+
 def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
     """Delete files in temp_dir that are older than days_old
 
@@ -80,6 +118,8 @@ def main():
     run_table_cleanups()
     print("Cleaning up external files...")
     cleanup_external_files()
+    print("Checking for spike sorting v2 orphans...")
+    report_v2_orphans()
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
     print("Checking for AnalysisFile Issues...")

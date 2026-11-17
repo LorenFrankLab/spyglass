@@ -21,11 +21,10 @@ def _concurrent_cache_resolve_worker(
     results,
 ) -> None:
     """Resolve one fake analyzer through the production cache transaction."""
-    import datajoint as dj
-
+    import spyglass.settings as settings
     from spyglass.spikesorting.v2._curation import analyzer as resolver
 
-    dj.config["custom"]["spikesorting_v2_analyzer_dir"] = cache_root
+    settings.analyzer_dir = cache_root
 
     def _load(candidate, _expected, _role, **kwargs):
         marker = Path(candidate) / "complete.txt"

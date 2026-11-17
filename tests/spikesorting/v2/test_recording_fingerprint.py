@@ -338,33 +338,26 @@ class TestRecordingArtifactLock:
     different recordings run concurrently. No DB.
     """
 
-    def test_same_recording_is_mutually_exclusive(
-        self, tmp_path, restore_custom_config
-    ):
-        import datajoint as dj
+    def test_same_recording_is_mutually_exclusive(self, tmp_path, monkeypatch):
         from filelock import Timeout
 
         from spyglass.spikesorting.v2._recording.fingerprint import (
             recording_artifact_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         held = recording_artifact_lock("rec-A")
         contender = recording_artifact_lock("rec-A")
         with held:
             with pytest.raises(Timeout):
                 contender.acquire(timeout=0)
 
-    def test_different_recordings_do_not_block(
-        self, tmp_path, restore_custom_config
-    ):
-        import datajoint as dj
-
+    def test_different_recordings_do_not_block(self, tmp_path, monkeypatch):
         from spyglass.spikesorting.v2._recording.fingerprint import (
             recording_artifact_lock,
         )
 
-        dj.config["custom"]["spikesorting_v2_analyzer_dir"] = str(tmp_path)
+        monkeypatch.setattr("spyglass.settings.analyzer_dir", str(tmp_path))
         with recording_artifact_lock("rec-A"):
             with recording_artifact_lock("rec-B").acquire(timeout=0):
                 pass

@@ -337,10 +337,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - The `spikesorting-v2` extras require `threadpoolctl>=3` for runtime receipts;
     drop the `pubnub<6.4` pin #1609
 - Add `dj.config["custom"]` keys for spike sorting v2:
-    `spikesorting_v2_job_kwargs` (SpikeInterface job settings for every stage),
-    `spikesorting_v2_analyzer_dir` and `spikesorting_v2_figpack_dir` (cache
-    roots), and `figpack_api_key` (or `FIGPACK_API_KEY`) for hosted reviews
-    #1609
+    `spikesorting_v2_job_kwargs` (SpikeInterface job settings for every stage)
+    and `figpack_api_key` (or `FIGPACK_API_KEY`) for hosted reviews #1609
+- Add Spyglass directories `analyzer` and `figpack` (`SPYGLASS_ANALYZER_DIR`,
+    `SPYGLASS_FIGPACK_DIR`, default `{base}/spikesorting_v2/...`) for spike
+    sorting v2 caches; `maintenance_scripts/cleanup.py` reports their
+    orphans #1609
 - Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
     recompute and file namespace capture #1609
 - Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface

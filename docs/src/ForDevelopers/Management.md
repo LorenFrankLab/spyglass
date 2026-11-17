@@ -296,6 +296,10 @@ including orphan detection, external file deletion, and temp directory cleanup.
     - Table cleanups (`Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`,
         `DecodingOutput`, `SpikeSortingRecording`)
     - External file deletion (unreferenced files)
+    - Spike sorting v2 orphan report, skipped without v2: count and size of
+        analyzer and FigPack folders no row references. Report only; delete
+        with `Sorting.find_orphaned_analyzer_folders(dry_run=False)` and
+        `FigPackCuration.find_orphaned_bundles(dry_run=False)`
     - Temp directory cleanup (files older than 7 days)
     - Version table updates (fetches latest from PyPI)
 - `run_jobs.sh` - Orchestration script that:

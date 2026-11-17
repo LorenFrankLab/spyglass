@@ -77,7 +77,6 @@ from spyglass.utils.mixins.populate import StagedOutputs
 from spyglass.settings import sg_config
 from spyglass.spikesorting.v2._review import visualization as _viz
 from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
-from spyglass.spikesorting.v2._storage.analyzer_cache import v2_storage_root
 from spyglass.spikesorting.v2._storage.observation_io import (
     resolve_review_timeline_inputs,
     review_timeline_from_inputs,
@@ -110,10 +109,13 @@ class FigPackBuildResult:
 def figpack_cache_root() -> Path:
     """Return the root directory for saved FigPack bundles.
 
-    ``dj.config["custom"]["spikesorting_v2_figpack_dir"]`` when set, else
-    ``Path(base_dir) / "spikesorting_v2" / "figpack"``.
+    ``spyglass.settings.figpack_dir`` (``SPYGLASS_FIGPACK_DIR``), by default
+    ``{base_dir}/spikesorting_v2/figpack``. Read per call so a test that
+    patches the setting takes effect.
     """
-    return v2_storage_root("spikesorting_v2_figpack_dir", "figpack")
+    from spyglass.settings import figpack_dir
+
+    return Path(figpack_dir)
 
 
 def figpack_bundle_path(figpack_curation_id) -> Path:
@@ -1308,7 +1310,7 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     f"{page} was built at {uri}, outside this machine's FigPack "
                     f"folder ({root}), and is not readable here. Open it on the "
                     "machine that built it, or set "
-                    "dj.config['custom']['spikesorting_v2_figpack_dir'] to a "
+                    "dj.config['custom']['spyglass_dirs']['figpack'] to a "
                     "folder every machine shares. The page was left in place."
                 )
                 logger.warning(message)

@@ -246,13 +246,11 @@ def test_selection_and_view_are_idempotent(
 
     # A bundle under another machine's FigPack folder may still exist there:
     # its row is kept and only a warning is returned.
-    import datajoint as dj
-
     shutil.rmtree(rebuilt.uri)
     with pytest.MonkeyPatch.context() as patch:
-        custom = dict(dj.config.get("custom") or {})
-        custom["spikesorting_v2_figpack_dir"] = str(tmp_path / "elsewhere")
-        patch.setitem(dj.config, "custom", custom)
+        patch.setattr(
+            "spyglass.settings.figpack_dir", str(tmp_path / "elsewhere")
+        )
         message = FigPackCuration.drop_unavailable_view(first)
         assert "outside this machine's FigPack folder" in message
         assert (FigPackCuration & first).fetch1("figpack_uri") == rebuilt.uri
@@ -981,8 +979,6 @@ def test_bundle_outside_the_cache_root_or_in_use_is_kept(
     operation is removed; anything else is left in place."""
     import shutil
 
-    import datajoint as dj
-
     from spyglass.spikesorting.v2._review.operations import (
         _acquire_operation_lock,
     )
@@ -1011,9 +1007,9 @@ def test_bundle_outside_the_cache_root_or_in_use_is_kept(
             populated_sorting_with_curation, upload=False
         )
         with pytest.MonkeyPatch.context() as patch:
-            custom = dict(dj.config.get("custom") or {})
-            custom["spikesorting_v2_figpack_dir"] = str(tmp_path / "elsewhere")
-            patch.setitem(dj.config, "custom", custom)
+            patch.setattr(
+                "spyglass.settings.figpack_dir", str(tmp_path / "elsewhere")
+            )
             (FigPackCuration & key).delete(safemode=False)
         assert Path(moved.uri).is_dir()
     finally:
