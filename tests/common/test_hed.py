@@ -10,14 +10,20 @@ columns: one on a task table, one on the trials table. It verifies that:
 """
 
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
 from hdmf.common import DynamicTable, VectorData
+from packaging.version import Version
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.file import Subject
 
 ndx_hed = pytest.importorskip("ndx_hed")
+# ndx-hed < 0.3 (the releases that install next to numpy<2 and pynwb 3) cannot
+# read back a HedTags column it wrote; 0.3 needs pynwb >= 4.2 (#1694).
+if Version(version("ndx-hed")) < Version("0.3.0"):
+    pytest.skip("HED tests need ndx-hed >= 0.3.0", allow_module_level=True)
 
 SCHEMA_VERSION = "8.5.0"
 # In the form ndx-hed stores it (it normalizes definitions on write), so the
