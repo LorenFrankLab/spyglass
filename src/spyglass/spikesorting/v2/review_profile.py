@@ -46,7 +46,7 @@ _PROFILE_CONTENT_FIELDS = (
 
 
 @schema
-class CurationReviewProfile(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class CurationReviewProfile(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """One immutable recipe + display contract for browser curation.
 
     - Re-inserting the same name and content is a no-op.

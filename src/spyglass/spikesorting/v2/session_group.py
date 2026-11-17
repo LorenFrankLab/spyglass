@@ -149,7 +149,7 @@ def assert_members_share_electrode_space(members: list[dict]) -> None:
 
 
 @schema
-class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
+class SessionGroup(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
     """A named bundle of sorting members to analyze together.
 
     A member is a ``(nwb_file_name, sort_group_id, interval_list_name,
@@ -277,7 +277,7 @@ class SessionGroup(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
 
 @schema
 class ConcatenatedRecordingSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """One selection per group, recipes, and frozen member/artifact choices.
 

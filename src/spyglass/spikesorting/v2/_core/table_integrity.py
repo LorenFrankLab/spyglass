@@ -267,7 +267,7 @@ class FactoryOnlyMaster(_IdentityMasterGuard):
     """Reject direct ``insert`` / ``update1`` of a factory-constructed master.
 
     A direct insert skips the factory's atomic master + part construction.
-    Must precede ``SpyglassMixin`` / ``dj.Manual`` in the MRO. Subclasses set
+    Goes after ``SpyglassMixin`` and before ``dj.Manual``. Subclasses set
     :attr:`_factory_create_call`.
     """
 
@@ -290,8 +290,8 @@ class ImmutableParamsLookup:
 
     Downstream ids hash the row name, not its content, so editing content in
     place silently redefines existing ids. Guards ``update1`` and
-    ``insert(..., replace=True)``. Must precede ``SpyglassMixin`` /
-    ``dj.Lookup`` in the MRO.
+    ``insert(..., replace=True)``. Goes after ``SpyglassMixin`` and before
+    ``dj.Lookup``, except on a ``SpyglassMixinPart``, which it must precede.
     """
 
     def update1(self, row, *, allow_param_mutation=False):

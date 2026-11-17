@@ -494,7 +494,7 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
 
 @schema
 class RecordingArtifactRecomputeSelection(
-    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+    SpyglassMixin, _RecomputeSelectionMixin, dj.Manual
 ):
     """Plan a recording recompute attempt under a labeled environment."""
 
@@ -628,7 +628,7 @@ class RecordingArtifactRecomputeSelection(
 
 
 @schema
-class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
+class RecordingArtifactRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
     """Regenerate a recording artifact and compare trace content hashes.
 
     Steps
@@ -1091,7 +1091,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
 
 @schema
 class SortingAnalyzerRecomputeSelection(
-    _RecomputeSelectionMixin, SpyglassMixin, dj.Manual
+    SpyglassMixin, _RecomputeSelectionMixin, dj.Manual
 ):
     """Plan an analyzer recompute attempt under a labeled environment."""
 
@@ -1132,7 +1132,7 @@ class SortingAnalyzerRecomputeSelection(
 
 
 @schema
-class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
+class SortingAnalyzerRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
     """Regenerate an analyzer folder and compare extension content hashes.
 
     Steps

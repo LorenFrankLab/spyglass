@@ -233,7 +233,7 @@ class CurationEvaluationComputed(NamedTuple):
 
 
 @schema
-class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class QualityMetricParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Which quality metrics to compute and their per-metric kwargs.
 
     ``metric_names`` is validated against SpikeInterface's metric list;
@@ -340,7 +340,7 @@ class QualityMetricParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
 
 @schema
-class AutoCurationRules(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class AutoCurationRules(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Auto-merge preset + ordered threshold rules that label units.
 
     Insert only through ``insert_rules(row, rule_rows)``, which validates
@@ -530,7 +530,7 @@ class _WaveformsAccessor:
 
 @schema
 class CurationEvaluationSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """A committed ``CurationV2`` row paired with metric / auto-rule params.
 

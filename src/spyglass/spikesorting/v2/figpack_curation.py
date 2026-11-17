@@ -770,7 +770,7 @@ def collect_figpack_bundles(relation) -> list[dict]:
 
 @schema
 class FigPackCurationSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """A committed ``CurationV2`` row paired with a FigPack UI configuration.
 

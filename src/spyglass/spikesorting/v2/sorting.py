@@ -255,7 +255,7 @@ schema = dj.schema("spikesorting_v2_sorting")
 
 
 @schema
-class SorterParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class SorterParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Per-sorter Pydantic-validated parameter blob.
 
     ``insert_default`` ships rows for MS4, MS5, KS4, SC2, TDC2, and
@@ -446,7 +446,7 @@ def _reject_unsafe_waveform_params_name(row, _schema_cls) -> None:
 
 @schema
 class AnalyzerWaveformParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+    SpyglassMixin, ImmutableParamsLookup, dj.Lookup
 ):
     """Tracked window / subsample / whitening for a sort's analyzer recipe.
 
@@ -512,7 +512,7 @@ class PreprocessingWaveformParameters(SpyglassMixin, dj.Manual):
 
 
 @schema
-class SortingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     - Exactly one of ``RecordingSource`` or ``ConcatenatedRecordingSource``.

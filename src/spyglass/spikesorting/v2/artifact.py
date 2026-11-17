@@ -98,7 +98,7 @@ class ArtifactComputed(NamedTuple):
 
 @schema
 class ArtifactDetectionParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+    SpyglassMixin, ImmutableParamsLookup, dj.Lookup
 ):
     """Validated artifact-detection parameter blob.
 
@@ -491,7 +491,7 @@ def _insert_artifact_selection(
 
 @schema
 class RecordingArtifactSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """Single-recording artifact-detection request."""
 
@@ -534,7 +534,7 @@ class RecordingArtifactSelection(
 
 @schema
 class SharedArtifactSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """Cross-recording (shared-group) artifact-detection request.
 

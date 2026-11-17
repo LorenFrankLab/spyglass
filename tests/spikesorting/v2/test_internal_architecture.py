@@ -225,3 +225,108 @@ def test_recording_serialization_preserves_traces_and_clock(wrapper):
     np.testing.assert_allclose(
         restored_pickle.get_times(), expected_times, rtol=0, atol=1e-12
     )
+
+
+# Leading bases a v2 table may put before ``SpyglassMixin``, with the reason
+# (see "Base class order" in the v2 developer guide).
+_MIXIN_FIRST_EXCEPTIONS = {
+    # SpyglassMixinPart already ends in dj.Part; a later mixin never runs.
+    "AutoCurationRules.Rule": ("ImmutableParamsLookup",),
+    # Overrides PopulateMixin's ``_staged_outputs = None``.
+    "Recording": ("StagedOutputCleanupMixin",),
+    "ConcatenatedRecording": ("StagedOutputCleanupMixin",),
+    "MotionCorrectedRecording": ("StagedOutputCleanupMixin",),
+    "CurationEvaluation": ("StagedOutputCleanupMixin",),
+    "FigPackCuration": ("StagedOutputCleanupMixin",),
+    "ConcatMemberCurationV2": ("StagedOutputCleanupMixin",),
+    "UnitMatch": ("StagedOutputCleanupMixin",),
+    # Wraps PopulateMixin's ``_populate1``.
+    "Sorting": (
+        "_analyzer_cache.AnalyzerPublicationMixin",
+        "StagedOutputCleanupMixin",
+    ),
+    # Overrides SpyglassMixin's ``delete`` and ``_parallel_make``.
+    "RecordingArtifactDetection": ("_ArtifactDetectionMixin",),
+    "SharedArtifactDetection": ("_ArtifactDetectionMixin",),
+}
+_SPYGLASS_BASES = {"SpyglassMixin", "SpyglassMixinPart", "_Merge"}
+_DJ_TIERS = {"dj.Manual", "dj.Lookup", "dj.Computed", "dj.Imported", "dj.Part"}
+
+
+def _table_bases():
+    """Yield ``(path, qualified name, base names)`` for each v2 table class."""
+
+    def visit(node, path, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                name = f"{prefix}{child.name}"
+                bases = tuple(ast.unparse(base) for base in child.bases)
+                if set(bases) & (_SPYGLASS_BASES | _DJ_TIERS):
+                    yield path, name, bases
+                yield from visit(child, path, f"{name}.")
+
+    for path in sorted(ROOT.rglob("*.py")):
+        yield from visit(ast.parse(path.read_text()), path, "")
+
+
+def test_v2_tables_inherit_spyglass_mixin_first():
+    """``SpyglassMixin`` is the first base except for the listed overrides."""
+    exceptions = {}
+    for path, name, bases in _table_bases():
+        first = next(
+            (i for i, base in enumerate(bases) if base in _SPYGLASS_BASES), None
+        )
+        assert first is not None, f"{path}: {name}{bases} lacks SpyglassMixin"
+        if first:
+            exceptions[name] = bases[:first]
+    assert exceptions == _MIXIN_FIRST_EXCEPTIONS
+
+
+def test_mixins_after_spyglass_mixin_define_nothing_it_defines():
+    """The mixins placed after ``SpyglassMixin`` are not shadowed by it."""
+    from spyglass.utils.dj_mixin import SpyglassMixin
+
+    spyglass_names = {
+        name
+        for cls in SpyglassMixin.__mro__
+        if cls is not object
+        for name in vars(cls)
+        if not name.startswith("__")
+    }
+    sources = {
+        "_core/table_integrity.py": (
+            "_IdentityMasterGuard",
+            "SelectionMasterInsertGuard",
+            "FactoryOnlyMaster",
+            "ImmutableParamsLookup",
+        ),
+        "recompute.py": ("_RecomputeSelectionMixin", "_RecomputeMixin"),
+    }
+    checked = set()
+    for rel, names in sources.items():
+        tree = ast.parse((ROOT / rel).read_text())
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name in names:
+                defined = set()
+                for item in node.body:
+                    if isinstance(
+                        item, (ast.FunctionDef, ast.AsyncFunctionDef)
+                    ):
+                        defined.add(item.name)
+                    elif isinstance(item, ast.Assign):
+                        defined |= {
+                            t.id
+                            for t in item.targets
+                            if isinstance(t, ast.Name)
+                        }
+                    elif isinstance(item, ast.AnnAssign) and isinstance(
+                        item.target, ast.Name
+                    ):
+                        defined.add(item.target.id)
+                assert defined, node.name
+                assert not defined & spyglass_names, (
+                    f"{node.name} defines {sorted(defined & spyglass_names)}, "
+                    "which SpyglassMixin also defines; it must precede it"
+                )
+                checked.add(node.name)
+    assert checked == {name for names in sources.values() for name in names}

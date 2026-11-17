@@ -105,7 +105,7 @@ schema = dj.schema("spikesorting_v2_motion")
 
 @schema
 class MotionEstimationParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+    SpyglassMixin, ImmutableParamsLookup, dj.Lookup
 ):
     """Named motion-estimation recipes: a SpikeInterface preset plus overrides.
 
@@ -174,7 +174,7 @@ class MotionEstimationParameters(
 
 @schema
 class MotionInterpolationParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+    SpyglassMixin, ImmutableParamsLookup, dj.Lookup
 ):
     """Named motion-interpolation recipes for applying a saved estimate.
 
@@ -219,7 +219,7 @@ class MotionInterpolationParameters(
 
 @schema
 class MotionCorrectionParameters(
-    ImmutableParamsLookup, SpyglassMixin, dj.Lookup
+    SpyglassMixin, ImmutableParamsLookup, dj.Lookup
 ):
     """Named public motion-correction recipes: estimation plus interpolation.
 
@@ -297,7 +297,7 @@ def _source_filter_problem(source_kind: str, source_key: dict) -> str | None:
 
 @schema
 class MotionEstimateSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """One motion estimate to compute: a source, an optional mask, a recipe.
 
@@ -1054,7 +1054,7 @@ def _estimate_source(motion_estimate_id) -> tuple:
 
 @schema
 class MotionCorrectedRecordingSelection(
-    SelectionMasterInsertGuard, SpyglassMixin, dj.Manual
+    SpyglassMixin, SelectionMasterInsertGuard, dj.Manual
 ):
     """One corrected recording to compute: a saved estimate and a recipe.
 

@@ -185,6 +185,23 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 - The remaining public names in the table modules (insert guards, integrity
     audits, compute helpers) support the tables and are not entry points.
 
+### Base class order
+
+`SpyglassMixin` is the first base of a v2 table, except as listed below
+([Mixin](../Features/Mixin.md)). A v2 mixin that only adds methods or guards
+`insert` / `update1` comes next, before the DataJoint tier:
+`ImmutableParamsLookup`, `SelectionMasterInsertGuard`, `FactoryOnlyMaster` and
+the recompute mixins. These go first:
+
+- `StagedOutputCleanupMixin`: replaces `PopulateMixin._staged_outputs = None`,
+    which `PopulateMixin.__init_subclass__` reads.
+- `AnalyzerPublicationMixin` (`Sorting`): wraps `PopulateMixin._populate1`.
+- `_ArtifactDetectionMixin`: overrides `delete` and `_parallel_make`.
+- `ImmutableParamsLookup` on `AutoCurationRules.Rule`: `SpyglassMixinPart`
+    already ends in `dj.Part`, so a guard after it would never run.
+
+`test_internal_architecture.py` checks this list.
+
 ## Pipeline structure
 
 ```

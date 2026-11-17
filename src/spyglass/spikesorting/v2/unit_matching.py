@@ -156,7 +156,7 @@ class UnitMatchComputed(NamedTuple):
 
 
 @schema
-class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """A named, registry-validated cross-session matcher configuration."""
 
     definition = """
@@ -235,7 +235,7 @@ class MatcherParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
 
 
 @schema
-class UnitMatchSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
     """One row per (matcher params, explicit ordered set of matching inputs).
 
     A matching input is one curated sort of a single recording or same-day

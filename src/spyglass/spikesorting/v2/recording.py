@@ -700,7 +700,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
 
 @schema
-class PreprocessingParameters(ImmutableParamsLookup, SpyglassMixin, dj.Lookup):
+class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Phase-shift + bandpass + bad-channel + reference parameters.
 
     Validated by :class:`PreprocessingParamsSchema`. Whitening is set in
@@ -789,7 +789,7 @@ def resolve_recording_input_hash(
 
 
 @schema
-class RecordingSelection(SelectionMasterInsertGuard, SpyglassMixin, dj.Manual):
+class RecordingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
     """One row per (raw, sort group, interval, preprocessing params, team).
 
     UUID-keyed so downstream FKs are single-column.

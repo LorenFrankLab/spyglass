@@ -107,7 +107,7 @@ def _figpack_module(table):
 
 
 @schema
-class CurationV2(FactoryOnlyMaster, SpyglassMixin, dj.Manual):
+class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
     """Manual curation labels + merge groups for a sorted Sorting.
 
     - Several curations per sort, keyed by ``curation_id``.
