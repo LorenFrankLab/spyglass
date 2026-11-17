@@ -46,9 +46,7 @@ def test_motion_selection_unmaterialized_detection_is_schema_bypass(dj_conn):
     ) as raised:
         insert_estimate_selection_rows(
             MotionEstimateSelection,
-            _master_row(estimate_id),
-            MotionEstimateSelection.RecordingSource,
-            {"motion_estimate_id": estimate_id, "recording_id": uuid.uuid4()},
+            {**_master_row(estimate_id), "recording_id": uuid.uuid4()},
             missing_detection,
             refetch=lambda: None,
         )
@@ -57,8 +55,8 @@ def test_motion_selection_unmaterialized_detection_is_schema_bypass(dj_conn):
 
 
 def test_motion_selection_unsatisfied_source_fk_is_schema_bypass(dj_conn):
-    """A source part whose Recording is missing is a SchemaBypassError, and
-    the transaction leaves no master behind."""
+    """A selection whose Recording is missing is a SchemaBypassError, and
+    the transaction leaves no row behind."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2._motion.selection import (
@@ -79,12 +77,7 @@ def test_motion_selection_unsatisfied_source_fk_is_schema_bypass(dj_conn):
     ) as raised:
         insert_estimate_selection_rows(
             MotionEstimateSelection,
-            _master_row(estimate_id),
-            MotionEstimateSelection.RecordingSource,
-            {
-                "motion_estimate_id": estimate_id,
-                "recording_id": missing_recording,
-            },
+            {**_master_row(estimate_id), "recording_id": missing_recording},
             None,
             refetch=lambda: None,
         )

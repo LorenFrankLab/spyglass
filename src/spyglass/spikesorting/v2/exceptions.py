@@ -35,10 +35,11 @@ class DuplicateParameterContentError(SpikeSortingV2Error, ValueError):
 
 
 class SchemaBypassError(SpikeSortingV2Error, RuntimeError):
-    """Raise when a source-part master row lacks exactly one source part.
+    """Raise when a stored row was written or edited outside its create path.
 
-    Message names the table, the PK, "expected exactly one source", and
-    points the caller at ``insert_selection()``.
+    For example a selection row that names zero or two sources, or whose
+    stored source does not give its deterministic id. Message names the
+    table and the PK and points the caller at ``insert_selection()``.
     """
 
 

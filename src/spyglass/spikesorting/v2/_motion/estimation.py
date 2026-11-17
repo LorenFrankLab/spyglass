@@ -1725,27 +1725,27 @@ def motion_estimate_identity_payload(
     return payload
 
 
-def motion_estimate_parts_mismatch(
+def motion_estimate_source_mismatch(
     motion_estimate_id, lineage, master_row: dict
 ) -> str | None:
-    """Describe why a selection's current parts do not give its id.
+    """Describe why a selection's stored source does not give its id.
 
-    Recomputes the id from the current parts and stored master columns, so
-    only a part inserted or deleted outside ``insert_selection`` mismatches.
+    Recomputes the id from the stored columns, so only a row written or
+    edited outside ``insert_selection`` mismatches.
 
     Parameters
     ----------
     motion_estimate_id : uuid.UUID or str
         The stored primary key.
     lineage : SourceLineage
-        The source and artifact detection read from the selection's parts.
+        The source and artifact detection read from the selection row.
     master_row : dict
         The selection master's stored columns.
 
     Returns
     -------
     str or None
-        ``None`` when the parts give ``motion_estimate_id``; otherwise a
+        ``None`` when the stored source gives ``motion_estimate_id``; otherwise a
         description of the id they give.
     """
     from spyglass.spikesorting.v2._core.selection_identity import (

@@ -48,11 +48,12 @@ class RecordingSelectionPlan(NamedTuple):
 class SortingSelectionPlan(NamedTuple):
     """The rows + restrictions a ``SortingSelection`` insert needs.
 
-    - Exactly one of ``recording_source_row`` / ``concat_source_row`` is set,
-      matching ``source_kind``.
+    - ``master_row`` names exactly one source column, matching
+      ``source_kind``, and the ``motion_corrected_recording_id`` when one is
+      requested.
     - ``artifact_detection_id`` and ``motion_corrected_recording_id`` are
-      normalized UUIDs or ``None``. ``insert_selection`` builds the
-      ``ArtifactDetectionSource`` row, which needs a DB-side merge id.
+      normalized UUIDs or ``None``. ``insert_selection`` adds the row's
+      ``artifact_detection_merge_id``, which is resolved DB-side.
     - ``source_kind`` ``"concat"`` corresponds to
       ``SourceLineage.kind`` ``"concatenated_recording"``.
     """
@@ -62,8 +63,6 @@ class SortingSelectionPlan(NamedTuple):
     master_restriction: dict
     source_restriction: dict
     master_row: dict
-    recording_source_row: dict | None
-    concat_source_row: dict | None
     artifact_detection_id: uuid.UUID | None
     motion_corrected_recording_id: uuid.UUID | None
 
@@ -187,16 +186,21 @@ def build_sorting_selection_plan(key: dict) -> SortingSelectionPlan:
         key.get("sorting_id"), sorting_id, field="sorting_id"
     )
 
-    master_row = {**master_restriction, "sorting_id": sorting_id}
-    source_row = {"sorting_id": sorting_id, **source_restriction}
+    master_row = {
+        **master_restriction,
+        **source_restriction,
+        "sorting_id": sorting_id,
+    }
+    if motion_corrected_recording_id is not None:
+        master_row["motion_corrected_recording_id"] = (
+            motion_corrected_recording_id
+        )
     return SortingSelectionPlan(
         sorting_id=sorting_id,
         source_kind="concat" if has_concat else "recording",
         master_restriction=master_restriction,
         source_restriction=source_restriction,
         master_row=master_row,
-        recording_source_row=None if has_concat else source_row,
-        concat_source_row=source_row if has_concat else None,
         artifact_detection_id=artifact_detection_id,
         motion_corrected_recording_id=motion_corrected_recording_id,
     )

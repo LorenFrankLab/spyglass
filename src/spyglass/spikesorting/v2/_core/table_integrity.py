@@ -20,77 +20,45 @@ from spyglass.spikesorting.v2.exceptions import (
 )
 
 
-def single_source_part(table, key: dict) -> tuple[str, dict]:
-    """Return the one XOR source part row of a selection master.
+def stored_source(table_name: str, row: dict) -> tuple[str, dict]:
+    """Return the one source a selection row names.
 
-    For masters with exactly one ``RecordingSource`` or
-    ``ConcatenatedRecordingSource`` part row.
+    For selection masters that store a source as the nullable
+    ``recording_id`` and ``concat_recording_id`` columns, exactly one set.
 
     Parameters
     ----------
-    table : type
-        The selection master class.
-    key : dict
-        A key restricting ``table`` to one master; non-primary-key fields
-        are ignored.
+    table_name : str
+        The selection table's name, for the error message.
+    row : dict
+        The selection row (or the row about to be inserted).
 
     Returns
     -------
     kind : {"recording", "concatenated_recording"}
-        Which source part holds the row.
+        Which column holds the source.
     source_key : dict
         ``{"recording_id": ...}`` or ``{"concat_recording_id": ...}``.
 
     Raises
     ------
     SchemaBypassError
-        If zero or more than one source part row exists for ``key``.
+        If the row names zero or both sources.
     """
-    master_key = {k: v for k, v in key.items() if k in table.primary_key}
-    recording_ids = (table.RecordingSource & master_key).fetch("recording_id")
-    concat_ids = (table.ConcatenatedRecordingSource & master_key).fetch(
-        "concat_recording_id"
-    )
-    total = len(recording_ids) + len(concat_ids)
-    if total != 1:
+    recording_id = row.get("recording_id")
+    concat_recording_id = row.get("concat_recording_id")
+    if (recording_id is None) == (concat_recording_id is None):
         raise SchemaBypassError(
-            f"{table.__name__} {master_key} has {total} source part "
-            f"rows; expected exactly one. Use {table.__name__}."
-            "insert_selection() to add or remove this selection."
+            f"{table_name} row {row} has recording_id={recording_id} and "
+            f"concat_recording_id={concat_recording_id}; exactly one must "
+            f"be set. Use {table_name}.insert_selection() to add this "
+            "selection."
         )
-    if len(recording_ids):
-        return "recording", {"recording_id": recording_ids[0]}
-    return "concatenated_recording", {"concat_recording_id": concat_ids[0]}
-
-
-def optional_part_value(table, key: dict, part, column: str):
-    """Return ``column`` of a selection's zero-or-one part row, or ``None``.
-
-    Parameters
-    ----------
-    table : type
-        The selection master class that owns ``part``.
-    key : dict
-        A key restricting ``table`` to one master; non-primary-key fields
-        are ignored.
-    part : type
-        The optional part table to read.
-    column : str
-        The ``part`` attribute to return.
-
-    Raises
-    ------
-    SchemaBypassError
-        If more than one ``part`` row exists for ``key``.
-    """
-    master_key = {k: v for k, v in key.items() if k in table.primary_key}
-    rows = (part & master_key).fetch(column)
-    if len(rows) > 1:
-        raise SchemaBypassError(
-            f"{table.__name__} {master_key} has {len(rows)} "
-            f"{part.__name__} rows; expected zero or one."
-        )
-    return rows[0] if len(rows) else None
+    if recording_id is not None:
+        return "recording", {"recording_id": recording_id}
+    return "concatenated_recording", {
+        "concat_recording_id": concat_recording_id
+    }
 
 
 def foreign_key_referrers(
@@ -245,15 +213,36 @@ class SelectionMasterInsertGuard(_IdentityMasterGuard):
     Only ``insert_selection`` holds the full logical identity the primary key
     is derived from. This catches the easy mistake early; integrity is
     enforced by PK uniqueness and the bypass checks. ``insert_selection``
-    passes ``allow_direct_insert=True`` itself.
+    passes ``allow_direct_insert=True`` itself. A table that sets
+    ``_xor_source = True`` also refuses any row that does not name exactly
+    one of ``recording_id`` / ``concat_recording_id`` (:func:`stored_source`).
     """
+
+    _xor_source: bool = False
 
     def _direct_insert_reason(self) -> str:
         return (
             "the primary key is derived from the selection's full logical "
-            "identity (and, for the part-bearing masters, the source-part "
-            "rows are inserted atomically with it). Use "
+            "identity. Use "
             f"{type(self).__name__}.insert_selection()."
+        )
+
+    def insert(self, rows, *args, allow_direct_insert=False, **kwargs):
+        """Insert after the direct-insert guard and, if set, the XOR check.
+
+        Raises
+        ------
+        SchemaBypassError
+            If ``_xor_source`` is set and a row names zero or both sources.
+        """
+        if self._xor_source and allow_direct_insert:
+            rows = [
+                _insert_row_to_dict(row, self.heading.names) for row in rows
+            ]
+            for row in rows:
+                stored_source(type(self).__name__, row)
+        super().insert(
+            rows, *args, allow_direct_insert=allow_direct_insert, **kwargs
         )
 
     def _update1_create_hint(self) -> str:

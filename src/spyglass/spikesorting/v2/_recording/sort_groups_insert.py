@@ -20,7 +20,7 @@ def cross_team_downstream(nwb_file_name: str) -> tuple:
     summary = []
     for team in sorted(set(rec_sel.fetch("team_name"))):
         team_recs = rec_sel & {"team_name": team}
-        sortings = SortingSelection.RecordingSource & team_recs.proj()
+        sortings = SortingSelection & team_recs.proj()
         summary.append(
             {
                 "team_name": team,

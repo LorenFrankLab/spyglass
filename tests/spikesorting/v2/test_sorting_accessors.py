@@ -286,18 +286,7 @@ def test_sorting_selection_rejects_cross_recording_artifact_detection_source():
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
-            sort_keys = (
-                SortingSelection.RecordingSource & {"recording_id": rid_sort}
-            ).fetch("KEY", as_dict=True)
-            if sort_keys:
-                (
-                    SortingSelection.ArtifactDetectionSource & sort_keys
-                ).delete_quick()
-                (
-                    SortingSelection.RecordingSource
-                    & {"recording_id": rid_sort}
-                ).delete_quick()
-                (SortingSelection & sort_keys).delete_quick()
+            (SortingSelection & {"recording_id": rid_sort}).delete_quick()
             (
                 RecordingArtifactDetection
                 & {"artifact_detection_id": artifact_detection_id}
@@ -338,16 +327,13 @@ def test_get_sorting_zero_unit_returns_empty_numpysorting(populated_sorting):
             "sorting_id": sid,
             "sorter": "clusterless_thresholder",
             "sorter_params_name": "default",
+            "recording_id": recording_id,
         },
         allow_direct_insert=True,
     )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        SortingSelection.RecordingSource.insert1(
-            {"sorting_id": sid, "recording_id": recording_id},
-            allow_direct_insert=True,
-        )
         Sorting.insert1(
             {
                 "sorting_id": sid,

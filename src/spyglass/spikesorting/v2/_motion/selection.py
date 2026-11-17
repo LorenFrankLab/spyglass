@@ -70,11 +70,9 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
         source_key = {
             "concat_recording_id": uuid.UUID(str(concat_recording_id))
         }
-        source_part = table_cls.ConcatenatedRecordingSource
     else:
         source_kind = "recording"
         source_key = {"recording_id": uuid.UUID(str(recording_id))}
-        source_part = table_cls.RecordingSource
     source_table = _SOURCE_TABLES[source_kind]
 
     params_key = {"motion_estimation_params_name": params_name}
@@ -125,7 +123,6 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
     def _existing():
         return table_cls._find_existing_pk(
             master_row,
-            source_part,
             source_key,
             artifact_detection_id,
             motion_estimate_id,
@@ -136,9 +133,7 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
         return existing
     return insert_estimate_selection_rows(
         table_cls,
-        {"motion_estimate_id": motion_estimate_id, **master_row},
-        source_part,
-        {"motion_estimate_id": motion_estimate_id, **source_key},
+        {"motion_estimate_id": motion_estimate_id, **master_row, **source_key},
         artifact_detection_id,
         refetch=_existing,
     )
@@ -146,34 +141,33 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
 
 def insert_estimate_selection_rows(
     table_cls,
-    master_row,
-    source_part,
-    source_row,
+    row,
     artifact_detection_id,
     *,
     refetch,
 ) -> dict:
-    """Insert the master and its parts atomically, locked against deletion.
+    """Insert the selection row atomically, locked against deletion.
 
     Uses the artifact-bound insert shared with ``SortingSelection``; a
     duplicate-key race refetches the winner. ``table_cls`` is the
-    ``MotionEstimateSelection`` class.
+    ``MotionEstimateSelection`` class; ``row`` names its source and lacks
+    only the artifact detection's merge id.
 
-    Recovery has no savepoint, so the master insert must stay first: the
-    deterministic key collides there before any part row is written.
+    Recovery has no savepoint, so the insert must stay the transaction's
+    only statement.
     """
-    motion_estimate_id = master_row["motion_estimate_id"]
+    motion_estimate_id = row["motion_estimate_id"]
+    source = {
+        name: row[name]
+        for name in ("recording_id", "concat_recording_id")
+        if name in row
+    }
 
     def insert_rows(art_merge_id) -> None:
-        table_cls.insert1(master_row, allow_direct_insert=True)
-        source_part.insert1(source_row)
-        if art_merge_id is not None:
-            table_cls.ArtifactDetectionSource.insert1(
-                {
-                    "motion_estimate_id": motion_estimate_id,
-                    "artifact_detection_merge_id": art_merge_id,
-                }
-            )
+        table_cls.insert1(
+            {**row, "artifact_detection_merge_id": art_merge_id},
+            allow_direct_insert=True,
+        )
 
     return insert_artifact_bound_selection(
         table_cls,
@@ -183,8 +177,7 @@ def insert_estimate_selection_rows(
         refetch=refetch,
         consumer="a motion estimate",
         inputs=(
-            f"source {source_row} / "
-            f"artifact_detection_id={artifact_detection_id}"
+            f"source {source} / artifact_detection_id={artifact_detection_id}"
         ),
         input_tables=(
             "MotionEstimationParameters, Recording / ConcatenatedRecording "

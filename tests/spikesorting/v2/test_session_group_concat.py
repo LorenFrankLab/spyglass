@@ -903,8 +903,8 @@ def test_concat_make_fetch_rejects_mismatched_electrode_space(
 
 
 def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
-    """A bypass-inserted concat sort carrying an ``ArtifactDetectionSource`` row
-    raises ``SchemaBypassError`` at ``make_fetch``.
+    """A bypass-inserted concat sort carrying an artifact detection raises
+    ``SchemaBypassError`` at ``make_fetch``.
 
     Member masks belong to the concat source, so a sorting-stage artifact id
     cannot describe them.
@@ -935,19 +935,8 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
             ArtifactDetectionOutput,
         )
 
-        SortingSelection.insert1(
-            {
-                "sorting_id": sid,
-                "sorter": "mountainsort5",
-                "sorter_params_name": "franklab_30khz_ms5_2026_06",
-            },
-            allow_direct_insert=True,
-        )
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": concat_id}
-        )
         # Register a bypass recording artifact in the merge and point the
-        # ArtifactDetectionSource part at it.
+        # concat sort at it.
         RecordingArtifactDetection().insert(
             [{"artifact_detection_id": art_id}], allow_direct_insert=True
         )
@@ -964,8 +953,15 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
             ArtifactDetectionOutput.RecordingArtifactDetection(),
             [{"merge_id": art_merge_id, "artifact_detection_id": art_id}],
         )
-        SortingSelection.ArtifactDetectionSource.insert1(
-            {"sorting_id": sid, "artifact_detection_merge_id": art_merge_id}
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+                "concat_recording_id": concat_id,
+                "artifact_detection_merge_id": art_merge_id,
+            },
+            allow_direct_insert=True,
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -976,13 +972,6 @@ def test_concat_with_artifact_id_revalidated_at_compute(dj_conn):
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
-            (
-                SortingSelection.ArtifactDetectionSource & {"sorting_id": sid}
-            ).delete_quick()
-            (
-                SortingSelection.ConcatenatedRecordingSource
-                & {"sorting_id": sid}
-            ).delete_quick()
             (SortingSelection & {"sorting_id": sid}).delete_quick()
             (
                 ArtifactDetectionOutput.RecordingArtifactDetection

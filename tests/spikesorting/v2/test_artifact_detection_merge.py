@@ -85,12 +85,12 @@ def ingested_recording(dj_conn, smoke_nwb):
 def test_insert_selection_composes_xor_and_artifact_atomically(
     ingested_recording,
 ):
-    """One insert_selection lands the recording-source part and the artifact
+    """One insert_selection lands the recording source and the artifact
     registration together.
 
-    There is one ``RecordingSource`` part, no ``ConcatenatedRecordingSource``
-    part, one ``ArtifactDetectionSource`` part whose merge id resolves to the
-    natural artifact id, and one ``ArtifactDetectionOutput`` registration.
+    The row names the recording, no concat, and an
+    ``artifact_detection_merge_id`` that resolves to the natural artifact id,
+    with one ``ArtifactDetectionOutput`` registration.
     """
     from spyglass.spikesorting.v2.artifact_output import ArtifactDetectionOutput
     from spyglass.spikesorting.v2.sorting import SortingSelection
@@ -106,16 +106,15 @@ def test_insert_selection_composes_xor_and_artifact_atomically(
         }
     )
     try:
-        assert len(SortingSelection.RecordingSource & sort_pk) == 1
-        assert len(SortingSelection.ConcatenatedRecordingSource & sort_pk) == 0
-
-        src = (SortingSelection.ArtifactDetectionSource & sort_pk).fetch(
-            "artifact_detection_merge_id"
-        )
-        assert len(src) == 1
-        # The part stores the merge id, which resolves to the natural id.
+        row = (SortingSelection & sort_pk).fetch1()
+        assert row["recording_id"] == rec_pk["recording_id"]
+        assert row["concat_recording_id"] is None
+        assert row["artifact_detection_merge_id"] is not None
+        # The row stores the merge id, which resolves to the natural id.
         resolved_natural = (
-            ArtifactDetectionOutput.resolve_artifact_detection_id(src[0])
+            ArtifactDetectionOutput.resolve_artifact_detection_id(
+                row["artifact_detection_merge_id"]
+            )
         )
         assert str(resolved_natural) == str(art_pk["artifact_detection_id"])
         assert str(SortingSelection.resolve_artifact_detection(sort_pk)) == str(
@@ -129,12 +128,11 @@ def test_insert_selection_composes_xor_and_artifact_atomically(
         (SortingSelection & sort_pk).super_delete(warn=False)
 
 
-def test_artifact_output_delete_removes_source_part(ingested_recording):
-    """Deleting the ArtifactDetectionOutput row leaves no dangling
-    ``ArtifactDetectionSource`` part.
+def test_artifact_output_delete_removes_the_sorts_of_it(ingested_recording):
+    """Deleting the ArtifactDetectionOutput row deletes the sorts that use it.
 
-    The ``force_masters`` cascade removes the part and its ``SortingSelection``
-    master. Uses a second detection so the shared fixture is untouched.
+    The ``SortingSelection`` row references the merge row, so the cascade
+    removes it. Uses a second detection so the shared fixture is untouched.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -163,23 +161,18 @@ def test_artifact_output_delete_removes_source_part(ingested_recording):
         }
     )
     try:
-        assert SortingSelection.ArtifactDetectionSource & sort_pk
         merge_id = ArtifactDetectionOutput.get_merge_id(art2)
+        assert (SortingSelection & sort_pk).fetch1(
+            "artifact_detection_merge_id"
+        ) == merge_id
 
         (ArtifactDetectionOutput & {"merge_id": merge_id}).super_delete(
             warn=False, force_masters=True
         )
 
-        # A part cannot outlive its master, so the SortingSelection goes too.
-        assert not (
-            SortingSelection.ArtifactDetectionSource & sort_pk
-        ), "ArtifactDetectionSource part dangles after ArtifactDetectionOutput delete"
         assert not (
             SortingSelection & sort_pk
-        ), "SortingSelection master dangles"
-        assert not (
-            SortingSelection.RecordingSource & sort_pk
-        ), "RecordingSource part dangles"
+        ), "SortingSelection outlives its ArtifactDetectionOutput row"
     finally:
         (SortingSelection & sort_pk).super_delete(warn=False)
         (RecordingArtifactDetection & art2).super_delete(warn=False)
@@ -207,7 +200,9 @@ def test_artifact_free_sorting_id_matches_recording_only_payload(
     )
     try:
         assert SortingSelection.resolve_artifact_detection(sort_pk) is None
-        assert len(SortingSelection.ArtifactDetectionSource & sort_pk) == 0
+        assert (SortingSelection & sort_pk).fetch1(
+            "artifact_detection_merge_id"
+        ) is None
         expected = deterministic_id(
             "sorting",
             sorting_identity_payload(
@@ -277,9 +272,9 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
         assert sorts[0]["sorting_id"] != sorts[1]["sorting_id"]
         # One merge master backs the shared artifact...
         assert len(ArtifactDetectionOutput & {"merge_id": merge_id}) == 1
-        # ...and both sorts' ArtifactDetectionSource parts point at it.
+        # ...and both sorts point at it.
         for sort_pk in sorts:
-            got = (SortingSelection.ArtifactDetectionSource & sort_pk).fetch1(
+            got = (SortingSelection & sort_pk).fetch1(
                 "artifact_detection_merge_id"
             )
             assert str(got) == str(merge_id)
@@ -291,8 +286,7 @@ def test_two_sorts_one_artifact_share_single_registration(ingested_recording):
 def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
     """An artifact-free insert_selection is safe under an ambient transaction.
 
-    It touches no merge, so the master and recording source part land
-    together on commit.
+    It touches no merge, so the row lands on commit.
     """
     import datajoint as dj
 
@@ -310,10 +304,10 @@ def test_insert_selection_safe_inside_outer_transaction(ingested_recording):
                     "sorter_params_name": "default",
                 }
             )
-        # After commit: master and recording part present, no artifact part.
-        assert SortingSelection & sort_pk
-        assert SortingSelection.RecordingSource & sort_pk
-        assert not (SortingSelection.ArtifactDetectionSource & sort_pk)
+        # After commit: the row names the recording and no detection.
+        row = (SortingSelection & sort_pk).fetch1()
+        assert row["recording_id"] == rec_pk["recording_id"]
+        assert row["artifact_detection_merge_id"] is None
     finally:
         if sort_pk is not None:
             (SortingSelection & sort_pk).super_delete(warn=False)
@@ -415,8 +409,9 @@ def test_insert_selection_lazily_registers_unregistered_detection(
             }
         )
         # The lazy fallback re-registered it, and the sort links through it.
-        assert ArtifactDetectionOutput.get_merge_id(art_key)
-        assert SortingSelection.ArtifactDetectionSource & sort_pk
+        assert (SortingSelection & sort_pk).fetch1(
+            "artifact_detection_merge_id"
+        ) == ArtifactDetectionOutput.get_merge_id(art_key)
         assert str(SortingSelection.resolve_artifact_detection(sort_pk)) == str(
             art["artifact_detection_id"]
         )
@@ -675,7 +670,7 @@ def test_insert_selection_links_artifact_in_ambient_transaction(
 
 
 def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
-    """The ``ArtifactDetectionSource -> ArtifactDetectionOutput`` foreign key
+    """The ``SortingSelection -> ArtifactDetectionOutput`` foreign key
     rejects a row referencing a non-existent merge."""
     import uuid
 
@@ -684,21 +679,18 @@ def test_artifact_source_fk_rejects_dangling_detection(ingested_recording):
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_pk = ingested_recording["rec_pk"]
-    # An artifact-free master to hang a bogus artifact part on.
-    sort_pk = SortingSelection.insert_selection(
-        {
-            "recording_id": rec_pk["recording_id"],
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        }
-    )
+    sort_pk = {"sorting_id": uuid.uuid4()}
     try:
         with pytest.raises(dj.errors.IntegrityError):
-            SortingSelection.ArtifactDetectionSource.insert1(
+            SortingSelection.insert1(
                 {
-                    "sorting_id": sort_pk["sorting_id"],
+                    **sort_pk,
+                    "recording_id": rec_pk["recording_id"],
+                    "sorter": "clusterless_thresholder",
+                    "sorter_params_name": "default",
                     "artifact_detection_merge_id": uuid.uuid4(),
-                }
+                },
+                allow_direct_insert=True,
             )
     finally:
         (SortingSelection & sort_pk).super_delete(warn=False)

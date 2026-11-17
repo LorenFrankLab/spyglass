@@ -225,10 +225,8 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         & {"artifact_detection_id": run_summary["artifact_detection_id"]}
     ).fetch1()
 
-    # Recording and artifact live on parts/merge, not the SortingSelection master.
     sort_row = (
-        SortingSelection * SortingSelection.RecordingSource
-        & {"sorting_id": run_summary["sorting_id"]}
+        SortingSelection & {"sorting_id": run_summary["sorting_id"]}
     ).fetch1()
 
     stage_counts = {
@@ -246,7 +244,7 @@ def test_run_v2_pipeline_idempotent_row_counts(polymer_smoke_session):
         "SortingSelection": sum(
             1
             for k in (
-                SortingSelection * SortingSelection.RecordingSource
+                SortingSelection
                 & {
                     "sorter": sort_row["sorter"],
                     "sorter_params_name": sort_row["sorter_params_name"],
@@ -874,7 +872,7 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
     recording directly, with no artifact-detection stage.
 
     The status is ``"skipped"``, there is no ``artifact_detection_id``, and the
-    ``SortingSelection`` has no ``ArtifactDetectionSource`` row.
+    ``SortingSelection`` stores no artifact detection.
     """
     from spyglass.spikesorting.v2 import pipeline as pl
     from spyglass.spikesorting.v2.pipeline import run_v2_pipeline
@@ -905,11 +903,9 @@ def test_run_v2_pipeline_skips_artifact_when_preset_has_none(
     assert run_summary["artifact_detection_status"] == "skipped"
     assert run_summary["artifact_detection_id"] is None
     assert run_summary["n_units"] >= 1
-    # The sort carries no ArtifactDetectionSource row.
-    assert not (
-        SortingSelection.ArtifactDetectionSource
-        & {"sorting_id": run_summary["sorting_id"]}
-    )
+    assert (
+        SortingSelection & {"sorting_id": run_summary["sorting_id"]}
+    ).fetch1("artifact_detection_merge_id") is None
 
 
 def test_stage_statuses_vocabulary_includes_skipped():

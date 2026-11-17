@@ -1,7 +1,7 @@
 """DB-free tests for the selection-plan builders behind ``insert_selection``.
 
 The builders validate the request, normalize ids, derive the
-content-addressed PK, and shape the master and source part rows.
+content-addressed PK, and shape the rows to insert.
 """
 
 from __future__ import annotations
@@ -122,8 +122,8 @@ def test_recording_plan_rejects_mismatched_supplied_id():
 
 
 def test_sorting_plan_recording_only_shapes_rows():
-    """A recording-only request yields master + recording source rows and no
-    artifact source row."""
+    """A recording-only request yields one row naming the recording and no
+    artifact detection."""
     plan = build_sorting_selection_plan(
         {"recording_id": _REC, "sorter": "ms5", "sorter_params_name": "default"}
     )
@@ -137,13 +137,9 @@ def test_sorting_plan_recording_only_shapes_rows():
     assert plan.master_row == {
         "sorter": "ms5",
         "sorter_params_name": "default",
-        "sorting_id": plan.sorting_id,
-    }
-    assert plan.recording_source_row == {
-        "sorting_id": plan.sorting_id,
         "recording_id": _REC,
+        "sorting_id": plan.sorting_id,
     }
-    assert plan.concat_source_row is None
     assert plan.artifact_detection_id is None
 
 
@@ -198,8 +194,8 @@ def test_sorting_plan_requires_exactly_one_source():
 
 
 def test_sorting_plan_concat_only_shapes_rows():
-    """A concat-only request yields master + concat source rows, no recording
-    source row, and no artifact source row."""
+    """A concat-only request yields one row naming the concat and no
+    artifact detection."""
     plan = build_sorting_selection_plan(
         {
             "concat_recording_id": _CONCAT,
@@ -217,13 +213,9 @@ def test_sorting_plan_concat_only_shapes_rows():
     assert plan.master_row == {
         "sorter": "ms5",
         "sorter_params_name": "default",
-        "sorting_id": plan.sorting_id,
-    }
-    assert plan.concat_source_row == {
-        "sorting_id": plan.sorting_id,
         "concat_recording_id": _CONCAT,
+        "sorting_id": plan.sorting_id,
     }
-    assert plan.recording_source_row is None
     assert plan.artifact_detection_id is None
 
 
@@ -259,7 +251,7 @@ def test_sorting_plan_concat_and_recording_same_uuid_distinct_identity():
 
 def test_sorting_plan_concat_rejects_artifact():
     """A concat request that also supplies an artifact is rejected: concat
-    sorts must have no ArtifactDetectionSource row."""
+    sorts must have no artifact detection."""
     with pytest.raises(ValueError, match="artifact"):
         build_sorting_selection_plan(
             {
@@ -488,19 +480,19 @@ def _lineage_of(source):
 
 
 @pytest.mark.parametrize(("source", "sorting_id", "canonical"), _BASE_SORTS)
-def test_sort_parts_must_still_give_the_stored_sorting_id(
+def test_sort_source_must_still_give_the_stored_sorting_id(
     source, sorting_id, canonical
 ):
-    """The parts a selection was inserted with give back its ``sorting_id``
-    (the recorded ids included); a correction part added to an uncorrected
-    sort, or deleted from a corrected one, gives another id."""
+    """The source a selection was inserted with gives back its ``sorting_id``
+    (the recorded ids included); a correction added to an uncorrected sort,
+    or removed from a corrected one, gives another id."""
     from spyglass.spikesorting.v2._recording.source import (
-        sorting_parts_mismatch,
+        sorting_source_mismatch,
     )
 
     lineage = _lineage_of(source)
     assert (
-        sorting_parts_mismatch(
+        sorting_source_mismatch(
             sorting_id,
             lineage,
             **_BASE_SORTER,
@@ -508,7 +500,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
         )
         is None
     )
-    added = sorting_parts_mismatch(
+    added = sorting_source_mismatch(
         uuid.UUID(sorting_id),
         lineage,
         **_BASE_SORTER,
@@ -520,7 +512,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
         {**_BASE_SORTER, **source, "motion_corrected_recording_id": _CORRECTED}
     ).sorting_id
     assert (
-        sorting_parts_mismatch(
+        sorting_source_mismatch(
             corrected_id,
             lineage,
             **_BASE_SORTER,
@@ -529,7 +521,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
         is None
     )
     assert (
-        sorting_parts_mismatch(
+        sorting_source_mismatch(
             corrected_id,
             lineage,
             **_BASE_SORTER,
@@ -538,7 +530,7 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
         is not None
     )
     assert (
-        sorting_parts_mismatch(
+        sorting_source_mismatch(
             corrected_id,
             lineage,
             **_BASE_SORTER,
@@ -548,11 +540,11 @@ def test_sort_parts_must_still_give_the_stored_sorting_id(
     )
 
 
-def test_sort_parts_detect_artifact_part_drift():
-    """Deleting a sort's artifact detection part, adding one, or adding one
-    to a concatenated-recording sort all break the stored ``sorting_id``."""
+def test_sort_source_detects_artifact_drift():
+    """Clearing a sort's artifact detection, adding one, or adding one to a
+    concatenated-recording sort all break the stored ``sorting_id``."""
     from spyglass.spikesorting.v2._recording.source import (
-        sorting_parts_mismatch,
+        sorting_source_mismatch,
     )
 
     (
@@ -572,7 +564,7 @@ def test_sort_parts_detect_artifact_part_drift():
         ),
     ):
         assert (
-            sorting_parts_mismatch(
+            sorting_source_mismatch(
                 stored,
                 lineage,
                 **_BASE_SORTER,
@@ -582,7 +574,7 @@ def test_sort_parts_detect_artifact_part_drift():
         )
     other_sorter = {**_BASE_SORTER, "sorter_params_name": "other"}
     assert (
-        sorting_parts_mismatch(
+        sorting_source_mismatch(
             unmasked_id,
             _lineage_of(unmasked),
             **other_sorter,

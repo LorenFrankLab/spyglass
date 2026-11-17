@@ -154,9 +154,10 @@ class ConcatMemberCurationV2(
     @property
     def key_source(self):
         """Concat-backed curations expanded over their frozen members."""
+        # The inner join drops single-recording sorts (NULL concat id).
         joined = (
             CurationV2
-            * SortingSelection.ConcatenatedRecordingSource
+            * SortingSelection.proj("concat_recording_id")
             * ConcatenatedRecordingSelection.MemberSnapshot
         )
         # Drop concat_recording_id (implied by sorting_id) so the populate
@@ -349,13 +350,12 @@ class ConcatMemberCurationV2(
         dict
             The ``ConcatenatedRecordingSelection.MemberSnapshot`` row.
         """
-        source = (
-            SortingSelection.ConcatenatedRecordingSource
-            & {"sorting_id": sorting_id}
-        ).fetch1()
+        concat_recording_id = (
+            SortingSelection & {"sorting_id": sorting_id}
+        ).fetch1("concat_recording_id")
         return (
             ConcatenatedRecordingSelection.MemberSnapshot
-            & {"concat_recording_id": source["concat_recording_id"]}
+            & {"concat_recording_id": concat_recording_id}
             & {"member_index": member_index}
         ).fetch1()
 
@@ -369,7 +369,7 @@ class ConcatMemberCurationV2(
         curation_key = self._curation_key(key)
         curation_row = (CurationV2 & curation_key).fetch1()
         concat_recording_id = (
-            SortingSelection.ConcatenatedRecordingSource & curation_key
+            SortingSelection & {"sorting_id": curation_key["sorting_id"]}
         ).fetch1("concat_recording_id")
         concat_key = {"concat_recording_id": concat_recording_id}
 
@@ -711,8 +711,7 @@ class ConcatMemberCurationV2(
         member_index = row["member_index"]
         concat_key = {
             "concat_recording_id": (
-                SortingSelection.ConcatenatedRecordingSource
-                & {"sorting_id": row["sorting_id"]}
+                SortingSelection & {"sorting_id": row["sorting_id"]}
             ).fetch1("concat_recording_id")
         }
         indices, ends = (
@@ -771,9 +770,7 @@ class ConcatMemberCurationV2(
         """
         members = (
             (cls & key).proj()
-            * SortingSelection.ConcatenatedRecordingSource.proj(
-                "concat_recording_id"
-            )
+            * SortingSelection.proj("concat_recording_id")
             * ConcatenatedRecordingSelection.MemberSnapshot.proj(
                 "nwb_file_name", "sort_group_id"
             )

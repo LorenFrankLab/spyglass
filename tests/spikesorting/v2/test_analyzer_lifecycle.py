@@ -345,19 +345,20 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
 
     SorterParameters.insert_default()
     sid = uuid.uuid4()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
 
-    # The guard never reads the file, so the AnalysisNwbfile FK is bypassed.
+    # The guard never reads the file or the source, so their FKs are bypassed.
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "recording_id": uuid.uuid4(),
+            },
+            allow_direct_insert=True,
+        )
         Sorting.insert1(
             {
                 "sorting_id": sid,
@@ -738,10 +739,12 @@ def test_changed_analyzer_root_causes_miss_and_rebuild(
 def _insert_bypassed_sorting_row(sid, *, n_units):
     """Insert a minimal Sorting row via FK-checks-off bypass.
 
-    Only ``sorting_id`` and ``n_units`` matter, so the AnalysisNwbfile FK is
-    bypassed. Caller cleans up via the SortingSelection cascade.
+    Only ``sorting_id`` and ``n_units`` matter, so the AnalysisNwbfile and
+    source recording FKs are bypassed. Caller cleans up via the
+    SortingSelection cascade.
     """
     import datetime as dt
+    import uuid
 
     import datajoint as dj
 
@@ -754,17 +757,18 @@ def _insert_bypassed_sorting_row(sid, *, n_units):
 
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "recording_id": uuid.uuid4(),
+            },
+            allow_direct_insert=True,
+        )
         Sorting.insert1(
             {
                 "sorting_id": sid,

@@ -556,6 +556,14 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `Recording` and `ConcatenatedRecording` store `sampling_frequency` and
         their durations in double precision, and `Recording` stores the
         `n_samples` of its saved file #1609
+    - v2 `SortingSelection` and `MotionEstimateSelection` store their source as
+        nullable columns (`recording_id` or `concat_recording_id`,
+        `artifact_detection_merge_id`, and for a sort
+        `motion_corrected_recording_id`) instead of source part tables, so a
+        delete of any source removes every selection over it, the delete
+        permission check finds the session of a single-session sort, and
+        `SortingSelection & {"recording_id": rid}` restricts by recording.
+        No id changes #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

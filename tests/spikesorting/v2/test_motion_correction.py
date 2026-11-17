@@ -186,9 +186,12 @@ def test_selection_is_content_addressed_and_idempotent(drift_recording):
         == expected
     )
     assert other_recipe != first
-    assert len(MotionEstimateSelection.RecordingSource & first) == 1
-    assert not (MotionEstimateSelection.ConcatenatedRecordingSource & first)
-    assert not (MotionEstimateSelection.ArtifactDetectionSource & first)
+    row = (MotionEstimateSelection & first).fetch1()
+    assert (
+        row["recording_id"] == drift_recording["recording_key"]["recording_id"]
+    )
+    assert row["concat_recording_id"] is None
+    assert row["artifact_detection_merge_id"] is None
     lineage = MotionEstimateSelection.resolve_source(first)
     assert (lineage.kind, lineage.artifact_detection_id) == ("recording", None)
 
@@ -258,9 +261,12 @@ def test_direct_insert_and_orphan_master_are_refused(drift_recording):
     with pytest.raises(dj.errors.DataJointError, match="insert_selection"):
         MotionEstimateSelection.insert1(row)
 
-    MotionEstimateSelection.insert1(row, allow_direct_insert=True)
+    with pytest.raises(SchemaBypassError, match="exactly one must be set"):
+        MotionEstimateSelection.insert1(row, allow_direct_insert=True)
+    # dj.Table.insert skips the guard, as a raw SQL write would.
+    dj.Table.insert(MotionEstimateSelection(), [row])
     try:
-        with pytest.raises(SchemaBypassError, match="0 source part rows"):
+        with pytest.raises(SchemaBypassError, match="exactly one must be set"):
             MotionEstimateSelection.resolve_source(row)
     finally:
         (
@@ -519,10 +525,8 @@ def test_unfiltered_source_planted_directly_is_refused_at_compute(
     )
     key = {"motion_estimate_id": motion_estimate_id}
     MotionEstimateSelection.insert1(
-        {**key, **master_row}, allow_direct_insert=True
-    )
-    MotionEstimateSelection.RecordingSource.insert1(
-        {**key, "recording_id": recording_key["recording_id"]}
+        {**key, **master_row, "recording_id": recording_key["recording_id"]},
+        allow_direct_insert=True,
     )
     try:
         with pytest.raises(ValueError, match="no temporal filter"):
@@ -809,11 +813,14 @@ def test_concat_source_is_estimated_end_to_end(discontinuous_sources):
     assert error_rms < 0.5 * zero_rms
 
 
-def test_orphan_and_bypassed_source_parts_are_refused(
+def test_rows_with_two_sources_or_a_masked_concat_are_refused(
     discontinuous_sources, drift_recording
 ):
-    """``resolve_source`` refuses a master with both source parts, and a
-    concat source paired with an artifact detection (raw inserts)."""
+    """A row naming both sources is refused at insert and, written past the
+    guard, at ``resolve_source``; so is a concat source paired with an
+    artifact detection."""
+    import datajoint as dj
+
     from spyglass.spikesorting.v2.artifact import (
         RecordingArtifactDetection,
         RecordingArtifactSelection,
@@ -836,31 +843,30 @@ def test_orphan_and_bypassed_source_parts_are_refused(
         ArtifactDetectionOutput.insert_detection(artifact_key)
         merge_id = ArtifactDetectionOutput.get_merge_id(artifact_key)
 
-    def _orphan(**parts):
-        row = {
+    def _row(**sources):
+        return {
             "motion_estimate_id": uuid.uuid4(),
             "motion_estimation_params_name": "dredge_v1",
             "resolved_params_hash": "0" * 64,
             "spikeinterface_version": "0.104.3",
             "motion_algorithm_version": 1,
             "source_content_hash": "0" * 64,
+            **sources,
         }
-        MotionEstimateSelection.insert1(row, allow_direct_insert=True)
-        pk = {"motion_estimate_id": row["motion_estimate_id"]}
-        for part, extra in parts.items():
-            getattr(MotionEstimateSelection, part).insert1({**pk, **extra})
-        return pk
 
-    both = _orphan(
-        RecordingSource={"recording_id": recording_id},
-        ConcatenatedRecordingSource={"concat_recording_id": concat_id},
+    both_row = _row(recording_id=recording_id, concat_recording_id=concat_id)
+    with pytest.raises(SchemaBypassError, match="exactly one must be set"):
+        MotionEstimateSelection.insert1(both_row, allow_direct_insert=True)
+    # dj.Table.insert skips the guard, as a raw SQL write would.
+    dj.Table.insert(MotionEstimateSelection(), [both_row])
+    both = {"motion_estimate_id": both_row["motion_estimate_id"]}
+    concat_row = _row(
+        concat_recording_id=concat_id, artifact_detection_merge_id=merge_id
     )
-    concat_masked = _orphan(
-        ConcatenatedRecordingSource={"concat_recording_id": concat_id},
-        ArtifactDetectionSource={"artifact_detection_merge_id": merge_id},
-    )
+    MotionEstimateSelection.insert1(concat_row, allow_direct_insert=True)
+    concat_masked = {"motion_estimate_id": concat_row["motion_estimate_id"]}
     try:
-        with pytest.raises(SchemaBypassError, match="2 source part rows"):
+        with pytest.raises(SchemaBypassError, match="exactly one must be set"):
             MotionEstimateSelection.resolve_source(both)
         with pytest.raises(SchemaBypassError, match="pairs a concatenated"):
             MotionEstimateSelection.resolve_source(concat_masked)
@@ -870,12 +876,11 @@ def test_orphan_and_bypassed_source_parts_are_refused(
         )
 
 
-def test_artifact_part_changed_around_insert_is_refused(drift_recording):
-    """``motion_estimate_id`` folds in the artifact detection, so an
-    ``ArtifactDetectionSource`` part deleted from a masked selection, or
-    inserted on an unmasked one, does not give the stored id: the source
-    resolution (and so ``MotionEstimate.populate``) raises instead of
-    estimating on another mask than the one selected."""
+def test_artifact_changed_after_insert_is_refused(drift_recording):
+    """``motion_estimate_id`` folds in the artifact detection, so a detection
+    cleared from a masked selection, or set on an unmasked one, does not give
+    the stored id: the source resolution (and so ``MotionEstimate.populate``)
+    raises instead of estimating on another mask than the one selected."""
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.motion import (
         MotionEstimate,
@@ -887,8 +892,9 @@ def test_artifact_part_changed_around_insert_is_refused(drift_recording):
     masked = _select(recording_key, "dredge_v1", **artifact_key)
     unmasked = _select(recording_key, "dredge_v1")
     try:
-        parts = MotionEstimateSelection.ArtifactDetectionSource
-        artifact_row = (parts & masked).fetch1()
+        merge_id = (MotionEstimateSelection & masked).fetch1(
+            "artifact_detection_merge_id"
+        )
         for key, artifact_id in (
             (masked, artifact_key["artifact_detection_id"]),
             (unmasked, None),
@@ -896,21 +902,17 @@ def test_artifact_part_changed_around_insert_is_refused(drift_recording):
             lineage = MotionEstimateSelection.resolve_source(key)
             assert lineage.artifact_detection_id == artifact_id
 
-        (parts & masked).delete_quick()
-        parts.insert1(
-            {
-                **unmasked,
-                "artifact_detection_merge_id": artifact_row[
-                    "artifact_detection_merge_id"
-                ],
-            }
-        )
+        for key, value in ((masked, None), (unmasked, merge_id)):
+            MotionEstimateSelection().update1(
+                {**key, "artifact_detection_merge_id": value},
+                allow_master_mutation=True,
+            )
         for key in (masked, unmasked):
             with pytest.raises(
                 SchemaBypassError, match=str(key["motion_estimate_id"])
             ):
                 MotionEstimateSelection.resolve_source(key)
-            with pytest.raises(SchemaBypassError, match="current parts"):
+            with pytest.raises(SchemaBypassError, match="stored source"):
                 MotionEstimate.populate(key, reserve_jobs=False)
             assert not (MotionEstimate & key)
     finally:
@@ -2118,8 +2120,8 @@ def test_correction_identity_pins_source_masks_and_recipe(
                 SortingSelection.insert_selection({**sorter, **request})
         assert len(SortingSelection()) == n_selections + 1
 
-        SortingSelection.MotionCorrectionSource.insert1(
-            {**uncorrected, **concat_corrected}
+        SortingSelection().update1(
+            {**uncorrected, **concat_corrected}, allow_master_mutation=True
         )
         with pytest.raises(SchemaBypassError, match="not made from its"):
             Sorting().make_fetch(uncorrected)
@@ -2159,8 +2161,8 @@ def test_corrected_recording_referenced_by_a_sort_is_protected(
     discontinuous_sources,
 ):
     """A corrected recording a sort selected cannot be deleted from under
-    it: a quick delete fails on the foreign key and a cascade that would
-    leave the sort without its correction part is refused."""
+    it: a quick delete fails on the foreign key, and a cascade deletes the
+    sort's whole selection row (checked inside a rolled-back transaction)."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
@@ -2177,10 +2179,16 @@ def test_corrected_recording_referenced_by_a_sort_is_protected(
     try:
         with pytest.raises(dj.errors.IntegrityError):
             (MotionCorrectedRecording & corrected).delete_quick()
-        with pytest.raises(dj.errors.DataJointError, match="master"):
+        conn = dj.conn()
+        conn.start_transaction()
+        try:
             (MotionCorrectedRecording & corrected).super_delete(
-                warn=False, safemode=False
+                warn=False, safemode=False, transaction=False
             )
+            assert not (MotionCorrectedRecording & corrected)
+            assert not (SortingSelection & sort_key)
+        finally:
+            conn.cancel_transaction()
         assert MotionCorrectedRecording & corrected
         assert SortingSelection.resolve_motion_correction(sort_key) == (
             corrected["motion_corrected_recording_id"]
@@ -3413,7 +3421,7 @@ def _drop_artifact_detections(artifact_ids) -> None:
     merges = [{"merge_id": m} for m in merge_ids]
     if merges:
         estimates = (
-            MotionEstimateSelection.ArtifactDetectionSource
+            MotionEstimateSelection
             & [{"artifact_detection_merge_id": m} for m in merge_ids]
         ).fetch("KEY", as_dict=True)
         if estimates:

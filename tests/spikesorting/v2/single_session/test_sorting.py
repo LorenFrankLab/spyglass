@@ -135,11 +135,9 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
     si_sorting = Sorting().get_sorting(populated_sorting)
     assert len(si_sorting.unit_ids) == row["n_units"]
 
-    # ``recording_id`` is a non-PK FK on ``SortingSelection.RecordingSource``,
-    # so ``fetch1("KEY")`` would omit it.
-    recording_id = (
-        SortingSelection.RecordingSource & populated_sorting
-    ).fetch1("recording_id")
+    # ``recording_id`` is a non-PK FK on ``SortingSelection``, so
+    # ``fetch1("KEY")`` would omit it.
+    recording_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     rec = Recording().get_recording({"recording_id": recording_id})
     timestamps = rec.get_times()
     n_samples = len(timestamps)
@@ -170,7 +168,7 @@ def test_sorting_get_sorting_round_trips(populated_sorting):
 
 @pytest.mark.slow
 def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
-    """``make_fetch`` derives obs_intervals from the ArtifactDetectionSource part.
+    """``make_fetch`` derives obs_intervals from the selection's detection.
 
     ``make_fetch`` must attach the resolved ``artifact_detection_id`` to
     ``sel_row``; otherwise artifact-backed sorts skip masking and write
@@ -183,14 +181,14 @@ def test_sorting_make_fetch_resolves_artifact_obs_intervals(populated_sorting):
     )
     assert artifact_detection_id is not None, (
         "populated_sorting must be artifact-backed for this guard to be "
-        "meaningful (expected one ArtifactDetectionSource part row)."
+        "meaningful (expected an artifact_detection_merge_id)."
     )
 
     fetched = Sorting().make_fetch(populated_sorting)
     assert fetched.sel_row.get("artifact_detection_id") == artifact_detection_id
     assert fetched.obs_intervals is not None, (
         "make_fetch returned obs_intervals=None for an artifact-backed "
-        "sort; the ArtifactDetectionSource artifact_detection_id was not resolved, so "
+        "sort; the selection's artifact_detection_id was not resolved, so "
         "artifact masking is silently skipped."
     )
 
@@ -1150,8 +1148,7 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
     artifact_backed_pk = populated_sorting
     # Derived from the fixture row to track its sorter/params.
     backed_row = (SortingSelection & artifact_backed_pk).fetch1()
-    rec_row = (SortingSelection.RecordingSource & artifact_backed_pk).fetch1()
-    recording_id = rec_row["recording_id"]
+    recording_id = backed_row["recording_id"]
     sorter = backed_row["sorter"]
     sorter_params_name = backed_row["sorter_params_name"]
     assert (
@@ -1159,7 +1156,7 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
         is not None
     ), (
         "populated_sorting must yield an artifact-backed row (an "
-        "ArtifactDetectionSource part row) for this test to be meaningful."
+        "artifact_detection_merge_id) for this test to be meaningful."
     )
 
     no_artifact_pk = SortingSelection.insert_selection(
@@ -1176,7 +1173,9 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
         "not match any artifact_detection_id."
     )
     assert SortingSelection.resolve_artifact_detection(no_artifact_pk) is None
-    assert len(SortingSelection.ArtifactDetectionSource & no_artifact_pk) == 0
+    assert (SortingSelection & no_artifact_pk).fetch1(
+        "artifact_detection_merge_id"
+    ) is None
     # Idempotent.
     repeat_pk = SortingSelection.insert_selection(
         {
@@ -1193,14 +1192,13 @@ def test_sorting_selection_artifact_id_none_is_distinct_identity(
 
 
 @pytest.mark.slow
-def test_sorting_selection_artifact_detection_source_part_shape(
+def test_sorting_selection_artifact_detection_column_shape(
     populated_recording,
 ):
-    """Artifact state lives on the ArtifactDetectionSource part, not a master FK.
+    """Artifact state is the nullable ``artifact_detection_merge_id`` column.
 
-    No-artifact selections have zero ``ArtifactDetectionSource`` rows,
-    artifact-backed ones exactly one, and ``resolve_source`` still returns
-    one recording source.
+    No-artifact selections store NULL, artifact-backed ones the detection's
+    merge id, and ``resolve_source`` still returns one recording source.
     """
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -1233,7 +1231,9 @@ def test_sorting_selection_artifact_detection_source_part_shape(
     }
 
     no_art_pk = SortingSelection.insert_selection(dict(sorter_kwargs))
-    assert len(SortingSelection.ArtifactDetectionSource & no_art_pk) == 0
+    assert (SortingSelection & no_art_pk).fetch1(
+        "artifact_detection_merge_id"
+    ) is None
     assert SortingSelection.resolve_artifact_detection(no_art_pk) is None
 
     art_sort_pk = SortingSelection.insert_selection(
@@ -1242,7 +1242,9 @@ def test_sorting_selection_artifact_detection_source_part_shape(
             "artifact_detection_id": art_pk["artifact_detection_id"],
         }
     )
-    assert len(SortingSelection.ArtifactDetectionSource & art_sort_pk) == 1
+    assert (SortingSelection & art_sort_pk).fetch1(
+        "artifact_detection_merge_id"
+    ) is not None
     assert (
         SortingSelection.resolve_artifact_detection(art_sort_pk)
         == art_pk["artifact_detection_id"]

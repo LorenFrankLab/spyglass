@@ -1,8 +1,8 @@
 """Tests for v2 merge-id resolution by artifact detection.
 
-``artifact_detection_id`` lives on the optional
-``SortingSelection.ArtifactDetectionSource`` part, not ``SortingSelection``,
-so resolution goes through the part. An absent key is a wildcard;
+``SortingSelection`` stores the detection's merge id
+(``artifact_detection_merge_id``), not ``artifact_detection_id``, so
+resolution maps one to the other. An absent key is a wildcard;
 ``artifact_detection_id=None`` selects sorts with no artifact detection.
 str ids are normalized to ``uuid.UUID``.
 """
@@ -187,7 +187,7 @@ def test_merge_ids_distinguish_two_artifact_backed_sorts(
         assert ctx["merge_id_artifact"] in by_none
         assert merge_id_default not in by_none, (
             "resolve_restriction matched a DIFFERENT artifact's sort -- the "
-            "ArtifactDetectionSource restriction is keyed on the wrong column"
+            "artifact restriction is keyed on the wrong column"
         )
         by_default = set(
             get_spike_sorting_v2_merge_ids(
@@ -243,8 +243,8 @@ def test_merge_ids_artifact_detection_id_none_selects_no_artifact_sort(
 ):
     """``artifact_detection_id=None`` means "no artifact-detection pass".
 
-    It anti-joins: returns only the sort with NO ArtifactDetectionSource row,
-    not both sorts on the recording.
+    It returns only the sort with no artifact detection, not both sorts on
+    the recording.
     """
     from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,
@@ -261,7 +261,7 @@ def test_merge_ids_artifact_detection_id_none_selects_no_artifact_sort(
 @pytest.mark.slow
 @pytest.mark.integration
 def test_merge_ids_no_artifact_sort_unaffected(two_sorts_one_recording):
-    """A sort with no ArtifactDetectionSource resolves by recording/curation
+    """A sort with no artifact detection resolves by recording/curation
     keys when no artifact detection is requested."""
     from spyglass.spikesorting.v2.curation_api import (
         get_spike_sorting_v2_merge_ids,

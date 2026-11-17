@@ -169,9 +169,10 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 
 - `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
     two artifact-detection tables. Its parts are named after them, so the
-    generic merge methods apply. `SortingSelection.ArtifactDetectionSource`
-    holds one optional foreign key to it; user code does not import it. Deleting
-    a result also deletes the sorts and concat members that reference it.
+    generic merge methods apply. `SortingSelection` and `MotionEstimateSelection`
+    hold one optional foreign key to it (`artifact_detection_merge_id`); user
+    code does not import it. Deleting a result also deletes the sorts, motion
+    estimates and concat members that reference it.
     Concat members reference `RecordingArtifactDetection` directly.
 - Parameter tables are Pydantic-validated Lookups; user params validate the
     `params` blob on insert. `PreprocessingWaveformParameters`, a manual table,
@@ -193,7 +194,9 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 ([Mixin](../Features/Mixin.md)). A v2 mixin that only adds methods or guards
 `insert` / `update1` comes next, before the DataJoint tier:
 `ImmutableParamsLookup`, `SelectionMasterInsertGuard`, `FactoryOnlyMaster` and
-the recompute mixins. These go first:
+the recompute mixins. `SelectionMasterInsertGuard` with `_xor_source = True`
+(`SortingSelection`, `MotionEstimateSelection`) also refuses a row naming zero
+or both of `recording_id` / `concat_recording_id`. These go first:
 
 - `StagedOutputCleanupMixin`: replaces `PopulateMixin._staged_outputs = None`,
     which `PopulateMixin.__init_subclass__` reads.
@@ -231,26 +234,44 @@ Optional motion stage (on either path's Recording or ConcatenatedRecording):
   Recording | ConcatenatedRecording [+ ArtifactDetectionOutput, single source only]
     -> MotionEstimateSelection -> MotionEstimate
     -> MotionCorrectedRecordingSelection -> MotionCorrectedRecording
-    -> SortingSelection.MotionCorrectionSource
+    -> SortingSelection (motion_corrected_recording_id)
 
 Both curation paths:
   CurationV2 -> CurationEvaluationSelection -> CurationEvaluation
 ```
 
-- `SortingSelection` has four parts. It takes its source through one of two
-    exclusive parts: `RecordingSource` (a `Recording`) or
-    `ConcatenatedRecordingSource` (a `ConcatenatedRecording`).
-- Single-recording sorts can add an artifact detection through the optional
-    `ArtifactDetectionSource` part, a foreign key to `ArtifactDetectionOutput`.
+- `SortingSelection` stores its source as nullable foreign keys on the row:
+    exactly one of `recording_id` (a `Recording`) or `concat_recording_id` (a
+    `ConcatenatedRecording`). `MotionEstimateSelection` does the same.
+- Single-recording sorts and estimates can add an artifact detection,
+    `artifact_detection_merge_id`, a foreign key to `ArtifactDetectionOutput`.
     Concat sources already hold their frozen member masks and accept no
     sort-stage artifact input.
-- The optional `MotionCorrectionSource` part points at a
+- The optional `motion_corrected_recording_id` points at a
     `MotionCorrectedRecording` computed from the same source and mask.
+- The source is columns, not part tables, so every delete branch that reaches
+    a selection removes the whole row. A cascade with `force_masters` deletes
+    a master only through the first part it reaches, so a selection reached
+    later through another part kept its master and lost its source. The
+    columns also give `Session` a directed path to `SortingSelection` for the
+    delete permission check, and `SortingSelection & {"recording_id": ...}`
+    restricts by recording.
+- The database cannot require exactly one source, so `insert_selection` and
+    `SelectionMasterInsertGuard` refuse a row naming zero or both, and every
+    reader goes through `_core.table_integrity.stored_source`, which raises
+    `SchemaBypassError` for such a row.
 - `SortingSelection.resolve_source` returns the sort's original source as a
-    `_recording.source.SourceLineage(kind, key, artifact_detection_id)`; zero or
-    several source parts raise `SchemaBypassError`. `resolve_effective_source`
-    pairs that lineage with the `EffectiveTraces` consumers read (the
-    motion-corrected recording when one is pinned).
+    `_recording.source.SourceLineage(kind, key, artifact_detection_id)` and
+    re-derives `sorting_id` from the stored columns (as
+    `MotionEstimateSelection.resolve_source` does for `motion_estimate_id`); a
+    row written or edited outside `insert_selection` raises
+    `SchemaBypassError`. `resolve_effective_source` pairs that lineage with
+    the `EffectiveTraces` consumers read (the motion-corrected recording when
+    one is pinned).
+- A `None` id in a dict restriction is SQL `IS NULL`. A restriction by
+    another table never matches a NULL source column, and an anti-join on one
+    (`NOT IN`) drops the NULL rows, so anti-join on `sorting_id` instead
+    (`_curation/restriction.py`).
 - All tables live in `spikesorting_v2_*` schemas (`recording`, `artifact`,
     `artifact_output`, `sorting`, `curation`, `metric_curation`,
     `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
@@ -505,6 +526,15 @@ helper must import without a database.
 
 ### Deletion
 
+- A cascading delete with `force_masters=True` deletes a master only through
+    the first of its parts it reaches; a later branch into another part of the
+    same master deletes part rows only. Sort and motion-estimate selections
+    therefore store their source as columns. Masters that still have parts can
+    be left damaged by an upstream `Recording` delete:
+    `ConcatenatedRecordingSelection` (fewer `MemberSnapshot` rows),
+    `ArtifactDetectionOutput` and `SpikeSortingOutput` (a merge row with no
+    part), and `UnitMatchSelection` (missing `Input` rows).
+    `test_selection_source_cascade.py` reproduces each as a strict `xfail`.
 - `CurationV2.parent_curation_id` is a plain int. DataJoint cannot declare a
     nullable self-referential foreign key, and an equivalent two-FK edge table
     breaks the delete cascade.
@@ -929,13 +959,11 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     shared locked, verified rebuild. A rebuild under another SpikeInterface
     version is installed when it reproduces the stored hash; a new compute still
     refuses an SI version change.
-- **Deletion protection.** `SortingSelection.MotionCorrectionSource` is a
-    foreign key onto `MotionCorrectedRecording`. `delete_quick` on a referenced
-    row fails on the constraint, and a plain DataJoint delete without
-    `force_masters` is refused ("Attempt to delete part table ... before
-    deleting from its master"). `cautious_delete` sets `force_masters=True`, so
-    the delete cascades through the sorts that read it. The same covers a
-    `MotionEstimate` referenced by a `MotionCorrectedRecordingSelection`.
+- **Deletion protection.** `SortingSelection.motion_corrected_recording_id`
+    is a foreign key onto `MotionCorrectedRecording`. `delete_quick` on a
+    referenced row fails on the constraint; a cascading delete removes the
+    sorts that read it. The same covers a `MotionEstimate` referenced by a
+    `MotionCorrectedRecordingSelection`.
 - No recompute trio exists, as for concats.
 
 ## Analyzer caches

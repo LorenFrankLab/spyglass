@@ -2,7 +2,7 @@
 
 Covers the ``AnalyzerWaveformParameters`` Lookup (schema validation, shipped
 region rows, path-safe name guard), the source-preprocessing -> display-recipe
-resolver (single-recording and concat source parts), and that a populated sort
+resolver (single-recording and concat sources), and that a populated sort
 records its resolved display recipe and rebuilds the same cache folder.
 """
 
@@ -49,9 +49,9 @@ def _stub_row(table, id_attr, id_value, **fixed):
 
 @contextlib.contextmanager
 def _planted_source_sort(
-    selection_table, id_attr, source_part, preproc_name, trace_table=None
+    selection_table, id_attr, preproc_name, trace_table=None
 ):
-    """Plant a SortingSelection + source-part + stub upstream selection row.
+    """Plant a SortingSelection naming a stub upstream selection row.
 
     Gives resolver tests a sort with a chosen preprocessing recipe without
     a populate. Rows are inserted with FK checks off and removed on exit;
@@ -98,11 +98,9 @@ def _planted_source_sort(
                 "sorting_id": sid,
                 "sorter": sorter,
                 "sorter_params_name": sorter_params_name,
+                id_attr: id_value,
             },
             allow_direct_insert=True,
-        )
-        source_part.insert1(
-            {"sorting_id": sid, id_attr: id_value}, allow_direct_insert=True
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")
@@ -326,7 +324,7 @@ def test_display_waveform_params_name_not_in_sorting_identity(dj_conn):
 
 
 # --------------------------------------------------------------------------- #
-# Source-preprocessing -> display-recipe resolver (concat source part)
+# Source-preprocessing -> display-recipe resolver (concat source)
 # --------------------------------------------------------------------------- #
 
 
@@ -350,7 +348,6 @@ def test_concat_display_recipe_resolved_from_concat_preprocessing(dj_conn):
     with _planted_source_sort(
         ConcatenatedRecordingSelection,
         "concat_recording_id",
-        SortingSelection.ConcatenatedRecordingSource,
         HIPPOCAMPUS_PREPROC,
     ) as sid:
         preproc = SortingSelection.resolve_source_preprocessing_params_name(
@@ -397,7 +394,6 @@ def test_recording_source_display_recipe_resolved_by_region(
     with _planted_source_sort(
         RecordingSelection,
         "recording_id",
-        SortingSelection.RecordingSource,
         preproc_name,
     ) as sid:
         preproc = SortingSelection.resolve_source_preprocessing_params_name(
@@ -438,7 +434,6 @@ def test_make_fetch_resolves_hippocampus_display_blob(dj_conn, monkeypatch):
     with _planted_source_sort(
         RecordingSelection,
         "recording_id",
-        SortingSelection.RecordingSource,
         HIPPOCAMPUS_PREPROC,
         trace_table=Recording,
     ) as sid:

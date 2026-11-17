@@ -2,7 +2,7 @@
 
 - Every v2 ``AutoPopulate`` table uses tri-part ``make`` (compute runs outside
   the transaction), except a documented exclusion set.
-- Each ``SortingSelection`` has exactly one source part, and an artifact-backed
+- Each ``SortingSelection`` names exactly one source, and an artifact-backed
   sort maps to exactly one ``RecordingArtifactSelection``.
 - The v2 merge parts and ``source_class_dict`` entries are registered.
 - No part rows without a master.
@@ -387,7 +387,7 @@ def test_v2_dispatch_classes_wired_into_merge_table():
 def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
     populated_sorting,
 ):
-    """A ``SortingSelection`` has exactly one source part (recording XOR
+    """A ``SortingSelection`` names exactly one source (recording XOR
     concatenated) and, when artifact-backed, its ``artifact_detection_id`` maps
     to exactly one ``RecordingArtifactSelection``.
     """
@@ -404,17 +404,15 @@ def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
         f"SortingSelection master row matching {sort_master_pk}; "
         "fixture setup is broken."
     )
-    # A sort's source is recorded in exactly one of the two XOR source parts
-    # (recording XOR concatenated): never zero, never more than one.
-    sid = sort_master_pk["sorting_id"]
-    rec_parts = SortingSelection.RecordingSource & {"sorting_id": sid}
-    concat_parts = SortingSelection.ConcatenatedRecordingSource & {
-        "sorting_id": sid
-    }
-    total = len(rec_parts) + len(concat_parts)
+    # Exactly one of the two XOR source columns is set.
+    row = sort_master_rows.fetch1()
+    total = sum(
+        row[name] is not None
+        for name in ("recording_id", "concat_recording_id")
+    )
     assert total == 1, (
-        f"SortingSelection sorting_id={sid!r} has {total} source-"
-        f"part rows (expected 1). Source-part invariant violated."
+        f"SortingSelection {row['sorting_id']} names {total} sources "
+        "(expected 1)."
     )
 
     # Artifact master reachable via SortingSelection -> artifact_detection_id.

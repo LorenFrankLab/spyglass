@@ -193,7 +193,7 @@ def insert_artifact_bound_selection(
     Shared by ``SortingSelection`` and ``MotionEstimateSelection``.
 
     - Resolves (and if needed registers) the merge id before the transaction,
-      so a duplicate collides on the master insert with nothing to roll back.
+      so a duplicate collides on the insert with nothing to roll back.
     - A duplicate refetches the existing selection.
 
     Parameters
@@ -205,9 +205,8 @@ def insert_artifact_bound_selection(
     artifact_detection_id : uuid.UUID or None
         The detection the selection links, or ``None`` for none.
     insert_rows : callable
-        Inserts the master first, then its parts, given the detection's
-        merge id (``None`` without a detection). Runs inside the
-        transaction.
+        Inserts the selection row given the detection's merge id (``None``
+        without a detection). Runs inside the transaction.
     refetch : callable
         Returns the existing selection's primary key, or ``None``.
     consumer : str
@@ -225,8 +224,9 @@ def insert_artifact_bound_selection(
     Raises
     ------
     SchemaBypassError
-        If the detection is not populated, a duplicate master's parts do not
-        match this selection, or an input foreign key is unsatisfied.
+        If the detection is not populated, a duplicate row's stored source
+        does not match this selection, or an input foreign key is
+        unsatisfied.
     """
     table = table_cls.__name__
     art_merge_id = None
@@ -257,10 +257,10 @@ def insert_artifact_bound_selection(
             return existing
         master_id = ", ".join(str(value) for value in pk.values())
         raise SchemaBypassError(
-            f"{table} master {master_id} exists but its source/artifact "
-            "parts do not match this selection: the master was inserted "
-            "without insert_selection (a raw-insert orphan). Use "
-            "insert_selection(), or drop the orphan master."
+            f"{table} row {master_id} exists but its stored source or "
+            "artifact detection does not match this selection: the row was "
+            "inserted without insert_selection. Use insert_selection(), or "
+            "drop that row."
         ) from exc
     except dj.errors.IntegrityError as exc:
         raise SchemaBypassError(

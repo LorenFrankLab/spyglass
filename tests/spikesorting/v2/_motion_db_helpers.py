@@ -22,10 +22,8 @@ CONCAT_GROUP = "motion_concat"
 def drop_sorts_of_estimates(estimate_keys) -> None:
     """Delete every sort that reads a corrected recording of these estimates.
 
-    Run before deleting the estimates: their cascade reaches
-    ``SortingSelection.MotionCorrectionSource``, which DataJoint refuses to
-    delete before its master ("part before master"). A test that fails before
-    its own cleanup would otherwise turn the module teardown into that error.
+    Run before deleting the estimates, so the sorts' curations, merge
+    entries and matches go leaves-first (:func:`drop_pipeline_sorts`).
     """
     from spyglass.spikesorting.v2.motion import (
         MotionCorrectedRecordingSelection,
@@ -35,28 +33,19 @@ def drop_sorts_of_estimates(estimate_keys) -> None:
     if not estimate_keys:
         return
     corrected = (MotionCorrectedRecordingSelection & estimate_keys).proj()
-    drop_pipeline_sorts(
-        (SortingSelection.MotionCorrectionSource & corrected).fetch(
-            "sorting_id"
-        )
-    )
+    drop_pipeline_sorts((SortingSelection & corrected).fetch("sorting_id"))
 
 
 def drop_motion_selections(source_key) -> None:
-    """Delete every motion-estimate selection on a source (masters first),
-    after the sorts that read their corrected recordings.
+    """Delete every motion-estimate selection on a source, after the sorts
+    that read their corrected recordings.
 
     ``source_key`` is a ``{"recording_id": ...}`` or
     ``{"concat_recording_id": ...}`` restriction.
     """
     from spyglass.spikesorting.v2.motion import MotionEstimateSelection
 
-    source_part = (
-        MotionEstimateSelection.ConcatenatedRecordingSource
-        if "concat_recording_id" in source_key
-        else MotionEstimateSelection.RecordingSource
-    )
-    keys = (source_part & source_key).fetch("KEY", as_dict=True)
+    keys = (MotionEstimateSelection & source_key).fetch("KEY", as_dict=True)
     if keys:
         drop_sorts_of_estimates(keys)
         (MotionEstimateSelection & keys).super_delete(

@@ -37,14 +37,14 @@ class SourceLineage(NamedTuple):
     Attributes
     ----------
     kind : {"recording", "concatenated_recording"}
-        Which ``SortingSelection`` source part backs the sort.
+        Which source column of the selection backs the sort.
     key : dict
         The source row's primary key: ``{"recording_id": ...}`` or
         ``{"concat_recording_id": ...}``.
     artifact_detection_id : uuid.UUID or None
-        The artifact detection pinned on the sort's ``ArtifactDetectionSource``
-        part, or ``None``. Only a single-recording sort pins one; a concat
-        source owns its member masks upstream.
+        The artifact detection the selection pins, or ``None``. Only a
+        single-recording sort pins one; a concat source owns its member masks
+        upstream.
     """
 
     kind: BaseTraceKind
@@ -201,7 +201,7 @@ def correction_lineage_mismatch(
     return mismatches
 
 
-def sorting_parts_mismatch(
+def sorting_source_mismatch(
     sorting_id,
     lineage: SourceLineage,
     *,
@@ -209,28 +209,29 @@ def sorting_parts_mismatch(
     sorter_params_name: str,
     motion_corrected_recording_id,
 ) -> str | None:
-    """Describe why a sort's current parts do not give its ``sorting_id``.
+    """Describe why a sort's stored source does not give its ``sorting_id``.
 
-    Recomputing ``sorting_id`` from the current parts detects a part
-    inserted or deleted outside ``SortingSelection.insert_selection``.
+    Recomputing ``sorting_id`` from the stored columns detects a row written
+    or edited outside ``SortingSelection.insert_selection``.
 
     Parameters
     ----------
     sorting_id : uuid.UUID or str
         The stored ``SortingSelection`` primary key.
     lineage : SourceLineage
-        The source and artifact detection read from the selection's parts.
+        The source and artifact detection read from the selection row.
     sorter : str
         The selection's sorter.
     sorter_params_name : str
         The selection's ``SorterParameters`` name.
     motion_corrected_recording_id : uuid.UUID, str or None
-        The ``MotionCorrectionSource`` part's corrected recording, or ``None``.
+        The selection's corrected recording, or ``None``.
 
     Returns
     -------
     str or None
-        ``None`` when the parts give ``sorting_id``; otherwise a description.
+        ``None`` when the stored source gives ``sorting_id``; otherwise a
+        description.
     """
     if lineage.kind == "concatenated_recording":
         if lineage.artifact_detection_id is not None:

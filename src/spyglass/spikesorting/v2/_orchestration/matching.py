@@ -814,8 +814,8 @@ def _unit_match_member_choices(
             "team_name": member["team_name"],
         }
         # Include team_name: the ownership validator rejects other teams' sorts.
-        member_sortings = SortingSelection.RecordingSource * (
-            RecordingSelection & member_id
+        member_sortings = (
+            SortingSelection & (RecordingSelection & member_id).proj()
         )
         choices = (CurationV2 & member_sortings).fetch(
             "sorting_id",

@@ -150,7 +150,7 @@ def _warn_single_and_member_overlap(single, members) -> None:
     single_group = {
         row["sorting_id"]: (row["nwb_file_name"], row["sort_group_id"])
         for row in (
-            (SortingSelection.RecordingSource & sorts).proj("recording_id")
+            (SortingSelection & sorts).proj("recording_id")
             * RecordingSelection.proj("nwb_file_name", "sort_group_id")
         ).fetch(as_dict=True)
     }
@@ -160,9 +160,7 @@ def _warn_single_and_member_overlap(single, members) -> None:
             row["sort_group_id"],
         )
         for row in (
-            (SortingSelection.ConcatenatedRecordingSource & sorts).proj(
-                "concat_recording_id"
-            )
+            (SortingSelection & sorts).proj("concat_recording_id")
             * ConcatenatedRecordingSelection.MemberSnapshot.proj(
                 "nwb_file_name", "sort_group_id"
             )

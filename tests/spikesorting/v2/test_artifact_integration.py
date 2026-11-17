@@ -886,9 +886,9 @@ def test_make_fetch_raises_when_recording_absent_from_interval_dict(
     SorterParameters.insert_default()
     AnalyzerWaveformParameters.insert_default()
 
-    for sid in (
-        SortingSelection.RecordingSource & {"recording_id": recording_id}
-    ).fetch("sorting_id"):
+    for sid in (SortingSelection & {"recording_id": recording_id}).fetch(
+        "sorting_id"
+    ):
         (SortingSelection & {"sorting_id": sid}).super_delete(warn=False)
     art_pk = RecordingArtifactSelection.insert_selection(
         {

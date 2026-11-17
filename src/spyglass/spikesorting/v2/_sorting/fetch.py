@@ -89,7 +89,7 @@ def fetch_sorting_inputs(key) -> SortingFetched:
     source = SortingSelection.resolve_source(key)
 
     sel_row = (SortingSelection & key).fetch1()
-    # Lives on a part table, but downstream readers expect it on sel_row;
+    # Stored as a merge id, but downstream readers expect the natural id;
     # without it every artifact-backed sort would silently skip masking.
     sel_row["artifact_detection_id"] = source.artifact_detection_id
     sorter_row = (
@@ -110,11 +110,10 @@ def fetch_sorting_inputs(key) -> SortingFetched:
             f"{key.get('sorting_id')!r} carries artifact_detection_id="
             f"{sel_row['artifact_detection_id']!r}, but a concat sort "
             "owns its member masks through ConcatenatedRecordingSelection. "
-            "The ArtifactDetectionSource "
-            "part was inserted without SortingSelection.insert_selection "
-            "(schema bypass) and cannot describe all concat members. Re-create the selection "
-            "via insert_selection, or drop the stray "
-            "ArtifactDetectionSource row."
+            "The row was written without SortingSelection.insert_selection "
+            "(schema bypass) and its detection cannot describe all concat "
+            "members. Drop the selection and re-create it via "
+            "insert_selection."
         )
 
     anchor = resolve_sort_anchor(source)

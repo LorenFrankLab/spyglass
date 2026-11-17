@@ -57,8 +57,10 @@ def test_direct_match_preflight_reads_existing_assets_without_writes(
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
 
     recording = (
-        RecordingSelection * SortingSelection.RecordingSource
-        & accepted_three_unit_curation.as_key()
+        RecordingSelection
+        & (SortingSelection & accepted_three_unit_curation.as_key()).proj(
+            "recording_id"
+        )
     ).fetch1()
     interval_key = {
         "nwb_file_name": recording["nwb_file_name"],

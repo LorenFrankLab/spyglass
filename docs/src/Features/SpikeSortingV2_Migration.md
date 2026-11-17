@@ -253,6 +253,12 @@ the [CHANGELOG](../CHANGELOG.md) release notes show.
     - Filter fields are `freq_min` / `freq_max` (v1: `frequency_min` /
         `frequency_max`), nested under `bandpass_filter`.
     - `CurationV2.insert_curation(..., apply_merge=True)` keeps v1's spelling.
+    - `SortingSelection` carries `recording_id` as v1's
+        `SpikeSortingSelection` does, so `SortingSelection & {"recording_id":
+        rid}` restricts by recording. A concat sort has `concat_recording_id`
+        instead. The artifact detection is stored as
+        `artifact_detection_merge_id`; restrict by `artifact_detection_id`
+        through `CurationV2.resolve_restriction`.
 - **The artifact amplitude threshold is in microvolts.** v2's
     `amplitude_threshold_uv` (default 500) is compared against gain- and
     offset-scaled µV traces. v1's `amplitude_thresh_uV` (default 3000) was

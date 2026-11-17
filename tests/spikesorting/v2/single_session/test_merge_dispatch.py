@@ -261,8 +261,7 @@ def test_merge_dispatch_restrict_by_artifact_honored_in_v2(populated_sorting):
     pk = CurationV2.insert_curation(sorting_key=populated_sorting, labels={})
     expected = (SpikeSortingOutput.CurationV2 & pk).fetch1("merge_id")
 
-    # The artifact pass is on the ArtifactDetectionSource part, so use the
-    # resolver.
+    # The selection stores the detection's merge id, so use the resolver.
     artifact_detection_id = SortingSelection.resolve_artifact_detection(
         populated_sorting
     )

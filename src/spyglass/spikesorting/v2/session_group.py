@@ -2,8 +2,8 @@
 
 ``SessionGroup`` names a bundle of sorting members. ``ConcatenatedRecording``
 builds one masked, unwhitened concatenation from each member's populated
-``Recording``, which ``SortingSelection.ConcatenatedRecordingSource`` sorts as
-one piece.
+``Recording``, which a ``SortingSelection`` with a ``concat_recording_id``
+sorts as one piece.
 
 Tables:
 

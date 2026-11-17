@@ -803,35 +803,41 @@ def test_make_fetch_rechecks_the_sorters_own_correction(
         drop_sorts([sort_key])
 
 
-def test_part_drift_on_a_sorted_selection_is_refused(corrected_sorts):
-    """A correction part deleted from a corrected sort, or inserted (with
-    matching source and mask) onto an uncorrected one, after both were
-    sorted, is refused where consumers resolve their traces, instead of
-    silently switching them to other traces than the sorter read."""
+def test_correction_drift_on_a_sorted_selection_is_refused(corrected_sorts):
+    """A correction cleared from a corrected sort, or set (with matching
+    source and mask) on an uncorrected one, after both were sorted, is
+    refused where consumers resolve their traces, instead of silently
+    switching them to other traces than the sorter read."""
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     sorts = corrected_sorts
     uncorrected, corrected = sorts["uncorrected_sort"], sorts["corrected_sort"]
-    correction_part = SortingSelection.MotionCorrectionSource
-    drift = "not the ones it was selected with"
+    corrected_id = sorts["corrected_key"]["motion_corrected_recording_id"]
+    drift = "is not the one it was selected with"
+
+    def set_correction(sort, value):
+        SortingSelection().update1(
+            {**sort, "motion_corrected_recording_id": value},
+            allow_master_mutation=True,
+        )
 
     for sort in (uncorrected, corrected):
         SortingSelection.resolve_effective_source(sort)
 
-    correction_part.insert1({**uncorrected, **sorts["corrected_key"]})
+    set_correction(uncorrected, corrected_id)
     try:
         with pytest.raises(SchemaBypassError, match=drift):
             SortingSelection.resolve_effective_source(uncorrected)
     finally:
-        (correction_part & uncorrected).delete_quick()
+        set_correction(uncorrected, None)
 
-    (correction_part & corrected).delete_quick()
+    set_correction(corrected, None)
     try:
         with pytest.raises(SchemaBypassError, match=drift):
             SortingSelection.resolve_effective_source(corrected)
     finally:
-        correction_part.insert1({**corrected, **sorts["corrected_key"]})
+        set_correction(corrected, corrected_id)
     assert (
         SortingSelection.resolve_effective_source(corrected).traces.kind
         == "motion_corrected_recording"
@@ -1936,7 +1942,7 @@ def test_motion_cleanup_drops_the_sorts_of_corrected_recordings(
         drop_motion_selections(recording_key)
         assert not (SortingSelection & corrected_sort)
         assert not (MotionCorrectedRecording & corrected_key)
-        assert not (MotionEstimateSelection.RecordingSource & recording_key)
+        assert not (MotionEstimateSelection & recording_key)
         assert SortingSelection & uncorrected_sort
         assert Sorting & uncorrected_sort
     finally:

@@ -434,9 +434,9 @@ def test_noise_fill_reaches_only_the_sorter(masked_planted_sort, monkeypatch):
     sort_key = masked_planted_sort["sort_key"]
     sc2_pk = SortingSelection.insert_selection(
         {
-            "recording_id": (
-                SortingSelection.RecordingSource & sort_key
-            ).fetch1("recording_id"),
+            "recording_id": (SortingSelection & sort_key).fetch1(
+                "recording_id"
+            ),
             "sorter": "spykingcircus2",
             "sorter_params_name": "default",
             "artifact_detection_id": (

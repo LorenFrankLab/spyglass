@@ -263,7 +263,7 @@ def test_curation_v2_get_sort_group_info_returns_all_electrodes(
     rel = CurationV2().get_sort_group_info(pk)
     rec_row = (
         RecordingSelection
-        & (SortingSelection.RecordingSource & populated_sorting)
+        & (SortingSelection & populated_sorting).proj("recording_id")
     ).fetch1()
     expected = len(
         SortGroupV2.SortGroupElectrode
@@ -923,19 +923,16 @@ def test_curation_get_unit_brain_regions_concat_raises():
 
     SorterParameters.insert_default()
     sid = uuid.uuid4()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "concat_recording_id": uuid.uuid4(),
+            },
             allow_direct_insert=True,
         )
     finally:
@@ -981,19 +978,16 @@ def test_curation_get_unit_brain_regions_concat_anchor_member_df(
 
     SorterParameters.insert_default()
     sid = uuid.uuid4()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        SortingSelection.ConcatenatedRecordingSource.insert1(
-            {"sorting_id": sid, "concat_recording_id": uuid.uuid4()},
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "concat_recording_id": uuid.uuid4(),
+            },
             allow_direct_insert=True,
         )
         Sorting.insert1(

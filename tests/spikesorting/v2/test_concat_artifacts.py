@@ -734,9 +734,7 @@ def test_member_artifact_failure_retry_and_reuse(
             "KEY", as_dict=True
         )
         if concat_keys:
-            sorting_ids = (
-                SortingSelection.ConcatenatedRecordingSource & concat_keys
-            ).fetch("sorting_id")
+            sorting_ids = (SortingSelection & concat_keys).fetch("sorting_id")
             drop_pipeline_sorts(sorting_ids)
         for key in concat_keys:
             (ConcatenatedRecording & key).super_delete(warn=False)

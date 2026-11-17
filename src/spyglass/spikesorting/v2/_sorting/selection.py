@@ -34,24 +34,17 @@ from spyglass.spikesorting.v2.session_group import ConcatenatedRecording
 
 
 def insert_selection(table_cls, key: dict) -> dict:
-    """Insert master + exactly one source part; return PK-only dict.
+    """Insert one selection row naming its source; return PK-only dict.
 
     The body of ``SortingSelection.insert_selection`` (see its docstring).
     ``table_cls`` is ``SortingSelection``.
 
-    Duplicate-key recovery has no savepoint, so the master insert must stay
-    the transaction's first statement.
+    Duplicate-key recovery has no savepoint, so the insert must stay the
+    transaction's only statement.
     """
     from spyglass.spikesorting.v2.sorting import SorterParameters
 
     plan = build_sorting_selection_plan(key)
-
-    if plan.source_kind == "concat":
-        source_part = table_cls.ConcatenatedRecordingSource
-        source_row = plan.concat_source_row
-    else:
-        source_part = table_cls.RecordingSource
-        source_row = plan.recording_source_row
 
     def existing_pk() -> dict | None:
         return table_cls._find_existing_pk(
@@ -59,7 +52,6 @@ def insert_selection(table_cls, key: dict) -> dict:
             plan.source_restriction,
             plan.artifact_detection_id,
             plan.sorting_id,
-            source_part,
             plan.motion_corrected_recording_id,
         )
 
@@ -81,7 +73,7 @@ def insert_selection(table_cls, key: dict) -> dict:
             caller="SortingSelection.insert_selection",
         )
 
-    # Otherwise a missing source surfaces as a misleading part-FK bypass error.
+    # Otherwise a missing source surfaces as a misleading FK bypass error.
     if plan.source_kind == "recording":
         if not (Recording & plan.source_restriction):
             raise ValueError(
@@ -104,24 +96,10 @@ def insert_selection(table_cls, key: dict) -> dict:
     # Holds the artifact detection's advisory lock across the transaction.
     def insert_rows(art_merge_id) -> None:
         # This helper is the validation boundary.
-        table_cls.insert1(plan.master_row, allow_direct_insert=True)
-        source_part.insert1(source_row)
-        if art_merge_id is not None:
-            table_cls.ArtifactDetectionSource.insert1(
-                {
-                    "sorting_id": plan.master_row["sorting_id"],
-                    "artifact_detection_merge_id": art_merge_id,
-                }
-            )
-        if plan.motion_corrected_recording_id is not None:
-            table_cls.MotionCorrectionSource.insert1(
-                {
-                    "sorting_id": plan.master_row["sorting_id"],
-                    "motion_corrected_recording_id": (
-                        plan.motion_corrected_recording_id
-                    ),
-                }
-            )
+        table_cls.insert1(
+            {**plan.master_row, "artifact_detection_merge_id": art_merge_id},
+            allow_direct_insert=True,
+        )
 
     return insert_artifact_bound_selection(
         table_cls,
@@ -149,30 +127,26 @@ def find_existing_pk(
     source_restriction,
     artifact_detection_id,
     deterministic_id,
-    source_part,
     motion_corrected_recording_id,
 ) -> dict | None:
-    """Return the canonical master PK for this sort selection, or None.
+    """Return the canonical PK for this sort selection, or None.
 
-    Matches the sorter, the source through ``source_part``, the artifact
-    detection, and the motion correction, so none of those variants alias.
-    A match with a non-deterministic ``sorting_id`` raises
-    ``DuplicateSelectionError``. ``table_cls`` is ``SortingSelection``.
+    Matches the sorter, the source, the artifact detection, and the motion
+    correction, so none of those variants alias. A match with a
+    non-deterministic ``sorting_id`` raises ``DuplicateSelectionError``.
+    ``table_cls`` is ``SortingSelection``.
     """
     candidates = (
-        (table_cls * source_part) & master_restriction & source_restriction
-    ).fetch("KEY", as_dict=True)
+        table_cls
+        & master_restriction
+        & source_restriction
+        & {"motion_corrected_recording_id": motion_corrected_recording_id}
+    ).fetch("sorting_id")
     master_ids = {
-        cand["sorting_id"]
-        for cand in candidates
-        if table_cls.resolve_artifact_detection(
-            {"sorting_id": cand["sorting_id"]}
-        )
+        sorting_id
+        for sorting_id in candidates
+        if table_cls.resolve_artifact_detection({"sorting_id": sorting_id})
         == artifact_detection_id
-        and table_cls.resolve_motion_correction(
-            {"sorting_id": cand["sorting_id"]}
-        )
-        == motion_corrected_recording_id
     }
     return existing_selection_pk(
         master_ids,

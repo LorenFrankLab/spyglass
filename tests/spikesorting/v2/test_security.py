@@ -130,7 +130,6 @@ def test_v2_artifacts_not_world_writable(populated_sorting):
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    # recording_id lives on the RecordingSource part.
     recording_id = SortingSelection.resolve_source(populated_sorting).key[
         "recording_id"
     ]

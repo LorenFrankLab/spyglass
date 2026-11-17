@@ -85,8 +85,8 @@ def test_recording_populates_and_round_trips(
     )
 
     # Clear any prior row so populate() runs. ``force_masters=True`` deletes
-    # selection masters reached via their ``RecordingSource`` part, which a
-    # bare ``super_delete`` refuses (part-before-master rule).
+    # masters reached through a part (e.g. a concatenation's
+    # ``MemberSnapshot``), which a bare ``super_delete`` refuses.
     (Recording & recording_selection_key).super_delete(
         warn=False, force_masters=True
     )

@@ -247,7 +247,7 @@ def _clean_session_v2(session_key):
         )
     if rec_keys:
         sorting_keys = (
-            SortingSelection.RecordingSource
+            SortingSelection
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
         ).fetch("KEY", as_dict=True)
         if sorting_keys:
@@ -261,8 +261,7 @@ def _clean_session_v2(session_key):
                 )
             (CurationV2 & sorting_keys).super_delete(warn=False)
             (Sorting & sorting_keys).super_delete(warn=False)
-            # Step 2: masters before Recording, whose cascade would hit
-            # the orphan RecordingSource part.
+            # Step 2: selections before Recording, explicitly.
             (SortingSelection & sorting_keys).super_delete(warn=False)
 
         # Step 3: artifact merge master first, so the Recording cascade
@@ -389,9 +388,9 @@ def clean_session_groups_for_owner(owner: str) -> None:
             {"concat_recording_id": c["concat_recording_id"]}
             for c in concat_keys
         ]
-        sort_keys = (
-            SortingSelection.ConcatenatedRecordingSource & concat_id_restr
-        ).fetch("KEY", as_dict=True)
+        sort_keys = (SortingSelection & concat_id_restr).fetch(
+            "KEY", as_dict=True
+        )
         if sort_keys:
             drop_unitmatch_selections_for(sort_keys)
             for mid in (
@@ -411,8 +410,7 @@ def clean_session_groups_for_owner(owner: str) -> None:
                 )
             (CurationV2 & sort_keys).super_delete(warn=False, safemode=False)
             (Sorting & sort_keys).super_delete(warn=False, safemode=False)
-            # Drop SortingSelection masters BEFORE ConcatenatedRecording so its
-            # cascade never hits the orphan ConcatenatedRecordingSource part.
+            # Drop the selections before ConcatenatedRecording, explicitly.
             (SortingSelection & sort_keys).super_delete(
                 warn=False, safemode=False
             )
@@ -792,7 +790,7 @@ def write_processed_recording_nwb(
 def _plant_concat_sorting_selection(sid):
     """Land a minimal concat-source ``SortingSelection`` via FK-checks-off.
 
-    Points the source part at a fake ``concat_recording_id`` so
+    Points the selection at a fake ``concat_recording_id`` so
     source-dispatch tests skip building a real ``ConcatenatedRecording``.
     The caller cleans up ``SortingSelection & {sid}``.
     """
@@ -817,12 +815,9 @@ def _plant_concat_sorting_selection(sid):
                     "sorting_id": sid,
                     "sorter": "clusterless_thresholder",
                     "sorter_params_name": "default",
+                    "concat_recording_id": uuid.uuid4(),
                 }
             ],
-        )
-        dj.Table.insert(
-            SortingSelection.ConcatenatedRecordingSource(),
-            [{"sorting_id": sid, "concat_recording_id": uuid.uuid4()}],
         )
     finally:
         conn.query("SET FOREIGN_KEY_CHECKS=1")

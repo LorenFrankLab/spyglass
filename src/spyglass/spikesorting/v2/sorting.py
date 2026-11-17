@@ -2,12 +2,10 @@
 
 Tables:
     SorterParameters: per-sorter Pydantic-validated params.
-    SortingSelection: sorting request for one source.
-        .RecordingSource: single-session source.
-        .ConcatenatedRecordingSource: same-day concat source.
-        .ArtifactDetectionSource: optional artifact mask (single source).
-        .MotionCorrectionSource: optional motion-corrected recording, sorted
-            in place of the source.
+    SortingSelection: sorting request for one source (a Recording or a
+        same-day ConcatenatedRecording), an optional artifact mask (single
+        recording only) and an optional motion-corrected recording, sorted in
+        place of the source.
     Sorting (+ Unit): sorted units NWB and SortingAnalyzer folder.
 
 A concat sort anchors the per-unit Electrode FK and the analysis-NWB parent to
@@ -63,7 +61,7 @@ from spyglass.spikesorting.v2._recording.source import (
     correction_lineage_mismatch,
     effective_source_from_base,
     effective_source_from_correction,
-    sorting_parts_mismatch,
+    sorting_source_mismatch,
 )
 from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
@@ -95,8 +93,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    optional_part_value,
-    single_source_part,
+    stored_source,
 )
 from spyglass.spikesorting.v2._core.job_config import resolve_effective_seed
 from spyglass.spikesorting.v2._recording.unit_metadata import (
@@ -509,69 +506,41 @@ class PreprocessingWaveformParameters(SpyglassMixin, dj.Manual):
     """
 
 
+def _artifact_detection_id(row: dict):
+    """The ``artifact_detection_id`` behind a selection row's merge id."""
+    merge_id = row["artifact_detection_merge_id"]
+    if merge_id is None:
+        return None
+    return ArtifactDetectionOutput.resolve_artifact_detection_id(merge_id)
+
+
 @schema
 class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
-    """One row per (recording, sorter, artifact detection) tuple.
+    """One row per (source, sorter, artifact detection, motion correction).
 
-    - Exactly one of ``RecordingSource`` or ``ConcatenatedRecordingSource``.
-    - Optional ``ArtifactDetectionSource``. A part row rather than a nullable
-      FK, so "no detection" does not act as a wildcard in restrictions.
-    - Optional ``MotionCorrectionSource``: the sort reads that
-      ``MotionCorrectedRecording``, made from the same source and mask,
-      instead of the source traces. Its id is part of ``sorting_id``.
+    - Exactly one of ``recording_id`` or ``concat_recording_id`` is set.
+    - ``artifact_detection_merge_id`` (single recording only) and
+      ``motion_corrected_recording_id`` are optional; the corrected recording
+      is made from the same source and mask, and the sort reads it instead
+      of the source traces.
+    - Every term is part of ``sorting_id``.
     """
 
     definition = """
     sorting_id: uuid
     ---
     -> SorterParameters
+    -> [nullable] Recording
+    -> [nullable] ConcatenatedRecording
+    -> [nullable] MotionCorrectedRecording
+    -> [nullable] ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
     """
 
-    class RecordingSource(SpyglassMixinPart):
-        """Single-session recording source for a sorting selection."""
-
-        definition = """
-        -> master
-        ---
-        -> Recording
-        """
-
-    class ConcatenatedRecordingSource(SpyglassMixinPart):
-        """Concatenated-recording source for a sorting selection."""
-
-        definition = """
-        -> master
-        ---
-        -> ConcatenatedRecording
-        """
-
-    class ArtifactDetectionSource(SpyglassMixinPart):
-        """Optional artifact-detection pass for a sorting selection.
-
-        Read through :meth:`SortingSelection.resolve_artifact_detection`.
-        """
-
-        definition = """
-        -> master
-        ---
-        -> ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
-        """
-
-    class MotionCorrectionSource(SpyglassMixinPart):
-        """Optional motion-corrected recording a sort reads.
-
-        Read through :meth:`SortingSelection.resolve_motion_correction`.
-        """
-
-        definition = """
-        -> master
-        ---
-        -> MotionCorrectedRecording
-        """
+    _xor_source = True
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
-        """Insert master + exactly one source part; return PK-only dict.
+        """Insert one selection row naming its source; return PK-only dict.
 
         Selections with and without an artifact detection are distinct
         rows. Re-inserting the same request returns the existing key.
@@ -604,8 +573,8 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
             If a matching master has a non-deterministic ``sorting_id`` (a
             raw ``insert`` bypass).
         SchemaBypassError
-            If a deterministic master exists but its source parts are missing
-            or mismatched.
+            If a row with the deterministic ``sorting_id`` exists but stores
+            another source, artifact detection or motion correction.
         """
 
         return _sorting_selection_insert.insert_selection(cls, key)
@@ -617,7 +586,6 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         source_restriction,
         artifact_detection_id,
         deterministic_id,
-        source_part,
         motion_corrected_recording_id,
     ) -> dict | None:
         """Return the canonical master PK for this sort selection, or None.
@@ -631,67 +599,54 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
             source_restriction,
             artifact_detection_id,
             deterministic_id,
-            source_part,
             motion_corrected_recording_id,
         )
+
+    @classmethod
+    def _stored_row(cls, key: dict) -> dict:
+        """The one selection row ``key`` names (non-PK fields ignored)."""
+        return (
+            cls & {k: v for k, v in key.items() if k in cls.primary_key}
+        ).fetch1()
 
     @classmethod
     def resolve_source(cls, key: dict) -> SourceLineage:
         """Return a sorting selection's source and its pinned artifact mask.
 
-        Returns ``SourceLineage(kind, key, artifact_detection_id)`` for the
-        one source part.
+        Returns ``SourceLineage(kind, key, artifact_detection_id)`` from the
+        row's source columns.
 
         Raises
         ------
         SchemaBypassError
-            If zero or multiple source part rows exist for ``key``.
+            If the row names zero or both of ``recording_id`` and
+            ``concat_recording_id``.
         """
-        kind, source_key = single_source_part(cls, key)
+        row = cls._stored_row(key)
+        kind, source_key = stored_source(cls.__name__, row)
         return SourceLineage(
             kind=kind,
             key=source_key,
-            artifact_detection_id=cls.resolve_artifact_detection(key),
+            artifact_detection_id=_artifact_detection_id(row),
         )
 
     @classmethod
     def resolve_artifact_detection(cls, key: dict):
         """Return the ``artifact_detection_id`` for a selection, or ``None``.
 
-        Resolves the part's merge id to ``artifact_detection_id``. Concat
+        Resolves the stored merge id to ``artifact_detection_id``. Concat
         sorts return ``None`` but may still be masked: their detections live
         on ``ConcatenatedRecordingSelection.MemberSnapshot``.
-
-        Raises
-        ------
-        SchemaBypassError
-            If more than one ``ArtifactDetectionSource`` row exists for ``key``.
         """
-        merge_id = optional_part_value(
-            cls, key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
-        )
-        if merge_id is None:
-            return None
-        return ArtifactDetectionOutput.resolve_artifact_detection_id(merge_id)
+        return _artifact_detection_id(cls._stored_row(key))
 
     @classmethod
     def resolve_motion_correction(cls, key: dict):
         """Return the sort's ``motion_corrected_recording_id``, or ``None``.
 
-        Reads the optional ``MotionCorrectionSource`` part; ``None`` means the
-        sort reads its source's own traces.
-
-        Raises
-        ------
-        SchemaBypassError
-            If more than one ``MotionCorrectionSource`` row exists for ``key``.
+        ``None`` means the sort reads its source's own traces.
         """
-        return optional_part_value(
-            cls,
-            key,
-            cls.MotionCorrectionSource,
-            "motion_corrected_recording_id",
-        )
+        return cls._stored_row(key)["motion_corrected_recording_id"]
 
     @classmethod
     def resolve_effective_source(cls, key: dict) -> EffectiveSource:
@@ -717,13 +672,14 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         ------
         SchemaBypassError
             If the selected corrected recording was not made from the sort's
-            source and artifact mask, or the current source, artifact
-            detection and motion-correction parts do not give the stored
-            ``sorting_id`` (a part row inserted or deleted without
+            source and artifact mask, or the stored source, artifact
+            detection and motion correction do not give the stored
+            ``sorting_id`` (a row written or edited without
             :meth:`insert_selection`).
         """
+        master = cls._stored_row(key)
         lineage = cls.resolve_source(key)
-        corrected_id = cls.resolve_motion_correction(key)
+        corrected_id = master["motion_corrected_recording_id"]
         if corrected_id is not None:
             mismatches = correction_lineage_mismatch(
                 lineage,
@@ -735,17 +691,13 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
                 raise SchemaBypassError(
                     f"SortingSelection {dict(key)} reads motion-corrected "
                     f"recording {corrected_id}, which was not made from its "
-                    f"source and mask ({'; '.join(mismatches)}). The "
-                    "MotionCorrectionSource part was inserted without "
-                    "SortingSelection.insert_selection; drop the selection "
-                    "and re-insert it."
+                    f"source and mask ({'; '.join(mismatches)}). The row "
+                    "was written without SortingSelection.insert_selection; "
+                    "drop the selection and re-insert it."
                 )
-        # sorting_id folds in every part, so a part inserted or deleted after
-        # the selection (and after its sort) shows up as an id mismatch.
-        master = (
-            cls & {k: v for k, v in key.items() if k in cls.primary_key}
-        ).fetch1()
-        mismatch = sorting_parts_mismatch(
+        # sorting_id folds in every source column, so a row written or edited
+        # outside insert_selection shows up as an id mismatch.
+        mismatch = sorting_source_mismatch(
             master["sorting_id"],
             lineage,
             sorter=master["sorter"],
@@ -754,10 +706,9 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         )
         if mismatch is not None:
             raise SchemaBypassError(
-                f"SortingSelection {master['sorting_id']}: its current parts "
-                f"({mismatch}) are not the ones it was selected with. A "
-                "source, ArtifactDetectionSource or MotionCorrectionSource "
-                "part was inserted or deleted without "
+                f"SortingSelection {master['sorting_id']}: its stored source "
+                f"({mismatch}) is not the one it was selected with. The row "
+                "was written or edited without "
                 "SortingSelection.insert_selection, so its consumers would "
                 "read other traces than its sorter did. Drop the selection "
                 "(and its sort) and re-insert it with insert_selection."

@@ -3,10 +3,8 @@
 Tables:
     MotionEstimationParameters: named, validated SpikeInterface motion recipes.
     MotionEstimateSelection: one source (a Recording or an uncorrected
-        ConcatenatedRecording), an optional artifact mask, and a recipe.
-        .RecordingSource: single-recording source.
-        .ConcatenatedRecordingSource: concatenated-recording source.
-        .ArtifactDetectionSource: optional mask (single recording only).
+        ConcatenatedRecording), an optional artifact mask (single recording
+        only), and a recipe.
     MotionEstimate: the saved SpikeInterface ``Motion``, its estimation clock,
         resolved configuration and diagnostics.
     MotionInterpolationParameters: named interpolation recipes, every
@@ -18,8 +16,8 @@ Tables:
     MotionCorrectedRecording: the corrected, masked, unwhitened traces written
         with the source's own timestamps.
 
-``SortingSelection.MotionCorrectionSource`` selects a corrected recording as
-a sort's input. Computation lives in ``_motion``.
+``SortingSelection.motion_corrected_recording_id`` selects a corrected
+recording as a sort's input. Computation lives in ``_motion``.
 """
 
 from __future__ import annotations
@@ -65,8 +63,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
-    optional_part_value,
-    single_source_part,
+    stored_source,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.mixins.populate import StagedOutputs
@@ -81,7 +78,7 @@ from spyglass.spikesorting.v2._motion import estimation as _motion
 from spyglass.spikesorting.v2._motion.estimation import (
     displacement_on_source_clock,
     estimation_clock_from_blob,
-    motion_estimate_parts_mismatch,
+    motion_estimate_source_mismatch,
     motion_from_storage_dict,
     spans_without_evidence,
     unfiltered_source_problem,
@@ -299,12 +296,12 @@ class MotionEstimateSelection(
 ):
     """One motion estimate to compute: a source, an optional mask, a recipe.
 
-    Exactly one of ``RecordingSource`` / ``ConcatenatedRecordingSource``
-    exists per row. ``ArtifactDetectionSource`` applies to single recordings
-    only; a concatenation carries its members' masks. ``motion_estimate_id``
-    hashes the source, its ``content_hash``, the artifact detection, the
-    recipe, the resolved configuration, and the SpikeInterface and algorithm
-    versions. Create rows with :meth:`insert_selection`.
+    Exactly one of ``recording_id`` / ``concat_recording_id`` is set per
+    row. ``artifact_detection_merge_id`` applies to single recordings only; a
+    concatenation carries its members' masks. ``motion_estimate_id`` hashes
+    the source, its ``content_hash``, the artifact detection, the recipe, the
+    resolved configuration, and the SpikeInterface and algorithm versions.
+    Create rows with :meth:`insert_selection`.
     """
 
     definition = """
@@ -315,34 +312,12 @@ class MotionEstimateSelection(
     spikeinterface_version: varchar(32)  # SpikeInterface the configuration was resolved with
     motion_algorithm_version: int        # estimation algorithm version at selection
     source_content_hash: char(64)        # content_hash of the source trace artifact
+    -> [nullable] Recording
+    -> [nullable] ConcatenatedRecording
+    -> [nullable] ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
     """
 
-    class RecordingSource(SpyglassMixinPart):
-        """Single-recording source of a motion estimate."""
-
-        definition = """
-        -> master
-        ---
-        -> Recording
-        """
-
-    class ConcatenatedRecordingSource(SpyglassMixinPart):
-        """Concatenated-recording source of a motion estimate."""
-
-        definition = """
-        -> master
-        ---
-        -> ConcatenatedRecording
-        """
-
-    class ArtifactDetectionSource(SpyglassMixinPart):
-        """Optional artifact mask of a single-recording motion estimate."""
-
-        definition = """
-        -> master
-        ---
-        -> ArtifactDetectionOutput.proj(artifact_detection_merge_id='merge_id')
-        """
+    _xor_source = True
 
     _INPUT_FIELDS = frozenset(
         {
@@ -384,7 +359,7 @@ class MotionEstimateSelection(
         DuplicateSelectionError
             If a matching row has a non-deterministic ``motion_estimate_id``.
         SchemaBypassError
-            If the deterministic master exists with other source parts.
+            If the deterministic row exists with another stored source.
         """
         return _motion_selection_insert.insert_estimate_selection(cls, key)
 
@@ -392,15 +367,14 @@ class MotionEstimateSelection(
     def _find_existing_pk(
         cls,
         master_row,
-        source_part,
         source_key,
         artifact_detection_id,
         deterministic_id,
     ) -> dict | None:
         """Return the canonical PK for this selection, or ``None``.
 
-        Matches masters with the same identity columns, source part and
-        artifact state; any match whose id is not the deterministic one is a
+        Matches rows with the same identity columns, source and artifact
+        state; any match whose id is not the deterministic one is a
         raw-insert bypass.
 
         Raises
@@ -408,9 +382,7 @@ class MotionEstimateSelection(
         DuplicateSelectionError
             If a match has a non-deterministic ``motion_estimate_id``.
         """
-        candidates = ((cls * source_part) & master_row & source_key).fetch(
-            "motion_estimate_id"
-        )
+        candidates = (cls & master_row & source_key).fetch("motion_estimate_id")
         matching = {
             candidate
             for candidate in candidates
@@ -431,17 +403,16 @@ class MotionEstimateSelection(
         )
 
     @classmethod
-    def resolve_artifact_detection(cls, key: dict):
-        """Return the pinned ``artifact_detection_id``, or ``None``.
+    def _stored_row(cls, key: dict) -> dict:
+        """The one selection row ``key`` names (non-PK fields ignored)."""
+        return (
+            cls & {k: v for k, v in key.items() if k in cls.primary_key}
+        ).fetch1()
 
-        Raises
-        ------
-        SchemaBypassError
-            If more than one ``ArtifactDetectionSource`` row exists.
-        """
-        merge_id = optional_part_value(
-            cls, key, cls.ArtifactDetectionSource, "artifact_detection_merge_id"
-        )
+    @classmethod
+    def resolve_artifact_detection(cls, key: dict):
+        """Return the pinned ``artifact_detection_id``, or ``None``."""
+        merge_id = cls._stored_row(key)["artifact_detection_merge_id"]
         if merge_id is None:
             return None
         return ArtifactDetectionOutput.resolve_artifact_detection_id(merge_id)
@@ -450,47 +421,46 @@ class MotionEstimateSelection(
     def resolve_source(cls, key: dict) -> SourceLineage:
         """Return the selection's source and pinned artifact detection.
 
-        Re-derives ``motion_estimate_id`` from the current parts to catch
-        parts inserted or deleted after selection.
+        Re-derives ``motion_estimate_id`` from the stored source columns to
+        catch a row written or edited outside :meth:`insert_selection`.
 
         Raises
         ------
         SchemaBypassError
-            If the row has zero or two source parts, a concat source
-            carries an artifact detection, or the current parts do not give
-            the stored ``motion_estimate_id`` (a raw insert or part-only
-            delete bypassing :meth:`insert_selection`).
+            If the row names zero or two sources, a concat source carries an
+            artifact detection, or the stored source does not give the stored
+            ``motion_estimate_id``.
         """
-        master_key = {k: v for k, v in key.items() if k in cls.primary_key}
-        kind, source_key = single_source_part(cls, master_key)
-        artifact_detection_id = cls.resolve_artifact_detection(master_key)
+        master = cls._stored_row(key)
+        kind, source_key = stored_source(cls.__name__, master)
+        artifact_detection_id = cls.resolve_artifact_detection(master)
         if (
             kind == "concatenated_recording"
             and artifact_detection_id is not None
         ):
             raise SchemaBypassError(
-                f"MotionEstimateSelection {master_key} pairs a concatenated "
-                "recording with an ArtifactDetectionSource; a concat source "
-                "owns its member masks. Drop the stray part row."
+                f"MotionEstimateSelection {master['motion_estimate_id']} pairs "
+                "a concatenated recording with an artifact detection; a "
+                "concat source owns its member masks. Drop the selection and "
+                "re-insert it with insert_selection."
             )
         lineage = SourceLineage(
             kind=kind,
             key=source_key,
             artifact_detection_id=artifact_detection_id,
         )
-        master = (cls & master_key).fetch1()
-        mismatch = motion_estimate_parts_mismatch(
+        mismatch = motion_estimate_source_mismatch(
             master["motion_estimate_id"], lineage, master
         )
         if mismatch is not None:
             raise SchemaBypassError(
                 f"MotionEstimateSelection {master['motion_estimate_id']}: its "
-                f"current parts ({mismatch}) are not the ones it was selected "
-                "with. A source or ArtifactDetectionSource part was inserted "
-                "or deleted without MotionEstimateSelection.insert_selection, "
-                "so the estimate would describe another mask or source than "
-                "the one selected. Drop the selection (and everything made "
-                "from it) and re-insert it with insert_selection."
+                f"stored source ({mismatch}) is not the one it was selected "
+                "with. The row was written or edited without "
+                "MotionEstimateSelection.insert_selection, so the estimate "
+                "would describe another mask or source than the one "
+                "selected. Drop the selection (and everything made from it) "
+                "and re-insert it with insert_selection."
             )
         return lineage
 

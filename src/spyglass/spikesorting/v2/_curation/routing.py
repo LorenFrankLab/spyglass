@@ -14,7 +14,7 @@ from spyglass.spikesorting.v2._artifacts.naming import (
 )
 from spyglass.utils import logger
 
-# Only on ``RecordingSelection`` (via ``SortingSelection.RecordingSource``).
+# Only on ``RecordingSelection`` (via ``SortingSelection.recording_id``).
 _REC_KEYS = (
     "nwb_file_name",
     "team_name",
@@ -30,8 +30,9 @@ _CONCAT_KEYS = (
 )
 # On both source selections; alone, matches both families.
 _SHARED_SOURCE_KEYS = ("preprocessing_params_name",)
-# Artifact and motion ids live on optional parts, so the join assembly
-# resolves them separately (``_PART_RESOLVED_SORT_KEYS``).
+# The selection stores a merge id, not ``artifact_detection_id``, and a
+# ``None`` id has its own meaning, so the join assembly resolves these
+# separately (``_PART_RESOLVED_SORT_KEYS``).
 _SORT_KEYS = (
     "sorter",
     "sorter_params_name",

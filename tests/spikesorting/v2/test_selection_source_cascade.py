@@ -143,6 +143,49 @@ def _estimate(**source) -> dict:
     )
 
 
+def _outcome(call) -> str:
+    """What ``call()`` does: ``"ok"`` or the exception it raises."""
+    try:
+        call()
+    except Exception as exc:  # noqa: BLE001 - recorded, not handled
+        return f"{type(exc).__name__}: {str(exc)[:300]}"
+    return "ok"
+
+
+def _drop_survivors(table, keys) -> None:
+    """Delete rows a damaging cascade left, so module teardown can run."""
+    keys = [key for key in keys if table & key]
+    if keys:
+        (table & keys).super_delete(
+            warn=False, safemode=False, force_masters=True
+        )
+
+
+@pytest.fixture(autouse=True)
+def _drop_session_groups(drift_recording):
+    """Delete the session groups a test made, before the session teardown.
+
+    The session cleanup deletes ``RecordingSelection`` rows without
+    ``force_masters``, which refuses to reach ``SessionGroup.Member`` first.
+    """
+    from spyglass.spikesorting.v2.session_group import SessionGroup
+
+    before = set(
+        (SessionGroup & {"session_group_owner": MOTION_TEAM}).fetch(
+            "session_group_name"
+        )
+    )
+    yield
+    made = [
+        {"session_group_owner": MOTION_TEAM, "session_group_name": name}
+        for name in (SessionGroup & {"session_group_owner": MOTION_TEAM}).fetch(
+            "session_group_name"
+        )
+        if name not in before
+    ]
+    _drop_survivors(SessionGroup, made)
+
+
 def _remaining(table, keys) -> list:
     """The keys among ``keys`` that still have a row in ``table``."""
     return [key for key in keys if table & key]
@@ -439,3 +482,343 @@ def test_selection_ids_match_the_pinned_values(
     assert {name: uuid.UUID(str(v)) for name, v in ids.items()} == {
         name: uuid.UUID(v) for name, v in _PINNED_IDS.items()
     }
+
+
+# ---- other masters the same cascade can damage --------------------------------
+#
+# A delete with ``force_masters=True`` (Spyglass's default) deletes a master
+# only through the first of its parts the cascade reaches; a later branch into
+# another part of the same master deletes part rows only (DataJoint
+# ``Table.delete``, ``visited_masters``). These tests record where that still
+# leaves a master without some of its parts.
+
+
+def _concat_of(group_name, runs, artifact_ids) -> dict:
+    """A populated concat of existing member recordings; returns its key."""
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+        SessionGroup,
+    )
+
+    SessionGroup.create_group(MOTION_TEAM, group_name, runs)
+    concat_key = ConcatenatedRecordingSelection.insert_selection(
+        {
+            "session_group_owner": MOTION_TEAM,
+            "session_group_name": group_name,
+            "preprocessing_params_name": "default",
+        },
+        artifact_detection_ids=artifact_ids,
+    )
+    ConcatenatedRecording.populate(concat_key, reserve_jobs=False)
+    return concat_key
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "A force_masters cascade deletes a master only through the first of "
+        "its parts it reaches (DataJoint visited_masters): the artifact "
+        "branch deletes the masked concat, the Recording branch then deletes "
+        "only the plain concat's MemberSnapshot row for R."
+    ),
+)
+def test_member_recording_delete_removes_every_concat_of_it(drift_recording):
+    """Two concatenations share member R, one masking it, one not.
+
+    The masked concat's ``MemberSnapshot`` is also reached through R's
+    artifact detection, a second branch into the same master.
+    """
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        ConcatenatedRecordingSelection,
+    )
+
+    nwb = drift_recording["nwb_file_name"]
+    member_r = _recording(nwb, "snapshot r", 2.0, 8.0)
+    _recording(nwb, "snapshot y", 12.0, 18.0)
+    runs = [
+        _member_run(nwb, "snapshot r", 2.0, 8.0),
+        _member_run(nwb, "snapshot y", 12.0, 18.0),
+    ]
+    t0 = session_start_s(nwb)
+    artifact_key = masked_artifact(member_r, [t0 + 4.0, t0 + 4.5])
+    masked = _concat_of(
+        "snapshot masked",
+        runs,
+        {0: artifact_key["artifact_detection_id"], 1: None},
+    )
+    plain = _concat_of("snapshot plain", runs, {0: None, 1: None})
+
+    (Recording & member_r).delete(safemode=False)
+
+    surviving = _remaining(ConcatenatedRecordingSelection, [masked, plain])
+    try:
+        report = {
+            str(key["concat_recording_id"]): {
+                "member rows (of 2)": len(
+                    ConcatenatedRecordingSelection.MemberSnapshot & key
+                ),
+                "ConcatenatedRecording row": bool(ConcatenatedRecording & key),
+                "make_fetch": _outcome(
+                    lambda: ConcatenatedRecording().make_fetch(key)
+                ),
+                "get_recording": _outcome(
+                    lambda: ConcatenatedRecording().get_recording(key)
+                ),
+                "sort selection": _outcome(
+                    lambda: _sort(
+                        concat_recording_id=key["concat_recording_id"]
+                    )
+                ),
+            }
+            for key in surviving
+        }
+        assert surviving == [], f"concats outlived member R: {report}"
+    finally:
+        _drop_survivors(ConcatenatedRecordingSelection, surviving)
+
+
+def _plant_shared_detection(group_name, recording_keys) -> dict:
+    """Rows of a shared detection over ``recording_keys``, registered in
+    ``ArtifactDetectionOutput``. No traces are read; the cascade only needs
+    the rows and their foreign keys."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import (
+        SharedArtifactDetection,
+        SharedArtifactGroup,
+        SharedArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
+
+    nwb = (RecordingSelection & recording_keys[0]).fetch1("nwb_file_name")
+    detection_id, merge_id = uuid.uuid4(), uuid.uuid4()
+    dj.Table.insert(
+        SharedArtifactGroup(),
+        [{"shared_artifact_group_name": group_name, "nwb_file_name": nwb}],
+    )
+    dj.Table.insert(
+        SharedArtifactGroup.Member(),
+        [
+            {"shared_artifact_group_name": group_name, **key}
+            for key in recording_keys
+        ],
+    )
+    dj.Table.insert(
+        SharedArtifactSelection(),
+        [
+            {
+                "artifact_detection_id": detection_id,
+                "artifact_detection_params_name": "none",
+                "shared_artifact_group_name": group_name,
+                "member_set_hash": "0" * 64,
+            }
+        ],
+    )
+    dj.Table.insert(
+        SharedArtifactDetection(),
+        [{"artifact_detection_id": detection_id}],
+        allow_direct_insert=True,
+    )
+    dj.Table.insert(
+        ArtifactDetectionOutput(),
+        [{"merge_id": merge_id, "source": "SharedArtifactDetection"}],
+    )
+    dj.Table.insert(
+        ArtifactDetectionOutput.SharedArtifactDetection(),
+        [{"merge_id": merge_id, "artifact_detection_id": detection_id}],
+    )
+    return {"merge_id": merge_id, "artifact_detection_id": detection_id}
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "A force_masters cascade deletes a master only through the first of "
+        "its parts it reaches (DataJoint visited_masters): the second branch "
+        "into ArtifactDetectionOutput deletes only a part row, leaving a "
+        "merge row with no part that a sort of R2 still references."
+    ),
+)
+def test_recording_delete_leaves_no_artifact_output_without_its_part(
+    drift_recording,
+):
+    """R has its own detection and is in a shared group with R2; a sort of R2
+    uses the shared detection. Deleting R reaches ``ArtifactDetectionOutput``
+    through both of its parts."""
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    nwb = drift_recording["nwb_file_name"]
+    member_r = _recording(nwb, "shared r", 2.0, 8.0)
+    member_r2 = _recording(nwb, "shared r2", 12.0, 18.0)
+    t0 = session_start_s(nwb)
+    own = masked_artifact(member_r, [t0 + 4.0, t0 + 4.5])
+    own_merge = {"merge_id": ArtifactDetectionOutput.get_merge_id(own)}
+    shared = _plant_shared_detection("cascade shared", [member_r, member_r2])
+    sort_r2 = {"sorting_id": uuid.uuid4()}
+    SortingSelection.insert1(
+        {
+            **sort_r2,
+            **sorter_key(),
+            **member_r2,
+            "artifact_detection_merge_id": shared["merge_id"],
+        },
+        allow_direct_insert=True,
+    )
+
+    (Recording & member_r).delete(safemode=False)
+
+    merges = [own_merge, {"merge_id": shared["merge_id"]}]
+    partless = [
+        key
+        for key in _remaining(ArtifactDetectionOutput, merges)
+        if not any(
+            part & key
+            for part in (
+                ArtifactDetectionOutput.RecordingArtifactDetection,
+                ArtifactDetectionOutput.SharedArtifactDetection,
+            )
+        )
+    ]
+    try:
+        report = {
+            "partless merge rows": partless,
+            "sort of R2 kept": bool(SortingSelection & sort_r2),
+            "resolve_source of that sort": _outcome(
+                lambda: SortingSelection.resolve_source(sort_r2)
+            ),
+        }
+        assert partless == [], f"partless ArtifactDetectionOutput: {report}"
+    finally:
+        _drop_survivors(SortingSelection, [sort_r2])
+        _drop_survivors(ArtifactDetectionOutput, partless)
+
+
+def _curated_sorts_over_r_and_concat(nwb, prefix):
+    """A curated sort of R and a curated sort of a concat (R, Y), with the
+    concat's member curations populated."""
+    from spyglass.spikesorting.v2.concat_member_curation import (
+        ConcatMemberCurationV2,
+    )
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    member_r = _recording(nwb, f"{prefix} r", 2.0, 8.0)
+    _recording(nwb, f"{prefix} y", 12.0, 18.0)
+    runs = [
+        _member_run(nwb, f"{prefix} r", 2.0, 8.0),
+        _member_run(nwb, f"{prefix} y", 12.0, 18.0),
+    ]
+    concat_key = _concat_of(f"{prefix} concat", runs, {0: None, 1: None})
+    sort_r = _sort(**member_r)
+    sort_c = _sort(concat_recording_id=concat_key["concat_recording_id"])
+    _populate_sorts([sort_r, sort_c])
+    curation_r = CurationV2.insert_curation(sorting_key=sort_r)
+    curation_c = CurationV2.insert_curation(sorting_key=sort_c)
+    ConcatMemberCurationV2.populate(curation_c, reserve_jobs=False)
+    return member_r, curation_r, curation_c
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "A force_masters cascade deletes a master only through the first of "
+        "its parts it reaches (DataJoint visited_masters): the second branch "
+        "into SpikeSortingOutput deletes only a part row, leaving a merge "
+        "row with no part."
+    ),
+)
+def test_recording_delete_leaves_no_spike_sorting_output_without_its_part(
+    drift_recording,
+):
+    """R is sorted on its own and as a concat member; deleting R reaches
+    ``SpikeSortingOutput`` through its ``CurationV2`` and
+    ``ConcatMemberCurationV2`` parts."""
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.recording import Recording
+
+    member_r, curation_r, curation_c = _curated_sorts_over_r_and_concat(
+        drift_recording["nwb_file_name"], "merge"
+    )
+    v2_parts = (
+        SpikeSortingOutput.CurationV2,
+        SpikeSortingOutput.ConcatMemberCurationV2,
+    )
+    merges = [
+        {"merge_id": merge_id}
+        for part in v2_parts
+        for merge_id in (part & [curation_r, curation_c]).fetch("merge_id")
+    ]
+    # R's curation and the two concat members; a concat curation itself is
+    # registered through its members only.
+    assert len(merges) == 3, merges
+
+    (Recording & member_r).delete(safemode=False)
+
+    partless = [
+        key
+        for key in _remaining(SpikeSortingOutput, merges)
+        if not any(
+            part & key for part in SpikeSortingOutput.parts(as_objects=True)
+        )
+    ]
+    try:
+        assert partless == [], f"partless SpikeSortingOutput: {partless}"
+    finally:
+        _drop_survivors(SpikeSortingOutput, partless)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "A force_masters cascade deletes a master only through the first of "
+        "its parts it reaches (DataJoint visited_masters): the match over "
+        "the concat is reached later through Input and InputRecording, "
+        "which lose their rows while the UnitMatchSelection row stays."
+    ),
+)
+def test_recording_delete_removes_every_match_of_it(drift_recording):
+    """One match pins a curation of R's own sort, another a curation of a
+    concat with R as a member; deleting R reaches ``UnitMatchSelection``
+    through ``Input`` (by both curations) and ``InputRecording``."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatchSelection,
+    )
+
+    member_r, curation_r, curation_c = _curated_sorts_over_r_and_concat(
+        drift_recording["nwb_file_name"], "match"
+    )
+    MatcherParameters.insert_default()
+    matches = [
+        UnitMatchSelection.insert_inputs(
+            [curation],
+            "unitmatch_default",
+            unit_policy="v2_unflagged_single_units",
+        )
+        for curation in (curation_r, curation_c)
+    ]
+
+    (Recording & member_r).delete(safemode=False)
+
+    surviving = _remaining(UnitMatchSelection, matches)
+    try:
+        parts = {
+            str(key["unitmatch_id"]): (
+                len(UnitMatchSelection.Input & key),
+                len(UnitMatchSelection.InputRecording & key),
+            )
+            for key in surviving
+        }
+        assert surviving == [], f"matches outlived R: {parts}"
+    finally:
+        _drop_survivors(UnitMatchSelection, surviving)

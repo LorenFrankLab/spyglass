@@ -507,9 +507,7 @@ def fresh_recording_identity(populated_sorting):
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     rec_row = (RecordingSelection & {"recording_id": rec_id}).fetch1()
 
     team_name = "v2_selection_identity_test_team"
@@ -634,9 +632,7 @@ def test_sorting_selection_artifact_detection_vs_none_distinct(
     sorter get distinct ids, each matching its derived id."""
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
@@ -835,9 +831,7 @@ def test_recording_input_hash_matches_make_fetch(populated_sorting):
     )
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     row = (RecordingSelection & {"recording_id": rec_id}).fetch1()
     stored = row["recording_input_hash"]
     live = resolve_recording_input_hash(
@@ -956,15 +950,40 @@ def test_direct_master_insert_rejected_all_masters(module, cls_name, extra):
     assert len(cls & {pk_field: row[pk_field]}) == 0
 
 
+@pytest.mark.usefixtures("dj_conn")
+@pytest.mark.parametrize(
+    "module, cls_name",
+    [
+        ("spyglass.spikesorting.v2.sorting", "SortingSelection"),
+        ("spyglass.spikesorting.v2.motion", "MotionEstimateSelection"),
+    ],
+)
+@pytest.mark.parametrize("n_sources", [0, 2])
+def test_direct_insert_needs_exactly_one_source(module, cls_name, n_sources):
+    """Even with ``allow_direct_insert=True``, a row naming zero or both of
+    ``recording_id`` / ``concat_recording_id`` is refused before any write.
+    """
+    import importlib
+
+    from spyglass.spikesorting.v2.exceptions import SchemaBypassError
+
+    cls = getattr(importlib.import_module(module), cls_name)
+    pk_field = cls.primary_key[0]
+    row = {pk_field: uuid.uuid4()}
+    if n_sources == 2:
+        row.update(recording_id=uuid.uuid4(), concat_recording_id=uuid.uuid4())
+    with pytest.raises(SchemaBypassError, match="exactly one must be set"):
+        cls.insert1(row, allow_direct_insert=True)
+    assert len(cls & {pk_field: row[pk_field]}) == 0
+
+
 @pytest.mark.slow
 @pytest.mark.integration
 def test_sorting_selection_duplicate_pk_race_refetches(populated_sorting):
     """SortingSelection duplicate-PK race loser refetches the winner's row."""
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
@@ -992,18 +1011,16 @@ def test_sorting_selection_duplicate_pk_race_refetches(populated_sorting):
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_sorting_selection_orphan_master_raises_schema_bypass(
+def test_sorting_selection_mismatched_row_raises_schema_bypass(
     populated_sorting,
 ):
-    """A deterministic SortingSelection master with NO recording source
-    part (a raw-insert orphan) surfaces a SchemaBypassError on the
+    """A row with the deterministic ``sorting_id`` that stores another
+    artifact detection (a raw insert) surfaces a SchemaBypassError on the
     duplicate-PK refetch."""
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     sorter, sorter_params_name = (SortingSelection & populated_sorting).fetch1(
         "sorter", "sorter_params_name"
     )
@@ -1018,16 +1035,22 @@ def test_sorting_selection_orphan_master_raises_schema_bypass(
             "artifact_detection_id": None,
         },
     )
+    other_merge_id = (SortingSelection & populated_sorting).fetch1(
+        "artifact_detection_merge_id"
+    )
+    assert other_merge_id is not None
     SortingSelection.insert1(
         {
             "sorting_id": det_id,
             "sorter": sorter,
             "sorter_params_name": sorter_params_name,
+            "recording_id": rec_id,
+            "artifact_detection_merge_id": other_merge_id,
         },
         allow_direct_insert=True,
     )
     try:
-        with pytest.raises(SchemaBypassError, match="raw-insert orphan"):
+        with pytest.raises(SchemaBypassError, match="does not match this"):
             SortingSelection.insert_selection(
                 {
                     "recording_id": rec_id,
@@ -1055,9 +1078,7 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
     from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
-    rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
-        "recording_id"
-    )
+    rec_id = (SortingSelection & populated_sorting).fetch1("recording_id")
     nwb_file_name = (RecordingSelection & {"recording_id": rec_id}).fetch1(
         "nwb_file_name"
     )

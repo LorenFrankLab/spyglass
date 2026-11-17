@@ -929,6 +929,7 @@
       "overrides": {
         "test_artifact_detection_selection_shared_group_writes_deterministic_pk": "pipeline",
         "test_changed_sort_interval_mints_a_new_recording": "pipeline",
+        "test_direct_insert_needs_exactly_one_source": "db_unit",
         "test_direct_master_insert_rejected_all_masters": "db_unit",
         "test_direct_master_insert_rejected_without_flag": "pipeline",
         "test_factory_master_direct_insert_rejected": "db_unit",
@@ -943,7 +944,7 @@
         "test_recording_selection_writes_deterministic_pk": "pipeline",
         "test_sorting_selection_artifact_detection_vs_none_distinct": "pipeline",
         "test_sorting_selection_duplicate_pk_race_refetches": "pipeline",
-        "test_sorting_selection_orphan_master_raises_schema_bypass": "pipeline",
+        "test_sorting_selection_mismatched_row_raises_schema_bypass": "pipeline",
         "test_update1_rejected_all_masters": "db_unit"
       }
     },
@@ -1289,6 +1290,7 @@
     "tests/spikesorting/v2/test_review_browser.py:review_bundle_template": "stage",
     "tests/spikesorting/v2/test_review_inspection.py:inspection_analyzer_folder": "stage",
     "tests/spikesorting/v2/test_selection_identity.py:fresh_recording_identity": "db_unit",
+    "tests/spikesorting/v2/test_selection_source_cascade.py:_drop_session_groups": "stage",
     "tests/spikesorting/v2/test_session_group_concat.py:same_day_group": "db_unit",
     "tests/spikesorting/v2/test_si_metric_patches.py:sd_ratio_twins": "stage",
     "tests/spikesorting/v2/test_si_metric_patches.py:small_ground_truth": "stage",
