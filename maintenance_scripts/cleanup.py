@@ -45,19 +45,26 @@ def report_v2_orphans():
     """Print count and size of spike sorting v2 folders no row references.
 
     Report only: the audits delete after an interactive confirmation, so an
-    admin runs them with dry_run=False. Skipped when v2 is not installed.
+    admin runs them with dry_run=False. Skipped when v2 cannot be imported or
+    an audit fails, so the report never stops the cleanup.
     """
     try:
         from spyglass.spikesorting.v2.figpack_curation import FigPackCuration
         from spyglass.spikesorting.v2.sorting import Sorting
-    except ImportError as err:
-        print(f"Skipping spike sorting v2 orphan report: {err}")
+
+        reports = {
+            "analyzer": Sorting.find_orphaned_analyzer_folders(dry_run=True),
+            "FigPack bundle": FigPackCuration.find_orphaned_bundles(
+                dry_run=True
+            ),
+        }
+    except Exception as err:  # noqa: BLE001
+        print(
+            "Skipping spike sorting v2 orphan report: "
+            f"{type(err).__name__}: {err}"
+        )
         return
 
-    reports = {
-        "analyzer": Sorting.find_orphaned_analyzer_folders(dry_run=True),
-        "FigPack bundle": FigPackCuration.find_orphaned_bundles(dry_run=True),
-    }
     for name, report in reports.items():
         disk, staging = report["disk_side"], report["staging"]
         size = sum(_folder_bytes(folder) for folder in disk + staging)

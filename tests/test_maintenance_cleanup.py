@@ -87,3 +87,27 @@ def test_v2_orphan_report_is_a_dry_run(cleanup, monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "analyzer folders: 1 unreferenced, 1 staging (1,024 bytes)" in out
     assert "bundle folders: 0 unreferenced, 0 staging (0 bytes)" in out
+
+
+def test_orphan_report_skips_when_an_audit_fails(cleanup, monkeypatch, capsys):
+    """An audit that raises is reported and does not stop the cleanup."""
+
+    class Sorting:
+        @staticmethod
+        def find_orphaned_analyzer_folders(*, dry_run):
+            raise RuntimeError("SpikeInterface 0.99 is installed")
+
+    class FigPackCuration:
+        @staticmethod
+        def find_orphaned_bundles(*, dry_run):
+            return {"disk_side": [], "staging": []}
+
+    for name, table in zip(V2_MODULES, (FigPackCuration, Sorting)):
+        module = types.ModuleType(name)
+        setattr(module, table.__name__, table)
+        monkeypatch.setitem(sys.modules, name, module)
+
+    cleanup.report_v2_orphans()
+
+    out = capsys.readouterr().out
+    assert "Skipping spike sorting v2 orphan report: RuntimeError" in out
