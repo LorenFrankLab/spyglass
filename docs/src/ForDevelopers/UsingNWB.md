@@ -420,3 +420,12 @@ ndx_franklab_novela.AssociatedFiles </b>
 | Spyglass Table  |  Key  |                                     NWBfile Location | Config option |                                                                                 Notes |
 | :-------------- | :---: | ---------------------------------------------------: | ------------: | ------------------------------------------------------------------------------------: |
 | StateScriptFile | epoch | nwbf.processing.associated_files.[index].task_epochs |               | type(nwbf.processing.associated_files.[index]) == ndx_franklab_novela.AssociatedFiles |
+
+<b> NWBfile Location: nwbf.external_resources <br/> Object type:
+hdmf.common.resources.HERD </b>
+
+| Spyglass Table              |       Key       |                           NWBfile Location | Config option |                    Notes |
+| :-------------------------- | :-------------: | -----------------------------------------: | ------------: | -----------------------: |
+| ExternalResources           | herd_object_id  |          nwbf.external_resources.object_id |               |       one entry per file |
+| ExternalResources.Reference | reference_index | nwbf.external_resources.to_dataframe() row |               | object, path, field, key |
+| OntologyTerm                |    entity_id    |     nwbf.external_resources entities table |               |      shared across files |
