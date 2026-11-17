@@ -7,11 +7,11 @@ ______________________________________________________________________
 ## Quick Start
 
 ```bash
-# Run all tests
-pytest
+# Run every test outside spike sorting (default environment)
+pytest --lane core
 
 # Run fast tests only
-pytest -m "not slow and not very_slow"
+pytest --lane core -m "not slow and not very_slow"
 
 # Run specific test file
 pytest tests/position/v1/test_trodes.py
@@ -24,13 +24,17 @@ pytest --cov=spyglass --cov-report term-missing
 pytest --no-teardown -v
 ```
 
+No single environment runs every test: spike sorting v0/v1 need SpikeInterface
+0.99 and v2 needs 0.104 with its extras. Pick the tests with `--lane`; see
+[the lane table](#github-actions-workflow).
+
 ### Spike sorting v2
 
 Use the isolated helper tier for a dependable database-free development run:
 
 ```bash
 pytest tests/spikesorting/v2 --v2-tier unit --no-cov \
-  -m "not slow and not very_slow and not regenerate"
+  -m "not slow and not very_slow"
 ```
 
 This command starts no Docker server, fetches no datasets, and rejects

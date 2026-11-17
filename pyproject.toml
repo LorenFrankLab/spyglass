@@ -244,8 +244,6 @@ addopts = [
   "--cov=spyglass",
   "--cov-report=term-missing",
   "--no-cov-on-fail",
-  # regenerate tests overwrite committed baselines; opt in with -m regenerate
-  "-m", "not regenerate",
 ]
 testpaths = [ "tests" ]
 log_level = "INFO"
@@ -281,7 +279,6 @@ markers = [
 
   # Special markers
   "serial: Tests that must run serially (not parallel-safe)",
-  "regenerate: Tests that regenerate large on-disk fixtures (manual run only)",
   "acceptance: End-to-end acceptance probes; run only with --run-acceptance",
   "smoke: End-to-end v2 path check that also runs on every pull request",
 
