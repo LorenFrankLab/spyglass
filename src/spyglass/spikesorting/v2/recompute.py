@@ -444,9 +444,6 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     content_hash: char(64)      # stored Recording.content_hash (provenance)
     """
 
-    # Tri-part keeps the NWB read outside the populate transaction.
-    _parallel_make = True
-
     def make_fetch(self, key) -> RecordingVersionsFetched:
         """Read the artifact's file name + stored content_hash (no file I/O)."""
         analysis_file_name, content_hash = (Recording & key).fetch1(
@@ -678,7 +675,8 @@ class RecordingArtifactRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         """
         return {"recording_id": key["recording_id"]}
 
-    # Tri-part keeps the slow regeneration outside the populate transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:
@@ -951,9 +949,6 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         )
         return all_pairs & [is_display, is_metric]
 
-    # Tri-part keeps the analyzer load and hashing outside the transaction.
-    _parallel_make = True
-
     def make_fetch(self, key) -> AnalyzerVersionsFetched:
         """Read the unit count and resolve the analyzer folder.
 
@@ -1182,7 +1177,8 @@ class SortingAnalyzerRecompute(_RecomputeMixin, SpyglassMixin, dj.Computed):
         """
         return {"sorting_id": key["sorting_id"]}
 
-    # Tri-part keeps the slow regeneration outside the populate transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> RecomputeFetched:

@@ -359,10 +359,6 @@ class ConcatMemberCurationV2(
             & {"member_index": member_index}
         ).fetch1()
 
-    # Tri-part make keeps NWB reads and the write outside the populate
-    # transaction.
-    _parallel_make = True
-
     def make_fetch(self, key) -> ConcatMemberFetched:
         """Resolve the frozen members, boundaries, files and curation state.
 

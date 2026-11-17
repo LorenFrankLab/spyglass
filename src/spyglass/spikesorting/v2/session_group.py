@@ -571,7 +571,8 @@ class ConcatenatedRecording(
             member_indices.append(int(plan["member_index"]))
         return recordings, member_sample_counts, member_indices
 
-    # Tri-part make keeps the concat and NWB write outside the transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> ConcatRecordingFetched:

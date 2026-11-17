@@ -881,7 +881,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         n_spikes: int     # spikes of the unit whose sort frame lies in this recording's frame span
         """
 
-    # Tri-part make: heavy work runs outside the DB transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> UnitMatchFetched:

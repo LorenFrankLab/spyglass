@@ -321,6 +321,22 @@ storage service. Do not allocate random output files in `make_fetch`: DataJoint
 calls fetch again to verify its deterministic snapshot. Registration belongs in
 `make_insert`, and failed attempts must remove only their own staged outputs.
 
+Two deliberate exceptions to the rules in
+[Populate](../Features/Populate.md):
+
+- `make_fetch` can write. When a stored trace file is missing, the first
+    `make_fetch` of any table that reads it rebuilds the file (see
+    [Rebuilds](#rebuilds)) and refreshes two bookkeeping rows, and
+    `FigPackCuration.make_fetch` can rebuild a display analyzer and its
+    inventory rows. The rebuild needs database reads, so it cannot move to
+    `make_compute`. It is safe because the rebuilt file has the stored
+    `content_hash`: the second, in-transaction `make_fetch` finds the file and
+    returns the same snapshot.
+- `_parallel_make = True` is set on every tri-part table whose compute runs
+    SpikeInterface processing, so `populate(processes>1)` keeps working when a
+    stage starts worker processes. The tables that only read or write files
+    leave it off; `test_integrity.py` lists them.
+
 `_storage.nwb` owns trace readers, streaming writes and geometry persistence;
 preprocessing lives in `_recording.preprocessing`. `_storage.rebuilds` owns
 artifact verification, rebuilding, atomic publication and checksum

@@ -970,8 +970,9 @@ class FigPackCuration(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     spikeinterface_version: varchar(32)
     """
 
-    # Tri-part make keeps analyzer work and upload outside the transaction.
     # The analyzer self-heal runs in the first, untransacted make_fetch call.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> FigPackCurationFetched:

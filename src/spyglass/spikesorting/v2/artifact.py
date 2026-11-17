@@ -632,7 +632,8 @@ class _ArtifactDetectionMixin:
     :meth:`get_artifact_removed_intervals` returns a bare array.
     """
 
-    # Tri-part make: the long detection scan runs outside the transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
     _single_source: bool = True
 

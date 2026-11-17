@@ -28,6 +28,17 @@ _MONOLITHIC_MAKE_EXCLUSIONS = {
     "spyglass.spikesorting.v2.unit_matching.TrackedUnit",
 }
 
+#: Tri-part tables whose compute never runs SpikeInterface chunk processing,
+#: so it starts no worker process and ``_parallel_make`` stays off.
+_NO_WORKER_PROCESS_TABLES = {
+    # Reads the pynwb namespace versions stored in one NWB file.
+    "spyglass.spikesorting.v2.recompute.RecordingArtifactVersions",
+    # Loads an analyzer folder and hashes its extension arrays.
+    "spyglass.spikesorting.v2.recompute.SortingAnalyzerVersions",
+    # Splits curated spike trains by member and writes one Units NWB.
+    "spyglass.spikesorting.v2.concat_member_curation.ConcatMemberCurationV2",
+}
+
 
 def _autopopulate_tables_in(package) -> dict[str, type]:
     """Return the ``AutoPopulate`` tables declared under ``package``.
@@ -77,11 +88,18 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
     - DataJoint uses tri-part only when ``make`` is a generator function; a
       regular ``make`` override runs monolithic.
     - ``_parallel_make`` is required so ``populate(processes>1)`` uses the
-      non-daemon pool that SI ``n_jobs>1`` needs.
+      non-daemon pool that SI ``n_jobs>1`` needs. Only the
+      :data:`_NO_WORKER_PROCESS_TABLES` leave it off.
     - Each :data:`_MONOLITHIC_MAKE_EXCLUSIONS` entry must exist and be
       monolithic.
     """
     tables = _v2_autopopulate_tables()
+
+    stale_no_worker = sorted(_NO_WORKER_PROCESS_TABLES - set(tables))
+    assert not stale_no_worker, (
+        f"{stale_no_worker} are not v2 AutoPopulate tables; remove them from "
+        "_NO_WORKER_PROCESS_TABLES."
+    )
 
     stale = sorted(_MONOLITHIC_MAKE_EXCLUSIONS - set(tables))
     assert not stale, (
@@ -112,7 +130,8 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
         if (
             missing
             or not inspect.isgeneratorfunction(cls.make)
-            or getattr(cls, "_parallel_make", False) is not True
+            or getattr(cls, "_parallel_make", False)
+            is (name in _NO_WORKER_PROCESS_TABLES)
         ):
             not_tripart.append(
                 f"{name} (generator make="
@@ -121,11 +140,13 @@ def test_tripart_dispatch_active_on_all_v2_computed_tables():
             )
     assert not not_tripart, (
         "v2 AutoPopulate tables not on DataJoint's tri-part dispatch with "
-        "_parallel_make=True: "
+        "the expected _parallel_make: "
         + "; ".join(not_tripart)
         + ". Split make into make_fetch / make_compute / make_insert (keeping "
         "the inherited generator make) or, for a table that does only bounded "
-        "DB bookkeeping, add it to _MONOLITHIC_MAKE_EXCLUSIONS with a reason."
+        "DB bookkeeping, add it to _MONOLITHIC_MAKE_EXCLUSIONS with a reason. "
+        "Set _parallel_make=True unless the table is in "
+        "_NO_WORKER_PROCESS_TABLES."
     )
 
 

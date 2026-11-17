@@ -925,7 +925,8 @@ class Sorting(
         n_spikes: int
         """
 
-    # Tri-part make keeps the long sort outside the populate transaction.
+    # populate(processes>1) needs the non-daemon pool when SpikeInterface
+    # starts worker processes.
     _parallel_make = True
 
     def make_fetch(self, key) -> SortingFetched:
