@@ -36,6 +36,20 @@ def test_public_curation_api_is_reexported():
     assert pipeline.ReviewImportReceipt is ReviewImportReceipt
 
 
+def test_merge_id_lookup_is_a_declared_curation_api_export():
+    """The documented merge-id lookup is in ``curation_api.__all__``."""
+    from spyglass.spikesorting.v2 import curation_api
+    from spyglass.spikesorting.v2._recording.unit_metadata import (
+        get_spike_sorting_v2_merge_ids,
+    )
+
+    assert "get_spike_sorting_v2_merge_ids" in curation_api.__all__
+    assert (
+        curation_api.get_spike_sorting_v2_merge_ids
+        is get_spike_sorting_v2_merge_ids
+    )
+
+
 def _single_session_run_summary():
     return {
         "pipeline_preset": "franklab_probe_hippocampus_30khz_ms4_2026_06",

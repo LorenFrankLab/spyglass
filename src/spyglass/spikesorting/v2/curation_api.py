@@ -1924,5 +1924,6 @@ __all__ = [
     "EvaluationSpec",
     "MergeEvaluateReceipt",
     "RunResult",
+    "get_spike_sorting_v2_merge_ids",
     "save_manual_curation",
 ]

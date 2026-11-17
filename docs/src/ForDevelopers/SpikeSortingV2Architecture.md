@@ -105,7 +105,7 @@ Package root, `spyglass.spikesorting.v2`:
     provenance.
 - `get_spike_sorting_v2_merge_ids`: merge ids of v2 curations matching a
     restriction. Import it from `curation_api`, which re-exports it from
-    `_recording.unit_metadata`; it is not in `curation_api.__all__`.
+    `_recording.unit_metadata`.
 
 `spyglass.spikesorting.v2.review_api` (`FigPackReview` also in `pipeline`; needs
 the `spikesorting-v2-curation` extra):
