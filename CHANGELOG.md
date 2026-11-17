@@ -133,6 +133,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Common
 
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Accept ndx-pose `CalibratedCamera` devices in `CameraDevice`, `TaskEpoch`
+        and `VideoFile`; `DeviceModel` is optional #1721
+    - Ingest a plain core `Device` as a camera when an `ImageSeries` records with
+        it, so `TaskEpoch` resolves its camera ID #1721
+    - Support rate-based external `ImageSeries` in `VideoFile` #1721
 
 - Decoding
 
@@ -154,6 +159,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - `DLCPosVideo` sorts bodyparts, making video color assignment reproducible
         across databases #1679
     - `VideoMaker` raises on a failed partial render #1679
+    - Add `CameraCalibration` and `ImportedMultiCameraPose` for multi-camera 3D
+        pose (ndx-pose >= 0.4.0 `MultiCameraPoseEstimation`, e.g. DANNCE);
+        uncalibrated cameras keep their video link #1724
+    - `ImportedPose` skips the series-less per-camera children of a
+        `MultiCameraPoseEstimation` #1724
 
 - Spike Sorting
 
