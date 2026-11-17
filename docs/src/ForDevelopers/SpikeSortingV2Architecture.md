@@ -21,8 +21,8 @@ How `spyglass.spikesorting.v2` is organized, and why.
     here. Neither are the `*Fetched` / `*Computed` classes, which carry data
     between a table's `make_fetch`, `make_compute`, and `make_insert`.
 - `pipeline` declares a literal `__all__`, which the API reference renders. The
-    package root's literal `__all__` is the subset it re-exports. Root names
-    after the first three load lazily from `pipeline`, so
+    package root's literal `__all__` is the subset it re-exports. Every root
+    name except `CurationLabel` loads lazily from `pipeline`, so
     `import spyglass.spikesorting.v2` stays light.
 - Most work needs only the package root, `pipeline`, and the curation and review
     handles. Use the tables to query results or compose a stage by hand.
@@ -37,9 +37,9 @@ module-level function that repeats an object method.
 Package root, `spyglass.spikesorting.v2`:
 
 - `initialize_v2_defaults`: install every default parameter row, idempotently.
-    Run it first.
+    Run it first. Also in `pipeline`.
 - `verify_v2_default_catalog`: report stored default rows whose content differs
-    from the shipped content.
+    from the shipped content. Also in `pipeline`.
 - `CurationLabel`: the canonical labels (`accept`, `mua`, `noise`, ...).
 
 `spyglass.spikesorting.v2.pipeline`:

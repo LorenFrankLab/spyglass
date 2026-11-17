@@ -115,12 +115,10 @@ def test_package_root_reexports_primary_entrypoints():
 
     v2 = importlib.import_module("spyglass.spikesorting.v2")
     assert _ROOT_REEXPORTS <= set(v2.__all__)
-    lazy = set(v2.__all__) - {
-        "initialize_v2_defaults",
-        "verify_v2_default_catalog",
-        "CurationLabel",
-    }
+    lazy = set(v2.__all__) - {"CurationLabel"}
     assert lazy <= set(pl.__all__)
+    # The API reference renders ``pipeline``; these two must be in it.
+    assert {"initialize_v2_defaults", "verify_v2_default_catalog"} <= lazy
 
     missing = [name for name in _ROOT_REEXPORTS if not hasattr(v2, name)]
     assert not missing, f"package root no longer re-exports: {missing}"

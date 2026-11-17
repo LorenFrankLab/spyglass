@@ -49,6 +49,8 @@ from spyglass.spikesorting.v2._orchestration.reporting import (
     describe_parameter_rows,
     describe_run,
     describe_units,
+    initialize_v2_defaults,
+    verify_v2_default_catalog,
 )
 from spyglass.spikesorting.v2._orchestration.matching import (
     describe_unit_match_choices,
@@ -130,6 +132,8 @@ from spyglass.spikesorting.v2._orchestration.types import (
 
 __all__ = [
     # also lazy names of the package root
+    "initialize_v2_defaults",
+    "verify_v2_default_catalog",
     "run_v2_pipeline",
     "run_v2_concat_pipeline",
     "run_v2_pipeline_session",

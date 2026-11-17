@@ -672,6 +672,71 @@ def verify_v2_default_catalog(*, strict: bool = False) -> list[dict]:
     return stale
 
 
+def initialize_v2_defaults() -> None:
+    """Install the default Lookup rows for every v2 spike-sorting stage.
+
+    Calls ``insert_default()`` on ``PreprocessingParameters``,
+    ``ArtifactDetectionParameters``, ``SorterParameters``,
+    ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
+    ``AutoCurationRules``, ``MatcherParameters``, ``CurationReviewProfile``,
+    and ``MotionCorrectionParameters`` (with the estimation and interpolation
+    recipes it names), saves the shipped presets in ``PipelinePreset``, then
+    adds the v2 unit-selection policies. Idempotent.
+    Warns when a stored default row differs from the shipped content.
+
+    Examples
+    --------
+    >>> from spyglass.spikesorting.v2 import initialize_v2_defaults
+    >>> initialize_v2_defaults()
+    """
+    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
+    from spyglass.spikesorting.v2.metric_curation import (
+        AutoCurationRules,
+        QualityMetricParameters,
+    )
+    from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
+    from spyglass.spikesorting.v2.recording import PreprocessingParameters
+    from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+    )
+    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
+
+    PreprocessingParameters.insert_default()
+    ArtifactDetectionParameters.insert_default()
+    SorterParameters.insert_default()
+    AnalyzerWaveformParameters.insert_default()
+    QualityMetricParameters.insert_default()
+    AutoCurationRules.insert_default()
+    MatcherParameters.insert_default()
+    CurationReviewProfile.insert_default()
+    MotionCorrectionParameters.insert_default()
+    PipelinePreset.insert_default()
+    # Additive rows in the shared UnitSelectionParams table.
+    from spyglass.spikesorting.v2.analysis_selection import (
+        ensure_v2_unit_selection_policies,
+    )
+
+    ensure_v2_unit_selection_policies()
+
+    # insert_default skips existing keys, so a diverged stored default is
+    # never reseeded; warn about it here.
+    from spyglass.utils import logger
+
+    stale = verify_v2_default_catalog(strict=False)
+    if stale:
+        logger.warning(
+            "initialize_v2_defaults: %d stored default row(s) diverge from the "
+            "shipped content and were NOT reseeded (insert_default skips "
+            "existing keys): %s. Drop the stale row(s) and re-run, or call "
+            "verify_v2_default_catalog(strict=True) to inspect.",
+            len(stale),
+            stale,
+        )
+
+
 def audit_recording_input_hashes(restriction=None) -> list[dict]:
     """List recording selections whose stored input hash no longer matches.
 
