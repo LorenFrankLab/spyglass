@@ -441,7 +441,8 @@ channels:
         its `manual_exclusions_overlap_sorted_time` check (a run raises
         `PreflightError`), and with `preflight=False` the artifact stage raises
         `IneffectiveManualExclusionError`, naming the interval and the sorted time
-        range.
+        range. A malformed interval raises `PipelineInputError` naming the entry
+        point.
     - They are stored on the artifact selection and part of its identity: changing
         them creates a new artifact result and sort.
     - A preset with automatic detection off still applies them. `min_length_s`
@@ -756,6 +757,10 @@ and custom-rule details.
     voltage/spike-train metrics (`snr`, `amplitude_cutoff`, `firing_rate`,
     `isi_violation`, ...) use the unwhitened display analyzer. The metric recipe
     is `CurationEvaluationSelection.metric_waveform_params_name`.
+- Template metrics and quality metrics are computed at the sort's `peak_sign`.
+    For `template_metrics` this differs from SpikeInterface's default
+    (`"both"`), so a stored one at other params is recomputed once, with a
+    warning.
 - `metric_names` is validated against the installed SpikeInterface. SI 0.104 has
     no `nn_isolation` / `nn_noise_overlap` metric names. Request `nn_advanced`
     (with `skip_pc_metrics=False`) and threshold its `nn_noise_overlap` column.
@@ -1015,14 +1020,17 @@ saved estimate rather than trusting a sort's improvement. No real lab recording
 with drift has been tested.
 
 `motion_mode` on `run_v2_pipeline`, `run_v2_pipeline_session`,
-`run_v2_concat_pipeline`, `preflight_v2_pipeline` and
-`preflight_v2_pipeline_session`:
+`run_v2_concat_pipeline`, `preflight_v2_pipeline`,
+`preflight_v2_concat_pipeline` and `preflight_v2_pipeline_session`:
 
 - `"off"` (default): no motion stage.
 - `"estimate"`: saves a `MotionEstimate` under the source's mask but sorts the
     uncorrected traces (same `sorting_id` as `"off"`).
 - `"apply"`: also saves a `MotionCorrectedRecording` and sorts it (a new
     `sorting_id`).
+
+With `preflight=False`, a missing motion recipe raises `PipelineInputError`
+naming the entry point.
 
 Section 10 of the [first-sort notebook](../notebooks/10_Spike_SortingV2.ipynb)
 is an optional, off-by-default example: estimate, inspect, then apply that exact
@@ -1092,15 +1100,26 @@ The production recipes also change these defaults from v1's shipped rows:
 - **Preflight fails.** `report.errors` lists the blocking fixes; `report.checks`
     is the full list (`check.name`, `check.ok`, `check.fix`). Preflight and
     `describe_run` also show reference, preprocessing, artifact, and motion
-    settings next to the effective sorter configuration.
+    settings next to the effective sorter configuration, and whether the contact
+    geometry is registered or the `tetrode_12.5` square assumed from
+    `probe_type`. Check a concat run with `preflight_v2_concat_pipeline`, which
+    takes the `SessionGroup` key and the run's options; each member's problems
+    start with `concat member {i}: `. A run whose preflight blocks raises
+    `PreflightError` listing every problem; a passing preflight logs one line
+    with its plan.
 - **A stage fails.** `PipelineStageError`
-    (`spyglass.spikesorting.v2.exceptions`) names the stage (`err.stage`) and
-    carries `err.partial_run_summary`. Fix the cause and rerun with the same
-    inputs; completed stages are reused. A failed sorter restarts its stage, not
-    an internal checkpoint. The same holds for a whole-session batch.
+    (`spyglass.spikesorting.v2.exceptions`) names the entry point, its target
+    (session and sort group, or session group), the stage (`err.stage`) and the
+    stages that finished, and carries `err.partial_run_summary`. Fix the cause
+    and re-run the same call; completed stages are reused. Each stage logs its
+    start and time at INFO, and the run ends with a `done in N s` line. A failed
+    sorter restarts its stage, not an internal checkpoint. The same holds for a
+    whole-session batch.
 - **The sorter is missing.** Preflight checks
     `spikeinterface.sorters.installed_sorters()` and says whether to install a
-    runtime or pick another preset.
+    runtime or pick another preset. For a missing sorter row,
+    `SorterParameters.missing_row_fix(sorter, sorter_params_name)` says why and
+    what creates it.
 - **The sort group looks wrong.** Re-run `describe_sort_groups(nwb_file_name)`.
     Recreate groups only after `SortGroupV2.preview_existing_entries`.
 - **A helper raises on a name.** Inspection helpers such as
@@ -1108,8 +1127,11 @@ The production recipes also change these defaults from v1's shipped rows:
     on an id or name they cannot find instead of skipping it; the message lists
     the valid ones.
 - **Zero units.** A zero-unit sort writes an empty but real curation and
-    `merge_id`, valid for a quiet shank. `require_units=True` makes it an error.
-- **Unexpectedly few units.** Check `run_summary["warnings"]`, the preset's
+    `merge_id`, valid for a quiet shank. `require_units=True` makes it an error
+    (`ZeroUnitSortError`, naming the entry point and target).
+- **Unexpectedly few units.** Check `run_summary["warnings"]` (also filled on a
+    reused run: a sort interval clipped to the raw data, a skipped phase shift,
+    channels a motion correction removed or extrapolated), the preset's
     threshold units in `describe_pipeline_presets()`, and whether artifact
     masking removed the interval you meant to sort.
 - **A script hangs.** Add the `__main__` guard (see
