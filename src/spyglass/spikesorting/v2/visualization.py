@@ -163,6 +163,11 @@ def recording_key_for_sorting(sorting_key) -> dict:
     recording-level plots show the uncorrected source. The corrected traces
     are in the sort's analyzers and ``CurationV2.get_recording``.
 
+    Parameters
+    ----------
+    sorting_key : dict
+        Restriction selecting one ``SortingSelection`` row.
+
     Raises
     ------
     ValueError
@@ -212,6 +217,15 @@ def plot_recording_traces(recording_key, *, backend="matplotlib", **kwargs):
     Reads ``Recording.get_recording``, never a motion-corrected recording (see
     :func:`recording_key_for_sorting`). SI ``TracesWidget`` kwargs pass
     through.
+
+    Parameters
+    ----------
+    recording_key : dict
+        A ``Recording`` key (see :func:`recording_key_for_sorting`).
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_traces``.
     """
     from spyglass.spikesorting.v2.recording import Recording
 
@@ -222,7 +236,17 @@ def plot_recording_traces(recording_key, *, backend="matplotlib", **kwargs):
 
 
 def plot_recording_probe_map(recording_key, *, backend="matplotlib", **kwargs):
-    """Plot the saved preprocessed recording's probe map (SI ``plot_probe_map``)."""
+    """Plot the saved preprocessed recording's probe map (SI ``plot_probe_map``).
+
+    Parameters
+    ----------
+    recording_key : dict
+        A ``Recording`` key (see :func:`recording_key_for_sorting`).
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_probe_map``.
+    """
     from spyglass.spikesorting.v2.recording import Recording
 
     import spikeinterface.widgets as sw
@@ -246,6 +270,18 @@ def plot_sorting_summary(
     ``backend`` has no default because SI 0.104.3's ``SortingSummaryWidget``
     has no matplotlib backend; pass ``spikeinterface_gui``, ``sortingview``,
     or ``figpack``.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : {"spikeinterface_gui", "sortingview", "figpack"}
+        Required; ``None`` raises.
+    **kwargs
+        Passed to SpikeInterface ``plot_sorting_summary``.
     """
     supported = ("spikeinterface_gui", "sortingview", "figpack")
     if backend is None:
@@ -280,6 +316,20 @@ def plot_unit_summary(
 
     ``unit_id`` is a unit of ``curation``. Needs the display ``unit_locations``
     extension; raises if absent unless ``compute_missing=True``.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    unit_id : int
+        A unit of ``curation``.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_unit_summary``.
     """
     import spikeinterface.widgets as sw
 
@@ -297,6 +347,17 @@ def plot_waveforms(curation, unit_ids=None, *, backend="matplotlib", **kwargs):
 
     Uses the curation's display analyzer, whose ``waveforms`` and
     ``templates`` extensions are always present.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    unit_ids : list of int, optional
+        Units to plot. Default ``None``: every unit.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_unit_waveforms``.
     """
     import spikeinterface.widgets as sw
 
@@ -318,6 +379,18 @@ def plot_spikes_on_traces(
 
     Needs the display ``unit_locations`` extension; raises if absent unless
     ``compute_missing=True``.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_spikes_on_traces``.
     """
     import spikeinterface.widgets as sw
 
@@ -337,6 +410,18 @@ def plot_unit_locations(
 
     Needs the display ``unit_locations`` extension; raises if absent unless
     ``compute_missing=True``. Locations come from unwhitened templates.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_unit_locations``.
     """
     import spikeinterface.widgets as sw
 
@@ -359,6 +444,15 @@ def plot_metrics(curation_evaluation_key, *, backend="matplotlib", **kwargs):
     analyzer-extension view use ``plot_si_quality_metrics``. Only the
     ``matplotlib`` backend is accepted; ``columns`` (in ``kwargs``) limits the
     metrics shown.
+
+    Parameters
+    ----------
+    curation_evaluation_key : dict
+        Restriction selecting one ``CurationEvaluation`` row.
+    backend : str, optional
+        Only ``"matplotlib"`` (default) is accepted.
+    **kwargs
+        Passed to the metric figure, e.g. ``columns``.
     """
     if backend != "matplotlib":
         raise ValueError(
@@ -385,6 +479,18 @@ def plot_si_quality_metrics(
     Spyglass metric table (see ``plot_metrics``). Raises if absent unless
     ``compute_missing=True``. PC/NN metrics differ from ``plot_metrics``
     because Spyglass computes them on the whitened metric analyzer.
+
+    Parameters
+    ----------
+    curation_evaluation_key : dict
+        Restriction selecting one ``CurationEvaluation`` row.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_quality_metrics``.
     """
     import spikeinterface.widgets as sw
 
@@ -411,6 +517,18 @@ def plot_si_template_metrics(
     Spyglass metric table (see ``plot_metrics``). Raises if absent unless
     ``compute_missing=True``. Shows every SI template-metric column, while
     ``plot_metrics`` shows only the columns Spyglass persists.
+
+    Parameters
+    ----------
+    curation_evaluation_key : dict
+        Restriction selecting one ``CurationEvaluation`` row.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"matplotlib"``.
+    **kwargs
+        Passed to SpikeInterface ``plot_template_metrics``.
     """
     import spikeinterface.widgets as sw
 
@@ -441,6 +559,18 @@ def plot_suggested_merges(
 
     Defaults to ``ipywidgets``, the only backend SI 0.104.3's
     ``PotentialMergesWidget`` supports.
+
+    Parameters
+    ----------
+    curation_evaluation_key : dict
+        Restriction selecting one ``CurationEvaluation`` row.
+    backend : str, optional
+        SpikeInterface widget backend. Default ``"ipywidgets"``.
+    compute_missing : bool, optional
+        Compute the missing display extensions once instead of raising.
+        Default ``False``.
+    **kwargs
+        Passed to SpikeInterface ``plot_potential_merges``.
     """
     from spyglass.spikesorting.v2.metric_curation import CurationEvaluation
 
@@ -488,6 +618,18 @@ def export_si_report(
     already has ``quality_metrics``; those are SI metrics, not
     ``CurationEvaluation.get_metrics()``. Writes ``spyglass_provenance.json``
     beside the report.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    output_folder : str or pathlib.Path
+        Folder to write.
+    compute_missing : bool, optional
+        First compute ``spike_amplitudes``, ``correlograms`` and
+        ``unit_locations``. Default ``False``.
+    **kwargs
+        Passed to SpikeInterface ``export_report``.
     """
     import spikeinterface.exporters as sie
 
@@ -532,6 +674,15 @@ def export_to_phy(curation, output_folder, **kwargs):
       whitened metric analyzer, not the display copy.
     - ``add_quality_metrics`` / ``add_template_metrics``: these are SI
       display-analyzer metrics, not ``CurationEvaluation.get_metrics()``.
+
+    Parameters
+    ----------
+    curation : CurationRef or dict
+        The curation, or its ``{sorting_id, curation_id}`` key.
+    output_folder : str or pathlib.Path
+        Folder to write.
+    **kwargs
+        Passed to SpikeInterface ``export_to_phy``.
     """
     import spikeinterface.exporters as sie
 
