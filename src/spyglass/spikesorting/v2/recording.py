@@ -1428,9 +1428,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         Raises
         ------
         ValueError
-            If the recording has no ``ValidInterval`` row (a database
-            populated before it existed: run the backfill in the release
-            notes).
+            If the recording has no ``ValidInterval`` row, which only a
+            direct delete of that part row leaves behind.
         """
         recording_key = (self & key).fetch1("KEY")
         part = (self.ValidInterval & recording_key).fetch(
@@ -1438,9 +1437,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
         if not part:
             raise ValueError(
-                f"Recording {recording_key} has no ValidInterval row. Run the "
-                "Recording.ValidInterval backfill in the spike sorting v2 "
-                "release notes (CHANGELOG.md)."
+                f"Recording {recording_key} has no ValidInterval row, so its "
+                "kept times are not stored. Delete this Recording and populate "
+                "it again."
             )
         return (IntervalList & part[0]).fetch_interval()
 

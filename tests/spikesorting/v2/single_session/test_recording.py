@@ -2511,11 +2511,11 @@ def test_recording_delete_removes_valid_interval_unless_used(
         _drop_two_segment_recording(polymer_smoke_session, pk, interval_name)
 
 
-def test_recording_without_valid_interval_names_the_backfill(
+def test_recording_without_valid_interval_says_to_populate_again(
     populated_recording,
 ):
     """A recording populated before ``ValidInterval`` existed has no row; the
-    accessor and the manual-exclusion check name the backfill instead of
+    accessor and the manual-exclusion check say to populate again instead of
     recomputing the times."""
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
@@ -2529,9 +2529,9 @@ def test_recording_without_valid_interval_names_the_backfill(
     ArtifactDetectionParameters.insert_default()
     (Recording.ValidInterval & pk).delete_quick()
     try:
-        with pytest.raises(ValueError, match="backfill"):
+        with pytest.raises(ValueError, match="populate it again"):
             Recording().get_valid_interval(pk)
-        with pytest.raises(ValueError, match="backfill"):
+        with pytest.raises(ValueError, match="populate it again"):
             RecordingArtifactSelection.insert_selection(
                 {
                     **pk,

@@ -171,14 +171,11 @@ permissions and path handling are in the
 
 ### Databases that already hold v2 tables
 
-If your database declared the v2 tables before this release, an admin runs the
-v2 schema changes in the [CHANGELOG](../CHANGELOG.md) release notes: the
-`compared` column on `UnitMatch.MatchableUnit`, the `MemberSnapshot` foreign key
-to `Recording`, the renamed shared artifact tables, the recording recompute
-tables renamed to the v1 names, and the foreign keys from
-`UnitMatchSelection.InputRecording` to `Recording` and from
-`UnitMatch.MatchableUnit` to `CurationV2.Unit`. Existing `MatchableUnit` rows
-get `compared = 1`, including units the matcher never saw.
+A database that declared the v2 tables from a branch before this release has no
+migration: table shapes and some ids changed. An admin drops the
+`spikesorting_v2_*` schemas and the `SpikeSortingOutput` parts `CurationV2` and
+`ConcatMemberCurationV2` (with their master rows), then declares them again as
+the [CHANGELOG](../CHANGELOG.md) release notes show.
 
 - A `recording_id` also depends on the saved time cut (the sort interval
     intersected with the raw data's valid times, after `min_segment_length`).
@@ -491,8 +488,7 @@ freezes the checked groups as `sort_group_ids=`, and describes
     ```
 
     These are the requested times; the stored samples can sit up to one sample
-    inside each edge. A database populated before this row existed needs the
-    backfill in the release notes.
+    inside each edge.
 
 - **Artifact `IntervalList` names are `artifact_detection_{uuid}`** (v1: a bare
     UUID). Use the helpers rather than string parsing:
