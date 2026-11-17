@@ -1085,6 +1085,10 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
 - A completed `matched=0` comparison lists differing objects in the `Name`
     (missing from old/new) and `Hash` (differing) parts. Skipped or failed
     attempts put the reason in `err_msg`.
+- `SortingAnalyzerVersions.status` says whether a folder was hashed: `ok`,
+    `zero_units` (no analyzer can exist) or `missing_folder` (absent or
+    unloadable, inventoried without a rebuild). `analyzer_hash` is NULL unless
+    `status` is `ok`.
 - A rebuild retires the prior `SortingAnalyzerVersions` generation and its
     verdicts with `delete_quick`
     (`recompute.invalidate_sorting_analyzer_inventory`), so a read path needs no

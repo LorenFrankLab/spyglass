@@ -722,7 +722,11 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     )
 
     SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
-    assert (SortingAnalyzerVersions & populated_sorting).fetch1("analyzer_hash")
+    status, analyzer_hash = (
+        SortingAnalyzerVersions & populated_sorting
+    ).fetch1("status", "analyzer_hash")
+    assert status == "ok"
+    assert analyzer_hash
     SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
     SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
@@ -852,6 +856,7 @@ def test_analyzer_manifest_records_noise_levels_seed(
     # noise_levels is in the recompute content set.
     assert "noise_levels" in manifest["extension_content_hashes"]
     # analyzer_hash combines the extension content hashes only.
+    assert row["status"] == "ok"
     assert row["analyzer_hash"] == combined_hash(
         manifest["extension_content_hashes"]
     )
@@ -893,7 +898,10 @@ def test_sorting_analyzer_versions_fetch_pins_folder_and_compute_needs_no_db(
 
     SortingAnalyzerVersions.populate(key, reserve_jobs=False)
     row = (SortingAnalyzerVersions & key).fetch1()
-    assert computed.analyzer_hash == row["analyzer_hash"]
+    assert (computed.status, computed.analyzer_hash) == (
+        row["status"],
+        row["analyzer_hash"],
+    )
     assert (
         computed.analyzer_manifest["extension_content_hashes"]
         == row["analyzer_manifest"]["extension_content_hashes"]
@@ -904,13 +912,10 @@ def test_sorting_analyzer_versions_fetch_pins_folder_and_compute_needs_no_db(
 def test_sorting_analyzer_versions_compute_zero_unit_and_missing(
     tmp_path, monkeypatch
 ):
-    """A zero-unit sort inventories the zero-unit hash and an absent folder
-    the missing hash, from the fetched inputs alone and with no DB access."""
-    from spyglass.spikesorting.v2.recompute import (
-        _MISSING_HASH,
-        _ZERO_HASH,
-        SortingAnalyzerVersions,
-    )
+    """A zero-unit sort inventories status ``zero_units`` and an absent folder
+    ``missing_folder``, both with no hash, from the fetched inputs alone and
+    with no DB access."""
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
     from tests.spikesorting.v2._tripart_helpers import forbid_db_queries
 
     key = {"sorting_id": "no-such-sort", "waveform_params_name": "recipe"}
@@ -919,10 +924,45 @@ def test_sorting_analyzer_versions_compute_zero_unit_and_missing(
     with forbid_db_queries(monkeypatch, "SortingAnalyzerVersions"):
         zero = table.make_compute(key, 0, absent)
         missing = table.make_compute(key, 3, absent)
-    assert (zero.analyzer_hash, zero.analyzer_manifest) == (_ZERO_HASH, {})
-    assert (missing.analyzer_hash, missing.analyzer_manifest) == (
-        _MISSING_HASH,
+    assert (zero.status, zero.analyzer_hash, zero.analyzer_manifest) == (
+        "zero_units",
+        None,
         {},
+    )
+    assert (
+        missing.status,
+        missing.analyzer_hash,
+        missing.analyzer_manifest,
+    ) == ("missing_folder", None, {})
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_sorting_analyzer_versions_hash_is_pinned(monkeypatch):
+    """A loaded analyzer's ``analyzer_hash`` keeps its stored value for the
+    same extension content hashes (pinned on the base commit)."""
+    from spyglass.spikesorting.v2 import recompute
+    from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
+
+    content = {
+        "noise_levels": "a" * 64,
+        "random_spikes": "b" * 64,
+        "templates": "c" * 64,
+    }
+    monkeypatch.setattr(
+        analyzer_mod, "load_analyzer_folder_no_rebuild", lambda *a, **k: None
+    )
+    monkeypatch.setattr(recompute, "hash_extension_data", lambda _a: content)
+    monkeypatch.setattr(recompute, "analyzer_seed_modes", lambda _a: {})
+    monkeypatch.setattr(
+        recompute, "analyzer_folder_storage_fingerprint", lambda _f: "f" * 64
+    )
+    key = {"sorting_id": "s", "waveform_params_name": "recipe"}
+    computed = recompute.SortingAnalyzerVersions().make_compute(
+        key, 3, "/unused.analyzer"
+    )
+    assert computed.status == "ok"
+    assert computed.analyzer_hash == (
+        "2e07ed1f6fc88ccead7e4bd54f08283cb47db08de9b24a6d5d6f6de1c8df995c"
     )
 
 
@@ -977,10 +1017,7 @@ def test_sorting_analyzer_versions_records_missing_without_rebuild(
     zero-unit sort)."""
     import shutil
 
-    from spyglass.spikesorting.v2.recompute import (
-        _MISSING_HASH,
-        SortingAnalyzerVersions,
-    )
+    from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
 
     sort_key, recipe, folder = display_analyzer_folder
     shutil.rmtree(folder)
@@ -988,7 +1025,8 @@ def test_sorting_analyzer_versions_records_missing_without_rebuild(
     row = (
         SortingAnalyzerVersions & sort_key & {"waveform_params_name": recipe}
     ).fetch1()
-    assert row["analyzer_hash"] == _MISSING_HASH
+    assert row["status"] == "missing_folder"
+    assert row["analyzer_hash"] is None
     assert not row["analyzer_manifest"]  # {} / None: no hashed content
     assert not folder.exists()  # the inventory did NOT rebuild
 

@@ -81,11 +81,6 @@ from spyglass.spikesorting.v2.sorting import SortingSelection
 
 schema = dj.schema("spikesorting_v2_recompute")
 
-_ZERO_HASH = "0" * 64
-# "Analyzer folder absent"; _ZERO_HASH is a zero-unit sort. Non-hex, so it
-# cannot collide with a sha256.
-_MISSING_HASH = "MISSING_ANALYZER_FOLDER".ljust(64, "0")
-
 
 def _current_env_id() -> Optional[str]:
     """Return the current ``UserEnvironment`` env_id (inserting if needed)."""
@@ -279,7 +274,8 @@ class AnalyzerVersionsComputed(NamedTuple):
 
     si_deps: dict
     analyzer_manifest: dict
-    analyzer_hash: str
+    status: str
+    analyzer_hash: Optional[str]
 
 
 def _recompute_compute(
@@ -927,7 +923,8 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     ---
     si_deps=null: blob          # spikeinterface version, etc.
     analyzer_manifest=null: blob # extension_content_hashes + base_extension_seed_modes
-    analyzer_hash: char(64)
+    status: enum('ok', 'zero_units', 'missing_folder') # missing_folder: absent or unloadable
+    analyzer_hash=null: char(64) # combined extension content hash; NULL unless status='ok'
     """
 
     @property
@@ -972,8 +969,9 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     ) -> AnalyzerVersionsComputed:
         """Load the analyzer and hash its extensions, without DB access.
 
-        An absent or unloadable folder is inventoried as ``_MISSING_HASH``,
-        not rebuilt, so reclaimed disk is not re-materialized.
+        An absent or unloadable folder is inventoried with status
+        ``missing_folder``, not rebuilt, so reclaimed disk is not
+        re-materialized. A sort with no units has status ``zero_units``.
         """
         from spyglass.spikesorting.v2._sorting.analyzer import (
             load_analyzer_folder_no_rebuild,
@@ -983,7 +981,10 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
         if n_units == 0:
             # SI cannot build an analyzer over zero units.
             return AnalyzerVersionsComputed(
-                si_deps=si_deps, analyzer_manifest={}, analyzer_hash=_ZERO_HASH
+                si_deps=si_deps,
+                analyzer_manifest={},
+                status="zero_units",
+                analyzer_hash=None,
             )
         try:
             analyzer = load_analyzer_folder_no_rebuild(
@@ -1012,23 +1013,26 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
             return AnalyzerVersionsComputed(
                 si_deps=si_deps,
                 analyzer_manifest={},
-                analyzer_hash=_MISSING_HASH,
+                status="missing_folder",
+                analyzer_hash=None,
             )
         return AnalyzerVersionsComputed(
             si_deps=si_deps,
             analyzer_manifest=manifest,
-            analyzer_hash=(
-                combined_hash(content_hashes) if content_hashes else _ZERO_HASH
-            ),
+            status="ok",
+            analyzer_hash=combined_hash(content_hashes),
         )
 
-    def make_insert(self, key, si_deps, analyzer_manifest, analyzer_hash):
+    def make_insert(
+        self, key, si_deps, analyzer_manifest, status, analyzer_hash
+    ):
         """Insert the analyzer inventory row."""
         self.insert1(
             {
                 **key,
                 "si_deps": si_deps,
                 "analyzer_manifest": analyzer_manifest,
+                "status": status,
                 "analyzer_hash": analyzer_hash,
             }
         )

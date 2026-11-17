@@ -822,7 +822,8 @@
         "test_reclaimed_analyzer_folder_is_not_a_changed_generation": "unit",
         "test_recompute_attempt_all_rejects_negative_rounding": "db_unit",
         "test_recording_missing_probe_info_detects_absence": "db_unit",
-        "test_sorting_analyzer_versions_compute_zero_unit_and_missing": "db_unit"
+        "test_sorting_analyzer_versions_compute_zero_unit_and_missing": "db_unit",
+        "test_sorting_analyzer_versions_hash_is_pinned": "db_unit"
       }
     },
     "test_recompute_hashing.py": {

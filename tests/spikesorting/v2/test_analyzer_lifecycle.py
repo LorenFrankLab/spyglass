@@ -382,6 +382,72 @@ def test_get_analyzer_zero_unit_raises_before_path_lookup():
         (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
 
 
+@pytest.mark.usefixtures("dj_conn")
+def test_zero_unit_sort_inventory_status_and_recompute_match():
+    """A zero-unit sort is inventoried with status ``zero_units`` and no hash,
+    and its analyzer recompute is trivially matched."""
+    import datetime as dt
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.recompute import (
+        SortingAnalyzerRecompute,
+        SortingAnalyzerRecomputeSelection,
+        SortingAnalyzerVersions,
+    )
+    from spyglass.spikesorting.v2.sorting import (
+        AnalyzerWaveformParameters,
+        SorterParameters,
+        Sorting,
+        SortingSelection,
+    )
+
+    AnalyzerWaveformParameters.insert_default()
+    SorterParameters.insert_default()
+    sid = uuid.uuid4()
+    SortingSelection.insert1(
+        {
+            "sorting_id": sid,
+            "sorter": "clusterless_thresholder",
+            "sorter_params_name": "default",
+        },
+        allow_direct_insert=True,
+    )
+    # No file is read for a zero-unit sort, so the AnalysisNwbfile FK is
+    # bypassed.
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        Sorting.insert1(
+            {
+                "sorting_id": sid,
+                "analysis_file_name": "zero_unit_fake.nwb",
+                "object_id": "zero-unit-fake-object-id",
+                "n_units": 0,
+                "time_of_sort": dt.datetime(2020, 1, 1, 0, 0, 0),
+                "display_waveform_params_name": _DISPLAY,
+                "spikeinterface_version": "0.0.0",
+            },
+            allow_direct_insert=True,
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    key = {"sorting_id": sid, "waveform_params_name": _DISPLAY}
+    try:
+        SortingAnalyzerVersions.populate(key, reserve_jobs=False)
+        status, analyzer_hash = (SortingAnalyzerVersions & key).fetch1(
+            "status", "analyzer_hash"
+        )
+        assert (status, analyzer_hash) == ("zero_units", None)
+        SortingAnalyzerRecomputeSelection.attempt_all(key)
+        SortingAnalyzerRecompute.populate(key, reserve_jobs=False)
+        assert (SortingAnalyzerRecompute & key).fetch1("matched") == 1
+    finally:
+        (SortingSelection & {"sorting_id": sid}).delete(safemode=False)
+
+
 def test_build_analyzer_cleans_partial_folder_when_create_fails(
     monkeypatch, tmp_path
 ):

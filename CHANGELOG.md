@@ -544,6 +544,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         `spikesorting_recording_v2`), as v1 does; read them with
         `Recording().get_valid_interval(key)`. `Recording.delete` removes the
         row and refuses while another table uses it #1609
+    - v2 `SortingAnalyzerVersions` records a `status` (`ok`, `zero_units`,
+        `missing_folder`); `analyzer_hash` holds only a real content hash and is
+        NULL unless `status` is `ok` #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
