@@ -32,7 +32,7 @@ _MONOLITHIC_MAKE_EXCLUSIONS = {
 #: so it starts no worker process and ``_parallel_make`` stays off.
 _NO_WORKER_PROCESS_TABLES = {
     # Reads the pynwb namespace versions stored in one NWB file.
-    "spyglass.spikesorting.v2.recompute.RecordingArtifactVersions",
+    "spyglass.spikesorting.v2.recompute.RecordingRecomputeVersions",
     # Loads an analyzer folder and hashes its extension arrays.
     "spyglass.spikesorting.v2.recompute.SortingAnalyzerVersions",
     # Splits curated spike trains by member and writes one Units NWB.

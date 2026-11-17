@@ -174,7 +174,7 @@ class RecomputeComputed(NamedTuple):
 
 
 class RecordingRegenInputs(NamedTuple):
-    """What ``RecordingArtifactRecompute.make_compute`` regenerates from.
+    """What ``RecordingRecompute.make_compute`` regenerates from.
 
     Attributes
     ----------
@@ -244,14 +244,14 @@ class AnalyzerRegenInputs(NamedTuple):
 
 
 class RecordingVersionsFetched(NamedTuple):
-    """DB inputs for ``RecordingArtifactVersions.make_compute`` (no file I/O)."""
+    """DB inputs for ``RecordingRecomputeVersions.make_compute`` (no file I/O)."""
 
     analysis_file_name: str
     content_hash: str
 
 
 class RecordingVersionsComputed(NamedTuple):
-    """``make_compute`` -> ``make_insert`` for ``RecordingArtifactVersions``."""
+    """``make_compute`` -> ``make_insert`` for ``RecordingRecomputeVersions``."""
 
     nwb_deps: Optional[dict]
     content_hash: str
@@ -427,7 +427,7 @@ class _RecomputeMixin:
 
 
 @schema
-class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
+class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     """Dependency + content inventory for a ``Recording`` artifact.
 
     Steps
@@ -493,16 +493,16 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
 
 
 @schema
-class RecordingArtifactRecomputeSelection(
+class RecordingRecomputeSelection(
     SpyglassMixin, _RecomputeSelectionMixin, dj.Manual
 ):
     """Plan a recording recompute attempt under a labeled environment."""
 
-    _versions_table = RecordingArtifactVersions
-    _recompute_table_name = "RecordingArtifactRecompute"
+    _versions_table = RecordingRecomputeVersions
+    _recompute_table_name = "RecordingRecompute"
 
     definition = """
-    -> RecordingArtifactVersions
+    -> RecordingRecomputeVersions
     -> UserEnvironment
     ---
     logged_at_creation=0: bool
@@ -520,7 +520,7 @@ class RecordingArtifactRecomputeSelection(
     ) -> None:
         """Insert a recompute attempt for every eligible artifact (current env).
 
-        Only artifacts passing :meth:`RecordingArtifactVersions.this_env` are
+        Only artifacts passing :meth:`RecordingRecomputeVersions.this_env` are
         planned unless ``force_attempt=True``. Known structural impossibilities
         are recorded in ``xfail_reason`` so the recompute records ``matched=0``
         without regenerating.
@@ -531,7 +531,7 @@ class RecordingArtifactRecomputeSelection(
         Parameters
         ----------
         restriction : dict, str, or list, optional
-            Restriction on ``RecordingArtifactVersions``. Default all.
+            Restriction on ``RecordingRecomputeVersions``. Default all.
         limit : int, optional
             Plan at most this many artifacts, sampled at random from the
             eligible set. Default None (all).
@@ -548,7 +548,7 @@ class RecordingArtifactRecomputeSelection(
                 "No UserEnvironment available; cannot plan recompute attempts."
             )
             return
-        versions = RecordingArtifactVersions()
+        versions = RecordingRecomputeVersions()
         eligible = versions if force_attempt else versions.this_env()
         source = eligible & restriction
         if limit:
@@ -584,7 +584,7 @@ class RecordingArtifactRecomputeSelection(
         Parameters
         ----------
         key : dict
-            A key carrying ``recording_id`` (e.g. a ``RecordingArtifactVersions``
+            A key carrying ``recording_id`` (e.g. a ``RecordingRecomputeVersions``
             primary key).
         skip_probe, skip_pynwb_api, skip_nwb_spec : bool, optional
             Enable each xfail pattern. All default True.
@@ -596,7 +596,7 @@ class RecordingArtifactRecomputeSelection(
             ``"pynwb_api_incompatible"``, ``"nwb_spec_incompatible"``, or None.
         """
         rec_key = {"recording_id": key["recording_id"]}
-        prev_runs = RecordingArtifactRecompute & rec_key & "matched=0"
+        prev_runs = RecordingRecompute & rec_key & "matched=0"
 
         if skip_probe:
             # Wording raised by _recording.geometry / _recording.preprocessing.
@@ -628,7 +628,7 @@ class RecordingArtifactRecomputeSelection(
 
 
 @schema
-class RecordingArtifactRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
+class RecordingRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
     """Regenerate a recording artifact and compare trace content hashes.
 
     Steps
@@ -641,7 +641,7 @@ class RecordingArtifactRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
     """
 
     definition = """
-    -> RecordingArtifactRecomputeSelection
+    -> RecordingRecomputeSelection
     ---
     matched: bool
     err_msg=NULL: varchar(255)
@@ -687,7 +687,7 @@ class RecordingArtifactRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
         failure is carried as a :class:`FetchFailure`. ``rounding`` is
         ``TRACE_ROUNDING`` and unused by the recording path.
         """
-        xfail_reason = (RecordingArtifactRecomputeSelection & key).fetch1(
+        xfail_reason = (RecordingRecomputeSelection & key).fetch1(
             "xfail_reason"
         )
         parent = self.get_parent_key(key)
@@ -736,7 +736,7 @@ class RecordingArtifactRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
             parent_key,
             xfail_reason,
             regen=_regen,
-            what="RecordingArtifactRecompute",
+            what="RecordingRecompute",
         )
 
     def make_insert(
@@ -847,7 +847,7 @@ def _resolve_recording_regen_inputs(parent_key: dict) -> RecordingRegenInputs:
     ``Recording.make_fetch``. A failure stops resolution and is carried as a
     :class:`FetchFailure`.
     """
-    what = "RecordingArtifactRecompute"
+    what = "RecordingRecompute"
     current = _resolve_or_failure(
         lambda: Recording().resolve_stored_traces(parent_key),
         what=what,
@@ -1273,7 +1273,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, _RecomputeMixin, dj.Computed):
     ) -> list:
         """Delete analyzer folders verified in the current environment.
 
-        Same gates as :meth:`RecordingArtifactRecompute.delete_files`.
+        Same gates as :meth:`RecordingRecompute.delete_files`.
         ``Sorting.get_analyzer`` rebuilds a deleted folder.
 
         Parameters

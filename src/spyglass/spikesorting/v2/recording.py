@@ -1073,7 +1073,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         Steps 1-7 of :class:`Recording`. Filtering before the time
         restriction keeps join transients out of selected intervals. A
-        classmethod so ``RecordingArtifactRecompute.make_compute`` can run it
+        classmethod so ``RecordingRecompute.make_compute`` can run it
         without a table instance (constructing one queries the DB).
 
         Parameters

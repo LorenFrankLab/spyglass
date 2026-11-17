@@ -418,23 +418,23 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
 
 
 def clear_recompute_deleted_flag(recording_id) -> None:
-    """Best-effort clear of stale ``RecordingArtifactRecompute.deleted``.
+    """Best-effort clear of stale ``RecordingRecompute.deleted``.
 
     ``deleted=1`` means "removed and still absent". A failed clear is logged;
     file tracking is presence-aware, so it cannot hide the rebuilt file.
     """
     try:
         from spyglass.spikesorting.v2.recompute import (
-            RecordingArtifactRecompute,
-            RecordingArtifactVersions,
+            RecordingRecompute,
+            RecordingRecomputeVersions,
         )
 
-        versions = RecordingArtifactVersions & {"recording_id": recording_id}
-        flagged = (RecordingArtifactRecompute & versions & "deleted=1").fetch(
+        versions = RecordingRecomputeVersions & {"recording_id": recording_id}
+        flagged = (RecordingRecompute & versions & "deleted=1").fetch(
             "KEY", as_dict=True
         )
         for flagged_key in flagged:
-            RecordingArtifactRecompute.update1({**flagged_key, "deleted": 0})
+            RecordingRecompute.update1({**flagged_key, "deleted": 0})
     except Exception as exc:  # pragma: no cover -- best-effort accuracy
         logger.warning(
             "Recording._rebuild_nwb_artifact: could not clear stale "

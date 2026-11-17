@@ -413,7 +413,7 @@ def clean_recompute(populated_sorting):
     sort_key = {"sorting_id": populated_sorting["sorting_id"]}
 
     def _clear():
-        (rc.RecordingArtifactVersions & rec_key).delete(safemode=False)
+        (rc.RecordingRecomputeVersions & rec_key).delete(safemode=False)
         (rc.SortingAnalyzerVersions & sort_key).delete(safemode=False)
         (UserEnvironment & {"env_id": "planted_stale_env_00"}).delete(
             safemode=False
@@ -434,23 +434,23 @@ def test_recording_recompute_matches_and_delete_gate(
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
 
     rec_key = _recording_key(populated_sorting)
 
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    assert (RecordingArtifactVersions & rec_key).fetch1("content_hash")
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    assert (RecordingRecomputeVersions & rec_key).fetch1("content_hash")
 
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    matched_row = RecordingArtifactRecompute & rec_key & "matched=1"
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    matched_row = RecordingRecompute & rec_key & "matched=1"
     assert matched_row, "deterministic re-preprocess should match the cache"
 
     # Current-env match: delete_files (dry run, age 0) lists the artifact.
-    listed = RecordingArtifactRecompute().delete_files(
+    listed = RecordingRecompute().delete_files(
         rec_key, dry_run=True, days_since_creation=0
     )
     assert listed
@@ -471,13 +471,13 @@ def test_recording_recompute_matches_and_delete_gate(
         },
         skip_duplicates=True,
     )
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
     stale_sel = {
         **{k: v for k, v in sel_key.items() if k != "env_id"},
         "env_id": stale_env,
     }
-    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
-    RecordingArtifactRecompute.insert1(
+    RecordingRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingRecompute.insert1(
         {
             **stale_sel,
             "matched": 1,
@@ -487,18 +487,16 @@ def test_recording_recompute_matches_and_delete_gate(
         allow_direct_insert=True,
     )
     # Remove the current-env match so only the stale-env match remains.
-    (RecordingArtifactRecompute & {**sel_key, "env_id": env_id}).delete(
-        safemode=False
-    )
+    (RecordingRecompute & {**sel_key, "env_id": env_id}).delete(safemode=False)
 
     from spyglass.spikesorting.v2.exceptions import StaleEnvMatchedError
 
     with pytest.raises(StaleEnvMatchedError):
-        RecordingArtifactRecompute().delete_files(
+        RecordingRecompute().delete_files(
             rec_key, dry_run=True, days_since_creation=0
         )
     # force_stale_env overrides (dry run -> lists, does not delete).
-    forced = RecordingArtifactRecompute().delete_files(
+    forced = RecordingRecompute().delete_files(
         rec_key, dry_run=True, days_since_creation=0, force_stale_env=True
     )
     assert forced
@@ -520,9 +518,9 @@ def test_recording_delete_gate_keeps_a_file_whose_inputs_changed(
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
     )
     from spyglass.spikesorting.v2.recording import (
@@ -564,12 +562,10 @@ def test_recording_delete_gate_keeps_a_file_whose_inputs_changed(
             }
         )
         Recording.populate(rec_key, reserve_jobs=False)
-        RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-        RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-        selection = (RecordingArtifactRecomputeSelection & rec_key).fetch1(
-            "KEY"
-        )
-        RecordingArtifactRecompute.insert1(
+        RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+        RecordingRecomputeSelection.attempt_all(rec_key)
+        selection = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
+        RecordingRecompute.insert1(
             {
                 **selection,
                 "matched": 1,
@@ -592,20 +588,20 @@ def test_recording_delete_gate_keeps_a_file_whose_inputs_changed(
         )
         for dry_run in (True, False):
             assert (
-                RecordingArtifactRecompute().delete_files(
+                RecordingRecompute().delete_files(
                     rec_key, dry_run=dry_run, days_since_creation=0
                 )
                 == []
             )
         assert path.exists()
-        assert (RecordingArtifactRecompute & rec_key).fetch1("deleted") == 0
+        assert (RecordingRecompute & rec_key).fetch1("deleted") == 0
 
         IntervalList.insert1({**interval, "valid_times": original}, update=True)
-        assert RecordingArtifactRecompute().delete_files(
+        assert RecordingRecompute().delete_files(
             rec_key, dry_run=False, days_since_creation=0
         ) == [str(path)]
         assert not path.exists()
-        assert (RecordingArtifactRecompute & rec_key).fetch1("deleted") == 1
+        assert (RecordingRecompute & rec_key).fetch1("deleted") == 1
     finally:
         (RecordingSelection & interval).delete(safemode=False)
         (IntervalList & interval).delete_quick()
@@ -627,18 +623,18 @@ def test_remove_matched_drops_redundant_failed_cross_env_selection(
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
     )
 
     rec_key = _recording_key(populated_sorting)
 
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    assert RecordingArtifactRecompute & rec_key & "matched=1"
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    assert RecordingRecompute & rec_key & "matched=1"
 
     # Plant a SECOND selection under a stale env whose recompute FAILED
     # (matched=0) on the SAME artifact that matched in the current env.
@@ -652,13 +648,13 @@ def test_remove_matched_drops_redundant_failed_cross_env_selection(
         },
         skip_duplicates=True,
     )
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
     stale_sel = {
         **{k: v for k, v in sel_key.items() if k != "env_id"},
         "env_id": stale_env,
     }
-    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
-    RecordingArtifactRecompute.insert1(
+    RecordingRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingRecompute.insert1(
         {
             **stale_sel,
             "matched": 0,
@@ -671,13 +667,11 @@ def test_remove_matched_drops_redundant_failed_cross_env_selection(
 
     # The redundant stale-env selection (with its failed child) is removed
     # without raising; the current-env matched selection is kept.
-    removed = RecordingArtifactRecomputeSelection.remove_matched(
-        rec_key, dry_run=False
-    )
+    removed = RecordingRecomputeSelection.remove_matched(rec_key, dry_run=False)
     assert removed >= 1
-    assert not (RecordingArtifactRecomputeSelection & stale_sel)
-    assert not (RecordingArtifactRecompute & stale_sel)
-    assert RecordingArtifactRecompute & rec_key & "matched=1"
+    assert not (RecordingRecomputeSelection & stale_sel)
+    assert not (RecordingRecompute & stale_sel)
+    assert RecordingRecompute & rec_key & "matched=1"
 
 
 @pytest.mark.slow
@@ -688,19 +682,19 @@ def test_recording_recompute_refuses_unmatched(
     """delete_files never selects a matched=0 artifact."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
     )
 
     rec_key = _recording_key(populated_sorting)
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (RecordingRecompute & sel_key).delete(safemode=False)
     # Plant a matched=0 row.
-    RecordingArtifactRecompute.insert1(
+    RecordingRecompute.insert1(
         {
             **sel_key,
             "matched": 0,
@@ -709,11 +703,11 @@ def test_recording_recompute_refuses_unmatched(
         },
         allow_direct_insert=True,
     )
-    listed = RecordingArtifactRecompute().delete_files(
+    listed = RecordingRecompute().delete_files(
         rec_key, dry_run=True, days_since_creation=0
     )
     assert listed == []  # matched=0 is never deletable
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    (RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1131,28 +1125,28 @@ def test_file_tracking_excludes_v2_deleted_files(
 ):
     """A v2 recompute-deleted artifact is excluded from orphan detection.
 
-    The file-tracking ``deleted`` set includes v2 ``RecordingArtifactRecompute``
+    The file-tracking ``deleted`` set includes v2 ``RecordingRecompute``
     rows with deleted=1.
     """
     _assert_temp_base_dir()
     from spyglass.common.common_file_tracking import AnalysisFileIssues
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
     )
     from spyglass.spikesorting.v2.recording import Recording
 
     rec_key = _recording_key(populated_sorting)
     fname = (Recording & rec_key).fetch1("analysis_file_name")
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (RecordingRecompute & sel_key).delete(safemode=False)
     # Plant a matched + deleted row WITHOUT unlinking the shared recording file
     # (other package-scoped tests reuse it); we only test the tracking hook.
-    RecordingArtifactRecompute.insert1(
+    RecordingRecompute.insert1(
         {
             **sel_key,
             "matched": 1,
@@ -1164,7 +1158,7 @@ def test_file_tracking_excludes_v2_deleted_files(
     try:
         assert fname in AnalysisFileIssues._get_recompute_deleted()
     finally:
-        (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+        (RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1177,10 +1171,10 @@ def test_recording_recompute_mismatch_records_hash_rows(
     from spyglass.spikesorting.v2 import recompute as rc
 
     rec_key = _recording_key(populated_sorting)
-    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    rc.RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
     # Force the fresh rebuild's fingerprint to differ from the stored
     # content_hash so make() records matched=0 and a Hash diff row (without
@@ -1195,19 +1189,19 @@ def test_recording_recompute_mismatch_records_hash_rows(
             "metadata": "deadbeefmismatch",
         },
     )
-    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    row = rc.RecordingArtifactRecompute & sel_key
+    rc.RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingRecompute & sel_key
     assert row.fetch1("matched") == 0
-    assert rc.RecordingArtifactRecompute.Hash & sel_key
+    assert rc.RecordingRecompute.Hash & sel_key
     # A matched=0 artifact is never deletable.
     assert (
-        rc.RecordingArtifactRecompute().delete_files(
+        rc.RecordingRecompute().delete_files(
             rec_key, dry_run=True, days_since_creation=0
         )
         == []
     )
     # Cautious delete cascades to the Hash/Name diff part rows.
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1224,24 +1218,24 @@ def test_recording_recompute_regen_failure_records_matched_zero(
     from spyglass.spikesorting.v2 import recompute as rc
 
     rec_key = _recording_key(populated_sorting)
-    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    rc.RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
     def _boom(rk):
         raise RuntimeError("simulated SI pin mismatch")
 
     monkeypatch.setattr(rc, "_recompute_recording_fingerprint", _boom)
     # populate must COMPLETE (not propagate the regen failure)...
-    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    row = rc.RecordingArtifactRecompute & sel_key
+    rc.RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingRecompute & sel_key
     assert row.fetch1("matched") == 0
     # ...recording the truncated failure message and NO diff part rows.
     assert "simulated SI pin mismatch" in (row.fetch1("err_msg") or "")
-    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
-    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    assert not (rc.RecordingRecompute.Name & sel_key)
+    assert not (rc.RecordingRecompute.Hash & sel_key)
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1263,10 +1257,10 @@ def test_recording_recompute_fetch_resolves_inputs_and_compute_only_stages(
     )
 
     rec_key = _recording_key(populated_sorting)
-    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    table = rc.RecordingArtifactRecompute()
+    rc.RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    table = rc.RecordingRecompute()
 
     fetched = table.make_fetch(sel_key)
     parent_key = {"recording_id": str(rec_key["recording_id"])}
@@ -1278,7 +1272,7 @@ def test_recording_recompute_fetch_resolves_inputs_and_compute_only_stages(
     )
     assert fetch_hash(table.make_fetch(sel_key)) == fetch_hash(fetched)
     with forbid_db_queries(
-        monkeypatch, "RecordingArtifactRecompute", allow_staging=True
+        monkeypatch, "RecordingRecompute", allow_staging=True
     ):
         computed = table.make_compute(sel_key, *fetched)
     assert computed.outcome == "compare", computed.err_msg
@@ -1300,29 +1294,29 @@ def test_recording_recompute_fetch_failure_records_matched_zero(
     from tests.spikesorting.v2._tripart_helpers import fetch_hash
 
     rec_key = _recording_key(populated_sorting)
-    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    rc.RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
     def _boom(self, key):
         raise RuntimeError("simulated missing probe geometry")
 
     monkeypatch.setattr(Recording, "make_fetch", _boom)
-    table = rc.RecordingArtifactRecompute()
+    table = rc.RecordingRecompute()
     fetched = table.make_fetch(sel_key)
     assert fetched.regen_inputs.recording == rc.FetchFailure(
         "simulated missing probe geometry"
     )
     assert fetch_hash(table.make_fetch(sel_key)) == fetch_hash(fetched)
 
-    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    row = (rc.RecordingArtifactRecompute & sel_key).fetch1()
+    rc.RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    row = (rc.RecordingRecompute & sel_key).fetch1()
     assert row["matched"] == 0
     assert row["err_msg"] == "simulated missing probe geometry"
-    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
-    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    assert not (rc.RecordingRecompute.Name & sel_key)
+    assert not (rc.RecordingRecompute.Hash & sel_key)
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1339,21 +1333,21 @@ def test_recording_recompute_xfail_records_matched_zero(
     from spyglass.spikesorting.v2 import recompute as rc
 
     rec_key = _recording_key(populated_sorting)
-    rc.RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    rc.RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (rc.RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
-    rc.RecordingArtifactRecomputeSelection.update1(
+    rc.RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    rc.RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (rc.RecordingRecomputeSelection & rec_key).fetch1("KEY")
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
+    rc.RecordingRecomputeSelection.update1(
         {**sel_key, "xfail_reason": "known-bad recording"}
     )
 
-    rc.RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    row = rc.RecordingArtifactRecompute & sel_key
+    rc.RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    row = rc.RecordingRecompute & sel_key
     assert row.fetch1("matched") == 0
     assert (row.fetch1("err_msg") or "").startswith("xfail:")
-    assert not (rc.RecordingArtifactRecompute.Name & sel_key)
-    assert not (rc.RecordingArtifactRecompute.Hash & sel_key)
-    (rc.RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    assert not (rc.RecordingRecompute.Name & sel_key)
+    assert not (rc.RecordingRecompute.Hash & sel_key)
+    (rc.RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1368,25 +1362,25 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
     )
 
     rec_key = _recording_key(populated_sorting)
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
 
     # Unknown age (NULL created_at) on the sole current-env authorizing row.
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
-    RecordingArtifactRecompute.insert1(
+    (RecordingRecompute & sel_key).delete(safemode=False)
+    RecordingRecompute.insert1(
         {**sel_key, "matched": 1, "created_at": None, "deleted": 0},
         allow_direct_insert=True,
     )
     assert (
-        RecordingArtifactRecompute().delete_files(
+        RecordingRecompute().delete_files(
             rec_key, dry_run=True, days_since_creation=1
         )
         == []
@@ -1394,8 +1388,8 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
 
     # Too-recent age: the file mtime is within this test session (< 1 day), so
     # a 1-day floor must also refuse the otherwise-matched artifact.
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
-    RecordingArtifactRecompute.insert1(
+    (RecordingRecompute & sel_key).delete(safemode=False)
+    RecordingRecompute.insert1(
         {
             **sel_key,
             "matched": 1,
@@ -1405,12 +1399,12 @@ def test_recording_recompute_age_gate_refuses_recent_or_unknown(
         allow_direct_insert=True,
     )
     assert (
-        RecordingArtifactRecompute().delete_files(
+        RecordingRecompute().delete_files(
             rec_key, dry_run=True, days_since_creation=1
         )
         == []
     ), "too-recent authorizing row must not be reclaimed"
-    (RecordingArtifactRecompute & sel_key).delete(safemode=False)
+    (RecordingRecompute & sel_key).delete(safemode=False)
 
 
 @pytest.mark.slow
@@ -1429,9 +1423,9 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
 
     from spyglass.common.common_nwbfile import AnalysisNwbfile
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
     from spyglass.spikesorting.v2.recording import Recording
 
@@ -1442,11 +1436,11 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
         analysis_file_name, from_schema=True
     )
 
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    RecordingRecompute.populate(rec_key, reserve_jobs=False)
     assert (
-        RecordingArtifactRecompute & rec_key & "matched=1"
+        RecordingRecompute & rec_key & "matched=1"
     ), "a fresh rebuild must reproduce content_hash -> matched=1"
 
     # Restore independently of the accessor being tested, including when its
@@ -1456,13 +1450,13 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
     backup = tmp_path / "recording-before-reclamation.nwb"
     shutil.copy2(abs_path, backup)
     try:
-        removed = RecordingArtifactRecompute().delete_files(
+        removed = RecordingRecompute().delete_files(
             rec_key, dry_run=False, days_since_creation=0
         )
         assert (
             removed and not Path(abs_path).exists()
         ), "delete_files must reclaim the matched artifact"
-        assert RecordingArtifactRecompute & rec_key & "deleted=1"
+        assert RecordingRecompute & rec_key & "deleted=1"
 
         # get_recording rebuilds + reconciles the checksum; traces are identical.
         rec = Recording().get_recording(rec_key)
@@ -1472,7 +1466,7 @@ def test_delete_files_round_trip(populated_sorting, clean_recompute, tmp_path):
         ).exists(), "the canonical file must be back on disk"
         # The rebuild's best-effort clear flips the recompute rows to deleted=0.
         assert not (
-            RecordingArtifactRecompute & rec_key & "deleted=1"
+            RecordingRecompute & rec_key & "deleted=1"
         ), "rebuild must clear the stale deleted=1 flag (presence-aware)"
     finally:
         # Readers of the rebuilt file can keep their open handle while the
@@ -1502,40 +1496,40 @@ def test_recompute_authority_anchors_on_content_hash(
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
     from spyglass.spikesorting.v2.recording import Recording
 
     rec_key = _recording_key(populated_sorting)
     row_key = (Recording & rec_key).fetch1("KEY")
     real_hash = (Recording & rec_key).fetch1("content_hash")
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
 
     # Drift the ROW identity only: the on-disk file and a fresh rebuild are
     # unchanged and mutually consistent, but neither matches the drifted hash.
     Recording.update1({**row_key, "content_hash": "0" * 64})
     try:
-        RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-        RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+        RecordingRecomputeSelection.attempt_all(rec_key)
+        RecordingRecompute.populate(rec_key, reserve_jobs=False)
         assert (
-            RecordingArtifactRecompute & rec_key & "matched=0"
+            RecordingRecompute & rec_key & "matched=0"
         ), "fresh rebuild != drifted row content_hash must NOT match"
         assert (
-            RecordingArtifactRecompute().delete_files(
+            RecordingRecompute().delete_files(
                 rec_key, dry_run=True, days_since_creation=0
             )
             == []
         ), "a non-matched artifact is never deletable"
     finally:
         Recording.update1({**row_key, "content_hash": real_hash})
-        (RecordingArtifactRecompute & rec_key).delete(safemode=False)
+        (RecordingRecompute & rec_key).delete(safemode=False)
 
     # With the true hash restored, a fresh recompute matches.
-    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
+    RecordingRecompute.populate(rec_key, reserve_jobs=False)
     assert (
-        RecordingArtifactRecompute & rec_key & "matched=1"
+        RecordingRecompute & rec_key & "matched=1"
     ), "fresh rebuild == restored content_hash must match"
 
 
@@ -1681,20 +1675,20 @@ def test_recording_recompute_mixed_env_deletes(
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
 
     rec_key = _recording_key(populated_sorting)
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
-    RecordingArtifactRecompute.populate(rec_key, reserve_jobs=False)
-    assert RecordingArtifactRecompute & rec_key & "matched=1"  # current env
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    RecordingRecomputeSelection.attempt_all(rec_key)
+    RecordingRecompute.populate(rec_key, reserve_jobs=False)
+    assert RecordingRecompute & rec_key & "matched=1"  # current env
 
     # Disk space with only the single current-env matched row (baseline for the
     # no-double-count check below).
-    space_single = RecordingArtifactRecompute().get_disk_space(rec_key)
+    space_single = RecordingRecompute().get_disk_space(rec_key)
 
     # Plant a stale-env matched row for the same artifact with NULL created_at;
     # only the current-env row is age-gated.
@@ -1708,19 +1702,19 @@ def test_recording_recompute_mixed_env_deletes(
         },
         skip_duplicates=True,
     )
-    sel_key = (RecordingArtifactRecomputeSelection & rec_key).fetch1("KEY")
+    sel_key = (RecordingRecomputeSelection & rec_key).fetch1("KEY")
     stale_sel = {
         **{k: v for k, v in sel_key.items() if k != "env_id"},
         "env_id": stale_env,
     }
-    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
-    RecordingArtifactRecompute.insert1(
+    RecordingRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingRecompute.insert1(
         {**stale_sel, "matched": 1, "created_at": None, "deleted": 0},
         allow_direct_insert=True,
     )
 
     # get_disk_space must NOT double-count the one file across the two env rows.
-    space_mixed = RecordingArtifactRecompute().get_disk_space(rec_key)
+    space_mixed = RecordingRecompute().get_disk_space(rec_key)
     assert space_mixed == space_single, (
         f"disk space double-counted across env rows: {space_mixed} != "
         f"{space_single}"
@@ -1728,7 +1722,7 @@ def test_recording_recompute_mixed_env_deletes(
 
     # Current-env match authorizes deletion; the NULL-age stale row must not
     # block it (age-gate applies only to the authorizing current-env row).
-    listed = RecordingArtifactRecompute().delete_files(
+    listed = RecordingRecompute().delete_files(
         rec_key, dry_run=True, days_since_creation=0
     )
     assert listed, "current-env match should authorize despite the stale row"
@@ -1786,34 +1780,34 @@ def test_attempt_all_skips_incompatible_env(populated_sorting, clean_recompute):
     """
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
 
     rec_key = _recording_key(populated_sorting)
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    ver_key = (RecordingArtifactVersions & rec_key).fetch1("KEY")
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    ver_key = (RecordingRecomputeVersions & rec_key).fetch1("KEY")
 
     # Baseline: env-compatible -> planned.
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingRecomputeSelection.attempt_all(rec_key)
     assert (
-        RecordingArtifactRecomputeSelection & rec_key
+        RecordingRecomputeSelection & rec_key
     ), "an env-compatible artifact must be planned"
 
     # Drift the inventoried env to incompatible; the default gate skips it.
-    (RecordingArtifactRecomputeSelection & rec_key).delete(safemode=False)
-    RecordingArtifactVersions.update1(
+    (RecordingRecomputeSelection & rec_key).delete(safemode=False)
+    RecordingRecomputeVersions.update1(
         {**ver_key, "nwb_deps": {"core": "0.0.0-incompatible"}}
     )
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingRecomputeSelection.attempt_all(rec_key)
     assert not (
-        RecordingArtifactRecomputeSelection & rec_key
+        RecordingRecomputeSelection & rec_key
     ), "an env-incompatible artifact must be skipped by default"
 
     # force_attempt overrides the gate.
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key, force_attempt=True)
+    RecordingRecomputeSelection.attempt_all(rec_key, force_attempt=True)
     assert (
-        RecordingArtifactRecomputeSelection & rec_key
+        RecordingRecomputeSelection & rec_key
     ), "force_attempt must plan even an env-incompatible artifact"
 
 
@@ -1824,9 +1818,9 @@ def test_attempt_all_limit(populated_sorting, clean_recompute):
     eligible set; an unthrottled call fills in the rest."""
     _assert_temp_base_dir()
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
     )
     from spyglass.spikesorting.v2.recording import (
         Recording,
@@ -1859,22 +1853,22 @@ def test_attempt_all_limit(populated_sorting, clean_recompute):
     try:
         if not (Recording & rec_key2):
             Recording.populate(rec_key2, reserve_jobs=False)
-        RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-        RecordingArtifactVersions.populate(rec_key2, reserve_jobs=False)
-        assert len(RecordingArtifactVersions & restr) == 2
+        RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+        RecordingRecomputeVersions.populate(rec_key2, reserve_jobs=False)
+        assert len(RecordingRecomputeVersions & restr) == 2
 
-        RecordingArtifactRecomputeSelection.attempt_all(restr, limit=1)
+        RecordingRecomputeSelection.attempt_all(restr, limit=1)
         assert (
-            len(RecordingArtifactRecomputeSelection & restr) == 1
+            len(RecordingRecomputeSelection & restr) == 1
         ), "limit=1 must insert exactly one selection"
 
         # Unthrottled fills in the remainder (skip_duplicates keeps the first).
-        RecordingArtifactRecomputeSelection.attempt_all(restr)
-        assert len(RecordingArtifactRecomputeSelection & restr) == 2
+        RecordingRecomputeSelection.attempt_all(restr)
+        assert len(RecordingRecomputeSelection & restr) == 2
     finally:
         # One cascading delete from the selection top removes the 2nd
         # recording's Recompute/Selection/Versions/Recording rows.
-        (RecordingArtifactRecompute & rec_key2).delete(safemode=False)
+        (RecordingRecompute & rec_key2).delete(safemode=False)
         (RecordingSelection & rec_key2).delete(safemode=False)
 
 
@@ -1889,9 +1883,9 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
     _assert_temp_base_dir()
     from spyglass.common.common_user import UserEnvironment
     from spyglass.spikesorting.v2.recompute import (
-        RecordingArtifactRecompute,
-        RecordingArtifactRecomputeSelection,
-        RecordingArtifactVersions,
+        RecordingRecompute,
+        RecordingRecomputeSelection,
+        RecordingRecomputeVersions,
         _artifact_created_at,
         _recording_missing_probe_info,
     )
@@ -1902,13 +1896,13 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
 
     # Healthy recording: probe info present -> not flagged.
     assert _recording_missing_probe_info(nwb_file_name) is False
-    assert RecordingArtifactRecomputeSelection._check_xfail(rec_key) == (
+    assert RecordingRecomputeSelection._check_xfail(rec_key) == (
         False,
         None,
     )
 
-    RecordingArtifactVersions.populate(rec_key, reserve_jobs=False)
-    ver_key = (RecordingArtifactVersions & rec_key).fetch1("KEY")
+    RecordingRecomputeVersions.populate(rec_key, reserve_jobs=False)
+    ver_key = (RecordingRecomputeVersions & rec_key).fetch1("KEY")
 
     # Plant a prior failed attempt under a STALE env (survives re-planning the
     # current-env selection) whose error names a structural impossibility.
@@ -1923,8 +1917,8 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
         skip_duplicates=True,
     )
     stale_sel = {**ver_key, "env_id": stale_env}
-    RecordingArtifactRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
-    RecordingArtifactRecompute.insert1(
+    RecordingRecomputeSelection.insert1(stale_sel, skip_duplicates=True)
+    RecordingRecompute.insert1(
         {
             **stale_sel,
             "matched": 0,
@@ -1938,21 +1932,21 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
         allow_direct_insert=True,
     )
 
-    check = RecordingArtifactRecomputeSelection._check_xfail
+    check = RecordingRecomputeSelection._check_xfail
     assert check(rec_key) == (True, "missing_probe_info")
 
     # The same narrow detector recognizes PyNWB-API and NWB-spec patterns.
-    RecordingArtifactRecompute.update1(
+    RecordingRecompute.update1(
         {**stale_sel, "err_msg": "got an unexpected keyword argument 'dtype'"}
     )
     assert check(rec_key) == (True, "pynwb_api_incompatible")
-    RecordingArtifactRecompute.update1(
+    RecordingRecompute.update1(
         {**stale_sel, "err_msg": "No spec found for type in namespace core"}
     )
     assert check(rec_key) == (True, "nwb_spec_incompatible")
 
     # attempt_all plans the selection and records the xfail reason on it.
-    RecordingArtifactRecompute.update1(
+    RecordingRecompute.update1(
         {
             **stale_sel,
             "err_msg": (
@@ -1961,11 +1955,11 @@ def test_check_xfail_marks_structural(populated_sorting, clean_recompute):
             ),
         }
     )
-    RecordingArtifactRecomputeSelection.attempt_all(rec_key)
+    RecordingRecomputeSelection.attempt_all(rec_key)
     env_id = UserEnvironment().this_env["env_id"]
-    assert (
-        RecordingArtifactRecomputeSelection & {**ver_key, "env_id": env_id}
-    ).fetch1("xfail_reason") == "missing_probe_info"
+    assert (RecordingRecomputeSelection & {**ver_key, "env_id": env_id}).fetch1(
+        "xfail_reason"
+    ) == "missing_probe_info"
 
 
 def test_negative_days_rejected(dj_conn):
@@ -1976,7 +1970,7 @@ def test_negative_days_rejected(dj_conn):
     """
     from spyglass.spikesorting.v2 import recompute as rc
 
-    for tbl in (rc.RecordingArtifactRecompute, rc.SortingAnalyzerRecompute):
+    for tbl in (rc.RecordingRecompute, rc.SortingAnalyzerRecompute):
         with pytest.raises(
             ValueError, match="days_since_creation must be >= 0"
         ):

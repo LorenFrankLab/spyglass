@@ -198,6 +198,43 @@ else:
     conn.query(f"DROP TABLE {drift_name}")
 ```
 
+```python
+# Only for a database that declared the v2 recording recompute tables before
+# this release (#1609): they take the v1 names. `alter()` cannot rename a
+# table, so run the DDL directly. Importing v2 declared the new names empty:
+# stop if they hold rows, drop the empty tables, then rename the old ones in
+# one atomic statement. Restart Python afterward.
+import datajoint as dj
+
+from spyglass.spikesorting.v2.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,
+)
+
+recompute = RecordingRecompute()
+db, conn = recompute.database, recompute.connection
+renames = {  # old name: new table, children first
+    f"`{db}`.`__recording_artifact_recompute__hash`": recompute.Hash,
+    f"`{db}`.`__recording_artifact_recompute__name`": recompute.Name,
+    f"`{db}`.`__recording_artifact_recompute`": RecordingRecompute,
+    f"`{db}`.`recording_artifact_recompute_selection`": (
+        RecordingRecomputeSelection
+    ),
+    f"`{db}`.`__recording_artifact_versions`": RecordingRecomputeVersions,
+}
+if not any(dj.FreeTable(conn, old).is_declared for old in renames):
+    print("No old recording recompute tables: nothing to rename.")
+elif any(len(table()) for table in renames.values()):
+    raise ValueError("The renamed recompute tables hold rows: already run?")
+else:
+    conn.query(
+        "DROP TABLE " + ", ".join(t.full_table_name for t in renames.values())
+    )
+    pairs = [f"{old} TO {t.full_table_name}" for old, t in renames.items()]
+    conn.query("RENAME TABLE " + ", ".join(pairs))
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -609,6 +646,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         renamed `SharedArtifactSelection` and `SharedArtifactDetection`, and the
         `ArtifactDetectionOutput` parts are named after their source tables, so
         the generic merge methods work on it #1609
+    - v2 `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection` and
+        `RecordingArtifactRecompute` are renamed `RecordingRecomputeVersions`,
+        `RecordingRecomputeSelection` and `RecordingRecompute`, the v1 names
+        #1609
     - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
         `CurationRef.open_analyzer(extra_extensions=...)`), and
         `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609

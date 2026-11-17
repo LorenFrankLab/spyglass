@@ -172,10 +172,11 @@ permissions and path handling are in the
 ### Databases that already hold v2 tables
 
 If your database declared the v2 tables before this release, an admin runs the
-two schema changes in the [CHANGELOG](../CHANGELOG.md) release notes: the
-`compared` column on `UnitMatch.MatchableUnit` and the `MemberSnapshot` foreign
-key to `Recording`. Existing `MatchableUnit` rows get `compared = 1`, including
-units the matcher never saw.
+v2 schema changes in the [CHANGELOG](../CHANGELOG.md) release notes: the
+`compared` column on `UnitMatch.MatchableUnit`, the `MemberSnapshot` foreign key
+to `Recording`, the renamed shared artifact tables, and the recording recompute
+tables renamed to the v1 names. Existing `MatchableUnit` rows get
+`compared = 1`, including units the matcher never saw.
 
 - A `recording_id` also depends on the saved time cut (the sort interval
     intersected with the raw data's valid times, after `min_segment_length`).
@@ -730,7 +731,7 @@ Only stored per-pair burst metrics (`BurstPairUnit`) have no v2 table.
 | FigURL curation views                     | `FigURLCuration` rows stay readable                                      | `run.start_review(profile=...) → preview_import() → commit() → continue_review()`; local or hosted FigPack; `spikesorting-v2-curation` extra |
 | Custom unit properties                    | v1 curation `metrics` and `UnitAnnotation` rows stay readable            | metrics on `CurationEvaluation`; lab-specific values in `UnitAnnotation` by `merge_id`                                                       |
 | Burst-pair curation                       | `BurstPair` rows stay readable; stored per-pair metrics exist only there | `CurationEvaluation` plotting helpers; no v2 `BurstPair` table                                                                               |
-| Recording/analyzer recompute              | v1 recompute rows stay readable                                          | `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*`                                                                                |
+| Recording/analyzer recompute              | v1 recompute rows stay readable                                          | `RecordingRecompute*` and `SortingAnalyzerRecompute*`                                                                                        |
 | Concatenated recording / session group    | (no v1 equivalent)                                                       | same-day concatenate-and-sort                                                                                                                |
 | Cross-session unit matching (`UnitMatch`) | (no v1 equivalent)                                                       | `UnitMatch` / `TrackedUnit`                                                                                                                  |
 | Motion correction                         | (no v1 equivalent)                                                       | optional, experimental motion stage                                                                                                          |
@@ -880,28 +881,28 @@ v1's `RecordingRecompute` becomes two verification families. An artifact is
 deleted only after a round trip shows it can be regenerated from its stored
 lineage.
 
-| Recording                             | SortingAnalyzer                     | Role                                                                                                        |
-| ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `RecordingArtifactVersions`           | `SortingAnalyzerVersions`           | Inventory dependencies and a reference content hash.                                                        |
-| `RecordingArtifactRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` (`rounding` precision applies to the analyzer trio only). |
-| `RecordingArtifactRecompute`          | `SortingAnalyzerRecompute`          | Regenerate, compare content hashes, record `matched` / `deleted`.                                           |
+| Recording                     | SortingAnalyzer                     | Role                                                                                                        |
+| ----------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `RecordingRecomputeVersions`  | `SortingAnalyzerVersions`           | Inventory dependencies and a reference content hash.                                                        |
+| `RecordingRecomputeSelection` | `SortingAnalyzerRecomputeSelection` | Plan an attempt under a labeled `UserEnvironment` (`rounding` precision applies to the analyzer trio only). |
+| `RecordingRecompute`          | `SortingAnalyzerRecompute`          | Regenerate, compare content hashes, record `matched` / `deleted`.                                           |
 
 ```python
 from spyglass.spikesorting.v2.recompute import (
-    RecordingArtifactRecompute,
-    RecordingArtifactRecomputeSelection,
-    RecordingArtifactVersions,
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,
 )
 
 rec_key = {"recording_id": ...}
-RecordingArtifactVersions.populate(rec_key)  # 1. inventory
-RecordingArtifactRecomputeSelection.attempt_all(rec_key)  # 2. plan
-RecordingArtifactRecompute.populate(rec_key)  # 3. regenerate + compare
-RecordingArtifactRecompute().get_disk_space(rec_key)  # 4. size of matched files
+RecordingRecomputeVersions.populate(rec_key)  # 1. inventory
+RecordingRecomputeSelection.attempt_all(rec_key)  # 2. plan
+RecordingRecompute.populate(rec_key)  # 3. regenerate + compare
+RecordingRecompute().get_disk_space(rec_key)  # 4. size of matched files
 
-files = RecordingArtifactRecompute().delete_files(rec_key, dry_run=True)
+files = RecordingRecompute().delete_files(rec_key, dry_run=True)
 print(files)  # 5. review eligible paths, then delete
-RecordingArtifactRecompute().delete_files(rec_key, dry_run=False)
+RecordingRecompute().delete_files(rec_key, dry_run=False)
 # Later, get_recording() rebuilds the deleted file on demand.
 ```
 

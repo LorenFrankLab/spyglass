@@ -4,6 +4,9 @@
 
 - `spyglass.spikesorting.v0.spikesorting_recording.SpikeSortingRecording`
 - `spyglass.spikesorting.v1.recording.SpikeSortingRecording`
+- `spyglass.spikesorting.v2.recording.Recording` and the `SortingAnalyzer`
+    folders of `spyglass.spikesorting.v2.sorting.Sorting` (see
+    [Spike sorting v2](#spike-sorting-v2))
 
 ## Why
 
@@ -285,6 +288,54 @@ Then, create a new environment with ...
 ```bash
 conda env create -f /your/path/previous_env_id.yaml
 ```
+
+## Spike sorting v2
+
+`spyglass.spikesorting.v2.recompute` declares its own tables in the
+`spikesorting_v2_recompute` schema. `RecordingRecomputeVersions`,
+`RecordingRecomputeSelection` and `RecordingRecompute` (with `Name` and `Hash`
+parts) cover the preprocessed `Recording` NWB file. `SortingAnalyzerVersions`,
+`SortingAnalyzerRecomputeSelection` and `SortingAnalyzerRecompute` cover a
+sort's `SortingAnalyzer` folder.
+
+```python
+from spyglass.spikesorting.v2.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,
+)
+
+RecordingRecomputeVersions().populate(my_keys)
+RecordingRecomputeSelection().attempt_all(my_keys)
+RecordingRecompute().populate(my_keys)
+RecordingRecompute().delete_files(my_keys, dry_run=True)
+```
+
+What differs from v1:
+
+1. New files are not logged at creation. Populate the `Versions` table for
+    every file you want to verify.
+2. `attempt_all` plans attempts. `RecordingRecomputeSelection.attempt_all`
+    takes no `rounding` argument, because the recording's stored
+    `content_hash` fixes the precision. The analyzer selection takes
+    `rounding` (default 4).
+3. The comparison hashes the file's content (preprocessed traces, or
+    deterministic analyzer extension data), not the whole file. A recording
+    matches when the rebuild reproduces its stored `content_hash`.
+4. The rebuild is a temporary file or folder that is always removed.
+    `delete_files` deletes only the original and sets `deleted`. It defaults to
+    `dry_run=True`, needs a `matched=1` row from the current `UserEnvironment`
+    (`force_stale_env=True` overrides), and skips files newer than
+    `days_since_creation` days (default 7).
+5. `Recording.get_recording()` and `Sorting.get_analyzer()` rebuild a deleted
+    file or folder on the next read.
+6. `Name` and `Hash` list the differing components; they have no `compare`
+    method.
+
+See the
+[v2 migration guide](./SpikeSortingV2_Migration.md#disk-space-and-recompute)
+and the
+[developer guide](../ForDevelopers/SpikeSortingV2Architecture.md#recompute).
 
 ## Misc Notes
 

@@ -82,7 +82,7 @@ class AnalysisFileIssues(dj.Manual):
             ("spyglass.spikesorting.v1.recompute", "RecordingRecompute"),
             (
                 "spyglass.spikesorting.v2.recompute",
-                "RecordingArtifactRecompute",
+                "RecordingRecompute",
             ),
         ):
             try:

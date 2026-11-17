@@ -1205,7 +1205,7 @@ def test_curation_evaluation_display_derivative_delegates_without_mutation(
 def test_reclaimed_traces_keep_the_cached_analyzer(planted_two_unit_sort):
     """A reclaimed trace file is restored instead of discarding the analyzer.
 
-    ``RecordingArtifactRecompute.delete_files`` reclaims trace NWBs while the
+    ``RecordingRecompute.delete_files`` reclaims trace NWBs while the
     analyzer folder still references them. Loading the analyzer must restore
     the traces and keep the cache, including extensions added after the sort.
     """

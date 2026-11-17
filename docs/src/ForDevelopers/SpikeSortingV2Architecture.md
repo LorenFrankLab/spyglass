@@ -162,7 +162,7 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 | `session_group`                      | `SessionGroup`, `ConcatenatedRecordingSelection`, `ConcatenatedRecording`                                                                                                                                 |
 | `concat_member_curation`             | `ConcatMemberCurationV2`                                                                                                                                                                                    |
 | `unit_matching`                      | `MatcherParameters`, `UnitMatchSelection`, `UnitMatch`, `TrackedUnit`                                                                                                                                     |
-| `recompute`                          | `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`              |
+| `recompute`                          | `RecordingRecomputeVersions`, `RecordingRecomputeSelection`, `RecordingRecompute`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`                             |
 | `pipeline_preset`                    | `PipelinePreset`                                                                                                                                                                                          |
 
 - `ArtifactDetectionOutput` (`artifact_output`) is the internal merge over the
@@ -709,8 +709,7 @@ helper must import without a database.
     There is no hash-mutating `repair()`.
 - Rebuild, read repair, and recompute deletion are serialized per artifact
     (`artifact_slot_lock`), so reclamation never races a rebuild.
-- A rebuild clears stale `RecordingArtifactRecompute.deleted` flags, best
-    effort.
+- A rebuild clears stale `RecordingRecompute.deleted` flags, best effort.
 - `get_abs_path` checksums the whole file (~1.3 s/GiB) when it is below
     DataJoint's `filepath_checksum_size_limit` (1 GiB in Spyglass's defaults,
     `settings.py`), and DataJoint runs `make_fetch` twice. Inside a transaction,
@@ -993,7 +992,7 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     with a different timeout.
 - `artifact_slot_lock(prefix, slot_id)` keeps one trace artifact's rebuild
     (`get_recording` read repair) and reclamation
-    (`RecordingArtifactRecompute.delete_files`) from interleaving.
+    (`RecordingRecompute.delete_files`) from interleaving.
 - Lock files live under the analyzer root. Shared storage needs cross-host POSIX
     locking there; local-filesystem tests do not prove it.
 
@@ -1075,7 +1074,7 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     verdicts with `delete_quick`
     (`recompute.invalidate_sorting_analyzer_inventory`), so a read path needs no
     delete permission, then inventories the published folder again.
-- `RecordingArtifactRecompute.delete_files` keeps, with a warning, a file whose
+- `RecordingRecompute.delete_files` keeps, with a warning, a file whose
     recording inputs changed or can no longer be read since selection, because a
     rebuild would refuse them.
 - Rebuilds, evaluations and recompute use the sort's stored
@@ -1513,9 +1512,8 @@ working.
 ### File tracking
 
 `common/common_file_tracking.py`: `AnalysisFileIssues` skips analysis files that
-the v1 `RecordingRecompute` or v2 `RecordingArtifactRecompute` deleted after a
-verified recompute, but only while the file is missing from disk; a rebuilt file
-is checked again.
+a v1 or v2 `RecordingRecompute` deleted after a verified recompute, but only
+while the file is missing from disk; a rebuilt file is checked again.
 
 ### Warn or raise at the consumer boundary
 
