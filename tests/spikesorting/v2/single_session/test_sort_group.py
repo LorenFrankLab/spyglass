@@ -417,6 +417,48 @@ def test_sort_group_rejects_invalid_reference_mode():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_sort_group_insert_validates_tuple_and_dataframe_rows():
+    """Reference validation also runs for tuple and DataFrame rows."""
+    import pandas as pd
+
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    with pytest.raises(ValueError, match="ReferenceMode"):
+        SortGroupV2().insert1(("a27_irrelevant_.nwb", 0, "banana", None))
+    frame = pd.DataFrame(
+        [
+            {
+                "nwb_file_name": "a27_irrelevant_.nwb",
+                "sort_group_id": 0,
+                "reference_mode": "banana",
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="ReferenceMode"):
+        SortGroupV2().insert(frame)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_part_inserts_reach_their_checks_with_tuple_rows():
+    """Tuple rows reach the part tables' own checks instead of failing first."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    # No master row, so the foreign key is what refuses the member.
+    with pytest.raises(dj.errors.IntegrityError):
+        SortGroupV2.SortGroupElectrode().insert1(
+            ("a27_irrelevant_.nwb", 0, "0", 0)
+        )
+    part = CurationV2.ParentMergeGroup()
+    row = dict.fromkeys(part.heading.names, 0)
+    row["sorting_id"] = "00000000-0000-0000-0000-000000000000"
+    with pytest.raises(ValueError, match="no CurationV2 row"):
+        part.insert1(tuple(row[name] for name in part.heading.names))
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_sort_group_reference_electrode_id_consistency():
     """``reference_electrode_id`` is non-null iff mode=='specific'; both
     violations raise at insert.

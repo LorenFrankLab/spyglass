@@ -39,6 +39,9 @@ from spyglass.spikesorting.v2._curation.transforms import (
 from spyglass.spikesorting.v2._storage.units_nwb import write_curated_units_nwb
 from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
 from spyglass.spikesorting.v2._core.enums import CurationLabel, CurationSource
+from spyglass.spikesorting.v2._core.lookup_validation import (
+    insert_rows_to_dicts,
+)
 from spyglass.spikesorting.v2._core.table_integrity import (
     FactoryOnlyMaster,
     foreign_key_referrers,
@@ -222,7 +225,7 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
             child) or names a ``parent_unit_id`` absent from the immediate
             parent curation.
             """
-            rows = [dict(row) for row in rows]
+            rows = insert_rows_to_dicts(rows, self.heading.names)
             if rows:
                 self._validate_parent_provenance(rows)
             super().insert(rows, **kwargs)

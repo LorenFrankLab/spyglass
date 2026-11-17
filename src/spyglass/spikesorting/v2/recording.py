@@ -80,6 +80,7 @@ from spyglass.spikesorting.v2._core.reference_resolution import (
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _ensure_lookup_row_exists,
+    insert_rows_to_dicts,
 )
 from spyglass.spikesorting.v2._core.selection_identity import (
     existing_selection_pk,
@@ -248,7 +249,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
             ValueError
                 If a group's 'specific' reference electrode is in ``rows``.
             """
-            rows = [dict(r) for r in rows]
+            rows = insert_rows_to_dicts(rows, self.heading.names)
             self._assert_no_reference_member(rows)
             super().insert(rows, **kwargs)
 
@@ -290,7 +291,7 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
     def insert(self, rows, **kwargs):
         """Insert rows after validating each row's reference fields."""
-        rows = [dict(r) for r in rows]
+        rows = insert_rows_to_dicts(rows, self.heading.names)
         for r in rows:
             _validate_reference_fields(r)
         super().insert(rows, **kwargs)

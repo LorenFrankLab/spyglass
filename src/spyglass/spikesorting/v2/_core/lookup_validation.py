@@ -482,6 +482,60 @@ def reject_stale_quality_metric_defaults(stored_rows, default_rows) -> None:
             )
 
 
+def insert_rows_to_dicts(rows, attr_names) -> list[dict]:
+    """Normalize the row formats ``dj.Table.insert`` accepts to dicts.
+
+    Parameters
+    ----------
+    rows : iterable or pandas.DataFrame
+        Mappings, positional sequences or numpy records, or a DataFrame whose
+        columns are attribute names.
+    attr_names : Sequence[str]
+        The table heading's attribute names in definition order
+        (``self.heading.names``), used to label a positional row.
+
+    Returns
+    -------
+    list[dict]
+        One new dict per row.
+
+    Raises
+    ------
+    TypeError
+        If a row is a ``str`` or ``bytes``, as from iterating one mapping.
+    ValueError
+        If a positional row's length does not match ``attr_names``.
+    """
+    import numpy as np
+    import pandas as pd
+
+    if isinstance(rows, pd.DataFrame):
+        # DataJoint drops an unnamed index and keeps a named one as columns.
+        unnamed = len(rows.index.names) == 1 and not rows.index.names[0]
+        rows = rows.reset_index(drop=unnamed).to_dict("records")
+    normalized = []
+    for row in rows:
+        if isinstance(row, Mapping):
+            normalized.append(dict(row))
+        elif isinstance(row, np.void) and row.dtype.names:
+            normalized.append({name: row[name] for name in row.dtype.names})
+        elif isinstance(row, (str, bytes)):
+            raise TypeError(
+                "insert expects an iterable of rows; got a "
+                f"{type(row).__name__} row. Pass a list of rows, or use "
+                "insert1 for one row."
+            )
+        else:
+            values = tuple(row)
+            if len(values) != len(attr_names):
+                raise ValueError(
+                    f"positional insert row has {len(values)} value(s) for "
+                    f"the {len(attr_names)} attributes {tuple(attr_names)!r}."
+                )
+            normalized.append(dict(zip(attr_names, values)))
+    return normalized
+
+
 def _insert_row_to_dict(row, attr_names) -> dict:
     """Normalize a DataJoint insert row to a mutable dict.
 

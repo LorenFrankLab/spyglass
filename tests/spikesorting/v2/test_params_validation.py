@@ -440,6 +440,37 @@ def test_clusterless_rejects_implausible_mad_threshold():
     assert uv.detect_threshold == 100.0
 
 
+def test_insert_rows_to_dicts_accepts_every_datajoint_row_format():
+    """Dicts, tuples, numpy records and DataFrames all become dicts."""
+    import numpy as np
+    import pandas as pd
+
+    from spyglass.spikesorting.v2._core.lookup_validation import (
+        insert_rows_to_dicts,
+    )
+
+    names = ("nwb_file_name", "sort_group_id", "reference_mode")
+    expected = [
+        {"nwb_file_name": "a.nwb", "sort_group_id": 0, "reference_mode": "none"}
+    ]
+    src = dict(expected[0])
+    out = insert_rows_to_dicts([src], names)
+    assert out == expected and out[0] is not src
+    assert insert_rows_to_dicts([("a.nwb", 0, "none")], names) == expected
+    # Columns may be in any order; an unnamed index is dropped.
+    frame = pd.DataFrame(expected)[list(reversed(names))]
+    assert insert_rows_to_dicts(frame, names) == expected
+    records = frame.to_records(index=False)
+    assert insert_rows_to_dicts(records, names) == expected
+    assert insert_rows_to_dicts(np.array(records), names) == expected
+
+    # Iterating one mapping yields its keys.
+    with pytest.raises(TypeError, match="use insert1"):
+        insert_rows_to_dicts(src, names)
+    with pytest.raises(ValueError, match="2 value"):
+        insert_rows_to_dicts([("a.nwb", 0)], names)
+
+
 def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
     """``_insert_row_to_dict`` handles the supported insert row shapes.
 
