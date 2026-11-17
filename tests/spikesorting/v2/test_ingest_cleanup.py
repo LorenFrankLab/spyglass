@@ -84,6 +84,7 @@ def isolated_interval_owners(dj_conn):
                         "n_channels": 4,
                         "sampling_frequency": 1000.0,
                         "duration_s": 10.0,
+                        "n_samples": 10000,
                         "content_hash": "0" * 64,
                     },
                     allow_direct_insert=True,

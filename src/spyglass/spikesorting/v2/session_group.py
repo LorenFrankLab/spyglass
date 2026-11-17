@@ -517,8 +517,8 @@ class ConcatenatedRecording(
     electrical_series_path: varchar(255)
     object_id: varchar(72)
     n_channels: int
-    sampling_frequency: float
-    total_duration_s: float
+    sampling_frequency: double
+    total_duration_s: double
     n_samples: bigint            # concat sample count; exact integer basis for the MemberBoundary back-mapping
     content_hash: char(64)
     obs_intervals: longblob     # kept intervals on the synthetic concat timeline, in seconds

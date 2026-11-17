@@ -180,6 +180,7 @@ def test_make_insert_raises_on_genuine_truncation():
             sampling_frequency=fs,
             n_channels=4,
             duration_s=saved_end - saved_start,
+            n_samples=round((saved_end - saved_start) * fs) + 1,
             sel={
                 "nwb_file_name": "truncation_guard_probe.nwb",
                 "interval_list_name": "raw data valid times",

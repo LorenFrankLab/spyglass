@@ -553,6 +553,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         session and member set, and `SharedArtifactSelection.Member` freezes
         the members it scans and may mask; `member_set_hash` and
         `SharedArtifactGroupMemberDriftError` are removed #1609
+    - v2 `Recording` and `ConcatenatedRecording` store `sampling_frequency` and
+        their durations in double precision, and `Recording` stores the
+        `n_samples` of its saved file #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

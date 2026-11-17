@@ -956,8 +956,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     electrical_series_path: varchar(255)
     object_id: varchar(72)
     n_channels: int
-    sampling_frequency: float
-    duration_s: float
+    sampling_frequency: double
+    duration_s: double
+    n_samples: bigint           # frames in the stored ElectricalSeries
     content_hash: char(64)
     """
 
@@ -1101,6 +1102,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             sampling_frequency=artifact.sampling_frequency,
             n_channels=artifact.n_channels,
             duration_s=artifact.duration_s,
+            n_samples=artifact.n_samples,
             sel=sel,
             sort_valid_times=sort_valid_times,
             expected_saved_total=expectation.expected_saved_total,
@@ -1261,6 +1263,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sampling_frequency,
         n_channels,
         duration_s,
+        n_samples,
         sel,
         sort_valid_times,
         expected_saved_total,
@@ -1299,6 +1302,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Number of channels in the persisted recording.
         duration_s : float
             Persisted recording duration, in seconds.
+        n_samples : int
+            Number of frames in the persisted recording.
         sel : dict
             The fetched ``RecordingSelection`` row.
         sort_valid_times : numpy.ndarray
@@ -1358,6 +1363,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "n_channels": n_channels,
                     "sampling_frequency": sampling_frequency,
                     "duration_s": duration_s,
+                    "n_samples": n_samples,
                     "content_hash": content_hash,
                 }
             )

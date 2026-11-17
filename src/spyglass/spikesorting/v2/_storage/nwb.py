@@ -534,8 +534,8 @@ def write_recording_artifact(
     -------
     RecordingArtifactResult
         ``(analysis_file_name, object_id, content_hash, saved_start,
-        saved_end, sampling_frequency, n_channels, duration_s)``. The saved
-        times describe the persisted timestamps.
+        saved_end, sampling_frequency, n_channels, duration_s, n_samples)``.
+        The saved times and ``n_samples`` describe the persisted traces.
     """
     from spyglass.spikesorting.v2._core.signal_math import (
         _get_recording_timestamps,
@@ -554,6 +554,7 @@ def write_recording_artifact(
             filtering_description=filtering_description,
             provenance_tables=provenance_tables,
         )
+        n_samples = int(recording.get_num_samples(segment_index=0))
         # Multiple intervals: the override's span would count the gaps, so
         # use the concatenation's gap-free time axis.
         if n_selected_intervals == 1:
@@ -564,7 +565,6 @@ def write_recording_artifact(
             saved_end = float(saved_times[-1])
         else:
             # ``ignore_times=True`` gives a 0-based axis; avoid materializing it.
-            n_samples = int(recording.get_num_samples(segment_index=0))
             saved_start = 0.0
             saved_end = (
                 0.0 if n_samples == 0 else (n_samples - 1) / sampling_frequency
@@ -588,4 +588,5 @@ def write_recording_artifact(
         saved_end=saved_end,
         n_channels=n_channels,
         duration_s=duration_s,
+        n_samples=n_samples,
     )

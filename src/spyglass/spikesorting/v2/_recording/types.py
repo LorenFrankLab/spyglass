@@ -68,6 +68,7 @@ class RecordingComputed(NamedTuple):
     sampling_frequency: float
     n_channels: int
     duration_s: float
+    n_samples: int
     sel: dict
     sort_valid_times: np.ndarray
     expected_saved_total: float
@@ -83,7 +84,7 @@ class RecordingArtifactResult(NamedTuple):
     """Outputs of :meth:`Recording._compute_recording_artifact`.
 
     Read by name, never splatted into ``make_*``. Field order matches
-    ``RecordingComputed``'s first eight fields.
+    ``RecordingComputed``'s first nine fields.
     """
 
     analysis_file_name: str
@@ -94,3 +95,4 @@ class RecordingArtifactResult(NamedTuple):
     sampling_frequency: float
     n_channels: int
     duration_s: float
+    n_samples: int

@@ -1128,3 +1128,161 @@ def test_artifact_path_reverified_outside_transactions_reused_inside(
     with dj.conn().transaction:
         assert resolve() == str(artifact)
     assert len(checked) == 3, "a file changed since its check must be verified"
+
+
+# ---------------------------------------------------------------------------
+# Stored rate, duration and sample count
+# ---------------------------------------------------------------------------
+
+#: Base-commit values for the chronic minirec fixture. The ids and hashes do
+#: not read the stored rate, duration or sample count; regenerate (do not
+#: loosen) only when their derivation is meant to change.
+_PINNED_RECORDINGS = {
+    "chronic_minirec_a_.nwb": (
+        "02a9f450-ff62-5ca3-a184-1dd0554cfa42",
+        "69d15b4909ad3545f5d761417e9ff947d7c45238b63b29cdd40020b2602494c0",
+    ),
+    "chronic_minirec_b_.nwb": (
+        "500e5fd7-cba1-5a77-8146-66701a427228",
+        "2a3d01d932caa0b5eb1ed3708ed11d8e0daf6d6963e43318cda1c8f071278fe6",
+    ),
+}
+_PINNED_INPUT_HASH = (
+    "ad6bd98dd32e1b1380f8534b88e44da2d2e030e10af52e9f5e6c33a981943780"
+)
+_PINNED_CONCAT = (
+    "5bb4d9d1-9c27-57c1-be4b-a4f5bff479f9",
+    "ed8d2cb8ed28d65dd27ec2336e5202ac3831a4cf56b0bf4215a7b7308410491d",
+)
+
+
+@pytest.mark.slow
+def test_recording_and_concat_ids_are_pinned(chronic_2_session_minirec):
+    """Recording and concat ids and hashes keep their base-commit values, and
+    the stored rate, duration and sample count describe the stored file."""
+    import uuid
+
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.session_group import (
+        ConcatenatedRecording,
+        SessionGroup,
+    )
+    from tests.spikesorting.v2._concat_helpers import select_unmasked_concat
+
+    sub = chronic_2_session_minirec
+    for pk in sub["recording_pks"]:
+        sel = (RecordingSelection & pk).fetch1()
+        row = (Recording & pk).fetch1()
+        recording_id, content_hash = _PINNED_RECORDINGS[sel["nwb_file_name"]]
+        assert pk["recording_id"] == uuid.UUID(recording_id)
+        assert sel["recording_input_hash"] == _PINNED_INPUT_HASH
+        assert row["content_hash"] == content_hash
+        assert row["sampling_frequency"] == 30000.0
+        stored = Recording().get_recording(pk)
+        assert row["n_samples"] == stored.get_num_samples() == 150000
+        assert row["duration_s"] == (150000 - 1) / 30000.0
+
+    group = {
+        "session_group_owner": sub["owner"],
+        "session_group_name": "pin_group",
+    }
+    SessionGroup.create_group(
+        group["session_group_owner"],
+        group["session_group_name"],
+        sub["same_day_members"],
+    )
+    try:
+        pk = select_unmasked_concat(
+            {
+                **group,
+                "preprocessing_params_name": sub["preprocessing_params_name"],
+            }
+        )
+        ConcatenatedRecording.populate(pk, reserve_jobs=False)
+        row = (ConcatenatedRecording & pk).fetch1()
+        assert pk["concat_recording_id"] == uuid.UUID(_PINNED_CONCAT[0])
+        assert row["content_hash"] == _PINNED_CONCAT[1]
+        assert row["n_samples"] == 300000
+        assert row["total_duration_s"] == 300000 / row["sampling_frequency"]
+    finally:
+        (SessionGroup & group).delete(safemode=False)
+
+
+@pytest.mark.slow
+def test_fractional_sampling_rate_is_stored_exactly(
+    dj_conn, tmp_path, monkeypatch
+):
+    """A rate that is not a whole number is stored at full precision, and a
+    sorting rebuilt from stored frames has the stored rate.
+
+    The row keeps the raw source's rate. A reload of the stored file infers
+    its rate from the stored timestamps, which can differ in the last bits.
+    """
+    from datetime import datetime, timezone
+
+    import spikeinterface as si
+
+    from spyglass.common import Nwbfile, Raw
+    from spyglass.spikesorting.v2._storage.nwb import read_raw_recording
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from tests.spikesorting.v2._ingest_helpers import (
+        _clean_session_v2,
+        configure_v2_run_inputs,
+        synthesize_minirec_nwb,
+    )
+    from tests.spikesorting.v2._sorter_stub import plant_sorter
+
+    src = synthesize_minirec_nwb(
+        tmp_path / "fractional_rate.nwb",
+        session_start=datetime(2023, 6, 22, 12, tzinfo=timezone.utc),
+        fixture_name="fractional_rate",
+        seed=7,
+        duration_s=2.0,
+        sampling_frequency=29999.7,
+    )
+    nwb_file_name = copy_and_insert_nwb(src, dest_name="fractional_rate.nwb")
+    session = {"nwb_file_name": nwb_file_name}
+    frames = np.array([1000, 20000, 40000], dtype=np.int64)
+
+    def _plant(sorter, sorter_params, recording, sorting_id, **_):
+        return si.NumpySorting.from_samples_and_labels(
+            samples_list=[frames],
+            labels_list=[np.zeros(frames.size, dtype=np.int32)],
+            sampling_frequency=recording.get_sampling_frequency(),
+        )
+
+    try:
+        run = configure_v2_run_inputs(nwb_file_name, "v2_fractional_rate")
+        pk = RecordingSelection.insert_selection(
+            {**run, "preprocessing_params_name": "default"}
+        )
+        Recording.populate(pk, reserve_jobs=False)
+        row = (Recording & pk).fetch1()
+        fs = row["sampling_frequency"]
+        raw = read_raw_recording(
+            Nwbfile.get_abs_path(nwb_file_name),
+            (Raw & session).fetch1("raw_object_id"),
+        )
+        assert fs == raw.get_sampling_frequency()
+        assert fs != round(fs) and float(np.float32(fs)) != fs
+        stored = Recording().get_recording(pk)
+        assert stored.get_sampling_frequency() == pytest.approx(fs, rel=1e-12)
+        assert row["n_samples"] == stored.get_num_samples()
+
+        sort_pk = SortingSelection.insert_selection(
+            {
+                "recording_id": pk["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+            }
+        )
+        plant_sorter(monkeypatch, _plant)
+        Sorting.populate(sort_pk, reserve_jobs=False)
+        sorting = Sorting().get_sorting(sort_pk)
+        assert sorting.get_sampling_frequency() == fs
+        np.testing.assert_array_equal(
+            sorting.get_unit_spike_train(sorting.unit_ids[0]), frames
+        )
+    finally:
+        _clean_session_v2(session)

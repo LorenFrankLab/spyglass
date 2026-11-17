@@ -840,6 +840,8 @@
       "overrides": {
         "test_geometry_columns_are_created_when_absent": "unit",
         "test_geometry_is_persisted_at_double_precision": "unit",
+        "test_fractional_sampling_rate_is_stored_exactly": "stage",
+        "test_recording_and_concat_ids_are_pinned": "stage",
         "test_recording_semantic_round_trip": "pipeline"
       }
     },

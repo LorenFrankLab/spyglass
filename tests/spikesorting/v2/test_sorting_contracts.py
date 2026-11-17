@@ -101,7 +101,7 @@ def test_recording_fetched_matches_make_compute_signature():
 
 def test_recording_artifact_result_field_contract():
     """``RecordingArtifactResult`` fields equal ``RecordingComputed``'s
-    first eight, in order.
+    first nine, in order.
     """
     from spyglass.spikesorting.v2._recording.types import (
         RecordingArtifactResult,
@@ -117,8 +117,9 @@ def test_recording_artifact_result_field_contract():
         "sampling_frequency",
         "n_channels",
         "duration_s",
+        "n_samples",
     )
-    assert RecordingArtifactResult._fields == RecordingComputed._fields[:8]
+    assert RecordingArtifactResult._fields == RecordingComputed._fields[:9]
 
 
 @pytest.mark.slow
