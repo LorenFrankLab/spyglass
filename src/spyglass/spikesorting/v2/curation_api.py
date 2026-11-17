@@ -539,8 +539,20 @@ class CurationRef:
     ) -> "EvaluationResult":
         """Create/reuse and populate an evaluation over this curation.
 
-        ``metric_waveform_params_name`` names the metric waveform recipe;
-        ``None`` uses this curation's default one.
+        Parameters
+        ----------
+        metric_params_name : str
+            ``QualityMetricParameters`` row to compute.
+        auto_curation_rules_name : str
+            ``AutoCurationRules`` row to apply.
+        metric_waveform_params_name : str, optional
+            Metric waveform recipe. ``None`` (default) uses this curation's
+            default one.
+
+        Returns
+        -------
+        EvaluationResult
+            The populated evaluation.
         """
         self.as_key()
         spec = EvaluationSpec(
@@ -635,9 +647,15 @@ class CurationRef:
 
         Covers exactly this generation's units, in microvolts. The copy lives
         in Spyglass's temp dir and is removed on exit, so mutating it cannot
-        touch the published cache. ``extra_extensions`` (``{name: params}``)
-        are computed into the published cache first, so repeated calls reuse
-        them.
+        touch the published cache.
+
+        Parameters
+        ----------
+        extra_extensions : dict, optional
+            ``{name: params}`` extensions to add. Ones the published analyzer
+            lacks, or holds with other params, are computed into a
+            disk-backed derivative keyed by the request, so repeated calls
+            reuse it; the published analyzer is never changed.
         """
         return open_curation_analyzer(
             **display_analyzer_request(self), extra_extensions=extra_extensions
@@ -900,18 +918,23 @@ class CurationPlots:
         return getattr(visualization, function)(self._curation, *args, **kwargs)
 
     def sorting_summary(self, **kwargs):
+        """Call ``visualization.plot_sorting_summary`` on this curation."""
         return self._call("plot_sorting_summary", **kwargs)
 
     def unit_summary(self, unit_id, **kwargs):
+        """Call ``visualization.plot_unit_summary`` on this curation."""
         return self._call("plot_unit_summary", unit_id, **kwargs)
 
     def waveforms(self, unit_ids=None, **kwargs):
+        """Call ``visualization.plot_waveforms`` on this curation."""
         return self._call("plot_waveforms", unit_ids, **kwargs)
 
     def spikes_on_traces(self, **kwargs):
+        """Call ``visualization.plot_spikes_on_traces`` on this curation."""
         return self._call("plot_spikes_on_traces", **kwargs)
 
     def unit_locations(self, **kwargs):
+        """Call ``visualization.plot_unit_locations`` on this curation."""
         return self._call("plot_unit_locations", **kwargs)
 
 
@@ -928,33 +951,64 @@ class EvaluationPlots:
         return getattr(CurationEvaluation(), method)(key, *args, **kwargs)
 
     def metrics(self, **kwargs):
+        """Call ``CurationEvaluation.plot_metrics`` on this evaluation."""
         return self._call("plot_metrics", **kwargs)
 
     def units_qc(self, **kwargs):
+        """Call ``CurationEvaluation.plot_units_qc`` on this evaluation."""
         return self._call("plot_units_qc", **kwargs)
 
     def correlograms(self, **kwargs):
+        """Call ``CurationEvaluation.plot_correlograms`` on this evaluation."""
         return self._call("plot_correlograms", **kwargs)
 
     def suggested_merges(self, **kwargs):
+        """Call ``CurationEvaluation.plot_suggested_merges``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("plot_suggested_merges", **kwargs)
 
     def si_quality_metrics(self, **kwargs):
+        """Call ``CurationEvaluation.plot_si_quality_metrics``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("plot_si_quality_metrics", **kwargs)
 
     def si_template_metrics(self, **kwargs):
+        """Call ``CurationEvaluation.plot_si_template_metrics``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("plot_si_template_metrics", **kwargs)
 
     def pair_correlograms(self, pairs, **kwargs):
+        """Call ``CurationEvaluation.investigate_pair_xcorrel``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("investigate_pair_xcorrel", pairs, **kwargs)
 
     def pair_peaks(self, pairs, **kwargs):
+        """Call ``CurationEvaluation.investigate_pair_peaks``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("investigate_pair_peaks", pairs, **kwargs)
 
     def peak_over_time(self, pairs, **kwargs):
+        """Call ``CurationEvaluation.plot_peak_over_time``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("plot_peak_over_time", pairs, **kwargs)
 
     def burst_pair_metrics(self, pairs=None, **kwargs):
+        """Call ``CurationEvaluation.plot_burst_pair_metrics``.
+
+        Runs on this evaluation; ``kwargs`` pass through.
+        """
         return self._call("plot_burst_pair_metrics", pairs=pairs, **kwargs)
 
 
@@ -1419,6 +1473,15 @@ class EvaluationResult:
         As :meth:`CurationRef.start_review`, but displays this evaluation,
         which must cover its curation with the profile's exact recipe names
         and be populated (``ValueError`` / ``LookupError`` otherwise).
+
+        Parameters
+        ----------
+        profile, upload, ephemeral, display_options
+            As in :meth:`CurationRef.start_review`.
+
+        Returns
+        -------
+        FigPackReview
         """
         from spyglass.spikesorting.v2.review_api import _start_review
 
@@ -1559,7 +1622,29 @@ class RunResult(dict):
         ephemeral: bool = False,
         display_options=None,
     ):
-        """Start the canonical review without silently changing its source."""
+        """Start the canonical review without silently changing its source.
+
+        Warns when reviewing the auto-labeled child with a profile whose
+        metric or rule recipe differs from this run's preset.
+
+        Parameters
+        ----------
+        profile, upload, ephemeral, display_options
+            As in :meth:`CurationRef.start_review`.
+        source : {"auto_labeled", "root"}, optional
+            The curation to review. Default ``"auto_labeled"``, which needs a
+            run with ``auto_curate=True``.
+
+        Returns
+        -------
+        FigPackReview
+
+        Raises
+        ------
+        ValueError
+            If ``source`` is not one of the two, or ``"auto_labeled"`` on a
+            run without an auto-labeled child.
+        """
         if source == "auto_labeled":
             curation = self.auto_labeled_curation
             if curation is None:

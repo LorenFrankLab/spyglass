@@ -949,6 +949,23 @@ def open_curation_analyzer(
 
     The copy lives in a temp dir under Spyglass's temp dir, removed on exit,
     so mutating it cannot alter the published cache.
+
+    Parameters
+    ----------
+    curation_ref : CurationRef
+        The curation generation whose analyzer to copy.
+    waveform_recipe : str
+        ``AnalyzerWaveformParameters`` row of the analyzer.
+    role : {"display", "metric"}, optional
+        Which analyzer of the sort. Default ``"display"``.
+    extra_extensions : dict, optional
+        ``{name: params}`` extensions to add; unmet ones are computed into a
+        disk-backed derivative of the published analyzer.
+
+    Yields
+    ------
+    si.SortingAnalyzer
+        The working copy.
     """
     published = _resolve_curation_analyzer(
         curation_ref, waveform_recipe, role, extra_extensions=extra_extensions

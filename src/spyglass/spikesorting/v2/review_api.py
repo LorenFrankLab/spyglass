@@ -102,7 +102,22 @@ class ReviewProfileRef:
 
     @classmethod
     def resolve(cls, profile: str | "ReviewProfileRef") -> "ReviewProfileRef":
-        """Resolve and recheck a persisted profile by name."""
+        """Resolve and recheck a persisted profile by name.
+
+        Parameters
+        ----------
+        profile : str or ReviewProfileRef
+            A ``CurationReviewProfile`` name, or a reference to recheck.
+
+        Returns
+        -------
+        ReviewProfileRef
+
+        Raises
+        ------
+        ValueError
+            If the name is not stored; the message lists the stored ones.
+        """
         from spyglass.spikesorting.v2.review_profile import (
             FRANKLAB_REVIEW_PROFILE,
             CurationReviewProfile,
@@ -394,6 +409,16 @@ class FigPackReview:
         seconds and shows every raster spike in that window.
         Without a window, the raster uses the review's overview budget. This
         inspection does not edit the draft or change evaluation settings.
+
+        Parameters
+        ----------
+        unit_ids : sequence of int
+            Units of this review's curation to show.
+        time_range : tuple of (float, float), optional
+            ``(start, stop)`` raster window in recording-relative seconds.
+            Default ``None`` uses the overview budget.
+        include_traces : bool, optional
+            Also add a bounded spike-on-trace figure. Default ``False``.
         """
         from spyglass.spikesorting.v2._storage.observation_io import (
             cached_review_timeline,
@@ -452,6 +477,12 @@ class FigPackReview:
         Use ``panel = review.commit_panel()`` after saving the browser draft.
         Merge commits open the reevaluated child for verification. A no-change
         review has an explicit "Record reviewed" button.
+
+        Parameters
+        ----------
+        open_browser : bool, optional
+            Open the verification review of a merge commit in a browser.
+            Default ``True``.
         """
         from spyglass.spikesorting.v2._review.notebook import ReviewCommitPanel
 
@@ -513,7 +544,24 @@ class FigPackReview:
 
     @classmethod
     def resume(cls, review_id) -> "FigPackReview":
-        """Reconstruct a review from its selection, bundle, and profile."""
+        """Reconstruct a review from its selection, bundle, and profile.
+
+        Opens any reviewer's review, not only the current user's.
+
+        Parameters
+        ----------
+        review_id : uuid.UUID or str
+            The ``figpack_curation_id`` that ``start_review`` printed.
+
+        Returns
+        -------
+        FigPackReview
+
+        Raises
+        ------
+        LookupError
+            If no review has this id, or its view was never built.
+        """
         from spyglass.spikesorting.v2._review.view import require_figpack
         from spyglass.spikesorting.v2.figpack_curation import (
             FigPackCuration,
@@ -778,8 +826,31 @@ class CurationChangeSet:
     ) -> "ReviewImportReceipt":
         """Commit exactly this preview after a UUID + annotation-hash recheck.
 
-        ``on_commit`` receives the durable child before reevaluation. Connected
-        delivery uses it to retain the child's identity if later work fails.
+        Parameters
+        ----------
+        conflict_resolutions : dict, optional
+            Merged ``unit_id`` to the labels it keeps; needs one entry per
+            predicted merge label conflict.
+        confirm_no_changes : bool, optional
+            Record a review with no edits as an explicit reviewed child.
+            Default ``False`` raises on an empty change set.
+        on_commit : callable, optional
+            Receives the durable child ``CurationRef`` before reevaluation.
+            Connected delivery uses it to retain the child's identity if later
+            work fails.
+
+        Returns
+        -------
+        ReviewImportReceipt
+
+        Raises
+        ------
+        ReviewChangedSincePreviewError
+            If the bundle changed since this preview.
+        UnresolvedMergeLabelConflictError
+            If a merge label conflict has no resolution.
+        ValueError
+            If there are no changes and ``confirm_no_changes`` is False.
         """
         return _commit_change_set(
             self,
