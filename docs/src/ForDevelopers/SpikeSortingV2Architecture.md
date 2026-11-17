@@ -540,14 +540,21 @@ helper must import without a database.
     nullable self-referential foreign key, and an equivalent two-FK edge table
     breaks the delete cascade.
 - `insert_curation` reserves each `curation_id` from `CurationIdCounter`, one
-    row per `SortingSelection`, under a row lock, and commits the reservation
-    before staging the NWB. A number is never given twice while the selection
+    row per `SortingSelection`, and commits the reservation before staging the
+    NWB. A number is never given twice while the selection
     exists, so a merge id never comes back with other spikes after a curation
     or `Sorting` delete. Deleting the selection deletes its counter, and its
     deterministic `sorting_id` then numbers from 0 again.
-- The insert transaction takes the same lock and runs under READ COMMITTED,
-    so it sees a root or matching child committed while it waited. It keeps one
-    root per sort and returns that root (or child) instead. A fresh sort's
+- The reservation and the insert decision each hold the sort's MySQL named
+    lock (`CurationV2._curation_lock`, `sgcur:` plus a key hash), taken before
+    their transaction starts, so the snapshot holds every row the previous
+    holder committed. Named locks take no row or gap locks, so sorts never
+    block each other; row locks on a `sorting_id` range would gap-lock the next
+    sort's rows. The NWB is staged between the two without the lock. A wait is
+    logged, and `CURATION_LOCK_TIMEOUT_S` raises `CurationLockTimeoutError`.
+    `insert_curation` refuses to run inside an open transaction, whose old
+    snapshot would hide the previous holder's rows. The insert keeps one root
+    per sort and returns that root (or a matching child) instead. A fresh sort's
     first root is 0 unless two root inserts race; code finds a root by
     `parent_curation_id == -1`.
 - Lineage integrity is kept by `insert_curation`, the only writer, and

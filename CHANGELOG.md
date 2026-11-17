@@ -568,6 +568,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         `SortingSelection` row exists (new `CurationIdCounter` table), so a
         curation made after a delete gets a new number and merge id; a sort
         still has one root, found by `parent_curation_id == -1` #1609
+    - v2 `CurationV2.insert_curation` serializes one sort's curations with a
+        MySQL named lock, raises `CurationLockTimeoutError` if it cannot take
+        it, and refuses to run inside an open transaction #1609
     - v2 `curation_evaluation_id` includes the curation's `curation_uuid`, and
         `CurationEvaluation.populate` refuses a selection whose curation was
         replaced #1609

@@ -13,10 +13,12 @@ External NWB Units stay in ``ImportedSpikeSorting``.
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from collections import defaultdict
 
 import datajoint as dj
+from datajoint.hash import key_hash
 from datajoint.utils import get_master
 
 from spyglass.common.common_ephys import Electrode  # noqa: F401
@@ -50,6 +52,7 @@ from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import _get_lock
 from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,
 )
@@ -70,7 +73,10 @@ from spyglass.spikesorting.v2.curation_api import (
     CurationRef,
     _read_unit_properties,
 )
-from spyglass.spikesorting.v2.exceptions import ConcatBrainRegionAmbiguousError
+from spyglass.spikesorting.v2.exceptions import (
+    ConcatBrainRegionAmbiguousError,
+    CurationLockTimeoutError,
+)
 from spyglass.spikesorting.v2.recording import Recording
 
 if TYPE_CHECKING:
@@ -80,6 +86,9 @@ if TYPE_CHECKING:
     import spikeinterface as si
 
 schema = dj.schema("spikesorting_v2_curation")
+
+#: Seconds an insert waits for another session's curation lock of its sort.
+CURATION_LOCK_TIMEOUT_S = 600
 
 CONCAT_MERGE_GATE_MESSAGE = (
     "CurationV2 for concat-backed sorting {sorting_id} was NOT registered in "
@@ -105,11 +114,16 @@ def _figpack_module(table):
     return figpack_curation
 
 
+def _curation_lock_name(sorting_id) -> str:
+    """MySQL named-lock name of a sort's curation inserts (64-char cap)."""
+    return "sgcur:" + key_hash({"sorting_id": str(uuid.UUID(str(sorting_id)))})
+
+
 @schema
 class CurationIdCounter(SpyglassMixin, dj.Manual):
     """The next unused ``curation_id`` of each sort selection.
 
-    ``CurationV2.insert_curation`` reserves numbers here under a row lock, so
+    ``CurationV2.insert_curation`` reserves numbers here under a named lock, so
     a number given to one curation of a sort is never given to another, even
     after that curation or the ``Sorting`` row is deleted. The row goes with
     its ``SortingSelection``. Written only by ``CurationV2.insert_curation``.
@@ -464,7 +478,8 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
 
         ``curation_id`` is reserved from ``CurationIdCounter`` before staging,
         so it is never one an earlier curation of the sort had. A sort keeps
-        one root; the insert checks for it under the counter lock.
+        one root; the insert checks for it under the sort's named lock. Must
+        run outside an open transaction.
 
         Parameters
         ----------
@@ -537,7 +552,17 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
             curation already exists and non-default parameters were passed
             without ``reuse_existing=True``; or if ``labels`` reference
             truly-stray unit_id(s) and ``allow_unknown_unit_ids`` is False.
+        RuntimeError
+            If called inside an open DataJoint transaction.
+        CurationLockTimeoutError
+            If another session holds the sort's curation lock too long.
         """
+        if cls.connection.in_transaction:
+            raise RuntimeError(
+                "CurationV2.insert_curation must be called outside an open "
+                "DataJoint transaction: it serializes curations of a sort and "
+                "commits its own transactions."
+            )
         sorting_id = sorting_key["sorting_id"]
         # This order sets the NWB unit write order; DataJoint has no default.
         sorting_units = (Sorting.Unit & {"sorting_id": sorting_id}).fetch(
@@ -735,41 +760,38 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         )
 
     @classmethod
-    def _read_committed_next_transaction(cls) -> None:
-        """Let the next transaction read rows committed while it waits.
+    @contextmanager
+    def _curation_lock(cls, sorting_id):
+        """Hold the sort's MySQL named lock for the block.
 
-        DataJoint starts a transaction with a consistent snapshot, which would
-        hide rows another insert committed while this one waited for the
-        counter lock. A caller's open transaction is left as it is.
+        Every number reservation and insert decision of a sort runs under it,
+        one at a time. Take it before the transaction starts, so the
+        transaction's snapshot holds every row the previous holder committed.
+        The same session may take it again; each take is released once.
+
+        Raises
+        ------
+        CurationLockTimeoutError
+            If the lock is not free within ``CURATION_LOCK_TIMEOUT_S``.
         """
-        if not cls.connection.in_transaction:
-            cls.connection.query(
-                "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+        name = _curation_lock_name(sorting_id)
+        connection = cls.connection
+        if not _get_lock(connection, name, 0):
+            logger.info(
+                "CurationV2: waiting for another curation insert of "
+                f"sorting_id={sorting_id}"
             )
-
-    @classmethod
-    def _lock_curation_counter(cls, sorting_id) -> int:
-        """Lock the sort's ``CurationIdCounter`` row; return its next id.
-
-        Call inside a transaction; the lock holds until it ends, so curation
-        inserts of one sort run one at a time. Creates the row at 0 for a
-        fresh sort.
-        """
-        counter = CurationIdCounter.full_table_name
-        sorting_bytes = uuid.UUID(str(sorting_id)).bytes
-        # Takes the row's exclusive lock whether it inserts or not.
-        cls.connection.query(
-            f"INSERT INTO {counter} (sorting_id, next_curation_id) "
-            "VALUES (%s, 0) "
-            "ON DUPLICATE KEY UPDATE next_curation_id = next_curation_id",
-            args=(sorting_bytes,),
-        )
-        (next_id,) = cls.connection.query(
-            f"SELECT next_curation_id FROM {counter} WHERE sorting_id = %s "
-            "FOR UPDATE",
-            args=(sorting_bytes,),
-        ).fetchone()
-        return int(next_id)
+            if not _get_lock(connection, name, CURATION_LOCK_TIMEOUT_S):
+                raise CurationLockTimeoutError(
+                    "CurationV2: another session held the curation lock of "
+                    f"sorting_id={sorting_id} for over "
+                    f"{CURATION_LOCK_TIMEOUT_S} s. Retry once it finishes, "
+                    "or end the session that holds it."
+                )
+        try:
+            yield
+        finally:
+            connection.query("SELECT RELEASE_LOCK(%s)", args=(name,))
 
     @classmethod
     def _reserve_curation_id(cls, sorting_id) -> int:
@@ -778,16 +800,24 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         Commits before the NWB is staged, so a failed insert leaves a gap.
         The ``max + 1`` term covers rows inserted around ``insert_curation``.
         """
-        cls._read_committed_next_transaction()
-        with cls._safe_context():
-            next_id = cls._lock_curation_counter(sorting_id)
-            existing = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
-            curation_id = max([next_id, *(int(c) + 1 for c in existing)])
-            cls.connection.query(
-                f"UPDATE {CurationIdCounter.full_table_name} "
-                "SET next_curation_id = %s WHERE sorting_id = %s",
-                args=(curation_id + 1, uuid.UUID(str(sorting_id)).bytes),
+        counter_key = {"sorting_id": sorting_id}
+        with cls._curation_lock(sorting_id), cls.connection.transaction:
+            next_ids = (CurationIdCounter & counter_key).fetch(
+                "next_curation_id"
             )
+            existing = (cls & counter_key).fetch("curation_id")
+            curation_id = max(
+                [
+                    *(int(n) for n in next_ids),
+                    0,
+                    *(int(c) + 1 for c in existing),
+                ]
+            )
+            row = {**counter_key, "next_curation_id": curation_id + 1}
+            if len(next_ids):
+                CurationIdCounter.update1(row)
+            else:
+                CurationIdCounter.insert1(row)
         return curation_id
 
     @classmethod
@@ -864,7 +894,7 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         ``merge_group_rows`` and ``parent_merge_group_rows`` are inserted
         verbatim.
 
-        Holds the sort's counter lock, then calls ``find_existing``; if it
+        Holds the sort's curation lock, then calls ``find_existing``; if it
         returns a key (the sort's root, or a matching child), inserts nothing
         and returns that key. This keeps one root per sort.
         """
@@ -910,9 +940,7 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         register_merge = source.kind == "recording"
 
-        cls._read_committed_next_transaction()
-        with cls._safe_context():
-            cls._lock_curation_counter(sorting_id)
+        with cls._curation_lock(sorting_id), cls._safe_context():
             existing = find_existing()
             if existing is not None:
                 return existing

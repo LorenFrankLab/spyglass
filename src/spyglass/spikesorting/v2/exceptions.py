@@ -247,6 +247,15 @@ class CurationNotFoundError(SpikeSortingV2Error, LookupError):
     """
 
 
+class CurationLockTimeoutError(SpikeSortingV2Error, TimeoutError):
+    """Raise when a curation insert cannot take its sort's lock in time.
+
+    ``CurationV2.insert_curation`` serializes the curations of one sort with
+    a MySQL named lock; another session held it past
+    ``curation.CURATION_LOCK_TIMEOUT_S``.
+    """
+
+
 class UnsupportedMetricValueError(SpikeSortingV2Error, ValueError):
     """Raise when a metric write receives a non-scalar or non-numeric cell.
 

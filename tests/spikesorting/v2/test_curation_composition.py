@@ -550,7 +550,7 @@ def test_matching_child_committed_while_waiting_is_returned(
     planted_three_unit_sort, monkeypatch
 ):
     """A reuse_existing child whose early check missed an identical child
-    finds it under the counter lock and returns it instead of a duplicate."""
+    finds it under the curation lock and returns it instead of a duplicate."""
     from spyglass.spikesorting.v2._curation import insert as _curation_insert
     from spyglass.spikesorting.v2.curation import CurationV2
 
@@ -588,54 +588,145 @@ def test_matching_child_committed_while_waiting_is_returned(
         clear_curations_for(sort_pk)
 
 
-@pytest.mark.slow
-@pytest.mark.integration
-def test_reservation_waits_for_the_counter_lock(planted_three_unit_sort):
-    """A reservation waits for another session's counter lock and then reads
-    the number that session committed."""
-    import time
-    from concurrent.futures import ThreadPoolExecutor
-
+def _other_connection():
     import datajoint as dj
 
-    from spyglass.spikesorting.v2.curation import CurationIdCounter, CurationV2
-
-    sort_pk = planted_three_unit_sort
-    clear_curations_for(sort_pk)
-    sorting_id = sort_pk["sorting_id"]
-    other = dj.Connection(
+    return dj.Connection(
         dj.config["database.host"],
         dj.config["database.user"],
         dj.config["database.password"],
         port=dj.config["database.port"],
     )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_reservation_waits_for_the_curation_lock(planted_three_unit_sort):
+    """A reservation waits for another session's curation lock and then reads
+    the number that session committed while holding it.
+
+    Fails if the reservation's transaction started before the lock was held:
+    its snapshot would still show the old counter value.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from spyglass.spikesorting.v2.curation import (
+        CurationIdCounter,
+        CurationV2,
+        _curation_lock_name,
+    )
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    sorting_id = sort_pk["sorting_id"]
+    name = _curation_lock_name(sorting_id)
+    other = _other_connection()
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         assert CurationV2._reserve_curation_id(sorting_id) == 0
-        counter = CurationIdCounter.full_table_name
-        sorting_bytes = uuid.UUID(str(sorting_id)).bytes
-        other.start_transaction()
-        (held,) = other.query(
-            f"SELECT next_curation_id FROM {counter} WHERE sorting_id = %s "
-            "FOR UPDATE",
-            args=(sorting_bytes,),
-        ).fetchone()
+        (held,) = other.query("SELECT GET_LOCK(%s, 0)", args=(name,)).fetchone()
         assert held == 1
         waiting = pool.submit(CurationV2._reserve_curation_id, sorting_id)
         time.sleep(1.0)
         assert not waiting.done(), "the reservation did not wait for the lock"
         other.query(
-            f"UPDATE {counter} SET next_curation_id = 6 WHERE sorting_id = %s",
-            args=(sorting_bytes,),
+            f"UPDATE {CurationIdCounter.full_table_name} "
+            "SET next_curation_id = 6 WHERE sorting_id = %s",
+            args=(uuid.UUID(str(sorting_id)).bytes,),
         )
-        other.commit_transaction()
+        other.query("SELECT RELEASE_LOCK(%s)", args=(name,))
         assert waiting.result(timeout=60) == 6
         assert (CurationIdCounter & sort_pk).fetch1("next_curation_id") == 7
     finally:
-        if other.in_transaction:
-            other.cancel_transaction()
         other.close()
         pool.shutdown(wait=True)
+        clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_curation_lock_times_out_and_pairs_releases(
+    planted_three_unit_sort, monkeypatch, caplog
+):
+    """A held lock makes the insert wait with a log line and then raise; the
+    same session can take its own lock again, and every take is released,
+    also on error."""
+    from spyglass.spikesorting.v2 import curation
+    from spyglass.spikesorting.v2.curation import (
+        CurationV2,
+        _curation_lock_name,
+    )
+    from spyglass.spikesorting.v2.exceptions import CurationLockTimeoutError
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    name = _curation_lock_name(sort_pk["sorting_id"])
+    other = _other_connection()
+    try:
+        assert other.query("SELECT GET_LOCK(%s, 0)", args=(name,)).fetchone()
+        monkeypatch.setattr(curation, "CURATION_LOCK_TIMEOUT_S", 1)
+        caplog.set_level("INFO")
+        with pytest.raises(CurationLockTimeoutError, match="curation lock"):
+            CurationV2.insert_curation(sort_pk)
+        assert any(
+            "waiting for another curation insert" in r.message
+            for r in caplog.records
+        )
+        assert not (CurationV2 & sort_pk)
+        other.query("SELECT RELEASE_LOCK(%s)", args=(name,))
+
+        def is_free():
+            return other.query(
+                "SELECT IS_FREE_LOCK(%s)", args=(name,)
+            ).fetchone()[0]
+
+        with CurationV2._curation_lock(sort_pk["sorting_id"]):
+            # Nested take by the same session, as a reservation under it.
+            assert CurationV2._reserve_curation_id(sort_pk["sorting_id"]) == 0
+            assert not is_free()
+        assert is_free()
+        with pytest.raises(ZeroDivisionError):
+            with CurationV2._curation_lock(sort_pk["sorting_id"]):
+                1 / 0
+        assert is_free()
+    finally:
+        other.close()
+        clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_curation_lock_is_held_before_each_transaction(
+    planted_three_unit_sort, monkeypatch
+):
+    """Both the reservation and the insert decision take the lock outside a
+    transaction, and an insert inside a caller's transaction is refused."""
+    from contextlib import contextmanager
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    real_lock = CurationV2._curation_lock.__func__
+    in_transaction_at_take = []
+
+    @contextmanager
+    def recording_lock(cls, sorting_id):
+        in_transaction_at_take.append(cls.connection.in_transaction)
+        with real_lock(cls, sorting_id):
+            yield
+
+    try:
+        monkeypatch.setattr(
+            CurationV2, "_curation_lock", classmethod(recording_lock)
+        )
+        CurationV2.insert_curation(sort_pk)
+        assert in_transaction_at_take == [False, False]
+        with CurationV2.connection.transaction:
+            with pytest.raises(RuntimeError, match="outside an open"):
+                CurationV2.insert_curation(sort_pk, reuse_existing=True)
+    finally:
         clear_curations_for(sort_pk)
 
 
