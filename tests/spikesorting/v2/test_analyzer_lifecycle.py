@@ -407,19 +407,20 @@ def test_zero_unit_sort_inventory_status_and_recompute_match():
     AnalyzerWaveformParameters.insert_default()
     SorterParameters.insert_default()
     sid = uuid.uuid4()
-    SortingSelection.insert1(
-        {
-            "sorting_id": sid,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": "default",
-        },
-        allow_direct_insert=True,
-    )
-    # No file is read for a zero-unit sort, so the AnalysisNwbfile FK is
+    # No file or source is read for a zero-unit sort, so their FKs are
     # bypassed.
     conn = dj.conn()
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
+        SortingSelection.insert1(
+            {
+                "sorting_id": sid,
+                "sorter": "clusterless_thresholder",
+                "sorter_params_name": "default",
+                "recording_id": uuid.uuid4(),
+            },
+            allow_direct_insert=True,
+        )
         Sorting.insert1(
             {
                 "sorting_id": sid,

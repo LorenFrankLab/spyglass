@@ -70,9 +70,10 @@ Package root, `spyglass.spikesorting.v2`:
 - `describe_run`: a run summary as a receipt (stages, warnings, effective sorter
     configuration, merge ids). `describe_units`: per-unit sort-time snapshot.
 - `describe_epochs`: task epochs and interval lists on the acquisition clock,
-    with candidate recording keys and cache readiness. Pipeline output
-    intervals (a non-empty `IntervalList.pipeline`) are left out unless a
-    recording was already selected over them.
+    with candidate recording keys and cache readiness. Intervals that
+    spike sorting wrote as results (`IntervalList.pipeline` starting with
+    `spikesorting_`) are left out unless a recording was already selected over
+    them.
 - `describe_unit_match_choices`: the curations pinnable per group member.
 - `plan_v2_unit_match` / `plan_v2_unit_match_from_sorts` /
     `plan_v2_unit_match_from_curations`: a reviewable matching plan from a

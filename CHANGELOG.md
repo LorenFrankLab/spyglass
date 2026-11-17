@@ -536,9 +536,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         recording stage never read; an insert with that key raises #1609
     - v2 `Sorting.time_of_sort` is a `timestamp` the database server fills in, so
         sorts run on machines in different time zones compare #1609
-    - v2 `describe_epochs` lists only intervals a user would sort: task epochs,
-        intervals no pipeline wrote, and intervals already selected for a
-        recording #1609
+    - v2 `describe_epochs` leaves out the interval rows that spike sorting
+        writes as results (recording kept times, artifact detections), unless
+        a recording was already selected over one #1609
     - v2 `Recording` stores the times it was cut to in `IntervalList` (owned by
         `Recording.ValidInterval`, named `recording_{recording_id}`, pipeline
         `spikesorting_recording_v2`), as v1 does; read them with

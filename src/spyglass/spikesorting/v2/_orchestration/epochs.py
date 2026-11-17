@@ -66,17 +66,21 @@ def _interval_bounds(interval):
         return (), None, None, None, "invalid", str(exc)
 
 
-def _is_pipeline_output(interval) -> bool:
-    """Whether a pipeline wrote this interval list as one of its results."""
-    return bool(interval.get("pipeline"))
+def _is_sorting_output(interval) -> bool:
+    """Whether a spike sorting stage wrote this interval list as a result.
+
+    Every sorting version labels its recording and artifact rows with a
+    ``pipeline`` value that starts with ``spikesorting_``.
+    """
+    return str(interval.get("pipeline") or "").startswith("spikesorting_")
 
 
 def epoch_rows_to_dataframe(nwb_file_name, tasks, intervals, recordings):
     """Pure chooser from fetched rows; preserve labels, keys, bounds, and gaps.
 
-    A pipeline's own output interval (a non-empty ``pipeline``, such as a
-    recording's kept times or an artifact-detection result) is left out unless
-    it is a task epoch or a recording was already selected over it.
+    An interval a spike sorting stage wrote as its own result (a recording's
+    kept times, an artifact detection) is left out unless it is a task epoch or
+    a recording was already selected over it.
     """
     by_name = {row["interval_list_name"]: row for row in intervals}
     tasks_by_interval = {}
@@ -93,7 +97,7 @@ def epoch_rows_to_dataframe(nwb_file_name, tasks, intervals, recordings):
     sortable = {
         name
         for name, interval in by_name.items()
-        if not _is_pipeline_output(interval) or name in candidates_by_interval
+        if not _is_sorting_output(interval) or name in candidates_by_interval
     }
     for name in sorted(sortable | set(tasks_by_interval)):
         bounds, start, stop, duration, status, error = _interval_bounds(
@@ -217,9 +221,10 @@ def _recording_candidates(selection_rows):
 def describe_epochs(nwb_file_name: str, sort_group_id: int | None = None):
     """List exact epoch/interval choices and existing recording-cache readiness.
 
-    - Lists the intervals a user would sort: task epochs, intervals no pipeline
-      wrote (an empty ``IntervalList.pipeline``), and any interval a recording
-      was already selected over. Other pipeline outputs are left out; query
+    - Lists the intervals a user would sort. The result rows that spike
+      sorting itself writes (``IntervalList.pipeline`` starting with
+      ``spikesorting_``: recording kept times, artifact detections) are left
+      out unless a recording was already selected over one; query
       ``IntervalList`` to see every row.
     - ``kind``: ``'task_epoch'`` for TaskEpoch-linked intervals, else
       ``'interval_list'``.

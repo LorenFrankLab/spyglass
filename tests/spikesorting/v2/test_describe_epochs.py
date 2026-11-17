@@ -118,8 +118,8 @@ def test_epoch_chooser_reports_empty_malformed_and_orphaned_intervals():
     assert frame.loc["missing", "task_epoch_key"]["epoch"] == 3
 
 
-def test_epoch_chooser_lists_only_intervals_a_user_would_sort():
-    """Pipeline output intervals are hidden unless a task or recording uses one."""
+def test_epoch_chooser_leaves_out_sorting_result_intervals():
+    """Rows a sorting stage wrote are hidden unless a recording uses one."""
     times = [[0.0, 1.0]]
 
     def interval(name, pipeline=""):
@@ -135,18 +135,16 @@ def test_epoch_chooser_lists_only_intervals_a_user_would_sort():
         [
             interval("01_r1"),
             interval("raw data valid times"),
-            interval("my interval"),
+            interval("my labelled interval", "my_lab_epochs"),
             interval("pos 0 valid times", "position"),
             interval("recording_abc", "spikesorting_recording_v2"),
-            interval(
-                "artifact_detection_abc", "spikesorting_artifact_detection_v2"
-            ),
-            interval("lfp valid times", "lfp_v1"),
-            interval("sorted pipeline output", "lfp_v1"),
+            interval("artifact_abc", "spikesorting_artifact_detection_v2"),
+            interval("v1 artifact", "spikesorting_artifact_v1"),
+            interval("resorted result", "spikesorting_recording_v1"),
         ],
         [
             {
-                "interval_list_name": "sorted pipeline output",
+                "interval_list_name": "resorted result",
                 "sort_group_id": 0,
                 "recording_id": "r0",
             }
@@ -155,9 +153,10 @@ def test_epoch_chooser_lists_only_intervals_a_user_would_sort():
 
     assert list(frame["interval_list_name"]) == [
         "01_r1",
-        "my interval",
+        "my labelled interval",
+        "pos 0 valid times",
         "raw data valid times",
-        "sorted pipeline output",
+        "resorted result",
     ]
 
 
