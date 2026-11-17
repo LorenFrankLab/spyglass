@@ -182,6 +182,9 @@ LabTeam.insert1(
 # is concat-shaped: `member_recording_ids` and `concat_recording_id` in place of
 # the single-session `recording_id`, plus `member_artifacts` with exact detection
 # IDs, statuses and masked durations. Inspect the scientific setup in the receipt.
+# `run_v2_concat_pipeline` first runs the checks of `preflight_v2_concat_pipeline`;
+# call it with the group key and the run's options to check without writing
+# (each member's problems start with `concat member {i}: `).
 # Detection choices are frozen; no mask is inherited from an earlier sort. The
 # synthetic concat curation itself stays out of `SpikeSortingOutput`; the
 # summary instead returns one wall-clock-aligned `member_merge_ids` entry per

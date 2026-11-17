@@ -291,6 +291,8 @@ print(report.summary())
 # existing rows and returns the same run summary (same `root_merge_id`) without
 # inserting duplicates. After a failure, rerun the same inputs to reuse completed
 # stages; a failed sorter restarts its stage, not an internal checkpoint.
+# Each stage logs its start and time, and a failed stage's `PipelineStageError`
+# names the stages that finished.
 # If you want to see each table this call fills, the
 # [Tables](./10_Spike_SortingV2_Tables.ipynb) notebook runs them one at a time.
 
@@ -307,7 +309,8 @@ run_summary = run_v2_pipeline(
 # `describe_run(run_summary)` renders the run as a receipt with:
 #
 # - a summary row: `n_units`, `root_merge_id` (the uncurated root),
-#   `auto_labeled_merge_id` (the auto-labeled child, `None` until you curate),
+#   `auto_labeled_merge_id` (the auto-labeled child, `None` unless the run
+#   passed `auto_curate=True`),
 #   and a `"root only"` / `"auto-labeled"` status;
 # - one row per stage: `*_status` is `"computed"` (ran this call), `"reused"`
 #   (row already existed) or `"skipped"` (the preset has no such stage), and
@@ -315,6 +318,8 @@ run_summary = run_v2_pipeline(
 # - one row per advisory `warning`;
 # - one `config` row per effective sorter setting (the kwargs SpikeInterface
 #   received, whiten routing, seed, job kwargs, backend).
+#
+# `print(run_summary.summary())` prints the same receipt as plain text.
 #
 # A **zero-unit** sort is a legitimate quiet-shank result (it still writes an
 # empty curation and merge row) and appears as a warning row. Pass
