@@ -118,6 +118,49 @@ def test_epoch_chooser_reports_empty_malformed_and_orphaned_intervals():
     assert frame.loc["missing", "task_epoch_key"]["epoch"] == 3
 
 
+def test_epoch_chooser_lists_only_intervals_a_user_would_sort():
+    """Pipeline output intervals are hidden unless a task or recording uses one."""
+    times = [[0.0, 1.0]]
+
+    def interval(name, pipeline=""):
+        return {
+            "interval_list_name": name,
+            "valid_times": times,
+            "pipeline": pipeline,
+        }
+
+    frame = epoch_rows_to_dataframe(
+        "session.nwb",
+        [{"epoch": 1, "task_name": "run", "interval_list_name": "01_r1"}],
+        [
+            interval("01_r1"),
+            interval("raw data valid times"),
+            interval("my interval"),
+            interval("pos 0 valid times", "position"),
+            interval("recording_abc", "spikesorting_recording_v2"),
+            interval(
+                "artifact_detection_abc", "spikesorting_artifact_detection_v2"
+            ),
+            interval("lfp valid times", "lfp_v1"),
+            interval("sorted pipeline output", "lfp_v1"),
+        ],
+        [
+            {
+                "interval_list_name": "sorted pipeline output",
+                "sort_group_id": 0,
+                "recording_id": "r0",
+            }
+        ],
+    )
+
+    assert list(frame["interval_list_name"]) == [
+        "01_r1",
+        "my interval",
+        "raw data valid times",
+        "sorted pipeline output",
+    ]
+
+
 def test_epoch_chooser_has_stable_empty_columns():
     frame = epoch_rows_to_dataframe("empty.nwb", [], [], [])
     assert frame.empty
