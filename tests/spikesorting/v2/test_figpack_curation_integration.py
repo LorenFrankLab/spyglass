@@ -509,7 +509,10 @@ def test_verified_save_refuses_reused_numeric_curation_id(
     planted_two_unit_sort,
 ):
     """An old figure cannot attach after its numeric parent id is reused."""
-    from tests.spikesorting.v2._ingest_helpers import clear_curations_for
+    from tests.spikesorting.v2._ingest_helpers import (
+        clear_curations_for,
+        reuse_curation_number,
+    )
 
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.exceptions import FigPackIdentityError
@@ -521,6 +524,7 @@ def test_verified_save_refuses_reused_numeric_curation_id(
         uri = FigPackCuration.build_curation_view(original, upload=False)
         original_uuid = (CurationV2 & original).fetch1("curation_uuid")
         (CurationV2 & original).delete(safemode=False)
+        reuse_curation_number(original)
         replacement = CurationV2.create_initial_curation(planted_two_unit_sort)
         assert replacement["curation_id"] == original["curation_id"]
         assert (CurationV2 & replacement).fetch1("curation_uuid") != (

@@ -703,8 +703,10 @@ its observed intervals.
         `update1(..., allow_master_mutation=True)` and
         `insert(..., allow_direct_insert=True)`.
     - Each `CurationV2` generation gets a database-unique `curation_uuid`.
-        Deleting and recreating a numeric `curation_id` gives a new UUID;
-        `reuse_existing=True` keeps the existing generation.
+        A `curation_id` is not given again while its `SortingSelection` row
+        exists, so a new curation after a delete gets a new number, a new
+        merge id and a new UUID; `reuse_existing=True` keeps the existing
+        generation.
     - `UnitMatch` freezes its matchable units (`UnitMatch.MatchableUnit`), so
         later relabels cannot change a populated result.
     - A `SharedArtifactGroup` is keyed by session and name and is made with

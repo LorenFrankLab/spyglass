@@ -3,6 +3,8 @@
 import uuid
 
 import pytest
+
+from tests.spikesorting.v2._ingest_helpers import reuse_curation_number
 from tests.spikesorting.v2._ingest_helpers import matched_unit_ids
 
 
@@ -113,6 +115,7 @@ def test_match_plan_rejects_recreated_curation(reviewed_curation, source):
         )
 
         (CurationV2 & child).delete(safemode=False)
+        reuse_curation_number(child)
         replacement = CurationV2.insert_curation(
             sorting_key,
             parent_curation_id=root["curation_id"],

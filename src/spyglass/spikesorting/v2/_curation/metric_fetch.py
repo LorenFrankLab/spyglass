@@ -6,6 +6,7 @@ DataJoint tables are imported inside the functions.
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from spyglass.spikesorting.v2._curation.metrics import (
@@ -22,6 +23,9 @@ from spyglass.spikesorting.v2._artifacts.readers import (
     read_recording_artifact_valid_times,
 )
 from spyglass.spikesorting.v2._core.observed_time import OBSERVATION_VERSION
+from spyglass.spikesorting.v2._core.selection_identity import (
+    evaluation_selection_id,
+)
 from spyglass.spikesorting.v2._curation.analyzer import (
     merged_analyzer_cache_inputs,
 )
@@ -29,6 +33,7 @@ from spyglass.spikesorting.v2._storage.recompute import analyzer_hash_for_role
 from spyglass.spikesorting.v2.exceptions import (
     AnalyzerFolderInvalidError,
     AnalyzerFolderMissingError,
+    SchemaBypassError,
     ZeroUnitAnalyzerError,
 )
 
@@ -82,9 +87,9 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     sorting_key = {"sorting_id": sorting_id}
 
     # Re-check: allow_direct_insert can bypass selection validation.
-    merges_applied, curated_analysis_file_name = (
+    merges_applied, curated_analysis_file_name, curation_uuid = (
         CurationV2 & curation_key
-    ).fetch1("merges_applied", "analysis_file_name")
+    ).fetch1("merges_applied", "analysis_file_name", "curation_uuid")
     CurationV2.assert_committed_curation(
         curation_key,
         context="CurationEvaluation",
@@ -98,6 +103,29 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
             f"observation version is {OBSERVATION_VERSION}. Recreate the "
             "selection with CurationEvaluationSelection.insert_selection "
             "and populate that."
+        )
+    expected_id = evaluation_selection_id(
+        {
+            name: sel[name]
+            for name in (
+                "sorting_id",
+                "curation_id",
+                "metric_params_name",
+                "auto_curation_rules_name",
+                "metric_waveform_params_name",
+                "observation_version",
+            )
+        },
+        curation_uuid,
+    )
+    if uuid.UUID(str(sel["curation_evaluation_id"])) != expected_id:
+        raise SchemaBypassError(
+            f"CurationEvaluationSelection {sel['curation_evaluation_id']} is "
+            f"not the content-addressed id {expected_id} for its fields and "
+            f"the live curation (curation_uuid {curation_uuid}): the curation "
+            "was replaced after the selection was made, or the row bypassed "
+            "insert_selection. Drop the row and re-insert via "
+            "insert_selection()."
         )
 
     qm = (

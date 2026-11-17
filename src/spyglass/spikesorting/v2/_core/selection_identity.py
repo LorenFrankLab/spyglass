@@ -53,6 +53,29 @@ def deterministic_id(kind: str, payload: dict) -> uuid.UUID:
     return _deterministic_id(V2_SELECTION_NAMESPACE, kind, payload)
 
 
+def evaluation_selection_id(identity: dict, curation_uuid) -> uuid.UUID:
+    """Return the ``curation_evaluation_id`` of a selection.
+
+    Parameters
+    ----------
+    identity : dict
+        The selection's ``sorting_id``, ``curation_id``,
+        ``metric_params_name``, ``auto_curation_rules_name``,
+        ``metric_waveform_params_name`` and ``observation_version``.
+    curation_uuid
+        The evaluated curation's ``curation_uuid``.
+
+    Returns
+    -------
+    uuid.UUID
+        The deterministic ``uuid5`` primary key.
+    """
+    return deterministic_id(
+        "curation_evaluation",
+        {**identity, "curation_uuid": str(curation_uuid)},
+    )
+
+
 def recording_identity_payload(key: dict) -> dict:
     """Build a ``RecordingSelection`` logical-identity payload.
 

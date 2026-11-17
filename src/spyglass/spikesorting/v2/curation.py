@@ -81,10 +81,6 @@ if TYPE_CHECKING:
 
 schema = dj.schema("spikesorting_v2_curation")
 
-#: Retries when a concurrent insert claims the allocated ``curation_id``
-#: (allocated outside the transaction).
-_CURATION_ID_RACE_RETRIES = 5
-
 CONCAT_MERGE_GATE_MESSAGE = (
     "CurationV2 for concat-backed sorting {sorting_id} was NOT registered in "
     "SpikeSortingOutput: its spike times are on the concatenated recording's "
@@ -110,6 +106,23 @@ def _figpack_module(table):
 
 
 @schema
+class CurationIdCounter(SpyglassMixin, dj.Manual):
+    """The next unused ``curation_id`` of each sort selection.
+
+    ``CurationV2.insert_curation`` reserves numbers here under a row lock, so
+    a number given to one curation of a sort is never given to another, even
+    after that curation or the ``Sorting`` row is deleted. The row goes with
+    its ``SortingSelection``. Written only by ``CurationV2.insert_curation``.
+    """
+
+    definition = """
+    -> SortingSelection
+    ---
+    next_curation_id: int  # lowest curation_id not yet given to this sort
+    """
+
+
+@schema
 class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
     """Manual curation labels + merge groups for a sorted Sorting.
 
@@ -118,8 +131,12 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
       DataJoint cannot declare a nullable self-FK; :meth:`delete` guards it.
     - ``object_id`` is the column name ``SpikeSortingOutput`` reads in
       ``get_spike_times()``.
-    - ``curation_uuid`` identifies one row generation; ``curation_id`` can be
-      reused after deletion.
+    - ``curation_id`` comes from ``CurationIdCounter`` and is not given again
+      while the ``SortingSelection`` row exists. A fresh sort's first root is
+      0 unless two root inserts race. ``curation_uuid`` identifies one row
+      generation.
+    - One root (``parent_curation_id == -1``) per sort; find it by that, not
+      by its number.
     - Write only through :meth:`insert_curation`; direct ``insert`` and
       ``update1`` are blocked.
     """
@@ -439,6 +456,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         curated-units NWB is staged separately and deleted on any later failure
         (DataJoint cannot roll back filesystem side effects).
 
+        ``curation_id`` is reserved from ``CurationIdCounter`` before staging,
+        so it is never one an earlier curation of the sort had. A sort keeps
+        one root; the insert checks for it under the counter lock.
+
         Parameters
         ----------
         sorting_key
@@ -476,10 +497,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         reuse_existing : bool, optional
             Root: if a root exists and non-default arguments were passed,
             False (default) raises ``ValueError`` and True returns the
-            existing root, including one a concurrent insert created first
-            (a root always takes ``curation_id`` 0). Child: True returns an
-            existing child whose parent, labels, merge groups,
-            ``apply_merge``, description, and source all match.
+            existing root, including one a concurrent insert created first.
+            Child: True returns an existing child whose parent, labels, merge
+            groups, ``apply_merge``, description, and source all match,
+            including one a concurrent insert created first.
         allow_unknown_unit_ids
             For label keys absent from both ``Sorting.Unit`` and the curated
             units: False (default) raises ``ValueError``, True warns and drops
@@ -553,7 +574,7 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
             raw_sorting_units=sorting_units,
         )
 
-        curation_id, unit_rows, kept_unit_to_contributors, labels = (
+        _, unit_rows, kept_unit_to_contributors, labels = (
             build_curation_insert_plan(
                 sorting_id=sorting_id,
                 sorting_units=source_units,
@@ -561,19 +582,21 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
                 apply_merge=apply_merge,
                 labels=labels,
                 allow_unknown_unit_ids=allow_unknown_unit_ids,
-                # A root always takes id 0, so concurrent roots collide.
-                curation_id=(
-                    0
-                    if parent_curation_id == -1
-                    else cls._next_curation_id(sorting_id)
-                ),
+                # Stamped below, so a reuse return does not spend a number.
+                curation_id=-1,
                 parent_labels=parent_labels,
                 label_policy=label_policy,
             )
         )
 
-        def _find_matching_child():
-            # Reads ``unit_rows`` at call time: a curation_id retry re-stamps it.
+        def _find_existing():
+            if parent_curation_id == -1:
+                roots = (
+                    cls & {"sorting_id": sorting_id, "parent_curation_id": -1}
+                ).fetch("KEY", as_dict=True, order_by="curation_id", limit=1)
+                return roots[0] if roots else None
+            if not reuse_existing:
+                return None
             return _curation_insert.find_matching_child_curation(
                 cls,
                 sorting_id=sorting_id,
@@ -586,138 +609,105 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
                 curation_source=curation_source,
             )
 
-        if parent_curation_id != -1 and reuse_existing:
-            existing_child = _find_matching_child()
-            if existing_child is not None:
-                logger.warning(
-                    "CurationV2.insert_curation: matching child curation "
-                    f"already exists for sorting_id={sorting_id}, "
-                    f"parent_curation_id={parent_curation_id}; returning "
-                    "existing key without staging a new NWB."
-                )
-                return existing_child
-
-        # Concurrent children can allocate the same curation_id; retry on
-        # DuplicateError with a fresh id.
-        for attempt in range(_CURATION_ID_RACE_RETRIES + 1):
-            # Random, not content-derived, so a recreated curation_id never
-            # makes stale caches look current.
-            curation_uuid = uuid.uuid4()
-            # Shared by the NWB lineage and the DB insert so both agree.
-            merge_group_rows, parent_merge_group_rows = (
-                build_merge_provenance_rows(
+        def _reuse(existing):
+            if parent_curation_id == -1:
+                # Warns, or raises for inputs the root would ignore.
+                return _curation_insert.validate_parent_or_reuse_root(
+                    cls,
                     sorting_id=sorting_id,
-                    curation_id=curation_id,
-                    kept_unit_to_contributors=kept_unit_to_contributors,
-                    parent_raw_contributors=parent_raw_contributors,
-                )
-            )
-
-            # Stage outside the transaction to keep it short.
-            analysis_file_name, units_object_id, staged_parent_nwb = (
-                cls._stage_curation_artifact(
-                    sorting_id=sorting_id,
-                    kept_unit_to_contributors=kept_unit_to_contributors,
-                    apply_merge=apply_merge,
-                    labels=labels,
-                    unit_rows=unit_rows,
-                    source_units_abs_path=source_units_abs_path,
-                    merge_group_rows=merge_group_rows,
-                    curation_header={
-                        **build_curation_header(
-                            sorting_id=sorting_id,
-                            curation_id=curation_id,
-                            curation_uuid=curation_uuid,
-                            parent_curation_id=parent_curation_id,
-                            curation_source=curation_source,
-                            merges_applied=apply_merge,
-                            description=description,
-                        ),
-                        **runtime_environment_provenance(
-                            execution_params={"stage": "curation"}
-                        ),
-                    },
-                )
-            )
-
-            try:
-                cls._insert_curation_rows_transaction(
-                    sorting_id=sorting_id,
-                    curation_id=curation_id,
-                    curation_uuid=curation_uuid,
                     parent_curation_id=parent_curation_id,
-                    analysis_file_name=analysis_file_name,
-                    units_object_id=units_object_id,
-                    staged_parent_nwb=staged_parent_nwb,
+                    labels=labels,
+                    merge_groups=merge_groups,
+                    description=description,
                     apply_merge=apply_merge,
                     curation_source=curation_source,
-                    description=description,
-                    unit_rows=unit_rows,
-                    labels=labels,
-                    merge_group_rows=merge_group_rows,
-                    parent_merge_group_rows=parent_merge_group_rows,
-                    allow_custom_labels=allow_custom_labels,
+                    reuse_existing=reuse_existing,
                 )
-            except Exception as exc:
-                # DB rows rolled back; remove the staged file.
-                _unlink_staged_analysis_file(
-                    analysis_file_name, context="CurationV2.insert_curation"
-                )
-                if parent_curation_id == -1 and isinstance(
-                    exc, dj.errors.DuplicateError
-                ):
-                    # A concurrent insert created the root first; reuse it.
-                    existing_root = (
-                        _curation_insert.validate_parent_or_reuse_root(
-                            cls,
-                            sorting_id=sorting_id,
-                            parent_curation_id=parent_curation_id,
-                            labels=labels,
-                            merge_groups=merge_groups,
-                            description=description,
-                            apply_merge=apply_merge,
-                            curation_source=curation_source,
-                            reuse_existing=reuse_existing,
-                        )
-                    )
-                    if existing_root is not None:
-                        return existing_root
-                if (
-                    parent_curation_id != -1
-                    and isinstance(exc, dj.errors.DuplicateError)
-                    and attempt < _CURATION_ID_RACE_RETRIES
-                ):
-                    # The concurrent insert may be this same child.
-                    if reuse_existing:
-                        existing_child = _find_matching_child()
-                        if existing_child is not None:
-                            logger.warning(
-                                "CurationV2.insert_curation: a concurrent "
-                                "insert created the matching child for "
-                                f"sorting_id={sorting_id}, parent_curation_id="
-                                f"{parent_curation_id}; returning it instead of "
-                                "staging a duplicate."
-                            )
-                            return existing_child
-                    new_id = cls._next_curation_id(sorting_id)
-                    logger.warning(
-                        "CurationV2.insert_curation: curation_id "
-                        f"{curation_id} for sorting_id={sorting_id} was claimed "
-                        "by a concurrent insert; retrying with curation_id "
-                        f"{new_id} (attempt {attempt + 1})."
-                    )
-                    curation_id = new_id
-                    # Other rows are rebuilt from curation_id next iteration.
-                    unit_rows = [
-                        {**row, "curation_id": curation_id} for row in unit_rows
-                    ]
-                    continue
-                raise
-            return {"sorting_id": sorting_id, "curation_id": curation_id}
-        raise RuntimeError(  # pragma: no cover
-            "CurationV2.insert_curation: exhausted curation_id retries without "
-            "inserting or raising."
+            logger.warning(
+                "CurationV2.insert_curation: matching child curation "
+                f"already exists for sorting_id={sorting_id}, "
+                f"parent_curation_id={parent_curation_id}; returning "
+                "existing key without staging a new NWB."
+            )
+            return existing
+
+        if parent_curation_id != -1:
+            existing_child = _find_existing()
+            if existing_child is not None:
+                return _reuse(existing_child)
+
+        curation_id = cls._reserve_curation_id(sorting_id)
+        unit_rows = [{**row, "curation_id": curation_id} for row in unit_rows]
+        # Random, not content-derived, so a recreated curation never makes
+        # stale caches look current.
+        curation_uuid = uuid.uuid4()
+        # Shared by the NWB lineage and the DB insert so both agree.
+        merge_group_rows, parent_merge_group_rows = build_merge_provenance_rows(
+            sorting_id=sorting_id,
+            curation_id=curation_id,
+            kept_unit_to_contributors=kept_unit_to_contributors,
+            parent_raw_contributors=parent_raw_contributors,
         )
+
+        # Stage outside the transaction to keep it short.
+        analysis_file_name, units_object_id, staged_parent_nwb = (
+            cls._stage_curation_artifact(
+                sorting_id=sorting_id,
+                kept_unit_to_contributors=kept_unit_to_contributors,
+                apply_merge=apply_merge,
+                labels=labels,
+                unit_rows=unit_rows,
+                source_units_abs_path=source_units_abs_path,
+                merge_group_rows=merge_group_rows,
+                curation_header={
+                    **build_curation_header(
+                        sorting_id=sorting_id,
+                        curation_id=curation_id,
+                        curation_uuid=curation_uuid,
+                        parent_curation_id=parent_curation_id,
+                        curation_source=curation_source,
+                        merges_applied=apply_merge,
+                        description=description,
+                    ),
+                    **runtime_environment_provenance(
+                        execution_params={"stage": "curation"}
+                    ),
+                },
+            )
+        )
+
+        try:
+            existing = cls._insert_curation_rows_transaction(
+                sorting_id=sorting_id,
+                curation_id=curation_id,
+                curation_uuid=curation_uuid,
+                parent_curation_id=parent_curation_id,
+                analysis_file_name=analysis_file_name,
+                units_object_id=units_object_id,
+                staged_parent_nwb=staged_parent_nwb,
+                apply_merge=apply_merge,
+                curation_source=curation_source,
+                description=description,
+                unit_rows=unit_rows,
+                labels=labels,
+                merge_group_rows=merge_group_rows,
+                parent_merge_group_rows=parent_merge_group_rows,
+                allow_custom_labels=allow_custom_labels,
+                find_existing=_find_existing,
+            )
+        except Exception:
+            # DB rows rolled back; remove the staged file.
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="CurationV2.insert_curation"
+            )
+            raise
+        if existing is not None:
+            # A concurrent insert committed the root or this child first.
+            _unlink_staged_analysis_file(
+                analysis_file_name, context="CurationV2.insert_curation"
+            )
+            return _reuse(existing)
+        return {"sorting_id": sorting_id, "curation_id": curation_id}
 
     # ---- insert_curation steps ---------------------------------------------
 
@@ -739,14 +729,60 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         )
 
     @classmethod
-    def _next_curation_id(cls, sorting_id) -> int:
-        """Return the next auto-increment ``curation_id`` for a sorting.
+    def _read_committed_next_transaction(cls) -> None:
+        """Let the next transaction read rows committed while it waits.
 
-        ``max(existing) + 1``, or 0. Not serialized against concurrent
-        inserts; ``insert_curation`` retries on collision.
+        DataJoint starts a transaction with a consistent snapshot, which would
+        hide rows another insert committed while this one waited for the
+        counter lock. A caller's open transaction is left as it is.
         """
-        existing_ids = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
-        return int(max(existing_ids)) + 1 if len(existing_ids) else 0
+        if not cls.connection.in_transaction:
+            cls.connection.query(
+                "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+            )
+
+    @classmethod
+    def _lock_curation_counter(cls, sorting_id) -> int:
+        """Lock the sort's ``CurationIdCounter`` row; return its next id.
+
+        Call inside a transaction; the lock holds until it ends, so curation
+        inserts of one sort run one at a time. Creates the row at 0 for a
+        fresh sort.
+        """
+        counter = CurationIdCounter.full_table_name
+        sorting_bytes = uuid.UUID(str(sorting_id)).bytes
+        # Takes the row's exclusive lock whether it inserts or not.
+        cls.connection.query(
+            f"INSERT INTO {counter} (sorting_id, next_curation_id) "
+            "VALUES (%s, 0) "
+            "ON DUPLICATE KEY UPDATE next_curation_id = next_curation_id",
+            args=(sorting_bytes,),
+        )
+        (next_id,) = cls.connection.query(
+            f"SELECT next_curation_id FROM {counter} WHERE sorting_id = %s "
+            "FOR UPDATE",
+            args=(sorting_bytes,),
+        ).fetchone()
+        return int(next_id)
+
+    @classmethod
+    def _reserve_curation_id(cls, sorting_id) -> int:
+        """Return a ``curation_id`` no curation of this sort has had.
+
+        Commits before the NWB is staged, so a failed insert leaves a gap.
+        The ``max + 1`` term covers rows inserted around ``insert_curation``.
+        """
+        cls._read_committed_next_transaction()
+        with cls._safe_context():
+            next_id = cls._lock_curation_counter(sorting_id)
+            existing = (cls & {"sorting_id": sorting_id}).fetch("curation_id")
+            curation_id = max([next_id, *(int(c) + 1 for c in existing)])
+            cls.connection.query(
+                f"UPDATE {CurationIdCounter.full_table_name} "
+                "SET next_curation_id = %s WHERE sorting_id = %s",
+                args=(curation_id + 1, uuid.UUID(str(sorting_id)).bytes),
+            )
+        return curation_id
 
     @classmethod
     def _stage_curation_artifact(
@@ -811,7 +847,8 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         merge_group_rows: list[dict],
         parent_merge_group_rows: list[dict],
         allow_custom_labels: bool,
-    ) -> None:
+        find_existing,
+    ) -> dict | None:
         """Insert the master/Unit/UnitLabel/MergeGroup rows atomically.
 
         Registers the staged AnalysisNwbfile, inserts the master and part
@@ -820,6 +857,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         not registered: their synthetic timeline is not session-safe.
         ``merge_group_rows`` and ``parent_merge_group_rows`` are inserted
         verbatim.
+
+        Holds the sort's counter lock, then calls ``find_existing``; if it
+        returns a key (the sort's root, or a matching child), inserts nothing
+        and returns that key. This keeps one root per sort.
         """
         master_row = {
             "sorting_id": sorting_id,
@@ -863,7 +904,12 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         source = SortingSelection.resolve_source({"sorting_id": sorting_id})
         register_merge = source.kind == "recording"
 
+        cls._read_committed_next_transaction()
         with cls._safe_context():
+            cls._lock_curation_counter(sorting_id)
+            existing = find_existing()
+            if existing is not None:
+                return existing
             AnalysisNwbfile().add(staged_parent_nwb, analysis_file_name)
             # insert_curation already validated every row.
             cls.insert1(master_row, allow_direct_insert=True)

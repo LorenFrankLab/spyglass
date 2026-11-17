@@ -176,7 +176,8 @@ class CurationDeleteReceipt:
 class CurationRef:
     """A curation handle pinned to one immutable row generation.
 
-    The numeric ``curation_id`` is ergonomic but reusable after deletion.
+    The numeric ``curation_id`` is not given twice while its sort selection
+    exists, but repeats if the selection is deleted and inserted again.
     Every database-consuming operation therefore verifies ``curation_uuid``
     again and raises ``CurationNotFoundError`` if the row is gone or replaced.
     """

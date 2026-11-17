@@ -5,6 +5,8 @@ import uuid
 
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import reuse_curation_number
+
 pytestmark = [pytest.mark.stage, pytest.mark.integration]
 
 
@@ -374,6 +376,7 @@ def test_direct_match_plan_refuses_recreated_numeric_curation_id(
     key = ref.as_key()
     parent = (CurationV2 & key).fetch1("parent_curation_id")
     (CurationV2 & key).delete(safemode=False)
+    reuse_curation_number(key)
     replacement = CurationV2.insert_curation(
         {"sorting_id": ref.sorting_id},
         parent_curation_id=parent,

@@ -564,6 +564,13 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         permission check finds the session of a single-session sort, and
         `SortingSelection & {"recording_id": rid}` restricts by recording.
         No id changes #1609
+    - v2 `CurationV2` never gives a `curation_id` twice while its
+        `SortingSelection` row exists (new `CurationIdCounter` table), so a
+        curation made after a delete gets a new number and merge id; a sort
+        still has one root, found by `parent_curation_id == -1` #1609
+    - v2 `curation_evaluation_id` includes the curation's `curation_uuid`, and
+        `CurationEvaluation.populate` refuses a selection whose curation was
+        replaced #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

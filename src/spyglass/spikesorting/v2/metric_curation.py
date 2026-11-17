@@ -92,7 +92,7 @@ from spyglass.spikesorting.v2._core.runtime import (
 )
 from spyglass.spikesorting.v2._core.selection_identity import (
     assert_supplied_id_matches,
-    deterministic_id,
+    evaluation_selection_id,
     existing_selection_pk,
 )
 from spyglass.spikesorting.v2._curation.analyzer import display_analyzer_request
@@ -554,7 +554,8 @@ class CurationEvaluationSelection(
         """Insert or find a curation-evaluation selection; return PK-only dict.
 
         ``curation_evaluation_id`` is a deterministic ``uuid5`` of the
-        selection fields. ``metric_waveform_params_name`` (the whitened recipe
+        selection fields and the curation's ``curation_uuid``, so a replaced
+        curation never shares an evaluation id. ``metric_waveform_params_name`` (the whitened recipe
         for PC/NN metrics) defaults to the sort's region metric row.
 
         Raises
@@ -595,8 +596,8 @@ class CurationEvaluationSelection(
             "metric_waveform_params_name": metric_waveform_params_name,
             "observation_version": OBSERVATION_VERSION,
         }
-        curation_evaluation_id = deterministic_id(
-            "curation_evaluation", identity
+        curation_evaluation_id = evaluation_selection_id(
+            identity, (CurationV2 & parent_key).fetch1("curation_uuid")
         )
         assert_supplied_id_matches(
             key.get("curation_evaluation_id"),

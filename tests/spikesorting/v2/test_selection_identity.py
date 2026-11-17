@@ -42,6 +42,99 @@ def test_namespace_is_frozen_literal():
     assert str(V2_SELECTION_NAMESPACE) == "b44d4765-4714-5c69-96d5-97feb2217e86"
 
 
+def test_stored_ids_outside_evaluation_are_pinned():
+    """Sorting, merge, FigPack and UnitMatch ids keep their stored values.
+
+    Values computed on the commit before evaluation ids took the curation's
+    ``curation_uuid``.
+    """
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        sorting_identity_payload,
+    )
+    from spyglass.spikesorting.v2._matching.graph import input_set_hash
+    from spyglass.spikesorting.v2._review.annotations import (
+        figpack_config_hash,
+    )
+    from tests.spikesorting.v2.test_matcher_graph_inputs import _parts
+
+    sorting_id = uuid.UUID(int=11)
+    assert (
+        str(
+            deterministic_id(
+                "sorting",
+                sorting_identity_payload(
+                    recording_id=uuid.UUID(int=2),
+                    sorter="mountainsort4",
+                    sorter_params_name="franklab_tetrode_hippocampus_30KHz",
+                ),
+            )
+        )
+        == "a8e65109-075d-5e04-ac70-f2162adeed74"
+    )
+    assert (
+        dj.hash.key_hash(
+            {"sorting_id": sorting_id, "curation_id": 3, "source": "CurationV2"}
+        )
+        == "3d1f75c7f40ed547fa9e306e70df330f"
+    )
+    config_hash = figpack_config_hash(
+        sorting_id=sorting_id,
+        curation_id=3,
+        curation_uuid=uuid.UUID(int=12),
+        label_options=["accept", "mua", "noise"],
+        displayed_unit_properties=None,
+        upload=False,
+        ephemeral=False,
+    )
+    assert (
+        str(
+            deterministic_id(
+                "figpack_curation",
+                {
+                    "sorting_id": sorting_id,
+                    "curation_id": 3,
+                    "figpack_config_hash": config_hash,
+                },
+            )
+        )
+        == "649fa654-4ca0-55eb-8688-8e842cc3162e"
+    )
+    set_hash = input_set_hash(*_parts())
+    assert (
+        str(
+            deterministic_id(
+                "unitmatch",
+                {"matcher_params_name": "default", "input_set_hash": set_hash},
+            )
+        )
+        == "2bde63c4-e9c4-58a5-a65a-2a746926b84f"
+    )
+
+
+def test_evaluation_id_follows_the_curation_generation():
+    """The same evaluation fields over a replaced curation get a new id."""
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        evaluation_selection_id,
+    )
+
+    identity = {
+        "sorting_id": uuid.UUID(int=11),
+        "curation_id": 3,
+        "metric_params_name": "m",
+        "auto_curation_rules_name": "r",
+        "metric_waveform_params_name": "w",
+        "observation_version": 1,
+    }
+    first = evaluation_selection_id(identity, uuid.UUID(int=12))
+    assert first == evaluation_selection_id(identity, str(uuid.UUID(int=12)))
+    assert first != evaluation_selection_id(identity, uuid.UUID(int=13))
+    # The id before the curation_uuid joined the identity.
+    assert first != uuid.UUID("b92e5f0a-9928-582b-aadf-a932593b9341")
+    assert first != deterministic_id("curation_evaluation", identity)
+
+
 def test_deterministic_id_returns_uuid():
     assert isinstance(deterministic_id("recording", {"a": 1}), uuid.UUID)
 

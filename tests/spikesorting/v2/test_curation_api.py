@@ -510,34 +510,28 @@ def test_curation_ref_state_operation_lineage_and_merge_id(
         with pytest.raises(CurationNotFoundError):
             stale_receipt.root_curation
 
-        # The earlier ref rejects a recreated row that reuses the PK.
+        # A recreated curation gets a new number; the earlier ref is gone.
         stale = save_manual_curation(
             parent_curation=root, description="generation one"
         )
         stale_id = stale.curation_id
         (CurationV2 & stale.as_key()).delete(safemode=False)
         replacement = save_manual_curation(
-            parent_curation=root, description="generation two"
+            parent_curation=root, description="generation one"
         )
-        assert replacement.curation_id == stale_id
+        assert replacement.curation_id > stale_id
         assert replacement.curation_uuid != stale.curation_uuid
-        from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
-
-        with pytest.raises(CurationNotFoundError, match="was replaced"):
+        with pytest.raises(CurationNotFoundError, match="was deleted"):
             stale.as_key()
-        # Mappings: stale uuid refused, new uuid resolves, bare key resolves
-        # the current generation.
         from dataclasses import asdict
 
-        with pytest.raises(CurationNotFoundError, match="stale curation_uuid"):
+        with pytest.raises(CurationNotFoundError, match="no current"):
             CurationRef.from_key(asdict(stale))
-        assert CurationRef.from_key(asdict(replacement)) == replacement
-        assert (
+        with pytest.raises(CurationNotFoundError, match="no current"):
             CurationRef.from_key(
                 {"sorting_id": root.sorting_id, "curation_id": stale_id}
             )
-            == replacement
-        )
+        assert CurationRef.from_key(asdict(replacement)) == replacement
     finally:
         clear_curations_for(sorting_key)
 

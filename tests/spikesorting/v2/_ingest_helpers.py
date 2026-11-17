@@ -89,11 +89,28 @@ def drop_unitmatch_selections_for(sorting_restriction) -> None:
         ).super_delete(warn=False, safemode=False)
 
 
+def reuse_curation_number(curation_key) -> None:
+    """Point a sort's ``CurationIdCounter`` back at a deleted curation's id.
+
+    The next curation of the sort then takes that ``curation_id`` again, as
+    when the sort selection is deleted and inserted again.
+    """
+    from spyglass.spikesorting.v2.curation import CurationIdCounter
+
+    CurationIdCounter.update1(
+        {
+            "sorting_id": curation_key["sorting_id"],
+            "next_curation_id": int(curation_key["curation_id"]),
+        }
+    )
+
+
 def clear_curations_for(sorting_key) -> None:
-    """Delete every ``CurationV2`` row for a sorting plus its merge masters.
+    """Reset a sorting to fresh: its curations, merge masters and counter.
 
     Merge masters go first because DataJoint refuses to drop a part row
-    whose master is still present.
+    whose master is still present. Dropping the ``CurationIdCounter`` row
+    makes the next root ``curation_id`` 0 again.
 
     Parameters
     ----------
@@ -105,7 +122,7 @@ def clear_curations_for(sorting_key) -> None:
     from spyglass.spikesorting.v2.concat_member_curation import (
         ConcatMemberCurationV2,
     )
-    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.curation import CurationIdCounter, CurationV2
 
     drop_unitmatch_selections_for(sorting_key)
     for mid in (SpikeSortingOutput.ConcatMemberCurationV2 & sorting_key).fetch(
@@ -122,6 +139,7 @@ def clear_curations_for(sorting_key) -> None:
             warn=False, safemode=False
         )
     (CurationV2 & sorting_key).super_delete(warn=False, safemode=False)
+    (CurationIdCounter & sorting_key).delete_quick()
 
 
 def configure_v2_run_inputs(

@@ -157,7 +157,7 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 | `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording` (+ `ValidInterval`)                                                                                                           |
 | `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedArtifactSelection`, `SharedArtifactDetection`                                    |
 | `sorting`                            | `SorterParameters`, `AnalyzerWaveformParameters`, `PreprocessingWaveformParameters`, `SortingSelection`, `Sorting`                                                                                        |
-| `curation`                           | `CurationV2`                                                                                                                                                                                              |
+| `curation`                           | `CurationV2`, `CurationIdCounter`                                                                                                                                                                         |
 | `metric_curation`                    | `QualityMetricParameters`, `AutoCurationRules`, `CurationEvaluationSelection`, `CurationEvaluation`                                                                                                       |
 | `review_profile`                     | `CurationReviewProfile`                                                                                                                                                                                   |
 | `figpack_curation`                   | `FigPackCurationSelection`, `FigPackCuration` (the layer under `FigPackReview`)                                                                                                                           |
@@ -539,8 +539,17 @@ helper must import without a database.
 - `CurationV2.parent_curation_id` is a plain int. DataJoint cannot declare a
     nullable self-referential foreign key, and an equivalent two-FK edge table
     breaks the delete cascade.
-- A root curation always has `curation_id` 0. A concurrent root insert returns
-    the existing root.
+- `insert_curation` reserves each `curation_id` from `CurationIdCounter`, one
+    row per `SortingSelection`, under a row lock, and commits the reservation
+    before staging the NWB. A number is never given twice while the selection
+    exists, so a merge id never comes back with other spikes after a curation
+    or `Sorting` delete. Deleting the selection deletes its counter, and its
+    deterministic `sorting_id` then numbers from 0 again.
+- The insert transaction takes the same lock and runs under READ COMMITTED,
+    so it sees a root or matching child committed while it waited. It keeps one
+    root per sort and returns that root (or child) instead. A fresh sort's
+    first root is 0 unless two root inserts race; code finds a root by
+    `parent_curation_id == -1`.
 - Lineage integrity is kept by `insert_curation`, the only writer, and
     `CurationV2.delete`, which refuses to orphan a descendant. Delete leaf-up,
     or delete the whole `Sorting`. `super_delete`, `delete_quick` and upstream

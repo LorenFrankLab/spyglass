@@ -19,6 +19,7 @@ import datajoint as dj
 import numpy as np
 import pytest
 
+from tests.spikesorting.v2._ingest_helpers import reuse_curation_number
 from tests.spikesorting.v2._unitmatch_helpers import (
     install_fixture_pairer,
     reforge_selection,
@@ -1541,6 +1542,7 @@ def test_named_plan_checks_every_generation_before_reuse(
         assert plan.curations[1]["sorting_id"] == str(stale["sorting_id"])
         reviewed_uuid = plan.curations[1]["curation_uuid"]
         (CurationV2 & stale).delete(safemode=False)
+        reuse_curation_number(stale)
         replacement = CurationV2.insert_curation(
             {"sorting_id": stale["sorting_id"]},
             parent_curation_id=roots[stale_name]["curation_id"],

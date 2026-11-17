@@ -7,6 +7,8 @@ fresh ``max+1`` id is absent from ``Sorting.Unit``.
 
 from __future__ import annotations
 
+import uuid
+
 import numpy as np
 import pytest
 
@@ -468,115 +470,309 @@ def test_insert_curation_rejects_preview_parent(planted_two_unit_sort):
         clear_curations_for(planted_two_unit_sort)
 
 
+def _merge_id(curation_key):
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    return (SpikeSortingOutput.CurationV2 & curation_key).fetch1("merge_id")
+
+
+def _evaluation_id(curation_key):
+    from spyglass.spikesorting.v2.metric_curation import (
+        CurationEvaluationSelection,
+    )
+
+    return CurationEvaluationSelection.insert_selection(
+        {
+            **curation_key,
+            "metric_params_name": "minimal",
+            "auto_curation_rules_name": "none",
+        }
+    )["curation_evaluation_id"]
+
+
 @pytest.mark.slow
 @pytest.mark.integration
-def test_insert_curation_retries_on_curation_id_collision(
-    planted_three_unit_sort, monkeypatch
+def test_deleted_curation_number_is_never_given_again(
+    planted_three_unit_sort, curation_evaluation_defaults
 ):
-    """A concurrent insert claiming the allocated curation_id is recovered.
+    """A curation made after a delete gets a new number, merge id and
+    evaluation id; the old merge id resolves to nothing. The same holds for
+    a deleted root, and the sort keeps one root."""
+    import datajoint as dj
 
-    The ``max+1`` id is allocated outside the insert transaction. Forcing
-    ``_next_curation_id`` to return a taken id first, ``insert_curation`` must
-    retry with a fresh id.
-    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
     from spyglass.spikesorting.v2.curation import CurationV2
 
     sort_pk = planted_three_unit_sort
     clear_curations_for(sort_pk)
     try:
-        root = CurationV2.insert_curation(sort_pk)  # curation_id 0
-        child_a = CurationV2.insert_curation(
-            sort_pk,
+        root = CurationV2.insert_curation(sort_pk)
+        assert root["curation_id"] == 0  # a fresh sort's first root
+        child_args = dict(
             parent_curation_id=root["curation_id"],
             labels={0: ["noise"]},
-        )  # curation_id 1
-        assert child_a["curation_id"] == 1
-
-        # First allocation returns the already-taken id 1 (collision), every
-        # later call returns the real next id (2).
-        calls = {"n": 0}
-
-        def _fake_next(cls, sorting_id):
-            calls["n"] += 1
-            return 1 if calls["n"] == 1 else 2
-
-        monkeypatch.setattr(
-            CurationV2, "_next_curation_id", classmethod(_fake_next)
+            description="replaceable child",
+        )
+        first = CurationV2.insert_curation(sort_pk, **child_args)
+        first_merge_id = _merge_id(first)
+        first_evaluation_id = _evaluation_id(first)
+        assert first_merge_id == uuid.UUID(
+            dj.hash.key_hash({**first, "source": "CurationV2"})
         )
 
-        child_b = CurationV2.insert_curation(
-            sort_pk,
-            parent_curation_id=root["curation_id"],
-            labels={2: ["mua"]},  # distinct content -> not a reuse of child_a
+        (CurationV2 & first).delete(safemode=False)
+        second = CurationV2.insert_curation(sort_pk, **child_args)
+        assert second["curation_id"] > first["curation_id"]
+        assert _merge_id(second) != first_merge_id
+        assert not (SpikeSortingOutput & {"merge_id": first_merge_id})
+        assert _evaluation_id(second) != first_evaluation_id
+        # The untouched root keeps its merge id.
+        assert _merge_id(root) == uuid.UUID(
+            dj.hash.key_hash({**root, "source": "CurationV2"})
         )
-        # Retried past the collision to the fresh id, no crash.
-        assert child_b["curation_id"] == 2
-        assert calls["n"] >= 2  # initial allocation + at least one retry
-        assert CurationV2 & {**sort_pk, "curation_id": 2}
+
+        (CurationV2 & second).delete(safemode=False)
+        (CurationV2 & root).delete(safemode=False)
+        new_root = CurationV2.insert_curation(sort_pk)
+        assert new_root["curation_id"] > second["curation_id"]
+        assert CurationV2.insert_curation(sort_pk) == new_root
+        roots = CurationV2 & {**sort_pk, "parent_curation_id": -1}
+        assert roots.fetch("KEY") == [new_root]
+        with pytest.raises(ValueError, match="already exists"):
+            CurationV2.insert_curation(sort_pk, description="second root")
     finally:
         clear_curations_for(sort_pk)
 
 
 @pytest.mark.slow
 @pytest.mark.integration
-def test_insert_curation_retry_reuses_concurrent_winner(
+def test_matching_child_committed_while_waiting_is_returned(
     planted_three_unit_sort, monkeypatch
 ):
-    """Under a curation_id collision with the same logical child, the retry
-    returns that child (reuse_existing) instead of inserting a duplicate.
-    """
+    """A reuse_existing child whose early check missed an identical child
+    finds it under the counter lock and returns it instead of a duplicate."""
     from spyglass.spikesorting.v2._curation import insert as _curation_insert
     from spyglass.spikesorting.v2.curation import CurationV2
 
     sort_pk = planted_three_unit_sort
     clear_curations_for(sort_pk)
     try:
-        root = CurationV2.insert_curation(sort_pk)  # curation_id 0
-        # The "concurrent winner": a child with specific content at id 1.
+        root = CurationV2.insert_curation(sort_pk)
         winner = CurationV2.insert_curation(
             sort_pk,
             parent_curation_id=root["curation_id"],
             labels={0: ["noise"]},
         )
-        assert winner["curation_id"] == 1
-
-        # Pre-loop reuse check MISSES (as if the winner is not yet visible);
-        # the retry's re-check finds it via the real implementation.
         real_find = _curation_insert.find_matching_child_curation
-        find_calls = {"n": 0}
+        calls = []
 
-        def fake_find(table_cls, **kwargs):
-            find_calls["n"] += 1
-            if find_calls["n"] == 1:
-                return None
+        def stale_first_find(table_cls, **kwargs):
+            calls.append(kwargs["parent_curation_id"])
+            if len(calls) == 1:
+                return None  # checked before the winner committed
             return real_find(table_cls, **kwargs)
 
         monkeypatch.setattr(
-            _curation_insert, "find_matching_child_curation", fake_find
+            _curation_insert, "find_matching_child_curation", stale_first_find
         )
-        # Force the id allocation to collide with the winner (1).
-        id_calls = {"n": 0}
-
-        def fake_next_id(cls, sorting_id):
-            id_calls["n"] += 1
-            return 1 if id_calls["n"] == 1 else 2
-
-        monkeypatch.setattr(
-            CurationV2, "_next_curation_id", classmethod(fake_next_id)
-        )
-
-        # Insert the SAME logical child again with reuse on.
         result = CurationV2.insert_curation(
             sort_pk,
             parent_curation_id=root["curation_id"],
             labels={0: ["noise"]},
             reuse_existing=True,
         )
-        # Returned the winner; did NOT stage a duplicate child at id 2.
-        assert result["curation_id"] == winner["curation_id"] == 1
-        assert not (CurationV2 & {**sort_pk, "curation_id": 2})
+        assert result == winner
+        assert len(calls) == 2
+        assert len(CurationV2 & sort_pk) == 2
     finally:
         clear_curations_for(sort_pk)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_reservation_waits_for_the_counter_lock(planted_three_unit_sort):
+    """A reservation waits for another session's counter lock and then reads
+    the number that session committed."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationIdCounter, CurationV2
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    sorting_id = sort_pk["sorting_id"]
+    other = dj.Connection(
+        dj.config["database.host"],
+        dj.config["database.user"],
+        dj.config["database.password"],
+        port=dj.config["database.port"],
+    )
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        assert CurationV2._reserve_curation_id(sorting_id) == 0
+        counter = CurationIdCounter.full_table_name
+        sorting_bytes = uuid.UUID(str(sorting_id)).bytes
+        other.start_transaction()
+        (held,) = other.query(
+            f"SELECT next_curation_id FROM {counter} WHERE sorting_id = %s "
+            "FOR UPDATE",
+            args=(sorting_bytes,),
+        ).fetchone()
+        assert held == 1
+        waiting = pool.submit(CurationV2._reserve_curation_id, sorting_id)
+        time.sleep(1.0)
+        assert not waiting.done(), "the reservation did not wait for the lock"
+        other.query(
+            f"UPDATE {counter} SET next_curation_id = 6 WHERE sorting_id = %s",
+            args=(sorting_bytes,),
+        )
+        other.commit_transaction()
+        assert waiting.result(timeout=60) == 6
+        assert (CurationIdCounter & sort_pk).fetch1("next_curation_id") == 7
+    finally:
+        if other.in_transaction:
+            other.cancel_transaction()
+        other.close()
+        pool.shutdown(wait=True)
+        clear_curations_for(sort_pk)
+
+
+def _insert_in_child_process(sort_pk, kwargs, start, results):
+    """Insert a curation from a forked process on its own connection."""
+    try:
+        import datajoint as dj
+
+        # The forked socket belongs to the parent process.
+        dj.conn().connect()
+        from spyglass.spikesorting.v2.curation import CurationV2
+
+        start.wait(timeout=60)
+        key = CurationV2.insert_curation(sort_pk, **kwargs)
+        results.put(("ok", int(key["curation_id"])))
+    except BaseException as exc:  # reported to the parent
+        results.put(("error", repr(exc)))
+
+
+def _run_concurrently(sort_pk, kwargs_list):
+    import multiprocessing
+
+    context = multiprocessing.get_context("fork")
+    start, results = context.Event(), context.Queue()
+    processes = [
+        context.Process(
+            target=_insert_in_child_process,
+            args=(sort_pk, kwargs, start, results),
+        )
+        for kwargs in kwargs_list
+    ]
+    for process in processes:
+        process.start()
+    try:
+        start.set()
+        outcomes = [results.get(timeout=300) for _ in processes]
+        for process in processes:
+            process.join(timeout=60)
+            assert process.exitcode == 0
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+            process.join(timeout=5)
+    assert all(status == "ok" for status, _ in outcomes), outcomes
+    return sorted(curation_id for _, curation_id in outcomes)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_concurrent_curations_of_one_sort(planted_three_unit_sort):
+    """Two processes inserting at once: two roots give one root, two
+    different children get two distinct numbers, and neither fails."""
+    import multiprocessing
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("needs POSIX fork")
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        roots = _run_concurrently(
+            sort_pk, [{"reuse_existing": True}, {"reuse_existing": True}]
+        )
+        # Both return the one root; the loser's reserved number is a gap.
+        assert roots[0] == roots[1]
+        assert len(CurationV2 & {**sort_pk, "parent_curation_id": -1}) == 1
+        children = _run_concurrently(
+            sort_pk,
+            [
+                {"parent_curation_id": roots[0], "labels": {0: ["noise"]}},
+                {"parent_curation_id": roots[0], "labels": {1: ["mua"]}},
+            ],
+        )
+        assert len(set(children)) == 2
+        assert len(CurationV2 & sort_pk) == 3
+    finally:
+        clear_curations_for(sort_pk)
+
+
+def _plant_three_units(
+    sorter,
+    sorter_params,
+    recording,
+    sorting_id,
+    *,
+    job_kwargs=None,
+    execution_params=None,
+    statistics_spans=None,
+):
+    """The ``planted_three_unit_sort`` fixture's sorter output."""
+    import spikeinterface as si
+
+    samples = np.array(
+        [500, 1500, 2500, 3500, 700, 1700, 2700, 3700, 900, 1900, 2900, 3900],
+        dtype=np.int64,
+    )
+    labels = np.repeat(np.arange(3, dtype=np.int32), 4)
+    return si.NumpySorting.from_samples_and_labels(
+        samples_list=[samples],
+        labels_list=[labels],
+        sampling_frequency=recording.get_sampling_frequency(),
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_repopulated_sorting_continues_curation_numbers(
+    planted_three_unit_sort, monkeypatch
+):
+    """Deleting the ``Sorting`` row keeps its selection's counter, so the
+    re-populated sort's curations do not reuse the earlier numbers."""
+    from spyglass.spikesorting.v2.curation import CurationIdCounter, CurationV2
+    from spyglass.spikesorting.v2.sorting import Sorting
+    from tests.spikesorting.v2._sorter_stub import plant_sorter
+
+    sort_pk = planted_three_unit_sort
+    clear_curations_for(sort_pk)
+    try:
+        root = CurationV2.insert_curation(sort_pk)
+        child = CurationV2.insert_curation(
+            sort_pk, parent_curation_id=root["curation_id"]
+        )
+        (CurationV2 & child).delete(safemode=False)
+        (CurationV2 & root).delete(safemode=False)
+        (Sorting & sort_pk).super_delete(warn=False, safemode=False)
+        assert (CurationIdCounter & sort_pk).fetch1("next_curation_id") == 2
+
+        plant_sorter(monkeypatch, _plant_three_units)
+        Sorting.populate(sort_pk, reserve_jobs=False)
+        assert CurationV2.insert_curation(sort_pk)["curation_id"] == 2
+    finally:
+        clear_curations_for(sort_pk)
+        if not (Sorting & sort_pk):
+            plant_sorter(monkeypatch, _plant_three_units)
+            Sorting.populate(sort_pk, reserve_jobs=False)
 
 
 @pytest.mark.slow

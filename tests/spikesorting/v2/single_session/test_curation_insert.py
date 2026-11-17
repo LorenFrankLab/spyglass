@@ -86,8 +86,8 @@ def test_curation_uuid_immutable_and_unique(populated_sorting):
 
 
 @pytest.mark.slow
-def test_curation_id_reuse_yields_new_uuid(populated_sorting):
-    """Delete/recreate may reuse the numeric id but never its generation UUID."""
+def test_recreated_curation_gets_new_id_and_uuid(populated_sorting):
+    """Delete/recreate gives a new numeric id and a new generation UUID."""
     from spyglass.spikesorting.v2.curation import CurationV2
 
     _clear_curations(populated_sorting)
@@ -107,7 +107,7 @@ def test_curation_id_reuse_yields_new_uuid(populated_sorting):
             description="replaceable child",
         )
         replacement_uuid = (CurationV2 & replacement).fetch1("curation_uuid")
-        assert replacement["curation_id"] == first["curation_id"]
+        assert replacement["curation_id"] > first["curation_id"]
         assert replacement_uuid != first_uuid
     finally:
         _clear_curations(populated_sorting)

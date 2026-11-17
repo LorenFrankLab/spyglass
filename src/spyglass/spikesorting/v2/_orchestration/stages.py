@@ -387,7 +387,7 @@ def _run_root_curation_stage(
     stage_seconds["curation"] = curation_seconds
     run_summary["root_curation_id"] = curation_key["curation_id"]
     run_summary["root_merge_id"] = merge_id
-    # curation_id is reusable after deletion; the UUID pins the generation.
+    # The UUID pins the generation even if the sort selection is recreated.
     run_summary["root_curation_uuid"] = (CurationV2 & curation_key).fetch1(
         "curation_uuid"
     )
