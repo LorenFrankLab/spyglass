@@ -571,6 +571,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `curation_evaluation_id` includes the curation's `curation_uuid`, and
         `CurationEvaluation.populate` refuses a selection whose curation was
         replaced #1609
+    - v2 `UnitMatch.MatchableUnit` references its `UnitMatchSelection.Input`
+        and `UnitMatch.RecordingSpikeCount` its `InputRecording`; `Pair`,
+        `MatchableUnit` and `TrackedUnit.Member` inserts refuse units outside
+        the match, a unit is in at most one tracked unit of a match, and
+        `CurationV2.delete` also refuses while another table's part uses one
+        of its units #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

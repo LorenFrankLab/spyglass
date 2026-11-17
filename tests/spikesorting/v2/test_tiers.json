@@ -1148,6 +1148,7 @@
         "test_pairs_nwb_round_trip_preserves_missing_drift_and_fdr": "unit",
         "test_raw_pair_insert_rejects_noninteger_identifiers": "db_unit",
         "test_selection_geometry_dispatches_without_global_policy": "db_unit",
+        "test_unit_match_parts_reference_their_selection_inputs": "db_unit",
         "test_unit_semantics_for_sorter": "unit",
         "test_unitmatch_bundle_rejects_asymmetric_window_before_io": "unit",
         "test_unitmatch_computed_matches_make_insert_signature": "db_unit",

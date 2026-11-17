@@ -395,12 +395,15 @@ class UnitMatchSelectionIntegrityError(SpikeSortingV2Error, RuntimeError):
 
 
 class UnitMatchPairIntegrityError(SpikeSortingV2Error, RuntimeError):
-    """Raise when a ``UnitMatch.Pair`` row is outside the pinned curation universe.
+    """Raise when a match part row is outside the match's unit universe.
 
     ``Pair`` endpoints reference ``CurationV2.Unit`` globally, so the
     ``Pair.insert`` override validates that each endpoint is a pinned input
-    curation, both endpoints differ in curation, the undirected edge is new,
-    and ``match_probability`` is in ``[0, 1]``.
+    curation and a ``MatchableUnit`` of the match, both endpoints differ in
+    curation, the undirected edge is new, and ``match_probability`` is in
+    ``[0, 1]``. ``MatchableUnit.insert`` refuses a unit outside its input's
+    pinned curation, and ``TrackedUnit.Member.insert`` a unit that is not a
+    ``MatchableUnit`` of the match.
     """
 
 

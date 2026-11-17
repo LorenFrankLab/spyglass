@@ -1321,9 +1321,20 @@ A preset names one parameter row per stage: preprocessing, artifact detection
     the frozen selection rows. `UnitMatch.MatchableUnit` freezes the units the
     matcher saw, so a relabel between `UnitMatch` and `TrackedUnit` populate
     cannot drop an unpaired singleton. Its rows reference `CurationV2.Unit`,
-    which a relabel never changes, and `UnitMatchSelection.InputRecording`
-    references `Recording`, so deleting either upstream row deletes the
-    selection and its run. Its `compared` column is 0 for a unit the
+    which a relabel never changes, and `UnitMatchSelection.Input`;
+    `RecordingSpikeCount` references `UnitMatchSelection.InputRecording`,
+    which references `Recording`, so deleting either upstream row deletes the
+    selection and its run. `MatchableUnit.insert` refuses a unit outside its
+    input's pinned curation.
+- `UnitMatch.Pair` and `TrackedUnit.Member` reference `CurationV2.Unit`, not
+    `MatchableUnit`: a foreign key between the parts of two match tables would
+    let a cascade reach `UnitMatch` through a part and leave masters behind,
+    as `CurationV2` needs a special delete for. Their `insert` refuses a unit
+    that is not a `MatchableUnit` of the match, so `make_insert` writes
+    `MatchableUnit` first. A unique index keeps a unit in one tracked unit of
+    a match.
+- `CurationV2.delete` refuses while a part of another table references the
+    curation or one of its `CurationV2.Unit` rows. Its `compared` column is 0 for a unit the
     matcher never saw (left out of its input bundle, and every unit of a
     single-input run), so an unevaluated unit can be told from one that was
     evaluated and left unmatched.

@@ -2978,13 +2978,15 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
 
 
 @pytest.mark.slow
-def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
+def test_pair_insert_rejects_unpinned_curation(
+    two_session_curated_group, monkeypatch
+):
     """A raw ``UnitMatch.Pair.insert`` raises ``UnitMatchPairIntegrityError``
     for an unpinned-curation endpoint, a same-curation edge, a reversed or
     duplicate edge, or an out-of-range ``match_probability``.
 
-    Validation reads the pinned ``UnitMatchSelection.Input`` rows, so no
-    populated ``UnitMatch`` is needed.
+    Validation reads the pinned ``UnitMatchSelection.Input`` rows and the
+    match's ``MatchableUnit`` rows, so the match is populated with no pairs.
     """
     import uuid
 
@@ -2998,14 +3000,13 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
     )
 
     grp = two_session_curated_group
-    pk = UnitMatchSelection.insert_selection(
-        grp["owner"],
-        grp["group_name"],
-        "unitmatch_default",
+    with _populated_pair_match(
+        grp,
+        monkeypatch,
         grp["choices"],
-        unit_policy="v2_unflagged_single_units",
-    )
-    try:
+        params_name="pair_refuse_params",
+        pairs=[],
+    ) as pk:
         members = (UnitMatchSelection.Input & pk).fetch(
             as_dict=True, order_by="input_index"
         )
@@ -3073,8 +3074,6 @@ def test_pair_insert_rejects_unpinned_curation(two_session_curated_group):
                     pair_row(node1, node0, idx=902),
                 ]
             )
-    finally:
-        (UnitMatchSelection & pk).super_delete(warn=False)
 
 
 @pytest.mark.slow
@@ -3833,3 +3832,280 @@ def test_divergent_electrode_warning_does_not_contradict_the_error():
     assert "allow_divergent_electrodes=True" in advisory
     blocking = message([1], advisory=False)
     assert "proceeds" not in blocking and "not a rejection" not in blocking
+
+
+@contextmanager
+def _populated_pair_match(grp, monkeypatch, choices, *, params_name, pairs):
+    """Populate ``UnitMatch`` and ``TrackedUnit`` over two inputs.
+
+    Yields the selection key; removes the selection and the matcher row after.
+    """
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        drop_unitmatch_selections_for,
+    )
+
+    saved = _install_fixture_pairer(
+        monkeypatch,
+        matcher_name="parts_test_pairer",
+        matcher_params_name=params_name,
+        pairs=pairs,
+    )
+    try:
+        selection_pk = UnitMatchSelection.insert_selection(
+            grp["owner"],
+            grp["group_name"],
+            params_name,
+            choices,
+            unit_policy="v2_unflagged_single_units",
+        )
+        UnitMatch.populate(selection_pk, reserve_jobs=False)
+        TrackedUnit.populate(selection_pk, reserve_jobs=False)
+        yield selection_pk
+    finally:
+        drop_unitmatch_selections_for(
+            [{"sorting_id": c["sorting_id"]} for c in choices.values()]
+        )
+        (MatcherParameters & {"matcher_params_name": params_name}).super_delete(
+            warn=False
+        )
+        _restore_matcher_registry(saved)
+
+
+def _match_row_counts(selection_pk) -> dict:
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    tables = {
+        "selection": UnitMatchSelection,
+        "input": UnitMatchSelection.Input,
+        "input_recording": UnitMatchSelection.InputRecording,
+        "unit_match": UnitMatch,
+        "pair": UnitMatch.Pair,
+        "matchable_unit": UnitMatch.MatchableUnit,
+        "recording_spike_count": UnitMatch.RecordingSpikeCount,
+        "tracked_unit": TrackedUnit,
+        "member": TrackedUnit.Member,
+    }
+    return {name: len(table & selection_pk) for name, table in tables.items()}
+
+
+def test_unit_match_parts_reference_their_selection_inputs(dj_conn):
+    """``MatchableUnit`` and ``RecordingSpikeCount`` reference the selection's
+    input parts and keep their key columns in order."""
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    matchable = UnitMatch.MatchableUnit
+    counts = UnitMatch.RecordingSpikeCount
+    assert UnitMatchSelection.Input.full_table_name in matchable.parents()
+    assert UnitMatchSelection.InputRecording.full_table_name in counts.parents()
+    assert matchable.primary_key == [
+        "unitmatch_id",
+        "input_index",
+        "sorting_id",
+        "curation_id",
+        "unit_id",
+    ]
+    assert counts.primary_key == [
+        "unitmatch_id",
+        "input_index",
+        "recording_index",
+        "unit_id",
+    ]
+    # No part references a sibling part or another master's computed part.
+    assert matchable.full_table_name not in UnitMatch.Pair.parents()
+    assert matchable.full_table_name not in TrackedUnit.Member.parents()
+
+
+@pytest.mark.slow
+def test_match_parts_refuse_units_outside_the_match(
+    two_session_curated_group, monkeypatch
+):
+    """A matchable unit must come from its input's pinned curation, a pair
+    or tracked-unit member must be a matchable unit of the match, and a unit
+    is in at most one tracked unit of a match."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.exceptions import UnitMatchPairIntegrityError
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit, UnitMatch
+
+    grp = two_session_curated_group
+    with _populated_pair_match(
+        grp,
+        monkeypatch,
+        grp["choices"],
+        params_name="parts_refuse_params",
+        pairs=[],
+    ) as selection_pk:
+        input_0, input_1 = (UnitMatch.MatchableUnit & selection_pk).fetch(
+            as_dict=True, order_by="input_index"
+        )
+        with pytest.raises(UnitMatchPairIntegrityError, match="pins"):
+            UnitMatch.MatchableUnit.insert1(
+                {**input_0, "input_index": 1}, allow_direct_insert=True
+            )
+
+        # No pairs: each unit is a singleton tracked unit.
+        members = (TrackedUnit.Member & selection_pk).fetch(as_dict=True)
+        member_0, member_1 = (
+            next(m for m in members if m["sorting_id"] == row["sorting_id"])
+            for row in (input_0, input_1)
+        )
+        with pytest.raises(dj.errors.DuplicateError):
+            TrackedUnit.Member.insert1(
+                {**member_0, "tracked_unit_id": member_1["tracked_unit_id"]},
+                allow_direct_insert=True,
+            )
+
+        # A unit outside the match's MatchableUnit rows is refused.
+        (UnitMatch.MatchableUnit & input_1).delete_quick()
+        pair = {
+            **selection_pk,
+            "pair_index": 0,
+            "session_a_sorting_id": input_0["sorting_id"],
+            "session_a_curation_id": input_0["curation_id"],
+            "unit_a_id": input_0["unit_id"],
+            "session_b_sorting_id": input_1["sorting_id"],
+            "session_b_curation_id": input_1["curation_id"],
+            "unit_b_id": input_1["unit_id"],
+            "match_probability": 0.9,
+        }
+        with pytest.raises(UnitMatchPairIntegrityError, match="MatchableUnit"):
+            UnitMatch.Pair.insert1(pair, allow_direct_insert=True)
+        with pytest.raises(UnitMatchPairIntegrityError, match="MatchableUnit"):
+            TrackedUnit.Member.insert1(
+                {**member_1, "tracked_unit_id": member_0["tracked_unit_id"]},
+                allow_direct_insert=True,
+            )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "deleter",
+    ["unit_match", "tracked_unit", "selection", "recording", "curation"],
+)
+def test_unit_match_deletes_remove_whole_masters(
+    two_session_curated_group, monkeypatch, deleter
+):
+    """A plain delete of a match table, or from upstream, removes whole
+    masters with their parts; a curation delete refuses and removes nothing.
+    """
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+    from spyglass.spikesorting.v2.sorting import Sorting, SortingSelection
+    from spyglass.spikesorting.v2.unit_matching import (
+        TrackedUnit,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+    from tests.spikesorting.v2._ingest_helpers import (
+        clear_curations_for,
+        drop_unitmatch_selections_for,
+    )
+
+    grp = two_session_curated_group
+    # A second recording of member 1, so the recording delete leaves the
+    # fixture's own recordings alone.
+    second_rec = RecordingSelection.insert_selection(
+        {
+            **grp["members"][1],
+            "preprocessing_params_name": "no_filter",
+            "team_name": grp["owner"],
+        }
+    )
+    second_sort = None
+    try:
+        if not (Recording & second_rec):
+            Recording.populate(second_rec, reserve_jobs=False)
+        mp = pytest.MonkeyPatch()
+        try:
+            plant_sorter(mp, _plant_single_unit)
+            second_sort = SortingSelection.insert_selection(
+                {
+                    "recording_id": second_rec["recording_id"],
+                    "sorter": "mountainsort5",
+                    "sorter_params_name": _ensure_minirec_ms5_params(),
+                }
+            )
+            if not (Sorting & second_sort):
+                Sorting.populate(second_sort, reserve_jobs=False)
+        finally:
+            mp.undo()
+        clear_curations_for(second_sort)
+        second_curation = CurationV2.insert_curation(second_sort)
+        unit_a = int(matched_unit_ids(grp["choices"][0])[0])
+        unit_b = int(matched_unit_ids(second_curation)[0])
+        choices = {0: grp["choices"][0], 1: second_curation}
+        with _populated_pair_match(
+            grp,
+            monkeypatch,
+            choices,
+            params_name=f"delete_{deleter}_params",
+            pairs=[[unit_a, unit_b]],
+        ) as selection_pk:
+            before = _match_row_counts(selection_pk)
+            assert all(before.values()), before
+            assert before["pair"] == 1
+            master_tables = {
+                "unit_match": UnitMatch,
+                "tracked_unit": TrackedUnit,
+                "selection": UnitMatchSelection,
+            }
+            if deleter in master_tables:
+                (master_tables[deleter] & selection_pk).delete(safemode=False)
+            elif deleter == "recording":
+                (Recording & second_rec).delete(safemode=False)
+            else:
+                with pytest.raises(ValueError, match="Part tables of other"):
+                    (CurationV2 & second_curation).delete(safemode=False)
+            after = _match_row_counts(selection_pk)
+            removed = {
+                "unit_match": {
+                    "unit_match",
+                    "pair",
+                    "matchable_unit",
+                    "recording_spike_count",
+                    "tracked_unit",
+                    "member",
+                },
+                "tracked_unit": {"tracked_unit", "member"},
+                "selection": set(before),
+                "recording": set(before),
+                "curation": set(),
+            }[deleter]
+            assert after == {
+                name: 0 if name in removed else count
+                for name, count in before.items()
+            }
+            # The fixture's own curation is never touched.
+            assert CurationV2 & grp["choices"][0]
+    finally:
+        if second_sort is not None and (SortingSelection & second_sort):
+            drop_unitmatch_selections_for(second_sort)
+            for mid in (SpikeSortingOutput.CurationV2 & second_sort).fetch(
+                "merge_id"
+            ):
+                (SpikeSortingOutput & {"merge_id": mid}).super_delete(
+                    warn=False
+                )
+            clear_curations_for(second_sort)
+            (Sorting & second_sort).super_delete(warn=False)
+            (SortingSelection & second_sort).super_delete(warn=False)
+        (Recording & second_rec).super_delete(warn=False)
+        (RecordingSelection & second_rec).super_delete(warn=False)

@@ -671,6 +671,49 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         )
 
 
+def _rows_to_dicts(rows, attr_names) -> list[dict]:
+    """Normalize one row or many rows passed to a part ``insert``."""
+    if isinstance(rows, Mapping):
+        rows = [rows]
+    return [_insert_row_to_dict(row, attr_names) for row in rows]
+
+
+def _pinned_input_curations(unitmatch_ids) -> dict:
+    """Map ``(unitmatch_id, input_index)`` to its pinned curation.
+
+    Keys and values are ``(str, int)`` pairs; the value is
+    ``(sorting_id, curation_id)``.
+    """
+    restriction = [{"unitmatch_id": u} for u in unitmatch_ids]
+    if not restriction:
+        return {}
+    return {
+        (str(row["unitmatch_id"]), int(row["input_index"])): (
+            str(row["sorting_id"]),
+            int(row["curation_id"]),
+        )
+        for row in (UnitMatchSelection.Input & restriction).fetch(
+            "unitmatch_id",
+            "input_index",
+            "sorting_id",
+            "curation_id",
+            as_dict=True,
+        )
+    }
+
+
+def _matchable_nodes(unitmatch_id) -> set:
+    """``(sorting_id, curation_id, unit_id)`` of a match's matchable units."""
+    return {
+        (str(sorting_id), int(curation_id), int(unit_id))
+        for sorting_id, curation_id, unit_id in zip(
+            *(UnitMatch.MatchableUnit & {"unitmatch_id": unitmatch_id}).fetch(
+                "sorting_id", "curation_id", "unit_id"
+            )
+        )
+    }
+
+
 @schema
 class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """Pairwise unit matches across a selection's matching inputs.
@@ -732,6 +775,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             Positional rows are normalized to dicts. Each row must have:
 
             - both endpoints in pinned input curations
+            - both endpoints ``MatchableUnit`` rows of the same match
             - endpoints in different curations
             - a new undirected edge (no reversed or duplicate pair)
             - ``match_probability`` in ``[0, 1]``
@@ -747,12 +791,17 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             normalized = [_insert_row_to_dict(row, attr_names) for row in rows]
             # Per-unitmatch_id caches so a batch does not re-query per row.
             pinned_cache: dict = {}
+            matchable_cache: dict = {}
             seen_edges: dict = {}
             for row in normalized:
-                self._validate_pair_row(row, pinned_cache, seen_edges)
+                self._validate_pair_row(
+                    row, pinned_cache, matchable_cache, seen_edges
+                )
             super().insert(normalized, **kwargs)
 
-        def _validate_pair_row(self, row, pinned_cache, seen_edges) -> None:
+        def _validate_pair_row(
+            self, row, pinned_cache, matchable_cache, seen_edges
+        ) -> None:
             """Reject a single ``Pair`` row outside the pinned curation universe."""
             unitmatch_id = row.get("unitmatch_id")
             if unitmatch_id is None:
@@ -814,6 +863,16 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 )
             node_a = (*endpoint_a, identifiers["unit_a_id"])
             node_b = (*endpoint_b, identifiers["unit_b_id"])
+            if unitmatch_id not in matchable_cache:
+                matchable_cache[unitmatch_id] = _matchable_nodes(unitmatch_id)
+            for label, node in (("a", node_a), ("b", node_b)):
+                if node not in matchable_cache[unitmatch_id]:
+                    raise UnitMatchPairIntegrityError(
+                        f"UnitMatch.Pair.insert: endpoint {label} unit {node} "
+                        "is not a UnitMatch.MatchableUnit of "
+                        f"unitmatch_id={unitmatch_id}; insert the match's "
+                        "MatchableUnit rows first."
+                    )
             edge = frozenset((node_a, node_b))
             if unitmatch_id not in seen_edges:
                 seen_edges[unitmatch_id] = self._existing_pair_edges(
@@ -861,30 +920,62 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         relabel cannot drop an unpaired unit. ``compared`` is 0 for a unit the
         matcher never saw, so an unpaired unit that was not evaluated can be
         told from one that was evaluated and found unmatched. Each row
-        references its ``CurationV2.Unit``, which a relabel never changes.
+        references its ``UnitMatchSelection.Input`` and its
+        ``CurationV2.Unit``, which a relabel never changes. ``sorting_id`` and
+        ``curation_id`` follow from ``input_index`` but stay in the key,
+        which ``TrackedUnit`` and the readers use; :meth:`insert` checks they
+        are the input's pinned curation.
         """
 
         definition = """
         -> master
-        input_index: int
+        -> UnitMatchSelection.Input
         -> CurationV2.Unit
         ---
         compared=1: tinyint   # 0 if the matcher never saw the unit (left out of its input bundle)
         """
+
+        def insert(self, rows, **kwargs):
+            """Insert units, refusing one outside its input's pinned curation.
+
+            Raises
+            ------
+            UnitMatchPairIntegrityError
+                If a row's ``(sorting_id, curation_id)`` is not the curation
+                ``UnitMatchSelection.Input`` pins at its ``input_index``.
+            """
+            rows = _rows_to_dicts(rows, self.heading.names)
+            pinned = _pinned_input_curations(
+                {row["unitmatch_id"] for row in rows}
+            )
+            for row in rows:
+                input_key = (str(row["unitmatch_id"]), int(row["input_index"]))
+                curation = (str(row["sorting_id"]), int(row["curation_id"]))
+                # A missing input is left to the foreign key.
+                if input_key in pinned and pinned[input_key] != curation:
+                    raise UnitMatchPairIntegrityError(
+                        "UnitMatch.MatchableUnit.insert: unit "
+                        f"{row['unit_id']} of curation {curation} is not from "
+                        f"the curation {pinned[input_key]} that "
+                        f"input_index {input_key[1]} of unitmatch_id="
+                        f"{input_key[0]} pins. Use "
+                        "UnitMatchSelection.insert_inputs() + populate()."
+                    )
+            super().insert(rows, **kwargs)
 
     class RecordingSpikeCount(SpyglassMixinPart):
         """Frozen per-recording spike counts of every matchable unit.
 
         One row per (input, constituent recording, unit): spikes whose sort
         frame lies in the recording's ``[start_sample, end_sample)``. Counts
-        over an input's recordings sum to the unit's total. Not FK'd: a row
-        holds only ``unit_id``; ``MatchableUnit`` references the curated unit.
+        over an input's recordings sum to the unit's total. Each row
+        references its ``UnitMatchSelection.InputRecording``; ``unit_id`` is
+        a plain int, and ``MatchableUnit`` references the curated unit.
         """
 
         definition = """
         -> master
-        input_index: int
-        recording_index: int
+        -> UnitMatchSelection.InputRecording
         unit_id: int
         ---
         n_spikes: int     # spikes of the unit whose sort frame lies in this recording's frame span
@@ -1062,11 +1153,12 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "matcher_provenance": matcher_provenance,
                 }
             )
-            # ``read_pairs`` returns exactly the Pair columns besides the PK.
-            self.Pair.insert([{**key, **pair} for pair in pairs])
+            # Before Pair, whose insert checks endpoints against these rows.
             self.MatchableUnit.insert(
                 [{**key, **unit} for unit in matchable_units]
             )
+            # ``read_pairs`` returns exactly the Pair columns besides the PK.
+            self.Pair.insert([{**key, **pair} for pair in pairs])
             self.RecordingSpikeCount.insert(
                 [{**key, **count} for count in recording_spike_counts]
             )
@@ -1165,12 +1257,46 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     """
 
     class Member(SpyglassMixinPart):
-        """One row per (tracked unit, contributing curated unit)."""
+        """One row per (tracked unit, contributing curated unit).
+
+        A unit is in at most one tracked unit of a match (unique index), and
+        :meth:`insert` checks it is a ``UnitMatch.MatchableUnit`` of the match.
+        """
 
         definition = """
         -> master
         -> CurationV2.Unit
+        unique index (unitmatch_id, sorting_id, curation_id, unit_id)
         """
+
+        def insert(self, rows, **kwargs):
+            """Insert members, refusing a unit outside the match's units.
+
+            Raises
+            ------
+            UnitMatchPairIntegrityError
+                If a row's unit is not a ``UnitMatch.MatchableUnit`` of its
+                ``unitmatch_id``.
+            """
+            rows = _rows_to_dicts(rows, self.heading.names)
+            matchable: dict = {}
+            for row in rows:
+                unitmatch_id = row["unitmatch_id"]
+                if unitmatch_id not in matchable:
+                    matchable[unitmatch_id] = _matchable_nodes(unitmatch_id)
+                node = (
+                    str(row["sorting_id"]),
+                    int(row["curation_id"]),
+                    int(row["unit_id"]),
+                )
+                if node not in matchable[unitmatch_id]:
+                    raise UnitMatchPairIntegrityError(
+                        f"TrackedUnit.Member.insert: unit {node} is not a "
+                        "UnitMatch.MatchableUnit of "
+                        f"unitmatch_id={unitmatch_id}. Tracked units come "
+                        "from TrackedUnit.populate()."
+                    )
+            super().insert(rows, **kwargs)
 
     def make(self, key):
         """Derive tracked units from the pairwise ``UnitMatch.Pair`` graph.

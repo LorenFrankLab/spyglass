@@ -309,8 +309,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
           ``curation_id``) is not also being deleted. Delete leaf-up.
         - another table uses the curation's ``SpikeSortingOutput`` entry
           (``SortedSpikesGroup``, a unit annotation, waveform features).
-        - a part of another table uses the curation (``UnitMatchSelection``);
-          the cascade would delete the part row but keep its master.
+        - a part of another table uses the curation or one of its
+          ``CurationV2.Unit`` rows (``UnitMatchSelection``, ``UnitMatch``,
+          ``TrackedUnit``); the cascade would delete the part row but keep its
+          master.
 
         ``super_delete``, ``delete_quick``, and upstream cascades skip this
         guard; :meth:`audit_orphaned_lineage` finds the orphans they leave.
@@ -370,9 +372,13 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
                 f"(parent_curation_id, child_curation_id) pairs: {orphaned}. "
                 "Delete the descendant curations first (leaf-up)."
             )
+        referrers = foreign_key_referrers(self, list(rows))
+        unit_keys = (cls.Unit & list(rows)).fetch("KEY") if len(rows) else []
+        for name, n_rows in foreign_key_referrers(cls.Unit, unit_keys).items():
+            referrers[name] = referrers.get(name, 0) + n_rows
         external_parts = {
             name: n_rows
-            for name, n_rows in foreign_key_referrers(self, list(rows)).items()
+            for name, n_rows in referrers.items()
             if get_master(name)
             not in (
                 "",
@@ -383,10 +389,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         if external_parts:
             raise ValueError(
                 f"{cls.__name__}.delete: refusing to delete. Part tables of "
-                f"other tables still use these curations: {external_parts} "
-                "(rows per table). Delete their masters first (for example "
-                "the UnitMatchSelection that matches the curation), then "
-                "delete the curation."
+                "other tables still use these curations or their units: "
+                f"{external_parts} (rows per table). Delete their masters "
+                "first (for example the UnitMatchSelection that matches the "
+                "curation), then delete the curation."
             )
         if safemode is not None:
             kwargs["safemode"] = safemode
