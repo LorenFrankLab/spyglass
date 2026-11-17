@@ -232,6 +232,7 @@ def test_recording_serialization_preserves_traces_and_clock(wrapper):
 _MIXIN_FIRST_EXCEPTIONS = {
     # SpyglassMixinPart already ends in dj.Part; a later mixin never runs.
     "AutoCurationRules.Rule": ("ImmutableParamsLookup",),
+    "SharedArtifactGroup.Member": ("FactoryOnlyMaster",),
     # Overrides PopulateMixin's ``_staged_outputs = None``.
     "Recording": ("StagedOutputCleanupMixin",),
     "ConcatenatedRecording": ("StagedOutputCleanupMixin",),

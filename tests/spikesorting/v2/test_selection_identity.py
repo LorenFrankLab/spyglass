@@ -24,7 +24,7 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     recording_identity_payload,
     recording_input_hash,
 )
-from spyglass.utils.identity import canonical_json
+from spyglass.utils.identity import canonical_json, sha256_json
 
 # --------------------------------------------------------------------------
 # Pure-helper unit tests (no database).
@@ -985,39 +985,52 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
     populated_sorting,
 ):
     """``SharedArtifactSelection.insert_selection`` writes the
-    deterministic PK, is idempotent, and differs from the recording-source id
-    for the same params and recording."""
+    deterministic PK over session, group name and member set, freezes the
+    members, is idempotent, and differs from the recording-source id for the
+    same params and recording."""
     from spyglass.spikesorting.v2.artifact import (
         SharedArtifactGroup,
         SharedArtifactSelection,
     )
+    from spyglass.spikesorting.v2.recording import RecordingSelection
     from spyglass.spikesorting.v2.sorting import SortingSelection
 
     rec_id = (SortingSelection.RecordingSource & populated_sorting).fetch1(
         "recording_id"
     )
-    group_name = "v2_selection_identity_shared_group"
-    # Single-member group: trivially one-session and time-axis-consistent.
-    (SharedArtifactGroup & {"shared_artifact_group_name": group_name}).delete(
-        safemode=False
+    nwb_file_name = (RecordingSelection & {"recording_id": rec_id}).fetch1(
+        "nwb_file_name"
     )
-    SharedArtifactGroup.insert_group(group_name, [{"recording_id": rec_id}])
+    group_key = {
+        "nwb_file_name": nwb_file_name,
+        "shared_artifact_group_name": "v2_selection_identity_shared_group",
+    }
+    # Single-member group: trivially one-session and time-axis-consistent.
+    (SharedArtifactGroup & group_key).delete(safemode=False)
+    SharedArtifactGroup.create_group(
+        nwb_file_name,
+        group_key["shared_artifact_group_name"],
+        [{"recording_id": rec_id}],
+    )
 
     expected = deterministic_id(
         "artifact_detection",
         {
             "source_kind": "shared_artifact_group",
             "artifact_detection_params_name": "default",
-            "shared_artifact_group_name": group_name,
+            **group_key,
+            "member_set_hash": sha256_json(
+                [str(rec_id)], separators=(", ", ": ")
+            ),
         },
     )
-    select_key = {
-        "shared_artifact_group_name": group_name,
-        "artifact_detection_params_name": "default",
-    }
+    select_key = {**group_key, "artifact_detection_params_name": "default"}
     try:
         pk = SharedArtifactSelection.insert_selection(dict(select_key))
         assert pk == {"artifact_detection_id": expected}
+        assert (SharedArtifactSelection.Member & pk).fetch1(
+            "recording_id"
+        ) == rec_id
         # Idempotent re-call returns the same id.
         assert SharedArtifactSelection.insert_selection(dict(select_key)) == pk
         rec_source_id = deterministic_id(
@@ -1030,12 +1043,36 @@ def test_artifact_detection_selection_shared_group_writes_deterministic_pk(
         )
         assert expected != rec_source_id
     finally:
-        (SharedArtifactSelection & {"artifact_detection_id": expected}).delete(
-            safemode=False
+        (SharedArtifactGroup & group_key).delete(safemode=False)
+
+
+def test_shared_artifact_identity_covers_session_and_members():
+    """The same group name in another session, or with other members, is a
+    different detection; member order is not part of the identity."""
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        artifact_detection_identity_payload,
+    )
+
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+
+    def _id(nwb_file_name, members):
+        return deterministic_id(
+            "artifact_detection",
+            artifact_detection_identity_payload(
+                artifact_detection_params_name="default",
+                shared_artifact_group_name="default",
+                nwb_file_name=nwb_file_name,
+                member_recording_ids=members,
+            ),
         )
-        (
-            SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-        ).delete(safemode=False)
+
+    base = _id("s1_.nwb", [a, b])
+    assert _id("s1_.nwb", [b, a]) == base
+    assert _id("s2_.nwb", [a, b]) != base
+    assert _id("s1_.nwb", [a]) != base
+    for nwb_file_name, members in ((None, [a]), ("s1_.nwb", [])):
+        with pytest.raises(ValueError, match="nwb_file_name and member"):
+            _id(nwb_file_name, members)
 
 
 # --------------------------------------------------------------------------
@@ -1056,6 +1093,7 @@ _MASTER_UPDATE1_CASES = [
     ("spyglass.spikesorting.v2.metric_curation", "CurationEvaluationSelection"),
     ("spyglass.spikesorting.v2.curation", "CurationV2"),
     ("spyglass.spikesorting.v2.session_group", "SessionGroup"),
+    ("spyglass.spikesorting.v2.artifact", "SharedArtifactGroup"),
 ]
 
 
@@ -1098,11 +1136,13 @@ def test_update1_rejected_all_masters(module, cls_name):
     [
         ("spyglass.spikesorting.v2.curation", "CurationV2"),
         ("spyglass.spikesorting.v2.session_group", "SessionGroup"),
+        ("spyglass.spikesorting.v2.artifact", "SharedArtifactGroup"),
     ],
 )
 def test_factory_master_direct_insert_rejected(module, cls_name):
-    """A direct ``insert1`` into ``CurationV2`` or ``SessionGroup`` is
-    rejected; use ``insert_curation`` / ``create_group``."""
+    """A direct ``insert1`` into ``CurationV2``, ``SessionGroup`` or
+    ``SharedArtifactGroup`` is rejected; use ``insert_curation`` /
+    ``create_group``."""
     import importlib
 
     import datajoint as dj
@@ -1143,3 +1183,47 @@ def test_master_update1_bypass_allows_mutation(fresh_recording_identity):
             {**pk, "team_name": current_team}, allow_master_mutation=True
         )
         (LabTeam & replacement_team).delete(safemode=False)
+
+
+def test_recording_artifact_detection_ids_are_pinned():
+    """Single-recording detection ids keep their base-commit values.
+
+    Captured from ``RecordingArtifactSelection.insert_selection`` on the
+    chronic minirec recordings; regenerate (do not loosen) only when the
+    recording-source identity is meant to change.
+    """
+    from spyglass.spikesorting.v2._core.selection_identity import (
+        artifact_detection_identity_payload,
+    )
+
+    cases = [
+        (
+            "02a9f450-ff62-5ca3-a184-1dd0554cfa42",
+            None,
+            "94dc697a-58f8-5054-834d-a72e6fd3cb23",
+        ),
+        (
+            "02a9f450-ff62-5ca3-a184-1dd0554cfa42",
+            [[3.0, 3.5]],
+            "a07ce75e-58dc-5575-b1ad-02fc3b1a381c",
+        ),
+        (
+            "500e5fd7-cba1-5a77-8146-66701a427228",
+            None,
+            "bf3f06bb-4627-5de8-bf40-2bb78c8ded09",
+        ),
+        (
+            "500e5fd7-cba1-5a77-8146-66701a427228",
+            [[3.0, 3.5]],
+            "cab4f7af-2b43-5ab3-93d4-e9be7c6622b6",
+        ),
+    ]
+    for recording_id, exclusions, expected in cases:
+        payload = artifact_detection_identity_payload(
+            artifact_detection_params_name="default",
+            recording_id=uuid.UUID(recording_id),
+            manual_excluded_times=exclusions,
+        )
+        assert deterministic_id("artifact_detection", payload) == uuid.UUID(
+            expected
+        )

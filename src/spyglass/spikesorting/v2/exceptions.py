@@ -393,16 +393,6 @@ class UnitMatchSelectionIntegrityError(SpikeSortingV2Error, RuntimeError):
     """
 
 
-class SharedArtifactGroupMemberDriftError(SpikeSortingV2Error, RuntimeError):
-    """Raise when a shared artifact group's member set changed under a fixed id.
-
-    The ``artifact_detection_id`` covers params and group name only; the
-    member set is snapshotted as ``member_set_hash``. ``make_fetch`` raises
-    when the live members differ. Delete the selection and re-run
-    ``insert_selection``, or restore the group's members.
-    """
-
-
 class UnitMatchPairIntegrityError(SpikeSortingV2Error, RuntimeError):
     """Raise when a ``UnitMatch.Pair`` row is outside the pinned curation universe.
 

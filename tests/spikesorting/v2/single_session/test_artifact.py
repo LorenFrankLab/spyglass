@@ -11,8 +11,10 @@ from tests.spikesorting.v2.single_session._helpers import (
 
 
 @pytest.mark.slow
-def test_shared_artifact_group_insert_validates_inputs(populated_recording):
-    """``SharedArtifactGroup.insert_group`` validates session
+def test_shared_artifact_group_insert_validates_inputs(
+    populated_recording, polymer_smoke_session
+):
+    """``SharedArtifactGroup.create_group`` validates session
     consistency, recording existence, sampling-frequency match,
     duration / n_samples match, and non-empty members.
 
@@ -21,14 +23,15 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
     """
     from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
 
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
     # Empty members -> ValueError.
     with pytest.raises(ValueError, match="members list is empty"):
-        SharedArtifactGroup.insert_group("empty_group", [])
+        SharedArtifactGroup.create_group(nwb_file_name, "empty_group", [])
 
     # Member missing recording_id -> ValueError.
     with pytest.raises(ValueError, match="must include 'recording_id'"):
-        SharedArtifactGroup.insert_group(
-            "bad_member", [{"not_recording_id": "x"}]
+        SharedArtifactGroup.create_group(
+            nwb_file_name, "bad_member", [{"not_recording_id": "x"}]
         )
 
     # Non-existent recording_id -> ValueError.
@@ -36,14 +39,24 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
 
     bogus_rid = uuid.uuid4()
     with pytest.raises(ValueError, match="not in Recording"):
-        SharedArtifactGroup.insert_group(
+        SharedArtifactGroup.create_group(
+            nwb_file_name,
             "bogus_recording",
             [{"recording_id": bogus_rid}],
         )
 
+    # Members of another session -> ValueError.
+    with pytest.raises(ValueError, match="not 'other_session_.nwb'"):
+        SharedArtifactGroup.create_group(
+            "other_session_.nwb",
+            "v2_wrong_session",
+            [{"recording_id": populated_recording["recording_id"]}],
+        )
+
     # Happy path: one member writes master + Member rows. Multi-member
     # mismatches are tested below.
-    SharedArtifactGroup.insert_group(
+    SharedArtifactGroup.create_group(
+        nwb_file_name,
         "v2_solo_group",
         [{"recording_id": populated_recording["recording_id"]}],
     )
@@ -67,7 +80,7 @@ def test_shared_artifact_group_insert_validates_inputs(populated_recording):
 def test_shared_artifact_group_insert_rejects_mismatched_durations(
     populated_recording, polymer_smoke_session
 ):
-    """``insert_group`` rejects members whose recordings span
+    """``create_group`` rejects members whose recordings span
     different time windows (different ``interval_list_name`` on the
     upstream selection).
 
@@ -120,7 +133,8 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
     Recording.populate(second_rec_pk, reserve_jobs=False)
 
     with pytest.raises(ValueError, match="differing exact timestamps"):
-        SharedArtifactGroup.insert_group(
+        SharedArtifactGroup.create_group(
+            nwb_file_name,
             "v2_mismatched_durations",
             [
                 {"recording_id": populated_recording["recording_id"]},
@@ -141,7 +155,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_durations(
 def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     populated_recording, polymer_smoke_session, monkeypatch
 ):
-    """``insert_group`` rejects members whose preprocessed
+    """``create_group`` rejects members whose preprocessed
     recordings have differing ``get_dtype()`` values.
 
     ``Recording.get_recording`` is stubbed to return recordings that differ
@@ -195,7 +209,7 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     class _FakeRec:
         """SI stub with shared timestamps and a given dtype.
 
-        Models the SI methods ``insert_group`` calls.
+        Models the SI methods ``create_group`` calls.
         """
 
         def __init__(self, n_samples, dtype_str, fs=30000.0):
@@ -238,7 +252,8 @@ def test_shared_artifact_group_insert_rejects_mismatched_dtypes(
     monkeypatch.setattr(Recording, "get_recording", _fake_get_recording)
 
     with pytest.raises(ValueError, match="differing dtypes"):
-        SharedArtifactGroup.insert_group(
+        SharedArtifactGroup.create_group(
+            nwb_file_name,
             "v2_mismatched_dtypes",
             [{"recording_id": rid_a}, {"recording_id": rid_b}],
         )
@@ -983,7 +998,7 @@ def test_detect_artifacts_clamps_artifact_at_recording_end(dj_conn):
 @pytest.mark.slow
 @pytest.mark.integration
 def test_shared_group_make_compute_reads_fetched_members_without_db(
-    populated_recording, monkeypatch
+    populated_recording, polymer_smoke_session, monkeypatch
 ):
     """``make_fetch`` resolves each member's cached file (hash-stable across
     DataJoint's two fetches) and ``make_compute`` scans the members with no
@@ -1003,17 +1018,21 @@ def test_shared_group_make_compute_reads_fetched_members_without_db(
     )
 
     ArtifactDetectionParameters.insert_default()
-    group_name = "v2_shared_group_compute_guard"
-    group = SharedArtifactGroup & {"shared_artifact_group_name": group_name}
+    group_key = {
+        "nwb_file_name": polymer_smoke_session["nwb_file_name"],
+        "shared_artifact_group_name": "v2_shared_group_compute_guard",
+    }
+    group = SharedArtifactGroup & group_key
     group.super_delete(warn=False)
     rec_key = {"recording_id": populated_recording["recording_id"]}
     try:
-        SharedArtifactGroup.insert_group(group_name, [rec_key])
+        SharedArtifactGroup.create_group(
+            group_key["nwb_file_name"],
+            group_key["shared_artifact_group_name"],
+            [rec_key],
+        )
         art_pk = SharedArtifactSelection.insert_selection(
-            {
-                "shared_artifact_group_name": group_name,
-                "artifact_detection_params_name": "default",
-            }
+            {**group_key, "artifact_detection_params_name": "default"}
         )
         table = SharedArtifactDetection()
         fetched = table.make_fetch(art_pk)
@@ -1058,22 +1077,23 @@ def test_shared_artifact_group_populate_end_to_end(
     )
 
     ArtifactDetectionParameters.insert_default()
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
     group_name = "v2_e2e_shared_group"
+    group_key = {
+        "nwb_file_name": nwb_file_name,
+        "shared_artifact_group_name": group_name,
+    }
 
-    (
-        SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-    ).super_delete(warn=False)
+    (SharedArtifactGroup & group_key).super_delete(warn=False)
 
-    SharedArtifactGroup.insert_group(
+    SharedArtifactGroup.create_group(
+        nwb_file_name,
         group_name,
         [{"recording_id": populated_recording["recording_id"]}],
     )
 
     art_pk = SharedArtifactSelection.insert_selection(
-        {
-            "shared_artifact_group_name": group_name,
-            "artifact_detection_params_name": "none",
-        }
+        {**group_key, "artifact_detection_params_name": "none"}
     )
     # ``none`` preset: full-window valid interval, independent of amplitude.
     SharedArtifactDetection.populate(art_pk, reserve_jobs=False)
@@ -1081,7 +1101,6 @@ def test_shared_artifact_group_populate_end_to_end(
     interval_name = artifact_detection_interval_list_name(
         art_pk["artifact_detection_id"]
     )
-    nwb_file_name = polymer_smoke_session["nwb_file_name"]
     rows = (
         IntervalList
         & {
@@ -1258,7 +1277,7 @@ def test_shared_artifact_group_multi_member_union(
             with_artifact=str(key["recording_id"]) == str(rid_a)
         )
 
-    # ``insert_group`` validates the members through ``get_recording``; the
+    # ``create_group`` validates the members through ``get_recording``; the
     # detection reads the files its ``make_fetch`` resolved.
     from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
 
@@ -1292,12 +1311,16 @@ def test_shared_artifact_group_multi_member_union(
     )
 
     group_name = "v2_multi_member_union_group"
+    group_key = {
+        "nwb_file_name": nwb_file_name,
+        "shared_artifact_group_name": group_name,
+    }
 
     def _clear_shared_group():
         # Delete detections and selections before the group they reference.
-        stale_art_ids = (
-            SharedArtifactSelection & {"shared_artifact_group_name": group_name}
-        ).fetch("artifact_detection_id")
+        stale_art_ids = (SharedArtifactSelection & group_key).fetch(
+            "artifact_detection_id"
+        )
         for aid in stale_art_ids:
             (SharedArtifactDetection & {"artifact_detection_id": aid}).delete(
                 safemode=False
@@ -1305,29 +1328,19 @@ def test_shared_artifact_group_multi_member_union(
             (
                 SharedArtifactSelection & {"artifact_detection_id": aid}
             ).super_delete(warn=False)
-        (
-            SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-        ).super_delete(warn=False)
+        (SharedArtifactGroup & group_key).super_delete(warn=False)
 
     _clear_shared_group()
     try:
-        SharedArtifactGroup.insert_group(
+        SharedArtifactGroup.create_group(
+            nwb_file_name,
             group_name,
             [{"recording_id": rid_a}, {"recording_id": rid_b}],
         )
-        assert (
-            len(
-                SharedArtifactGroup.Member
-                & {"shared_artifact_group_name": group_name}
-            )
-            == 2
-        )
+        assert len(SharedArtifactGroup.Member & group_key) == 2
 
         art_pk = SharedArtifactSelection.insert_selection(
-            {
-                "shared_artifact_group_name": group_name,
-                "artifact_detection_params_name": params_name,
-            }
+            {**group_key, "artifact_detection_params_name": params_name}
         )
         SharedArtifactDetection.populate(art_pk, reserve_jobs=False)
 

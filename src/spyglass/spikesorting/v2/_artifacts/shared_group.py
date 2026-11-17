@@ -16,7 +16,7 @@ from spyglass.spikesorting.v2.exceptions import SchemaBypassError
 def validate_shared_artifact_group_members(member_meta) -> str:
     """Validate session + sampling-frequency consistency; return the nwb_file_name.
 
-    Runs before ``insert_group`` loads any (multi-GB) member recording.
+    Runs before ``create_group`` loads any (multi-GB) member recording.
 
     Parameters
     ----------
@@ -38,7 +38,7 @@ def validate_shared_artifact_group_members(member_meta) -> str:
     sessions = {m["nwb_file_name"] for m in member_meta}
     if len(sessions) != 1:
         raise ValueError(
-            "SharedArtifactGroup.insert_group: members span "
+            "SharedArtifactGroup.create_group: members span "
             f"{len(sessions)} sessions ({sorted(sessions)}); a shared "
             "artifact-detection pass only makes sense within one "
             "session because the detection writes IntervalList rows "
@@ -49,7 +49,7 @@ def validate_shared_artifact_group_members(member_meta) -> str:
     sampling_frequencies = {float(m["sampling_frequency"]) for m in member_meta}
     if len(sampling_frequencies) != 1:
         raise ValueError(
-            "SharedArtifactGroup.insert_group: members have "
+            "SharedArtifactGroup.create_group: members have "
             f"differing sampling frequencies "
             f"{sorted(sampling_frequencies)}; "
             "``si.aggregate_channels`` requires identical fs."
@@ -63,7 +63,7 @@ def assert_shared_group_recordings_aggregatable(
     """Re-assert at compute that shared-group members can be channel-aggregated.
 
     A direct ``SharedArtifactSelection`` insert can bypass
-    ``SharedArtifactGroup.insert_group``'s checks and yield a silently wrong
+    ``SharedArtifactGroup.create_group``'s checks and yield a silently wrong
     ``si.aggregate_channels`` union.
 
     Parameters
@@ -88,7 +88,7 @@ def assert_shared_group_recordings_aggregatable(
             "span "
             f"sessions {sorted(sessions)}; a shared artifact pass aggregates "
             "channels within ONE session. The member set was inserted without "
-            "SharedArtifactGroup.insert_group (schema bypass)."
+            "SharedArtifactGroup.create_group (schema bypass)."
         )
     if len(recordings) < 2:
         return
@@ -106,7 +106,7 @@ def assert_shared_group_recordings_aggregatable(
             "are not "
             f"channel-aggregatable -- recording_id={rid!r} {detail} differs "
             f"from anchor recording_id={reference_id!r}. The member set was "
-            "inserted without SharedArtifactGroup.insert_group (schema bypass); "
+            "inserted without SharedArtifactGroup.create_group (schema bypass); "
             "``si.aggregate_channels`` would otherwise produce a silently wrong "
             "union."
         )

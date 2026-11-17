@@ -38,7 +38,8 @@ def isolated_interval_owners(dj_conn):
         {"artifact_detection_id": value} for value in split_ids + shared_ids
     ]
     group_keys = [
-        {"shared_artifact_group_name": value} for value in group_names
+        {**session, "shared_artifact_group_name": value}
+        for session, value in zip(sessions, group_names)
     ]
     # Same names in another session: cleanup must match full keys, not names.
     interval_keys = [
@@ -100,18 +101,26 @@ def isolated_interval_owners(dj_conn):
                     {"artifact_detection_id": split_ids[index]},
                     allow_direct_insert=True,
                 )
-                SharedArtifactGroup.insert1({**group_keys[index], **session})
+                SharedArtifactGroup.insert1(
+                    group_keys[index], allow_direct_insert=True
+                )
                 SharedArtifactGroup.Member.insert1(
-                    {**group_keys[index], **recording_keys[index]}
+                    {**group_keys[index], **recording_keys[index]},
+                    allow_direct_insert=True,
                 )
                 SharedArtifactSelection.insert1(
                     {
                         "artifact_detection_id": shared_ids[index],
                         **group_keys[index],
                         "artifact_detection_params_name": "unused_cleanup_recipe",
-                        "member_set_hash": "0" * 64,
                     },
                     allow_direct_insert=True,
+                )
+                SharedArtifactSelection.Member.insert1(
+                    {
+                        "artifact_detection_id": shared_ids[index],
+                        **recording_keys[index],
+                    }
                 )
                 SharedArtifactDetection.insert1(
                     {"artifact_detection_id": shared_ids[index]},
@@ -169,6 +178,7 @@ def isolated_interval_owners(dj_conn):
                 RecordingArtifactDetection,
                 SharedArtifactDetection,
                 RecordingArtifactSelection,
+                SharedArtifactSelection.Member,
                 SharedArtifactSelection,
             ):
                 (table & detection_keys).delete_quick()

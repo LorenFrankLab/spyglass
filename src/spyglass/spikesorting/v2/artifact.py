@@ -6,7 +6,8 @@ Tables (one result table per source kind, unified by the
 - ``ArtifactDetectionParameters``: threshold detection parameters
 - ``SharedArtifactGroup`` (+ ``Member``): opt-in cross-recording detection
 - ``RecordingArtifactSelection``: single-recording request
-- ``SharedArtifactSelection``: cross-recording request
+- ``SharedArtifactSelection`` (+ ``Member``): cross-recording request with
+  its frozen member set
 - ``RecordingArtifactDetection`` / ``SharedArtifactDetection``: results;
   each ``RemovedInterval`` part owns the ``IntervalList`` rows it writes
 
@@ -48,6 +49,7 @@ from spyglass.spikesorting.v2._storage.nwb import StoredTraces
 from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2._core.table_integrity import (
+    FactoryOnlyMaster,
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
@@ -72,11 +74,10 @@ from spyglass.spikesorting.v2._core.selection_identity import (
     artifact_detection_identity_payload,
     assert_supplied_id_matches,
     deterministic_id,
-    shared_group_member_set_hash,
 )
 from spyglass.spikesorting.v2.exceptions import (
     IneffectiveManualExclusionError,
-    SharedArtifactGroupMemberDriftError,
+    SchemaBypassError,
 )
 from spyglass.spikesorting.v2.recording import RecordingSelection
 
@@ -154,23 +155,31 @@ class ArtifactDetectionParameters(
 
 
 @schema
-class SharedArtifactGroup(SpyglassMixin, dj.Manual):
-    """Named bundle of Recording rows that share an artifact-detection pass.
+class SharedArtifactGroup(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
+    """Named bundle of one session's Recording rows that share a detection.
 
     For behavioral artifacts seen on every probe (chewing, licking, head
     bumps), which per-sort-group detection can miss. One detection pass over
     the union of the members' channels yields valid times shared by every
-    member. All members must belong to one session.
+    member.
+
+    Create groups with :meth:`create_group`. Membership is fixed at creation:
+    direct ``insert`` and ``update1`` of the master and ``Member`` are
+    blocked, so a different member set is a new group.
     """
+
+    #: Named in ``FactoryOnlyMaster``'s reject messages.
+    _factory_create_call = "SharedArtifactGroup.create_group()"
 
     definition = """
-    shared_artifact_group_name: varchar(64)
-    ---
     -> Session
+    shared_artifact_group_name: varchar(64)
     """
 
-    class Member(SpyglassMixinPart):
+    class Member(FactoryOnlyMaster, SpyglassMixinPart):
         """One member Recording of a shared artifact-detection group."""
+
+        _factory_create_call = "SharedArtifactGroup.create_group()"
 
         definition = """
         -> master
@@ -178,13 +187,19 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    def insert_group(cls, name: str, members: list[dict]) -> None:
+    def create_group(
+        cls, nwb_file_name: str, group_name: str, members: list[dict]
+    ) -> None:
         """Insert master + Member rows after checking members share a time axis.
+
+        Re-creating an existing group with the same members does nothing.
 
         Parameters
         ----------
-        name : str
-            Group name (master PK).
+        nwb_file_name : str
+            The session every member belongs to.
+        group_name : str
+            Group name, unique within the session.
         members : list of dict
             Member recordings; each must contain ``recording_id``. Other
             fields are ignored.
@@ -193,14 +208,15 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         ------
         ValueError
             If ``members`` is empty, a ``recording_id`` is not a populated
-            ``Recording``, or members differ in session, sampling frequency,
-            dtype or timestamps.
+            ``Recording``, members differ in session (or are not in
+            ``nwb_file_name``), sampling frequency, dtype or timestamps, or
+            the group exists with other members.
         RuntimeError
             If a member recording cannot be loaded.
         """
         if not members:
             raise ValueError(
-                "SharedArtifactGroup.insert_group: members list is empty. "
+                "SharedArtifactGroup.create_group: members list is empty. "
                 "Pass at least one recording_id dict."
             )
 
@@ -208,10 +224,28 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         for m in members:
             if "recording_id" not in m:
                 raise ValueError(
-                    "SharedArtifactGroup.insert_group: every member dict "
+                    "SharedArtifactGroup.create_group: every member dict "
                     f"must include 'recording_id'. Got: {m!r}."
                 )
             member_recording_ids.append(m["recording_id"])
+
+        group_key = {
+            "nwb_file_name": nwb_file_name,
+            "shared_artifact_group_name": group_name,
+        }
+        if cls & group_key:
+            existing = {
+                str(rid)
+                for rid in (cls.Member & group_key).fetch("recording_id")
+            }
+            if existing == {str(rid) for rid in member_recording_ids}:
+                return
+            raise ValueError(
+                f"SharedArtifactGroup.create_group: group {group_key} exists "
+                "with other members. A group's members are fixed; use a new "
+                "group name, or delete this group (and the detections that "
+                "use it) first."
+            )
 
         # ``si.aggregate_channels`` needs equal n_samples, fs and dtype; check
         # here for a clear error instead of an opaque one at populate.
@@ -235,7 +269,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         ]
         if missing:
             raise ValueError(
-                "SharedArtifactGroup.insert_group: recording_id(s) "
+                "SharedArtifactGroup.create_group: recording_id(s) "
                 f"{missing} are not in Recording. Populate Recording for "
                 "those selections first."
             )
@@ -244,7 +278,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
         }
 
         # Cheap session/fs checks before loading multi-GB recordings.
-        nwb_file_name = validate_shared_artifact_group_members(
+        member_session = validate_shared_artifact_group_members(
             [
                 {
                     "nwb_file_name": sel_by_id[str(rid)]["nwb_file_name"],
@@ -255,6 +289,11 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 for rid in member_recording_ids
             ]
         )
+        if member_session != nwb_file_name:
+            raise ValueError(
+                "SharedArtifactGroup.create_group: the members belong to "
+                f"session {member_session!r}, not {nwb_file_name!r}."
+            )
 
         # ``aggregate_channels`` stacks by frame index, so timestamps must
         # match exactly; equal lengths can still start at different times.
@@ -266,7 +305,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 rec_obj = Recording().get_recording({"recording_id": rid})
             except Exception as exc:
                 raise RuntimeError(
-                    "SharedArtifactGroup.insert_group: failed to load "
+                    "SharedArtifactGroup.create_group: failed to load "
                     f"preprocessed recording for recording_id={rid!r} "
                     f"({type(exc).__name__}: {exc}). The strict "
                     "n_samples / dtype check at insert time requires "
@@ -282,7 +321,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 and len(explicit_time_vector) != n_samples
             ):
                 raise ValueError(
-                    "SharedArtifactGroup.insert_group: recording_id="
+                    "SharedArtifactGroup.create_group: recording_id="
                     f"{rid!r} reports get_num_samples()={n_samples}, "
                     f"but its timestamp vector has length "
                     f"{len(explicit_time_vector)}. The preprocessed recording "
@@ -297,7 +336,7 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
                 reference_rid = rid
             elif fingerprint != reference_fingerprint:
                 raise ValueError(
-                    "SharedArtifactGroup.insert_group: members have "
+                    "SharedArtifactGroup.create_group: members have "
                     "differing exact timestamps (recording_id="
                     f"{reference_rid!r} and recording_id={rid!r} have "
                     "non-identical timestamp vectors). Shared artifact "
@@ -308,34 +347,22 @@ class SharedArtifactGroup(SpyglassMixin, dj.Manual):
             member_dtypes.add(str(rec_obj.get_dtype()))
         if len(member_dtypes) != 1:
             raise ValueError(
-                "SharedArtifactGroup.insert_group: members have "
+                "SharedArtifactGroup.create_group: members have "
                 f"differing dtypes {sorted(member_dtypes)}; "
                 "``si.aggregate_channels`` requires identical dtype."
             )
 
-        master_row = {
-            "shared_artifact_group_name": name,
-            "nwb_file_name": nwb_file_name,
-        }
         member_rows = [
-            {
-                "shared_artifact_group_name": name,
-                "recording_id": rid,
-            }
-            for rid in member_recording_ids
+            {**group_key, "recording_id": rid} for rid in member_recording_ids
         ]
-
         with cls._safe_context():
-            cls.insert1(master_row)
-            cls.Member.insert(member_rows)
+            # Rows were validated above.
+            cls.insert1(group_key, allow_direct_insert=True)
+            cls.Member.insert(member_rows, allow_direct_insert=True)
 
 
 def _assert_manual_exclusions_effective(
-    exclusions,
-    caller: str,
-    *,
-    recording_id=None,
-    shared_artifact_group_name=None,
+    exclusions, caller: str, recording_ids
 ) -> None:
     """Raise unless every exclusion overlaps time the source recording keeps.
 
@@ -350,8 +377,8 @@ def _assert_manual_exclusions_effective(
         Normalized ``(n, 2)`` ``[start, stop)`` session-second intervals.
     caller : str
         The selection table name, prefixed to the message.
-    recording_id, shared_artifact_group_name : optional
-        The single-recording or shared-group source (exactly one).
+    recording_ids : sequence
+        The source's recording ids: one, or a shared group's members.
 
     Raises
     ------
@@ -360,15 +387,16 @@ def _assert_manual_exclusions_effective(
     ValueError
         If the source recording has no ``Recording.ValidInterval`` row.
     """
-    if recording_id is not None:
-        restriction = RecordingSelection & {"recording_id": recording_id}
-    else:
-        restriction = RecordingSelection & (
-            SharedArtifactGroup.Member
-            & {"shared_artifact_group_name": shared_artifact_group_name}
-        )
-    requests = (restriction & Recording).fetch(
-        "recording_id", "nwb_file_name", "interval_list_name", as_dict=True
+    requests = (
+        RecordingSelection
+        & [{"recording_id": rid} for rid in recording_ids]
+        & Recording
+    ).fetch(
+        "recording_id",
+        "nwb_file_name",
+        "interval_list_name",
+        as_dict=True,
+        order_by="recording_id",
     )
     if not requests:
         return  # The FK insert reports a missing source.
@@ -392,11 +420,11 @@ def _insert_artifact_selection(
     selection_cls,
     *,
     artifact_detection_params_name,
-    recording_id=None,
-    shared_artifact_group_name=None,
+    source: dict,
+    recording_ids,
     supplied_id=None,
     manual_excluded_times=None,
-    extra_row,
+    member_part=None,
 ) -> dict:
     """Idempotently insert one artifact-detection selection row.
 
@@ -411,20 +439,21 @@ def _insert_artifact_selection(
         The source-specific selection table to insert into.
     artifact_detection_params_name : str
         The ``ArtifactDetectionParameters`` row name.
-    recording_id : uuid or str, optional
-        Single-recording source id (mutually exclusive with
-        ``shared_artifact_group_name``).
-    shared_artifact_group_name : str, optional
-        Shared-group source name (mutually exclusive with ``recording_id``).
+    source : dict
+        The source identity passed to ``artifact_detection_identity_payload``
+        (``recording_id``, or the shared group's ``nwb_file_name``,
+        ``shared_artifact_group_name`` and ``member_recording_ids``).
+    recording_ids : sequence
+        The recordings the detection scans; one row each in ``member_part``.
     supplied_id : optional
         A caller-supplied ``artifact_detection_id`` to validate against the
         derived one, or ``None``.
     manual_excluded_times : array-like, optional
         ``[start, stop)`` absolute session-second intervals to exclude; part
         of the identity. Each must overlap the source's sorted time.
-    extra_row : dict
-        Source-specific columns to add to the inserted row (the source FK,
-        plus ``member_set_hash`` for the shared-group table).
+    member_part : dj.Part, optional
+        The part that freezes ``recording_ids`` with the selection, written in
+        the same transaction as the master.
 
     Returns
     -------
@@ -440,16 +469,12 @@ def _insert_artifact_selection(
     exclusions = normalize_manual_exclusions(manual_excluded_times)
     if exclusions:
         _assert_manual_exclusions_effective(
-            exclusions,
-            selection_cls.__name__,
-            recording_id=recording_id,
-            shared_artifact_group_name=shared_artifact_group_name,
+            exclusions, selection_cls.__name__, recording_ids
         )
     payload = artifact_detection_identity_payload(
         artifact_detection_params_name=artifact_detection_params_name,
-        recording_id=recording_id,
-        shared_artifact_group_name=shared_artifact_group_name,
         manual_excluded_times=exclusions,
+        **source,
     )
     artifact_detection_id = deterministic_id("artifact_detection", payload)
     assert_supplied_id_matches(
@@ -469,12 +494,16 @@ def _insert_artifact_selection(
         **pk,
         "artifact_detection_params_name": artifact_detection_params_name,
         "manual_excluded_times": exclusions,
-        **extra_row,
+        **{k: v for k, v in source.items() if k != "member_recording_ids"},
     }
     try:
         with selection_cls._safe_context():
             # allow_direct_insert: insert_selection IS the validation boundary.
             selection_cls.insert1(row, allow_direct_insert=True)
+            if member_part is not None:
+                member_part.insert(
+                    [{**pk, "recording_id": rid} for rid in recording_ids]
+                )
     except dj.errors.DuplicateError:
         # A concurrent caller inserted the same content-addressed row.
         logger.debug(
@@ -522,10 +551,10 @@ class RecordingArtifactSelection(
             artifact_detection_params_name=key[
                 "artifact_detection_params_name"
             ],
-            recording_id=recording_id,
+            source={"recording_id": recording_id},
+            recording_ids=[recording_id],
             supplied_id=key.get("artifact_detection_id"),
             manual_excluded_times=key.get("manual_excluded_times"),
-            extra_row={"recording_id": recording_id},
         )
 
 
@@ -535,9 +564,9 @@ class SharedArtifactSelection(
 ):
     """Cross-recording (shared-group) artifact-detection request.
 
-    ``member_set_hash`` snapshots the member ``recording_id`` set, which is
-    not part of the identity. ``SharedArtifactDetection.make_fetch``
-    rejects a changed member set.
+    The identity includes the session and the group's member set, and the
+    ``Member`` part freezes that set: it is the one record of which
+    recordings the detection scans and may mask.
     """
 
     definition = """
@@ -545,46 +574,66 @@ class SharedArtifactSelection(
     ---
     -> ArtifactDetectionParameters
     -> SharedArtifactGroup
-    member_set_hash: char(64)   # frozen sha256 of the sorted (order-independent) member recording_id set
     manual_excluded_times=null: longblob # immutable [start, stop) session seconds
     """
+
+    class Member(SpyglassMixinPart):
+        """One recording the detection scans, frozen with the selection."""
+
+        definition = """
+        -> master
+        -> Recording
+        """
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
         """Idempotently register a shared-group artifact selection.
 
-        Snapshots the group's current member set onto ``member_set_hash``.
+        Freezes the group's members in the ``Member`` part.
 
         Parameters
         ----------
         key : dict
-            Must carry ``artifact_detection_params_name`` and
-            ``shared_artifact_group_name``. An explicit
+            Must carry ``artifact_detection_params_name``, ``nwb_file_name``
+            and ``shared_artifact_group_name``. An explicit
             ``artifact_detection_id`` is validated against the derived id.
 
         Returns
         -------
         dict
             ``{"artifact_detection_id": ...}``, the content-addressed PK.
+
+        Raises
+        ------
+        ValueError
+            If the ``SharedArtifactGroup`` does not exist.
         """
-        group_name = key["shared_artifact_group_name"]
-        member_recording_ids = (
-            SharedArtifactGroup.Member
-            & {"shared_artifact_group_name": group_name}
-        ).fetch("recording_id")
-        member_set_hash = shared_group_member_set_hash(member_recording_ids)
+        group_key = {
+            "nwb_file_name": key["nwb_file_name"],
+            "shared_artifact_group_name": key["shared_artifact_group_name"],
+        }
+        member_recording_ids = sorted(
+            str(rid)
+            for rid in (SharedArtifactGroup.Member & group_key).fetch(
+                "recording_id"
+            )
+        )
+        if not member_recording_ids:
+            raise ValueError(
+                f"SharedArtifactSelection.insert_selection: {group_key} is "
+                "not a SharedArtifactGroup. Create it with "
+                "SharedArtifactGroup.create_group() first."
+            )
         return _insert_artifact_selection(
             cls,
             artifact_detection_params_name=key[
                 "artifact_detection_params_name"
             ],
-            shared_artifact_group_name=group_name,
+            source={**group_key, "member_recording_ids": member_recording_ids},
+            recording_ids=member_recording_ids,
             supplied_id=key.get("artifact_detection_id"),
             manual_excluded_times=key.get("manual_excluded_times"),
-            extra_row={
-                "shared_artifact_group_name": group_name,
-                "member_set_hash": member_set_hash,
-            },
+            member_part=cls.Member,
         )
 
 
@@ -932,8 +981,8 @@ class SharedArtifactDetection(
 
     Steps
     -----
-    1. Resolve the parameters and members, refusing a member set that
-       differs from ``member_set_hash``.
+    1. Resolve the parameters and the members frozen in
+       ``SharedArtifactSelection.Member``.
     2. Open each member's recording and check they can be aggregated.
     3. Union the members' channels and scan once for artifacts.
     4. Remove the manual exclusions.
@@ -961,7 +1010,7 @@ class SharedArtifactDetection(
         """
 
     def make_fetch(self, key) -> SharedArtifactFetched:
-        """Read params, resolve members, and reject a member-set drift.
+        """Read params and the members frozen with the selection.
 
         Missing cached artifacts are rebuilt through ``Recording``.
 
@@ -972,15 +1021,9 @@ class SharedArtifactDetection(
             ``recording_id`` / ``nwb_file_name`` tuples, the canonical parent
             ``nwb_file_name``, the per-row job kwargs and the resolved member
             artifacts.
-
-        Raises
-        ------
-        SharedArtifactGroupMemberDriftError
-            If the live member set differs from ``member_set_hash``.
         """
         (
             group_name,
-            frozen_hash,
             manual_excluded_times,
             params_blob,
             artifact_job_kwargs,
@@ -988,7 +1031,6 @@ class SharedArtifactDetection(
             ArtifactDetectionParameters * (SharedArtifactSelection & key)
         ).fetch1(
             "shared_artifact_group_name",
-            "member_set_hash",
             "manual_excluded_times",
             "params",
             "job_kwargs",
@@ -997,8 +1039,7 @@ class SharedArtifactDetection(
 
         # Ordered so both make_fetch calls DeepHash equal.
         members = (
-            SharedArtifactGroup.Member * RecordingSelection
-            & {"shared_artifact_group_name": group_name}
+            SharedArtifactSelection.Member * RecordingSelection & key
         ).fetch(
             "recording_id",
             "nwb_file_name",
@@ -1006,26 +1047,12 @@ class SharedArtifactDetection(
             order_by="recording_id",
         )
         if not members:
-            raise RuntimeError(
-                "SharedArtifactDetection.make: SharedArtifactGroup "
-                f"{group_name!r} has zero members; insert_group should have "
-                "rejected the empty case."
+            raise SchemaBypassError(
+                "SharedArtifactDetection.make: SharedArtifactSelection "
+                f"{key['artifact_detection_id']} has no Member rows; "
+                "insert_selection writes them with the selection."
             )
         member_recording_ids = tuple(str(m["recording_id"]) for m in members)
-        current_hash = shared_group_member_set_hash(member_recording_ids)
-        if current_hash != frozen_hash:
-            raise SharedArtifactGroupMemberDriftError(
-                "SharedArtifactDetection.make: SharedArtifactGroup "
-                f"{group_name!r} member set changed since "
-                f"artifact_detection_id={key['artifact_detection_id']} was "
-                f"created (frozen member_set_hash {frozen_hash[:12]} != "
-                f"current {current_hash[:12]}). The artifact_detection_id "
-                "identity is params+group only, so insert_selection() returns "
-                "this same id with its stale snapshot -- to scan the new "
-                "membership, DELETE this selection and re-run "
-                "insert_selection() (which re-snapshots the current members), "
-                "or restore the group's members."
-            )
         member_nwb_file_names = tuple(m["nwb_file_name"] for m in members)
         return SharedArtifactFetched(
             validated=validated,
@@ -1069,7 +1096,7 @@ class SharedArtifactDetection(
                 "source has no member_recording_ids; make_fetch contract "
                 "violated."
             )
-        # 2. Open each member and re-check insert_group's invariants, which a
+        # 2. Open each member and re-check create_group's invariants, which a
         # direct insert can bypass.
         per_member_recordings = [
             read_stored_traces(traces) for traces in member_traces
@@ -1147,20 +1174,18 @@ def assert_artifact_detection_covers_recording(
         return
 
     if SharedArtifactDetection & artifact_detection_key:
-        group_name = (SharedArtifactSelection & artifact_detection_key).fetch1(
-            "shared_artifact_group_name"
-        )
         if not (
-            SharedArtifactGroup.Member
-            & {
-                "shared_artifact_group_name": group_name,
-                "recording_id": recording_id,
-            }
+            SharedArtifactSelection.Member
+            & artifact_detection_key
+            & {"recording_id": recording_id}
         ):
+            group = (SharedArtifactSelection & artifact_detection_key).fetch(
+                "nwb_file_name", "shared_artifact_group_name", as_dict=True
+            )[0]
             raise ValueError(
                 f"{caller}: artifact_detection_id "
-                f"{artifact_detection_id!r} belongs to shared artifact group "
-                f"{group_name!r}, which does not include requested "
+                f"{artifact_detection_id!r} was detected over shared artifact "
+                f"group {group}, whose members do not include requested "
                 f"recording_id={target_recording_id!r}."
             )
         return

@@ -1,6 +1,6 @@
 """Artifact-detection invariants: shared-group guards and selection branches.
 
-The insert_group checks fire before any recording load, so preconditions are
+The create_group checks fire before any recording load, so preconditions are
 planted with FK checks off instead of a real populate.
 """
 
@@ -17,7 +17,7 @@ def _plant_fake_recording(recording_id, nwb_file_name, sampling_frequency):
     checks off.
 
     Sets only the ``nwb_file_name`` and ``sampling_frequency`` the
-    insert_group guards read. Returns the ``recording_id``.
+    create_group guards read. Returns the ``recording_id``.
     """
     import datajoint as dj
 
@@ -74,7 +74,7 @@ def _drop_fake_recording(recording_id):
 class _FakeRecording:
     """Stand-in for an explicit-time_vector SI recording.
 
-    Implements the SI calls ``insert_group`` uses (``get_time_info``,
+    Implements the SI calls ``create_group`` uses (``get_time_info``,
     ``sample_index_to_time``, ``get_num_samples``) so the real fingerprint
     path runs.
     """
@@ -125,7 +125,8 @@ def test_shared_artifact_group_rejects_cross_session_members():
     group_name = "v2_a25_cross_session"
     try:
         with pytest.raises(ValueError, match="members span 2 sessions"):
-            SharedArtifactGroup.insert_group(
+            SharedArtifactGroup.create_group(
+                "session_a_.nwb",
                 group_name,
                 [{"recording_id": rid_a}, {"recording_id": rid_b}],
             )
@@ -155,7 +156,8 @@ def test_shared_artifact_group_rejects_frequency_mismatch():
     rid_b = _plant_fake_recording(uuid.uuid4(), "session_freq_.nwb", 25000.0)
     try:
         with pytest.raises(ValueError, match="differing sampling frequencies"):
-            SharedArtifactGroup.insert_group(
+            SharedArtifactGroup.create_group(
+                "session_freq_.nwb",
                 "v2_a25_freq_mismatch",
                 [{"recording_id": rid_a}, {"recording_id": rid_b}],
             )
@@ -190,7 +192,8 @@ def test_shared_artifact_group_rejects_timestamp_mismatch(monkeypatch):
 
     try:
         with pytest.raises(ValueError, match="differing exact timestamps"):
-            SharedArtifactGroup.insert_group(
+            SharedArtifactGroup.create_group(
+                "session_times_.nwb",
                 "v2_a25_timestamp_mismatch",
                 [{"recording_id": rid_a}, {"recording_id": rid_b}],
             )
@@ -409,35 +412,44 @@ def test_artifact_detection_delete_refuses_master_without_part_rows():
 
 
 @pytest.mark.usefixtures("dj_conn")
-def test_shared_group_member_set_frozen(monkeypatch):
-    """A ``SharedArtifactGroup.Member`` added after selection makes
-    ``make_fetch`` raise a member-drift error; an unedited selection fetches."""
+def test_shared_group_membership_is_fixed_and_frozen(monkeypatch):
+    """A group's members cannot change after creation, and a detection reads
+    and masks only the members frozen with its selection.
+
+    A member added through the maintenance bypass reaches neither the
+    detection's inputs nor the coverage check.
+    """
     import uuid
+
+    import datajoint as dj
 
     from spyglass.spikesorting.v2._storage.nwb import StoredTraces
     from spyglass.spikesorting.v2.artifact import (
         ArtifactDetectionParameters,
-        SharedArtifactGroup,
         SharedArtifactDetection,
+        SharedArtifactGroup,
         SharedArtifactSelection,
+        assert_artifact_detection_covers_recording,
     )
     from spyglass.spikesorting.v2.exceptions import (
-        SharedArtifactGroupMemberDriftError,
+        ImmutableRowError,
+        UnsupportedDirectInsertError,
     )
     from spyglass.spikesorting.v2.recording import Recording
-
-    import datajoint as dj
 
     ArtifactDetectionParameters.insert_default()
     session = "v2_member_freeze_.nwb"
     rid_a = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
     rid_b = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
     rid_c = _plant_fake_recording(uuid.uuid4(), session, 30000.0)
-    group_name = "v2_member_freeze_group"
-    art_pk = None
-    conn = dj.conn()
-    # Bypass insert_group, which loads member recordings; the drift check
-    # reads only recording_ids. The file lookup after it is stubbed.
+    group_key = {
+        "nwb_file_name": session,
+        "shared_artifact_group_name": "v2_member_freeze_group",
+    }
+    times = np.arange(8, dtype=np.float64) / 30000.0
+    monkeypatch.setattr(
+        Recording, "get_recording", lambda self, key: _FakeRecording(times)
+    )
     monkeypatch.setattr(
         Recording,
         "resolve_stored_traces",
@@ -445,68 +457,253 @@ def test_shared_group_member_set_frozen(monkeypatch):
             f"/fake/{key['recording_id']}.nwb", "/fake/es", "0" * 64
         ),
     )
+    conn = dj.conn()
+    art_pk = None
+    # The planted session has no Session row.
     conn.query("SET FOREIGN_KEY_CHECKS=0")
     try:
-        SharedArtifactGroup.insert1(
-            {
-                "shared_artifact_group_name": group_name,
-                "nwb_file_name": session,
-            },
-            allow_direct_insert=True,
+        SharedArtifactGroup.create_group(
+            session,
+            group_key["shared_artifact_group_name"],
+            [{"recording_id": rid_a}, {"recording_id": rid_b}],
         )
-        SharedArtifactGroup.Member.insert(
-            [
-                {
-                    "shared_artifact_group_name": group_name,
-                    "recording_id": rid_a,
-                },
-                {
-                    "shared_artifact_group_name": group_name,
-                    "recording_id": rid_b,
-                },
-            ],
-            allow_direct_insert=True,
+        # The same members again is a no-op; other members are refused.
+        SharedArtifactGroup.create_group(
+            session,
+            group_key["shared_artifact_group_name"],
+            [{"recording_id": rid_b}, {"recording_id": rid_a}],
         )
-    finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=1")
+        with pytest.raises(ValueError, match="exists with other members"):
+            SharedArtifactGroup.create_group(
+                session,
+                group_key["shared_artifact_group_name"],
+                [{"recording_id": rid} for rid in (rid_a, rid_b, rid_c)],
+            )
+        with pytest.raises(UnsupportedDirectInsertError, match="create_group"):
+            SharedArtifactGroup.Member.insert1(
+                {**group_key, "recording_id": rid_c}
+            )
+        with pytest.raises(UnsupportedDirectInsertError, match="create_group"):
+            SharedArtifactGroup.insert1(
+                {**group_key, "shared_artifact_group_name": "v2_other"}
+            )
+        with pytest.raises(ImmutableRowError):
+            SharedArtifactGroup().update1(group_key)
 
-    try:
         art_pk = SharedArtifactSelection.insert_selection(
-            {
-                "shared_artifact_group_name": group_name,
-                "artifact_detection_params_name": "default",
-            }
+            {**group_key, "artifact_detection_params_name": "default"}
         )
-        # Unedited: the live member set matches the snapshot.
-        fetched = SharedArtifactDetection().make_fetch(art_pk)
-        assert [t.abs_path for t in fetched.member_traces] == [
-            f"/fake/{rid}.nwb" for rid in fetched.member_recording_ids
-        ]
+        frozen = {str(rid_a), str(rid_b)}
+        assert {
+            str(r)
+            for r in (SharedArtifactSelection.Member & art_pk).fetch(
+                "recording_id"
+            )
+        } == frozen
 
-        # Drift: add a member after the snapshot was taken.
+        # A maintenance bypass adds a member after the selection.
         SharedArtifactGroup.Member.insert1(
-            {"shared_artifact_group_name": group_name, "recording_id": rid_c}
+            {**group_key, "recording_id": rid_c}, allow_direct_insert=True
         )
-        with pytest.raises(
-            SharedArtifactGroupMemberDriftError, match="member set"
-        ):
-            SharedArtifactDetection().make_fetch(art_pk)
+        fetched = SharedArtifactDetection().make_fetch(art_pk)
+        assert set(fetched.member_recording_ids) == frozen
+        SharedArtifactDetection.insert1(art_pk, allow_direct_insert=True)
+        for rid in (rid_a, rid_b):
+            assert_artifact_detection_covers_recording(
+                recording_id=rid,
+                artifact_detection_id=art_pk["artifact_detection_id"],
+                caller="test",
+            )
+        with pytest.raises(ValueError, match="do not include"):
+            assert_artifact_detection_covers_recording(
+                recording_id=rid_c,
+                artifact_detection_id=art_pk["artifact_detection_id"],
+                caller="test",
+            )
     finally:
-        conn.query("SET FOREIGN_KEY_CHECKS=0")
         try:
             if art_pk is not None:
-                (SharedArtifactSelection & art_pk).delete_quick()
-            (
-                SharedArtifactGroup.Member
-                & {"shared_artifact_group_name": group_name}
-            ).delete_quick()
-            (
-                SharedArtifactGroup & {"shared_artifact_group_name": group_name}
-            ).delete_quick()
+                for table in (
+                    SharedArtifactDetection,
+                    SharedArtifactSelection.Member,
+                    SharedArtifactSelection,
+                ):
+                    (table & art_pk).delete_quick()
+            (SharedArtifactGroup.Member & group_key).delete_quick()
+            (SharedArtifactGroup & group_key).delete_quick()
         finally:
             conn.query("SET FOREIGN_KEY_CHECKS=1")
         for rid in (rid_a, rid_b, rid_c):
             _drop_fake_recording(rid)
+
+
+def _orphan_masters():
+    """Shared-artifact masters left without their part rows."""
+    from spyglass.spikesorting.v2.artifact import (
+        SharedArtifactDetection,
+        SharedArtifactGroup,
+        SharedArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+
+    return {
+        "group": len(SharedArtifactGroup - SharedArtifactGroup.Member),
+        "selection": len(
+            SharedArtifactSelection - SharedArtifactSelection.Member
+        ),
+        "detection": len(
+            SharedArtifactDetection - SharedArtifactDetection.RemovedInterval
+        ),
+        "output": len(
+            ArtifactDetectionOutput
+            - ArtifactDetectionOutput.RecordingArtifactDetection
+            - ArtifactDetectionOutput.SharedArtifactDetection
+        ),
+    }
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_deleting_member_recording_removes_its_shared_detections(
+    chronic_2_session_minirec, monkeypatch
+):
+    """Deleting a member ``Recording`` removes every group holding it, with
+    each group's selection, populated detection, merge registration, interval
+    ownership rows and the sorts that use it; groups without it stay whole.
+
+    ``g12`` and ``g2`` share member ``r2``; ``g1`` holds only ``r1``.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        CORTEX_PREPROC,
+        HIPPOCAMPUS_PREPROC,
+    )
+    from spyglass.spikesorting.v2 import artifact as artifact_module
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        SharedArtifactDetection,
+        SharedArtifactGroup,
+        SharedArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    member = chronic_2_session_minirec["same_day_members"][0]
+    nwb_file_name = member["nwb_file_name"]
+    window = "v2_shared_cascade_window"
+    raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": window,
+            "valid_times": np.asarray([[raw[0][0] + 0.5, raw[0][0] + 4.0]]),
+            "pipeline": "shared_group_cascade_test",
+        },
+        skip_duplicates=True,
+    )
+    ArtifactDetectionParameters.insert_default()
+    baseline = _orphan_masters()
+    # Both members are the one tetrode under two recipes, so their contacts
+    # coincide; the union scan is not what this test checks.
+    monkeypatch.setattr(
+        artifact_module.si,
+        "aggregate_channels",
+        lambda recordings: recordings[0],
+    )
+    r1, r2 = (
+        RecordingSelection.insert_selection(
+            {
+                **member,
+                "interval_list_name": window,
+                "preprocessing_params_name": recipe,
+                "team_name": chronic_2_session_minirec["owner"],
+            }
+        )
+        for recipe in (HIPPOCAMPUS_PREPROC, CORTEX_PREPROC)
+    )
+    Recording.populate([r1, r2], reserve_jobs=False)
+
+    groups = {"g12": [r1, r2], "g2": [r2], "g1": [r1]}
+    detections, sorts = {}, {}
+    for name, members in groups.items():
+        SharedArtifactGroup.create_group(nwb_file_name, name, members)
+        detections[name] = SharedArtifactSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "shared_artifact_group_name": name,
+                "artifact_detection_params_name": "none",
+            }
+        )
+        SharedArtifactDetection.populate(detections[name], reserve_jobs=False)
+        sorts[name] = SortingSelection.insert_selection(
+            {
+                "recording_id": members[-1]["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+                **detections[name],
+            }
+        )
+    assert _orphan_masters() == baseline
+
+    def _present(name):
+        detection = detections[name]
+        rows = {
+            "group": SharedArtifactGroup
+            & {
+                "nwb_file_name": nwb_file_name,
+                "shared_artifact_group_name": name,
+            },
+            "selection": SharedArtifactSelection & detection,
+            "frozen members": SharedArtifactSelection.Member & detection,
+            "detection": SharedArtifactDetection & detection,
+            "interval owner": SharedArtifactDetection.RemovedInterval
+            & detection,
+            "merge": ArtifactDetectionOutput.SharedArtifactDetection
+            & detection,
+            "sort": SortingSelection & sorts[name],
+        }
+        return {label: bool(rows[label]) for label in rows}
+
+    try:
+        (Recording & r2).delete(safemode=False)
+        for name in ("g12", "g2"):
+            assert not any(_present(name).values()), (name, _present(name))
+        assert all(_present("g1").values()), _present("g1")
+        assert _orphan_masters() == baseline
+
+        (Recording & r1).delete(safemode=False)
+        assert not any(_present("g1").values()), _present("g1")
+        assert _orphan_masters() == baseline
+    finally:
+        (RecordingSelection & [r1, r2]).delete(safemode=False)
+        # An upstream cascade leaves a detection's IntervalList row behind.
+        (
+            IntervalList
+            & {"nwb_file_name": nwb_file_name}
+            & [
+                {
+                    "interval_list_name": artifact_detection_interval_list_name(
+                        pk["artifact_detection_id"]
+                    )
+                }
+                for pk in detections.values()
+            ]
+            + [{"interval_list_name": window}]
+        ).delete_quick()
 
 
 @pytest.mark.usefixtures("dj_conn")

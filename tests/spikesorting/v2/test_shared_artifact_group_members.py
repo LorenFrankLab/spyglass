@@ -71,7 +71,7 @@ def test_validate_shared_group_members_rejects_differing_sampling_frequency():
 
 # --------------------------------------------------------------------------- #
 # ``make_compute`` re-checks the aggregation invariants on loaded recordings,
-# raising ``SchemaBypassError`` for members inserted around ``insert_group``.
+# raising ``SchemaBypassError`` for members inserted around ``create_group``.
 # --------------------------------------------------------------------------- #
 
 

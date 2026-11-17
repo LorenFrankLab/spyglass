@@ -102,12 +102,16 @@ def artifact_detection_identity_payload(
     artifact_detection_params_name,
     recording_id=None,
     shared_artifact_group_name=None,
+    nwb_file_name=None,
+    member_recording_ids=None,
     manual_excluded_times=None,
 ) -> dict:
     """Build an artifact-detection selection logical-identity payload.
 
     Exactly one of ``recording_id`` or ``shared_artifact_group_name`` must be
-    given. ``source_kind`` keeps the two source kinds from aliasing.
+    given. ``source_kind`` keeps the two source kinds from aliasing. A shared
+    group's identity is its session, name and member set, so a group of the
+    same name in another session, or with other members, gets another id.
 
     Parameters
     ----------
@@ -119,6 +123,12 @@ def artifact_detection_identity_payload(
     shared_artifact_group_name : optional
         The cross-recording shared-group source name. Mutually exclusive
         with ``recording_id``. Default ``None``.
+    nwb_file_name : str, optional
+        The shared group's session. Required with
+        ``shared_artifact_group_name``.
+    member_recording_ids : iterable, optional
+        The shared group's member ``recording_id`` values; order does not
+        matter. Required (non-empty) with ``shared_artifact_group_name``.
     manual_excluded_times : optional
         Manual exclusion intervals; hashed into the identity when non-empty.
 
@@ -131,7 +141,8 @@ def artifact_detection_identity_payload(
     ------
     ValueError
         If neither or both of ``recording_id`` and
-        ``shared_artifact_group_name`` are given.
+        ``shared_artifact_group_name`` are given, or a shared group lacks its
+        session or members.
     """
     if (recording_id is None) == (shared_artifact_group_name is None):
         raise ValueError(
@@ -156,33 +167,20 @@ def artifact_detection_identity_payload(
             "artifact_detection_params_name": artifact_detection_params_name,
             "recording_id": recording_id,
         }
+    members = sorted(str(rid) for rid in member_recording_ids or ())
+    if nwb_file_name is None or not members:
+        raise ValueError(
+            "artifact_detection_identity_payload: a shared artifact group "
+            "source needs its nwb_file_name and member_recording_ids."
+        )
     return {
         **manual,
         "source_kind": "shared_artifact_group",
         "artifact_detection_params_name": artifact_detection_params_name,
+        "nwb_file_name": nwb_file_name,
         "shared_artifact_group_name": shared_artifact_group_name,
+        "member_set_hash": sha256_json(members, separators=(", ", ": ")),
     }
-
-
-def shared_group_member_set_hash(recording_ids) -> str:
-    """Content-address the member set of a ``SharedArtifactGroup``.
-
-    The membership can change under a fixed ``artifact_detection_id``, so the
-    hash is stored at selection time and ``make_fetch`` rejects drift.
-    Order-independent.
-
-    Parameters
-    ----------
-    recording_ids : iterable
-        The member ``recording_id`` values (``uuid.UUID`` or ``str``).
-
-    Returns
-    -------
-    str
-        The 64-char sha256 hex digest.
-    """
-    ordered = sorted(str(recording_id) for recording_id in recording_ids)
-    return sha256_json(ordered, separators=(", ", ": "))
 
 
 def recording_input_hash(

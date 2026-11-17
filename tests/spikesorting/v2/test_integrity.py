@@ -430,12 +430,16 @@ def test_selection_fk_chain_holds_for_artifact_and_sorting_selection(
 
 def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
     """No ``CurationV2.Unit`` / ``Sorting.Unit`` /
-    ``SharedArtifactGroup.Member`` row without a parent master.
+    ``SharedArtifactGroup.Member`` / ``SharedArtifactSelection.Member`` row
+    without a parent master.
 
     Only ``Sorting.Unit`` is guaranteed non-empty by the fixture.
     """
     _ = populated_sorting  # ensure population
-    from spyglass.spikesorting.v2.artifact import SharedArtifactGroup
+    from spyglass.spikesorting.v2.artifact import (
+        SharedArtifactGroup,
+        SharedArtifactSelection,
+    )
     from spyglass.spikesorting.v2.curation import CurationV2
     from spyglass.spikesorting.v2.sorting import Sorting
 
@@ -460,16 +464,14 @@ def test_no_orphan_part_rows_in_v2_tables(populated_sorting):
             f"sorting_id={sid!r}, curation_id={cid!r}"
         )
 
-    # SharedArtifactGroup.Member -> SharedArtifactGroup master; may be empty.
-    member_keys = (SharedArtifactGroup.Member).fetch("KEY", as_dict=True)
-    group_master_pks = {r["shared_artifact_group_name"] for r in member_keys}
-    for name in group_master_pks:
-        assert (
-            len(SharedArtifactGroup & {"shared_artifact_group_name": name}) == 1
-        ), (
-            f"SharedArtifactGroup.Member references missing master "
-            f"shared_artifact_group_name={name!r}"
-        )
+    # Shared-artifact Member parts -> their masters; may be empty.
+    for master in (SharedArtifactGroup, SharedArtifactSelection):
+        for key in (master.Member & {}).fetch("KEY", as_dict=True):
+            master_key = {k: key[k] for k in master.primary_key}
+            assert len(master & master_key) == 1, (
+                f"{master.__name__}.Member references missing master "
+                f"{master_key!r}"
+            )
 
 
 def test_v2_lookup_tables_validate_via_pydantic():

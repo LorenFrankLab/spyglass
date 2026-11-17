@@ -973,7 +973,8 @@
     "test_shared_artifact_group.py": {
       "tier": "db_unit",
       "overrides": {
-        "test_artifact_detection_delete_refuses_master_without_part_rows": "db_unit"
+        "test_artifact_detection_delete_refuses_master_without_part_rows": "db_unit",
+        "test_deleting_member_recording_removes_its_shared_detections": "stage"
       }
     },
     "test_shared_artifact_group_members.py": {

@@ -547,6 +547,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `SortingAnalyzerVersions` records a `status` (`ok`, `zero_units`,
         `missing_folder`); `analyzer_hash` holds only a real content hash and is
         NULL unless `status` is `ok` #1609
+    - v2 `SharedArtifactGroup` is keyed by session and name, made with
+        `create_group(nwb_file_name, group_name, members)` (was `insert_group`),
+        and its members cannot change. A shared detection's id covers the
+        session and member set, and `SharedArtifactSelection.Member` freezes
+        the members it scans and may mask; `member_set_hash` and
+        `SharedArtifactGroupMemberDriftError` are removed #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

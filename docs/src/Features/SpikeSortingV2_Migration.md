@@ -688,8 +688,9 @@ its observed intervals.
     analyzer folders left by deletes that bypass `Sorting.delete()` (see
     [Disk space](#disk-space-and-recompute)).
 - **Immutable identity-bearing masters.** Deterministic-id selection masters,
-    `CurationV2`, and `SessionGroup` reject `update1`; `CurationV2` and
-    `SessionGroup` also reject a direct `insert`. Their columns feed the ids
+    `CurationV2`, `SessionGroup` and `SharedArtifactGroup` reject `update1`;
+    `CurationV2`, `SessionGroup` and `SharedArtifactGroup` (and its `Member`
+    part) also reject a direct `insert`. Their columns feed the ids
     downstream rows reference, so a change ships as a new selection, curation,
     or group.
     - Escape hatches for a deliberate edit of a row with no live references:
@@ -698,11 +699,13 @@ its observed intervals.
     - Each `CurationV2` generation gets a database-unique `curation_uuid`.
         Deleting and recreating a numeric `curation_id` gives a new UUID;
         `reuse_existing=True` keeps the existing generation.
-    - `UnitMatch` freezes its matchable units (`UnitMatch.MatchableUnit`), and a
-        `SharedArtifactGroup`-backed selection freezes its members, so later
-        relabels or membership edits cannot change a populated result. Recover a
-        drifted artifact group by recreating that selection or restoring the
-        group's members.
+    - `UnitMatch` freezes its matchable units (`UnitMatch.MatchableUnit`), so
+        later relabels cannot change a populated result.
+    - A `SharedArtifactGroup` is keyed by session and name and is made with
+        `SharedArtifactGroup.create_group(nwb_file_name, group_name, members)`;
+        its members cannot change. Its detection's id covers the session and
+        the member set, and `SharedArtifactSelection.Member` freezes the
+        members it scans and may mask. For other members, create a new group.
 - **Stale-default audit.** `verify_v2_default_catalog()` flags a stored shipped
     row whose content differs from the shipped content (e.g. a hand-edited
     blob). `initialize_v2_defaults` runs it and warns.

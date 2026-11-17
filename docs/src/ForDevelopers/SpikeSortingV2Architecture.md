@@ -783,15 +783,26 @@ the ordered member recordings) has the same fail-closed lifecycle as
     cleanup sees live children, not orphans.
 - A detection registers in `ArtifactDetectionOutput` inside its `make_insert`
     transaction, so only populated detections are registered.
-- `SharedArtifactGroup.insert_group` validates members at insert, because
-    `si.aggregate_channels` stacks members by frame index and a mismatch would
-    fail later with an opaque shape error. One session and one sampling
-    frequency are checked before any 5-50 GB member is loaded.
+- `SharedArtifactGroup` is keyed by session and name, like `SortedSpikesGroup`
+    and `PositionGroup`. `SharedArtifactGroup.create_group` validates members
+    at insert, because `si.aggregate_channels` stacks members by frame index and
+    a mismatch would fail later with an opaque shape error. One session and one
+    sampling frequency are checked before any 5-50 GB member is loaded.
+- A group's members are fixed. The master and `Member` are `FactoryOnlyMaster`
+    tables (`create_group` is the only writer), and re-creating a group with
+    other members raises. Unlike the v1 groups, `create_group` is a classmethod
+    and is a no-op for the same members, and the part is `Member`, as on
+    `SessionGroup`.
+- A shared detection's identity is its parameters, session, group name, member
+    set and manual exclusions. `SharedArtifactSelection.Member` freezes the
+    members with the selection; the detection's inputs and the check that a
+    sort's recording is covered (`assert_artifact_detection_covers_recording`)
+    read it, never the live group.
 - Equal lengths are not enough: two intervals of one session can match in
     length, fs and dtype but start at different times. Timestamp vectors are
     compared by a streamed SHA-256 (`_core.signal_math.timestamp_fingerprint`).
     `SharedArtifactDetection.make_compute` re-checks, because a direct
-    selection insert bypasses `insert_group`.
+    insert bypasses `create_group`.
 - Manual exclusions are absolute session timestamps, on the
     `IntervalList.valid_times` clock. Each one must overlap sorted time.
     Preflight fails its `manual_exclusions_overlap_sorted_time` check, and the
