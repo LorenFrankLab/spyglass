@@ -30,6 +30,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_filter import FirFilterParameters
+from spyglass.common.common_hed import HedAnnotation, HedMetadata
 from spyglass.common.common_interval import IntervalList, Interval
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import (
@@ -87,6 +88,8 @@ __all__ = [
     "Electrode",
     "ElectrodeGroup",
     "FirFilterParameters",
+    "HedAnnotation",
+    "HedMetadata",
     "LFP",
     "LFPBand",
     "LFPBandSelection",

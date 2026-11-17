@@ -133,6 +133,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Common
 
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Add `HedMetadata` and `HedAnnotation` (with `.Row`) to ingest an NWB file's
+        HED schema version, definitions and `HedTags` columns #1723
 
 - Decoding
 

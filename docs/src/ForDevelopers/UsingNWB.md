@@ -420,3 +420,12 @@ ndx_franklab_novela.AssociatedFiles </b>
 | Spyglass Table  |  Key  |                                     NWBfile Location | Config option |                                                                                 Notes |
 | :-------------- | :---: | ---------------------------------------------------: | ------------: | ------------------------------------------------------------------------------------: |
 | StateScriptFile | epoch | nwbf.processing.associated_files.[index].task_epochs |               | type(nwbf.processing.associated_files.[index]) == ndx_franklab_novela.AssociatedFiles |
+
+<b> NWBfile Location: nwbf.lab_meta_data and any DynamicTable <br/> Object
+types: ndx_hed.HedLabMetaData, ndx_hed.HedTags </b>
+
+| Spyglass Table    |        Key         |                  NWBfile Location | Config option |                        Notes |
+| :---------------- | :----------------: | --------------------------------: | ------------: | ---------------------------: |
+| HedMetadata       | hed_schema_version | HedLabMetaData.hed_schema_version |               |           one entry per file |
+| HedAnnotation     |   hed_object_id    |          HedTags column object_id |               | one entry per HedTags column |
+| HedAnnotation.Row |     row_index      |                HedTags column row |               |           HED string per row |

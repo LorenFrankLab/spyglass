@@ -19,6 +19,7 @@ from spyglass.common.common_device import (
     ProbeType,
 )
 from spyglass.common.common_dio import DIOEvents
+from spyglass.common.common_hed import HedAnnotation, HedMetadata
 from spyglass.common.common_ephys import (
     Electrode,
     ElectrodeGroup,
@@ -211,6 +212,8 @@ def populate_all_common(
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
+            HedMetadata,  # Depends on Session
+            HedAnnotation,  # Depends on Session
         ],
     ]
 
