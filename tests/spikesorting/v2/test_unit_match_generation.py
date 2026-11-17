@@ -220,10 +220,11 @@ def test_curation_delete_refuses_while_a_unit_match_uses_it(
 @pytest.mark.integration
 @pytest.mark.stage
 def test_match_parts_reference_recording_and_curated_unit(reviewed_curation):
-    """``InputRecording`` and ``MatchableUnit`` cannot name a missing row."""
+    """``InputRecording``, ``MatchableUnit`` and ``Input`` name only real rows."""
     import datajoint as dj
 
     from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.motion import MotionCorrectedRecording
     from spyglass.spikesorting.v2.recording import Recording
     from spyglass.spikesorting.v2.unit_matching import (
         MatcherParameters,
@@ -234,6 +235,8 @@ def test_match_parts_reference_recording_and_curated_unit(reviewed_curation):
     recording_part = UnitMatchSelection.InputRecording
     assert recording_part.full_table_name in Recording().children()
     assert UnitMatch.MatchableUnit.full_table_name in CurationV2.Unit.children()
+    input_part = UnitMatchSelection.Input
+    assert input_part.full_table_name in MotionCorrectedRecording().children()
 
     _, child = reviewed_curation
     MatcherParameters.insert_default()
@@ -249,6 +252,18 @@ def test_match_parts_reference_recording_and_curated_unit(reviewed_curation):
             dj.Table.insert1(
                 recording_part(),
                 {**row, "recording_index": 1, "recording_id": uuid.uuid4()},
+            )
+        # An uncorrected sort stores NULL; a made-up id is refused.
+        input_row = (input_part & pk).fetch1()
+        assert input_row["motion_corrected_recording_id"] is None
+        with pytest.raises(dj.errors.IntegrityError):
+            dj.Table.insert1(
+                input_part(),
+                {
+                    **input_row,
+                    "input_index": 1,
+                    "motion_corrected_recording_id": uuid.uuid4(),
+                },
             )
         unit = (UnitMatch.MatchableUnit & pk).fetch(as_dict=True)[0]
         with pytest.raises(dj.errors.IntegrityError):

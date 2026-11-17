@@ -46,6 +46,9 @@ from spyglass.spikesorting.v2._matching.inputs import (
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
+from spyglass.spikesorting.v2.motion import (  # noqa: F401
+    MotionCorrectedRecording,
+)
 from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2._core.table_integrity import (
@@ -264,7 +267,8 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         """One matching input: a curated sort, in chronological order.
 
         ``source_id`` names a ``Recording`` or a ``ConcatenatedRecording``, so
-        it has no foreign key.
+        it has no foreign key. ``motion_corrected_recording_id`` is NULL for a
+        sort that was not motion-corrected.
         """
 
         definition = """
@@ -275,7 +279,7 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         curation_uuid: uuid               # generation of the pinned curation
         source_kind: varchar(32)          # sort source kind: recording or concatenated_recording
         source_id: uuid                   # recording_id or concat_recording_id
-        motion_corrected_recording_id=null: uuid
+        -> [nullable] MotionCorrectedRecording
         input_start_time: datetime        # earliest session start among the input's recordings
         selection_snapshot: longblob     # exact generation, policy and eligible IDs frozen before matching
         """
