@@ -187,6 +187,7 @@ def test_make_insert_raises_on_genuine_truncation():
             sort_valid_times=np.array([[saved_start, expected_saved_total]]),
             expected_saved_total=expected_saved_total,
             n_intended_intervals=n_intended_intervals,
+            valid_times=np.array([[saved_start, expected_saved_total]]),
         )
 
     message = str(excinfo.value)

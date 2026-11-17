@@ -2311,3 +2311,233 @@ def test_xz_geometry_reloads_with_four_positions(dj_conn, tmp_path, request):
         sorting=sorting, recording=reloaded, sparse=False
     )
     assert analyzer.get_num_channels() == 4
+
+
+# ---------- Recording.ValidInterval ----------------------------------------
+
+
+def _two_segment_recording(polymer_smoke_session, interval_name):
+    """Populate a ``Recording`` cut to two disjoint, off-grid segments.
+
+    Returns ``(recording_pk, sort_valid_times, raw_valid_times)``.
+    """
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2.recording import (
+        PreprocessingParameters,
+        Recording,
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    PreprocessingParameters.insert_default()
+    LabTeam.insert1(
+        {"team_name": "v2_test_team", "team_description": "v2 pipeline tests"},
+        skip_duplicates=True,
+    )
+    if not (SortGroupV2 & polymer_smoke_session):
+        SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    raw_valid_times = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    start, end = float(raw_valid_times[0][0]), float(raw_valid_times[-1][-1])
+    total = end - start
+    # Off the sample grid, so the stored samples sit inside each edge.
+    sort_valid_times = np.asarray(
+        [
+            [start + 0.1 * total + 1.3e-5, start + 0.4 * total + 2.1e-5],
+            [start + 0.6 * total + 0.7e-5, start + 0.9 * total + 1.9e-5],
+        ]
+    )
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": interval_name,
+            "valid_times": sort_valid_times,
+            "pipeline": "v2_valid_interval_test",
+        },
+        skip_duplicates=True,
+    )
+    sort_group_id = int(
+        sorted((SortGroupV2 & polymer_smoke_session).fetch("sort_group_id"))[0]
+    )
+    pk = RecordingSelection.insert_selection(
+        {
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_name,
+            "preprocessing_params_name": "default",
+            "team_name": "v2_test_team",
+        }
+    )
+    Recording.populate(pk, reserve_jobs=False)
+    return pk, sort_valid_times, raw_valid_times
+
+
+def _drop_two_segment_recording(polymer_smoke_session, pk, interval_name):
+    """Remove the recording, its selection, owned row and sort interval."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._recording.valid_interval import (
+        recording_interval_list_name,
+    )
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    (Recording & pk).super_delete(warn=False)
+    (RecordingSelection & pk).super_delete(warn=False)
+    for name in (
+        recording_interval_list_name(pk["recording_id"]),
+        interval_name,
+    ):
+        (
+            IntervalList
+            & {"nwb_file_name": nwb_file_name, "interval_list_name": name}
+        ).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_recording_valid_interval_holds_the_requested_cut(
+    polymer_smoke_session,
+):
+    """Populate writes one owned ``IntervalList`` row: the sort interval
+    within the raw valid times (v1's rule), named after the recording, and
+    the stored samples lie within one sample inside each of its edges."""
+    import numpy as np
+
+    from spyglass.common import IntervalList
+    from spyglass.common.common_interval import Interval
+    from spyglass.spikesorting.v2._core.signal_math import (
+        base_intervals_and_gaps,
+    )
+    from spyglass.spikesorting.v2._recording.restriction import (
+        intended_save_intervals,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    interval_name = "v2_valid_interval_cut"
+    pk, sort_valid_times, raw_valid_times = _two_segment_recording(
+        polymer_smoke_session, interval_name
+    )
+    try:
+        part = (Recording.ValidInterval & pk).fetch(as_dict=True)
+        assert len(part) == 1
+        row = (IntervalList & part[0]).fetch1()
+        assert row["interval_list_name"] == f"recording_{pk['recording_id']}"
+        assert row["nwb_file_name"] == polymer_smoke_session["nwb_file_name"]
+        assert row["pipeline"] == "spikesorting_recording_v2"
+
+        expected = intended_save_intervals(
+            sort_valid_times, raw_valid_times, 1.0
+        )
+        v1_rule = (
+            Interval(sort_valid_times)
+            .intersect(Interval(raw_valid_times), min_length=1.0)
+            .times
+        )
+        assert expected.shape == (2, 2)
+        np.testing.assert_array_equal(row["valid_times"], expected)
+        np.testing.assert_array_equal(row["valid_times"], v1_rule)
+        np.testing.assert_array_equal(
+            Recording().get_valid_interval(pk).times, expected
+        )
+
+        recording = Recording().get_recording(pk)
+        period = 1.0 / recording.get_sampling_frequency()
+        stored = np.asarray(base_intervals_and_gaps(recording).base_intervals)
+        assert stored.shape == expected.shape
+        assert np.all(stored[:, 0] >= expected[:, 0])
+        assert np.all(stored[:, 0] - expected[:, 0] < period)
+        assert np.all(stored[:, 1] <= expected[:, 1])
+        assert np.all(expected[:, 1] - stored[:, 1] < period)
+    finally:
+        _drop_two_segment_recording(polymer_smoke_session, pk, interval_name)
+
+
+@pytest.mark.slow
+def test_recording_delete_removes_valid_interval_unless_used(
+    polymer_smoke_session,
+):
+    """``Recording.delete`` refuses while another table uses the owned
+    interval, deleting nothing, and otherwise removes the row with the
+    recording."""
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.recording import (
+        Recording,
+        RecordingSelection,
+    )
+
+    interval_name = "v2_valid_interval_delete"
+    pk, _, _ = _two_segment_recording(polymer_smoke_session, interval_name)
+    owned = (Recording.ValidInterval & pk).fetch1()
+    interval_key = {
+        "nwb_file_name": owned["nwb_file_name"],
+        "interval_list_name": owned["interval_list_name"],
+    }
+    user = None
+    try:
+        selection = (RecordingSelection & pk).fetch1()
+        user = RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": selection["nwb_file_name"],
+                "sort_group_id": selection["sort_group_id"],
+                "interval_list_name": interval_key["interval_list_name"],
+                "preprocessing_params_name": "default",
+                "team_name": "v2_test_team",
+            }
+        )
+        with pytest.raises(ValueError, match="refusing to delete"):
+            (Recording & pk).delete(safemode=False)
+        assert Recording & pk and IntervalList & interval_key
+        assert Recording.ValidInterval & pk
+
+        (RecordingSelection & user).super_delete(warn=False)
+        user = None
+        (Recording & pk).delete(safemode=False)
+        assert not (Recording & pk)
+        assert not (IntervalList & interval_key)
+    finally:
+        if user is not None:
+            (RecordingSelection & user).super_delete(warn=False)
+        _drop_two_segment_recording(polymer_smoke_session, pk, interval_name)
+
+
+def test_recording_without_valid_interval_names_the_backfill(
+    populated_recording,
+):
+    """A recording populated before ``ValidInterval`` existed has no row; the
+    accessor and the manual-exclusion check name the backfill instead of
+    recomputing the times."""
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.recording import Recording
+
+    pk = {"recording_id": populated_recording["recording_id"]}
+    part = (Recording.ValidInterval & pk).fetch1()
+    start = float(Recording().get_valid_interval(pk).times[0][0])
+    ArtifactDetectionParameters.insert_default()
+    (Recording.ValidInterval & pk).delete_quick()
+    try:
+        with pytest.raises(ValueError, match="backfill"):
+            Recording().get_valid_interval(pk)
+        with pytest.raises(ValueError, match="backfill"):
+            RecordingArtifactSelection.insert_selection(
+                {
+                    **pk,
+                    "artifact_detection_params_name": "none",
+                    "manual_excluded_times": [[start + 0.1, start + 0.2]],
+                }
+            )
+    finally:
+        Recording.ValidInterval.insert1(part, allow_direct_insert=True)

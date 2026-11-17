@@ -240,6 +240,12 @@ def _clean_session_v2(session_key):
                 (IntervalList & (owner & keys)).fetch("KEY", as_dict=True)
             )
     if rec_keys:
+        owned_intervals.extend(
+            (IntervalList & (Recording.ValidInterval & rec_keys)).fetch(
+                "KEY", as_dict=True
+            )
+        )
+    if rec_keys:
         sorting_keys = (
             SortingSelection.RecordingSource
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
@@ -286,7 +292,7 @@ def _clean_session_v2(session_key):
             warn=False, force_masters=True
         )
 
-    # Step 5: Recording and SortGroupV2, then abandoned artifact intervals.
+    # Step 5: Recording and SortGroupV2, then abandoned owned intervals.
     (Recording & rec_keys).super_delete(warn=False) if rec_keys else None
     (RecordingSelection & session_key).super_delete(warn=False)
     (SortGroupV2 & session_key).super_delete(warn=False)
@@ -294,8 +300,10 @@ def _clean_session_v2(session_key):
     # Keep intervals another detection still owns; delete_quick never
     # cascades into surviving rows.
     for interval_key in owned_intervals:
-        if (RecordingArtifactDetection.RemovedInterval & interval_key) or (
-            SharedArtifactDetection.RemovedInterval & interval_key
+        if (
+            (RecordingArtifactDetection.RemovedInterval & interval_key)
+            or (SharedArtifactDetection.RemovedInterval & interval_key)
+            or (Recording.ValidInterval & interval_key)
         ):
             continue
         (IntervalList & interval_key).delete_quick()

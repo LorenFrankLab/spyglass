@@ -298,6 +298,69 @@ if "job_kwargs" in preprocessing.heading.names:
     preprocessing.alter()
 ```
 
+```python
+# Only for a database with v2 `Recording` rows populated before
+# `Recording.ValidInterval` (#1609). Run once; a second run finds nothing to
+# do. Each recording's kept times are recomputed from its selection's inputs
+# and stored only while those inputs still hash to its `recording_input_hash`.
+# A recording whose inputs changed or are missing is printed and skipped.
+# Run as a user who can create tables: importing `Recording` declares the part.
+from spyglass.spikesorting.v2._recording.restriction import sorted_valid_times
+from spyglass.spikesorting.v2._recording.valid_interval import (
+    insert_valid_interval_row,
+    valid_interval_row,
+)
+from spyglass.spikesorting.v2.recording import (
+    Recording,
+    RecordingSelection,
+    resolve_recording_input_hash,
+)
+
+pending = RecordingSelection * (Recording - Recording.ValidInterval.proj())
+selections = pending.proj(
+    "nwb_file_name",
+    "sort_group_id",
+    "interval_list_name",
+    "preprocessing_params_name",
+    "recording_input_hash",
+).fetch(as_dict=True)
+n_done = 0
+for sel in selections:
+    inputs = dict(
+        nwb_file_name=sel["nwb_file_name"],
+        interval_list_name=sel["interval_list_name"],
+        preprocessing_params_name=sel["preprocessing_params_name"],
+    )
+    try:
+        input_hash = resolve_recording_input_hash(
+            sort_group_id=sel["sort_group_id"], **inputs
+        )
+    except ValueError as exc:
+        print(f"skipped {sel['recording_id']}: {exc}")
+        continue
+    if input_hash != sel["recording_input_hash"]:
+        print(
+            f"skipped {sel['recording_id']}: its inputs changed since it was "
+            "populated, so its kept times cannot be recomputed."
+        )
+        continue
+    row = valid_interval_row(
+        sel["nwb_file_name"], sel["recording_id"], sorted_valid_times(**inputs)
+    )
+    with Recording.connection.transaction:
+        insert_valid_interval_row(row)
+        Recording.ValidInterval.insert1(
+            {
+                "recording_id": sel["recording_id"],
+                "nwb_file_name": row["nwb_file_name"],
+                "interval_list_name": row["interval_list_name"],
+            },
+            allow_direct_insert=True,
+        )
+    n_done += 1
+print(f"Backfilled {n_done} of {len(selections)} recording(s).")
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -728,6 +791,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         samples and session joins apart #1609
     - v2 `PreprocessingParameters` drops its `job_kwargs` column, which the
         recording stage never read; an insert with that key raises #1609
+    - v2 `Recording` stores the times it was cut to in `IntervalList` (owned by
+        `Recording.ValidInterval`, named `recording_{recording_id}`, pipeline
+        `spikesorting_recording_v2`), as v1 does; read them with
+        `Recording().get_valid_interval(key)`. `Recording.delete` removes the
+        row and refuses while another table uses it #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

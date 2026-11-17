@@ -151,7 +151,7 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 
 | Module (`spyglass.spikesorting.v2.`) | Tables                                                                                                                                                                                                    |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording`                                                                                                                               |
+| `recording`                          | `SortGroupV2`, `PreprocessingParameters`, `RecordingSelection`, `Recording` (+ `ValidInterval`)                                                                                                           |
 | `artifact`                           | `ArtifactDetectionParameters`, `RecordingArtifactSelection`, `RecordingArtifactDetection`, `SharedArtifactGroup`, `SharedArtifactSelection`, `SharedArtifactDetection`                                    |
 | `sorting`                            | `SorterParameters`, `AnalyzerWaveformParameters`, `PreprocessingWaveformParameters`, `SortingSelection`, `Sorting`                                                                                        |
 | `curation`                           | `CurationV2`                                                                                                                                                                                              |
@@ -531,6 +531,10 @@ helper must import without a database.
     Upstream cascades skip these overrides, and
     `FigPackCuration.find_orphaned_bundles(dry_run=True)` reports what they
     leave.
+- `Recording.delete` removes the `IntervalList` rows its `ValidInterval` part
+    owns, after the cascade, and refuses beforehand if another table uses one,
+    as the artifact detections do. An upstream cascade skips the override and
+    leaves the row unowned; `IntervalList().cleanup()` removes such rows.
 - `CurationV2.delete` imports `figpack_curation` only when its schema exists
     (`curation._figpack_module`), because importing it declares tables.
 - Before that cascade, the delete refuses if any table outside the merge
@@ -595,6 +599,15 @@ helper must import without a database.
     can then see which samples are zero from a mask and where sessions join.
     The row's columns stay the copy the code reads; files written before these
     tables lack them.
+- `Recording.make_insert` writes the times the recording was cut to
+    (`intended_save_intervals`, v1's rule) to `IntervalList` as
+    `recording_{recording_id}` with pipeline `spikesorting_recording_v2`, owned
+    by `Recording.ValidInterval`; `get_valid_interval` reads it. These are the
+    requested times: the stored samples start at the first sample at or after
+    each start and end at the last sample at or before each stop, so they can
+    differ by up to one sample per edge. For the sample-exact coverage, use
+    `_core.signal_math.base_intervals_and_gaps` on `get_recording`. A rebuild
+    leaves the row alone; concatenations add no row.
 
 ### Contact geometry
 

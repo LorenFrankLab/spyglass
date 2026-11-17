@@ -339,9 +339,10 @@ def _assert_manual_exclusions_effective(
 ) -> None:
     """Raise unless every exclusion overlaps time the source recording keeps.
 
-    The valid time is the sort interval within the raw data valid times
-    (``sorted_valid_times``), the same one preflight checks. A shared group's
-    members are timestamp-identical, so the first member's time is used.
+    The valid time is the source recording's stored kept time
+    (``Recording.get_valid_interval``), the same rule preflight checks. A
+    shared group's members are timestamp-identical, so the first member's
+    time is used.
 
     Parameters
     ----------
@@ -356,11 +357,9 @@ def _assert_manual_exclusions_effective(
     ------
     IneffectiveManualExclusionError
         If an exclusion overlaps none of that time.
+    ValueError
+        If the source recording has no ``Recording.ValidInterval`` row.
     """
-    from spyglass.spikesorting.v2._recording.restriction import (
-        sorted_valid_times,
-    )
-
     if recording_id is not None:
         restriction = RecordingSelection & {"recording_id": recording_id}
     else:
@@ -368,17 +367,16 @@ def _assert_manual_exclusions_effective(
             SharedArtifactGroup.Member
             & {"shared_artifact_group_name": shared_artifact_group_name}
         )
-    requests = restriction.fetch(
-        "nwb_file_name",
-        "interval_list_name",
-        "preprocessing_params_name",
-        as_dict=True,
+    requests = (restriction & Recording).fetch(
+        "recording_id", "nwb_file_name", "interval_list_name", as_dict=True
     )
     if not requests:
         return  # The FK insert reports a missing source.
-    valid_times = sorted_valid_times(**requests[0])
-    if valid_times is None:
-        return
+    valid_times = (
+        Recording()
+        .get_valid_interval({"recording_id": requests[0]["recording_id"]})
+        .times
+    )
     problem = manual_exclusion_problem(
         exclusions,
         valid_times,

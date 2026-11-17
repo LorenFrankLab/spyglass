@@ -477,24 +477,22 @@ freezes the checked groups as `sort_group_ids=`, and describes
 
 ## What you query differently
 
-- **No `recording_id`-keyed `IntervalList` row.** `Recording` stores only
-    `duration_s`. Valid times live on the `IntervalList` you selected:
+- **The recording's `IntervalList` row is `recording_{recording_id}`** (v1: the
+    bare `recording_id`), tagged `pipeline="spikesorting_recording_v2"` (v1:
+    `spikesorting_recording_v1`). It holds the same times as v1's row: the sort
+    interval within the raw valid times, pieces shorter than
+    `min_segment_length` dropped.
 
     ```python
-    from spyglass.common import IntervalList
-    from spyglass.spikesorting.v2.recording import RecordingSelection
+    from spyglass.spikesorting.v2.recording import Recording
 
-    sel = (RecordingSelection & {"recording_id": rid}).fetch1()
-    valid_times = (
-        IntervalList
-        & {
-            "nwb_file_name": sel["nwb_file_name"],
-            "interval_list_name": sel["interval_list_name"],
-        }
-    ).fetch1(
-        "valid_times"
-    )  # ndarray, shape (n_intervals, 2)
+    interval = Recording().get_valid_interval({"recording_id": rid})
+    interval.times  # ndarray, shape (n_intervals, 2), session seconds
     ```
+
+    These are the requested times; the stored samples can sit up to one sample
+    inside each edge. A database populated before this row existed needs the
+    backfill in the release notes.
 
 - **Artifact `IntervalList` names are `artifact_detection_{uuid}`** (v1: a bare
     UUID). Use the helpers rather than string parsing:

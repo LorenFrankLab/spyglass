@@ -4,7 +4,9 @@ Tables:
     SortGroupV2: per-session electrode grouping.
     PreprocessingParameters: Pydantic-validated preprocessing blob.
     RecordingSelection: one row per (raw, sort group, interval, params).
-    Recording: materialized preprocessed recording (NWB-resident).
+    Recording: materialized preprocessed recording (NWB-resident), with a
+        ``ValidInterval`` part owning the ``IntervalList`` row of its kept
+        times.
 
 The recording applies bandpass filtering and referencing. Whitening happens
 at the sort stage so motion correction never sees whitened data.
@@ -18,6 +20,7 @@ import datajoint as dj
 import numpy as np
 
 from spyglass.common import IntervalList, LabTeam, Session  # noqa: F401
+from spyglass.common.common_interval import Interval
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
@@ -40,6 +43,11 @@ from spyglass.spikesorting.v2._recording.types import (
     RecordingArtifactResult,
     RecordingComputed,
     RecordingFetched,
+)
+from spyglass.spikesorting.v2._recording.valid_interval import (
+    insert_valid_interval_row,
+    refuse_used_valid_intervals,
+    valid_interval_row,
 )
 from spyglass.spikesorting.v2._recording.restriction import (
     compute_recording_save_expectation,
@@ -935,7 +943,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     5. Interpolate an ``interpolate`` recipe's bad channels, then reference.
     6. Fix tetrode geometry and check contact positions are distinct.
     7. Stream to a staged AnalysisNwbfile and fingerprint its content.
-    8. Check the saved duration for truncation, then register the file.
+    8. Check the saved duration for truncation, then register the file and
+       the ``IntervalList`` row of its kept times (``ValidInterval``).
     """
 
     _populate_key_lock = True
@@ -953,6 +962,22 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
+
+    class ValidInterval(SpyglassMixinPart):
+        """The ``IntervalList`` row of the times this recording was cut to.
+
+        The requested times: the sort interval within the raw valid times,
+        pieces shorter than ``min_segment_length`` dropped (v1's rule). The
+        stored samples start at the first sample at or after each start and
+        end at the last sample at or before each stop, so they can differ by
+        up to one sample per edge; ``_core.signal_math.base_intervals_and_gaps``
+        on :meth:`Recording.get_recording` gives the sample-exact coverage.
+        """
+
+        definition = """
+        -> master
+        -> IntervalList
+        """
 
     def make_fetch(self, key) -> RecordingFetched:
         """Read every DB input the compute step needs (no SI / NWB I/O).
@@ -1058,9 +1083,14 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 bad_channel_handling=preprocessing_params.bad_channel_handling,
             ),
         )
-        # Step 8: the duration make_insert checks for truncation.
+        # Step 8: the kept times and the duration make_insert checks.
+        valid_times = intended_save_intervals(
+            sort_valid_times,
+            raw_valid_times,
+            preprocessing_params.min_segment_length,
+        )
         expectation = self._save_expectation(
-            fetched, artifact.sampling_frequency
+            fetched, valid_times, artifact.sampling_frequency
         )
         return RecordingComputed(
             analysis_file_name=artifact.analysis_file_name,
@@ -1075,6 +1105,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             sort_valid_times=sort_valid_times,
             expected_saved_total=expectation.expected_saved_total,
             n_intended_intervals=expectation.n_intended_intervals,
+            valid_times=valid_times,
         )
 
     @classmethod
@@ -1179,7 +1210,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def _save_expectation(fetched: RecordingFetched, sampling_frequency):
+    def _save_expectation(
+        fetched: RecordingFetched, intended_intervals, sampling_frequency
+    ):
         """Intended saved duration; warns when the request passes raw coverage.
 
         Filters as ``restrict_recording`` does, so dropped slivers are not
@@ -1190,6 +1223,8 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ----------
         fetched : RecordingFetched
             The inputs :meth:`make_fetch` resolved.
+        intended_intervals : numpy.ndarray
+            ``(n_intervals, 2)`` seconds from ``intended_save_intervals``.
         sampling_frequency : float
             Sampling rate of the written recording, in Hz.
 
@@ -1200,11 +1235,6 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         """
         sel = fetched.sel
         min_segment_length = fetched.preprocessing_params.min_segment_length
-        intended_intervals = intended_save_intervals(
-            fetched.sort_valid_times,
-            fetched.raw_valid_times,
-            min_segment_length,
-        )
         expectation = compute_recording_save_expectation(
             intended_intervals,
             fetched.sort_valid_times,
@@ -1235,6 +1265,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         sort_valid_times,
         expected_saved_total,
         n_intended_intervals,
+        valid_times,
     ):
         """Run the truncation check and atomically register the artifact.
 
@@ -1279,6 +1310,9 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         n_intended_intervals : int
             Number of consolidated intended intervals; scales the
             truncation tolerance.
+        valid_times : numpy.ndarray
+            ``(n_intervals, 2)`` session seconds the recording was cut to,
+            written to ``IntervalList`` and owned by :class:`ValidInterval`.
 
         Returns
         -------
@@ -1309,8 +1343,12 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                 "packets or interval misalignment."
             )
 
+        interval_row = valid_interval_row(
+            nwb_file_name, key["recording_id"], valid_times
+        )
         with self._safe_context():
             AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+            insert_valid_interval_row(interval_row)
             self.insert1(
                 {
                     **key,
@@ -1321,6 +1359,13 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                     "sampling_frequency": sampling_frequency,
                     "duration_s": duration_s,
                     "content_hash": content_hash,
+                }
+            )
+            self.ValidInterval.insert1(
+                {
+                    **key,
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": interval_row["interval_list_name"],
                 }
             )
 
@@ -1365,6 +1410,77 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
             ``electrical_series_path`` and the row's ``content_hash``.
         """
         return stored_traces(type(self), key, (self & key).fetch1())
+
+    def get_valid_interval(self, key: dict) -> Interval:
+        """Return the times this recording was cut to.
+
+        Parameters
+        ----------
+        key : dict
+            Restriction selecting a single ``Recording`` row.
+
+        Returns
+        -------
+        Interval
+            The :class:`ValidInterval` row's ``IntervalList`` entry; see that
+            part for how it relates to the stored samples.
+
+        Raises
+        ------
+        ValueError
+            If the recording has no ``ValidInterval`` row (a database
+            populated before it existed: run the backfill in the release
+            notes).
+        """
+        recording_key = (self & key).fetch1("KEY")
+        part = (self.ValidInterval & recording_key).fetch(
+            "nwb_file_name", "interval_list_name", as_dict=True
+        )
+        if not part:
+            raise ValueError(
+                f"Recording {recording_key} has no ValidInterval row. Run the "
+                "Recording.ValidInterval backfill in the spike sorting v2 "
+                "release notes (CHANGELOG.md)."
+            )
+        return (IntervalList & part[0]).fetch_interval()
+
+    def delete(self, *restrictions, safemode=None, **kwargs):
+        """Delete recordings, their dependents, and owned intervals.
+
+        ``IntervalList`` rows are removed for recordings actually deleted,
+        since only :class:`ValidInterval` records which rows this table owns.
+        Positional arguments are restrictions, applied before rows are
+        fetched.
+
+        Raises
+        ------
+        ValueError
+            Before deleting anything, if another table uses an owned interval.
+        """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                safemode=safemode, **kwargs
+            )
+        owned = (self.ValidInterval & self.proj()).fetch(as_dict=True)
+        interval_keys = [
+            {k: row[k] for k in ("nwb_file_name", "interval_list_name")}
+            for row in owned
+        ]
+        refuse_used_valid_intervals(
+            interval_keys, self.ValidInterval, context="Recording.delete"
+        )
+        if safemode is None:
+            super().delete(**kwargs)
+        else:
+            super().delete(safemode=safemode, **kwargs)
+        gone = [
+            interval_key
+            for row, interval_key in zip(owned, interval_keys)
+            if not (Recording & {"recording_id": row["recording_id"]})
+        ]
+        if gone:
+            # delete_quick never cascades: a row put to use meanwhile raises.
+            (IntervalList & gone).delete_quick()
 
     # ---- visualization delegates (see v2.visualization facade) -----------
 

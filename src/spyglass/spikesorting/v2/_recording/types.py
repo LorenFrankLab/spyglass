@@ -52,6 +52,12 @@ class RecordingComputed(NamedTuple):
     """Outputs of :meth:`Recording.make_compute`.
 
     Unpacked positionally into ``make_insert``.
+
+    Attributes
+    ----------
+    valid_times : numpy.ndarray
+        ``(n_intervals, 2)`` session seconds the recording was cut to
+        (``intended_save_intervals``); stored in ``Recording.ValidInterval``.
     """
 
     analysis_file_name: str
@@ -66,6 +72,7 @@ class RecordingComputed(NamedTuple):
     sort_valid_times: np.ndarray
     expected_saved_total: float
     n_intended_intervals: int
+    valid_times: np.ndarray
 
     def staged_outputs(self) -> StagedOutputs:
         """The staged analysis file ``make_insert`` registers."""
