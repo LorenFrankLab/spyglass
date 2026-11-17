@@ -49,8 +49,10 @@ Package root, `spyglass.spikesorting.v2`:
 - `run_v2_concat_pipeline`: the same for a same-day `SessionGroup`
     concatenation.
 - `run_v2_pipeline_session`: every (or selected) sort group of a session.
-- `preflight_v2_pipeline` / `preflight_v2_pipeline_session`: read-only check of
-    a planned run before any compute. Return `PreflightReport` /
+- `preflight_v2_pipeline` / `preflight_v2_concat_pipeline` /
+    `preflight_v2_pipeline_session`: read-only check of a planned run before any
+    compute. Return `PreflightReport` (both single and concat; each concat
+    member's problems are prefixed `concat member {i}: `) /
     `PreflightSessionReport`.
 - `estimate_motion` / `estimate_concat_motion`: save a motion estimate without
     sorting, for inspection before applying it.
@@ -102,7 +104,8 @@ Package root, `spyglass.spikesorting.v2`:
     `CurationDeleteReceipt`, `CurationOperation`: subtree deletion and operation
     provenance.
 - `get_spike_sorting_v2_merge_ids`: merge ids of v2 curations matching a
-    restriction.
+    restriction. Import it from `curation_api`, which re-exports it from
+    `_recording.unit_metadata`; it is not in `curation_api.__all__`.
 
 `spyglass.spikesorting.v2.review_api` (`FigPackReview` also in `pipeline`; needs
 the `spikesorting-v2-curation` extra):
@@ -223,6 +226,11 @@ Both curation paths:
     sort-stage artifact input.
 - The optional `MotionCorrectionSource` part points at a
     `MotionCorrectedRecording` computed from the same source and mask.
+- `SortingSelection.resolve_source` returns the sort's original source as a
+    `_recording.source.SourceLineage(kind, key, artifact_detection_id)`; zero or
+    several source parts raise `SchemaBypassError`. `resolve_effective_source`
+    pairs that lineage with the `EffectiveTraces` consumers read (the
+    motion-corrected recording when one is pinned).
 - All tables live in `spikesorting_v2_*` schemas (`recording`, `artifact`,
     `artifact_output`, `sorting`, `curation`, `metric_curation`,
     `review_profile`, `concat_curation`, `figpack_curation`, `session_group`,
@@ -325,6 +333,12 @@ valid. Sorting and curation writers validate complete provenance before
 allocating an output, including the curation generation UUID on member exports.
 Matching rows and NWB headers require producer provenance.
 
+`_core.signal_math.kept_intervals` is the one rule for the seconds a sort
+observes: the artifact-removed valid times, else the recording's chunks split at
+timestamp gaps. The units writer, the concat writer and the matching inputs use
+it. `describe_units.firing_rate_hz` divides each unit's sort-time spike count by
+the sort's stored observed duration.
+
 Matching freezes unit-selection snapshots and original raw sample coverage in
 the `Input` and `InputRecording` parts. `_matching.coverage` maps persisted,
 unmasked recording timestamps to raw-frame ranges using bounded timestamp reads;
@@ -359,6 +373,31 @@ formats and imports have no migration shims.
 The staged-output mixin and SpikeInterface compatibility adapters own
 version-sensitive library internals. Keep these mechanisms centralized and run
 their lifecycle and serialization checks when changing supported versions.
+
+### Run requests and stages
+
+- The run entry points validate their options once, in
+    `_orchestration.source._validate_run_request`, into a `_RunRequest`. Every
+    step below reads that object, so no step falls back to an option's default.
+    A malformed manual exclusion raises `PipelineInputError` (a wrong container
+    type `TypeError`), prefixed with the entry point.
+- `_orchestration.stages` runs each stage and logs it at INFO as
+    `{caller} [{target}]: {stage} computing...`, then `computed in N s`; a
+    reused stage logs one `reused in N s` line. The run ends with
+    `done in N s, n_units=..., K warning(s)` and a pointer to `result.summary()`
+    / `describe_run(result)`.
+- A failing stage raises `PipelineStageError` with `stage`, `caller`, `target`
+    and `partial_run_summary`. Its message lists the finished stages with their
+    status and says that re-running the same call reuses them.
+- A passing preflight logs one line with the check and warning counts and the
+    plan. A blocked one raises `PreflightError`
+    (`{caller}: preflight blocked {target}:`, one bullet per problem).
+- After the recording stage, computed or reused, the run reads the stored
+    `Recording` and adds its advisories to the run warnings: a sort interval
+    clipped to the raw coverage, and a requested phase shift that was skipped
+    (no `inter_sample_shift`). After a motion correction it adds the channels
+    `border_mode="remove_channels"` removed or `"force_extrapolate"`
+    extrapolated. So a reused run reports them too.
 
 ### Staged outputs
 
@@ -511,14 +550,19 @@ their lifecycle and serialization checks when changing supported versions.
     probe definition filled both, but nothing enforces it. A v2 test fixture
     zeroes a tetrode's electrodes table while its device metadata keeps the
     square.
-- `_recording.geometry.effective_sort_group_geometry` is the recording
-    stage's verdict in its order: partly missing positions are refused, the
+- `_recording.geometry.effective_sort_group_geometry` applies the recording
+    stage's rules in its order: partly missing positions are refused, the
     `tetrode_12.5` repair replaces any positions, else `select_distinct_plane`.
-    The geometry preflight, the motion geometry preflight and
-    `plot_sort_group_geometry` all use it, on `Probe.Electrode` positions.
-    Coincident contacts are reported up front, not minutes into
-    `Recording.populate`. A session that disagrees with its probe can still
-    pass preflight and fail at `assert_unique_contact_positions`.
+    The geometry preflight, the motion geometry preflight,
+    `plot_sort_group_geometry` and the scientific setup's `geometry` row
+    (registered positions, or the `tetrode_12.5` square assumed from
+    `probe_type`; one row per concat member) all use it, on `Probe.Electrode`
+    positions. The recording stage itself applies the rules to the positions
+    SpikeInterface reads from the session's electrodes table
+    (`normalize_channel_locations`, `maybe_apply_tetrode_geometry`). Coincident
+    contacts are reported up front, not minutes into `Recording.populate`. A
+    session that disagrees with its probe can still pass preflight and fail at
+    `assert_unique_contact_positions`.
 - Both preflights read the kept contacts through
     `_recording.fetch.fetch_sort_group_contacts`, which shares
     `resolve_sort_group_channels` with the recording inputs: the members,
@@ -840,6 +884,17 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     receipt of that polarity. A sparse folder without a
     readable receipt, or whose polarity conflicts with its sorter, is invalid
     and rebuilt. Dense analyzers need no receipt.
+- The extensions in `_sorting.analyzer.PEAK_SIGN_EXTENSIONS`
+    (`spike_amplitudes`, `spike_locations`, `template_metrics`) are computed at
+    the sort's `peak_sign`. SpikeInterface 0.104.3's `template_metrics` default
+    is `"both"`; on the shipped negative sorts a unit's template metrics come
+    from the channel of its largest negative deflection, which can differ from
+    the default's choice. A stored `template_metrics` at other params is
+    recomputed once by `ensure_extensions`, with a warning; the cache validator
+    checks only the polarity extensions, so the folder is not rebuilt.
+- Quality metrics also run at the sort's `peak_sign`, which SpikeInterface uses
+    to pick PCA neighbor units on a sparse analyzer. Its default is `"neg"`, so
+    the shipped negative sorts are unaffected.
 - `Sorting` builds in a private directory and derives unit metadata from that
     build. Only the winning insert installs it. Extraction runs outside the
     database transaction; publication uses directory renames.
@@ -1090,7 +1145,9 @@ A preset names one parameter row per stage: preprocessing, artifact detection
 - `initialize_v2_defaults` inserts the shipped presets with
     `created_by="spyglass"`. A preset whose sorter row is absent (sorter not
     installed) is skipped. `verify_v2_default_catalog` compares the stored
-    shipped presets with the code.
+    shipped presets with the code. `SorterParameters.missing_row_fix` says why a
+    sorter row is missing and what creates it; preflight and the preset
+    functions use it.
 - `register_pipeline_preset` and `clone_pipeline_preset` insert a row with
     `created_by` set to the database user. The same name with the same content
     is a no-op; the same name with different content raises.
