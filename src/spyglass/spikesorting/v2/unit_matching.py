@@ -763,7 +763,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ---
         -> CurationV2.Unit.proj(session_a_sorting_id='sorting_id', session_a_curation_id='curation_id', unit_a_id='unit_id')
         -> CurationV2.Unit.proj(session_b_sorting_id='sorting_id', session_b_curation_id='curation_id', unit_b_id='unit_id')
-        match_probability: float
+        match_probability: double
         drift_estimate_um=NULL: float
         fdr_estimate=NULL: float
         """
@@ -1252,7 +1252,7 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
     ---
     n_sessions_detected: int   # distinct original sessions (nwb files) in which a member unit has at least one spike
     n_matching_inputs: int     # distinct matching inputs among the member units
-    median_match_probability=NULL: float  # NULL for singleton tracked units
+    median_match_probability=NULL: double  # NULL for singleton tracked units
     policy_used: varchar(32)              # tracked-unit derivation policy ('strict')
     """
 

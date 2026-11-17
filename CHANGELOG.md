@@ -577,6 +577,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         the match, a unit is in at most one tracked unit of a match, and
         `CurationV2.delete` also refuses while another table's part uses one
         of its units #1609
+    - v2 `UnitMatch.Pair.match_probability` and
+        `TrackedUnit.median_match_probability` are `double`, so the table, the
+        pairs NWB and the tracking threshold see the same value #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

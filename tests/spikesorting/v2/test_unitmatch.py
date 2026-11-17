@@ -3835,7 +3835,9 @@ def test_divergent_electrode_warning_does_not_contradict_the_error():
 
 
 @contextmanager
-def _populated_pair_match(grp, monkeypatch, choices, *, params_name, pairs):
+def _populated_pair_match(
+    grp, monkeypatch, choices, *, params_name, pairs, probability=0.99
+):
     """Populate ``UnitMatch`` and ``TrackedUnit`` over two inputs.
 
     Yields the selection key; removes the selection and the matcher row after.
@@ -3855,6 +3857,7 @@ def _populated_pair_match(grp, monkeypatch, choices, *, params_name, pairs):
         matcher_name="parts_test_pairer",
         matcher_params_name=params_name,
         pairs=pairs,
+        probability=probability,
     )
     try:
         selection_pk = UnitMatchSelection.insert_selection(
@@ -4109,3 +4112,37 @@ def test_unit_match_deletes_remove_whole_masters(
             (SortingSelection & second_sort).super_delete(warn=False)
         (Recording & second_rec).super_delete(warn=False)
         (RecordingSelection & second_rec).super_delete(warn=False)
+
+
+@pytest.mark.slow
+def test_match_probability_is_stored_exactly(
+    two_session_curated_group, monkeypatch
+):
+    """The ``Pair`` table, the pairs NWB and the tracked-unit median hold the
+    matcher's double probability exactly; 0.97 has no exact float32 form."""
+    import numpy as np
+
+    from spyglass.spikesorting.v2.unit_matching import TrackedUnit, UnitMatch
+
+    probability = 0.97
+    assert float(np.float32(probability)) != probability
+    grp = two_session_curated_group
+    unit_a = int(matched_unit_ids(grp["choices"][0])[0])
+    unit_b = int(matched_unit_ids(grp["choices"][1])[0])
+    with _populated_pair_match(
+        grp,
+        monkeypatch,
+        grp["choices"],
+        params_name="exact_probability_params",
+        pairs=[[unit_a, unit_b]],
+        probability=probability,
+    ) as selection_pk:
+        stored = (UnitMatch.Pair & selection_pk).fetch1("match_probability")
+        from_nwb = UnitMatch().get_pairs(selection_pk)["match_probability"]
+        assert stored == from_nwb.iloc[0] == probability
+        medians = [
+            row["median_match_probability"]
+            for row in (TrackedUnit & selection_pk).fetch(as_dict=True)
+            if row["median_match_probability"] is not None
+        ]
+        assert medians == [probability]
