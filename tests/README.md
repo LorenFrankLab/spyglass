@@ -410,7 +410,9 @@ durations.
     dispatch adds `mearec_neuropixels_60s` and `mearec_tetrode_60s`.
 - `SPYGLASS_V2_REQUIRE_FIXTURES` lists the event's fixtures and
     `pytest_sessionstart` fails if one is missing, so a green run means their
-    tests ran. Elsewhere, a test whose fixture is absent skips.
+    tests ran. While it is set, `skip_unless_fixtures_required`
+    (`tests/spikesorting/v2/_required_data.py`) also turns data-dependent skips
+    into failures. Elsewhere, a test whose fixture or data is absent skips.
 - `minirec20230622` has tetrode contacts in the x-z plane, which an x-y
     projection collapses. It drives the geometry round trip in
     `single_session/test_recording.py`; per-PR runs cover the repair on a
