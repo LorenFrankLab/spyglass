@@ -799,6 +799,48 @@ def test_schema_version_constants_match_schema_defaults():
     )
 
 
+def test_declared_schema_version_defaults_match_constants(dj_conn):
+    """Each definition's ``params_schema_version`` default is its constant."""
+    import re
+
+    from spyglass.spikesorting.v2 import (
+        artifact,
+        metric_curation,
+        motion,
+        recording,
+        sorting,
+    )
+    from spyglass.spikesorting.v2._params import (
+        analyzer_waveform,
+        motion_estimation,
+        motion_interpolation,
+    )
+
+    expected = {
+        recording.PreprocessingParameters: PREPROCESSING_SCHEMA_VERSION,
+        artifact.ArtifactDetectionParameters: ARTIFACT_DETECTION_SCHEMA_VERSION,
+        sorting.AnalyzerWaveformParameters: (
+            analyzer_waveform.ANALYZER_WAVEFORM_SCHEMA_VERSION
+        ),
+        motion.MotionEstimationParameters: (
+            motion_estimation.MOTION_ESTIMATION_SCHEMA_VERSION
+        ),
+        motion.MotionInterpolationParameters: (
+            motion_interpolation.MOTION_INTERPOLATION_SCHEMA_VERSION
+        ),
+        metric_curation.QualityMetricParameters: QUALITY_METRIC_SCHEMA_VERSION,
+        metric_curation.AutoCurationRules: AUTO_CURATION_RULES_SCHEMA_VERSION,
+    }
+    for table, constant in expected.items():
+        declared = re.search(
+            r"params_schema_version\s*=\s*(\d+)\s*:", table.definition
+        )
+        assert declared, f"{table.__name__} declares no default"
+        assert int(declared.group(1)) == constant, table.__name__
+        stored = table().heading.attributes["params_schema_version"].default
+        assert int(str(stored).strip("\"'")) == constant, table.__name__
+
+
 def test_recipe_catalog_rows_copy_inner_schema_version():
     """Recipe rows derive the outer version from the validated params blob."""
     from spyglass.spikesorting.v2._core.recipe_catalog import (

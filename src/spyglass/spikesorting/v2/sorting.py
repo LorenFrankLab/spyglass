@@ -27,7 +27,6 @@ from spyglass.common import IntervalList  # noqa: F401
 from spyglass.common.common_ephys import Electrode  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
 from spyglass.spikesorting.v2._params.analyzer_waveform import (
-    ANALYZER_WAVEFORM_SCHEMA_VERSION,
     AnalyzerWaveformParamsSchema,
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -460,11 +459,11 @@ class AnalyzerWaveformParameters(
       folder path.
     """
 
-    definition = f"""
+    definition = """
     waveform_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version={ANALYZER_WAVEFORM_SCHEMA_VERSION}: int
+    params_schema_version=3: int
     """
 
     _DEFAULT_CONTENTS: tuple = waveform_params_default_contents()

@@ -39,7 +39,6 @@ from spyglass.spikesorting.v2._artifacts.readers import (
     remove_artifact_interval_rows,
 )
 from spyglass.spikesorting.v2._params.artifact_detection import (
-    ARTIFACT_DETECTION_SCHEMA_VERSION,
     ArtifactDetectionParamsSchema,
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -120,11 +119,11 @@ class ArtifactDetectionParameters(
     ``4 × chunk_frames × n_channels × 4 bytes``. ``n_jobs`` defaults to 1.
     """
 
-    definition = f"""
+    definition = """
     artifact_detection_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version={ARTIFACT_DETECTION_SCHEMA_VERSION}: int
+    params_schema_version=2: int
     job_kwargs=null: blob  # SI job-kwargs for chunked scan; see docstring
     """
 

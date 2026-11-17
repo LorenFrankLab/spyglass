@@ -37,11 +37,9 @@ from spyglass.spikesorting.v2._motion import (
     selection as _motion_selection_insert,
 )
 from spyglass.spikesorting.v2._params.motion_estimation import (
-    MOTION_ESTIMATION_SCHEMA_VERSION,
     MotionEstimationParamsSchema,
 )
 from spyglass.spikesorting.v2._params.motion_interpolation import (
-    MOTION_INTERPOLATION_SCHEMA_VERSION,
     MotionInterpolationParamsSchema,
 )
 from spyglass.spikesorting.v2._core.recipe_catalog import (
@@ -119,11 +117,11 @@ class MotionEstimationParameters(
     ``random_seed`` job kwarg is rejected.
     """
 
-    definition = f"""
+    definition = """
     motion_estimation_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version={MOTION_ESTIMATION_SCHEMA_VERSION}: int
+    params_schema_version=1: int
     job_kwargs=null: blob  # SI job kwargs for detection and localization
     """
 
@@ -185,11 +183,11 @@ class MotionInterpolationParameters(
     ``dredge`` presets' interpolation) and ``kriging_remove_channels_v1``.
     """
 
-    definition = f"""
+    definition = """
     motion_interpolation_params_name: varchar(64)
     ---
     params: blob
-    params_schema_version={MOTION_INTERPOLATION_SCHEMA_VERSION}: int
+    params_schema_version=1: int
     """
 
     _DEFAULT_CONTENTS: tuple = motion_interpolation_default_contents()

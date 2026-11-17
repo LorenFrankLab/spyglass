@@ -686,6 +686,7 @@
       "tier": "unit",
       "overrides": {
         "test_clusterless_default_row_ships_noise_levels_one": "db_unit",
+        "test_declared_schema_version_defaults_match_constants": "db_unit",
         "test_param_lookup_bulk_insert_validates": "db_unit",
         "test_shipped_rows_carry_current_params_schema_version": "db_unit"
       }

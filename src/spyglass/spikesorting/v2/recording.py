@@ -31,7 +31,6 @@ from spyglass.spikesorting.v2._motion.estimation import (
     motion_to_storage_dict,
 )
 from spyglass.spikesorting.v2._params.preprocessing import (
-    PREPROCESSING_SCHEMA_VERSION,
     PreprocessingParamsSchema,
 )
 from spyglass.spikesorting.v2._recording import (
@@ -708,11 +707,11 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     ``SorterParameters`` and ``AnalyzerWaveformParameters`` instead.
     """
 
-    definition = f"""
+    definition = """
     preprocessing_params_name: varchar(128)
     ---
     params: blob
-    params_schema_version={PREPROCESSING_SCHEMA_VERSION}: int
+    params_schema_version=4: int
     job_kwargs=null: blob
     """
 
