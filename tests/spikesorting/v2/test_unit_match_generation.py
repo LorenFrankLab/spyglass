@@ -214,3 +214,94 @@ def test_curation_delete_refuses_while_a_unit_match_uses_it(
         assert UnitMatchSelection.Input & pk
     finally:
         (UnitMatchSelection & pk).super_delete(warn=False, safemode=False)
+
+
+@pytest.mark.database
+@pytest.mark.integration
+@pytest.mark.stage
+def test_match_parts_reference_recording_and_curated_unit(reviewed_curation):
+    """``InputRecording`` and ``MatchableUnit`` cannot name a missing row."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    recording_part = UnitMatchSelection.InputRecording
+    assert recording_part.full_table_name in Recording().children()
+    assert UnitMatch.MatchableUnit.full_table_name in CurationV2.Unit.children()
+
+    _, child = reviewed_curation
+    MatcherParameters.insert_default()
+    pk = UnitMatchSelection.insert_inputs(
+        [child],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
+    )
+    try:
+        UnitMatch.populate(pk, reserve_jobs=False)
+        row = (recording_part & pk).fetch1()
+        with pytest.raises(dj.errors.IntegrityError):
+            dj.Table.insert1(
+                recording_part(),
+                {**row, "recording_index": 1, "recording_id": uuid.uuid4()},
+            )
+        unit = (UnitMatch.MatchableUnit & pk).fetch(as_dict=True)[0]
+        with pytest.raises(dj.errors.IntegrityError):
+            dj.Table.insert1(
+                UnitMatch.MatchableUnit(), {**unit, "unit_id": 9999}
+            )
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False, safemode=False)
+
+
+@pytest.mark.database
+@pytest.mark.integration
+@pytest.mark.stage
+def test_deleting_a_matched_recording_removes_the_match(reviewed_curation):
+    """Deleting an input's ``Recording`` cascades to the selection and run,
+    including the frozen matchable units."""
+    from spyglass.spikesorting.v2.recording import Recording
+    from spyglass.spikesorting.v2.unit_matching import (
+        MatcherParameters,
+        UnitMatch,
+        UnitMatchSelection,
+    )
+
+    _, child = reviewed_curation
+    MatcherParameters.insert_default()
+    pk = UnitMatchSelection.insert_inputs(
+        [child],
+        "unitmatch_default",
+        unit_policy="v2_unflagged_single_units",
+    )
+    try:
+        UnitMatch.populate(pk, reserve_jobs=False)
+        assert UnitMatch.MatchableUnit & pk
+        recording = {
+            "recording_id": (UnitMatchSelection.InputRecording & pk).fetch1(
+                "recording_id"
+            )
+        }
+        connection = Recording.connection
+        connection.start_transaction()
+        try:
+            (Recording & recording).super_delete(
+                warn=False,
+                safemode=False,
+                transaction=False,
+                force_masters=True,
+            )
+            assert not (UnitMatchSelection & pk)
+            assert not (UnitMatch & pk)
+            assert not (UnitMatch.MatchableUnit & pk)
+        finally:
+            # Roll back so the shared recording survives.
+            connection.cancel_transaction()
+        assert UnitMatch.MatchableUnit & pk
+    finally:
+        (UnitMatchSelection & pk).super_delete(warn=False, safemode=False)

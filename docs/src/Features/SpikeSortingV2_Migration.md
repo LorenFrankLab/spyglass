@@ -174,9 +174,11 @@ permissions and path handling are in the
 If your database declared the v2 tables before this release, an admin runs the
 v2 schema changes in the [CHANGELOG](../CHANGELOG.md) release notes: the
 `compared` column on `UnitMatch.MatchableUnit`, the `MemberSnapshot` foreign key
-to `Recording`, the renamed shared artifact tables, and the recording recompute
-tables renamed to the v1 names. Existing `MatchableUnit` rows get
-`compared = 1`, including units the matcher never saw.
+to `Recording`, the renamed shared artifact tables, the recording recompute
+tables renamed to the v1 names, and the foreign keys from
+`UnitMatchSelection.InputRecording` to `Recording` and from
+`UnitMatch.MatchableUnit` to `CurationV2.Unit`. Existing `MatchableUnit` rows
+get `compared = 1`, including units the matcher never saw.
 
 - A `recording_id` also depends on the saved time cut (the sort interval
     intersected with the raw data's valid times, after `min_segment_length`).

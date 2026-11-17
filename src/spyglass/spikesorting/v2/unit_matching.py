@@ -46,6 +46,7 @@ from spyglass.spikesorting.v2._matching.inputs import (
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
+from spyglass.spikesorting.v2.recording import Recording  # noqa: F401
 from spyglass.spikesorting.v2.session_group import SessionGroup  # noqa: F401
 from spyglass.spikesorting.v2._core.table_integrity import (
     ImmutableParamsLookup,
@@ -260,7 +261,11 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
     """
 
     class Input(SpyglassMixinPart):
-        """One matching input: a curated sort, in chronological order."""
+        """One matching input: a curated sort, in chronological order.
+
+        ``source_id`` names a ``Recording`` or a ``ConcatenatedRecording``, so
+        it has no foreign key.
+        """
 
         definition = """
         -> master
@@ -279,7 +284,8 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         """One constituent original recording of a matching input.
 
         One row for a single-recording input; one row per concatenation
-        member, in member order, for a concatenation input.
+        member, in member order, for a concatenation input. Each row references
+        its ``Recording``.
         """
 
         definition = """
@@ -290,7 +296,7 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         nwb_file_name: varchar(64)
         sort_group_id: int
         interval_list_name: varchar(170)
-        recording_id: uuid
+        -> Recording
         recording_content_hash: char(64)
         session_start_time: datetime
         start_sample: bigint              # first frame of this recording in the sort's frame space
@@ -850,16 +856,14 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
         ``TrackedUnit.make`` reads this rather than current labels, so a
         relabel cannot drop an unpaired unit. ``compared`` is 0 for a unit the
         matcher never saw, so an unpaired unit that was not evaluated can be
-        told from one that was evaluated and found unmatched. Not FK'd: a
-        snapshot, not a live reference.
+        told from one that was evaluated and found unmatched. Each row
+        references its ``CurationV2.Unit``, which a relabel never changes.
         """
 
         definition = """
         -> master
         input_index: int
-        sorting_id: uuid
-        curation_id: int
-        unit_id: int
+        -> CurationV2.Unit
         ---
         compared=1: tinyint   # 0 if the matcher never saw the unit (left out of its input bundle)
         """
@@ -869,7 +873,8 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
 
         One row per (input, constituent recording, unit): spikes whose sort
         frame lies in the recording's ``[start_sample, end_sample)``. Counts
-        over an input's recordings sum to the unit's total. Not FK'd.
+        over an input's recordings sum to the unit's total. Not FK'd: a row
+        holds only ``unit_id``; ``MatchableUnit`` references the curated unit.
         """
 
         definition = """

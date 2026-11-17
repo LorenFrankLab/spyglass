@@ -1394,8 +1394,6 @@ def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
 ):
     """insert_selection rejects a master whose parts match its hash but carry
     an InputRecording row for a missing input (the hash ignores such rows)."""
-    import uuid
-
     from spyglass.spikesorting.v2.exceptions import SchemaBypassError
     from spyglass.spikesorting.v2.unit_matching import UnitMatchSelection
     from tests.spikesorting.v2._unitmatch_helpers import reforge_selection
@@ -1414,7 +1412,6 @@ def test_insert_selection_rejects_orphan_recording_parts_with_matching_hash(
     orphan = {
         **{k: v for k, v in template.items() if k != "unitmatch_id"},
         "input_index": 2,
-        "recording_id": uuid.uuid4(),
     }
     master = reforge_selection(pk, extra_recordings=[orphan])
     stored = (UnitMatchSelection & pk).fetch1("input_set_hash")

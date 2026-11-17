@@ -1252,7 +1252,10 @@ A preset names one parameter row per stage: preprocessing, artifact detection
 - Later steps (matcher feed order, pair orientation, `TrackedUnit`) read only
     the frozen selection rows. `UnitMatch.MatchableUnit` freezes the units the
     matcher saw, so a relabel between `UnitMatch` and `TrackedUnit` populate
-    cannot drop an unpaired singleton. Its `compared` column is 0 for a unit the
+    cannot drop an unpaired singleton. Its rows reference `CurationV2.Unit`,
+    which a relabel never changes, and `UnitMatchSelection.InputRecording`
+    references `Recording`, so deleting either upstream row deletes the
+    selection and its run. Its `compared` column is 0 for a unit the
     matcher never saw (left out of its input bundle, and every unit of a
     single-input run), so an unevaluated unit can be told from one that was
     evaluated and left unmatched.

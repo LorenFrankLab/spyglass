@@ -235,6 +235,45 @@ else:
     conn.query("RENAME TABLE " + ", ".join(pairs))
 ```
 
+```python
+# Only for a database that declared the v2 unit-matching tables before this
+# release (#1609): `UnitMatchSelection.InputRecording` references `Recording`
+# and `UnitMatch.MatchableUnit` references `CurationV2.Unit`. `alter()` cannot
+# add a foreign key, so run the DDL directly. Rows that point at nothing block
+# it: delete their `UnitMatchSelection` rows first. Restart Python afterward.
+from spyglass.spikesorting.v2.curation import CurationV2
+from spyglass.spikesorting.v2.recording import Recording
+from spyglass.spikesorting.v2.unit_matching import (
+    UnitMatch,
+    UnitMatchSelection,
+)
+
+changes = [  # part, referenced table, foreign key columns
+    (UnitMatchSelection.InputRecording(), Recording(), "`recording_id`"),
+    (
+        UnitMatch.MatchableUnit(),
+        CurationV2.Unit(),
+        "`sorting_id`, `curation_id`, `unit_id`",
+    ),
+]
+orphans = {
+    part.table_name: (part - parent.proj()).fetch("KEY")
+    for part, parent, _ in changes
+}
+if any(orphans.values()):
+    raise ValueError(f"Rows without their upstream row: {orphans}")
+Recording.connection.dependencies.load(force=True)
+for part, parent, columns in changes:
+    if parent.full_table_name in part.parents():
+        print(f"{part.table_name} already references {parent.table_name}")
+        continue
+    part.connection.query(
+        f"ALTER TABLE {part.full_table_name} ADD FOREIGN KEY ({columns}) "
+        + f"REFERENCES {parent.full_table_name} ({columns}) "
+        + "ON UPDATE CASCADE ON DELETE RESTRICT"
+    )
+```
+
 ### Breaking Changes
 
 #### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
@@ -650,6 +689,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         `RecordingArtifactRecompute` are renamed `RecordingRecomputeVersions`,
         `RecordingRecomputeSelection` and `RecordingRecompute`, the v1 names
         #1609
+    - v2 `UnitMatchSelection.InputRecording` references `Recording` and
+        `UnitMatch.MatchableUnit` references `CurationV2.Unit`, so neither can
+        name a missing row and exports follow them #1609
     - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
         `CurationRef.open_analyzer(extra_extensions=...)`), and
         `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609
